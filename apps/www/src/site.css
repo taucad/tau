@@ -1072,7 +1072,8 @@ main > .band:first-child::before {
 }
 /* The capture carries its own macOS window frame and shadow; the negative margins align the window, not the
    transparent shadow, with the column (window 3456 × 2160 inside a 3680 × 2384 image, inset 112 / 76 / 148 px).
-   Re-measure these if scripts/src/readme-hero-capture.ts re-shoots docs/assets/tau-desktop-*.webp at another size. */
+   Re-measure these if scripts/src/readme-hero-capture.ts re-shoots docs/assets/tau-desktop-*.webp at another size,
+   and keep the 1.065 (3680 / 3456) factor in the figure's sizes attribute in templates.mjs in step. */
 .workspace img {
   width: calc(100% * 3680 / 3456);
   max-width: none;

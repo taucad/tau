@@ -416,6 +416,88 @@ describe('ChatError', () => {
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Switch model', 'Resume']);
   });
 
+  /* W6, IS3: an operator-paused route is worded by the page. Resuming would re-send to the same paused route, so the
+   * card neither offers it nor promises the turn; the gateway's sentence and fields reach Tau Debug only. */
+  it('should word a paused model route itself and offer a model switch without Resume', async () => {
+    debug.enabled = true;
+    const user = userEvent.setup();
+    const gatewaySentence = "This model route is paused by Tau's operators.";
+    projected({
+      category: errorCategory.overloaded,
+      title: 'Service Temporarily Unavailable',
+      message: gatewaySentence,
+      code: 'MODEL_ROUTE_PAUSED',
+      httpStatus: 503,
+      details: { routeId: 'fixture-route' },
+    });
+
+    render(<ChatErrorBanner />);
+
+    const card = screen.getByRole('alert');
+    expect(card).toHaveTextContent('This model is paused');
+    expect(
+      screen.getByText("Tau's operators have paused this model. Switch to another model to continue."),
+    ).toBeInTheDocument();
+    expect(card).not.toHaveTextContent(gatewaySentence);
+    expect(card).not.toHaveTextContent('Service Temporarily Unavailable');
+    expect(card).not.toHaveTextContent('Everything up to here is saved.');
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Switch model',
+      'Try again',
+      'Debug details',
+    ]);
+
+    await user.click(screen.getByRole('button', { name: 'Debug details' }));
+    expect(JSON.parse(screen.getByTestId('code-viewer').textContent)).toEqual({
+      code: 'MODEL_ROUTE_PAUSED',
+      message: gatewaySentence,
+      httpStatus: 503,
+      details: { routeId: 'fixture-route' },
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
+  });
+
+  /* W11a, IC5, OQ15: a restricted account is the account's, not the route's: support is the one recovery, the copy names
+   * no case kind, and the gateway's sentence reaches Tau Debug only. */
+  it('should point a restricted account to support without Resume or a model switch', async () => {
+    debug.enabled = true;
+    const user = userEvent.setup();
+    const gatewaySentence = 'This Tau billing account is restricted.';
+    projected({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: gatewaySentence,
+      code: 'BILLING_ACCOUNT_RESTRICTED',
+      httpStatus: 403,
+    });
+
+    render(<ChatErrorBanner />);
+
+    const card = screen.getByRole('alert');
+    expect(card).toHaveTextContent('This account needs attention');
+    expect(
+      screen.getByText(
+        'Tau has paused spending on this account while we look at a billing issue. Contact support to continue.',
+      ),
+    ).toBeInTheDocument();
+    expect(card).not.toHaveTextContent(gatewaySentence);
+    expect(card).not.toHaveTextContent('Everything up to here is saved.');
+    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:support@tau.new');
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Debug details']);
+
+    await user.click(screen.getByRole('button', { name: 'Debug details' }));
+    expect(JSON.parse(screen.getByTestId('code-viewer').textContent)).toEqual({
+      code: 'BILLING_ACCOUNT_RESTRICTED',
+      message: gatewaySentence,
+      httpStatus: 403,
+    });
+    expect(regenerate).not.toHaveBeenCalled();
+    expect(continueChat).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       code: 'SESSION_LOG_INTEGRITY',

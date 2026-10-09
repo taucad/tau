@@ -58,7 +58,19 @@ TopoDSToStep_Builder: declare class TopoDSToStep_Builder extends TopoDSToStep_Ro
 
 TopoDSToStep_BuilderError: typeof TopoDSToStep_BuilderError[keyof typeof TopoDSToStep_BuilderError]
 
+  readonly TopoDSToStep_BuilderDone: 'TopoDSToStep_BuilderDone'
+
+  readonly TopoDSToStep_NoFaceMapped: 'TopoDSToStep_NoFaceMapped'
+
+  readonly TopoDSToStep_BuilderOther: 'TopoDSToStep_BuilderOther'
+
 TopoDSToStep_FacetedError: typeof TopoDSToStep_FacetedError[keyof typeof TopoDSToStep_FacetedError]
+
+  readonly TopoDSToStep_FacetedDone: 'TopoDSToStep_FacetedDone'
+
+  readonly TopoDSToStep_SurfaceNotPlane: 'TopoDSToStep_SurfaceNotPlane'
+
+  readonly TopoDSToStep_PCurveNotLinear: 'TopoDSToStep_PCurveNotLinear'
 
 TopoDSToStep_FacetedTool: declare class TopoDSToStep_FacetedTool
 
@@ -93,7 +105,23 @@ TopoDSToStep_MakeBrepWithVoids: declare class TopoDSToStep_MakeBrepWithVoids ext
 
 TopoDSToStep_MakeEdgeError: typeof TopoDSToStep_MakeEdgeError[keyof typeof TopoDSToStep_MakeEdgeError]
 
+  readonly TopoDSToStep_EdgeDone: 'TopoDSToStep_EdgeDone'
+
+  readonly TopoDSToStep_NonManifoldEdge: 'TopoDSToStep_NonManifoldEdge'
+
+  readonly TopoDSToStep_EdgeOther: 'TopoDSToStep_EdgeOther'
+
 TopoDSToStep_MakeFaceError: typeof TopoDSToStep_MakeFaceError[keyof typeof TopoDSToStep_MakeFaceError]
+
+  readonly TopoDSToStep_FaceDone: 'TopoDSToStep_FaceDone'
+
+  readonly TopoDSToStep_InfiniteFace: 'TopoDSToStep_InfiniteFace'
+
+  readonly TopoDSToStep_NonManifoldFace: 'TopoDSToStep_NonManifoldFace'
+
+  readonly TopoDSToStep_NoWireMapped: 'TopoDSToStep_NoWireMapped'
+
+  readonly TopoDSToStep_FaceOther: 'TopoDSToStep_FaceOther'
 
 TopoDSToStep_MakeFacetedBrep: declare class TopoDSToStep_MakeFacetedBrep extends TopoDSToStep_Root
 
@@ -287,7 +315,17 @@ TopoDSToStep_MakeTessellatedItem: declare class TopoDSToStep_MakeTessellatedItem
 
 TopoDSToStep_MakeVertexError: typeof TopoDSToStep_MakeVertexError[keyof typeof TopoDSToStep_MakeVertexError]
 
+  readonly TopoDSToStep_VertexDone: 'TopoDSToStep_VertexDone'
+
+  readonly TopoDSToStep_VertexOther: 'TopoDSToStep_VertexOther'
+
 TopoDSToStep_MakeWireError: typeof TopoDSToStep_MakeWireError[keyof typeof TopoDSToStep_MakeWireError]
+
+  readonly TopoDSToStep_WireDone: 'TopoDSToStep_WireDone'
+
+  readonly TopoDSToStep_NonManifoldWire: 'TopoDSToStep_NonManifoldWire'
+
+  readonly TopoDSToStep_WireOther: 'TopoDSToStep_WireOther'
 
 TopoDSToStep_Root: declare class TopoDSToStep_Root
 

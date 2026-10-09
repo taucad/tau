@@ -10,7 +10,8 @@ export const screenshotInputSchema = z
   .object({
     mode: z
       .enum(['single', 'multi_angle'])
-      .describe('single: deterministic perspective isometric view. multi_angle: all 6 orthographic views'),
+      .default('single')
+      .describe('single (default): deterministic perspective isometric view. multi_angle: all 6 orthographic views'),
     targetFile: rootedFilePathSchema.describe(
       'Source file path of the geometry unit to screenshot (e.g. "main.ts", "lib/bracket.scad").',
     ),

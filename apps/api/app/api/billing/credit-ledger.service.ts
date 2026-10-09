@@ -1,5 +1,5 @@
 /* oxlint-disable no-await-in-loop, max-lines, complexity -- financial mutations execute sequentially in one lock order */
-import { cashBlockingFinancialCaseKinds } from '#api/billing/billing-cash-reconciliation.service.js';
+import { spendBlockingFinancialCaseKinds } from '#api/billing/billing-cash-reconciliation.service.js';
 import {
   paymentOfferSnapshotSchema,
   paidPaymentEvidenceSchema,
@@ -8,11 +8,11 @@ import {
   cashProjectionDigest,
 } from '#api/billing/billing-payment-contract.js';
 import { maximumMeterCharge } from '#api/billing/billable-model-bound.js';
-import { calculatePreliminarySupplierCost } from '#api/billing/billable-model-cost.js';
+import { calculateSupplierCost } from '#api/billing/billable-model-cost.js';
 import { routeSkuFamily } from '#api/billing/billable-model-qualification.js';
 import { parseCommercialPolicyDocument, resolvePolicyRoute } from '#api/billing/billing-policy.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { and, asc, desc, eq, gt, inArray, lt, ne, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
@@ -23,12 +23,12 @@ import {
 } from '@taucad/billing';
 import type { FinancialActivityKind } from '@taucad/billing';
 import { DatabaseService } from '#database/database.service.js';
+import { MetricsService } from '#telemetry/metrics.js';
 import { BillingPolicyService, PolicyRouteUnavailableError } from '#api/billing/billing-policy.service.js';
 import {
   billingFinancialCase,
   billingBudget,
   billingBudgetFunding,
-  billingBudgetHold,
   billingInvocationEvidence,
   billingOperationException,
   billingOwnerBinding,
@@ -47,7 +47,6 @@ import {
   creditAttemptVoid,
   creditOperation,
   creditTransaction,
-  supplierCostEvidence,
   user,
 } from '#database/schema.js';
 import type {
@@ -67,8 +66,7 @@ import type {
   QualifiedAdmissionInput,
   ReversalMutationInput,
   SourceAmounts,
-  SupplierEvidenceInput,
-  SupplierFinalityInput,
+  SupplierCostUnpricedReason,
   TerminalEvidence,
   TerminalizeInput,
   TerminalReceipt,
@@ -221,9 +219,7 @@ const persistedInvocationEvidenceSchema = terminalHistorySchema
       context.addIssue({ code: 'custom', message: 'Reasoning must be a subset of output' });
     }
   });
-export const serializeInvocationEvidence = (
-  input: TerminalEvidence,
-): z.infer<typeof persistedInvocationEvidenceSchema> =>
+const serializeInvocationEvidence = (input: TerminalEvidence): z.infer<typeof persistedInvocationEvidenceSchema> =>
   persistedInvocationEvidenceSchema.parse({
     ...input,
     usageOccurredAt: input.usageOccurredAt?.toISOString(),
@@ -236,12 +232,7 @@ export const serializeInvocationEvidence = (
             quantity: item.quantity.toString(),
           })),
   });
-/** Source revision of the zero-cost final supplier evidence a refusal with a status proves. */
-export const rejectedSupplierSourceRevision = 'provider_rejected_v1';
-/** The ledger's own proof digest for a refusal it finalizes without the gateway's evidence digest. */
-const rejectedProofDigest = (operationId: string): string =>
-  createHash('sha256').update(`provider-rejected:${operationId}`).digest('hex');
-export const invocationEvidenceDigest = (evidence: z.infer<typeof persistedInvocationEvidenceSchema>): string => {
+const invocationEvidenceDigest = (evidence: z.infer<typeof persistedInvocationEvidenceSchema>): string => {
   const payload = JSON.stringify(evidence);
   if (Buffer.byteLength(payload) > 32_768) {
     throw new RangeError('Invocation evidence exceeds retained byte bound');
@@ -379,15 +370,64 @@ const hasConstraint = (error: unknown, constraint: string): boolean => {
   return false;
 };
 
+const genAiTokenTypes = new Map([
+  ['uncached_input', 'input'],
+  ['cache_read', 'cache_read'],
+  ['cache_write', 'cache_write'],
+  ['output', 'output'],
+]);
+/** One credit atom is one micro-USD. */
+const creditAtomsPerUsd = 1_000_000;
+
+/**
+ * Records the tokens and charged USD of one settled operation, written together so the two series
+ * reconcile. Both the live terminal and recovery's settlement call this; the labels are the
+ * operation's pinned model, provider, surface and activity, so cardinality stays that of admission.
+ */
+/* eslint-disable max-params-no-constructor/max-params-no-constructor -- one settled operation */
+export const recordSettledGenAiUsage = (
+  metrics: Pick<MetricsService, 'genAiCost' | 'genAiTokenUsage' | 'billingSupplierCostPicoUsd'> | undefined,
+  attributes: Record<'gen_ai.request.model' | 'gen_ai.provider.name' | 'tau.surface' | 'tau.activity', string>,
+  evidence: TerminalEvidence,
+  receipt: Pick<TerminalReceipt, 'chargedAtoms' | 'supplierCostPicoUsd'>,
+  environment: string,
+): void => {
+  metrics?.genAiCost.add(Number(receipt.chargedAtoms) / creditAtomsPerUsd, attributes);
+  // The supplier counter carries the charge's model and provider labels, so their ratio is the
+  // route's margin. A refusal or an undispatched call cost nothing, and an unpriced operation is
+  // counted by the unpriced-operations gauge instead.
+  if (receipt.supplierCostPicoUsd !== null && receipt.supplierCostPicoUsd > 0n) {
+    metrics?.billingSupplierCostPicoUsd.add(Number(receipt.supplierCostPicoUsd), {
+      'gen_ai.request.model': attributes['gen_ai.request.model'],
+      'gen_ai.provider.name': attributes['gen_ai.provider.name'],
+      'deployment.environment': environment,
+    });
+  }
+  // An absorbed turn's partial meters are not usage it was charged for.
+  const meterItems =
+    evidence.kind === 'provider_rejected' || evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
+  for (const item of meterItems) {
+    const tokenType = genAiTokenTypes.get(item.dimension);
+    if (tokenType !== undefined) {
+      metrics?.genAiTokenUsage.record(Number(item.quantity), { ...attributes, 'gen_ai.token.type': tokenType });
+    }
+  }
+};
+/* eslint-enable max-params-no-constructor/max-params-no-constructor -- one settled operation */
+
 @Injectable()
 export class CreditLedgerService {
+  private readonly logger = new Logger(CreditLedgerService.name);
+
   public constructor(
     @Inject(DatabaseService)
     private readonly databaseService: Pick<DatabaseService, 'database'>,
     private readonly policyService: BillingPolicyService,
+    // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
-  /** Creates stable financial identity before a financial transaction takes budget locks. */
+  /** Creates stable financial identity before a financial transaction takes the account lock. */
   public async ensureAccountBinding(input: { environment: string; authUserId: string }): Promise<string> {
     try {
       return await this.databaseService.database.transaction(async (tx) => {
@@ -411,6 +451,8 @@ export class CreditLedgerService {
             throw new ForbiddenException({
               code: 'billing_account_closed',
               message: 'Financial owner is revoked or closed',
+              // An operator restriction is not a closure: model admission answers it with its own code.
+              ...(found.revokedAt === null && found.status === 'restricted' ? { restricted: true } : {}),
             });
           }
           return found.accountId;
@@ -516,7 +558,6 @@ export class CreditLedgerService {
     /** Milliseconds. */
     executionTimeout: number;
     minimumOutput: bigint;
-    minimumSupplierPicoUsd: bigint;
   }): Promise<{ status: 'eligible'; executionDeadline: Date; remaining: number } | AdmissionDenied> {
     const effective = await this.selectRouteOrDeny(input);
     if ('status' in effective) {
@@ -533,8 +574,11 @@ export class CreditLedgerService {
           sql`${billingOwnerBinding.revokedAt} is null`,
         ),
       );
-    if (!bound || bound.account.environment !== input.environment || bound.account.status !== 'open') {
+    if (bound?.account.environment === input.environment && bound.account.status === 'restricted') {
       return { status: 'denied', reason: 'account_restricted' };
+    }
+    if (!bound || bound.account.environment !== input.environment || bound.account.status !== 'open') {
+      return { status: 'denied', reason: 'account_closed' };
     }
     const minimumAtoms = maximumMeterCharge(
       effective.rates.map((rate) => ({
@@ -565,36 +609,8 @@ export class CreditLedgerService {
     if (pending.length >= capacity.limit) {
       return { status: 'denied', reason: 'concurrency_unavailable' };
     }
-    const [paused] = await this.databaseService.database
-      .select({ sku: billingRoutePause.sku })
-      .from(billingRoutePause)
-      .where(
-        and(
-          eq(billingRoutePause.environment, input.environment),
-          eq(billingRoutePause.sku, routeSkuFamily(input.sku)[0]),
-        ),
-      );
-    if (paused) {
-      return { status: 'denied', reason: 'policy_unavailable' };
-    }
-    const budgets = await this.databaseService.database
-      .select({ budget: billingBudget, funding: billingBudgetFunding })
-      .from(billingBudget)
-      .innerJoin(billingBudgetFunding, eq(billingBudgetFunding.id, billingBudget.fundingId))
-      .where(inArray(billingBudget.id, [effective.route.spendBudgetId, effective.route.riskBudgetId]));
-    if (
-      budgets.length !== 2 ||
-      budgets.some(
-        ({ budget, funding }) =>
-          budget.environment !== input.environment ||
-          funding.environment !== input.environment ||
-          budget.quantum !== 'pico_usd' ||
-          budget.kind !== (budget.id === effective.route.spendBudgetId ? 'spend' : 'risk') ||
-          budget.consumed + budget.held + input.minimumSupplierPicoUsd > budget.approvedCap ||
-          funding.consumed + funding.held + input.minimumSupplierPicoUsd > funding.fundedLifetime,
-      )
-    ) {
-      return { status: 'denied', reason: 'budget_unavailable' };
+    if (await this.isRoutePaused(this.databaseService.database, input.environment, input.sku)) {
+      return { status: 'denied', reason: 'route_paused' };
     }
     const executionDeadline = new Date(effective.selectedAt.getTime() + input.executionTimeout);
     const [clock] = await this.databaseService.database
@@ -610,7 +626,7 @@ export class CreditLedgerService {
     return { status: 'eligible', executionDeadline, remaining };
   }
 
-  /** Places source and budget holds transactionally before any external dispatch. */
+  /** Places the customer's source holds transactionally before any external dispatch. */
   public async admitOperation(
     input: QualifiedAdmissionInput,
   ): Promise<Exclude<AdmissionResult, { status: 'denied' }> | AdmissionDenied> {
@@ -712,10 +728,6 @@ export class CreditLedgerService {
           })),
           invocation?.jointInputMaximum,
         );
-        const supplierMaximum = input.supplierMaximumPicoUsd;
-        if (supplierMaximum < 0n || supplierMaximum.toString().length > 78) {
-          throw new RangeError('Supplier maximum is outside numeric(78,0)');
-        }
         if (invocation !== undefined) {
           const supplierDimensions = new Set(
             invocation.supplierRates.map((rate) => `${rate.dimension}:${rate.tier ?? ''}`),
@@ -728,6 +740,7 @@ export class CreditLedgerService {
           ) {
             throw new Error('Supplier tariff does not cover the invocation meter contract');
           }
+          // The valuation prices the reported usage after settlement, so it must cover the same meters.
           const valuation = invocation.supplierValuation;
           if (valuation !== undefined) {
             if ((valuation.longContextMinimumInputTokens === null) !== (valuation.longContextRates === null)) {
@@ -738,100 +751,18 @@ export class CreditLedgerService {
               ...(valuation.longContextRates === null ? [] : [valuation.longContextRates]),
             ]) {
               const keys = new Set(schedule.map((rate) => `${rate.dimension}:${rate.tier ?? ''}`));
-              if (keys.size !== schedule.length || keys.size !== supplierDimensions.size) {
-                throw new Error('Supplier valuation does not match the pinned maximum tariff');
-              }
-              for (const rate of schedule) {
-                const maximum = invocation.supplierRates.find(
-                  (candidate) => candidate.dimension === rate.dimension && candidate.tier === rate.tier,
-                );
-                if (
-                  maximum === undefined ||
-                  BigInt(rate.numeratorPicoUsd) * BigInt(maximum.denominatorUnits) >
-                    BigInt(maximum.numeratorPicoUsd) * BigInt(rate.denominatorUnits)
-                ) {
-                  throw new Error('Supplier valuation exceeds the pinned maximum tariff');
-                }
+              if (
+                keys.size !== schedule.length ||
+                keys.size !== supplierDimensions.size ||
+                [...keys].some((key) => !supplierDimensions.has(key))
+              ) {
+                throw new Error('Supplier valuation does not match the pinned supplier tariff');
               }
             }
           }
-          const requiredSupplierMaximum = maximumMeterCharge(
-            invocation.supplierRates.map((rate) => ({
-              dimension: rate.dimension,
-              quantity: quantities.get(`${rate.dimension}:${rate.tier ?? ''}`)!,
-              numerator: BigInt(rate.numeratorPicoUsd),
-              denominator: BigInt(rate.denominatorUnits),
-            })),
-            invocation.jointInputMaximum,
-          );
-          if (
-            supplierMaximum < requiredSupplierMaximum ||
-            (invocation.jointInputMaximum !== undefined && supplierMaximum !== requiredSupplierMaximum)
-          ) {
-            throw new Error('Supplier hold does not cover the independently pinned tariff');
-          }
         }
-        await this.lockRoute(tx, input.environment, input.sku);
-        const [paused] = await tx
-          .select()
-          .from(billingRoutePause)
-          .where(
-            and(
-              eq(billingRoutePause.environment, input.environment),
-              eq(billingRoutePause.sku, routeSkuFamily(input.sku)[0]),
-            ),
-          );
-        if (paused) {
-          return { status: 'denied', reason: 'policy_unavailable' };
-        }
-        const requirements = [
-          {
-            budgetId: effective.route.spendBudgetId,
-            maximum: supplierMaximum,
-            kind: 'spend',
-          },
-          {
-            budgetId: effective.route.riskBudgetId,
-            maximum: supplierMaximum,
-            kind: 'risk',
-          },
-        ].sort((a, b) => a.budgetId.localeCompare(b.budgetId));
-        const discovered = await tx
-          .select()
-          .from(billingBudget)
-          .where(
-            inArray(
-              billingBudget.id,
-              requirements.map(({ budgetId }) => budgetId),
-            ),
-          );
-        const funding = await tx
-          .select()
-          .from(billingBudgetFunding)
-          .where(
-            inArray(
-              billingBudgetFunding.id,
-              discovered.map(({ fundingId }) => fundingId),
-            ),
-          )
-          .orderBy(asc(billingBudgetFunding.id))
-          .for('update');
-        const budgets = await tx
-          .select()
-          .from(billingBudget)
-          .where(
-            inArray(
-              billingBudget.id,
-              requirements.map(({ budgetId }) => budgetId),
-            ),
-          )
-          .orderBy(asc(billingBudget.id))
-          .for('update');
-        if (
-          budgets.length !== requirements.length ||
-          funding.length !== new Set(budgets.map(({ fundingId }) => fundingId)).size
-        ) {
-          return { status: 'denied', reason: 'budget_unavailable' };
+        if (await this.isRoutePaused(tx, input.environment, input.sku)) {
+          return { status: 'denied', reason: 'route_paused' };
         }
         const account = await this.lockAccount(tx, accountId);
         const [replay] = await tx
@@ -868,28 +799,15 @@ export class CreditLedgerService {
         if (voided) {
           return { status: 'denied', reason: 'attempt_voided' };
         }
-        for (const requirement of requirements) {
-          const budget = budgets.find(({ id }) => id === requirement.budgetId);
-          const fundingRow = funding.find(({ id }) => id === budget?.fundingId);
-          if (
-            !budget ||
-            !fundingRow ||
-            budget.quantum !== 'pico_usd' ||
-            budget.kind !== requirement.kind ||
-            budget.environment !== input.environment ||
-            budget.consumed + budget.held + requirement.maximum > budget.approvedCap ||
-            fundingRow.consumed + fundingRow.held + requirement.maximum > fundingRow.fundedLifetime
-          ) {
-            return { status: 'denied', reason: 'budget_unavailable' };
-          }
-        }
         const [cashAttention] = await tx
           .select({ id: billingFinancialCase.id })
           .from(billingFinancialCase)
           .where(
             and(
               eq(billingFinancialCase.environment, input.environment),
-              inArray(billingFinancialCase.kind, cashBlockingFinancialCaseKinds),
+              // Only a case that puts this account's own balance in question stops its spending; money
+              // Tau owes the customer, or Tau's own fee accounting, never does.
+              inArray(billingFinancialCase.kind, spendBlockingFinancialCaseKinds),
               inArray(billingFinancialCase.state, ['open', 'attention']),
               // Spending already-collected credit stops only for the account a case names; an
               // unattributed case pauses new collection instead (`assertNewCollectionCashScope`).
@@ -935,8 +853,6 @@ export class CreditLedgerService {
           return { status: 'denied', reason: 'insufficient_credit', ...shortfall };
         }
         const operationId = randomUUID();
-        const spendHoldId = randomUUID();
-        const riskHoldId = randomUUID();
         await tx
           .update(creditAccount)
           .set({
@@ -983,39 +899,11 @@ export class CreditLedgerService {
           promoHeldAtoms: authorized.promoAtoms,
           planHeldAtoms: authorized.planAtoms,
           purchasedHeldAtoms: authorized.purchasedAtoms,
-          spendBudgetHoldId: spendHoldId,
-          riskBudgetHoldId: riskHoldId,
           dispatchState: 'admitted',
           customerState: 'pending',
-          supplierState: 'reserved',
           generation: 1n,
           dueAt,
         });
-        for (const requirement of requirements) {
-          const budget = budgets.find(({ id }) => id === requirement.budgetId);
-          if (!budget) {
-            throw new Error('Locked budget disappeared');
-          }
-          await tx
-            .update(billingBudget)
-            .set({ held: sql`${billingBudget.held} + ${requirement.maximum}` })
-            .where(eq(billingBudget.id, requirement.budgetId));
-          await tx
-            .update(billingBudgetFunding)
-            .set({
-              held: sql`${billingBudgetFunding.held} + ${requirement.maximum}`,
-            })
-            .where(eq(billingBudgetFunding.id, budget.fundingId));
-          await tx.insert(billingBudgetHold).values({
-            id: requirement.kind === 'risk' ? riskHoldId : spendHoldId,
-            budgetId: requirement.budgetId,
-            operationId,
-            initialBound: requirement.maximum,
-            remainingHeld: requirement.maximum,
-            consumed: 0n,
-            finalityState: 'reserved',
-          });
-        }
         await this.queueReloadWork(
           tx,
           { ...account, revision: account.revision + 1n },
@@ -1454,92 +1342,32 @@ export class CreditLedgerService {
           };
         }
         await this.recordInvocationEvidence({ ...claim, evidence });
-        if (operation.dispatchIntentAt === null) {
-          await this.finalizeZeroSupplierCost(operation, {
-            environment: input.environment,
-            expectedGeneration: claim.generation,
-            sourceRevision: 'proved_no_dispatch_v1',
-            payloadDigest: createHash('sha256').update(`no-dispatch:${operation.id}`).digest('hex'),
-          });
-        } else {
-          if (operation.invocation !== null && evidence.kind === 'final_usage') {
-            const cost = calculatePreliminarySupplierCost({
-              invocation: operation.invocation,
-              evidence,
-              payloadDigest: invocationEvidenceDigest(serializeInvocationEvidence(evidence)),
-            });
-            if (cost !== undefined) {
-              const delivery = await this.appendSupplierEvidence({
-                ...cost,
-                numerator: BigInt(cost.numerator),
-                denominator: BigInt(cost.denominator),
-                operationId: operation.id,
-                environment: input.environment,
-                provider: operation.providerId ?? 'unknown',
-                credentialAccount: operation.invocation.credentialAccount,
-                sourceObjectId: operation.id,
-                finality: 'preliminary',
-                receivedAt: new Date(),
-              });
-              if (delivery === 'conflict') {
-                throw new Error('Conflicting recovered supplier evidence');
-              }
-            }
-          }
-          const [finalSupplierEvidence] = await this.databaseService.database
-            .select({ id: supplierCostEvidence.id })
-            .from(supplierCostEvidence)
-            .where(
-              and(
-                eq(supplierCostEvidence.operationId, operation.id),
-                eq(supplierCostEvidence.completeness, 'complete'),
-                eq(supplierCostEvidence.finality, 'final'),
-              ),
-            )
-            .orderBy(asc(supplierCostEvidence.receivedAt), asc(supplierCostEvidence.id))
-            .limit(1);
-          if (finalSupplierEvidence) {
-            await this.finalizeSupplier({
-              ...claim,
-              evidenceId: finalSupplierEvidence.id,
-              expectedGeneration: claim.generation,
-            });
-          } else if (evidence.kind === 'provider_rejected') {
-            // The gateway's own proof did not land before the restart; the refusal proves it anyway.
-            await this.finalizeZeroSupplierCost(operation, {
-              environment: input.environment,
-              expectedGeneration: claim.generation,
-              sourceRevision: rejectedSupplierSourceRevision,
-              payloadDigest: rejectedProofDigest(operation.id),
-            });
-          }
-        }
-        // Time to live: the turn reported nothing at all, so it writes off revenue and
-        // no supplier cost can ever be attributed. The spend hold is finalized in the
-        // terminalizer's own transaction and an operator owns the row. An absorbed turn
-        // that did retain evidence keeps its spend hold for supplier reconciliation.
-        const expired = !observation && operation.dispatchIntentAt !== null;
-        // The live path may have terminalized this operation since the claim was read; opening a
-        // case for a turn that settled normally would leave an operator chasing nothing.
-        const [stillPending] = expired
-          ? await this.databaseService.database
-              .select({ id: creditOperation.id })
-              .from(creditOperation)
-              .where(and(eq(creditOperation.id, operation.id), eq(creditOperation.customerState, 'pending')))
-          : [];
-        if (stillPending) {
-          await this.openRecoveryCase(operation, {
-            reason: 'time_to_live',
-            detail: `Expired ${recoveryGraceMinutes} minutes after due_at with no retained evidence`,
-          });
-        }
-        await this.terminalizeOperation({
+        const receipt = await this.terminalizeOperation({
           ...claim,
           expectedGeneration: claim.generation,
           evidence,
           resolvedAt: new Date(),
-          expireSpendHold: expired,
         });
+        // Time to live: the turn reported nothing at all, so it writes off revenue and its supplier
+        // cost stays unpriced. The unpriced-operations gauge counts it; this line names it.
+        if (!observation && operation.dispatchIntentAt !== null && receipt.customerState === 'absorbed') {
+          this.logAbsorbedRecovery(operation, {
+            reason: 'time_to_live',
+            detail: `Expired ${recoveryGraceMinutes} minutes after due_at with no retained evidence`,
+          });
+        }
+        recordSettledGenAiUsage(
+          this.metrics,
+          {
+            'gen_ai.request.model': operation.modelId,
+            'gen_ai.provider.name': operation.providerId ?? 'unknown',
+            'tau.surface': operation.surface,
+            'tau.activity': operation.activity,
+          },
+          evidence,
+          receipt,
+          input.environment,
+        );
         resolved += 1;
       } catch (error) {
         // Never retry provider execution: classify, then either back off or absorb this claim.
@@ -1572,11 +1400,9 @@ export class CreditLedgerService {
         throw new RangeError('Reasoning tokens must be a reported subset of output');
       }
     }
-    const context = await this.discoverOperationContext(input.operationId);
+    const accountId = await this.discoverOperationAccount(input.operationId);
     return this.databaseService.database.transaction(async (tx) => {
-      await this.lockRoute(tx, context.environment, context.sku);
-      await this.lockBudgetContext(tx, context.budgetIds, context.fundingIds);
-      const account = await this.lockAccount(tx, context.accountId);
+      const account = await this.lockAccount(tx, accountId);
       const [operation] = await tx
         .select()
         .from(creditOperation)
@@ -1635,16 +1461,7 @@ export class CreditLedgerService {
           : input.evidence.kind === 'absorbed_unknown'
             ? 'absorbed'
             : 'settled';
-      if (customerState === 'absorbed') {
-        await this.absorbHold(tx, operation.riskBudgetHoldId, 'absorbed');
-      }
-      /* No supplier evidence will arrive: the reserved spend is charged to the budget rather than
-       * left held, and later evidence still corrects it through finalizeSupplier. A ceiling cut is
-       * its own such proof — the stream was severed, so nothing further can ever price it — which is
-       * why it expires the hold on the settled side too rather than reserving it forever (R7/P6). */
-      if (input.expireSpendHold === true || input.evidence.kind === 'authorized_exhausted') {
-        await this.absorbHold(tx, operation.spendBudgetHoldId, 'unresolved');
-      }
+      const supplierCost = supplierCostOf(operation, input.evidence);
       await tx
         .update(creditAccount)
         .set({
@@ -1694,13 +1511,9 @@ export class CreditLedgerService {
           // Retains `terminalReason`: `execution_status` alone cannot separate a
           // client abort from an expired deadline once the turn is over.
           normalizationEvidence: history.normalizationEvidence,
-          supplierState:
-            priced.overrun ||
-            (customerState === 'absorbed' &&
-              operation.supplierState !== 'final' &&
-              operation.supplierState !== 'funded_exception')
-              ? 'unresolved'
-              : operation.supplierState,
+          // Written once, here: the receipt's supplier cost is immutable with the rest of it.
+          supplierCostPicoUsd: supplierCost.picoUsd,
+          supplierCostUnpricedReason: supplierCost.unpricedReason,
           actualRetailAtoms: priced.actualRetailAtoms,
           meterItems:
             meterItems.length > 0
@@ -1754,15 +1567,6 @@ export class CreditLedgerService {
             maximum: operation.authorizedAtoms,
           })
           .onConflictDoNothing();
-        await tx
-          .insert(billingRoutePause)
-          .values({
-            environment: operation.environment,
-            sku: routeSkuFamily(operation.sku)[0],
-            operationId: operation.id,
-            reason: 'retail_overrun',
-          })
-          .onConflictDoNothing();
       }
       if (priced.inputOverflow !== undefined) {
         await tx
@@ -1778,30 +1582,16 @@ export class CreditLedgerService {
             maximum: priced.inputOverflow.maximum,
           })
           .onConflictDoNothing();
-        await tx
-          .insert(billingRoutePause)
-          .values({
-            environment: operation.environment,
-            sku: routeSkuFamily(operation.sku)[0],
-            operationId: operation.id,
-            reason: 'input_bound_exceeded',
-          })
-          .onConflictDoNothing();
       }
       if (input.evidence.kind === 'authorized_exhausted') {
         /* The byte ceiling is sized from an unmeasured bytes-per-output-token constant, and its
          * failure mode is a truncated answer. The operator gets the two numbers that measure the
-         * constant, on a case kind that blocks neither cash nor the route. */
+         * constant; `responseBytes` also stays on the operation's own evidence. */
         const authorizedOutput =
           operation.maximumQuantities.find(({ dimension }) => dimension === 'output')?.quantity ?? 'unknown';
         const responseBytes = history.normalizationEvidence?.fields['responseBytes'] ?? 'unknown';
-        await this.openRecoveryCase(
-          operation,
-          {
-            reason: 'authorized_exhausted',
-            detail: `Response reached its authorized byte ceiling after ${responseBytes} bytes with ${authorizedOutput} authorized output tokens`,
-          },
-          tx,
+        this.logger.warn(
+          `Operation ${operation.id} on ${operation.sku} reached its authorized byte ceiling after ${responseBytes} bytes with ${authorizedOutput} authorized output tokens`,
         );
       }
       return {
@@ -1818,268 +1608,8 @@ export class CreditLedgerService {
           purchasedAtoms: normalized.assets.purchasedAtoms - account.purchasedAtoms,
         },
         resolvedAt: input.resolvedAt,
+        supplierCostPicoUsd: supplierCost.picoUsd,
       };
-    });
-  }
-
-  public async appendSupplierEvidence(input: SupplierEvidenceInput): Promise<'inserted' | 'replay' | 'conflict'> {
-    rationalUnsignedIntegerStringSchema.parse(input.numerator.toString());
-    rationalUnsignedIntegerStringSchema.parse(input.denominator.toString());
-    if (input.currency !== 'usd') {
-      throw new RangeError('Supplier evidence currency must be usd');
-    }
-    if (input.denominator === 0n) {
-      throw new RangeError('Supplier evidence denominator must be positive');
-    }
-    const context =
-      input.operationId === undefined ? undefined : await this.discoverOperationContext(input.operationId);
-    return this.databaseService.database.transaction(async (tx) => {
-      if (context !== undefined) {
-        await this.lockRoute(tx, context.environment, context.sku);
-      }
-      const [inserted] = await tx
-        .insert(supplierCostEvidence)
-        .values({ id: randomUUID(), ...input })
-        .onConflictDoNothing()
-        .returning();
-      const [found] = inserted
-        ? [inserted]
-        : await tx
-            .select()
-            .from(supplierCostEvidence)
-            .where(
-              and(
-                eq(supplierCostEvidence.environment, input.environment),
-                eq(supplierCostEvidence.provider, input.provider),
-                eq(supplierCostEvidence.credentialAccount, input.credentialAccount),
-                eq(supplierCostEvidence.sourceObjectId, input.sourceObjectId),
-                eq(supplierCostEvidence.sourceRevision, input.sourceRevision),
-              ),
-            );
-      if (!found) {
-        throw new Error('Supplier evidence delivery was not retained');
-      }
-      if (found.payloadDigest !== input.payloadDigest) {
-        return 'conflict';
-      }
-      if (found.operationId !== null) {
-        await tx
-          .update(creditOperation)
-          .set({ supplierState: 'preliminary' })
-          .where(and(eq(creditOperation.id, found.operationId), eq(creditOperation.supplierState, 'reserved')));
-        const [context] = await tx
-          .select({ operation: creditOperation, maximum: billingBudgetHold.initialBound })
-          .from(creditOperation)
-          .innerJoin(billingBudgetHold, eq(billingBudgetHold.id, creditOperation.spendBudgetHoldId))
-          .where(and(eq(creditOperation.id, found.operationId), eq(creditOperation.environment, found.environment)));
-        if (context && found.numerator * 1_000_000_000_000n > context.maximum * found.denominator) {
-          await tx
-            .insert(billingOperationException)
-            .values({
-              id: randomUUID(),
-              operationId: context.operation.id,
-              kind: 'supplier_bound',
-              sourceIdentity: found.id,
-              quantum: 'pico_usd',
-              observedNumerator: (found.numerator * 1_000_000_000_000n).toString(),
-              observedDenominator: found.denominator,
-              maximum: context.maximum,
-            })
-            .onConflictDoNothing();
-          await tx
-            .insert(billingRoutePause)
-            .values({
-              environment: context.operation.environment,
-              sku: routeSkuFamily(context.operation.sku)[0],
-              operationId: context.operation.id,
-              reason: 'supplier_bound_exceeded',
-            })
-            .onConflictDoNothing();
-        }
-      }
-      return inserted ? 'inserted' : 'replay';
-    });
-  }
-
-  /** Resolves a retained final observation through the existing supplier terminalizer. */
-  public async finalizeRecordedSupplierEvidence(
-    input: Omit<SupplierFinalityInput, 'evidenceId'> & {
-      payloadDigest: string;
-      sourceRevision: string;
-    },
-  ): Promise<'final' | 'unresolved' | 'replay'> {
-    const [evidence] = await this.databaseService.database
-      .select({ id: supplierCostEvidence.id })
-      .from(supplierCostEvidence)
-      .where(
-        and(
-          eq(supplierCostEvidence.operationId, input.operationId),
-          eq(supplierCostEvidence.payloadDigest, input.payloadDigest),
-          eq(supplierCostEvidence.sourceRevision, input.sourceRevision),
-          eq(supplierCostEvidence.completeness, 'complete'),
-          eq(supplierCostEvidence.finality, 'final'),
-        ),
-      );
-    if (!evidence) {
-      throw new Error('Qualified final supplier evidence not found');
-    }
-    return this.finalizeSupplier({ ...input, evidenceId: evidence.id });
-  }
-
-  /**
-   * Finalizes at zero the supplier side of operations a supplier refused before running them.
-   *
-   * Until the collector kept a refusal's own kind, a refused call was absorbed as cost-unknown
-   * and left `unresolved`, which the supplier sweep turned into a route-pausing case a day
-   * later. A refusal with a status proves zero cost, so each such operation gets the same final
-   * zero evidence the live path records now, and the next sweep closes its case. Idempotent:
-   * a replay finds the retained proof and the already-final operation.
-   */
-  public async finalizeRejectedSupplierLiabilities(input: {
-    environment: BillingEnvironment;
-    limit: number;
-  }): Promise<{ readonly repaired: number; readonly failedOperationIds: readonly string[] }> {
-    const operations = await this.databaseService.database
-      .select()
-      .from(creditOperation)
-      .where(
-        and(
-          eq(creditOperation.environment, input.environment),
-          eq(creditOperation.supplierState, 'unresolved'),
-          eq(creditOperation.customerState, 'absorbed'),
-          eq(creditOperation.meteringStatus, 'unavailable'),
-          sql`${creditOperation.normalizationEvidence}->>'terminalReason' = 'provider_rejected'`,
-        ),
-      )
-      .orderBy(asc(creditOperation.id))
-      .limit(input.limit);
-    let repaired = 0;
-    const failedOperationIds: string[] = [];
-    for (const operation of operations) {
-      try {
-        const state = await this.finalizeZeroSupplierCost(operation, {
-          environment: input.environment,
-          expectedGeneration: operation.generation,
-          sourceRevision: rejectedSupplierSourceRevision,
-          payloadDigest: rejectedProofDigest(operation.id),
-        });
-        if (state === 'final') {
-          repaired += 1;
-        }
-      } catch {
-        // One row's fault must not hold the rows after it: the job reports the id and the next pass retries.
-        failedOperationIds.push(operation.id);
-      }
-    }
-    return { repaired, failedOperationIds };
-  }
-
-  /** Applies qualified supplier finality independently of the customer receipt. */
-  public async finalizeSupplier(input: SupplierFinalityInput): Promise<'final' | 'unresolved' | 'replay'> {
-    const context = await this.discoverOperationContext(input.operationId);
-    return this.databaseService.database.transaction(async (tx) => {
-      await this.lockRoute(tx, context.environment, context.sku);
-      await this.lockBudgetContext(tx, context.budgetIds, context.fundingIds);
-      await this.lockAccount(tx, context.accountId);
-      const [operation] = await tx
-        .select()
-        .from(creditOperation)
-        .where(eq(creditOperation.id, input.operationId))
-        .for('update');
-      if (!operation || operation.accountId !== input.accountId) {
-        throw new Error('Credit operation not found for account');
-      }
-      assertMatchingRequestDigest(operation.requestDigest, input.requestDigest);
-      if (operation.generation !== input.expectedGeneration) {
-        throw new Error('Stale credit operation generation');
-      }
-      if (operation.supplierState === 'final' || operation.supplierState === 'funded_exception') {
-        return 'replay';
-      }
-      const [evidence] = await tx
-        .select()
-        .from(supplierCostEvidence)
-        .where(and(eq(supplierCostEvidence.id, input.evidenceId), eq(supplierCostEvidence.operationId, operation.id)));
-      if (evidence?.completeness !== 'complete' || evidence.finality !== 'final') {
-        throw new Error('Qualified final supplier evidence not found');
-      }
-      const holds = await tx
-        .select()
-        .from(billingBudgetHold)
-        .where(eq(billingBudgetHold.operationId, operation.id))
-        .orderBy(asc(billingBudgetHold.budgetId))
-        .for('update');
-      if (evidence.currency !== 'usd') {
-        throw new Error('Supplier evidence currency must be usd');
-      }
-      const exactConsumed =
-        (evidence.numerator * 1_000_000_000_000n + evidence.denominator - 1n) / evidence.denominator;
-      const amounts = new Map([
-        [operation.spendBudgetHoldId, exactConsumed],
-        [operation.riskBudgetHoldId, exactConsumed],
-      ]);
-      if (
-        holds.length !== 2 ||
-        new Set(holds.map(({ id }) => id)).size !== 2 ||
-        holds.some(({ id }) => !amounts.has(id))
-      ) {
-        throw new Error('Supplier holds do not match the operation pointers');
-      }
-      if (
-        holds.some((hold) => {
-          const amount = amounts.get(hold.id);
-          if (amount === undefined) {
-            throw new Error('Supplier hold amount is missing');
-          }
-          return amount > hold.initialBound;
-        })
-      ) {
-        await tx
-          .update(creditOperation)
-          .set({ supplierState: 'unresolved' })
-          .where(eq(creditOperation.id, operation.id));
-        await tx
-          .insert(billingRoutePause)
-          .values({
-            environment: operation.environment,
-            sku: routeSkuFamily(operation.sku)[0],
-            operationId: operation.id,
-            reason: 'supplier_bound_exceeded',
-          })
-          .onConflictDoNothing();
-        return 'unresolved';
-      }
-      for (const hold of holds) {
-        const consumed = amounts.get(hold.id);
-        if (consumed === undefined) {
-          throw new Error('Supplier hold amount is missing');
-        }
-        const consumedDelta = consumed - hold.consumed;
-        const [budget] = await tx.select().from(billingBudget).where(eq(billingBudget.id, hold.budgetId));
-        if (!budget) {
-          throw new Error('Supplier budget disappeared');
-        }
-        await tx
-          .update(billingBudget)
-          .set({
-            held: sql`${billingBudget.held} - ${hold.remainingHeld}`,
-            consumed: sql`${billingBudget.consumed} + ${consumedDelta}`,
-          })
-          .where(eq(billingBudget.id, hold.budgetId));
-        await tx
-          .update(billingBudgetFunding)
-          .set({
-            held: sql`${billingBudgetFunding.held} - ${hold.remainingHeld}`,
-            consumed: sql`${billingBudgetFunding.consumed} + ${consumedDelta}`,
-          })
-          .where(eq(billingBudgetFunding.id, budget.fundingId));
-        await tx
-          .update(billingBudgetHold)
-          .set({ remainingHeld: 0n, consumed, finalityState: 'final' })
-          .where(eq(billingBudgetHold.id, hold.id));
-      }
-      await tx.update(creditOperation).set({ supplierState: 'final' }).where(eq(creditOperation.id, operation.id));
-      return 'final';
     });
   }
 
@@ -2714,12 +2244,11 @@ export class CreditLedgerService {
    *
    * The retained evidence stays exactly as recorded; a content-free terminal
    * marker is what the transactional terminalizer prices at zero, so the
-   * customer keeps their credit, the risk hold is absorbed and the unproved
-   * supplier spend is finalized under an operator case.
+   * customer keeps their credit and the supplier cost stays unpriced.
    */
   private async absorbUnresolvableOperation(
     claim: OperationClaim,
-    cause: { reason: RecoveryCaseReason; detail: string },
+    cause: { reason: RecoveryAbsorptionReason; detail: string },
   ): Promise<void> {
     const [operation] = await this.databaseService.database
       .select()
@@ -2734,7 +2263,7 @@ export class CreditLedgerService {
     if (!operation) {
       return;
     }
-    await this.openRecoveryCase(operation, cause);
+    this.logAbsorbedRecovery(operation, cause);
     const evidence: TerminalEvidence = {
       kind: 'absorbed_unknown',
       executionStatus: operation.cancellationRequestedAt === null ? 'failed' : 'cancelled',
@@ -2746,11 +2275,10 @@ export class CreditLedgerService {
       expectedGeneration: claim.generation,
       evidence,
       resolvedAt: new Date(),
-      expireSpendHold: true,
     });
   }
 
-  /** Holds the claim for a bounded grace so late supplier evidence can still settle it. */
+  /** Holds the claim for a bounded grace so late usage evidence can still settle it. */
   private async deferRecovery(operationId: string, generation: bigint): Promise<void> {
     await this.databaseService.database
       .update(creditOperation)
@@ -2765,78 +2293,30 @@ export class CreditLedgerService {
   }
 
   /**
-   * Opens the operator's case for one recovered operation, idempotently.
+   * Names one operation recovery absorbed, for the operator reading the logs.
    *
-   * The kind is deliberately outside the cash- and supplier-blocking sets: an
-   * absorbed turn is Tau's loss to reconcile, not a reason to restrict the
-   * account or pause the route for every other caller.
+   * An absorbed turn is Tau's loss to reconcile, never a reason to restrict an
+   * account or pause a route: the recovery counters and the unpriced-operations
+   * gauge measure it, and this line says which operation and why.
    *
-   * @param operation - The operation the case is about; its id is the dedupe key.
-   * @param cause - Why the case exists, in the operator's own words.
-   * @param transaction - Commits the case with the settlement that caused it; a
-   *   recovery pass opens its case before the terminalizer instead.
+   * @param operation - The operation recovery absorbed.
+   * @param cause - Why it was absorbed, in the operator's own words.
    */
-  private async openRecoveryCase(
+  private logAbsorbedRecovery(
     operation: typeof creditOperation.$inferSelect,
-    cause: { reason: RecoveryCaseReason; detail: string },
-    transaction?: Tx,
-  ): Promise<void> {
-    const database = transaction ?? this.databaseService.database;
-    const [customer] = await database
-      .select({ stripeAccountId: billingStripeCustomer.stripeAccountId, livemode: billingStripeCustomer.livemode })
-      .from(billingStripeCustomer)
-      .where(
-        and(
-          eq(billingStripeCustomer.accountId, operation.accountId),
-          eq(billingStripeCustomer.environment, operation.environment),
-        ),
-      )
-      .limit(1);
-    const evidence = {
-      version: 'llm-recovery-v1',
-      reason: cause.reason,
-      detail: cause.detail,
-      attempts: (operation.generation - 1n).toString(),
-      dispatchIntentAt: operation.dispatchIntentAt?.toISOString() ?? null,
-      dueAt: operation.dueAt.toISOString(),
-      authorizedAtoms: operation.authorizedAtoms.toString(),
-      modelId: operation.modelId,
-      sku: operation.sku,
-    };
-    await database
-      .insert(billingFinancialCase)
-      .values({
-        id: randomUUID(),
+    cause: { reason: RecoveryAbsorptionReason; detail: string },
+  ): void {
+    this.logger.warn(
+      JSON.stringify({
+        event: 'billing.llm_recovery_absorbed',
         environment: operation.environment,
-        stripeAccountId: customer?.stripeAccountId ?? '',
-        livemode: customer?.livemode ?? false,
-        kind: recoveryFinancialCaseKind,
-        dedupeKey: operation.id,
-        accountId: operation.accountId,
-        sourceType: 'credit_operation',
-        sourceId: operation.id,
-        evidence,
-        owner: 'billing-operations',
-        nextStep: 'price_the_retained_evidence_or_write_off_the_supplier_cost',
-        firstEffectiveAt: operation.dueAt,
-      })
-      .onConflictDoUpdate({
-        target: [
-          billingFinancialCase.environment,
-          billingFinancialCase.stripeAccountId,
-          billingFinancialCase.livemode,
-          billingFinancialCase.kind,
-          billingFinancialCase.dedupeKey,
-        ],
-        // `firstEffectiveAt` stays where the case first landed; the protected trigger refuses to postpone it.
-        set: {
-          state: 'open',
-          lastSeenAt: sql`clock_timestamp()`,
-          resolvedAt: null,
-          resolutionEvidence: null,
-          evidence,
-        },
-      });
+        operationId: operation.id,
+        sku: operation.sku,
+        reason: cause.reason,
+        detail: cause.detail,
+        attempts: (operation.generation - 1n).toString(),
+      }),
+    );
   }
 
   private async dueLlmRecoveryState(input: {
@@ -3282,141 +2762,44 @@ export class CreditLedgerService {
     return { assets: next, debtAtoms: debt };
   }
 
-  /**
-   * Retains final zero-cost supplier evidence for an operation the supplier never ran, and
-   * finalizes the supplier side on it. Idempotent: a retained proof is found again, and an
-   * operation already final replays.
-   */
-  private async finalizeZeroSupplierCost(
-    operation: Pick<
-      typeof creditOperation.$inferSelect,
-      'id' | 'accountId' | 'requestDigest' | 'providerId' | 'invocation'
-    >,
-    input: {
-      environment: BillingEnvironment;
-      expectedGeneration: bigint;
-      sourceRevision: string;
-      payloadDigest: string;
-    },
-  ): Promise<'final' | 'unresolved' | 'replay'> {
-    const outcome = await this.appendSupplierEvidence({
-      operationId: operation.id,
-      environment: input.environment,
-      provider: operation.providerId ?? 'undispatched',
-      credentialAccount: operation.invocation?.credentialAccount ?? 'undispatched',
-      sourceObjectId: operation.id,
-      sourceRevision: input.sourceRevision,
-      payloadDigest: input.payloadDigest,
-      currency: 'usd',
-      numerator: 0n,
-      denominator: 1n,
-      completeness: 'complete',
-      finality: 'final',
-      receivedAt: new Date(),
-    });
-    if (outcome === 'conflict') {
-      throw new Error(`Conflicting ${input.sourceRevision} proof`);
-    }
-    const [evidence] = await this.databaseService.database
-      .select({ id: supplierCostEvidence.id })
-      .from(supplierCostEvidence)
-      .where(
-        and(
-          eq(supplierCostEvidence.operationId, operation.id),
-          eq(supplierCostEvidence.sourceRevision, input.sourceRevision),
-        ),
-      );
-    if (!evidence) {
-      throw new Error(`${input.sourceRevision} proof was not retained`);
-    }
-    return this.finalizeSupplier({
-      evidenceId: evidence.id,
-      operationId: operation.id,
-      accountId: operation.accountId,
-      requestDigest: operation.requestDigest,
-      expectedGeneration: input.expectedGeneration,
-    });
-  }
-
-  /** Charges what a hold still reserves to its budget; capacity is never handed back on absorption. */
-  private async absorbHold(tx: Tx, holdId: string, finalityState: 'absorbed' | 'unresolved'): Promise<void> {
-    const [hold] = await tx.select().from(billingBudgetHold).where(eq(billingBudgetHold.id, holdId)).for('update');
-    if (!hold || hold.remainingHeld === 0n) {
-      return;
-    }
-    const [budget] = await tx.select().from(billingBudget).where(eq(billingBudget.id, hold.budgetId));
-    if (!budget) {
-      throw new Error('Risk budget disappeared');
-    }
-    await tx
-      .update(billingBudget)
-      .set({
-        held: sql`${billingBudget.held} - ${hold.remainingHeld}`,
-        consumed: sql`${billingBudget.consumed} + ${hold.remainingHeld}`,
-      })
-      .where(eq(billingBudget.id, budget.id));
-    await tx
-      .update(billingBudgetFunding)
-      .set({
-        held: sql`${billingBudgetFunding.held} - ${hold.remainingHeld}`,
-        consumed: sql`${billingBudgetFunding.consumed} + ${hold.remainingHeld}`,
-      })
-      .where(eq(billingBudgetFunding.id, budget.fundingId));
-    await tx
-      .update(billingBudgetHold)
-      .set({
-        remainingHeld: 0n,
-        consumed: hold.consumed + hold.remainingHeld,
-        finalityState,
-      })
-      .where(eq(billingBudgetHold.id, hold.id));
-  }
-
-  private async discoverOperationContext(
-    operationId: string,
-  ): Promise<{ accountId: string; environment: string; sku: string; budgetIds: string[]; fundingIds: string[] }> {
+  private async discoverOperationAccount(operationId: string): Promise<string> {
     const [operation] = await this.databaseService.database
-      .select({
-        accountId: creditOperation.accountId,
-        environment: creditOperation.environment,
-        sku: creditOperation.sku,
-      })
+      .select({ accountId: creditOperation.accountId })
       .from(creditOperation)
       .where(eq(creditOperation.id, operationId));
     if (!operation) {
       throw new Error('Credit operation not found');
     }
-    const holds = await this.databaseService.database
-      .select({ budgetId: billingBudgetHold.budgetId })
-      .from(billingBudgetHold)
-      .where(eq(billingBudgetHold.operationId, operationId));
-    const budgetIds = holds.map(({ budgetId }) => budgetId).sort();
-    const budgets =
-      budgetIds.length === 0
-        ? []
-        : await this.databaseService.database
-            .select({ fundingId: billingBudget.fundingId })
-            .from(billingBudget)
-            .where(inArray(billingBudget.id, budgetIds));
-    return {
-      accountId: operation.accountId,
-      environment: operation.environment,
-      sku: operation.sku,
-      budgetIds,
-      fundingIds: [...new Set(budgets.map(({ fundingId }) => fundingId))].sort(),
-    };
+    return operation.accountId;
   }
 
-  /** Serializes SKU closure before the existing funding/budget/account/operation lock order. */
-  private async lockRoute(tx: Tx, environment: string, sku: string): Promise<void> {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([environment, sku])}, 0))`);
+  /**
+   * Whether an operator has paused this route. Only an unresumed pause row denies; a pause covers
+   * the whole route, its base sku and its long-context sibling alike.
+   */
+  private async isRoutePaused(
+    database: Pick<Tx, 'select'>,
+    environment: BillingEnvironment,
+    sku: string,
+  ): Promise<boolean> {
+    const [paused] = await database
+      .select({ id: billingRoutePause.id })
+      .from(billingRoutePause)
+      .where(
+        and(
+          eq(billingRoutePause.environment, environment),
+          eq(billingRoutePause.sku, routeSkuFamily(sku)[0]),
+          sql`${billingRoutePause.resumedAt} is null`,
+        ),
+      )
+      .limit(1);
+    return paused !== undefined;
   }
 
   private async replayAdmission(operationId: string, requestDigest: string): Promise<AdmissionResult> {
-    const context = await this.discoverOperationContext(operationId);
+    const accountId = await this.discoverOperationAccount(operationId);
     return this.databaseService.database.transaction(async (tx) => {
-      await this.lockBudgetContext(tx, context.budgetIds, context.fundingIds);
-      await this.lockAccount(tx, context.accountId);
+      await this.lockAccount(tx, accountId);
       const [operation] = await tx
         .select()
         .from(creditOperation)
@@ -3496,6 +2879,7 @@ export class CreditLedgerService {
         purchasedAtoms: transaction.purchasedDeltaAtoms,
       },
       resolvedAt: operation.resolvedAt,
+      supplierCostPicoUsd: operation.supplierCostPicoUsd,
     };
   }
 }
@@ -3506,16 +2890,42 @@ export const recoveryGraceMinutes = 5;
 /** Transient recovery attempts before the operation is absorbed, counted by `generation` (Q5). */
 export const maximumRecoveryAttempts = 5;
 
-/** The operator case one absorbed recovery opens; deliberately neither cash- nor supplier-blocking. */
-export const recoveryFinancialCaseKind = 'llm_recovery_absorbed';
+type RecoveryAbsorptionReason = 'time_to_live' | 'unresolvable_failure' | 'retries_exhausted';
 
-type RecoveryCaseReason = 'time_to_live' | 'unresolvable_failure' | 'retries_exhausted' | 'authorized_exhausted';
+/**
+ * The supplier cost a terminal receipt records, written once by the terminalizer.
+ *
+ * A refusal with a status, or an operation that never recorded its dispatch intent, cost the
+ * supplier nothing: a known zero. A cut stream reported no usage to price, so it is unpriced as
+ * `absorbed`; reported usage is priced at the pinned supplier valuation.
+ */
+const supplierCostOf = (
+  operation: Pick<typeof creditOperation.$inferSelect, 'dispatchIntentAt' | 'invocation'>,
+  evidence: TerminalEvidence,
+): {
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the receipt column of an unpriced operation
+  picoUsd: bigint | null;
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the receipt column of a priced operation
+  unpricedReason: SupplierCostUnpricedReason | null;
+} => {
+  if (evidence.kind === 'provider_rejected' || operation.dispatchIntentAt === null) {
+    return { picoUsd: 0n, unpricedReason: null };
+  }
+  const meterItems = evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
+  if (meterItems.length === 0) {
+    return { picoUsd: null, unpricedReason: 'absorbed' };
+  }
+  const cost = calculateSupplierCost({ valuation: operation.invocation?.supplierValuation, meterItems });
+  return 'picoUsd' in cost
+    ? { picoUsd: cost.picoUsd, unpricedReason: null }
+    : { picoUsd: null, unpricedReason: cost.unpriced };
+};
 
 /**
  * Recovery failures that recur on every attempt.
  *
- * Retained evidence is immutable and supplier evidence is append-only, so each
- * of these is a property of the stored row rather than of the attempt: retrying
+ * Retained evidence is immutable, so each of these is a property of the stored
+ * row rather than of the attempt: retrying
  * holds the customer's credit forever (Finding 6).
  */
 const unresolvableRecoveryFailures = new Set([
@@ -3524,9 +2934,6 @@ const unresolvableRecoveryFailures = new Set([
   'Terminal meter quantities contain duplicate dimensions',
   'Reasoning tokens must be a reported subset of output',
   'Too many terminal meter quantities',
-  'Conflicting recovered supplier evidence',
-  'Conflicting no-dispatch proof',
-  'Conflicting supplier evidence',
   'Stored complete usage lacks required evidence',
 ]);
 /* eslint-enable no-await-in-loop, max-lines, complexity -- financial mutations execute sequentially in one lock order */

@@ -336,16 +336,35 @@ export const appendReviewEvent = async (
 
 // --- Git ------------------------------------------------------------------------------------------
 
+// Tau Brain's untracked evidence trees push `git status` past Node's default 1 MiB `maxBuffer`.
+const gitMaxBuffer = 256 * 1024 * 1024;
 const gitRaw = (cwd: string, ...arguments_: string[]): string =>
-  execFileSync('git', arguments_, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync('git', arguments_, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: gitMaxBuffer,
+  });
 const git = (cwd: string, ...arguments_: string[]): string => gitRaw(cwd, ...arguments_).trim();
 
 const reviewFile = /(?:^|\/)review\/[^/]+\.json$/;
 
+const status = (repository: string, directory: string): string => {
+  try {
+    return gitRaw(repository, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', directory);
+  } catch (error) {
+    const partial = isObject(error) && isString(error['stdout']) ? error['stdout'] : '';
+    const reason = error instanceof Error ? error.message.split('\n')[0] : String(error);
+    throw new Error(
+      `Could not read the Git status of ${repository} (${Buffer.byteLength(partial)} bytes read): ${reason}`,
+    );
+  }
+};
+
 /** Porcelain entries under `directory`, as [status, path relative to the repository root]. */
 const changes = (repository: string, directory: string): ReadonlyArray<readonly [string, string]> =>
   // Untrimmed: the first entry's status can start with a space.
-  gitRaw(repository, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', directory)
+  status(repository, directory)
     .split('\0')
     .filter(Boolean)
     .map((entry) => [entry.slice(0, 2), entry.slice(3)] as const)
@@ -510,12 +529,17 @@ export const main = async (arguments_: readonly string[]): Promise<number> => {
       return report(await finishReview({ canvas }));
     }
     case 'check': {
-      const changed = changedReviewEvents();
-      if (changed.length > 0) {
-        console.error(changedMessage(changed));
+      try {
+        const changed = changedReviewEvents();
+        if (changed.length > 0) {
+          console.error(changedMessage(changed));
+          return 1;
+        }
+        return 0;
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
         return 1;
       }
-      return 0;
     }
     default: {
       console.error('usage: canvas-review.ts list|reply|resolve|reopen|finish <canvas> [thread] [flags] | check');

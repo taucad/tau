@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mockDeep } from 'vitest-mock-extended';
+import { ZodError } from 'zod';
 import type { DatabaseService } from '#database/database.service.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
@@ -53,6 +54,24 @@ describe('protected lifecycle command boundary', () => {
         },
       }),
     ).rejects.toThrow();
+    expect(database.database.transaction).not.toHaveBeenCalled();
+    expect(database.database.select).not.toHaveBeenCalled();
+  });
+
+  it('should reject the retired supplier sweep as an unknown operation before database work', async () => {
+    const database = mockDeep<DatabaseService>();
+
+    const sweep = runBillingLifecycleCommand({
+      database,
+      sourceStripe: createBillingStripeClient({ secretKey: 'rk_test_unconfigured' }),
+      environment: 'staging',
+      stripeAccountId: 'acct_test',
+      livemode: false,
+      request: { operation: 'sweep-supplier', environment: 'staging', pageSize: 100, unresolvedMaximumAge: 0 },
+    });
+
+    await expect(sweep).rejects.toThrow(ZodError);
+    await expect(sweep).rejects.toThrow(/invalid_union|Invalid input/u);
     expect(database.database.transaction).not.toHaveBeenCalled();
     expect(database.database.select).not.toHaveBeenCalled();
   });

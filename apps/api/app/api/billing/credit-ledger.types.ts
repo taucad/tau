@@ -45,11 +45,6 @@ export type SourceAmounts = {
   purchasedAtoms: bigint;
 };
 
-export type BudgetRequirement = {
-  budgetId: string;
-  maximum: bigint;
-};
-
 export type QualifiedAdmissionInput = {
   environment: BillingEnvironment;
   authUserId: string;
@@ -66,7 +61,6 @@ export type QualifiedAdmissionInput = {
   activity: string;
   sku: string;
   maximumQuantities: readonly MeterQuantity[];
-  supplierMaximumPicoUsd: bigint;
   replica: { schemaVersion: number; meterContractIds: readonly string[] };
   executionDeadline?: Date;
   invocation?: {
@@ -96,8 +90,9 @@ export type AdmissionDenial =
   | 'attempt_voided'
   | 'debt'
   | 'insufficient_credit'
-  | 'budget_unavailable'
   | 'concurrency_unavailable'
+  /** An operator paused this route; the gateway answers 503 `MODEL_ROUTE_PAUSED`. */
+  | 'route_paused'
   | 'policy_unavailable';
 
 export type AdmissionResult =
@@ -116,7 +111,8 @@ export type AdmissionResult =
   | { status: 'denied'; reason: AdmissionDenial };
 
 export type CustomerState = 'pending' | 'settled' | 'released' | 'absorbed';
-export type SupplierState = 'reserved' | 'preliminary' | 'unresolved' | 'final' | 'funded_exception';
+/** Why a terminal operation carries no supplier cost estimate. */
+export type SupplierCostUnpricedReason = 'missing_rate' | 'dimension_mismatch' | 'absorbed';
 export type DispatchState = 'admitted' | 'intent_recorded' | 'accepted' | 'recovery_required';
 
 export type NormalizedMeterItem = {
@@ -181,15 +177,6 @@ export type TerminalizeInput = {
   expectedGeneration: bigint;
   evidence: TerminalEvidence;
   resolvedAt: Date;
-  /**
-   * Finalize the supplier spend hold as `unresolved` in the same transaction.
-   *
-   * Recovery sets it when an absorbed expiry proves no further supplier
-   * evidence is coming, so the hold stops pinning budget. The live gateway
-   * never sets it: its operations either settle or keep the hold for
-   * reconciliation.
-   */
-  expireSpendHold?: boolean;
 };
 
 export type TerminalReceipt = {
@@ -202,22 +189,13 @@ export type TerminalReceipt = {
   accountDeltaAtoms: bigint;
   sourceDeltas: SourceAmounts;
   resolvedAt: Date;
-};
-
-export type SupplierEvidenceInput = {
-  operationId?: string;
-  environment: BillingEnvironment;
-  provider: string;
-  credentialAccount: string;
-  sourceObjectId: string;
-  sourceRevision: string;
-  payloadDigest: string;
-  currency: string;
-  numerator: bigint;
-  denominator: bigint;
-  completeness: 'partial' | 'complete';
-  finality: 'preliminary' | 'final';
-  receivedAt: Date;
+  /**
+   * What the supplier is estimated to have cost Tau, in pico-USD: usage priced at the pinned
+   * supplier rates, zero for a refusal or an undispatched call, absent when it could not be priced.
+   * Internal reporting only; never shown to the customer.
+   */
+  // oxlint-disable-next-line typescript/no-restricted-types -- null mirrors the receipt column of an unpriced operation
+  supplierCostPicoUsd: bigint | null;
 };
 
 export type AccountSnapshot = SourceAmounts & {
@@ -289,14 +267,6 @@ export type LlmRecoveryResult = {
 
 export type OwnerLlmRecoveryResult = LlmRecoveryResult & {
   pool: FundedLlmCapacityPool;
-};
-
-export type SupplierFinalityInput = {
-  evidenceId: string;
-  operationId: string;
-  accountId: string;
-  requestDigest: string;
-  expectedGeneration: bigint;
 };
 
 /** Complete source-qualified cash loss, applied only under its canonical Charge fence. */

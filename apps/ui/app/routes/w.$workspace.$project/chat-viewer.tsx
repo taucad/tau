@@ -1019,9 +1019,17 @@ const ViewerContent = memo(function ({
         }));
       }}
     >
-      {/* Status overlays: the running build phase at the top, in the bar's skin, so the bar below never moves for it.
-          In the editor the view menus, the failure and a view notice live in the bottom bar. */}
-      <div className='absolute top-2 right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2'>
+      {/* Status overlays: the running build phase in the bar's skin, outside the bar so the bar never moves for it.
+          With nothing rendered yet the pill is the viewer's only content, so it sits where the model will appear;
+          over a model it sits in the upper sixth, below the 96 px gizmo band and the pane's tab strip and above the
+          model's middle. In the editor the view menus, the failure and a view notice live in the bottom bar. */}
+      <div
+        data-slot='viewer-status'
+        className={cn(
+          'absolute right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2',
+          artifact && presentedArtifact ? 'top-[clamp(5rem,16%,8rem)]' : 'top-1/2 -translate-y-1/2',
+        )}
+      >
         <ChatViewerStatus />
         {unavailable && profile !== 'editor' ? (
           <div role='alert' className='rounded-md border border-border bg-background/95 p-3 text-sm shadow-sm'>

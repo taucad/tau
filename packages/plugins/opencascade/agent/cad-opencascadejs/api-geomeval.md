@@ -650,6 +650,10 @@ GeomEval_HyperboloidSurface: declare class GeomEval_HyperboloidSurface extends G
 
 GeomEval_HyperboloidSurface_SheetMode: typeof GeomEval_HyperboloidSurface_SheetMode[keyof typeof GeomEval_HyperboloidSurface_SheetMode]
 
+  readonly OneSheet: 'OneSheet'
+
+  readonly TwoSheets: 'TwoSheets'
+
 GeomEval_ParaboloidSurface: declare class GeomEval_ParaboloidSurface extends Geom_ElementarySurface
 
   // GeomEval_ParaboloidSurface.constructor (constructor)
@@ -756,6 +760,12 @@ GeomEval_RepCurveDesc_Base: declare class GeomEval_RepCurveDesc_Base extends Sta
   [Symbol.dispose](): void;
 
 GeomEval_RepCurveDesc_Base_Kind: typeof GeomEval_RepCurveDesc_Base_Kind[keyof typeof GeomEval_RepCurveDesc_Base_Kind]
+
+  readonly Full: 'Full'
+
+  readonly DerivBounded: 'DerivBounded'
+
+  readonly Mapped: 'Mapped'
 
 GeomEval_RepCurveDesc_DerivBounded: declare class GeomEval_RepCurveDesc_DerivBounded extends GeomEval_RepCurveDesc_Base
 
@@ -899,6 +909,12 @@ GeomEval_RepSurfaceDesc_Base: declare class GeomEval_RepSurfaceDesc_Base extends
   [Symbol.dispose](): void;
 
 GeomEval_RepSurfaceDesc_Base_Kind: typeof GeomEval_RepSurfaceDesc_Base_Kind[keyof typeof GeomEval_RepSurfaceDesc_Base_Kind]
+
+  readonly Full: 'Full'
+
+  readonly DerivBounded: 'DerivBounded'
+
+  readonly Mapped: 'Mapped'
 
 GeomEval_RepSurfaceDesc_DerivBounded: declare class GeomEval_RepSurfaceDesc_DerivBounded extends GeomEval_RepSurfaceDesc_Base
 

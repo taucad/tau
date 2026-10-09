@@ -120,6 +120,30 @@
       ],
       "outputs": ["{projectRoot}/src/generated/picovoxel"]
     },
+    "collect-usage": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/usage/collect-usage.ts",
+        "cwd": "libs/api-extractor"
+      },
+      "cache": false
+    },
+    "extract-tscircuit": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-tscircuit-types.ts",
+        "cwd": "libs/api-extractor"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/extract-tscircuit-types.ts",
+        "{projectRoot}/src/languages/typescript/extract.ts",
+        "{projectRoot}/src/languages/typescript/tscircuit.ts",
+        "{workspaceRoot}/pnpm-lock.yaml",
+        "sharedGlobals"
+      ],
+      "outputs": ["{projectRoot}/src/generated/tscircuit"]
+    },
     "generate-bundles": {
       "executor": "nx:run-commands",
       "options": {

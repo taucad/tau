@@ -6,7 +6,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(71);
+    expect(metrics).toHaveLength(66);
   });
 
   it('should bound funded-operation telemetry to content-free dimensions', () => {
@@ -21,9 +21,16 @@ describe('TauMetrics', () => {
       TauMetrics.billingFundedOperationDenials.attributes.safeParse({
         'deployment.environment': 'prod-us',
         'tau.billing.capacity_pool': 'helper',
-        'tau.billing.denial.reason': 'supplier_route_paused',
+        'tau.billing.denial.reason': 'operator_route_paused',
       }).success,
     ).toBe(true);
+    expect(
+      TauMetrics.billingFundedOperationDenials.attributes.safeParse({
+        'deployment.environment': 'prod-us',
+        'tau.billing.capacity_pool': 'helper',
+        'tau.billing.denial.reason': 'supplier_route_paused',
+      }).success,
+    ).toBe(false);
     expect(
       TauMetrics.billingFundedOperationTerminals.attributes.safeParse({
         'deployment.environment': 'development',
@@ -52,6 +59,60 @@ describe('TauMetrics', () => {
         'deployment.environment': 'prod-us',
         'tau.billing.capacity_pool': 'primary',
         'tau.billing.recovery.batch.outcome': 'provider supplied text',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('should meter supplier cost per call with the same model and provider labels as the customer charge', () => {
+    expect(TauMetrics.billingSupplierCostPicoUsd).toMatchObject({
+      name: 'tau.billing.supplier_cost_picousd',
+      unit: '{picousd}',
+      type: 'counter',
+    });
+    expect(Object.keys(TauMetrics.billingSupplierCostPicoUsd.attributes.shape).sort()).toEqual([
+      'deployment.environment',
+      'gen_ai.provider.name',
+      'gen_ai.request.model',
+    ]);
+    const chargeLabels = Object.keys(TauMetrics.genAiCost.attributes.shape);
+    expect(chargeLabels).toEqual(expect.arrayContaining(['gen_ai.request.model', 'gen_ai.provider.name']));
+    expect(
+      TauMetrics.billingSupplierCostPicoUsd.attributes.safeParse({
+        'gen_ai.request.model': 'model-a',
+        'gen_ai.provider.name': 'provider-a',
+        'deployment.environment': 'preview-123',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('should count unpriced operations by environment, provider, sku and a bounded reason', () => {
+    expect(TauMetrics.billingSupplierUnpricedOperations).toMatchObject({
+      name: 'tau.billing.supplier_unpriced_operations',
+      unit: '{operation}',
+      type: 'gauge',
+    });
+    expect(Object.keys(TauMetrics.billingSupplierUnpricedOperations.attributes.shape).sort()).toEqual([
+      'deployment.environment',
+      'gen_ai.provider.name',
+      'tau.billing.sku',
+      'tau.billing.unpriced.reason',
+    ]);
+    for (const reason of ['missing_rate', 'dimension_mismatch', 'absorbed']) {
+      expect(
+        TauMetrics.billingSupplierUnpricedOperations.attributes.safeParse({
+          'deployment.environment': 'staging',
+          'gen_ai.provider.name': 'provider-a',
+          'tau.billing.sku': 'model:route-a',
+          'tau.billing.unpriced.reason': reason,
+        }).success,
+      ).toBe(true);
+    }
+    expect(
+      TauMetrics.billingSupplierUnpricedOperations.attributes.safeParse({
+        'deployment.environment': 'staging',
+        'gen_ai.provider.name': 'provider-a',
+        'tau.billing.sku': 'model:route-a',
+        'tau.billing.unpriced.reason': 'provider supplied text',
       }).success,
     ).toBe(false);
   });
@@ -143,7 +204,7 @@ describe('TauMetrics', () => {
 
   it('should use pluralized names or mass nouns for counters', () => {
     const counters = metrics.filter((m) => m.type === 'counter');
-    const validSuffixes = /s$|cost$|microusd$|flagged$/;
+    const validSuffixes = /s$|cost$|microusd$|picousd$|flagged$/;
     for (const counter of counters) {
       const lastSegment = counter.name.split('.').at(-1) ?? '';
       expect(lastSegment).toMatch(validSuffixes);

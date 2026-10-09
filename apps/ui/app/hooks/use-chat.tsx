@@ -49,7 +49,7 @@ import type { ActorRefFrom } from 'xstate';
 import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
-import type { ChatSession } from '#services/chat-session-store.js';
+import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
 import type { TurnGroup } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
@@ -468,7 +468,7 @@ export type ChatActions = DraftActions & {
    * An unavailable resume is refused; replay is the separate regenerate verb.
    */
   continueChat: () => void;
-  stop: () => void;
+  stop: (origin: StopOrigin) => void;
   setMessages: (messages: MyUIMessage[]) => void;
   editMessage: (messageId: string, content: string, options?: { attachments?: readonly StoredAttachmentRef[] }) => void;
 };
@@ -551,12 +551,12 @@ export function useChatActions(chatId?: string): ChatActions {
         }
         void store.requestTurn(resolvedChatId, { kind: 'continue' });
       },
-      stop() {
+      stop(origin) {
         const session = requireSession('stop');
         if (!session) {
           return;
         }
-        store.stopRun(resolvedChatId);
+        store.stopRun(resolvedChatId, origin);
       },
       setMessages(messages: MyUIMessage[]) {
         const session = requireSession('setMessages');

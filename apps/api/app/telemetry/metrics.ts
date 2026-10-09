@@ -17,18 +17,7 @@ export class MetricsService {
   private readonly apiMeter = metrics.getMeter('tau-api');
   private readonly clientMeter = metrics.getMeter('tau-client');
 
-  // WebSocket / RPC
-  public readonly rpcCallDuration = this.apiMeter.createHistogram(TauMetrics.rpcCallDuration.name, {
-    description: TauMetrics.rpcCallDuration.description,
-    unit: TauMetrics.rpcCallDuration.unit,
-    advice: { explicitBucketBoundaries: [...TauMetrics.rpcCallDuration.buckets] },
-  });
-
-  public readonly rpcActiveCalls = this.apiMeter.createUpDownCounter(TauMetrics.rpcActiveCalls.name, {
-    description: TauMetrics.rpcActiveCalls.description,
-    unit: TauMetrics.rpcActiveCalls.unit,
-  });
-
+  // WebSocket
   public readonly wsActiveConnections = this.apiMeter.createUpDownCounter(TauMetrics.wsActiveConnections.name, {
     description: TauMetrics.wsActiveConnections.description,
     unit: TauMetrics.wsActiveConnections.unit,
@@ -48,22 +37,6 @@ export class MetricsService {
   public readonly wsUpgradeRejections = this.apiMeter.createCounter(TauMetrics.wsUpgradeRejections.name, {
     description: TauMetrics.wsUpgradeRejections.description,
     unit: TauMetrics.wsUpgradeRejections.unit,
-  });
-
-  public readonly rpcDeliveryEvents = this.apiMeter.createCounter(TauMetrics.rpcDeliveryEvents.name, {
-    description: TauMetrics.rpcDeliveryEvents.description,
-    unit: TauMetrics.rpcDeliveryEvents.unit,
-  });
-
-  public readonly rpcDeliveryWakeDuration = this.apiMeter.createHistogram(TauMetrics.rpcDeliveryWakeDuration.name, {
-    description: TauMetrics.rpcDeliveryWakeDuration.description,
-    unit: TauMetrics.rpcDeliveryWakeDuration.unit,
-    advice: { explicitBucketBoundaries: [...TauMetrics.rpcDeliveryWakeDuration.buckets] },
-  });
-
-  public readonly rpcActiveRunRooms = this.apiMeter.createUpDownCounter(TauMetrics.rpcActiveRunRooms.name, {
-    description: TauMetrics.rpcActiveRunRooms.description,
-    unit: TauMetrics.rpcActiveRunRooms.unit,
   });
 
   // AI / LLM (GenAI semantic conventions)
@@ -164,16 +137,6 @@ export class MetricsService {
   // Infrastructure
   public readonly redisConnectionState = this.apiMeter.createGauge(TauMetrics.redisConnectionState.name, {
     description: TauMetrics.redisConnectionState.description,
-  });
-
-  public readonly sseActiveConnections = this.apiMeter.createUpDownCounter(TauMetrics.sseActiveConnections.name, {
-    description: TauMetrics.sseActiveConnections.description,
-    unit: TauMetrics.sseActiveConnections.unit,
-  });
-
-  public readonly sseEvents = this.apiMeter.createCounter(TauMetrics.sseEvents.name, {
-    description: TauMetrics.sseEvents.description,
-    unit: TauMetrics.sseEvents.unit,
   });
 
   public readonly publicationViewsTotal = this.apiMeter.createCounter(TauMetrics.publicationViewsTotal.name, {
@@ -303,6 +266,19 @@ export class MetricsService {
     {
       description: TauMetrics.billingFundedOperationRecoveries.description,
       unit: TauMetrics.billingFundedOperationRecoveries.unit,
+    },
+  );
+
+  public readonly billingSupplierCostPicoUsd = this.apiMeter.createCounter(TauMetrics.billingSupplierCostPicoUsd.name, {
+    description: TauMetrics.billingSupplierCostPicoUsd.description,
+    unit: TauMetrics.billingSupplierCostPicoUsd.unit,
+  });
+
+  public readonly billingSupplierUnpricedOperations = this.apiMeter.createGauge(
+    TauMetrics.billingSupplierUnpricedOperations.name,
+    {
+      description: TauMetrics.billingSupplierUnpricedOperations.description,
+      unit: TauMetrics.billingSupplierUnpricedOperations.unit,
     },
   );
 

@@ -275,8 +275,8 @@ export const createBillableModelEvidenceCollector = (
             },
           };
     /* A supplier that answered with a status ran nothing, so the refusal is proof of zero cost,
-     * not unknown cost: it keeps its own kind and settles now, instead of absorbing the turn and
-     * leaving a supplier liability that the sweep turns into a route pause a day later. */
+     * not unknown cost: it keeps its own kind and releases the customer now, with a known zero
+     * supplier cost, instead of absorbing the turn as unpriced. */
     if (failure === 'provider_rejected') {
       return {
         kind: 'provider_rejected',

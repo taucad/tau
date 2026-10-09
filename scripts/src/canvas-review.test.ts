@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -195,6 +195,35 @@ describe('finishing a review', () => {
     writeFileSync(join(artifacts, 'demo', 'review', file!), '{}');
     expect(changedReviewEvents(artifacts)).toEqual([`artifacts/demo/review/${file}`]);
     expect(await finishReview({ canvas, root: artifacts })).toMatchObject({ status: 'refused', code: 'INVALID_EVENT' });
+  });
+
+  it('should read a status larger than the default 1 MiB child-process buffer', async () => {
+    const { root, artifacts, canvas } = repository();
+    await appendReviewEvent({ canvas, root: artifacts, event: comment });
+    await finishReview({ canvas, root: artifacts });
+    // Disposable evidence beside the canvas, as other programs leave it in Tau Brain.
+    const evidence = join(artifacts, canvas, 'evidence');
+    mkdirSync(evidence);
+    const name = 'x'.repeat(240);
+    for (let index = 0; index < 4400; index += 1) {
+      writeFileSync(join(evidence, `${index}-${name}.txt`), '');
+    }
+    const [file] = readdirSync(join(artifacts, canvas, 'review'));
+    writeFileSync(join(artifacts, canvas, 'review', file!), '{}');
+    const status = execFileSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], {
+      cwd: root,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    expect(status.byteLength).toBeGreaterThan(1024 * 1024);
+    expect(changedReviewEvents(artifacts)).toEqual([`artifacts/demo/review/${file}`]);
+  }, 60_000);
+
+  it('should name the repository in one line when the Git status cannot be read', () => {
+    const { root, artifacts } = repository();
+    writeFileSync(join(root, '.git', 'index'), 'corrupt');
+    expect(() => changedReviewEvents(artifacts)).toThrow(
+      new RegExp(`^Could not read the Git status of ${realpathSync(root)} \\(0 bytes read\\): [^\\n]+$`),
+    );
   });
 
   it('should report a canvas outside Git as read-only', async () => {

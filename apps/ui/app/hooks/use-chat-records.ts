@@ -40,7 +40,7 @@ export function useChatRecords(
     isLoading: isWorkerLoading || isLoading,
     error: getMetadataObservationError(resourceId) ?? (error instanceof Error ? error.message : undefined),
     retry: async () => {
-      refreshFilesystemObservations();
+      refreshFilesystemObservations(resourceId);
       return refetch();
     },
   };

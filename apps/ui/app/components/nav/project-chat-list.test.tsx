@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
@@ -484,13 +484,46 @@ describe('ProjectChatList', () => {
     expect(document.querySelector('[data-slot=chat-status][data-glyph=failed]')).toBeInTheDocument();
   });
 
-  it('shows a failure row with no control when the chats could not load', () => {
-    mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], error: 'offline' });
-    render(<ProjectChatList project={project} isProjectActive />);
-    const failure = document.querySelector('[data-slot=failure-row]');
-    expect(failure).toHaveTextContent("Couldn't load chats");
-    expect(failure?.querySelector('button, a')).toBeNull();
-  });
+  it.each([false, true])(
+    'should retry metadata with retained chats=%s without replacing observation leases',
+    async (retained) => {
+      const retry = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+      const chats = retained ? defaultChatsResult.chats : [];
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats, retry });
+      mockChatStatus.mockReturnValue(status({ state: 'working' }));
+      const { rerender, unmount } = render(<ProjectChatList project={project} isProjectActive />);
+      const registrations = mockObserve.mock.calls.length;
+      const links = screen.queryAllByRole('link');
+      mockUseChatRecords.mockReturnValue({
+        ...defaultChatsResult,
+        chats,
+        retry,
+        error: 'Provider offline\nprivate diagnostic',
+      });
+      rerender(<ProjectChatList project={project} isProjectActive />);
+      expect(document.querySelector('[data-slot=failure-row]')).toHaveTextContent("Couldn't load chats");
+      expect(screen.queryByText(/private diagnostic/u)).not.toBeInTheDocument();
+      expect(screen.queryAllByRole('link')).toEqual(links);
+      fireEvent.click(screen.getByRole('button', { name: 'Retry loading chats' }));
+      await waitFor(() => {
+        expect(retry).toHaveBeenCalledOnce();
+      });
+      expect(mockCloseChat).not.toHaveBeenCalled();
+      expect(mockObserve).toHaveBeenCalledTimes(registrations);
+      expect(mockRelease).not.toHaveBeenCalled();
+      if (retained) {
+        fireEvent.click(screen.getByRole('button', { name: 'Stop Chat 12' }));
+        expect(mockCloseChat).toHaveBeenCalledWith(project.id, 'chat_12');
+      }
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats, retry });
+      rerender(<ProjectChatList project={project} isProjectActive />);
+      expect(screen.queryByRole('button', { name: 'Retry loading chats' })).not.toBeInTheDocument();
+      expect(screen.queryAllByRole('link')).toEqual(links);
+      expect(mockRelease).not.toHaveBeenCalled();
+      unmount();
+      expect(mockRelease).toHaveBeenCalledTimes(chats.length);
+    },
+  );
 
   /* D17: renaming keeps the status column and outlines the whole row. */
   it('outlines the whole row while it is renamed and keeps its status column', () => {

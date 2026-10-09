@@ -211,7 +211,7 @@ type ProjectManagerContextType = {
   discoveryObservationError: string | undefined;
   metadataObservationError: string | undefined;
   getMetadataObservationError: (resourceId: string) => string | undefined;
-  refreshFilesystemObservations: () => void;
+  refreshFilesystemObservations: (resourceId?: string) => void;
   isLoading: boolean;
   error: Error | undefined;
   projectManagerRef: ActorRefFrom<typeof projectManagerMachine>;
@@ -801,6 +801,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const discoveryObservationRef = useRef<ObservationService<void> | undefined>(undefined);
   const metadataObservationRef = useRef<ObservationService<void> | undefined>(undefined);
+  const refreshProjectMetadataRef = useRef<((resourceId: string) => void) | undefined>(undefined);
   const [discoveryObservationError, setDiscoveryObservationError] = useState<string>();
   const [metadataObservationError, setMetadataObservationError] = useState<string>();
   const [metadataObservationErrors, setMetadataObservationErrors] = useState<ReadonlyMap<string, string>>(
@@ -810,7 +811,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     (resourceId: string): string | undefined => metadataObservationErrors.get(resourceId),
     [metadataObservationErrors],
   );
-  const refreshFilesystemObservations = useCallback(() => {
+  const refreshFilesystemObservations = useCallback((resourceId?: string) => {
+    if (resourceId !== undefined) {
+      refreshProjectMetadataRef.current?.(resourceId);
+      return;
+    }
     discoveryObservationRef.current?.refresh();
     metadataObservationRef.current?.refresh();
   }, []);
@@ -875,6 +880,10 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     discoveryObservationRef.current = discovery;
     const resources = new Map<string, Set<string>>();
     const projectMetadata = new Map<string, ObservationService<void>>();
+    const refreshProjectMetadata = (resourceId: string): void => {
+      projectMetadata.get(resourceId)?.refresh();
+    };
+    refreshProjectMetadataRef.current = refreshProjectMetadata;
     const publishMetadataHealth = (id: string, error: string | undefined): void => {
       setMetadataObservationErrors((previous) => {
         if (previous.get(id) === error) {
@@ -1158,6 +1167,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     return () => {
       unsubscribeDiscovery();
       unsubscribeMetadata();
+      if (refreshProjectMetadataRef.current === refreshProjectMetadata) {
+        refreshProjectMetadataRef.current = undefined;
+      }
       if (metadataObservationRef.current === metadata) {
         metadataObservationRef.current = undefined;
       }

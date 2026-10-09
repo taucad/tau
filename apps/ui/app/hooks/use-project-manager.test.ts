@@ -1720,6 +1720,101 @@ describe('useProjectManager.createProject', () => {
     },
   );
 
+  it('should retry failed project metadata without refetching or reacquiring a healthy sibling', async () => {
+    const failedClosed = Promise.withResolvers<void>();
+    const retryReady = Promise.withResolvers<void>();
+    const open = new Promise<void>(() => {
+      /* Watches remain open until disposal. */
+    });
+    const healthyDispose = vi.fn();
+    let failedRegistrations = 0;
+    mockWatchRecordFile.mockImplementation((path) => {
+      if (path.includes(fakeProject.id)) {
+        return { ready: Promise.resolve(), closed: open, dispose: healthyDispose };
+      }
+      failedRegistrations++;
+      return {
+        ready: failedRegistrations === 1 ? Promise.resolve() : retryReady.promise,
+        closed: failedRegistrations === 1 ? failedClosed.promise : open,
+        dispose: vi.fn(),
+      };
+    });
+    const { wrapper, queryClient } = createInspectableWrapper();
+    queryClient.setQueryData<ProjectListing>(['projects'], {
+      projects: [
+        { manifest: fakeProject, library: { projectId: fakeProject.id, lastActivityAt: 1 }, locator: fakeLocator },
+        {
+          manifest: unrelatedProject,
+          library: { projectId: unrelatedProject.id, lastActivityAt: 1 },
+          locator: unrelatedLocator,
+        },
+      ],
+      conflicts: [],
+      recoveries: [],
+      workspaceBindingRepairs: [],
+    });
+    const view = renderHook(
+      () => ({
+        manager: useProjectManager(),
+        healthy: useChatRecords(fakeProject.id),
+        failed: useChatRecords(unrelatedProject.id),
+      }),
+      { wrapper },
+    );
+    let pendingRetry: Promise<unknown> | undefined;
+    try {
+      await waitFor(() => {
+        expect(view.result.current.healthy.isLoading).toBe(false);
+        expect(view.result.current.failed.isLoading).toBe(false);
+        expect(mockWatchRecordFile).toHaveBeenCalledTimes(2);
+      });
+      await act(async () => {
+        failedClosed.resolve();
+      });
+      await waitFor(() => {
+        expect(view.result.current.failed.error).toBe('Observation connection closed.');
+      });
+      expect(view.result.current.healthy.error).toBeUndefined();
+      const healthyReads = mockReadChatRecords.mock.calls.filter(([id]) => id === fakeProject.id).length;
+      expect(healthyReads).toBeGreaterThan(0);
+      const cancelQueries = vi.spyOn(queryClient, 'cancelQueries');
+      const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+      act(() => {
+        pendingRetry = view.result.current.failed.retry();
+      });
+      await waitFor(() => {
+        expect(failedRegistrations).toBe(2);
+      });
+      expect(healthyDispose).not.toHaveBeenCalled();
+      expect(mockWatchRecordFile.mock.calls.filter(([path]) => path.includes(fakeProject.id))).toHaveLength(1);
+      expect(view.result.current.healthy.error).toBeUndefined();
+      expect(view.result.current.failed.error).toBe('Observation connection closed.');
+      expect(cancelQueries).not.toHaveBeenCalledWith({ queryKey: ['chats', fakeProject.id] });
+      expect(mockReadChatRecords.mock.calls.filter(([id]) => id === fakeProject.id)).toHaveLength(healthyReads);
+      await act(async () => {
+        retryReady.resolve();
+        await pendingRetry;
+      });
+      await waitFor(() => {
+        expect(view.result.current.failed.error).toBeUndefined();
+        expect(view.result.current.manager.metadataObservationError).toBeUndefined();
+      });
+      expect(healthyDispose).not.toHaveBeenCalled();
+      expect(mockWatchRecordFile.mock.calls.filter(([path]) => path.includes(fakeProject.id))).toHaveLength(1);
+      expect(invalidateQueries).not.toHaveBeenCalledWith(
+        { queryKey: ['chats', fakeProject.id] },
+        { cancelRefetch: false },
+      );
+      expect(mockReadChatRecords.mock.calls.filter(([id]) => id === fakeProject.id)).toHaveLength(healthyReads);
+    } finally {
+      retryReady.resolve();
+      view.unmount();
+      await Promise.allSettled(pendingRetry ? [pendingRetry] : []);
+      queryClient.clear();
+      mockWatchRecordFile.mockImplementation(recordWatch);
+    }
+  });
+
   it('keeps scoped chat health independent and retains its own fault through acknowledged retry', async () => {
     const siblingReady = Promise.withResolvers<void>();
     const healthyClosed = Promise.withResolvers<void>();

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { Pencil, Square, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
@@ -47,7 +47,7 @@ export function ProjectChatList({
   readonly isProjectActive: boolean;
   readonly isExpanded?: boolean;
 }): React.ReactNode {
-  const { chats: allChats, isLoading, error } = useChatRecords(project.id);
+  const { chats: allChats, isLoading, error, retry } = useChatRecords(project.id);
   const { updateChatName, deleteChat } = useChats(project.id, { enabled: false });
   const chats = useMemo(
     () => allChats.filter((chat) => chat.deletedAt === undefined && chat.purgedAt === undefined),
@@ -55,18 +55,21 @@ export function ProjectChatList({
   );
   const store = useChatSessionStore();
   // Metadata and ordering do not retire leases; only membership or the owning project/store does.
-  const observations = useRef(new Map<string, () => void>());
+  const observations = useMemo(
+    () => ({ projectId: project.id, store, leases: new Map<string, () => void>() }),
+    [project.id, store],
+  );
   useEffect(() => {
-    const releases = observations.current;
+    const releases = observations.leases;
     return () => {
       for (const release of releases.values()) {
         release();
       }
       releases.clear();
     };
-  }, [project.id, store]);
+  }, [observations]);
   useEffect(() => {
-    const releases = observations.current;
+    const releases = observations.leases;
     const chatIds = new Set(chats.map((chat) => chat.id));
     for (const [chatId, release] of releases) {
       if (!chatIds.has(chatId)) {
@@ -76,10 +79,10 @@ export function ProjectChatList({
     }
     for (const chatId of chatIds) {
       if (!releases.has(chatId)) {
-        releases.set(chatId, store.observe(chatId, project.id));
+        releases.set(chatId, observations.store.observe(chatId, observations.projectId));
       }
     }
-  }, [chats, project.id, store]);
+  }, [chats, observations]);
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -138,9 +141,14 @@ export function ProjectChatList({
             </SidebarMenuSubItem>
           ))
         : null}
-      {error && chats.length === 0 ? (
+      {error ? (
         <SidebarMenuSubItem>
-          <SidebarFailureRow what='chats' />
+          <SidebarFailureRow
+            what='chats'
+            onRetry={() => {
+              void retry();
+            }}
+          />
         </SidebarMenuSubItem>
       ) : null}
       {!isLoading && !error && chats.length === 0 ? (

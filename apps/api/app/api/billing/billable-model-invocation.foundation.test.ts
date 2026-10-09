@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { once } from 'node:events';
 import { ConfigService } from '@nestjs/config';
-import { VersioningType } from '@nestjs/common';
+import { ConflictException, VersioningType } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -31,6 +31,7 @@ import {
 } from '#database/schema.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { qualifiedMeterContracts, validateCommercialPolicy } from '#api/billing/billing-policy.js';
+import { assertNewCollectionCashScope } from '#api/billing/billing-cash-reconciliation.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
@@ -2276,6 +2277,40 @@ describe('account-scoped spend gate', () => {
       const operationId = await settle(owner, fixture.authUserId);
       const [operation] = await database.select().from(creditOperation).where(eq(creditOperation.id, operationId));
       expect(operation?.customerState).toBe('settled');
+    } finally {
+      await resolveCases([opened]);
+      await provider.close();
+    }
+  });
+
+  it('should answer 409 cash_scope_attention at new collection for an unattributed missing_local_payment and admit every account', async () => {
+    const provider = await settlingProvider();
+    const owner = createOwner(provider.url);
+    const fixture = await createFixture();
+    const bystander = await createFixture();
+    const opened = await openCase({
+      kind: 'missing_local_payment',
+      sourceType: 'stripe_payment_intent',
+      sourceId: `pi_${randomUUID()}`,
+    });
+    try {
+      const refusal = await assertNewCollectionCashScope(
+        { database },
+        { environment: 'development', stripeAccountId: 'acct_admission', livemode: false },
+        fixture.accountId,
+      ).catch((error: unknown) => error);
+      if (!(refusal instanceof ConflictException)) {
+        throw new TypeError('Expected the purchase-time cash scope refusal');
+      }
+      expect(refusal.getStatus()).toBe(409);
+      expect(refusal.message).toBe('cash_scope_attention');
+      for (const account of [fixture, bystander]) {
+        // oxlint-disable-next-line no-await-in-loop -- one settled turn per account against the same open case
+        const operationId = await settle(owner, account.authUserId);
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        const [operation] = await database.select().from(creditOperation).where(eq(creditOperation.id, operationId));
+        expect(operation?.customerState).toBe('settled');
+      }
     } finally {
       await resolveCases([opened]);
       await provider.close();

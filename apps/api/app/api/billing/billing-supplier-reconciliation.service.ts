@@ -50,8 +50,10 @@ export type SupplierInvoiceReconciliation = {
   readonly differencePicoUsd: string;
   /** Terminal operations of this provider credential whose usage falls in the period. */
   readonly operations: number;
-  /** Of those, operations whose receipt carries no supplier cost (a cut stream or an unpriced dimension). */
+  /** Of those, operations whose receipt carries no supplier cost and says why (a cut stream or an unpriced dimension). */
   readonly unpricedOperations: number;
+  /** Of those, receipts terminalized before migration 0049 added the supplier cost, so they carry neither column. */
+  readonly legacyOperations: number;
   /** Terminal operations in the period that name no provider or no invocation, so no credential can claim them. */
   readonly unattributedOperations: number;
 };
@@ -97,7 +99,13 @@ export class BillingSupplierReconciliationService {
       .select({
         metered: sql<string>`coalesce(sum(${creditOperation.supplierCostPicoUsd}) filter (where ${attributed}), 0)::text`,
         operations: count(sql`case when ${attributed} then 1 end`),
-        unpriced: count(sql`case when ${attributed} and ${creditOperation.supplierCostPicoUsd} is null then 1 end`),
+        unpriced: count(
+          sql`case when ${attributed} and ${creditOperation.supplierCostUnpricedReason} is not null then 1 end`,
+        ),
+        legacy: count(
+          sql`case when ${attributed} and ${creditOperation.supplierCostPicoUsd} is null
+            and ${creditOperation.supplierCostUnpricedReason} is null then 1 end`,
+        ),
         unattributed: count(
           sql`case when ${creditOperation.providerId} is null or ${creditOperation.invocation} is null then 1 end`,
         ),
@@ -122,6 +130,7 @@ export class BillingSupplierReconciliationService {
       differencePicoUsd: difference.toString(),
       operations: totals?.operations ?? 0,
       unpricedOperations: totals?.unpriced ?? 0,
+      legacyOperations: totals?.legacy ?? 0,
       unattributedOperations: totals?.unattributed ?? 0,
     };
     const evidence = {

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { resolve as resolvePath } from 'node:path';
+import { Logger } from '@nestjs/common';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { mockDeep } from 'vitest-mock-extended';
 import { eq, or, sql } from 'drizzle-orm';
@@ -254,9 +255,38 @@ describe('LLM recovery that cannot deadlock', () => {
     expect(Math.round(((held.leaseUntil?.getTime() ?? 0) - held.dueAt.getTime()) / 60_000)).toBe(recoveryGraceMinutes);
 
     await makeDue(admitted.operationId, recoveryGraceMinutes + 1);
-    const expiredPass = await pass(fixture);
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+    let absorbedLines: unknown[];
+    let expiredPass: Awaited<ReturnType<typeof pass>>;
+    try {
+      expiredPass = await pass(fixture);
+      absorbedLines = warn.mock.calls
+        .map(([line]) => (typeof line === 'string' && line.startsWith('{') ? (JSON.parse(line) as unknown) : undefined))
+        .filter(
+          (line) =>
+            typeof line === 'object' &&
+            line !== null &&
+            'event' in line &&
+            line.event === 'billing.llm_recovery_absorbed' &&
+            'operationId' in line &&
+            line.operationId === admitted.operationId,
+        );
+    } finally {
+      warn.mockRestore();
+    }
 
     expect(expiredPass).toMatchObject({ claimed: 1, resolved: 1, failedOperationIds: [] });
+    // The absorption is a log line for the operator, once, and never a case.
+    expect(absorbedLines).toEqual([
+      expect.objectContaining({
+        environment,
+        sku: fixture.sku,
+        reason: 'time_to_live',
+        attempts: expect.any(String) as unknown,
+      }),
+    ]);
     expect(await readOperation(admitted.operationId)).toMatchObject({
       customerState: 'absorbed',
       chargedAtoms: 0n,

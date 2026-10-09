@@ -255,6 +255,7 @@ describe('supplier invoice reconciliation', () => {
       differencePicoUsd: '400',
       operations: 2,
       unpricedOperations: 0,
+      legacyOperations: 0,
       unattributedOperations: 0,
     });
     expect(await invoiceCases(fixture, invoicePeriod)).toEqual([]);
@@ -283,6 +284,7 @@ describe('supplier invoice reconciliation', () => {
       differencePicoUsd: '2000',
       operations: 3,
       unpricedOperations: 1,
+      legacyOperations: 0,
       unattributedOperations: 1,
     });
     const cases = await invoiceCases(fixture, invoicePeriod);
@@ -300,11 +302,39 @@ describe('supplier invoice reconciliation', () => {
         localEstimatePicoUsd: '7000',
         confirmedTotalPicoUsd: '9000',
         unpricedOperations: 1,
+        legacyOperations: 0,
         unattributedOperations: 1,
       },
     });
     // Aggregate only: no account balance or journal row moves.
     expect(await accountState(fixture.accountId)).toEqual(before);
+  });
+
+  it('should count a receipt from before the supplier cost columns as legacy, not unpriced, and open no case', async () => {
+    const fixture = await createFixture();
+    const invoicePeriod = await periodFromNow();
+    await settle(fixture, { evidence: usage(3n) });
+    const legacy = await settle(fixture, { evidence: usage(4n) });
+    // A receipt terminalized before migration 0049 carries neither column; its terminal row is otherwise immutable.
+    await client.begin(async (transaction) => {
+      await transaction`SET LOCAL session_replication_role = replica`;
+      await transaction`UPDATE billing.credit_operation SET supplier_cost_pico_usd = NULL, supplier_cost_unpriced_reason = NULL
+        WHERE id = ${legacy.id}`;
+    });
+
+    const result = await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '3000'));
+
+    expect(result).toEqual({
+      status: 'matched',
+      localEstimatePicoUsd: '3000',
+      confirmedTotalPicoUsd: '3000',
+      differencePicoUsd: '0',
+      operations: 2,
+      unpricedOperations: 0,
+      legacyOperations: 1,
+      unattributedOperations: 0,
+    });
+    expect(await invoiceCases(fixture, invoicePeriod)).toEqual([]);
   });
 
   it('should keep one case across a repeated import and resolve it when a later import matches', async () => {

@@ -218,9 +218,7 @@ const persistedInvocationEvidenceSchema = terminalHistorySchema
       context.addIssue({ code: 'custom', message: 'Reasoning must be a subset of output' });
     }
   });
-export const serializeInvocationEvidence = (
-  input: TerminalEvidence,
-): z.infer<typeof persistedInvocationEvidenceSchema> =>
+const serializeInvocationEvidence = (input: TerminalEvidence): z.infer<typeof persistedInvocationEvidenceSchema> =>
   persistedInvocationEvidenceSchema.parse({
     ...input,
     usageOccurredAt: input.usageOccurredAt?.toISOString(),
@@ -233,7 +231,7 @@ export const serializeInvocationEvidence = (
             quantity: item.quantity.toString(),
           })),
   });
-export const invocationEvidenceDigest = (evidence: z.infer<typeof persistedInvocationEvidenceSchema>): string => {
+const invocationEvidenceDigest = (evidence: z.infer<typeof persistedInvocationEvidenceSchema>): string => {
   const payload = JSON.stringify(evidence);
   if (Buffer.byteLength(payload) > 32_768) {
     throw new RangeError('Invocation evidence exceeds retained byte bound');

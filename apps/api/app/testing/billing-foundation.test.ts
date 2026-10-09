@@ -1,9 +1,10 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
+import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import * as schema from '#database/schema.js';
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -11,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import postgres from 'postgres';
 import { setTimeout as wait } from 'node:timers/promises';
-import { afterAll, describe, expect, it, onTestFinished } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 import { installBillingProtections } from '#database/billing-protections.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
@@ -515,7 +516,7 @@ describe('billing database protections and real command', () => {
     }
   });
 
-  it('should install supplier-free protections on the fresh schema', async () => {
+  it('should install the expand-step protections on the fresh schema', async () => {
     const [state] = await client`SELECT
       NOT EXISTS (SELECT FROM pg_trigger WHERE tgname IN ('require_operation_holds', 'protect_budget_hold')) AS "holdTriggersGone",
       to_regprocedure('billing.require_operation_holds()') IS NULL AND to_regprocedure('billing.protect_budget_hold()') IS NULL
@@ -527,7 +528,7 @@ describe('billing database protections and real command', () => {
         OR has_table_privilege('tau_billing_runtime', 'billing.billing_route_pause', 'DELETE') AS "pauseWritable",
       has_table_privilege('tau_billing_runtime', 'billing.credit_attempt_void', 'INSERT') AS "attemptVoidWritable",
       has_table_privilege('tau_billing_runtime', 'billing.billing_budget_hold', 'INSERT')
-        OR has_table_privilege('tau_billing_runtime', 'billing.supplier_cost_evidence', 'INSERT') AS "supplierEvidenceWritable",
+        AND has_table_privilege('tau_billing_runtime', 'billing.supplier_cost_evidence', 'INSERT') AS "supplierEvidenceWritable",
       has_column_privilege('tau_billing_runtime', 'billing.credit_operation', 'supplier_cost_pico_usd', 'UPDATE')
         AND has_column_privilege('tau_billing_runtime', 'billing.credit_operation', 'supplier_cost_unpriced_reason', 'UPDATE')
         AS "supplierCostWritable",
@@ -542,9 +543,10 @@ describe('billing database protections and real command', () => {
       pauseReadable: true,
       pauseWritable: false,
       attemptVoidWritable: true,
-      supplierEvidenceWritable: false,
+      // Old-image Machines still write holds, evidence and supplier_state during the expand step's rolling deploy.
+      supplierEvidenceWritable: true,
       supplierCostWritable: true,
-      supplierStateWritable: false,
+      supplierStateWritable: true,
       promotionBudgetUsable: true,
     });
     // A pause is resumed once, and nothing else about it ever changes.
@@ -559,70 +561,6 @@ describe('billing database protections and real command', () => {
     await expect(
       client`UPDATE billing.billing_route_pause SET resumed_by = 'someone else' WHERE id = ${pause}`,
     ).rejects.toMatchObject({ code: '23514' });
-  });
-
-  it('should leave no hold trigger on a database that carried the pre-charter protections', async () => {
-    // What the protections script installed before supplier holds were retired.
-    await client.unsafe(`CREATE OR REPLACE FUNCTION billing.require_operation_holds() RETURNS trigger
-      LANGUAGE plpgsql SET search_path = pg_catalog AS $$ BEGIN
-        IF NEW.spend_budget_hold_id = NEW.risk_budget_hold_id OR
-          NOT EXISTS (SELECT FROM billing.billing_budget_hold h JOIN billing.billing_budget b ON b.id = h.budget_id
-            WHERE h.id = NEW.spend_budget_hold_id AND h.operation_id = NEW.id AND b.environment = NEW.environment AND b.kind = 'spend') OR
-          NOT EXISTS (SELECT FROM billing.billing_budget_hold h JOIN billing.billing_budget b ON b.id = h.budget_id
-            WHERE h.id = NEW.risk_budget_hold_id AND h.operation_id = NEW.id AND b.environment = NEW.environment AND b.kind = 'risk')
-        THEN RAISE EXCEPTION 'operation requires its own spend and risk holds' USING ERRCODE = '23503'; END IF;
-        RETURN NEW;
-      END $$`);
-    await client.unsafe(`CREATE OR REPLACE FUNCTION billing.protect_budget_hold() RETURNS trigger
-      LANGUAGE plpgsql SET search_path = pg_catalog AS $$ BEGIN
-        IF TG_OP = 'DELETE' OR ROW(OLD.id,OLD.budget_id,OLD.operation_id,OLD.initial_bound)
-          IS DISTINCT FROM ROW(NEW.id,NEW.budget_id,NEW.operation_id,NEW.initial_bound)
-        THEN RAISE EXCEPTION 'immutable budget hold cause' USING ERRCODE = '23514'; END IF;
-        RETURN NEW;
-      END $$`);
-    try {
-      await client.unsafe(`CREATE CONSTRAINT TRIGGER require_operation_holds AFTER INSERT ON billing.credit_operation
-        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.require_operation_holds()`);
-      await client.unsafe(`CREATE TRIGGER protect_budget_hold BEFORE UPDATE OR DELETE ON billing.billing_budget_hold
-        FOR EACH ROW EXECUTE FUNCTION billing.protect_budget_hold()`);
-      await client.unsafe(
-        `GRANT INSERT ON billing.billing_route_pause, billing.billing_budget_hold TO tau_billing_runtime`,
-      );
-      await client.unsafe(`GRANT UPDATE (supplier_state) ON billing.credit_operation TO tau_billing_runtime`);
-      // The expand migration's own hand-authored drops, exactly as an upgraded database runs them.
-      const migration = readFileSync(
-        resolve(import.meta.dirname, '../database/migrations/0049_supplier_simplification.sql'),
-        'utf8',
-      );
-      const drops = migration
-        .split('--> statement-breakpoint')
-        .map((statement) => statement.replaceAll(/^-->.*$/gmu, '').trim())
-        .filter((statement) => /^DROP (TRIGGER|FUNCTION) IF EXISTS /u.test(statement));
-      expect(drops).toHaveLength(4);
-      for (const statement of drops) {
-        // oxlint-disable-next-line no-await-in-loop -- DDL applies in the migration's own order
-        await client.unsafe(statement);
-      }
-      await installBillingProtections(client);
-    } finally {
-      await client.unsafe(`DROP TRIGGER IF EXISTS require_operation_holds ON billing.credit_operation`);
-      await client.unsafe(`DROP TRIGGER IF EXISTS protect_budget_hold ON billing.billing_budget_hold`);
-    }
-    const [state] = await client`SELECT
-      NOT EXISTS (SELECT FROM pg_trigger WHERE tgname IN ('require_operation_holds', 'protect_budget_hold')) AS "holdTriggersGone",
-      to_regprocedure('billing.require_operation_holds()') IS NULL AS "holdFunctionGone",
-      has_table_privilege('tau_billing_runtime', 'billing.billing_route_pause', 'INSERT') AS "pauseWritable",
-      has_table_privilege('tau_billing_runtime', 'billing.billing_budget_hold', 'INSERT') AS "holdWritable",
-      has_column_privilege('tau_billing_runtime', 'billing.credit_operation', 'supplier_state', 'UPDATE') AS "supplierStateWritable",
-      has_table_privilege('tau_billing_runtime', 'billing.credit_attempt_void', 'INSERT') AS "attemptVoidWritable"`;
-    expect(state).toEqual({
-      holdTriggersGone: true,
-      holdFunctionGone: true,
-      pauseWritable: false,
-      holdWritable: false,
-      supplierStateWritable: false,
-      attemptVoidWritable: true,
-    });
   });
 
   it('should constrain policy observation and cancellation to protected role capabilities', async () => {
@@ -709,6 +647,248 @@ describe('billing database protections and real command', () => {
     } finally {
       await Promise.all([runtime.end(), publisher.end()]);
     }
+  });
+});
+
+describe('billing upgrade from migration 0048 under the pre-charter protections', () => {
+  const name = `billing_upgrade_${String(process.pid)}`;
+  const target = new URL(databaseUrl);
+  target.pathname = `/${name}`;
+  const environment = 'prod-us';
+  const account = randomUUID();
+  const policy = randomUUID();
+  const activation = randomUUID();
+  const operations = [randomUUID(), randomUUID()] as const;
+  const resolvedKinds = [
+    'supplier_evidence_missing',
+    'supplier_evidence_mismatched',
+    'supplier_charge_unmatched',
+    'supplier_state_unresolved',
+    'llm_recovery_absorbed',
+    'journal_budget_residual',
+  ];
+  const untouchedKinds = [
+    'missing_local_payment',
+    'dispute_unresolved',
+    'journal_balance_drift',
+    'supplier_invoice_total_mismatch',
+  ];
+  let scratch: postgres.Sql | undefined;
+  let migrationsBefore0049: string | undefined;
+  const database = (): postgres.Sql => {
+    if (!scratch) {
+      throw new Error('The upgraded database was not created');
+    }
+    return scratch;
+  };
+
+  beforeAll(async () => {
+    await client.unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    await client.unsafe(`CREATE DATABASE ${name}`);
+    scratch = postgres(target.toString(), {
+      max: 1,
+      onnotice() {
+        /* Expected fixture DDL notices are not diagnostics. */
+      },
+    });
+    const migrationsFolder = resolve(import.meta.dirname, '../database/migrations');
+    migrationsBefore0049 = mkdtempSync(join(tmpdir(), 'tau-billing-0048-'));
+    cpSync(migrationsFolder, migrationsBefore0049, { recursive: true });
+    const journalPath = join(migrationsBefore0049, 'meta', '_journal.json');
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- drizzle-kit's journal file
+    const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as { entries: Array<{ tag: string }> };
+    const expand = journal.entries.findIndex((entry) => entry.tag === '0049_supplier_simplification');
+    expect(expand).toBeGreaterThan(0);
+    journal.entries = journal.entries.slice(0, expand);
+    writeFileSync(journalPath, JSON.stringify(journal));
+    const upgraded = database();
+    await migrate(drizzle(upgraded), { migrationsFolder: migrationsBefore0049 });
+
+    // The pre-charter protections' supplier grants and hold triggers, as origin/main installed them.
+    await upgraded.unsafe(`GRANT USAGE ON SCHEMA billing TO tau_billing_runtime`);
+    await upgraded.unsafe(`GRANT SELECT ON ALL TABLES IN SCHEMA billing TO tau_billing_runtime`);
+    await upgraded.unsafe(`GRANT INSERT ON billing.credit_operation, billing.billing_budget_hold,
+      billing.supplier_cost_evidence, billing.billing_route_pause TO tau_billing_runtime`);
+    await upgraded.unsafe(
+      `GRANT UPDATE (remaining_held, consumed, finality_state) ON billing.billing_budget_hold TO tau_billing_runtime`,
+    );
+    await upgraded.unsafe(`GRANT UPDATE (supplier_state) ON billing.credit_operation TO tau_billing_runtime`);
+    await upgraded.unsafe(`CREATE OR REPLACE FUNCTION billing.require_operation_holds() RETURNS trigger
+      LANGUAGE plpgsql SET search_path = pg_catalog AS $$ BEGIN
+        IF NEW.spend_budget_hold_id = NEW.risk_budget_hold_id OR
+          NOT EXISTS (SELECT FROM billing.billing_budget_hold h JOIN billing.billing_budget b ON b.id = h.budget_id
+            WHERE h.id = NEW.spend_budget_hold_id AND h.operation_id = NEW.id AND b.environment = NEW.environment AND b.kind = 'spend') OR
+          NOT EXISTS (SELECT FROM billing.billing_budget_hold h JOIN billing.billing_budget b ON b.id = h.budget_id
+            WHERE h.id = NEW.risk_budget_hold_id AND h.operation_id = NEW.id AND b.environment = NEW.environment AND b.kind = 'risk')
+        THEN RAISE EXCEPTION 'operation requires its own spend and risk holds' USING ERRCODE = '23503'; END IF;
+        RETURN NEW;
+      END $$`);
+    await upgraded.unsafe(`CREATE CONSTRAINT TRIGGER require_operation_holds AFTER INSERT ON billing.credit_operation
+      DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.require_operation_holds()`);
+    await upgraded.unsafe(`CREATE OR REPLACE FUNCTION billing.protect_budget_hold() RETURNS trigger
+      LANGUAGE plpgsql SET search_path = pg_catalog AS $$ BEGIN
+        IF TG_OP = 'DELETE' OR ROW(OLD.id,OLD.budget_id,OLD.operation_id,OLD.initial_bound)
+          IS DISTINCT FROM ROW(NEW.id,NEW.budget_id,NEW.operation_id,NEW.initial_bound)
+        THEN RAISE EXCEPTION 'immutable budget hold cause' USING ERRCODE = '23514'; END IF;
+        RETURN NEW;
+      END $$`);
+    await upgraded.unsafe(`CREATE TRIGGER protect_budget_hold BEFORE UPDATE OR DELETE ON billing.billing_budget_hold
+      FOR EACH ROW EXECUTE FUNCTION billing.protect_budget_hold()`);
+
+    // Rows a 0048 database carries: pending operations with their holds, an automatic pause, budgets and cases.
+    await upgraded`INSERT INTO billing.credit_account(id,environment) VALUES (${account},${environment})`;
+    await upgraded`INSERT INTO billing.billing_policy(id,environment,policy_version,schema_version,content_hash,canonical_content)
+      VALUES (${policy},${environment},${policy},1,${policy},'{}')`;
+    await upgraded`INSERT INTO billing.billing_policy_activation(id,environment,policy_id,job_key,request_hash,announced_at,effective_at)
+      VALUES (${activation},${environment},${policy},${activation},${activation},now(),now())`;
+    for (const kind of ['spend', 'risk', 'promotion_issuance']) {
+      const held = kind === 'promotion_issuance' ? 0 : 200;
+      // oxlint-disable-next-line no-await-in-loop -- each budget references its own funding row
+      await upgraded`INSERT INTO billing.billing_budget_funding(id,environment,kind,scope,funded_lifetime,held)
+        VALUES (${`funding-${kind}`},${environment},${kind},'global',1000000000,${held})`;
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await upgraded`INSERT INTO billing.billing_budget(id,environment,funding_id,kind,scope,period_start,period_end,quantum,approved_cap,held)
+        VALUES (${`budget-${kind}`},${environment},${`funding-${kind}`},${kind},'global',now() - interval '1 day',
+          now() + interval '30 day',${kind === 'promotion_issuance' ? 'atoms' : 'pico_usd'},1000000000,${held})`;
+    }
+    await upgraded.begin(async (transaction) => {
+      for (const operation of operations) {
+        // oxlint-disable-next-line no-await-in-loop -- the deferred hold trigger checks each operation at commit
+        await transaction`INSERT INTO billing.credit_operation(id,account_id,environment,surface,attempt_key,request_digest,
+          request_key_version,category,model_id,sku,pinned_tariff,maximum_quantities,activity,policy_id,activation_id,
+          meter_contract_id,authorized_atoms,promo_held_atoms,plan_held_atoms,purchased_held_atoms,due_at,
+          spend_budget_hold_id,risk_budget_hold_id)
+          VALUES (${operation},${account},${environment},'fixture',${operation},'digest',1,'llm','fixture','model:fixture',
+            '[]','[]','test',${policy},${activation},'fixture',0,0,0,0,now(),${`spend-${operation}`},${`risk-${operation}`})`;
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await transaction`INSERT INTO billing.billing_budget_hold(id,budget_id,operation_id,initial_bound,remaining_held)
+          VALUES (${`spend-${operation}`},'budget-spend',${operation},100,100),
+            (${`risk-${operation}`},'budget-risk',${operation},100,100)`;
+      }
+    });
+    await upgraded`INSERT INTO billing.billing_route_pause(environment,sku,operation_id,reason)
+      VALUES (${environment},'model:fixture',${operations[0]},'retail_overrun')`;
+    for (const kind of [...resolvedKinds, ...untouchedKinds]) {
+      for (const state of ['open', 'attention']) {
+        // oxlint-disable-next-line no-await-in-loop -- one case per kind and state
+        await upgraded`INSERT INTO billing.billing_financial_case(id,environment,stripe_account_id,livemode,kind,dedupe_key,
+          account_id,evidence,owner,next_step,state,first_effective_at)
+          VALUES (${randomUUID()},${environment},'',false,${kind},${`${kind}:${state}`},${account},'{}','ops','fixture',${state},now())`;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await upgraded`INSERT INTO billing.billing_financial_case(id,environment,stripe_account_id,livemode,kind,dedupe_key,
+        account_id,evidence,owner,next_step,state,first_effective_at,resolved_at,resolution_evidence)
+        VALUES (${randomUUID()},${environment},'',false,${kind},${`${kind}:resolved`},${account},'{}','ops','fixture',
+          'resolved',now(),'2026-01-01T00:00:00Z','{"prior":true}')`;
+    }
+
+    // The release command: the whole expand migration, then this build's protections.
+    await migrate(drizzle(upgraded), { migrationsFolder });
+    await installBillingProtections(upgraded);
+  }, 120_000);
+
+  afterAll(async () => {
+    await scratch?.end();
+    await client.unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    if (migrationsBefore0049) {
+      rmSync(migrationsBefore0049, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it('should keep the old image writable, refuse runtime pause writes and drop the hold triggers', async () => {
+    const upgraded = database();
+    const [state] = await upgraded`SELECT
+      NOT EXISTS (SELECT FROM pg_trigger WHERE tgname IN ('require_operation_holds', 'protect_budget_hold')) AS "holdTriggersGone",
+      to_regprocedure('billing.require_operation_holds()') IS NULL AND to_regprocedure('billing.protect_budget_hold()') IS NULL
+        AS "holdFunctionsGone",
+      EXISTS (SELECT FROM pg_trigger WHERE tgname = 'protect_route_pause') AS "pauseProtected",
+      has_table_privilege('tau_billing_runtime', 'billing.credit_attempt_void', 'INSERT') AS "attemptVoidWritable"`;
+    expect(state).toEqual({
+      holdTriggersGone: true,
+      holdFunctionsGone: true,
+      pauseProtected: true,
+      attemptVoidWritable: true,
+    });
+    const pauses = await upgraded`SELECT actor, resumed_at IS NOT NULL AS resumed, resumed_by AS "resumedBy",
+      resume_reason AS "resumeReason" FROM billing.billing_route_pause WHERE environment = ${environment}`;
+    expect(pauses).toEqual([
+      { actor: 'automatic', resumed: true, resumedBy: 'migration-0049', resumeReason: 'superseded_by_charter' },
+    ]);
+
+    const runtime = postgres(target.toString(), { max: 1, connection: { role: 'tau_billing_runtime' } });
+    try {
+      // An old-image Machine mid-rollout: admission inserts its holds, settlement writes evidence, holds and supplier_state.
+      const [first] = operations;
+      const oldOperation = randomUUID();
+      await runtime.begin(async (transaction) => {
+        await transaction`INSERT INTO billing.credit_operation(id,account_id,environment,surface,attempt_key,request_digest,
+          request_key_version,category,model_id,sku,pinned_tariff,maximum_quantities,activity,policy_id,activation_id,
+          meter_contract_id,authorized_atoms,promo_held_atoms,plan_held_atoms,purchased_held_atoms,due_at,
+          spend_budget_hold_id,risk_budget_hold_id,supplier_state)
+          VALUES (${oldOperation},${account},${environment},'fixture',${oldOperation},'digest',1,'llm','fixture','model:fixture',
+            '[]','[]','test',${policy},${activation},'fixture',0,0,0,0,now(),${`spend-${oldOperation}`},${`risk-${oldOperation}`},
+            'reserved')`;
+        await transaction`INSERT INTO billing.billing_budget_hold(id,budget_id,operation_id,initial_bound,remaining_held)
+          VALUES (${`spend-${oldOperation}`},'budget-spend',${oldOperation},100,100),
+            (${`risk-${oldOperation}`},'budget-risk',${oldOperation},100,100)`;
+      });
+      await runtime`INSERT INTO billing.supplier_cost_evidence(id,operation_id,environment,provider,credential_account,
+        source_object_id,source_revision,payload_digest,numerator,denominator,currency,completeness,finality,received_at)
+        VALUES (${randomUUID()},${first},${environment},'fixture','fixture',${first},'1','digest',40,1,'usd','complete','final',now())`;
+      await expect(
+        runtime`UPDATE billing.billing_budget_hold SET remaining_held = 60, consumed = 40, finality_state = 'final'
+          WHERE id = ${`spend-${first}`}`,
+      ).resolves.toHaveProperty('count', 1);
+      await expect(
+        runtime`UPDATE billing.credit_operation SET supplier_state = 'preliminary'
+          WHERE id = ${first} AND supplier_state = 'reserved'`,
+      ).resolves.toHaveProperty('count', 1);
+
+      // This build: an operation needs no holds, and route pauses are owner-written only.
+      const currentOperation = randomUUID();
+      await runtime`INSERT INTO billing.credit_operation(id,account_id,environment,surface,attempt_key,request_digest,
+        request_key_version,category,model_id,sku,pinned_tariff,maximum_quantities,activity,policy_id,activation_id,
+        meter_contract_id,authorized_atoms,promo_held_atoms,plan_held_atoms,purchased_held_atoms,due_at)
+        VALUES (${currentOperation},${account},${environment},'fixture',${currentOperation},'digest',1,'llm','fixture',
+          'model:fixture','[]','[]','test',${policy},${activation},'fixture',0,0,0,0,now())`;
+      await expect(
+        runtime`INSERT INTO billing.billing_route_pause(environment,sku,actor,reason)
+          VALUES (${environment},'model:runtime','runtime','fixture')`,
+      ).rejects.toMatchObject({ code: '42501' });
+      await expect(
+        runtime`UPDATE billing.billing_route_pause SET resumed_at = now(), resumed_by = 'runtime', resume_reason = 'fixture'`,
+      ).rejects.toMatchObject({ code: '42501' });
+      await expect(runtime`DELETE FROM billing.billing_route_pause`).rejects.toMatchObject({ code: '42501' });
+    } finally {
+      await runtime.end();
+    }
+    const written = await upgraded<Array<{ id: string; supplierState: unknown; holds: boolean }>>`SELECT id,
+      supplier_state AS "supplierState", spend_budget_hold_id IS NOT NULL AS "holds"
+      FROM billing.credit_operation WHERE account_id = ${account}`;
+    expect(written).toHaveLength(4);
+    expect(written.find(({ id }) => id === operations[0])).toMatchObject({ supplierState: 'preliminary', holds: true });
+  });
+
+  it('should resolve exactly the superseded supplier cases and keep every other case and earlier evidence', async () => {
+    const cases = await database()<
+      Array<{ dedupeKey: string; state: string; evidence: unknown; resolvedEarlier: boolean }>
+    >`
+      SELECT dedupe_key AS "dedupeKey", state, resolution_evidence AS evidence,
+        resolved_at = '2026-01-01T00:00:00Z' AS "resolvedEarlier"
+      FROM billing.billing_financial_case WHERE account_id = ${account}`;
+    const superseded = { disposition: 'superseded_by_charter', migration: '0049' };
+    const expected = [...resolvedKinds, ...untouchedKinds]
+      .flatMap((kind) => [
+        ...['open', 'attention'].map((state) => ({
+          dedupeKey: `${kind}:${state}`,
+          state: resolvedKinds.includes(kind) ? 'resolved' : state,
+          evidence: resolvedKinds.includes(kind) ? superseded : null,
+          resolvedEarlier: resolvedKinds.includes(kind) ? false : null,
+        })),
+        { dedupeKey: `${kind}:resolved`, state: 'resolved', evidence: { prior: true }, resolvedEarlier: true },
+      ])
+      .sort((left, right) => left.dedupeKey.localeCompare(right.dedupeKey));
+    expect([...cases].sort((left, right) => left.dedupeKey.localeCompare(right.dedupeKey))).toEqual(expected);
   });
 });
 
@@ -895,6 +1075,10 @@ describe('funded LLM recovery worker under a mid-run database outage', () => {
       expect(
         await client`SELECT id FROM billing.supplier_cost_evidence WHERE operation_id = ${operation}`,
       ).toHaveLength(0);
+      // The worker prints a pass's batch lines after both pools finish, so the line can trail the committed row.
+      await settle('the batch line that reports the resolution', () =>
+        batches('stdout').some(({ batch }) => batch['resolved'] === 1),
+      );
       const healthy = batches('stdout');
       expect(healthy.every(({ batch }) => batch['providerExecutions'] === 0)).toBe(true);
       expect(healthy.reduce((total, { batch }) => total + Number(batch['resolved'] ?? 0), 0)).toBe(1);

@@ -24,21 +24,15 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
     await transaction`GRANT SELECT ON billing.billing_policy, billing.billing_policy_activation,
       billing.billing_policy_activation_cancellation, billing.billing_policy_head TO tau_billing_policy_publisher`;
     await transaction`GRANT INSERT ON billing.credit_account, billing.billing_owner_binding, billing.credit_operation,
-      billing.credit_transaction, billing.credit_attempt_void, billing.billing_invocation_evidence, billing.billing_operation_exception,
+      billing.credit_transaction, billing.credit_attempt_void, billing.billing_budget_hold, billing.supplier_cost_evidence, billing.billing_invocation_evidence, billing.billing_operation_exception,
       billing.billing_purchase, billing.billing_period, billing.billing_promotion_issuance, billing.billing_reversal_case TO tau_billing_runtime`;
-    /* The runtime only reads route pauses (owner-identity commands write them) and no longer writes supplier
-     * holds, supplier evidence or supplier finality. Grants persist across script runs, so an upgraded database
-     * revokes what earlier versions of this script granted; the guards keep it valid once the tables are dropped. */
+    /* The supplier hold, evidence and supplier_state grants survive this expand step (and supplier_state stays out of
+     * protect_operation's immutable sets): the release command installs these protections before the rolling deploy
+     * replaces the app Machines, and until it is replaced an old-image Machine still inserts holds at admission and
+     * writes evidence, hold settlement and supplier_state at settlement. Current code writes none of them; the 0050
+     * contract step drops them with their tables and column. Route pauses are owner-written only, so an upgraded
+     * database revokes the INSERT that earlier versions of this script granted. */
     await transaction`REVOKE INSERT, UPDATE, DELETE ON billing.billing_route_pause FROM tau_billing_runtime`;
-    await transaction`REVOKE UPDATE (supplier_state) ON billing.credit_operation FROM tau_billing_runtime`;
-    await transaction`DO $$ BEGIN
-      IF to_regclass('billing.billing_budget_hold') IS NOT NULL THEN
-        REVOKE INSERT, UPDATE ON billing.billing_budget_hold FROM tau_billing_runtime;
-      END IF;
-      IF to_regclass('billing.supplier_cost_evidence') IS NOT NULL THEN
-        REVOKE INSERT ON billing.supplier_cost_evidence FROM tau_billing_runtime;
-      END IF;
-    END $$`;
     await transaction`GRANT INSERT ON billing.billing_stripe_customer, billing.billing_provider_leg,
       billing.stripe_event_inbox, billing.billing_stripe_source TO tau_billing_runtime`;
     await transaction`GRANT INSERT ON billing.billing_reload_consent, billing.billing_reload_work,
@@ -102,8 +96,9 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
       ON billing.credit_account TO tau_billing_runtime`;
     await transaction`GRANT UPDATE (revoked_at) ON billing.billing_owner_binding TO tau_billing_runtime`;
     await transaction`GRANT UPDATE (consumed, held) ON billing.billing_budget, billing.billing_budget_funding TO tau_billing_runtime`;
+    await transaction`GRANT UPDATE (remaining_held, consumed, finality_state) ON billing.billing_budget_hold TO tau_billing_runtime`;
     await transaction`GRANT UPDATE (net_applied_atoms) ON billing.billing_reversal_case TO tau_billing_runtime`;
-    await transaction`GRANT UPDATE (dispatch_state, customer_state, generation, lease_until,
+    await transaction`GRANT UPDATE (dispatch_state, customer_state, supplier_state, generation, lease_until,
       due_at, usage_occurred_at, resolved_at, terminal_revision, base_transaction_id, charged_atoms, actual_retail_atoms,
       meter_items, input_tokens, output_tokens, dispatch_intent_at, evidence_occurred_at,
       execution_status, metering_status, reasoning_tokens, normalization_evidence, cancellation_requested_at,
@@ -243,19 +238,19 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
         END IF;
         IF OLD.cancellation_requested_at IS NOT NULL AND NEW.cancellation_requested_at IS DISTINCT FROM OLD.cancellation_requested_at
         THEN RAISE EXCEPTION 'immutable cancellation intent' USING ERRCODE = '23514'; END IF;
-        IF (to_jsonb(OLD) - ARRAY['cancellation_requested_at','dispatch_state','customer_state','generation','lease_until','due_at',
+        IF (to_jsonb(OLD) - ARRAY['cancellation_requested_at','dispatch_state','customer_state','supplier_state','generation','lease_until','due_at',
              'usage_occurred_at','dispatch_intent_at','evidence_occurred_at','execution_status','metering_status',
              'reasoning_tokens','normalization_evidence','resolved_at','terminal_revision','base_transaction_id','charged_atoms','actual_retail_atoms','meter_items','input_tokens','output_tokens',
              'supplier_cost_pico_usd','supplier_cost_unpriced_reason'])
           IS DISTINCT FROM
-           (to_jsonb(NEW) - ARRAY['cancellation_requested_at','dispatch_state','customer_state','generation','lease_until','due_at',
+           (to_jsonb(NEW) - ARRAY['cancellation_requested_at','dispatch_state','customer_state','supplier_state','generation','lease_until','due_at',
              'usage_occurred_at','dispatch_intent_at','evidence_occurred_at','execution_status','metering_status',
              'reasoning_tokens','normalization_evidence','resolved_at','terminal_revision','base_transaction_id','charged_atoms','actual_retail_atoms','meter_items','input_tokens','output_tokens',
              'supplier_cost_pico_usd','supplier_cost_unpriced_reason'])
         THEN RAISE EXCEPTION 'immutable operation admission' USING ERRCODE = '23514'; END IF;
         IF OLD.customer_state <> 'pending' AND
-          (to_jsonb(OLD) - ARRAY['generation','lease_until','due_at']) IS DISTINCT FROM
-          (to_jsonb(NEW) - ARRAY['generation','lease_until','due_at'])
+          (to_jsonb(OLD) - ARRAY['supplier_state','generation','lease_until','due_at']) IS DISTINCT FROM
+          (to_jsonb(NEW) - ARRAY['supplier_state','generation','lease_until','due_at'])
         THEN RAISE EXCEPTION 'immutable terminal receipt' USING ERRCODE = '23514'; END IF;
         IF NEW.generation < OLD.generation THEN RAISE EXCEPTION 'stale operation generation' USING ERRCODE = '23514'; END IF;
         RETURN NEW;

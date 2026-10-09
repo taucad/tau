@@ -2847,13 +2847,8 @@ describe('admission without supplier state', () => {
       expect(row.customerState).not.toBe('pending');
       expect(row.supplierState).toBeNull();
     }
-    // The runtime role can no longer write it at all.
-    await expect(
-      firstClient.begin(async (transaction) => {
-        await transaction`set local role tau_billing_runtime`;
-        await transaction`update billing.credit_operation set supplier_state = 'final' where id = ${settled.operationId}`;
-      }),
-    ).rejects.toMatchObject({ code: '42501' });
+    /* The runtime role keeps its supplier_state grant until the 0050 contract step, so old-image Machines can
+     * settle during the expand step's rolling deploy (billing-foundation.test.ts, the 0048 upgrade suite). */
   });
 });
 

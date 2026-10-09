@@ -176,11 +176,15 @@ jobs:
         name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      # Restore-only: a lockfile change would otherwise save the 1.1 GB macOS store after
+      # the job (148-155 s on runs 37869646536 and 37878016418), delaying the jobs that wait
+      # on this one. The scheduled Darwin job in e2e-nightly.yml saves it from `main`.
       - &setup-nx-darwin
         name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
           node-version: '24.10.0'
+          save-pnpm-store: 'false'
 
       - &prepare-geospec
         name: Prepare GeoSpec engine products
@@ -207,8 +211,7 @@ jobs:
           key: ${{ needs.plan.outputs.geospec-key }}
           mode: save
 
-      - &retain-geospec-preparation
-        name: Retain the OCCT and toolchain preparation
+      - name: Retain the OCCT and toolchain preparation
         if: always() && steps.prepare.outcome == 'success' && github.event_name != 'pull_request'
         uses: ./.github/actions/geospec-preparation-save
         with:
@@ -224,14 +227,22 @@ jobs:
   # 9 minutes off the critical path of a run that changes the native source closure
   # (run 37437873976). The producer still serves the Linux lanes, which consume its
   # transport.
+  #
+  # The suites run as two Vitest shards on separate runners. Each shard repeats the
+  # setup, product and consumer steps (about 6 minutes), but the suites themselves took
+  # 300-357 s in one job, most of it one project, and set the end of most `main` runs.
   geospec-darwin:
-    name: Run GeoSpec Darwin host suites
+    name: Run GeoSpec Darwin host suites (${{ matrix.shard }}/2)
     needs: [plan]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
       needs.plan.outputs.geospec-required == 'true' &&
       needs.plan.outputs.geospec-darwin-tests == 'true'
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - *checkout-darwin
       - *setup-nx-darwin
@@ -264,9 +275,16 @@ jobs:
       # https://github.com/taucad/tau/issues/342
       - name: Run complete affected Darwin host suites
         if: needs.plan.outputs.geospec-darwin-tests == 'true'
-        run: pnpm nx run-many -t test --projects tag:host:darwin-arm64 --exclude tag:scope:api,tag:ci:quarantined --skip-nx-cache
+        run: pnpm nx run-many -t test --projects tag:host:darwin-arm64 --exclude tag:scope:api,tag:ci:quarantined --skip-nx-cache -- --shard=${{ matrix.shard }}/2
 
-      - *retain-geospec-preparation
+      # One shard saves, so both never race for the same cache key.
+      - name: Retain the OCCT and toolchain preparation
+        if: always() && steps.prepare.outcome == 'success' && github.event_name != 'pull_request' && matrix.shard == 1
+        uses: ./.github/actions/geospec-preparation-save
+        with:
+          generation: ${{ steps.prepare.outputs.generation }}
+          preparation-hit: ${{ steps.prepare.outputs.preparation-hit }}
+          cargo-hit: ${{ steps.prepare.outputs.cargo-hit }}
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
   # typecheck, build and its checks, and three test shards. One runner running every

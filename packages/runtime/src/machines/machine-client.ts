@@ -14,6 +14,7 @@ import type {
   MachineBindingOutcome,
   MachineCandidate,
   MachineDiscoveryEvent,
+  MachineEndpoint,
   MachineProvider,
   MachineStill,
 } from '#machines/machine.js';
@@ -40,10 +41,17 @@ import type {
 /** List the machine providers admitted by this host route. @public */
 export type MachineListProvidersInput = Readonly<{ signal?: AbortSignal }>;
 
-/** Start one bounded, user-initiated provider discovery operation. @public */
+/**
+ * Start one bounded, user-initiated provider discovery operation. With `endpoint`, discovery is addressed: the provider
+ * looks only where a person said the machine is (a network address, or a serial path), in the transport its
+ * `manifest.connection.transport` names; any other transport is refused `MACHINE_DISCOVERY_ENDPOINT_INVALID`.
+ * `configuration` holds only the provider's own binding fields, never where the machine is.
+ * @public
+ */
 export type MachineDiscoverInput = Readonly<{
   providerId: string;
   configuration: CacheValue;
+  endpoint?: MachineEndpoint;
   signal?: AbortSignal;
 }>;
 

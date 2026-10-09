@@ -24,12 +24,15 @@ import type { NodeMachineSupervision } from '#host/node-machine-supervision.js';
 import type { MachineChannelHostOperations } from '#machines/machine-channel.js';
 import type { MachineBindingRemoval } from '#machines/machine-client.js';
 import { machineCredentialReference } from '#machines/machine-credential.js';
+import { machineEndpointSchema, storedCandidateEndpointSchema } from '#machines/machine.js';
 import type { MachineBindingOutcome, MachineCandidate } from '#machines/machine.js';
 
+// ponytail: reads a provider candidate without `transport` as a network one until every provider names it; the same
+// schema reads bindings stored before R17, which is the part that stays.
 const candidateSchema = z.strictObject({
   id: identity,
   name: identity,
-  endpoint: z.strictObject({ address: identity, interface: identity }),
+  endpoint: storedCandidateEndpointSchema,
   claimedIdentity: z.strictObject({
     serial: identity.optional(),
     model: identity.optional(),
@@ -346,8 +349,18 @@ export const createNodeMachineBindings = (
     operations: {
       async *discover(operationInput) {
         const source = providerSources.get(operationInput.providerId);
-        if (!source || !context.runtime) {
+        if (!source || !context.runtime || context.unavailableProviders.has(source.id)) {
           throw new Error('MACHINE_PROVIDER_UNAVAILABLE');
+        }
+        // Addressed discovery reaches the provider only in the transport it connects over.
+        const parsedEndpoint =
+          operationInput.endpoint === undefined ? undefined : machineEndpointSchema.safeParse(operationInput.endpoint);
+        const endpoint = parsedEndpoint?.data;
+        if (
+          parsedEndpoint !== undefined &&
+          (endpoint === undefined || endpoint.transport !== source.manifest.connection.transport)
+        ) {
+          throw new Error('MACHINE_DISCOVERY_ENDPOINT_INVALID');
         }
         const definition = await definitionOf(source.id);
         const result = await definition.bindingConfiguration.schema['~standard'].validate(operationInput.configuration);
@@ -361,7 +374,7 @@ export const createNodeMachineBindings = (
           maximumCharacters: 65_536,
         });
         for await (const raw of definition.discover(
-          { configuration, signal: operationInput.signal },
+          { configuration, ...(endpoint === undefined ? {} : { endpoint }), signal: operationInput.signal },
           context.runtime.discovery,
         )) {
           operationInput.signal.throwIfAborted();

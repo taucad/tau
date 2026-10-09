@@ -16,7 +16,7 @@ const provider = fixtureProvider();
 const candidate: MachineCandidate = {
   id: 'candidate-1',
   name: 'Printer',
-  endpoint: { address: 'printer.local', interface: 'manual' },
+  endpoint: { transport: 'network', address: 'printer.local', interface: 'manual' },
   claimedIdentity: { model: 'X1C' },
   observedAt: '2026-09-14T00:00:00Z',
   expiresAt: '2026-09-14T00:01:00Z',

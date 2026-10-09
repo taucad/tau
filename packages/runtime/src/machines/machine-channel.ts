@@ -73,7 +73,7 @@ import {
   machineRequesterSchema as requesterSchema,
 } from '#machines/machine-jobs.js';
 import { machineCheckSchema } from '#machines/machine-observation.js';
-import { parseMachineProvider } from '#machines/machine.js';
+import { machineCandidateEndpointSchema, machineEndpointSchema, parseMachineProvider } from '#machines/machine.js';
 import type { MachineBindingOutcome, MachineProvider, MachineStill } from '#machines/machine.js';
 
 type EmptyInput = Readonly<Record<string, never>>;
@@ -176,7 +176,7 @@ const timestampSchema = z.iso.datetime({ offset: true });
 const candidateSchema = z.strictObject({
   id: identitySchema,
   name: identitySchema,
-  endpoint: z.strictObject({ address: identitySchema, interface: identitySchema }),
+  endpoint: machineCandidateEndpointSchema,
   claimedIdentity: z.strictObject({ serial: identitySchema.optional(), model: identitySchema.optional() }),
   observedAt: timestampSchema,
   expiresAt: timestampSchema,
@@ -596,7 +596,11 @@ const protocolSchemas: WireProtocolSchemas<MachineChannelProtocol> = {
   notifies: {},
   listens: {
     discover: {
-      args: z.strictObject({ providerId: identitySchema, configuration: configurationSchema }),
+      args: z.strictObject({
+        providerId: identitySchema,
+        configuration: configurationSchema,
+        endpoint: machineEndpointSchema.optional(),
+      }),
       event: discoveryFrameSchema.transform(freeze),
     },
     watch: { args: z.strictObject({ cursor: cursorSchema.optional() }), event: validator(parseMachineDirectoryFrame) },

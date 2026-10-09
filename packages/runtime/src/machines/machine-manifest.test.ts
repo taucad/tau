@@ -14,8 +14,39 @@ describe('parseMachineManifest', () => {
     expect(fffProcessOf(parsed)?.slicing.presets.map(({ id }) => id)).toEqual(['fast', 'standard', 'fine']);
   });
 
+  it('admits accepted file extensions and a stop remedy in the halt recovery', () => {
+    const { jobs, stop } = machineManifestFixture;
+    if (jobs.type !== 'supported') {
+      throw new Error('expected a job-capable fixture');
+    }
+    const parsed = parseMachineManifest({
+      ...machineManifestFixture,
+      jobs: { ...jobs, accepts: jobs.accepts.map((accepted) => ({ ...accepted, extensions: ['.gcode', '.nc'] })) },
+      stop: { ...stop, recovery: [{ type: 'stop', consequence: 'Home the machine afterwards.' }] },
+    });
+    expect(parsed.jobs.type === 'supported' && parsed.jobs.accepts[0]?.extensions).toEqual(['.gcode', '.nc']);
+    expect(parsed.stop.recovery).toEqual([{ type: 'stop', consequence: 'Home the machine afterwards.' }]);
+  });
+
+  it.each(['gcode', '.GCODE', '.g code'])('refuses the accepted extension %j', (extension) => {
+    const { jobs } = machineManifestFixture;
+    if (jobs.type !== 'supported') {
+      throw new Error('expected a job-capable fixture');
+    }
+    expect(() =>
+      parseMachineManifest({
+        ...machineManifestFixture,
+        jobs: { ...jobs, accepts: jobs.accepts.map((accepted) => ({ ...accepted, extensions: [extension] })) },
+      }),
+    ).toThrow();
+  });
+
   it.each([
     ['an unknown top-level key', { ...machineManifestFixture, colour: 'red' }],
+    [
+      'a stop remedy without its consequence',
+      { ...machineManifestFixture, stop: { ...machineManifestFixture.stop, recovery: [{ type: 'stop' }] } },
+    ],
     ['a version other than 3', { ...machineManifestFixture, version: 2 }],
     ['an action on an unknown component', { ...machineManifestFixture, actions: [{ ...light, componentId: 'laser' }] }],
     ['the same action twice on one component', { ...machineManifestFixture, actions: [pause, pause] }],

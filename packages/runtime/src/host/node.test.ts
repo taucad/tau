@@ -33,6 +33,7 @@ import type {
   MachineCandidate,
   MachineCommandReceipt,
   MachineJobCapability,
+  MachineManifestDefinition,
   MachinePreparation,
   MachineProviderDescriptor,
   MachineProviderHold,
@@ -159,7 +160,7 @@ const allGrants: readonly HostRouteGrant[] = hostAdmissionOperations
 const candidateFor = (id: string, serial?: string): MachineCandidate => ({
   id,
   name: `Printer ${id}`,
-  endpoint: { address: `${id}.local`, interface: 'manual' },
+  endpoint: { transport: 'network', address: `${id}.local`, interface: 'manual' },
   claimedIdentity: serial === undefined ? { model: 'X1C' } : { serial, model: 'X1C' },
   observedAt,
   expiresAt,
@@ -1272,6 +1273,33 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     await fixture.close();
   });
 
+  it('should start no job while the host quiesces, and approve one again once it resumes', async () => {
+    const jobs = storedJobs();
+    const fixture = await boundPrinter(jobs.facet);
+    await request(fixture.client, 'job-1');
+    const resume = fixture.host.quiesce();
+    await expect(approve(fixture.client, 'job-1')).rejects.toThrow('Tau is closing and starts nothing new.');
+    await expect(fixture.client.listJobs({})).resolves.toMatchObject([{ jobId: 'job-1', state: 'awaiting-approval' }]);
+    resume();
+    resume();
+    // Quiescing that begins after the approval, while the program transfers, still refuses the start.
+    let resumeAfterTransfer: (() => void) | undefined;
+    jobs.transfer.mockImplementationOnce(async (input) => {
+      resumeAfterTransfer = fixture.host.quiesce();
+      return { status: 'accepted', transferId: `transfer-${input.operationId}`, observedAt };
+    });
+    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({
+      state: 'failed',
+      failure: { code: 'MACHINE_HOST_CLOSING' },
+    });
+    expect(jobs.start).not.toHaveBeenCalled();
+    resumeAfterTransfer?.();
+    await request(fixture.client, 'job-2');
+    await expect(approve(fixture.client, 'job-2')).resolves.toMatchObject({ state: 'started' });
+    expect(jobs.start).toHaveBeenCalledOnce();
+    await fixture.close();
+  });
+
   it('should refuse a start whose setup changed since approval and follow an unknown start to its proof', async () => {
     const jobs = storedJobs();
     let setup: CacheValue = { plate: 'smooth' };
@@ -2193,6 +2221,110 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
       migrated: { journals: 1, machines: 1, droppedRequests: 0, droppedEffects: 0 },
     });
     expect(fixture.onError).not.toHaveBeenCalled();
+  });
+});
+
+describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('discovery and providers', () => {
+  const collect = async <Value>(stream: AsyncIterable<Value>): Promise<Value[]> => {
+    const values: Value[] = [];
+    for await (const value of stream) {
+      values.push(value);
+    }
+    return values;
+  };
+  const serialManifest = (environment: 'hardware' | 'simulation'): MachineManifestDefinition => ({
+    ...machineManifestDefinitionFixture,
+    connection: { ...machineManifestDefinitionFixture.connection, transport: 'serial' },
+    qualifications: machineManifestDefinitionFixture.qualifications.map((profile) => ({ ...profile, environment })),
+  });
+
+  it('should pass an addressed endpoint to the provider and refuse one in another transport', async () => {
+    const seen: unknown[] = [];
+    const provider = fixtureProvider({
+      id: 'binding-provider',
+      candidates: [candidateA],
+      onDiscover: (input) => {
+        seen.push(input.endpoint);
+      },
+    });
+    const fixture = await openServedHost(
+      await storeRoot(),
+      provider,
+      runtimeAt(() => observedAt),
+    );
+    const endpoint = { transport: 'network', address: '192.0.2.7', port: 8883 } as const;
+    await expect(
+      collect(fixture.client.discover({ providerId: 'binding-provider', configuration: {}, endpoint })),
+    ).resolves.toMatchObject([
+      { type: 'found', candidate: { endpoint: { transport: 'network', address: 'candidate-a.local' } } },
+    ]);
+    await discoverAll(fixture.client);
+    expect(seen).toEqual([endpoint, undefined]);
+    await expect(
+      collect(
+        fixture.client.discover({
+          providerId: 'binding-provider',
+          configuration: {},
+          endpoint: { transport: 'serial', path: '/dev/ttyUSB0' },
+        }),
+      ),
+    ).rejects.toThrow('MACHINE_DISCOVERY_ENDPOINT_INVALID');
+    expect(seen).toHaveLength(2);
+    await fixture.close();
+  });
+
+  it('should list a serial provider unavailable on a host without serial access, unless it only simulates', async () => {
+    const root = await storeRoot();
+    const network = fixtureProvider({ id: 'network-provider' });
+    const providers = [
+      fixtureProvider({ id: 'serial-provider', manifest: serialManifest('hardware') }),
+      fixtureProvider({ id: 'serial-simulator', manifest: serialManifest('simulation') }),
+      // A provider never says it is unavailable; the host does.
+      { ...network, unavailable: { reason: 'Claimed by the provider.' } },
+    ];
+    const open = async (runtime: NodeMachineRuntime) => {
+      const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
+      const onError = vi.fn();
+      const host = await createNodeMachineHost({
+        storeRoot: root,
+        hostId: 'host-1',
+        authorityId: 'authority-1',
+        admission,
+        providers,
+        runtime,
+        onError,
+      });
+      hosts.push(host);
+      const ports = new MessageChannel();
+      host.serve({
+        port: ports.port1,
+        session: host.issueSession({ actor: { kind: 'user', id: 'operator' }, grants: allGrants }),
+      });
+      const client = connectMachineChannel(ports.port2);
+      const listed = await client.listProviders({});
+      return { host, client, onError, listed: listed.map(({ id, unavailable }) => ({ id, unavailable })) };
+    };
+    const withoutSerial = await open(runtimeAt(() => observedAt));
+    expect(withoutSerial.listed).toEqual([
+      { id: 'serial-provider', unavailable: { reason: expect.stringContaining('serial ports') as string } },
+      { id: 'serial-simulator', unavailable: undefined },
+      { id: 'network-provider', unavailable: undefined },
+    ]);
+    expect(withoutSerial.onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'MACHINE_PROVIDER_UNAVAILABLE_CLAIMED', providerId: 'network-provider' }),
+    );
+    await expect(
+      collect(withoutSerial.client.discover({ providerId: 'serial-provider', configuration: {} })),
+    ).rejects.toThrow('MACHINE_PROVIDER_UNAVAILABLE');
+    withoutSerial.client.close();
+    await withoutSerial.host.close();
+    const base = runtimeAt(() => observedAt);
+    const withSerial = await open({
+      ...base,
+      discovery: { ...base.discovery, listSerialPorts: async () => [] },
+    });
+    expect(withSerial.listed.every(({ unavailable }) => unavailable === undefined)).toBe(true);
+    withSerial.client.close();
   });
 });
 

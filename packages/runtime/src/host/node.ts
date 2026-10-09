@@ -51,6 +51,7 @@ import { createMachineDirectory } from '#machines/machine-directory.js';
 import type { MachineDirectory, MachineDirectoryEntry } from '#machines/machine-directory.js';
 import type { MachineJob } from '#machines/machine-jobs.js';
 import type { MachineAlert } from '#machines/machine-observation.js';
+import { isSimulatedMachine } from '#machines/machine-manifest.js';
 import { parseMachineProvider } from '#machines/machine.js';
 import type {
   MachineCandidate,
@@ -129,6 +130,14 @@ export type NodeMachineHost = Readonly<{
   /** The provider and candidate a pending ceremony will bind, or `undefined` for an unknown ceremony; never a secret. */
   describeBinding(ceremonyId: string): Readonly<{ providerId: string; candidate: MachineCandidate }> | undefined;
   removeBinding(input: RemoveNodeMachineBindingInput): Promise<MachineBindingRemoval>;
+  /**
+   * Begin quiescing: until the returned `resume` is called (or the host closes), approving a job and the start of any
+   * job, stored or streamed, are refused `MACHINE_HOST_CLOSING`. Reads, stops, holds and actions carry on, and a run
+   * already started keeps running. A launcher calls this before it checks whether a streamed run is feeding a machine
+   * and then closes, so none begins in between; when it keeps running after all, it calls `resume`.
+   * @returns `resume`: admit starts again. Calling it more than once does nothing.
+   */
+  quiesce(): () => void;
   close(): Promise<void>;
 }>;
 
@@ -149,6 +158,11 @@ const closeOwned = async (operations: ReadonlyArray<() => void | Promise<void>>)
     throw new AggregateError(errors, 'Node machine host cleanup failed.');
   }
 };
+
+/** Why a host without serial access lists a serial provider unavailable. */
+const serialUnavailable = Object.freeze({
+  reason: 'This Tau cannot reach serial ports yet, so it cannot find or connect a machine on one.',
+});
 
 /** What a binding whose provider this host does not serve is listed with: nothing works until a person acts. */
 const providerUnservedAlert: MachineAlert = {
@@ -258,10 +272,22 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   }
   // One provider this host cannot read (a newer manifest or protocol version) is refused alone: its bindings are
   // listed stale with a remedy, and every other provider is served.
-  const providers = Object.freeze(
-    input.providers.flatMap((provider) => {
+  // A serial provider needs the host's serial access, unless it only simulates its machine; a host given custom
+  // operations owns that decision itself.
+  const unreachable = (manifest: MachineProvider['manifest']): boolean =>
+    input.runtime !== undefined &&
+    input.runtime.discovery.listSerialPorts === undefined &&
+    manifest.connection.transport === 'serial' &&
+    !isSimulatedMachine(manifest);
+  const providers: readonly MachineProvider[] = Object.freeze(
+    input.providers.flatMap((provider): MachineProvider[] => {
       try {
-        return [parseMachineProvider(provider)];
+        // `unavailable` is the host's to say; a provider that claims it is reported and not believed.
+        const { unavailable: claimed, ...parsed } = parseMachineProvider(provider);
+        if (claimed !== undefined) {
+          report(Object.assign(new Error('MACHINE_PROVIDER_UNAVAILABLE_CLAIMED'), { providerId: parsed.id }));
+        }
+        return [Object.freeze(unreachable(parsed.manifest) ? { ...parsed, unavailable: serialUnavailable } : parsed)];
       } catch (error) {
         report(
           Object.assign(new Error('MACHINE_PROVIDER_REFUSED', { cause: error }), { providerId: String(provider.id) }),
@@ -337,6 +363,8 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   /** One reconnect loop per supervised machine; aborting `stop` ends it. */
   const supervisors = new Map<string, NodeMachineSupervisor>();
   let closed = false;
+  /** Quiescers that have not resumed; any one of them refuses starts. */
+  let quiescers = 0;
   let directory: MachineDirectory | undefined;
   const commits = new Topic<void>({ name: 'node-machine-directory-commits', onError });
   const jobCommits = new Topic<MachineJob>({ name: 'node-machine-jobs', onError });
@@ -556,6 +584,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   const context: NodeMachineHostContext = {
     runtime: input.runtime,
     providerSources,
+    unavailableProviders: new Set(providers.filter(({ unavailable }) => unavailable).map(({ id }) => id)),
     store,
     directory: ownedDirectory,
     effectQueue,
@@ -570,6 +599,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     connectedSessions,
     supervisors,
     isClosed: () => closed,
+    isQuiescing: () => closed || quiescers > 0,
     now,
     report,
     definitionOf,
@@ -757,6 +787,16 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     completeBinding: bindings.completeBinding,
     describeBinding: bindings.describeBinding,
     removeBinding: bindings.removeBinding,
+    quiesce() {
+      quiescers += 1;
+      let resumed = false;
+      return () => {
+        if (!resumed) {
+          resumed = true;
+          quiescers -= 1;
+        }
+      };
+    },
     async close() {
       if (closing) {
         return closing;

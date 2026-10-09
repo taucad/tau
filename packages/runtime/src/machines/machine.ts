@@ -30,6 +30,11 @@ export type MachineAcceptedContainer = Readonly<{
   requiredMembers: readonly string[];
   payloadSelection: 'plate' | 'single';
   technology: string;
+  /**
+   * File-name extensions a program of this container may have, lower case with the leading dot (`.gcode`, `.nc`),
+   * so a consumer offers the right files without its own table. Absent: the media type alone says.
+   */
+  extensions?: readonly string[];
 }>;
 
 /** Frozen serializable machine-provider registration metadata. @public */
@@ -44,6 +49,11 @@ export type MachineProvider<Id extends string = string> = Readonly<{
   bindingConfiguration: ConfigurationManifestV1;
   /** Optional sparse preferences; observations and approvals never belong here. */
   settingsConfiguration?: ConfigurationManifestV1;
+  /**
+   * Set by the host, never by a provider: this host cannot serve the provider now (e.g. a serial provider on a host
+   * without serial access), and why, in a sentence a person reads. Consumers offer it disabled with the reason.
+   */
+  unavailable?: Readonly<{ reason: string }>;
 }>;
 
 /** Clock authority available to machine providers. @public */
@@ -79,12 +89,20 @@ export type MachineNetworkStream = Readonly<{
   close(): Promise<void>;
 }>;
 
-/** Host-owned authenticated network-video request that returns one bounded JPEG. @public */
+/**
+ * One JPEG still from an RTSP camera over TLS (RTSPS), a host service any provider may use. The host opens the TLS
+ * connection itself and checks it against `trust`, answers the camera's Basic or Digest challenge with `username` and
+ * the secret `secretRef` names (the decoder never sees either), plays `path`, and returns the first complete frame.
+ * Every endpoint detail comes from the provider; the host assumes no port, path or account.
+ * @public
+ */
 export type MachineNetworkStillInput = Readonly<{
   endpoint: Readonly<{ address: string; port: number }>;
   trust: MachineTransportTrust;
+  /** The credential the camera's challenge is answered with. */
   secretRef: string;
   username: string;
+  /** The stream's absolute path, e.g. `/live/1`. */
   path: string;
   /** Milliseconds. */
   connectTimeout: number;
@@ -167,18 +185,31 @@ export type MachineConnectionRuntime = Readonly<{
   openSerial?(input: MachineSerialRequest): Promise<MachineNetworkStream>;
   readArtifact(input: MachineArtifactReadInput): AsyncIterable<Uint8Array<ArrayBuffer>>;
   resolveSecret(input: Readonly<{ reference: string; signal: AbortSignal }>): Promise<string>;
+  /** RTSPS still capture; absent on a host that offers none. */
   captureNetworkStill?(input: MachineNetworkStillInput): Promise<MachineStill>;
+  /** Implicit-FTPS upload; absent on a host that offers none. */
   uploadFile?(input: MachineFileUploadInput): Promise<MachineFileUploadReceipt>;
 }>;
 
-/** Host-owned, bounded file upload to a machine's own storage. @public */
+/**
+ * One file uploaded to a machine's own storage over implicit FTPS (TLS from the first byte, TLS 1.2 or later), a host
+ * service any provider may use. The host checks the control and data connections against `trust`, logs in as
+ * `username` with the secret `secretRef` names, stores `bytes` under `remoteName` in binary passive mode, and then asks
+ * the server for the stored size: anything but `bytes.byteLength` rejects `MACHINE_UPLOAD_TRANSFER_MISMATCH`. The
+ * bytes are written in 64 KiB pieces, so a transfer watchdog that measures queued bytes sees steady progress on a
+ * slow server. At most 512 MiB. Every endpoint detail comes from the provider; the host assumes no port or account.
+ * @public
+ */
 export type MachineFileUploadInput = Readonly<{
   endpoint: Readonly<{ address: string; port: number }>;
   trust: MachineTransportTrust;
+  /** The password the login uses. */
   secretRef: string;
   username: string;
+  /** The stored file's name, in the login's working directory. */
   remoteName: string;
   bytes: Uint8Array<ArrayBuffer>;
+  /** Milliseconds: each connection, and each stretch of the transfer without progress. */
   connectTimeout: number;
   signal: AbortSignal;
 }>;
@@ -186,11 +217,56 @@ export type MachineFileUploadInput = Readonly<{
 /** Verified host transfer byte count. @public */
 export type MachineFileUploadReceipt = Readonly<{ bytesWritten: number }>;
 
-/** Transient endpoint evidence reported by bounded provider discovery. @public */
-export type MachineCandidateEndpoint = Readonly<{
-  address: string;
-  interface: string;
-}>;
+/**
+ * Where a machine is reached, in the kind its provider's `manifest.connection.transport` names: a network address
+ * (host name or IP, with an optional port when the provider's default does not apply) or a serial device path. A
+ * person's manual entry and a discovered candidate both carry one; binding configuration never does.
+ * @public
+ */
+export type MachineEndpoint =
+  | Readonly<{ transport: 'network'; address: string; port?: number }>
+  | Readonly<{ transport: 'serial'; path: string }>;
+
+/**
+ * Where a discovered candidate answered: a {@link MachineEndpoint}, plus the local interface a network candidate was
+ * seen on (`en0`, `udp4`, `manual`) when the provider knows it.
+ * @public
+ */
+export type MachineCandidateEndpoint =
+  | Readonly<{ transport: 'network'; address: string; port?: number; interface?: string }>
+  | Readonly<{ transport: 'serial'; path: string }>;
+
+const endpointText = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((value) => value.isWellFormed());
+const networkEndpointFields = { address: endpointText, port: z.number().int().min(1).max(65_535).optional() };
+const serialEndpointSchema = z.strictObject({ transport: z.literal('serial'), path: endpointText });
+
+/** The wire form of a {@link MachineEndpoint}. @internal */
+export const machineEndpointSchema = z.discriminatedUnion('transport', [
+  z.strictObject({ transport: z.literal('network'), ...networkEndpointFields }),
+  serialEndpointSchema,
+]);
+
+/** The wire form of a {@link MachineCandidateEndpoint}. @internal */
+export const machineCandidateEndpointSchema = z.discriminatedUnion('transport', [
+  z.strictObject({ transport: z.literal('network'), ...networkEndpointFields, interface: endpointText.optional() }),
+  serialEndpointSchema,
+]);
+
+/**
+ * A candidate endpoint, also reading the shape written before endpoints named their transport (`{ address,
+ * interface }`) as a network one: bindings stored by an earlier Tau keep it.
+ * @internal
+ */
+export const storedCandidateEndpointSchema = z.union([
+  machineCandidateEndpointSchema,
+  z
+    .strictObject({ address: endpointText, interface: endpointText })
+    .transform((legacy): MachineCandidateEndpoint => ({ transport: 'network', ...legacy })),
+]);
 
 /** Untrusted provider-reported identity evidence, not a physical identity key. @public */
 export type MachineClaimedIdentity = Readonly<{
@@ -223,6 +299,11 @@ export type MachineBindingOutcome =
 /** Named discovery operation input. @public */
 export type MachineDiscoveryInput<Configuration> = Readonly<{
   configuration: Configuration;
+  /**
+   * Addressed discovery: look for the machine only here, as a person entered it. Its `transport` is always the
+   * provider's `manifest.connection.transport` (the host refuses any other). Absent: scan as the provider does.
+   */
+  endpoint?: MachineEndpoint;
   signal: AbortSignal;
 }>;
 
@@ -633,6 +714,7 @@ const machineProviderSchema = z.strictObject({
   manifest: machineManifestSchema,
   bindingConfiguration: configurationManifestSchema,
   settingsConfiguration: configurationManifestSchema.optional(),
+  unavailable: z.strictObject({ reason: providerIdentitySchema }).optional(),
 });
 
 const providerKeys = [
@@ -644,7 +726,9 @@ const providerKeys = [
   'manifest',
   'bindingConfiguration',
   'settingsConfiguration',
+  'unavailable',
 ] as const;
+const optionalProviderKeys: ReadonlySet<string> = new Set(['settingsConfiguration', 'unavailable']);
 
 const providerLimits = {
   code: 'MACHINE_PROVIDER_DESCRIPTOR',
@@ -666,7 +750,7 @@ const providerWireValue = (value: unknown): Readonly<Record<string, unknown>> =>
   }
   return Object.fromEntries(
     providerKeys
-      .filter((key) => key !== 'settingsConfiguration' || descriptors[key] !== undefined)
+      .filter((key) => !optionalProviderKeys.has(key) || descriptors[key] !== undefined)
       .map((key) => {
         const descriptor = descriptors[key];
         if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {

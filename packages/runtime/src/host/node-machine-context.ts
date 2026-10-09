@@ -103,6 +103,8 @@ export type NodeMachineHostContext = Readonly<{
   runtime: NodeMachineRuntime | undefined;
   /** Each provider the host serves, by id, carrying its executable definition. */
   providerSources: ReadonlyMap<string, MachineProvider & RuntimePluginDefinitionCarrier<unknown>>;
+  /** The served providers this host cannot reach machines for (`MachineProvider.unavailable`), by id. */
+  unavailableProviders: ReadonlySet<string>;
   store: NodeMachineStore<NodeMachineJournalEvent>;
   directory: MachineDirectory;
   /** Serializes the host's work by key: `machine:<id>`, `operation:<id>`, `job:<id>` and `bindings`. */
@@ -129,6 +131,8 @@ export type NodeMachineHostContext = Readonly<{
   supervisors: Map<string, NodeMachineSupervisor>;
   /** Whether the host has begun closing; a call, since it changes after the context is built. */
   isClosed(): boolean;
+  /** Whether the host is quiescing or closing: no job start or streamed run may begin (`MACHINE_HOST_CLOSING`). */
+  isQuiescing(): boolean;
   now(): string;
   report(error: unknown): void;
   /** Resolve a provider's executable definition once, and the same promise after that. */

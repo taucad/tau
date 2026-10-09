@@ -26,7 +26,7 @@ import type { MachineChannelHostOperations } from '#machines/machine-channel.js'
 import type { MachineJob, MachinePreparedJob } from '#machines/machine-jobs.js';
 import type { MachineSnapshot } from '#machines/machine-observation.js';
 import { fixtureDescriptor, fixtureReport } from '#machines/machine-session.fixture.js';
-import type { MachineArtifactReference, MachineDescriptor } from '#machines/machine.js';
+import type { MachineArtifactReference, MachineCandidate, MachineDescriptor } from '#machines/machine.js';
 
 const temporaryDirectories: string[] = [];
 const stores: Array<NodeMachineStore<Operation>> = [];
@@ -55,10 +55,10 @@ const descriptorFor = (physicalId: string): MachineDescriptor => {
   };
 };
 const snapshot: MachineSnapshot = { ...fixtureReport({ observedAt }), operations: [] };
-const candidateFor = (id: string, serial: string, seenAt = observedAt) => ({
+const candidateFor = (id: string, serial: string, seenAt = observedAt): MachineCandidate => ({
   id,
   name: `Printer ${id}`,
-  endpoint: { address: `${id}.local`, interface: 'manual' },
+  endpoint: { transport: 'network', address: `${id}.local`, interface: 'manual' },
   claimedIdentity: { serial, model: 'X1C' },
   observedAt: seenAt,
   expiresAt: '2026-09-14T00:01:00.000Z',
@@ -492,6 +492,22 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     expect(second.onError).not.toHaveBeenCalled();
     expect(await readFile(join(root, 'printer-a', 'machine.json'), 'utf8')).toBe(unknownKey);
     expect(await readFile(join(root, 'printer-b', 'machine.json'), 'utf8')).toBe(oversized);
+  });
+
+  it('should read a binding stored before endpoints named their transport as a network one', async () => {
+    const root = await temporaryDirectory();
+    const first = await openStore(root);
+    await first.store.createMachine(bindingFor('Printer A', 'physical-a'));
+    await first.close();
+    const path = join(root, 'printer-a', 'machine.json');
+    const stored = JSON.parse(await readFile(path, 'utf8')) as { candidate: { endpoint: Record<string, unknown> } };
+    delete stored.candidate.endpoint['transport'];
+    await writeFile(path, JSON.stringify(stored, undefined, 2));
+    const second = await openStore(root);
+    expect(second.store.machines.map(({ record }) => record.candidate.endpoint)).toEqual([
+      { transport: 'network', address: 'candidate-physical-a.local', interface: 'manual' },
+    ]);
+    expect(second.onError).not.toHaveBeenCalled();
   });
 
   it("should refuse a FIFO in a record's place without waiting on it", async () => {

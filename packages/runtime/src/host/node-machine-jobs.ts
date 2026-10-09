@@ -419,6 +419,10 @@ export const createNodeMachineJobs = (
   };
 
   const refusal = (failure: MachineFailure): Error => machineError(failure);
+  const hostClosing: MachineFailure = {
+    code: 'MACHINE_HOST_CLOSING',
+    message: 'Tau is closing and starts nothing new. Approve the job again once Tau carries on.',
+  };
 
   // Transfer (for a stored delivery) and start, each once, through the journal. Never resends.
   const drive = async (job: MachineJob, input: Admitted): Promise<MachineJob> => {
@@ -500,6 +504,10 @@ export const createNodeMachineJobs = (
       machineQueue: true,
       ...input,
       async admit() {
+        // Checked again at the moment of sending: quiescing may have begun after the approval.
+        if (context.isQuiescing()) {
+          return { refusal: hostClosing };
+        }
         const checked = await prepare({
           machineId: current.machineId,
           artifact: prepared.artifact,
@@ -750,6 +758,10 @@ export const createNodeMachineJobs = (
               throw new Error('MACHINE_JOB_NOT_AWAITING');
             }
             return commitJob({ ...job, state: 'denied', resolvedBy });
+          }
+          // Refused before anything is recorded, so the job waits to be approved once Tau carries on.
+          if (context.isQuiescing()) {
+            throw refusal(hostClosing);
           }
           const isFirst = job.state === 'awaiting-approval';
           if (!isFirst && job.state !== 'approved' && job.state !== 'transferring' && job.state !== 'starting') {

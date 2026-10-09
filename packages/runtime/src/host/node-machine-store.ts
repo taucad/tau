@@ -38,6 +38,7 @@ import { parseMachineJob, parseMachinePreparedJob } from '#machines/machine-chan
 import { parseMachineDirectoryEntry } from '#machines/machine-directory.js';
 import type { MachineJob, MachinePreparedJob } from '#machines/machine-jobs.js';
 import type { MachineSnapshot } from '#machines/machine-observation.js';
+import { storedCandidateEndpointSchema } from '#machines/machine.js';
 import type { MachineCandidate, MachineDescriptor, MachineTransportTrust } from '#machines/machine.js';
 
 const storeFileName = 'store.json';
@@ -76,7 +77,7 @@ const boundedJson = (code: string, maximumDepth: number, maximumNodes: number) =
 const candidateSchema = z.strictObject({
   id: identity,
   name: identity,
-  endpoint: z.strictObject({ address: identity, interface: identity }),
+  endpoint: storedCandidateEndpointSchema,
   claimedIdentity: z.strictObject({ serial: identity.optional(), model: identity.optional() }),
   observedAt: timestamp,
   expiresAt: timestamp,

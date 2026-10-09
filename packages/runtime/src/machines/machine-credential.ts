@@ -9,7 +9,7 @@ const safePhysicalId = /^[A-Za-z0-9._-]{1,128}$/u;
  * so one printer always maps to one reference. Synchronous and dependency-free, so it runs in any realm.
  *
  * @public
- * @param providerId - Trusted provider id, e.g. `bambu`.
+ * @param providerId - Trusted provider id, e.g. `acme`.
  * @param physicalId - The printer's claimed physical identity, e.g. its serial.
  * @returns `vault:machine/<providerId>/<physicalId>`, or `vault:machine/<providerId>/sha256-<16 hex>` for an unsafe id.
  */

@@ -60,6 +60,7 @@ const configurationManifestSchema = z.custom<ConfigurationManifestV1>((value) =>
 const remedySchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('action'), componentId: identifier, action: z.string().min(1).max(128) }),
   z.strictObject({ type: z.literal('person'), instruction: sentence }),
+  z.strictObject({ type: z.literal('stop'), consequence: sentence }),
 ]);
 
 const haltOutcomeSchema = z.strictObject({
@@ -316,6 +317,14 @@ const acceptedContainerSchema = z.strictObject({
   requiredMembers: z.array(z.string().min(1).max(512)).max(128).readonly(),
   payloadSelection: z.enum(['plate', 'single']),
   technology: z.string().min(1).max(256),
+  /** File-name extensions of a program of this container, lower case with the dot (`.gcode`); see `MachineAcceptedContainer`. */
+  extensions: z
+    .array(z.string().regex(/^\.[a-z0-9][a-z0-9.-]{0,15}$/u))
+    .min(1)
+    .max(16)
+    .refine((extensions) => new Set(extensions).size === extensions.length)
+    .readonly()
+    .optional(),
 });
 
 const jobsSchema = z.discriminatedUnion('type', [

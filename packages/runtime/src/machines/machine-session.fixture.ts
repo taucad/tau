@@ -10,6 +10,7 @@ import type {
   MachineCommandReceipt,
   MachineConnectInput,
   MachineConnectionRuntime,
+  MachineDiscoveryInput,
   MachineManifestDefinition,
   MachineProviderDescriptor,
   MachineSession,
@@ -158,6 +159,8 @@ export const fixtureProvider = (
     connect?: (connection: MachineConnectInput<unknown>, runtime: MachineConnectionRuntime) => Promise<MachineSession>;
     /** The candidates discovery finds, in order. */
     candidates?: readonly MachineCandidate[];
+    /** Told each discovery's input as the host passes it. */
+    onDiscover?: (input: MachineDiscoveryInput<unknown>) => void;
   }> = {},
 ): MachineProvider & RuntimePluginDefinitionCarrier<unknown> =>
   defineMachine({
@@ -169,7 +172,8 @@ export const fixtureProvider = (
     manifest: input.manifest ?? machineManifestDefinitionFixture,
     bindingConfiguration,
     submissionConfiguration: machineSubmissionFixture,
-    async *discover() {
+    async *discover(discoverInput) {
+      input.onDiscover?.(discoverInput);
       for (const candidate of input.candidates ?? []) {
         yield { type: 'found', candidate };
       }

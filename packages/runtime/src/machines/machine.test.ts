@@ -55,7 +55,7 @@ describe('defineMachine', () => {
         candidate: {
           id: 'printer-1',
           name: 'Test printer',
-          endpoint: { address: 'printer.local', interface: 'en0' },
+          endpoint: { transport: 'network', address: 'printer.local', interface: 'en0' },
           claimedIdentity: { serial: 'claimed-serial', model: 'claimed-model' },
           observedAt: '2026-09-05T00:00:00Z',
           expiresAt: '2026-09-05T00:00:30Z',
@@ -90,7 +90,10 @@ describe('defineMachine', () => {
         }
         await runtime.resolveSecret({ reference: input.connection.secretRef, signal: input.signal });
         await runtime.connectStream({
-          endpoint: { address: input.candidate.endpoint.address, port: 8883 },
+          endpoint: {
+            address: input.candidate.endpoint.transport === 'network' ? input.candidate.endpoint.address : '',
+            port: 8883,
+          },
           transport: 'tls',
           trust: mqttTrust,
           connectTimeout: 1000,

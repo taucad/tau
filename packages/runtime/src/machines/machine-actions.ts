@@ -80,10 +80,17 @@ export type MachineActionQualification =
   | Readonly<{ status: 'designed' | 'unsupported'; reason: string }>
   | Readonly<{ status: 'qualified'; profileId: string }>;
 
-/** What clears a blocked check, an alert or an unavailable action. @public */
+/**
+ * What clears a blocked check, an alert or an unavailable action: a declared action, something a person does at the
+ * machine, or the machine's Stop. A `stop` remedy is for an effect only Stop can end early (e.g. a timed spindle run
+ * the firmware queues to its end); `consequence` says what Stop costs (e.g. that position must be re-established),
+ * and a pane renders it as a link to its Stop control, never as a second stop button.
+ * @public
+ */
 export type MachineRemedy =
   | Readonly<{ type: 'action'; componentId: string; action: string }>
-  | Readonly<{ type: 'person'; instruction: string }>;
+  | Readonly<{ type: 'person'; instruction: string }>
+  | Readonly<{ type: 'stop'; consequence: string }>;
 
 /**
  * What halting does on this machine: `stop`, and any action that pauses or ends a run. The pane shows it beside the
@@ -442,7 +449,7 @@ type DescribedAction = Omit<MachineActionDescriptor, 'configuration' | 'qualific
   Readonly<{ qualification?: MachineActionQualification }>;
 
 /**
- * One provider-owned action from its schema. The id must be namespaced (`bambu.ams.read-tag`).
+ * One provider-owned action from its schema. The id must be namespaced (`acme.spool.read-tag`).
  * @param action - Everything but the form.
  * @param schema - The parameters schema; the host validates every request with it.
  * @returns The definition, `designed` until the provider names a qualification.
@@ -609,6 +616,7 @@ export const machineFailureCodes = [
   'MACHINE_PREPARATION_FAILED',
   'MACHINE_TRANSFER_UNCONFIRMED',
   'HOST_RESTARTED',
+  'MACHINE_HOST_CLOSING',
 ] as const;
 
 /** One structured failure code. @public */

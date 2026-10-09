@@ -160,6 +160,7 @@ export type {
   MachineDiscoveryEvent,
   MachineDiscoveryInput,
   MachineDiscoveryRuntime,
+  MachineEndpoint,
   MachineFileUploadInput,
   MachineFileUploadReceipt,
   MachineGetDescriptorInput,

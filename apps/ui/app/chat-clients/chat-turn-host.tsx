@@ -19,7 +19,7 @@ import { buildUserMessage } from '#utils/chat.utils.js';
 import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
 import { createAgentUsageTelemetry } from '#chat-clients/_internal/agent-usage-telemetry.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
-import { isGlobalPrivacyControlEnabled } from '#lib/cookie-consent.lib.js';
+import { isGlobalPrivacyControlEnabled } from '#lib/global-privacy-control.lib.js';
 
 /** The route publishes command composition; project-scoped host observation lives in ProjectSessionBinding. */
 export function ChatTurnHost(): ReactNode {

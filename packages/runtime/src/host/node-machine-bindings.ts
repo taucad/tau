@@ -220,6 +220,7 @@ export const createNodeMachineBindings = (
           name: boundRecord.name,
           providerId: boundRecord.providerId,
           observations: providerSources.get(boundRecord.providerId)?.manifest.observations ?? [],
+          qualifications: providerSources.get(boundRecord.providerId)?.manifest.qualifications ?? [],
           session,
           onLost() {
             sessionLost.emit(machineId);
@@ -252,17 +253,25 @@ export const createNodeMachineBindings = (
           ) {
             throw new Error('MACHINE_BINDING_BUSY');
           }
-          machine.record = await store.writeMachine({
-            ...machine.record,
-            candidate: pending.candidate,
-            configuration: pending.configuration,
-            connection,
-          });
-          if (live) {
-            connectedSessions.delete(machineId);
-            sessionLost.emit(machineId);
+          // The old reconnect loop ends first, so an attempt it has in flight (at the old endpoint) never attaches
+          // after this one; if this one fails, the machine goes back to supervision on the backoff.
+          supervisors.get(machineId)?.stop.abort();
+          try {
+            machine.record = await store.writeMachine({
+              ...machine.record,
+              candidate: pending.candidate,
+              configuration: pending.configuration,
+              connection,
+            });
+            if (live) {
+              connectedSessions.delete(machineId);
+              sessionLost.emit(machineId);
+            }
+            await attach();
+          } catch (error) {
+            supervise(machine.record, undefined);
+            throw error;
           }
-          await attach();
           connectedSessions.set(machineId, session);
           return machine.record;
         });

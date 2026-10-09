@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
@@ -11,6 +11,8 @@ import { cloneBoundedJson } from '@taucad/parameters/json';
 import { createHostAdmissionAuthority, hostAdmissionOperations } from '#host/host-admission.js';
 import type { HostActor, HostRouteGrant } from '#host/host-admission.js';
 import { createNodeMachineEventLog } from '#host/node-machine-event-log.js';
+import { parseJournalEvent } from '#host/node-machine-operations.js';
+import { openNodeMachineStore } from '#host/node-machine-store.js';
 import { createNodeMachineHost } from '#host/node.js';
 import type { NodeMachineHost, NodeMachineRuntime } from '#host/node.js';
 import { connectMachineChannel } from '#machines/machine-channel.js';
@@ -20,6 +22,7 @@ import type { MachineApplyActionInput } from '#machines/machine-client.js';
 import type { MachineResolveJobInput } from '#machines/machine-jobs.js';
 import type { MachineObservation, MachineRun } from '#machines/machine-observation.js';
 import { machineManifestDefinitionFixture } from '#machines/machine-manifest.fixture.js';
+import { isSimulatedMachine } from '#machines/machine-manifest.js';
 import {
   fixtureDescriptor,
   fixtureObservation,
@@ -523,7 +526,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
     // oxlint-disable-next-line eslint/no-bitwise -- POSIX permission bits are a bit mask.
     expect(mode & 0o777).toBe(0o600);
     expect(JSON.parse(await readFile(join(machine, 'machine.json'), 'utf8'))).toMatchObject({
-      version: 1,
+      version: 2,
       id: machineId,
       name: 'Workshop X1C',
       providerId: 'binding-provider',
@@ -815,6 +818,50 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
     await fixture.close();
   });
 
+  it("should record a person's denial of an agent's action even once the machine has disconnected", async () => {
+    const run: MachineRun = {
+      runId: 'run-1',
+      origin: 'tau',
+      delivery: 'stored',
+      state: 'running',
+      progress: { basis: 'executed', counters: [] },
+    };
+    const active = fixtureReport({ state: { status: 'active' }, run });
+    const lose = Promise.withResolvers<void>();
+    let isOffline = false;
+    const provider = bindingProvider(() => {
+      if (isOffline) {
+        throw new Error('FIXTURE_OFFLINE');
+      }
+      return fixtureSession({
+        getSnapshot: async () => active,
+        async *observe() {
+          yield { type: 'snapshot', snapshot: active };
+          await lose.promise;
+        },
+      });
+    });
+    const fixture = await openServedHost(await storeRoot(), provider, runtimeAt(currentTimestamp));
+    await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+    isOffline = true;
+    lose.resolve();
+    await vi.waitFor(async () => {
+      await expect(fixture.client.get({ machineId })).resolves.not.toMatchObject({ freshness: 'current' });
+    });
+    const decide = async (decision: 'approve' | 'deny') =>
+      fixture.client.approveAction({
+        machineId,
+        operationId: 'cancel-1',
+        intent: { componentId: 'controller', action: 'run.cancel', version: 1, expectedRunId: 'run-1', parameters: {} },
+        decision,
+        approvedBy: operator,
+      });
+    // Nothing is approved that the machine could not take now; a denial admits nothing, so it is always recorded.
+    await expect(decide('approve')).resolves.toMatchObject({ status: 'refused', code: 'MACHINE_UNAVAILABLE' });
+    await expect(decide('deny')).resolves.toEqual({ status: 'denied', operationId: 'cancel-1' });
+    await fixture.close();
+  });
+
   it("should keep a person's approval when the action it admits is refused before it is journaled", async () => {
     const run: MachineRun = {
       runId: 'run-1',
@@ -1015,6 +1062,29 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
       expect(release).toHaveBeenCalledOnce();
     });
     await expect(fixture.client.renewHold({ holdId: 'jog-1' })).resolves.toEqual({ status: 'ended' });
+    await fixture.close();
+  });
+
+  it('should still stop, hold and apply actions while the host quiesces', async () => {
+    const stop = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const apply = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const release = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const fixture = await boundPrinter({
+      stop,
+      actions: { type: 'supported', apply, confirm: () => ({ status: 'confirmed' }) },
+      holds: { type: 'supported', begin: async () => ({ extend: async () => undefined, release }) },
+    });
+    const resume = await fixture.host.quiesce();
+    await expect(
+      fixture.client.applyAction(lightOn(fixture.revision, 'light-1', { requestedBy: operator })),
+    ).resolves.toMatchObject({ status: 'accepted' });
+    await expect(fixture.client.beginHold(jogOf(fixture.revision))).resolves.toMatchObject({ status: 'held' });
+    await expect(
+      fixture.client.stop({ machineId, operationId: 'stop-1', requestedBy: operator }),
+    ).resolves.toMatchObject({ kind: 'stop', status: 'accepted' });
+    expect(apply).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledOnce();
+    resume();
     await fixture.close();
   });
 
@@ -1277,26 +1347,130 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     const jobs = storedJobs();
     const fixture = await boundPrinter(jobs.facet);
     await request(fixture.client, 'job-1');
-    const resume = fixture.host.quiesce();
+    const resume = await fixture.host.quiesce();
     await expect(approve(fixture.client, 'job-1')).rejects.toThrow('Tau is closing and starts nothing new.');
     await expect(fixture.client.listJobs({})).resolves.toMatchObject([{ jobId: 'job-1', state: 'awaiting-approval' }]);
     resume();
     resume();
-    // Quiescing that begins after the approval, while the program transfers, still refuses the start.
-    let resumeAfterTransfer: (() => void) | undefined;
+    // Quiescing that begins after the approval, while the program transfers, still refuses the start; the job keeps
+    // its transfer and waits at `starting`, so a quit that is refused (or never happens) loses nothing.
+    let quiescing: Promise<() => void> | undefined;
     jobs.transfer.mockImplementationOnce(async (input) => {
-      resumeAfterTransfer = fixture.host.quiesce();
+      quiescing = fixture.host.quiesce();
       return { status: 'accepted', transferId: `transfer-${input.operationId}`, observedAt };
     });
-    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({
-      state: 'failed',
-      failure: { code: 'MACHINE_HOST_CLOSING' },
-    });
+    await expect(approve(fixture.client, 'job-1')).rejects.toThrow(
+      'Tau is closing, so the job did not start. It waits: approve it again once Tau carries on.',
+    );
     expect(jobs.start).not.toHaveBeenCalled();
-    resumeAfterTransfer?.();
-    await request(fixture.client, 'job-2');
-    await expect(approve(fixture.client, 'job-2')).resolves.toMatchObject({ state: 'started' });
+    await expect(fixture.client.listJobs({})).resolves.toMatchObject([{ jobId: 'job-1', state: 'starting' }]);
+    // The quit is refused: Tau carries on, and the person approves the same job again.
+    (await quiescing)?.();
+    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({ state: 'started' });
+    expect(jobs.transfer).toHaveBeenCalledOnce();
     expect(jobs.start).toHaveBeenCalledOnce();
+    await fixture.close();
+  });
+
+  it('should settle quiescing only once every start already admitted has settled', async () => {
+    const jobs = storedJobs();
+    const fixture = await boundPrinter(jobs.facet);
+    // Whether a promise settles within 50 ms of real time.
+    const isSettled = async (promise: Promise<unknown>): Promise<boolean> => {
+      const waited = Promise.withResolvers<boolean>();
+      setTimeout(() => {
+        waited.resolve(false);
+      }, 50);
+      const settled = async (): Promise<boolean> => {
+        await promise;
+        return true;
+      };
+      return Promise.race([settled(), waited.promise]);
+    };
+    // A start suspended in its last check (the provider's prepare) when quiescing begins is refused once it resumes.
+    await request(fixture.client, 'job-1');
+    const preparing = Promise.withResolvers<void>();
+    const prepared = Promise.withResolvers<void>();
+    jobs.prepare.mockImplementationOnce(async (input) => {
+      preparing.resolve();
+      await prepared.promise;
+      return readyPreparation(input, { plate: 'smooth' });
+    });
+    const refused = approve(fixture.client, 'job-1');
+    await preparing.promise;
+    const quiesced = fixture.host.quiesce();
+    await expect(isSettled(quiesced)).resolves.toBe(false);
+    prepared.resolve();
+    const resume = await quiesced;
+    await expect(refused).rejects.toThrow('Tau is closing, so the job did not start.');
+    expect(jobs.start).not.toHaveBeenCalled();
+    resume();
+    // A start already sending when quiescing begins is waited for, so its run is known before quiescing settles.
+    const sending = Promise.withResolvers<void>();
+    const sent = Promise.withResolvers<void>();
+    jobs.start.mockImplementationOnce(async (input) => {
+      sending.resolve();
+      await sent.promise;
+      return { status: 'accepted', runId: `run-${input.operationId}`, observedAt };
+    });
+    const started = approve(fixture.client, 'job-1');
+    await sending.promise;
+    const waiting = fixture.host.quiesce();
+    await expect(isSettled(waiting)).resolves.toBe(false);
+    sent.resolve();
+    const resumeAfterStart = await waiting;
+    await expect(fixture.client.listJobs({})).resolves.toMatchObject([
+      { jobId: 'job-1', state: 'started', run: { runId: 'run-start-job-1', outcome: 'running' } },
+    ]);
+    await expect(started).resolves.toMatchObject({ state: 'started' });
+    resumeAfterStart();
+    // Bounded: a start that does not settle in time fails quiescing, which admits starts again rather than keeping
+    // its gate up.
+    await request(fixture.client, 'job-2');
+    await request(fixture.client, 'job-3');
+    const hanging = Promise.withResolvers<void>();
+    const unhang = Promise.withResolvers<void>();
+    jobs.start.mockImplementationOnce(async (input) => {
+      hanging.resolve();
+      await unhang.promise;
+      return { status: 'accepted', runId: `run-${input.operationId}`, observedAt };
+    });
+    const second = approve(fixture.client, 'job-2');
+    await hanging.promise;
+    await expect(fixture.host.quiesce({ startTimeout: 10 })).rejects.toThrow('MACHINE_HOST_START_IN_FLIGHT');
+    const third = approve(fixture.client, 'job-3');
+    unhang.resolve();
+    await expect(second).resolves.toMatchObject({ state: 'started' });
+    await expect(third).resolves.toMatchObject({ state: 'started' });
+    await fixture.close();
+  });
+
+  it('should refuse to confirm a binding again while a streamed run it feeds is running', async () => {
+    const claimed = fixtureProvider({
+      id: 'binding-provider',
+      manifest: {
+        ...machineManifestDefinitionFixture,
+        connection: { ...machineManifestDefinitionFixture.connection, identity: 'claimed' },
+      },
+      candidates: [candidateA, candidateB],
+      async connect() {
+        const { prepare, start } = storedJobs();
+        return fixtureSession({
+          jobs: { type: 'supported', delivery: 'streamed', prepare, start },
+          descriptor: withJobFacts(() => ({ delivery: 'streamed' })),
+        });
+      },
+    });
+    const fixture = await openServedHost(await storeRoot(), claimed, runtimeAt(currentTimestamp));
+    await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+    await request(fixture.client, 'job-1');
+    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({ run: { outcome: 'running' } });
+    const ceremonyId = await beginCeremony(fixture.client, 'candidate-b', machineId);
+    await expect(
+      fixture.host.completeBinding({ ceremonyId, secretRef: 'vault:x1c', serviceTrust: {} }),
+    ).rejects.toThrow('MACHINE_BINDING_BUSY');
+    await expect(fixture.client.get({ machineId })).resolves.toMatchObject({ freshness: 'current' });
+    await expect(fixture.client.listJobs({})).resolves.toMatchObject([{ jobId: 'job-1', run: { outcome: 'running' } }]);
     await fixture.close();
   });
 
@@ -2326,6 +2500,130 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('d
     expect(withSerial.listed.every(({ unavailable }) => unavailable === undefined)).toBe(true);
     withSerial.client.close();
   });
+
+  it.each(['simulation', 'hardware'] as const)(
+    "should serve the provider's qualifications on a machine's capabilities, live and recovered (%s)",
+    async (environment) => {
+      const root = await storeRoot();
+      const provider = fixtureProvider({
+        id: 'binding-provider',
+        manifest: {
+          ...machineManifestDefinitionFixture,
+          qualifications: machineManifestDefinitionFixture.qualifications.map((profile) => ({
+            ...profile,
+            environment,
+          })),
+        },
+        candidates: [candidateA],
+        async connect() {
+          return fixtureSession();
+        },
+      });
+      const live = await openServedHost(
+        root,
+        provider,
+        runtimeAt(() => observedAt),
+      );
+      await bindAs(live, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+      const entry = await live.client.get({ machineId });
+      expect(entry.descriptor.capabilities.qualifications).toHaveLength(
+        machineManifestDefinitionFixture.qualifications.length,
+      );
+      expect(isSimulatedMachine(entry.descriptor.capabilities)).toBe(environment === 'simulation');
+      await live.close();
+      const recovered = await openServedHost(
+        root,
+        provider,
+        runtimeAt(() => observedAt),
+      );
+      const listed = await recovered.client.get({ machineId });
+      expect(isSimulatedMachine(listed.descriptor.capabilities)).toBe(environment === 'simulation');
+      await recovered.close();
+    },
+  );
+
+  it('should read an older serial binding as serial, and list one this host cannot reach with how to reach it', async () => {
+    const root = await storeRoot();
+    const store = await openNodeMachineStore({
+      storeRoot: root,
+      legacyStoreRoots: [],
+      parseOperation: parseJournalEvent,
+      now: () => observedAt,
+      onError: vi.fn(),
+    });
+    const { record } = await store.createMachine({
+      name: 'Bench CNC',
+      providerId: 'serial-provider',
+      physicalId: 'physical-1',
+      candidate: {
+        id: 'bench',
+        name: 'Bench CNC',
+        endpoint: { transport: 'network', address: '/dev/tty.usbserial-1' },
+        claimedIdentity: {},
+        observedAt,
+        expiresAt: observedAt,
+      },
+      configuration: {},
+      connection: { secretRef: 'vault:cnc', serviceTrust: {} },
+      boundAt: observedAt,
+    });
+    await store.close();
+    // As an older Tau wrote it: version 1, and an endpoint that does not name its transport.
+    const path = join(root, record.id, 'machine.json');
+    const stored = JSON.parse(await readFile(path, 'utf8')) as { version: number; candidate: { endpoint: unknown } };
+    stored.version = 1;
+    stored.candidate.endpoint = { address: '/dev/tty.usbserial-1', interface: 'serial' };
+    await writeFile(path, JSON.stringify(stored));
+    const seen: unknown[] = [];
+    const provider = fixtureProvider({
+      id: 'serial-provider',
+      manifest: serialManifest('hardware'),
+      async connect({ candidate }) {
+        seen.push(candidate.endpoint);
+        return fixtureSession();
+      },
+    });
+    const open = async (runtime: NodeMachineRuntime) => {
+      const host = await createNodeMachineHost({
+        storeRoot: root,
+        hostId: 'host-1',
+        authorityId: 'authority-1',
+        admission: createHostAdmissionAuthority({ hostId: 'host-1' }),
+        providers: [provider],
+        runtime,
+        onError: vi.fn(),
+      });
+      hosts.push(host);
+      const ports = new MessageChannel();
+      host.serve({
+        port: ports.port1,
+        session: host.issueSession({ actor: { kind: 'user', id: 'operator' }, grants: allGrants }),
+      });
+      return { host, client: connectMachineChannel(ports.port2) };
+    };
+    const base = runtimeAt(() => observedAt);
+    const withSerial = await open({ ...base, discovery: { ...base.discovery, listSerialPorts: async () => [] } });
+    expect(seen).toEqual([{ transport: 'serial', path: '/dev/tty.usbserial-1' }]);
+    await expect(withSerial.client.get({ machineId: record.id })).resolves.toMatchObject({ freshness: 'current' });
+    withSerial.client.close();
+    await withSerial.host.close();
+    // Without serial access the binding is listed with why and what a person can do, and never retried.
+    const withoutSerial = await open(base);
+    await expect(withoutSerial.client.get({ machineId: record.id })).resolves.toMatchObject({
+      freshness: 'stale',
+      snapshot: {
+        alerts: [
+          {
+            code: 'MACHINE_PROVIDER_UNAVAILABLE',
+            message: expect.stringContaining('serial ports') as string,
+            remedies: [{ type: 'person', instruction: expect.stringContaining('serial support') as string }],
+          },
+        ],
+      },
+    });
+    expect(seen).toHaveLength(1);
+    withoutSerial.client.close();
+  });
 });
 
 describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('reconnect supervision', () => {
@@ -2605,6 +2903,130 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     await vi.waitUntil(async () => !(await isListed('tau.unreachable')));
     await expect(fixture.client.get(machine)).resolves.toMatchObject({ freshness: 'current' });
     vi.useRealTimers();
+    await fixture.close();
+  });
+
+  /** A claimed-identity provider whose `connect` the test supplies, with candidates A and B. */
+  const claimedProvider = (connect: (candidate: MachineCandidate) => Promise<MachineSession>) =>
+    fixtureProvider({
+      id: 'binding-provider',
+      manifest: {
+        ...machineManifestDefinitionFixture,
+        connection: { ...machineManifestDefinitionFixture.connection, identity: 'claimed' },
+      },
+      candidates: [candidateA, candidateB],
+      async connect({ candidate }) {
+        return connect(candidate);
+      },
+    });
+
+  it('should supervise a confirmed binding at its new address when the confirming session fails to attach', async () => {
+    const seen: string[] = [];
+    let isAttachFailing = false;
+    const claimed = claimedProvider(async (candidate) => {
+      seen.push(candidate.id);
+      const session = fixtureSession();
+      if (!isAttachFailing) {
+        return session;
+      }
+      isAttachFailing = false;
+      let reads = 0;
+      // The ceremony reads the descriptor once to check identity; attaching reads it again, and that read fails.
+      return {
+        ...session,
+        async getDescriptor(input) {
+          reads += 1;
+          if (reads > 1) {
+            throw new Error('FIXTURE_ATTACH_FAILED');
+          }
+          return session.getDescriptor(input);
+        },
+      };
+    });
+    const fixture = await openServedHost(await storeRoot(), claimed, runtime);
+    await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+    const ceremonyId = await beginCeremony(fixture.client, 'candidate-b', machineId);
+    useFakeTimers();
+    isAttachFailing = true;
+    await expect(
+      fixture.host.completeBinding({ ceremonyId, secretRef: 'vault:x1c', serviceTrust: {} }),
+    ).rejects.toThrow('FIXTURE_ATTACH_FAILED');
+    expect(seen).toEqual(['candidate-a', 'candidate-b']);
+    // Not left stale without a loop: the next attempt follows the backoff, at the confirmed address.
+    await vi.advanceTimersByTimeAsync(2000);
+    await until(() => seen.length === 3);
+    expect(seen.at(-1)).toBe('candidate-b');
+    await vi.waitFor(async () => {
+      await expect(fixture.client.get(machine)).resolves.toMatchObject({ freshness: 'current' });
+    });
+    vi.useRealTimers();
+    await fixture.close();
+  });
+
+  it('should never let a reconnect at the old address replace a session a person just confirmed', async () => {
+    const lose = Promise.withResolvers<void>();
+    const oldAttempt = Promise.withResolvers<void>();
+    const oldSession = { close: vi.fn(async () => undefined), observe: vi.fn() };
+    let attempts = 0;
+    const claimed = claimedProvider(async (candidate) => {
+      if (candidate.id === 'candidate-b') {
+        const session = fixtureSession();
+        let reads = 0;
+        return {
+          ...session,
+          async getDescriptor(input) {
+            reads += 1;
+            if (reads > 1) {
+              // Attaching the confirmed session: the old loop's attempt at the old address connects meanwhile.
+              oldAttempt.resolve();
+              for (let turn = 0; turn < 20; turn += 1) {
+                // oxlint-disable-next-line eslint/no-await-in-loop -- real turns let the old attempt queue its attach.
+                await new Promise<void>((resolve) => {
+                  setImmediate(resolve);
+                });
+              }
+            }
+            return session.getDescriptor(input);
+          },
+        };
+      }
+      attempts += 1;
+      if (attempts === 1) {
+        return fixtureSession({
+          async *observe() {
+            yield { type: 'snapshot', snapshot: fixtureReport() };
+            await lose.promise;
+          },
+        });
+      }
+      await oldAttempt.promise;
+      return fixtureSession({
+        close: oldSession.close,
+        async *observe(input) {
+          oldSession.observe(input);
+          yield* [];
+        },
+      });
+    });
+    const fixture = await openServedHost(await storeRoot(), claimed, runtime);
+    await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+    const ceremonyId = await beginCeremony(fixture.client, 'candidate-b', machineId);
+    useFakeTimers();
+    lose.resolve();
+    await vi.advanceTimersByTimeAsync(2000);
+    await until(() => attempts === 2);
+    vi.useRealTimers();
+    await expect(
+      fixture.host.completeBinding({ ceremonyId, secretRef: 'vault:x1c', serviceTrust: {} }),
+    ).resolves.toEqual({
+      status: 'bound',
+      machineId,
+    });
+    await vi.waitFor(() => {
+      expect(oldSession.close).toHaveBeenCalled();
+    });
+    expect(oldSession.observe).not.toHaveBeenCalled();
+    await expect(fixture.client.get(machine)).resolves.toMatchObject({ freshness: 'current' });
     await fixture.close();
   });
 

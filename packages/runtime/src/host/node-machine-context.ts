@@ -129,6 +129,8 @@ export type NodeMachineHostContext = Readonly<{
   connectedSessions: Map<string, MachineSession>;
   /** One reconnect loop per supervised machine, by machine id. */
   supervisors: Map<string, NodeMachineSupervisor>;
+  /** Every job start between its quiescing check and its settled receipt; quiescing waits for these. */
+  startsInFlight: Set<Promise<unknown>>;
   /** Whether the host has begun closing; a call, since it changes after the context is built. */
   isClosed(): boolean;
   /** Whether the host is quiescing or closing: no job start or streamed run may begin (`MACHINE_HOST_CLOSING`). */

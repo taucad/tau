@@ -384,7 +384,7 @@ export const createNodeMachineJobs = (
         preparedDigest: await digestOf(body, 'NODE_MACHINE_PREPARED_JOB'),
       };
       const record = await context.store.writePreparation({
-        version: 1,
+        version: 2,
         prepared,
         providerId: checked.providerId,
         configuration: checked.configuration,
@@ -422,6 +422,11 @@ export const createNodeMachineJobs = (
   const hostClosing: MachineFailure = {
     code: 'MACHINE_HOST_CLOSING',
     message: 'Tau is closing and starts nothing new. Approve the job again once Tau carries on.',
+  };
+  // Refused at the moment of sending: nothing was sent and the job still waits at `starting` for a person.
+  const hostClosingAtStart: MachineFailure = {
+    code: 'MACHINE_HOST_CLOSING',
+    message: 'Tau is closing, so the job did not start. It waits: approve it again once Tau carries on.',
   };
 
   // Transfer (for a stored delivery) and start, each once, through the journal. Never resends.
@@ -488,7 +493,7 @@ export const createNodeMachineJobs = (
     const facts = startEntry?.descriptor.capabilities.jobs;
     // Journaled with the start, so whoever settles it later knows an at-machine start waits for the person.
     const start = facts?.type === 'supported' ? facts.start : 'remote';
-    const receipt = await journal.run({
+    const starting = journal.run({
       machineId: current.machineId,
       kind: 'start',
       operationId: startOperationId,
@@ -504,10 +509,6 @@ export const createNodeMachineJobs = (
       machineQueue: true,
       ...input,
       async admit() {
-        // Checked again at the moment of sending: quiescing may have begun after the approval.
-        if (context.isQuiescing()) {
-          return { refusal: hostClosing };
-        }
         const checked = await prepare({
           machineId: current.machineId,
           artifact: prepared.artifact,
@@ -557,6 +558,11 @@ export const createNodeMachineJobs = (
         if (interlock) {
           return { refusal: interlock };
         }
+        // Checked again after every wait above, at the moment of sending: quiescing may have begun after the
+        // approval. A start past this point is in `startsInFlight`, which quiescing waits for.
+        if (context.isQuiescing()) {
+          return { refusal: hostClosingAtStart };
+        }
         const step = {
           operationId: startOperationId,
           expectedMachineId: prepared.physicalMachineId,
@@ -578,9 +584,20 @@ export const createNodeMachineJobs = (
         return { send: async () => facet.start({ ...step, remoteName }) };
       },
     });
+    context.startsInFlight.add(starting);
+    let receipt: Awaited<typeof starting>;
+    try {
+      receipt = await starting;
+    } finally {
+      context.startsInFlight.delete(starting);
+    }
     current = latest();
     if (current.state === 'starting' && receipt.status === 'rejected') {
-      // Refused before anything was sent: the start op was never journaled.
+      // Refused before anything was sent: the start op was never journaled. A start refused because Tau is closing
+      // leaves the job `starting`, so a person approves it again (with full admission) once Tau carries on.
+      if (receipt.code === 'MACHINE_HOST_CLOSING') {
+        throw refusal(hostClosingAtStart);
+      }
       return fail({ code: receipt.code, message: receipt.message });
     }
     return current;
@@ -843,6 +860,10 @@ export const createNodeMachineJobs = (
             return await drive(current, { admitted, signal: admitted.signal });
           } catch (error) {
             const latest = jobs.get(jobId) ?? current;
+            // Nothing was started; the job waits for a person to approve it again.
+            if (latest.state === 'starting' && failureOf(error).code === 'MACHINE_HOST_CLOSING') {
+              throw error;
+            }
             return terminalJobStates.has(latest.state)
               ? latest
               : commitJob({ ...latest, state: 'failed', failure: failureOf(error) });

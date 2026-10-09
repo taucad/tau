@@ -104,7 +104,8 @@ export type NodeMachineSupervision = Readonly<{
   supervise(record: MachineBindingRecord, live: Promise<void> | undefined): void;
   /**
    * Give every recovered machine with a readable log one attempt now, in id order, then supervision unless it was
-   * refused for good or this host does not serve its provider.
+   * refused for good or this host does not serve its provider. A machine whose provider is unavailable here gets no
+   * attempt: it is listed with the host's reason and remedy.
    */
   resume(): Promise<void>;
 }>;
@@ -174,6 +175,7 @@ export const createNodeMachineSupervision = (context: NodeMachineHostContext): N
           name: record.name,
           providerId: record.providerId,
           observations: providerSources.get(record.providerId)?.manifest.observations ?? [],
+          qualifications: providerSources.get(record.providerId)?.manifest.qualifications ?? [],
           session,
           onLost() {
             sessionLost.emit(record.id);
@@ -273,7 +275,8 @@ export const createNodeMachineSupervision = (context: NodeMachineHostContext): N
         return;
       }
       for (const machine of machines.values()) {
-        if (machine.operations.status !== 'open') {
+        // A machine this host cannot reach (its provider is unavailable here) is listed with why, never retried.
+        if (machine.operations.status !== 'open' || context.unavailableProviders.has(machine.record.providerId)) {
           continue;
         }
         let live: Promise<void> | undefined;

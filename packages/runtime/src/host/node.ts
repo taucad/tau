@@ -131,13 +131,18 @@ export type NodeMachineHost = Readonly<{
   describeBinding(ceremonyId: string): Readonly<{ providerId: string; candidate: MachineCandidate }> | undefined;
   removeBinding(input: RemoveNodeMachineBindingInput): Promise<MachineBindingRemoval>;
   /**
-   * Begin quiescing: until the returned `resume` is called (or the host closes), approving a job and the start of any
-   * job, stored or streamed, are refused `MACHINE_HOST_CLOSING`. Reads, stops, holds and actions carry on, and a run
-   * already started keeps running. A launcher calls this before it checks whether a streamed run is feeding a machine
-   * and then closes, so none begins in between; when it keeps running after all, it calls `resume`.
+   * Begin quiescing: from this call until the returned `resume` is called (or the host closes), approving a job and
+   * the start of any job, stored or streamed, are refused `MACHINE_HOST_CLOSING`; a job refused at its start stays
+   * `starting` and is approved again. Reads, stops, holds and actions carry on, and a run already started keeps
+   * running. The promise settles once every start already past its check has settled, so its run, if any, is in the
+   * machine's report. A launcher awaits this before it checks whether a streamed run is feeding a machine and then
+   * closes, so none begins in between; when it keeps running after all, it calls `resume`.
+   * @param input - `startTimeout`: how long to wait for starts in flight, in milliseconds (default 10 s).
    * @returns `resume`: admit starts again. Calling it more than once does nothing.
+   * @throws `MACHINE_HOST_START_IN_FLIGHT` when a start is still in flight after `startTimeout`; starts are then admitted
+   * again, as after `resume`, and the launcher cannot know whether a run is beginning.
    */
-  quiesce(): () => void;
+  quiesce(input?: Readonly<{ /** Milliseconds. */ startTimeout?: number }>): Promise<() => void>;
   close(): Promise<void>;
 }>;
 
@@ -162,6 +167,26 @@ const closeOwned = async (operations: ReadonlyArray<() => void | Promise<void>>)
 /** Why a host without serial access lists a serial provider unavailable. */
 const serialUnavailable = Object.freeze({
   reason: 'This Tau cannot reach serial ports yet, so it cannot find or connect a machine on one.',
+});
+
+/**
+ * What a binding whose provider this host lists unavailable is listed with; it is neither connected nor retried.
+ * ponytail: serial access is the only unavailability this host derives, so the remedy names it; a second kind would
+ * carry its own remedy beside its reason.
+ * @param reason - The host's reason the provider is unavailable.
+ * @returns The alert.
+ */
+const providerUnavailableAlert = (reason: string): MachineAlert => ({
+  code: 'MACHINE_PROVIDER_UNAVAILABLE',
+  severity: 'serious',
+  message: reason,
+  blocks: 'everything',
+  remedies: [
+    {
+      type: 'person',
+      instruction: 'Open this machine in a Tau with serial support installed and enabled, or remove it here.',
+    },
+  ],
 });
 
 /** What a binding whose provider this host does not serve is listed with: nothing works until a person acts. */
@@ -226,6 +251,7 @@ const unreportedIdentity = (
         },
         revision: 'unreported',
         incarnation: 'unreported',
+        qualifications: manifest?.qualifications ?? [],
       },
     },
     snapshot: {
@@ -343,6 +369,15 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     return pending;
   };
   const now = (): string => input.runtime?.discovery.clock.now() ?? new Date().toISOString();
+  // A binding stored before endpoints named their transport reads as a network one (the store cannot know); for a
+  // provider that connects over serial it was a device path. Written in the new shape the next time it is written.
+  const storedTransport = (record: MachineBindingRecord): MachineBindingRecord => {
+    const { endpoint } = record.candidate;
+    const transport = providers.find(({ id }) => id === record.providerId)?.manifest.connection.transport;
+    return endpoint.transport === 'network' && transport === 'serial'
+      ? { ...record, candidate: { ...record.candidate, endpoint: { transport: 'serial', path: endpoint.address } } }
+      : record;
+  };
   const store = await openNodeMachineStore<NodeMachineJournalEvent>({
     storeRoot: input.storeRoot,
     legacyStoreRoots: input.legacyStoreRoots ?? [],
@@ -365,6 +400,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   let closed = false;
   /** Quiescers that have not resumed; any one of them refuses starts. */
   let quiescers = 0;
+  const startsInFlight = new Set<Promise<unknown>>();
   let directory: MachineDirectory | undefined;
   const commits = new Topic<void>({ name: 'node-machine-directory-commits', onError });
   const jobCommits = new Topic<MachineJob>({ name: 'node-machine-jobs', onError });
@@ -455,7 +491,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   };
   try {
     for (const loaded of store.machines) {
-      machines.set(loaded.record.id, { record: loaded.record, operations: loaded.operations });
+      machines.set(loaded.record.id, { record: storedTransport(loaded.record), operations: loaded.operations });
       for (const preparation of loaded.preparations) {
         preparations.set(preparation.prepared.preparedId, preparation);
       }
@@ -545,11 +581,19 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           machineId: record.id,
           name: record.name,
           providerId: record.providerId,
-          descriptor,
+          // Qualifications are the served provider's, never a stored copy's.
+          descriptor: {
+            ...descriptor,
+            capabilities: { ...descriptor.capabilities, qualifications: provider?.manifest.qualifications ?? [] },
+          },
           snapshot: {
             ...snapshot,
             operations: [],
-            ...(provider === undefined ? { alerts: [...snapshot.alerts, providerUnservedAlert] } : {}),
+            ...(provider === undefined
+              ? { alerts: [...snapshot.alerts, providerUnservedAlert] }
+              : provider.unavailable
+                ? { alerts: [...snapshot.alerts, providerUnavailableAlert(provider.unavailable.reason)] }
+                : {}),
           },
           freshness: 'stale',
           ...(record.testing === true ? { testing: true } : {}),
@@ -600,6 +644,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     supervisors,
     isClosed: () => closed,
     isQuiescing: () => closed || quiescers > 0,
+    startsInFlight,
     now,
     report,
     definitionOf,
@@ -787,15 +832,30 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     completeBinding: bindings.completeBinding,
     describeBinding: bindings.describeBinding,
     removeBinding: bindings.removeBinding,
-    quiesce() {
+    async quiesce({ startTimeout = 10_000 } = {}) {
       quiescers += 1;
       let resumed = false;
-      return () => {
+      const resume = (): void => {
         if (!resumed) {
           resumed = true;
           quiescers -= 1;
         }
       };
+      // A start registered after the gate went up is refused by it; only those already past it are waited for.
+      const inFlight = Promise.allSettled(startsInFlight);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = new Promise<boolean>((resolve) => {
+        timer = setTimeout(resolve, startTimeout, true);
+      });
+      try {
+        if (await Promise.race([inFlight.then(() => false), timedOut])) {
+          resume();
+          throw new Error('MACHINE_HOST_START_IN_FLIGHT');
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+      return resume;
     },
     async close() {
       if (closing) {

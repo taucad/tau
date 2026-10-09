@@ -42,13 +42,14 @@ const capabilitiesSchema = machineManifestSchema
     holds: true,
     jobs: true,
     stop: true,
+    qualifications: true,
   })
   .extend({ revision: identity, incarnation: identity });
 const descriptorShape = { id: identity, name: identity, vendor: identity, model: identity, firmware: identity };
 const descriptorSchema = z.strictObject({ ...descriptorShape, capabilities: capabilitiesSchema });
 const providerDescriptorSchema = z.strictObject({
   ...descriptorShape,
-  capabilities: capabilitiesSchema.omit({ revision: true, incarnation: true }),
+  capabilities: capabilitiesSchema.omit({ revision: true, incarnation: true, qualifications: true }),
 });
 const instant = z.iso.datetime({ offset: true });
 // A provider's own observations: components are admitted one by one, so one unreadable value degrades only itself.
@@ -182,6 +183,8 @@ export type AttachMachineDirectorySessionInput = Readonly<{
   session: Pick<MachineSession, 'getDescriptor' | 'getSnapshot' | 'observe' | 'close'>;
   /** The provider's freshness budgets; each observation is valid for its group's `staleAfter`. */
   observations?: MachineManifest['observations'];
+  /** The provider manifest's qualifications, stamped on the served capabilities (none when absent); never a session's. */
+  qualifications?: MachineManifest['qualifications'];
   /**
    * Called at most once when this session stops being live while it is still the machine's session: it reports a
    * connection other than `connected`, or its observation ends or fails. Never called for a replaced or removed
@@ -751,6 +754,7 @@ export const createMachineDirectory = (input: CreateMachineDirectoryInput): Mach
             revision: await machineCapabilityRevision(provided.capabilities),
             // Every connection is a new incarnation.
             incarnation: randomUuid(),
+            qualifications: attachment.qualifications ?? [],
           },
         };
         if (!isCurrent(owned)) {

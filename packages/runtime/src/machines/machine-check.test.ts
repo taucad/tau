@@ -175,13 +175,14 @@ describe('checkMachineActionAtSend', () => {
       name: 'Fixture printer',
       capabilities,
       report,
+      observations: machineManifestFixture.observations,
       componentId,
       action,
       expectedRunId: null,
       now,
     });
 
-  it('holds the report to the manifest freshness budgets it is given, as the host does', () => {
+  it('holds the report to the manifest freshness budgets, which a provider cannot leave out', () => {
     const hold = {
       name: 'Fixture printer',
       capabilities,
@@ -193,7 +194,11 @@ describe('checkMachineActionAtSend', () => {
       // Five seconds after the report: past the position's one-second budget.
       now: now + 5000,
     } as const;
-    expect(checkMachineActionAtSend(hold)).toBeUndefined();
+    expect(() =>
+      // @ts-expect-error -- the budgets are required, so freshness is never skipped by omission.
+      checkMachineActionAtSend(hold),
+    ).toThrow(TypeError);
+    expect(checkMachineActionAtSend({ ...hold, observations: [] })).toBeUndefined();
     expect(checkMachineActionAtSend({ ...hold, observations: machineManifestFixture.observations })).toMatchObject({
       code: 'MACHINE_ACTION_STALE_OBSERVATION',
     });
@@ -214,7 +219,12 @@ describe('machineActionIntent', () => {
       providerId: 'fixture-provider',
       descriptor: {
         ...fixtureDescriptor(),
-        capabilities: { ...fixtureDescriptor().capabilities, revision: 'revision-1', incarnation: 'incarnation-1' },
+        capabilities: {
+          ...fixtureDescriptor().capabilities,
+          revision: 'revision-1',
+          incarnation: 'incarnation-1',
+          qualifications: [],
+        },
       },
       snapshot: { ...printing, operations: [] },
       freshness: 'current',

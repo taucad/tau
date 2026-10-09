@@ -185,9 +185,17 @@ export type MachineConnectionRuntime = Readonly<{
   openSerial?(input: MachineSerialRequest): Promise<MachineNetworkStream>;
   readArtifact(input: MachineArtifactReadInput): AsyncIterable<Uint8Array<ArrayBuffer>>;
   resolveSecret(input: Readonly<{ reference: string; signal: AbortSignal }>): Promise<string>;
-  /** RTSPS still capture; absent on a host that offers none. */
+  /**
+   * RTSPS still capture: a standard-protocol host service any provider may use without declaring it in its manifest
+   * (`connection.services` lists only what binding pins). Every endpoint and trust detail comes from the call; the
+   * host checks the connection against the `trust` given. Absent on a host that offers none.
+   */
   captureNetworkStill?(input: MachineNetworkStillInput): Promise<MachineStill>;
-  /** Implicit-FTPS upload; absent on a host that offers none. */
+  /**
+   * Implicit-FTPS upload: a standard-protocol host service any provider may use without declaring it in its manifest
+   * (`connection.services` lists only what binding pins). Every endpoint, account and trust detail comes from the call;
+   * the host checks the connection against the `trust` given. Absent on a host that offers none.
+   */
   uploadFile?(input: MachineFileUploadInput): Promise<MachineFileUploadReceipt>;
 }>;
 
@@ -329,10 +337,13 @@ export type MachineInstalledCapabilities = Pick<
 
 /**
  * What is installed on this machine now, as the host serves it. A changed `revision` invalidates every form shown
- * before it; `incarnation` changes with every connection.
+ * before it; `incarnation` changes with every connection. `qualifications` are the provider manifest's, stamped by the
+ * host (a session never reports them), so `isSimulatedMachine(entry.descriptor.capabilities)` tells a simulator from a
+ * machine; they are not part of `revision`, which covers what the provider reports installed.
  * @public
  */
-export type MachineCapabilities = MachineInstalledCapabilities & Readonly<{ revision: string; incarnation: string }>;
+export type MachineCapabilities = MachineInstalledCapabilities &
+  Readonly<{ revision: string; incarnation: string; qualifications: MachineManifest['qualifications'] }>;
 
 /** A connected machine's identity and what it can do. @public */
 export type MachineDescriptor = Readonly<{
@@ -344,7 +355,7 @@ export type MachineDescriptor = Readonly<{
   capabilities: MachineCapabilities;
 }>;
 
-/** The descriptor a provider session reports; the host adds the capability revision and incarnation. @public */
+/** The descriptor a provider session reports; the host adds the capability revision, incarnation and qualifications. @public */
 export type MachineProviderDescriptor = Omit<MachineDescriptor, 'capabilities'> &
   Readonly<{ capabilities: MachineInstalledCapabilities }>;
 

@@ -7,16 +7,19 @@
  *   authority/authority.writer.lock the one writer's lock
  *   authority/machine-events.jsonl  the legacy journal: read once to migrate, never written
  *   <machineId>/                    0700, one directory per printer; the id is a slug of its name
- *     machine.json                  0600, atomic replace: binding, name, trust, testing, last-known identity
+ *     machine.json                  0600, atomic replace: binding, name, trust, testing, last-known identity (v2)
  *     journal.jsonl                 0600, append-only write-ahead operation journal
- *     preparations/<id>.json        0600, one preparation, deleted once it expires
+ *     preparations/<id>.json        0600, one preparation (v2), deleted once it expires
  *     jobs/<id>.json                0600, atomic replace: one whole job
  *     operations.jsonl, requests/   an older host's effect log and print requests, never read again
  *   <machineId>.removed-<epochMs>/  a removed printer's files, never read again
  * ```
  *
  * People and scripts may read every file; only the host holding the lock writes. A record the strict reader refuses
- * is reported as `MACHINE_STORE_RECORD_INVALID` and its bytes are never written again. The store holds references to
+ * is reported as `MACHINE_STORE_RECORD_INVALID` and its bytes are never written again. `machine.json` and preparation
+ * records are version 2 (the endpoint names its transport); version 1 records are read too and rewritten as version 2
+ * on their next write, so an older Tau, which reads only version 1, refuses a rewritten record by its version and
+ * keeps its file. The store holds references to
  * credentials, never a credential.
  *
  * @module
@@ -96,8 +99,11 @@ const nameSchema = z
   .max(maximumNameLength)
   .refine((value) => value.isWellFormed() && value.trim() === value);
 const bindingConfiguration = boundedJson('NODE_MACHINE_BINDING_CONFIGURATION', 20, 2048);
+// Version 2 records carry the transport-tagged endpoint and `testing`; a version 1 record (an older host's) is read
+// as well and written back as version 2, so an older Tau refuses a newer record by its version and keeps its bytes.
+const recordVersion = z.union([z.literal(1), z.literal(2)]).transform((): 2 => 2);
 const machineRecordSchema = z.strictObject({
-  version: z.literal(1),
+  version: recordVersion,
   id: z.string().regex(slugPattern),
   name: nameSchema,
   providerId: identity,
@@ -122,7 +128,7 @@ const storeRecordSchema = z.strictObject({
     .optional(),
 });
 const preparationRecordSchema = z.strictObject({
-  version: z.literal(1),
+  version: recordVersion,
   prepared: z.unknown().transform((value) => parseMachinePreparedJob(value)),
   providerId: identity,
   configuration: boundedJson('NODE_MACHINE_PREPARATION_CONFIGURATION', 20, 2048),
@@ -174,7 +180,7 @@ export type MachineLastKnown = Readonly<{
 
 /** The binding one `machine.json` holds; the host is its only writer. @internal */
 export type MachineBindingRecord = Readonly<{
-  version: 1;
+  version: 2;
   /** The directory name and machine id: a slug of the name, fixed when the machine is bound. */
   id: string;
   /** The display name the person gave the printer. */
@@ -197,7 +203,7 @@ export type NewMachineBindingRecord = Omit<MachineBindingRecord, 'version' | 'id
 
 /** One preparation's provider data, kept until it expires for the upload and start it allows. @internal */
 export type MachinePreparationRecord = Readonly<{
-  version: 1;
+  version: 2;
   prepared: MachinePreparedJob;
   providerId: string;
   configuration: CacheValue;
@@ -672,7 +678,7 @@ const migrateLegacyJournals = async (input: MigrationInput): Promise<z.infer<typ
   for (const { binding, last } of latest.values()) {
     const name = machineDisplayName(binding.machineId) || 'Printer';
     const base = {
-      version: 1,
+      version: 2,
       name,
       providerId: binding.providerId,
       physicalId: binding.physicalId,
@@ -931,7 +937,7 @@ export const openNodeMachineStore = async <Event extends CacheValue>(
     machines: Object.freeze(machines),
     async createMachine(candidate) {
       const slug = machineSlug(candidate.name);
-      const checked = parseMachineBindingRecord({ ...candidate, version: 1, id: slug });
+      const checked = parseMachineBindingRecord({ ...candidate, version: 2, id: slug });
       for (let attempt = 1; ; attempt += 1) {
         if (attempt > maximumIdAttempts) {
           throw new Error('MACHINE_STORE_ID_EXHAUSTED');

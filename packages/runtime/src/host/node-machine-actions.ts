@@ -907,24 +907,27 @@ export const createNodeMachineOperations = (
             message: 'Only a person can approve a machine action.',
           };
         }
-        const entry = await currentEntry(machineId);
-        if (!entry) {
-          return { status: 'refused', code: 'MACHINE_UNAVAILABLE', message: 'This machine is not connected.' };
-        }
         const { intent } = input;
-        // Only what an agent may send once a person approves it: a person-only or attended control, or one the machine
-        // refuses now, is not recorded, so nothing is approved that the agent's call could never use.
-        const check = checkMachineAction({
-          entry: admissionEntry(entry),
-          componentId: intent.componentId,
-          action: intent.action,
-          expectedRunId: intent.expectedRunId,
-          caller: 'agent',
-          attended: false,
-          now: Date.parse(now()),
-        });
-        if (check.status === 'unavailable') {
-          return { status: 'refused', code: check.code, message: check.message };
+        // A denial admits nothing, so it is recorded whatever the machine is doing now: a person can always decline.
+        if (input.decision === 'approve') {
+          const entry = await currentEntry(machineId);
+          if (!entry) {
+            return { status: 'refused', code: 'MACHINE_UNAVAILABLE', message: 'This machine is not connected.' };
+          }
+          // Only what an agent may send once a person approves it: a person-only or attended control, or one the
+          // machine refuses now, is not recorded, so nothing is approved that the agent's call could never use.
+          const check = checkMachineAction({
+            entry: admissionEntry(entry),
+            componentId: intent.componentId,
+            action: intent.action,
+            expectedRunId: intent.expectedRunId,
+            caller: 'agent',
+            attended: false,
+            now: Date.parse(now()),
+          });
+          if (check.status === 'unavailable') {
+            return { status: 'refused', code: check.code, message: check.message };
+          }
         }
         const inputDigest = await approvalDigest(machineId, intent);
         const decidedAt = Date.parse(now());

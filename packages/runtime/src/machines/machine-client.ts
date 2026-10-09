@@ -108,8 +108,9 @@ export type MachineApplyActionInput = Readonly<{
  * A person's answer to an agent's request that needs approval, recorded by the host against this operation id and
  * intent. The agent then sends the same intent with the same `operationId`; the host admits it once while the
  * approval is fresh and its intent, run included, matches. Only a person's session may approve, and only a request
- * an agent may send once approved. The host holds the decision in memory for 10 minutes; a host restart drops it,
- * and the person approves again.
+ * an agent may send once approved. A denial is recorded whatever the machine is doing (it admits nothing), so a
+ * person can always decline. The host holds the decision in memory for 10 minutes; a host restart drops it, and the
+ * person approves again.
  * @public
  */
 export type MachineApproveActionInput = Readonly<{
@@ -135,8 +136,8 @@ export type MachineApproveActionInput = Readonly<{
 }>;
 
 /**
- * What the host recorded for one approval. `refused`: nothing was recorded (an agent's session, an unknown action, or
- * one an agent could never send). An approval expires at `expiresAt` and does not survive a host restart.
+ * What the host recorded for one approval. `refused`: nothing was recorded (an agent's session, or an approval of an
+ * unknown action or one an agent could never send now). An approval expires at `expiresAt` and does not survive a host restart.
  * @public
  */
 export type MachineActionApproval =

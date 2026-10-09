@@ -51,7 +51,7 @@ const descriptorFor = (physicalId: string): MachineDescriptor => {
   return {
     ...reported,
     name: 'Fixture X1C',
-    capabilities: { ...reported.capabilities, revision: digest('9'), incarnation: 'incarnation-1' },
+    capabilities: { ...reported.capabilities, revision: digest('9'), incarnation: 'incarnation-1', qualifications: [] },
   };
 };
 const snapshot: MachineSnapshot = { ...fixtureReport({ observedAt }), operations: [] };
@@ -292,10 +292,10 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     const root = await temporaryDirectory();
     const first = await openStore(root);
     const { record, log } = await first.store.createMachine(bindingFor('Workshop X1C', 'physical-1'));
-    expect(record).toMatchObject({ version: 1, id: 'workshop-x1c', name: 'Workshop X1C', physicalId: 'physical-1' });
+    expect(record).toMatchObject({ version: 2, id: 'workshop-x1c', name: 'Workshop X1C', physicalId: 'physical-1' });
     await log.append({ type: 'fixture', value: 'effect' });
     const preparation = await first.store.writePreparation({
-      version: 1,
+      version: 2,
       prepared: preparedFor('workshop-x1c', 'prepared-1', '2026-09-14T00:10:00.000Z'),
       providerId: 'bambu',
       configuration: { plate: 1 },
@@ -320,7 +320,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     }
     expect(JSON.parse(await readFile(join(root, 'store.json'), 'utf8'))).toEqual({ version: 1 });
     expect(JSON.parse(await readFile(join(machine, 'machine.json'), 'utf8'))).toMatchObject({
-      version: 1,
+      version: 2,
       id: 'workshop-x1c',
       name: 'Workshop X1C',
       connection: { secretRef: 'vault:machine/bambu/physical-1' },
@@ -427,7 +427,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     await first.store.createMachine(bindingFor('Printer B', 'physical-b'));
     await first.store.writeJob(jobFor('printer-a', 'request-1'));
     await first.store.writePreparation({
-      version: 1,
+      version: 2,
       prepared: preparedFor('printer-a', 'prepared-1', '2026-09-14T00:10:00.000Z'),
       providerId: 'bambu',
       configuration: {},
@@ -494,13 +494,17 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     expect(await readFile(join(root, 'printer-b', 'machine.json'), 'utf8')).toBe(oversized);
   });
 
-  it('should read a binding stored before endpoints named their transport as a network one', async () => {
+  it('should read a version 1 binding stored before endpoints named their transport, and write it as version 2', async () => {
     const root = await temporaryDirectory();
     const first = await openStore(root);
     await first.store.createMachine(bindingFor('Printer A', 'physical-a'));
     await first.close();
     const path = join(root, 'printer-a', 'machine.json');
-    const stored = JSON.parse(await readFile(path, 'utf8')) as { candidate: { endpoint: Record<string, unknown> } };
+    const stored = JSON.parse(await readFile(path, 'utf8')) as {
+      version: number;
+      candidate: { endpoint: Record<string, unknown> };
+    };
+    stored.version = 1;
     delete stored.candidate.endpoint['transport'];
     await writeFile(path, JSON.stringify(stored, undefined, 2));
     const second = await openStore(root);
@@ -508,6 +512,17 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
       { transport: 'network', address: 'candidate-physical-a.local', interface: 'manual' },
     ]);
     expect(second.onError).not.toHaveBeenCalled();
+    const [machine] = second.store.machines;
+    if (!machine) {
+      throw new Error('expected the binding');
+    }
+    await second.store.writeMachine({ ...machine.record, name: 'Printer A' });
+    await second.close();
+    // An older Tau reads only version 1, so it refuses the rewritten record by its version and keeps the file.
+    expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({
+      version: 2,
+      candidate: { endpoint: { transport: 'network' } },
+    });
   });
 
   it("should refuse a FIFO in a record's place without waiting on it", async () => {
@@ -532,7 +547,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('m
     ] as const) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- preparations are written one at a time.
       await first.store.writePreparation({
-        version: 1,
+        version: 2,
         prepared: preparedFor('workshop-x1c', preparedId, expiresAt),
         providerId: 'bambu',
         configuration: {},

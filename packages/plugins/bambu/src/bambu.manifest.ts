@@ -428,6 +428,7 @@ const x1cProcess = {
   },
   filamentDiameter: millimetres(1.75),
   bed: {
+    heater: 'bed',
     maximumTemperature: celsius(120),
     plates: [
       { id: 'cool', label: 'Cool plate' },
@@ -465,6 +466,7 @@ const a1MiniProcess = {
   },
   filamentDiameter: millimetres(1.75),
   bed: {
+    heater: 'bed',
     maximumTemperature: celsius(80),
     plates: [
       { id: 'high-temperature', label: 'Smooth PEI plate' },

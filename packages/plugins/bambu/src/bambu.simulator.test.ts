@@ -560,6 +560,8 @@ describe('Simulated X1C jobs and run control', () => {
     expect(stopped.run).toMatchObject({ state: 'cancelled' });
     expect(stopped.state.status).toBe('ready');
     expect(stopped.alerts).toContainEqual(expect.objectContaining({ code: '0500-400E' }));
+    // Stop alone ends a print, as Bambu Studio sends it; the AMS abort is only for a filament change outside one.
+    expect(lastRequest(simulator, 'ams_control')).toBeUndefined();
   });
 
   it.each([
@@ -1100,6 +1102,8 @@ describe('Simulated printer faults the session must survive', () => {
     const report = await after(1);
     expect(report.activities).toContainEqual(expect.objectContaining({ kind: 'calibration', state: 'failed' }));
     expect(report.state.status).toBe('ready');
+    // A calibration is a system print: Stop alone ends it, with no AMS abort.
+    expect(lastRequest(simulator, 'ams_control')).toBeUndefined();
   });
 });
 

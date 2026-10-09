@@ -29,12 +29,11 @@ expectTypeOf(bambu).toEqualTypeOf(plugin);
 const machineDefinition = await resolveRuntimePluginDefinition('machine', bambuMachine());
 type MachineBinding = Parameters<typeof machineDefinition.connect>[0]['configuration'];
 expectTypeOf<MachineBinding>().toEqualTypeOf<{
-  logicalId: string;
   serial?: string;
   wireForm?: 'a' | 'b' | 'c';
 }>();
 // @ts-expect-error -- connection receives the admitted binding-schema output.
-const invalidMachineBinding: MachineBinding = { logicalId: 42 };
+const invalidMachineBinding: MachineBinding = { serial: 42 };
 void invalidMachineBinding;
 
 // The session reads exactly what the submission schema admits.

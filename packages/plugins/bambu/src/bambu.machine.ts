@@ -12,9 +12,8 @@ import { bambuSettingsConfiguration } from '#bambu.settings.js';
 
 const bindingConfiguration = defineConfiguration({
   id: 'bambu.machine.binding',
-  version: '2.0.0',
+  version: '2.1.0',
   schema: z.strictObject({
-    logicalId: z.string().min(1).max(64),
     serial: z.string().min(1).max(64).optional(),
     wireForm: z.enum(['a', 'b', 'c']).optional().meta({
       title: 'Command forms (testing)',

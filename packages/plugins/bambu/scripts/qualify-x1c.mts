@@ -861,6 +861,7 @@ const openSession = async (
           camera: pinned(configuration.trust.camera),
         },
       },
+      purpose: 'bind',
       signal,
     },
     runtime,
@@ -1370,10 +1371,7 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
       let candidate: MachineCandidate | undefined;
       for await (const event of client.discover({
         providerId: 'bambu',
-        configuration: {
-          logicalId: activeConfiguration.logicalId,
-          serial: activeConfiguration.serial,
-        },
+        configuration: { serial: activeConfiguration.serial },
         endpoint: { transport: 'network', address: activeConfiguration.address },
         signal: cancellation.signal,
       })) {

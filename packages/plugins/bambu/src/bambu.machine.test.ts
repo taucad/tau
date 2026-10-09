@@ -77,10 +77,7 @@ describe('bambuMachine', () => {
     const definition = await resolveRuntimePluginDefinition('machine', registration);
     const iterator = definition
       .discover(
-        {
-          configuration: { logicalId: 'workshop-x1c' },
-          signal: new AbortController().signal,
-        },
+        { configuration: {}, signal: new AbortController().signal },
         {
           clock: { now: () => '2026-09-14T00:00:00.000Z' },
           async *listenDatagrams() {

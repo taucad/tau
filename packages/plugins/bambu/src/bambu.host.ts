@@ -33,7 +33,6 @@ import type { BambuSubmission } from '#bambu.session.js';
 
 /** The admitted binding; where the printer is lives in the discovery endpoint, not here. @internal */
 export type BambuBinding = Readonly<{
-  logicalId: string;
   serial?: string;
   /** Which variant of the commands the clients disagree on to send; (a), Bambu Studio's, by default. */
   wireForm?: BambuWireForm;
@@ -98,7 +97,9 @@ export async function* discoverBambuMachines(
       type: 'found',
       candidate: Object.freeze({
         id: `${bambuModels[model].providerId}:${input.configuration.serial ?? address}`,
-        name: input.configuration.logicalId,
+        // What was entered and what it claims to be; the person names the machine at bind. A 253-character hostname
+        // would overrun the 256-character candidate name, so it is cut (the address is ASCII).
+        name: `${model} at ${address}`.slice(0, 256),
         endpoint: Object.freeze({ transport: 'network', address, interface: 'manual' }),
         claimedIdentity: Object.freeze({
           serial: input.configuration.serial,

@@ -25,8 +25,14 @@ const report =
   '{"print":{"sequence_id":"8","printer_type":"BL-P001","nozzle_diameter":"0.4","nozzle_temper":215,"nozzle_target_temper":220,"bed_temper":60,"bed_target_temper":65,"gcode_state":"RUNNING","mc_percent":42,"mc_remaining_time":3,"subtask_id":"run-1","subtask_name":"Cube","layer_num":12,"total_layer_num":120,"spd_lvl":2,"spd_mag":100,"stg_cur":1,"hms":[{"attr":201327360,"code":196619}],"cooling_fan_speed":"15","wifi_signal":"-47dBm","sdcard":true,"lights_report":[{"node":"chamber_light","mode":"on"}],"ams":{"tray_exist_bits":"1","tray_now":"0","tray_tar":"0","ams":[{"humidity":"3","temp":"22","tray":[{"tray_type":"PLA","tray_info_idx":"GFA00"},{},{},{}]}]}}}';
 const published = vi.hoisted((): string[] => []);
 const versionReply = vi.hoisted(() => ({ serial: '00M00A000000001', firmware: '01.08.02.00' }));
-// The model and state the mocked printer's status reports; `BL-P001` is the X1C.
-const statusReply = vi.hoisted(() => ({ printerType: 'BL-P001', externalSpool: false, gcodeState: 'RUNNING' }));
+// The model and state the mocked printer's status reports; `BL-P001` is the X1C. A non-zero `amsStatus` is reported
+// as `ams_status` (main state in bits 8–15).
+const statusReply = vi.hoisted(() => ({
+  printerType: 'BL-P001',
+  externalSpool: false,
+  gcodeState: 'RUNNING',
+  amsStatus: 0,
+}));
 // Push the mocked printer's whole status now, as a printer does on its own.
 const mockPrinter = vi.hoisted((): { push?: () => void } => ({}));
 // A CONNACK return code other than 0 refuses the connection, as MQTT.js reports it.
@@ -152,7 +158,10 @@ vi.mock('mqtt', async () => {
     #status(): string {
       return report
         .replace('BL-P001', statusReply.printerType)
-        .replace('"gcode_state":"RUNNING"', `"gcode_state":"${statusReply.gcodeState}"`)
+        .replace(
+          '"gcode_state":"RUNNING"',
+          `${statusReply.amsStatus === 0 ? '' : `"ams_status":${String(statusReply.amsStatus)},`}"gcode_state":"${statusReply.gcodeState}"`,
+        )
         .replace('"ams":{', statusReply.externalSpool ? externalSpoolReport : '"ams":{');
     }
 
@@ -265,7 +274,7 @@ describe('Bambu read-only controller', () => {
     const session = await connectBambuMachine(
       {
         candidate,
-        configuration: { logicalId: 'workshop' },
+        configuration: {},
         connection: {
           secretRef: 'vault:bambu-x1c',
           serviceTrust: {
@@ -273,6 +282,7 @@ describe('Bambu read-only controller', () => {
             camera: { type: 'pinned', digest: pinnedDigest },
           },
         },
+        purpose: 'bind',
         signal: new AbortController().signal,
       },
       runtime,
@@ -452,6 +462,53 @@ describe('Bambu read-only controller', () => {
     await session.close();
   });
 
+  it('should stop a print during its colour change with Stop alone, never the AMS abort', async () => {
+    published.length = 0;
+    // RUNNING with the AMS in a filament change (main 1): a multi-colour print swapping spools.
+    statusReply.amsStatus = 0x01_00;
+    try {
+      const session = await connectBambuMachine(
+        {
+          candidate,
+          configuration: {},
+          connection: {
+            secretRef: 'vault:bambu-x1c',
+            serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } },
+          },
+          purpose: 'bind',
+          signal: new AbortController().signal,
+        },
+        {
+          clock: { now: () => '2026-09-14T00:00:01.000Z' },
+          log: vi.fn(async () => undefined),
+          connectStream: vi.fn(async () => ({
+            readable: (async function* () {
+              yield* [];
+            })(),
+            write: vi.fn(async () => undefined),
+            close: vi.fn(async () => undefined),
+          })),
+          async *readArtifact() {
+            yield* [];
+          },
+          resolveSecret: vi.fn(async () => 'access-code-must-not-escape'),
+        },
+      );
+      // The stop's reply settles it at once; the bound only keeps a wrongly sent abort, which waits for the AMS to
+      // go idle, from hanging the test before the assertions.
+      await session.stop({ operationId: 'stop-colour-change', signal: AbortSignal.timeout(1000) });
+      const commands = published.map(
+        (payload) => (JSON.parse(payload) as { print?: { command?: string } }).print?.command,
+      );
+      // Bambu Studio's Stop during a print is `stop`; `ams_control abort` is only for a change outside one.
+      expect(commands).toContain('stop');
+      expect(commands).not.toContain('ams_control');
+      await session.close();
+    } finally {
+      statusReply.amsStatus = 0;
+    }
+  });
+
   it('should offer the external spool as slot 254 and start from it with the AMS off', async () => {
     published.length = 0;
     versionReply.serial = '00M00A000000001';
@@ -495,8 +552,9 @@ describe('Bambu read-only controller', () => {
     const session = await connectBambuMachine(
       {
         candidate,
-        configuration: { logicalId: 'workshop' },
+        configuration: {},
         connection: { secretRef: 'vault:bambu-x1c', serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } } },
+        purpose: 'bind',
         signal: new AbortController().signal,
       },
       runtime,
@@ -592,8 +650,9 @@ describe('Bambu read-only controller', () => {
         const session = await connectBambuMachine(
           {
             candidate: { ...candidate, claimedIdentity: { model, serial } },
-            configuration: { logicalId: 'workshop' },
+            configuration: {},
             connection: { secretRef: 'vault:bambu', serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } } },
+            purpose: 'bind',
             signal: new AbortController().signal,
           },
           {
@@ -663,7 +722,8 @@ describe('Bambu read-only controller', () => {
       const root = await mkdtemp(join(tmpdir(), 'tau-bambu-store-'));
       try {
         // Exactly as the store at f1fd08a32 wrote it: an endpoint without `transport`, and the binding form 1.1.0
-        // (`address` and `serial` in the configuration).
+        // (`logicalId`, `address` and `serial` in the configuration). The strict 2.1.0 form refuses `logicalId` and
+        // `address`, so this connects only because a stored configuration is never re-parsed.
         await writeFile(join(root, 'store.json'), JSON.stringify({ version: 1 }), { mode: 0o600 });
         await mkdir(join(root, 'workshop'), { mode: 0o700 });
         await writeFile(
@@ -771,10 +831,7 @@ describe('Bambu read-only controller', () => {
     });
     const events = discoverBambuMachines(
       {
-        configuration: {
-          logicalId: 'Workshop',
-          serial: '00M00A000000001',
-        },
+        configuration: { serial: '00M00A000000001' },
         endpoint: { transport: 'network', address: 'x1c.local' },
         signal: new AbortController().signal,
       },
@@ -788,7 +845,10 @@ describe('Bambu read-only controller', () => {
     expect(discovered).toMatchObject([
       {
         type: 'found',
-        candidate: { endpoint: { transport: 'network', address: 'x1c.local', interface: 'manual' } },
+        candidate: {
+          name: 'X1C at x1c.local',
+          endpoint: { transport: 'network', address: 'x1c.local', interface: 'manual' },
+        },
       },
     ]);
     expect(listenDatagrams).not.toHaveBeenCalled();
@@ -802,7 +862,7 @@ describe('Bambu read-only controller', () => {
       const { serial, ...endpoint } = entry;
       for await (const _event of discoverBambuMachines(
         {
-          configuration: { logicalId: 'Workshop', ...(serial === undefined ? {} : { serial }) },
+          configuration: serial === undefined ? {} : { serial },
           endpoint: { transport: 'network', ...endpoint },
           signal: new AbortController().signal,
         },
@@ -832,7 +892,7 @@ describe('Bambu read-only controller', () => {
       yield* [];
     });
     for await (const _event of discoverBambuMachines(
-      { configuration: { logicalId: 'discovery' }, signal: new AbortController().signal },
+      { configuration: {}, signal: new AbortController().signal },
       { clock: { now: () => '2026-09-14T00:00:00.000Z' }, listenDatagrams },
     )) {
       // A silent LAN yields nothing.
@@ -859,8 +919,9 @@ describe('Bambu read-only controller', () => {
       return connectBambuMachine(
         {
           candidate,
-          configuration: { logicalId: 'workshop' },
+          configuration: {},
           connection: { secretRef: 'vault:bambu-x1c', serviceTrust },
+          purpose: 'bind',
           signal: new AbortController().signal,
         },
         runtime,
@@ -900,11 +961,12 @@ describe('Bambu read-only controller', () => {
       connectBambuMachine(
         {
           candidate,
-          configuration: { logicalId: 'workshop' },
+          configuration: {},
           connection: {
             secretRef: 'vault:bambu-x1c',
             serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } },
           },
+          purpose: 'bind',
           signal: new AbortController().signal,
         },
         runtime,
@@ -932,7 +994,7 @@ describe('Bambu read-only controller', () => {
       },
       resolveSecret: vi.fn(async () => 'access-code-must-not-escape'),
     };
-    const connect = async (configuration: Readonly<{ logicalId: string; serial?: string }>) =>
+    const connect = async (configuration: Readonly<{ serial?: string }>) =>
       connectBambuMachine(
         {
           candidate,
@@ -941,6 +1003,7 @@ describe('Bambu read-only controller', () => {
             secretRef: 'vault:bambu-x1c',
             serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } },
           },
+          purpose: 'bind',
           signal: new AbortController().signal,
         },
         runtime,
@@ -948,12 +1011,12 @@ describe('Bambu read-only controller', () => {
     try {
       connack.code = 5;
       // Settings shows the message to the person, so it is a sentence; callers branch on the stable code.
-      await expect(connect({ logicalId: 'workshop' })).rejects.toMatchObject({
+      await expect(connect({})).rejects.toMatchObject({
         code: 'BAMBU_ACCESS_CODE_REJECTED',
         message: "The printer refused the access code. Check the code on the printer's screen and bind it again.",
       });
       connack.code = 3;
-      await expect(connect({ logicalId: 'workshop' })).rejects.toMatchObject({
+      await expect(connect({})).rejects.toMatchObject({
         code: 'BAMBU_MQTT_CONNECT_FAILED',
         message: 'Could not connect to the printer. Check that it is on and on this network, then try again.',
       });
@@ -961,7 +1024,7 @@ describe('Bambu read-only controller', () => {
       connack.code = 0;
     }
     // The bound serial fences the printer: an advertisement naming another one is not it.
-    await expect(connect({ logicalId: 'workshop', serial: '00M00A000000002' })).rejects.toMatchObject({
+    await expect(connect({ serial: '00M00A000000002' })).rejects.toMatchObject({
       code: 'BAMBU_SERIAL_MISMATCH',
       message: 'The printer at this address reports a different serial.',
     });
@@ -970,8 +1033,9 @@ describe('Bambu read-only controller', () => {
       connectBambuMachine(
         {
           candidate: { ...candidate, claimedIdentity: { model: 'X1C' } },
-          configuration: { logicalId: 'workshop' },
+          configuration: {},
           connection: { secretRef: 'vault:bambu-x1c', serviceTrust: {} },
+          purpose: 'bind',
           signal: new AbortController().signal,
         },
         runtime,
@@ -1015,7 +1079,7 @@ describe('Bambu read-only controller', () => {
       const session = await connectBambuMachine(
         {
           candidate: { ...candidate, claimedIdentity: { model: 'A1 mini', serial: versionReply.serial } },
-          configuration: { logicalId: 'Mini' },
+          configuration: {},
           connection: {
             secretRef: 'vault:mini',
             serviceTrust: {
@@ -1023,6 +1087,7 @@ describe('Bambu read-only controller', () => {
               camera: { type: 'pinned', digest: pinnedDigest },
             },
           },
+          purpose: 'bind',
           signal: new AbortController().signal,
         },
         {
@@ -1079,7 +1144,7 @@ describe('Bambu read-only controller', () => {
       connectBambuMachine(
         {
           candidate,
-          configuration: { logicalId: 'workshop' },
+          configuration: {},
           connection: {
             secretRef: 'vault:bambu-x1c',
             serviceTrust: {
@@ -1087,6 +1152,7 @@ describe('Bambu read-only controller', () => {
               camera: { type: 'pinned', digest: pinnedDigest },
             },
           },
+          purpose: 'bind',
           signal: new AbortController().signal,
         },
         {

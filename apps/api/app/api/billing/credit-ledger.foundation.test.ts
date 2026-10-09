@@ -2940,13 +2940,13 @@ describe('post-hoc supplier metering', () => {
   /* eslint-disable @typescript-eslint/naming-convention -- request bodies use the providers' own wire fields */
   it.each([
     {
-      // $1, $0.10, $1.25 (5m write) and $5 per million.
+      // The base tier of a tiered route: $0.10, $0.01, $0.125 (5m write) and $0.50 per million.
       routeId: 'anthropic-claude-haiku-5.5',
       providerWire: 'anthropic',
       body: { messages: [{ role: 'user', content: 'hello' }], max_tokens: 500 },
       priceHeaders: { 'anthropic-version': '2023-06-01' },
       cacheWriteTier: '5m',
-      supplierCostPicoUsd: 3_575_000_000n,
+      supplierCostPicoUsd: 357_500_000n,
     },
     {
       // The base tier of a tiered route: $0.20, $0.02, $0.25 (30m write) and $1.20 per million.

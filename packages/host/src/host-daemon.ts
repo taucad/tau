@@ -1199,7 +1199,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         fileSystemSplice,
         ...(agentSplice ? [agentSplice] : []),
       ];
-      const closeSession = (code: Exclude<HostSessionCloseCode, 'ROUTE_UNUSED'>): void => {
+      const closeSession = (code?: Exclude<HostSessionCloseCode, 'ROUTE_UNUSED'>): void => {
         closeCode = code;
         isDraining = true;
         for (const splice of splices) {

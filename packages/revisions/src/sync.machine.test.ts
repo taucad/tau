@@ -2775,3 +2775,110 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     harness.stop();
   });
 });
+
+describe('syncMachine telemetry (W36 D1)', () => {
+  const mint = (harness: Harness, revisionId: string): void => {
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId, branch: 'main' });
+  };
+  const attempts = (harness: Harness): ReadonlyArray<Record<string, unknown>> =>
+    harness.emitted.filter((event) => event['type'] === 'syncAttempt');
+
+  it('reports each settled pull and push once, with the lag only on an acknowledged push', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    expect(attempts(harness)).toEqual([
+      { type: 'syncAttempt', direction: 'pull', outcome: 'ok', durationMilliseconds: expect.any(Number) as unknown },
+    ]);
+
+    mint(harness, 'r1');
+    harness.clock.advance(2000);
+    await settleWhenRunning(harness.effects, 'push', {
+      error: Object.assign(new Error('no route'), { code: 'ENGINE_FAILED' }),
+    });
+    await vi.waitFor(() => {
+      expect(attempts(harness)).toHaveLength(2);
+    });
+    expect(attempts(harness)[1]).toEqual({
+      type: 'syncAttempt',
+      direction: 'push',
+      outcome: 'offline',
+      durationMilliseconds: expect.any(Number) as unknown,
+      pending: 0,
+    });
+
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+    harness.actor.send({ type: 'syncNow' });
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult({ name: mainRef, status: 'updated', head: 'h1' }),
+    });
+    await vi.waitFor(() => {
+      expect(attempts(harness).at(-1)).toMatchObject({ direction: 'push', outcome: 'ok' });
+    });
+    const acknowledged = attempts(harness).at(-1);
+    expect(acknowledged?.['pending']).toBe(1);
+    expect(acknowledged?.['lagMilliseconds']).toEqual(expect.any(Number));
+    expect(harness.actor.getSnapshot().context.unsyncedSince).toBeUndefined();
+
+    harness.stop();
+  });
+
+  it('keeps the lag of a revision minted while the previous push was on the wire', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    mint(harness, 'r1');
+    harness.clock.advance(2000);
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    mint(harness, 'r2');
+    const mintedMidPush = harness.actor.getSnapshot().context.mintedSincePushAt;
+    expect(mintedMidPush).toEqual(expect.any(Number) as unknown);
+    harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'h1' }) });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(attempts(harness).at(-1)).toMatchObject({ direction: 'push', outcome: 'ok' });
+    });
+    /* Once r1 is acknowledged, r2 is still owed, and its lag runs from its own mint. */
+    expect(harness.actor.getSnapshot().context.unsyncedSince).toBe(mintedMidPush);
+
+    harness.stop();
+  });
+
+  it('reports a push the remote refused for storage as quota_refused', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    mint(harness, 'r1');
+    harness.clock.advance(2000);
+    await settleWhenRunning(harness.effects, 'push', {
+      output: {
+        refs: [{ name: mainRef, status: 'rejected', reason: 'storage quota exceeded' }],
+        overQuota: ['big.step'],
+      },
+    });
+    await vi.waitFor(() => {
+      expect(attempts(harness).at(-1)).toMatchObject({ direction: 'push', outcome: 'quota_refused' });
+    });
+    expect(attempts(harness).at(-1)).not.toHaveProperty('lagMilliseconds');
+
+    harness.stop();
+  });
+
+  it('reports an offline open as an offline pull', async () => {
+    const harness = start({ online: false });
+
+    await vi.waitFor(() => {
+      expect(attempts(harness)).toContainEqual(expect.objectContaining({ direction: 'pull', outcome: 'offline' }));
+    });
+
+    harness.stop();
+  });
+});

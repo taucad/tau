@@ -168,6 +168,13 @@ type SyncMachineContextFields = Readonly<{
   requestId: string | undefined;
   error: string | undefined;
   reason: SyncFailureReason | undefined;
+  /** When this device first minted a revision the remote has not acknowledged, for the lag report. */
+  unsyncedSince: number | undefined;
+  /** The first mint since the current push was assembled: what is still unsynced once that push is acknowledged. */
+  mintedSincePushAt: number | undefined;
+  /** When the push or pull under way started, and the queue depth a push started with (`syncAttempt`). */
+  attemptStartedAt: number;
+  pushPending: number;
   debounceMilliseconds: number;
   debounceMaxWaitMilliseconds: number;
   retryMilliseconds: number;
@@ -269,7 +276,24 @@ export type SyncMachineEmitted =
   /** The remote and this device have diverged; W10's surface takes it from here. */
   | Readonly<{ type: 'syncConflict'; ref: string; reason: string }>
   /** The correlated answer to one `syncNow { pushId }` (the `publish.machine` row). */
-  | Readonly<{ type: 'pushSettled'; pushId: string; outcome: SyncPushOutcome }>;
+  | Readonly<{ type: 'pushSettled'; pushId: string; outcome: SyncPushOutcome }>
+  /**
+   * One push or pull settled, for the host's telemetry sender (W36 D1). Bounded
+   * facts only: the host adds where it runs and reports it, never this machine.
+   */
+  | Readonly<{
+      type: 'syncAttempt';
+      direction: 'push' | 'pull';
+      outcome: SyncAttemptOutcome;
+      durationMilliseconds: number;
+      /** First unsynced mint to the server's ack; on an acknowledged push only. */
+      lagMilliseconds?: number;
+      /** `.git/sync-pending` depth when the push started; on a push only. */
+      pending?: number;
+    }>;
+
+/** How one push or pull ended, in telemetry's bounded words. @public */
+export type SyncAttemptOutcome = 'ok' | 'retry' | 'quota_refused' | 'offline' | 'error';
 
 /** What `readPending` is asked, and what the record answers. @public */
 export type SyncReadPendingActorInput = Readonly<{ projectId: string }>;
@@ -743,6 +767,9 @@ const rememberHead = (context: SyncMachineContext, event: SyncMachineEvent): Syn
   /* A mint on another branch is pushed with the history set, but it is not this branch's head (RM-S3). */
   localHead: event.type === 'revisionMinted' && event.branch === context.branch ? event.revisionId : context.localHead,
   pendingMint: event.type === 'revisionMinted' ? true : context.pendingMint,
+  unsyncedSince: event.type === 'revisionMinted' ? (context.unsyncedSince ?? Date.now()) : context.unsyncedSince,
+  mintedSincePushAt:
+    event.type === 'revisionMinted' ? (context.mintedSincePushAt ?? Date.now()) : context.mintedSincePushAt,
   /* The trigger travels with the fact, because the state that *acts* on the
    * remembered mint is never the state the event arrived in (C17). */
   pendingFlush:
@@ -857,6 +884,37 @@ const rememberFetch = (
  * A pull step that failed. A refusal no wait can satisfy is terminal here too
  * (C3b/N2): the backoff would only re-fetch it.
  */
+/* One settled push, for the host's telemetry sender (W36 D1). */
+const reportPushAttempt = (
+  context: SyncMachineContext,
+  enq: SyncEnqueue,
+  attempt: Readonly<{ outcome: SyncAttemptOutcome; lagMilliseconds?: number }>,
+): void => {
+  enq.emit({
+    type: 'syncAttempt',
+    direction: 'push',
+    durationMilliseconds: Math.max(0, Date.now() - context.attemptStartedAt),
+    pending: context.pushPending,
+    ...attempt,
+  });
+};
+
+/* One settled pull (the open fetch), for the host's telemetry sender. */
+const reportPullAttempt = (context: SyncMachineContext, enq: SyncEnqueue, outcome: SyncAttemptOutcome): void => {
+  enq.emit({
+    type: 'syncAttempt',
+    direction: 'pull',
+    outcome,
+    durationMilliseconds: Math.max(0, Date.now() - context.attemptStartedAt),
+  });
+};
+
+/* The bounded telemetry word for a thrown push or pull. */
+const thrownOutcome = (error: unknown): SyncAttemptOutcome => {
+  const why = syncFailureReason(error);
+  return why === 'offline' ? 'offline' : why === 'quota' ? 'quota_refused' : isFatal(error) ? 'error' : 'retry';
+};
+
 const pullFailed = (error: unknown) => {
   const failure = {
     error: reason(error),
@@ -998,6 +1056,10 @@ const syncMachineDefinition = setup({
     requestId: undefined,
     error: undefined,
     reason: undefined,
+    unsyncedSince: undefined,
+    mintedSincePushAt: undefined,
+    attemptStartedAt: 0,
+    pushPending: 0,
     debounceMilliseconds: input.debounceMilliseconds ?? defaultDebounceMilliseconds,
     debounceMaxWaitMilliseconds:
       input.debounceMaxWaitMilliseconds ??
@@ -1217,10 +1279,11 @@ const syncMachineDefinition = setup({
      * authority's own watch plane, which is what makes "no reload" true.
      */
     opening: {
-      always: ({ context }) => {
+      always: ({ context }, enq) => {
         if (context.online) {
           return undefined;
         }
+        reportPullAttempt(context, enq, 'offline');
         /* A correlated `syncNow { pushId }` that arrives offline is answered
          * `queued` by `queued` itself (C18): the requester — `publish.machine` —
          * hears the honest outcome at once rather than waiting out a bound. */
@@ -1240,6 +1303,7 @@ const syncMachineDefinition = setup({
         return {
           context: {
             withinPullWindow: true,
+            attemptStartedAt: Date.now(),
             recordQueueDirty: false,
             pendingFetch: false,
             leaseSettled: false,
@@ -1250,9 +1314,12 @@ const syncMachineDefinition = setup({
       exit: () => ({ context: { withinPullWindow: false } }),
       after: {
         pullRenderWindow: { context: { withinPullWindow: false } },
-        pullDeadline: {
-          target: 'queued',
-          context: { error: 'The remote did not answer in time; this project will try again.', reason: 'offline' },
+        pullDeadline: ({ context }, enq) => {
+          reportPullAttempt(context, enq, 'retry');
+          return {
+            target: 'queued',
+            context: { error: 'The remote did not answer in time; this project will try again.', reason: 'offline' },
+          };
         },
       },
       initial: 'fetching',
@@ -1266,6 +1333,7 @@ const syncMachineDefinition = setup({
               deadlineMilliseconds: context.pullDeadlineMilliseconds,
             }),
             onDone: ({ context, event }, enq) => {
+              reportPullAttempt(context, enq, 'ok');
               const remembered = rememberFetch(context, enq, event.output);
               switch (event.output.integration) {
                 case 'fastForward': {
@@ -1279,7 +1347,10 @@ const syncMachineDefinition = setup({
                 }
               }
             },
-            onError: ({ event }) => pullFailed(event.error),
+            onError: ({ context, event }, enq) => {
+              reportPullAttempt(context, enq, thrownOutcome(event.error));
+              return pullFailed(event.error);
+            },
           },
         },
         fastForwarding: {
@@ -1445,6 +1516,9 @@ const syncMachineDefinition = setup({
           ahead: false,
           pushIds: [...context.pushIds, ...context.nextPushIds],
           nextPushIds: [],
+          attemptStartedAt: Date.now(),
+          pushPending: context.pending.length,
+          mintedSincePushAt: undefined,
         },
       }),
       invoke: {
@@ -1497,11 +1571,20 @@ const syncMachineDefinition = setup({
             enq.sendTo(context.parentRef, { type: 'remote', event: { type: 'pushed' } });
           }
           const quota = isQuotaAnswer(pending, event.output.overQuota);
+          const acknowledged = pending.length === 0;
+          /* A device that reopened with a queue and minted nothing since still owes its oldest entry. */
+          const since = context.unsyncedSince ?? Math.min(...context.pending.map((entry) => entry.recordedAt));
+          reportPushAttempt(context, enq, {
+            outcome: acknowledged ? 'ok' : quota ? 'quota_refused' : 'retry',
+            ...(acknowledged && Number.isFinite(since) ? { lagMilliseconds: Math.max(0, now - since) } : {}),
+          });
           return {
             target: 'recording',
             context: {
               leases,
               pending,
+              /* A revision minted while this push was on the wire is still unsent, from its own mint. */
+              unsyncedSince: acknowledged ? context.mintedSincePushAt : context.unsyncedSince,
               /* Rule 19: a refused history is terminal, as the thrown class is; a
                * record's refusal never blocks history, so it keeps retrying. */
               failure: quota && refusedHistory !== undefined ? 'fatal' : pending.length > 0 ? 'retry' : 'none',
@@ -1523,24 +1606,27 @@ const syncMachineDefinition = setup({
          * back — so the history ref is recorded here by hand, or an offline
          * close would leave an empty queue and claim it was backed up.
          */
-        onError: {
-          target: 'recording',
-          context: ({ context, event }) => ({
-            failure: isFatal(event.error) ? 'fatal' : 'retry',
-            /* A rate limit is the remote pacing this host, not this host
-             * failing: it waits the remote's wait and keeps its doubling (W13d). */
-            attempt: retryAfterOf(event.error) === undefined ? context.attempt + 1 : context.attempt,
-            retryAfterMilliseconds: retryAfterOf(event.error),
-            error: reason(event.error),
-            reason: syncFailureReason(event.error),
-            pending: nextPending({
-              pending: context.pending,
-              outcomes: throwFailures(context, reason(event.error)),
-              leases: context.leases,
-              remote: context.remote,
-              now: Date.now(),
-            }),
-          }),
+        onError: ({ context, event }, enq) => {
+          reportPushAttempt(context, enq, { outcome: thrownOutcome(event.error) });
+          return {
+            target: 'recording',
+            context: {
+              failure: isFatal(event.error) ? 'fatal' : 'retry',
+              /* A rate limit is the remote pacing this host, not this host
+               * failing: it waits the remote's wait and keeps its doubling (W13d). */
+              attempt: retryAfterOf(event.error) === undefined ? context.attempt + 1 : context.attempt,
+              retryAfterMilliseconds: retryAfterOf(event.error),
+              error: reason(event.error),
+              reason: syncFailureReason(event.error),
+              pending: nextPending({
+                pending: context.pending,
+                outcomes: throwFailures(context, reason(event.error)),
+                leases: context.leases,
+                remote: context.remote,
+                now: Date.now(),
+              }),
+            },
+          };
         },
       },
       on: {
@@ -1559,11 +1645,12 @@ const syncMachineDefinition = setup({
        * `queued`'s backoff.
        */
       after: {
-        pushDeadline: {
-          target: 'recording',
-          context: ({ context }) => {
-            const why = 'The remote did not answer in time; this project will try again.';
-            return {
+        pushDeadline: ({ context }, enq) => {
+          reportPushAttempt(context, enq, { outcome: 'retry' });
+          const why = 'The remote did not answer in time; this project will try again.';
+          return {
+            target: 'recording',
+            context: {
               failure: 'retry',
               attempt: context.attempt + 1,
               error: why,
@@ -1575,8 +1662,8 @@ const syncMachineDefinition = setup({
                 remote: context.remote,
                 now: Date.now(),
               }),
-            };
-          },
+            },
+          };
         },
       },
     },

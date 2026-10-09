@@ -1,16 +1,24 @@
+import { HttpException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import type { WireAccountClosure } from '@taucad/billing';
+import { createStripeClosureAdapter } from '#api/billing/billing-account-closure-stripe.js';
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import type {
   ClosureCancellationAdapter,
   ClosureCancellationResult,
 } from '#api/billing/billing-account-closure.service.js';
+import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
+import type { BillingCashQualification } from '#api/billing/billing-payments.service.js';
+import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
+import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
+import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import type { DatabaseService } from '#database/database.service.js';
 import type { billingAccountClosure, billingOwnerBinding } from '#database/schema.js';
 import * as schema from '#database/schema.js';
+import { seedPaidPurchase } from '#testing/billing-payment.fixture.js';
 
 describe('account closure cancellation boundary', () => {
   it('requires recovery of the original subscription identity and exposes no create operation', async () => {
@@ -401,6 +409,109 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
       expect(await first`select id from billing.billing_account_closure where account_id=${accountId}`).toHaveLength(0);
     } finally {
       await Promise.all([first.end(), second.end()]);
+    }
+  });
+
+  it('should refuse preparation while a payment action is pending and proceed once it is canceled', async () => {
+    const client = postgres(databaseUrl!, { max: 1, prepare: false });
+    const suffix = crypto.randomUUID();
+    const userId = `pending-user-${suffix}`;
+    const accountId = `pending-account-${suffix}`;
+    const requestId = `pending-close-${suffix}`;
+    try {
+      await client`insert into public."user" (id,name,email,email_verified,allows_ai_training,created_at,updated_at)
+        values (${userId},'Pending fixture',${`${suffix}@example.invalid`},false,true,now(),now())`;
+      await client`insert into billing.credit_account (id,environment,status)
+        values (${accountId},'development','open')`;
+      await client`insert into billing.billing_owner_binding (id,account_id,environment,auth_user_id)
+        values (${`pending-binding-${suffix}`},${accountId},'development',${userId})`;
+      const database = drizzle(client, { schema });
+      const { purchaseId } = await seedPaidPurchase({
+        database,
+        accountId,
+        environment: 'development',
+        atoms: 100n,
+        prepared: true,
+      });
+      // The seeded purchase has no provider leg, so cancelAction never reaches Stripe and the key is a placeholder.
+      const stripe = createBillingStripeClient({ secretKey: 'sk_test_closure_pending' });
+      const payments = new BillingPaymentsService(
+        { database },
+        stripe,
+        stripe,
+        {
+          environment: 'development',
+          stripeAccountId: 'acct_fixture',
+          livemode: false,
+          uiOrigin: 'https://tau.test',
+          webhookSecret: 'whsec_closure_pending_fixture',
+          collection: null,
+        },
+        mockDeep<BillingPolicyService>(),
+        mockDeep<CreditLedgerService>(),
+        mockDeep<BillingCashQualification>(),
+      );
+      // The module's own adapter, so the projection the browser depends on is the one wired in production.
+      const service = new BillingAccountClosureService(
+        { database },
+        createStripeClosureAdapter(
+          {
+            database,
+            sourceStripe: stripe,
+            protectedStripe: stripe,
+            environment: 'development',
+            stripeAccountId: 'acct_fixture',
+            livemode: false,
+          },
+          payments,
+        ),
+        'development',
+      );
+
+      // The refusal carries the pending payment as its owner sees it; the HTTP filter forwards it as `action`.
+      await expect(service.prepare({ authUserId: userId, requestId })).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'payment_action_pending', action: { actionId: purchaseId, state: 'prepared' } },
+      });
+      const closures = await client`select id from billing.billing_account_closure where account_id=${accountId}`;
+      expect(closures).toHaveLength(0);
+      // The refusal left no tombstone either: the account stays open and the owner binding stays bound.
+      const [account] = await client`select status from billing.credit_account where id=${accountId}`;
+      expect(account).toMatchObject({ status: 'open' });
+      const [binding] = await client`select revoked_at as "revokedAt" from billing.billing_owner_binding
+        where account_id=${accountId}`;
+      expect(binding).toMatchObject({ revokedAt: null });
+      // The race window: the purchase settles or is cancelled between the probe and the projection. The refusal
+      // keeps its code, without an action, rather than becoming the projection's 404.
+      const unprojected = new BillingAccountClosureService(
+        { database },
+        {
+          recoverAndCancel: vi.fn(),
+          describeAction: async () => {
+            throw new NotFoundException('payment_action_not_found');
+          },
+        },
+        'development',
+      );
+      const refusal: unknown = await unprojected
+        .prepare({ authUserId: userId, requestId })
+        .catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(HttpException);
+      expect((refusal as HttpException).getStatus()).toBe(409);
+      expect((refusal as HttpException).getResponse()).toEqual({ code: 'payment_action_pending' });
+      // The refusal changed nothing, so the still-bound owner cancels the action and retries the same request.
+      await expect(payments.cancelAction(userId, purchaseId)).resolves.toMatchObject({ state: 'canceled' });
+      await expect(service.prepare({ authUserId: userId, requestId })).resolves.toMatchObject({
+        state: 'ready_for_auth_deletion',
+      });
+      // Idempotent replay is decided before the purchase probe: the same request answers the same closure even if a
+      // purchase row appeared after the closure started.
+      await seedPaidPurchase({ database, accountId, environment: 'development', atoms: 100n, prepared: true });
+      await expect(service.prepare({ authUserId: userId, requestId })).resolves.toMatchObject({
+        state: 'ready_for_auth_deletion',
+      });
+    } finally {
+      await client.end();
     }
   });
 });

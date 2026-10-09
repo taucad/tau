@@ -410,6 +410,13 @@ export const failureOfError = (error: unknown, adapter: Pick<AcpAdapter, 'id' | 
   };
 };
 
+/*
+ * Codex refuses a model the account's login cannot run only in prose ("The 'x'
+ * model is not supported when using Codex with a ChatGPT account."); no AIR
+ * category or code marks it, and retrying it can never succeed.
+ */
+const modelRefused = (text: string): boolean => /\bmodel is not supported\b/iu.test(text);
+
 const authRequired = (context: AcpSessionContext): AcpFailure => ({
   code: 'EXTERNAL_AGENT_AUTH_REQUIRED',
   message: `${context.adapter.id} is not logged in. Sign in to it on the machine running this agent, then try again.`,
@@ -435,6 +442,9 @@ const failureOfCall = (context: AcpSessionContext, error: AcpCallError): AcpFail
     failure: { category: 'internal', title: error.message, actions: ['retry'] },
     ...(error.stderr === '' ? {} : { diagnostics: error.stderr }),
   };
+  if (modelRefused(error.message)) {
+    return { code: 'EXTERNAL_AGENT_MODEL_UNAVAILABLE', message: error.message };
+  }
   return {
     code: 'EXTERNAL_AGENT_FAILED',
     message: `${context.adapter.displayName} stopped unexpectedly: ${error.message}`,
@@ -469,7 +479,12 @@ const stopped = (
   };
   return {
     failure: {
-      code: stop.category === 'limit' ? 'EXTERNAL_AGENT_LIMIT_REACHED' : 'EXTERNAL_AGENT_FAILED',
+      code:
+        stop.category === 'limit'
+          ? 'EXTERNAL_AGENT_LIMIT_REACHED'
+          : modelRefused(title)
+            ? 'EXTERNAL_AGENT_MODEL_UNAVAILABLE'
+            : 'EXTERNAL_AGENT_FAILED',
       message: title,
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the stop is a JSON record.
       details: asJson(details) as JsonObject,

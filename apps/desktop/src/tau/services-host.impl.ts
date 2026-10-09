@@ -863,6 +863,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       },
       systemSkillBundles,
       apiBaseUrl: config.tauApiUrl,
+      syncTelemetryPlacement: 'desktop',
       tauCredential: () => {
         const token = authToken;
         return token === undefined ? undefined : { apiBaseUrl: config.tauApiUrl, authorization: `Bearer ${token}` };

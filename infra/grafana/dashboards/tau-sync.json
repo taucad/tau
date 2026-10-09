@@ -1,0 +1,271 @@
+{
+  "uid": "tau-sync",
+  "title": "Tau Sync & Object Storage (R2)",
+  "tags": ["tau", "sync", "storage", "r2"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
+        "current": { "text": "tau-api", "value": "tau-api" },
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
+      }
+    ]
+  },
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "title": "Tau Sync — project sync into the API (git smart HTTP)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "title": "Sync Requests (5m)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[5m])) or vector(0)"
+        }
+      ],
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 }
+    },
+    {
+      "title": "Push (receive-pack) p95",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_bucket{service_name=~\"$service\",http_route=~\".*git-receive-pack\"}[15m])))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 }
+    },
+    {
+      "title": "Fetch (upload-pack) p95",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_bucket{service_name=~\"$service\",http_route=~\".*git-upload-pack\"}[15m])))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 }
+    },
+    {
+      "title": "Sync Error Rate",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[15m])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[15m])), 1e-10)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 }
+    },
+    {
+      "title": "Sync Requests by Route",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (http_route, http_request_method) (rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[5m]))",
+          "legendFormat": "{{http_request_method}} {{http_route}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 }
+    },
+    {
+      "title": "Sync Latency p95 by Route",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_request_duration_bucket{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[5m])))",
+          "legendFormat": "{{http_route}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 }
+    },
+    {
+      "title": "Sync Responses by Status",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[5m]))",
+          "legendFormat": "{{http_response_status_code}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 20 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 }
+    },
+    {
+      "title": "LFS Batch & Verify",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (http_route) (rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\".*lfs.*\"}[5m]))",
+          "legendFormat": "{{http_route}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 }
+    },
+    {
+      "title": "Object storage — R2 in the cloud, MinIO locally (every API S3 call)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "panels": []
+    },
+    {
+      "title": "Storage Requests (5m)",
+      "type": "stat",
+      "targets": [
+        { "expr": "sum(increase(tau_storage_operation_duration_count{service_name=~\"$service\"}[5m])) or vector(0)" }
+      ],
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 23 }
+    },
+    {
+      "title": "Storage Error Rate",
+      "type": "stat",
+      "description": "Failed object-storage calls over all calls. Not-found (NoSuchKey, NotFound) is left out: Tau Sync and LFS use it as a normal existence check.",
+      "targets": [
+        {
+          "expr": "(sum(rate(tau_storage_operation_duration_count{service_name=~\"$service\",outcome=\"error\",error_type!~\"NoSuchKey|NotFound\"}[15m])) or vector(0)) / clamp_min(sum(rate(tau_storage_operation_duration_count{service_name=~\"$service\"}[15m])), 1e-10)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 23 }
+    },
+    {
+      "title": "Uploaded (1h)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_storage_transferred_bytes_total{service_name=~\"$service\",direction=\"upload\"}[1h])) or vector(0)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 23 }
+    },
+    {
+      "title": "Downloaded (1h)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_storage_transferred_bytes_total{service_name=~\"$service\",direction=\"download\"}[1h])) or vector(0)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 23 }
+    },
+    {
+      "title": "Requests by Operation",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_storage_operation) (rate(tau_storage_operation_duration_count{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{tau_storage_operation}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 }
+    },
+    {
+      "title": "p95 by Operation",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_storage_operation) (rate(tau_storage_operation_duration_bucket{service_name=~\"$service\"}[5m])))",
+          "legendFormat": "{{tau_storage_operation}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 }
+    },
+    {
+      "title": "Errors by Operation and Type",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_storage_operation, error_type) (rate(tau_storage_operation_duration_count{service_name=~\"$service\",outcome=\"error\"}[5m]))",
+          "legendFormat": "{{tau_storage_operation}} {{error_type}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 }
+    },
+    {
+      "title": "Requests by Bucket Tier",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_storage_tier) (rate(tau_storage_operation_duration_count{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{tau_storage_tier}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 }
+    },
+    {
+      "title": "Throughput by Direction",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (direction) (rate(tau_storage_transferred_bytes_total{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{direction}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 }
+    },
+    {
+      "title": "Sync & Storage Warnings and Errors",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{service_name=~\"$service\"} |~ \"(?i)(git|lfs|storage|s3|manifest|lease)\" | detected_level=~\"error|fatal|critical|warn\"",
+          "refId": "A"
+        }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 52 }
+    }
+  ]
+}

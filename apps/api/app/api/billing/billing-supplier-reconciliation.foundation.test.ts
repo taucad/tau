@@ -256,6 +256,35 @@ const terminalOperation = async (
   return { operationId: admitted.operationId, evidenceId };
 };
 
+/**
+ * A supplier refusal as the ledger recorded it before the collector kept its kind: the gateway
+ * retained `absorbed_unknown` with the refusal as its reason, then recovery absorbed the turn at
+ * zero and expired its holds, leaving the supplier side `unresolved`.
+ */
+const refusedOperationBeforeTheFix = async (fixture: Fixture, key: string): Promise<{ operationId: string }> => {
+  const admitted = await ledger.admitOperation(admission(fixture, key));
+  if (admitted.status !== 'admitted') {
+    throw new Error(`admission refused: ${admitted.status}`);
+  }
+  const evidence = {
+    kind: 'absorbed_unknown',
+    executionStatus: 'cancelled',
+    normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_rejected', fields: {} },
+  } as const;
+  const claim = { operationId: admitted.operationId, accountId: fixture.accountId, requestDigest: `sha256:${key}` };
+  await ledger.markDispatchIntent(admitted.operationId, admitted.generation);
+  await ledger.recordInvocationEvidence({ ...claim, evidence });
+  const receipt = await ledger.terminalizeOperation({
+    ...claim,
+    expectedGeneration: admitted.generation,
+    evidence,
+    resolvedAt: new Date(),
+    expireSpendHold: true,
+  });
+  expect(receipt).toMatchObject({ customerState: 'absorbed', chargedAtoms: 0n });
+  return { operationId: admitted.operationId };
+};
+
 /** Runs complete bounded passes; peer suites leave their own operations in this database. */
 const sweepAll = async (/** Milliseconds. */ unresolvedMaximumAge: number): Promise<number> => {
   let casesOpened = 0;
@@ -372,6 +401,37 @@ describe('supplier usage reconciliation foundation', () => {
     expect(required(cases[0], 'unresolved case')).toMatchObject({ state: 'open', accountId: fixture.accountId });
     expect(required(cases[0], 'unresolved case').evidence).toMatchObject({ supplierState: 'unresolved' });
     expect(required(cases[0], 'unresolved case').evidence['oldestEvidenceAt']).toEqual(expect.any(String));
+  });
+
+  /* The staging Haiku 4.5 pause of 2026-10-08: a refused call absorbed as cost-unknown stayed
+   * `unresolved`, the sweep cased it, and the case paused the route; closing the case alone cannot
+   * hold, because the sweep reopens it while the operation stays unresolved. */
+  it('finalizes a refused operation at zero so its route-pausing case closes and stays closed', async () => {
+    const fixture = await createFixture();
+    const refused = await refusedOperationBeforeTheFix(fixture, `refused-${randomUUID()}`);
+    await sweepAll(0);
+    expect(await casesFor('supplier_state_unresolved', refused.operationId)).toMatchObject([{ state: 'open' }]);
+
+    const repair = await ledger.finalizeRejectedSupplierLiabilities({ environment: 'development', limit: 1000 });
+    expect(repair.repaired).toBeGreaterThanOrEqual(1);
+    const [operation] = await database
+      .select()
+      .from(creditOperation)
+      .where(eq(creditOperation.id, refused.operationId));
+    expect(required(operation, 'repaired operation').supplierState).toBe('final');
+    const proof = await database
+      .select()
+      .from(supplierCostEvidence)
+      .where(eq(supplierCostEvidence.operationId, refused.operationId));
+    expect(proof).toMatchObject([
+      { sourceRevision: 'provider_rejected_v1', numerator: 0n, completeness: 'complete', finality: 'final' },
+    ]);
+    // A second pass finds the retained proof and the final operation, and changes nothing.
+    await ledger.finalizeRejectedSupplierLiabilities({ environment: 'development', limit: 1000 });
+
+    await sweepAll(0);
+    expect(await casesFor('supplier_state_unresolved', refused.operationId)).toMatchObject([{ state: 'resolved' }]);
+    expect(await casesFor('supplier_evidence_missing', refused.operationId)).toHaveLength(0);
   });
 
   it('reconciles an aggregate invoice total without allocating cost to any account', async () => {

@@ -126,6 +126,26 @@
         "command": "bash apps/api/scripts/sync-grafana-dashboards.sh"
       }
     },
+    "grafana:check": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "List Grafana panels and variables whose queries return no data, failing only on panels missing from infra/grafana/known-empty-panels.txt (GRAFANA_URL, default http://localhost:6100)."
+      },
+      "options": {
+        "command": "node apps/api/scripts/check-grafana-panels.mts --baseline=infra/grafana/known-empty-panels.txt"
+      }
+    },
+    "observability:exercise": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Drive every instrumented part of the LOCAL API (auth, telemetry ingest, Tau Sync, publications, Haiku 4.5 via the gateway, WebSockets) so the Grafana dashboards fill. Spends real Anthropic credit, capped by the harness user's promotional credit."
+      },
+      "options": {
+        "command": "node apps/api/scripts/exercise-observability.mts"
+      }
+    },
     "test:billing-foundation": {
       "executor": "nx:run-commands",
       "cache": false,
@@ -175,9 +195,9 @@
     "dev:cloud": {
       "executor": "nx:run-commands",
       "continuous": true,
-      "dependsOn": ["billing-operations", "billing-recovery"],
+      "dependsOn": ["billing-operations"],
       "metadata": {
-        "description": "Start the API dev server with the two billing workers deployments run beside it. With TAU_CLOUD_ENABLED=true the webhook only records a Stripe event; billing-operations fulfils purchases, subscriptions and automatic reloads, and billing-recovery settles abandoned LLM operations. Without them a paid checkout stays Processing."
+        "description": "Start the API dev server with the billing-operations worker deployments run beside it. With TAU_CLOUD_ENABLED=true the webhook only records a Stripe event; billing-operations fulfils purchases, subscriptions and automatic reloads. Without it a paid checkout stays Processing. The API itself settles abandoned LLM operations; the billing-recovery target is optional scale-out."
       },
       "options": {
         "command": "vite",

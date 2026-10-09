@@ -1,0 +1,268 @@
+{
+  "uid": "tau-agents",
+  "title": "Agents & Codex Usage",
+  "tags": ["tau", "ai", "agents", "codex"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
+        "current": { "text": "tau-api", "value": "tau-api" },
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
+      },
+      {
+        "name": "agent",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(tau_agent_turns_total, agent_id)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2
+      }
+    ]
+  },
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "title": "Usage by agent (Tau, Claude Code, Codex) and placement",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "title": "Turns (1h)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_agent_turns_total{service_name=~\"$service\",agent_id=~\"$agent\"}[1h])) or vector(0)"
+        }
+      ],
+      "gridPos": { "h": 5, "w": 5, "x": 0, "y": 1 }
+    },
+    {
+      "title": "Sessions Started (1h)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_agent_sessions_total{service_name=~\"$service\",agent_id=~\"$agent\",outcome=\"started\"}[1h])) or vector(0)"
+        }
+      ],
+      "gridPos": { "h": 5, "w": 5, "x": 5, "y": 1 }
+    },
+    {
+      "title": "Turn Error Rate",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "(sum(rate(tau_agent_turns_total{service_name=~\"$service\",agent_id=~\"$agent\",outcome=~\"error|refused\"}[1h])) or vector(0)) / clamp_min(sum(rate(tau_agent_turns_total{service_name=~\"$service\",agent_id=~\"$agent\"}[1h])), 1e-10)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.05 },
+              { "color": "red", "value": 0.2 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 10, "y": 1 }
+    },
+    {
+      "title": "Turn p95",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_agent_turn_duration_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[1h])))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 5, "w": 5, "x": 15, "y": 1 }
+    },
+    {
+      "title": "Tool Calls (1h)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_agent_tool_calls_total{service_name=~\"$service\",agent_id=~\"$agent\"}[1h])) or vector(0)"
+        }
+      ],
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 }
+    },
+    {
+      "title": "Turns by Agent and Outcome",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, outcome) (rate(tau_agent_turns_total{service_name=~\"$service\",agent_id=~\"$agent\"}[5m]))",
+          "legendFormat": "{{agent_id}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 20 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 }
+    },
+    {
+      "title": "Turns by Placement",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, agent_placement) (rate(tau_agent_turns_total{service_name=~\"$service\",agent_id=~\"$agent\"}[5m]))",
+          "legendFormat": "{{agent_id}} @ {{agent_placement}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 }
+    },
+    {
+      "title": "Turn Duration p50 / p95 by Agent",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, agent_id) (rate(tau_agent_turn_duration_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[15m])))",
+          "legendFormat": "{{agent_id}} p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, agent_id) (rate(tau_agent_turn_duration_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[15m])))",
+          "legendFormat": "{{agent_id}} p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 }
+    },
+    {
+      "title": "Time to First Update p95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, agent_id) (rate(tau_agent_time_to_first_update_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[15m])))",
+          "legendFormat": "{{agent_id}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 }
+    },
+    {
+      "title": "Tool Calls by Kind",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, tool_kind, status) (rate(tau_agent_tool_calls_total{service_name=~\"$service\",agent_id=~\"$agent\"}[5m]))",
+          "legendFormat": "{{agent_id}} {{tool_kind}} {{status}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 }
+    },
+    {
+      "title": "Agent-Reported Tokens",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, token_type) (rate(tau_agent_tokens_total{service_name=~\"$service\",agent_id=~\"$agent\"}[5m]))",
+          "legendFormat": "{{agent_id}} {{token_type}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 }
+    },
+    {
+      "title": "Errors and Refusals by Code",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, error_code) (increase(tau_agent_errors_total{service_name=~\"$service\",agent_id=~\"$agent\"}[15m]))",
+          "legendFormat": "{{agent_id}} {{error_code}}"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 30 }
+    },
+    {
+      "title": "Tau-funded LLM calls through the API gateway, by surface",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 38 },
+      "panels": []
+    },
+    {
+      "title": "User-Charged LLM Spend by Surface (USD/h)",
+      "description": "User-charged: what Tau bills the user for the call (priced from the model catalog), not the supplier invoice.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_surface, tau_activity) (increase(gen_ai_client_cost_total{service_name=~\"$service\"}[1h]))",
+          "legendFormat": "{{tau_surface}} / {{tau_activity}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 39 }
+    },
+    {
+      "title": "Tokens by Model and Type",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (gen_ai_request_model, gen_ai_token_type) (rate(gen_ai_client_token_usage_sum{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{gen_ai_request_model}} {{gen_ai_token_type}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 39 }
+    },
+    {
+      "title": "LLM Calls by Surface and Outcome",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_surface, error_type) (rate(gen_ai_client_operation_duration_count{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{tau_surface}} {{error_type}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 47 }
+    },
+    {
+      "title": "LLM Latency p95 and TTFT p95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gen_ai_client_operation_duration_bucket{service_name=~\"$service\"}[15m])))",
+          "legendFormat": "operation p95"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gen_ai_client_time_to_first_token_bucket{service_name=~\"$service\"}[15m])))",
+          "legendFormat": "TTFT p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 47 }
+    },
+    {
+      "title": "Agent & LLM Warnings and Errors",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{service_name=~\"$service\"} |~ \"(?i)(agent|acp|codex|llm|gateway)\" | detected_level=~\"error|fatal|critical|warn\"",
+          "refId": "A"
+        }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 55 }
+    }
+  ]
+}

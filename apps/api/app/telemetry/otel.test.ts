@@ -4,8 +4,9 @@ import type { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrument
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 
-const { instrumentationConfigs } = vi.hoisted(() => ({
+const { instrumentationConfigs, exporterConfigs } = vi.hoisted(() => ({
   instrumentationConfigs: [] as Array<Record<string, unknown>>,
+  exporterConfigs: [] as Array<{ withResourceConstantLabels?: RegExp }>,
 }));
 
 // Importing otel.ts starts the SDK; stub every exporter and the SDK so only the instrumentation config is observed.
@@ -16,7 +17,11 @@ vi.mock('@opentelemetry/sdk-node', () => ({
     }
   },
 }));
-vi.mock('@opentelemetry/exporter-prometheus', () => ({ PrometheusExporter: vi.fn() }));
+vi.mock('@opentelemetry/exporter-prometheus', () => ({
+  PrometheusExporter: vi.fn(function capture(config: { withResourceConstantLabels?: RegExp }) {
+    exporterConfigs.push(config);
+  }),
+}));
 vi.mock('@opentelemetry/exporter-trace-otlp-http', () => ({ OTLPTraceExporter: vi.fn() }));
 vi.mock('@opentelemetry/exporter-logs-otlp-http', () => ({ OTLPLogExporter: vi.fn() }));
 vi.mock('@opentelemetry/sdk-logs', () => ({ BatchLogRecordProcessor: vi.fn() }));
@@ -67,4 +72,14 @@ describe('OTEL incoming request span redaction', () => {
       expect(hook(request(url))).toStrictEqual({});
     },
   );
+});
+
+describe('OTEL Prometheus exporter', () => {
+  it('should label every series with service_name but leave other resource attributes off (OBS-13)', async () => {
+    await import('#telemetry/otel.js');
+    const labels = exporterConfigs[0]?.withResourceConstantLabels;
+
+    expect(labels?.test('service.name')).toBe(true);
+    expect(labels?.test('deployment.environment')).toBe(false);
+  });
 });

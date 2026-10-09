@@ -61,7 +61,10 @@ jobs:
           # staging deploys then take every app; the test lanes keep the affected set.
           NO_PREVIOUS_BUILD: ${{ steps.setup.outputs.no-previous-build == 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
         run: |
-          # `tail -1` keeps the JSON array and drops Nx's log lines.
+          # `pipefail` so a failing `nx show projects` fails the step instead of
+          # leaving an empty output behind `tail`. `tail -1` keeps the JSON array
+          # and drops Nx's log lines.
+          set -o pipefail
           apps=$(pnpm nx show projects --affected --type=app --json | tail -1)
           api=$(pnpm nx show projects --affected --projects tag:scope:api --json | tail -1)
           size=$(pnpm nx show projects --affected --with-target size --json | tail -1)
@@ -213,22 +216,28 @@ jobs:
           preparation-hit: ${{ steps.prepare.outputs.preparation-hit }}
           cargo-hit: ${{ steps.prepare.outputs.cargo-hit }}
 
-  # Restores the products this run's producer or an earlier run saved. The Darwin host
-  # suites still need a delivery assembled from this checkout's source kit, which
-  # `prepare-geospec-ci-artifacts` reassembles around them.
+  # Restores the products an earlier run saved. The Darwin host suites still need a
+  # delivery assembled from this checkout's source kit, which `prepare-geospec-ci-artifacts`
+  # reassembles around them. Without saved products it prepares them itself (an Nx Cloud
+  # hit, or a build on the retained OCCT preparation) instead of waiting for
+  # `geospec-producer`, so it starts beside the producer rather than after it: about
+  # 9 minutes off the critical path of a run that changes the native source closure
+  # (run 37437873976). The producer still serves the Linux lanes, which consume its
+  # transport.
   geospec-darwin:
     name: Run GeoSpec Darwin host suites
-    needs: [plan, geospec-producer]
+    needs: [plan]
     if: >-
-      !cancelled() && needs.plan.outputs.geospec-required == 'true' &&
-      needs.plan.outputs.geospec-darwin-tests == 'true' &&
-      (needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success')
+      !cancelled() && needs.plan.result == 'success' &&
+      needs.plan.outputs.geospec-required == 'true' &&
+      needs.plan.outputs.geospec-darwin-tests == 'true'
     runs-on: macos-15
     steps:
       - *checkout-darwin
       - *setup-nx-darwin
 
       - name: Restore GeoSpec engine products from an earlier run
+        if: needs.plan.outputs.geospec-cached == 'true'
         uses: ./.github/actions/geospec-transport
         with:
           key: ${{ needs.plan.outputs.geospec-key }}
@@ -990,16 +999,23 @@ jobs:
   # the git storage substrate landed, `test` for `tag:scope:api` — the repository
   # store, the commit protocol, the git transport, the lifecycle jobs and the git
   # e2e tier — runs only in the `api` job, and a deploy gated on `affected` alone
-  # would ship with all of them red. No `always()` gating is needed and none is
-  # wanted: the `api` job's own `if` (above) carries
-  # `(github.ref == 'refs/heads/main' && github.event_name == 'push')`, so on the
-  # only event that can reach this job it is unconditional and can never be skipped
-  # into skipping the deploy. A docs-only push to `main` still runs `api`, and this
-  # job still skips on its own `contains(…, 'api')` condition, so nothing is blocked.
+  # would ship with all of them red. The `if` needs `!cancelled()` and explicit
+  # results, like `deploy-ui-staging`: without a status function GitHub applies an
+  # implicit `success()`, which is false when any job up the `needs` chain was
+  # skipped — and `geospec-producer` (behind `api` and `affected`) skips whenever
+  # the GeoSpec products are cached, which silently skipped this deploy on most
+  # pushes to `main`. A docs-only push still skips on `contains(…, 'api')`.
+  # Keep `needs.plan.result` before `fromJSON` here and in `deploy-ui-staging`:
+  # with no implicit `success()`, a `plan` that failed before its output step
+  # leaves `deploy-apps` empty and `fromJSON('')` errors.
   deploy-api-staging:
     name: Deploy API (Staging)
     needs: [workspace, affected, plan, api]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api')
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') &&
+      needs.workspace.result == 'success' && needs.affected.result == 'success' &&
+      needs.api.result == 'success'
     uses: ./.github/workflows/deploy.yml
     with:
       environment: staging
@@ -1009,13 +1025,13 @@ jobs:
   # The staging UI: built in Actions with this run's GeoSpec products (Netlify
   # cannot produce them), from the producer's artifact or, when the native source
   # matched an earlier build, from the products cache, and published by the Netlify CLI. It waits for the same
-  # gates as a merge.
+  # gates as a merge. `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
   deploy-ui-staging:
     name: Deploy UI (Staging)
     needs: [workspace, affected, plan, geospec-producer]
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
-      contains(fromJSON(needs.plan.outputs.deploy-apps), 'ui') &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'ui') &&
       needs.workspace.result == 'success' && needs.affected.result == 'success' &&
       (needs.geospec-producer.result == 'success' || needs.plan.outputs.geospec-cached == 'true')
     permissions:

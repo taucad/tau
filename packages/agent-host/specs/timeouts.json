@@ -778,6 +778,14 @@
       "token": "setTimeout(callback:",
       "class": "None",
       "owner": "revisions host clock"
+    },
+    {
+      "id": "E21",
+      "bound": "Agent usage telemetry: drop a turn that never settles after 6 h, unreported",
+      "site": "apps/ui/app/chat-clients/_internal/agent-usage-telemetry.ts",
+      "token": "abandonAfter",
+      "class": "External edge (backstop)",
+      "owner": "W36"
     }
   ]
 }

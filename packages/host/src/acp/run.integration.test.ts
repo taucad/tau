@@ -1386,7 +1386,9 @@ describe('the external agent run kind', () => {
     await launcher.execute({ type: 'cancel', commandId: 'cmd-cancel', payload: { chatId, runId } });
   }, 90_000);
 
-  it('should record the sentence inside a provider error body rather than its JSON', async () => {
+  /* A model the account's login cannot run is a model choice, not a crash:
+   * Try again meets the same refusal, so it is typed for Switch model. */
+  it('should record a provider model refusal as a typed model-unavailable stop in its own words', async () => {
     const harness = await startHarness();
     const chatId = 'chat-external-model';
 
@@ -1397,7 +1399,7 @@ describe('the external agent run kind', () => {
     expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
       state: 'failed',
       detail: {
-        code: 'EXTERNAL_AGENT_FAILED',
+        code: 'EXTERNAL_AGENT_MODEL_UNAVAILABLE',
         message,
         details: { agentId: 'codex', failure: { category: 'service', title: message, actions: ['retry'] } },
       },

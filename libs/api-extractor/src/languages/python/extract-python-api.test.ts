@@ -36,10 +36,11 @@ describeWithPython('extractPythonApi(build123d)', () => {
   // Extract in a hook: a skipped describe still runs its body, which would throw without the runtime.
   let corpus: ApiCorpus;
   let entries: ApiEntry[];
+  // A cold `import build123d` (OCP) on a CI runner outlasts Vitest's 10 s hook default.
   beforeAll(() => {
     corpus = extractPythonApi('build123d');
     entries = [...flattenEntries(corpus)];
-  });
+  }, 120_000);
   const find = (name: string, from?: readonly ApiEntry[]): ApiEntry => {
     const entry = (from ?? corpus.entries).find((candidate) => candidate.name === name);
     expect(entry, `missing entry ${name}`).toBeDefined();

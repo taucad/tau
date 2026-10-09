@@ -1,0 +1,81 @@
+name: Billing staging e2e
+
+# The billing go-live matrix (billing-e2e) against a deployed stack, staging by default: fresh
+# mail.tm accounts, the real API and Stripe hosted Checkout in test mode. Evidence for the go-live
+# verdict, never a merge gate. Nightly runs the P0 rows; a dispatch picks the stack and the suite.
+# The harness refuses any tau.new host and any live Stripe key; it adds no secrets of its own.
+
+on:
+  schedule:
+    - cron: '37 16 * * *' # 16:37 UTC, 05:37 in New Zealand: quiet on staging, clear of billing-nightly at 14:17
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'App origin under test (tau.new is refused)'
+        required: false
+        default: 'https://taucad.dev'
+      api_url:
+        description: 'API origin of the same stack'
+        required: false
+        default: 'https://api.taucad.dev'
+      suite:
+        description: 'Rows to run'
+        required: false
+        default: 'p0'
+        type: choice
+        options:
+          - smoke
+          - p0
+          - all
+
+concurrency:
+  group: billing-staging-e2e
+  cancel-in-progress: false
+
+jobs:
+  billing-staging-e2e:
+    name: Billing matrix (${{ inputs.suite || 'p0' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: 'read'
+    env:
+      pnpm_config_verify_deps_before_run: warn
+      TAU_E2E_BASE_URL: ${{ inputs.base_url || 'https://taucad.dev' }}
+      TAU_E2E_API_URL: ${{ inputs.api_url || 'https://api.taucad.dev' }}
+      BILLING_E2E_SUITE: ${{ inputs.suite || 'p0' }}
+      # Optional and read-only: WH-01 reads the webhook endpoint status with it and skips without it.
+      STRIPE_TEST_READ_KEY: ${{ secrets.STRIPE_TEST_READ_RESTRICTED_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Install Chromium for Playwright
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Run the billing matrix
+        run: pnpm nx run billing-e2e:test:staging
+
+      # Blocked rows do not fail the job, so the counts and evidence must be visible without the artifact.
+      - name: Publish the matrix to the run summary
+        if: always()
+        run: |
+          for matrix in out/test-results/billing-e2e/*/results-matrix.md; do
+            if [ -f "$matrix" ]; then
+              cat "$matrix" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Upload results, screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: billing-staging-e2e-${{ github.run_id }}
+          path: out/test-results/billing-e2e
+          if-no-files-found: ignore
+          retention-days: 30

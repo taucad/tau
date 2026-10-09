@@ -55,6 +55,9 @@ const BillingSessionBridge = ({ children }: { readonly children: ReactNode }): R
 const returnSettleAttempts = 10;
 const returnSettleIntervalMilliseconds = 2000;
 const settlingStates = new Set(['redirect_required', 'processing', 'funds_received']);
+// Only a purchase Checkout can settle from its own session; a reload-setup Checkout's SetupIntent is qualified
+// by the sweep directly, so there is nothing to recover on its return.
+const purchaseCheckoutPurposes = new Set(['manual_topup', 'subscription_checkout']);
 const paymentActionParameter = stringParameter();
 const paymentActionIdPattern = /^[A-Za-z0-9._:-]{1,128}$/u;
 
@@ -155,6 +158,21 @@ export const useCloudPaymentActionReturn = (): void => {
     const inspectReturn = async (): Promise<void> => {
       try {
         let action = await getPaymentAction(binding, actionId);
+        if (
+          active &&
+          action.state === 'redirect_required' &&
+          purchaseCheckoutPurposes.has(action.purpose) &&
+          binding.financialSession.isCurrent()
+        ) {
+          // A paid Checkout whose webhook has not arrived settles from Stripe's own session on recovery;
+          // an open one comes back unchanged, still offering Resume Checkout. The read above stays ungated: a
+          // session that changed owner mid-flight still announces what it fetched, it just recovers nothing.
+          try {
+            action = await recoverPaymentAction({ ...binding, subjectId: action.subjectId }, actionId);
+          } catch {
+            // The fetched action stands; the bounded re-check below keeps following it.
+          }
+        }
         if (!active) {
           return;
         }

@@ -42,6 +42,14 @@ describe('owned Stripe closure and auth deletion', () => {
       .insert(schema.billingOwnerBinding)
       .values({ id: `owner-${id}`, accountId, environment: 'development', authUserId });
     const purchase = await seedPaidPurchase({ database, accountId, environment: 'development', atoms: 100n });
+    // Closure waits for captured cash to be granted; this fixture only borrows the purchase's Customer.
+    await fulfillPaidFixture({
+      database,
+      ledger: lateLedger,
+      accountId,
+      causeId: purchase.purchaseId,
+      source: 'purchased',
+    });
     const [paid] = await database
       .select()
       .from(schema.billingPurchase)

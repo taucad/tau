@@ -15,6 +15,10 @@ receivers:
           scrape_interval: 1s
           static_configs:
             - targets: ['127.0.0.1:8888']
+  # The API and its billing worker are one service (Fly process groups `app` and `billing-operations` of
+  # the same app), so they share `job`/`service_name` and differ by `instance`. 9465 is the optional
+  # `api:billing-recovery` scale-out target, which no deployment runs; the API recovers holds in-process.
+  # Ports follow apps/api/project.json: the API's default 9464, then the workers' OTEL_METRICS_PORT.
   prometheus/tau-api:
     config:
       scrape_configs:
@@ -22,6 +26,36 @@ receivers:
           scrape_interval: 5s
           static_configs:
             - targets: ['host.docker.internal:9464']
+              labels: { tau_process: 'app' }
+            - targets: ['host.docker.internal:9465']
+              labels: { tau_process: 'billing-recovery' }
+            - targets: ['host.docker.internal:9466']
+              labels: { tau_process: 'billing-operations' }
+  # Server-side views of the local dependencies. The API's postgres.js client has no OTel metrics, so
+  # pool and query health come from PostgreSQL itself. Credentials are the compose dev defaults.
+  postgresql:
+    endpoint: host.docker.internal:5432
+    transport: tcp
+    username: dev_user
+    password: dev_password
+    # Every database: each linked worktree runs on its own fork, `tau_dev_<worktree>`.
+    databases: []
+    collection_interval: 15s
+    tls:
+      insecure: true
+  redis:
+    endpoint: host.docker.internal:6379
+    collection_interval: 15s
+  # The machine the stack runs on (the Docker VM under Colima/Docker Desktop): the local stand-in for
+  # Fly's per-machine CPU, memory, load, network and disk I/O.
+  hostmetrics:
+    collection_interval: 15s
+    scrapers:
+      cpu:
+      load:
+      memory:
+      network:
+      disk:
 
 extensions:
   health_check:
@@ -57,7 +91,7 @@ service:
       processors: [batch]
       exporters: [otlphttp/traces]
     metrics:
-      receivers: [otlp, prometheus/collector, prometheus/tau-api]
+      receivers: [otlp, prometheus/collector, prometheus/tau-api, postgresql, redis, hostmetrics]
       processors: [batch]
       exporters: [otlphttp/metrics]
     logs:

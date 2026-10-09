@@ -972,6 +972,37 @@ describe('billing reload native service foundation', { concurrent: false }, () =
     expect(await automaticPurchases(accountId)).toHaveLength(1);
   });
 
+  it('should refuse a manual cancel or confirm of a prepared automatic purchase and leave it to its wake', async () => {
+    const { userId, accountId, consent } = await enableConsent();
+    const seeded = await seedSupersededAutomatic({
+      accountId,
+      consent,
+      startedAt: new Date(),
+      purchaseState: 'prepared',
+      legState: 'prepared',
+    });
+    const posts = paymentPostCount;
+
+    // Cancelled by hand the row would be immutable without a terminal outcome, holding the account's one pending
+    // reload slot forever; confirmed by hand its leg (the worker's envelope) would be dispatched as a bare request.
+    await expect(payments.cancelAction(userId, seeded.purchaseId)).rejects.toMatchObject({
+      response: { code: 'action_not_cancelable' },
+    });
+    await expect(payments.confirmAction(userId, seeded.purchaseId)).rejects.toMatchObject({
+      response: { code: 'action_not_confirmable' },
+    });
+    const purchase = await database.query.billingPurchase.findFirst({
+      where: eq(billingPurchase.id, seeded.purchaseId),
+    });
+    const leg = await database.query.billingProviderLeg.findFirst({ where: eq(billingProviderLeg.id, seeded.legId) });
+    expect({
+      purchase: purchase?.state ?? null,
+      outcome: purchase?.automaticTerminalOutcome ?? null,
+      leg: leg?.state ?? null,
+      posts: paymentPostCount - posts,
+    }).toEqual({ purchase: 'prepared', outcome: null, leg: 'prepared', posts: 0 });
+  });
+
   it('closes a prepared automatic purchase whose consent was revoked before its wake confirmed', async () => {
     const { userId, consentId, accountId, consent } = await enableConsent();
     const startedAt = new Date(Date.now() - 7_200_000);

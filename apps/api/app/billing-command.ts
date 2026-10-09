@@ -16,6 +16,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { financialEnvironmentSchema } from '@taucad/billing';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import { BillingRecoveryScheduler } from '#api/billing/billing-recovery.scheduler.js';
 import { BillingJournalReconciliationService } from '#api/billing/billing-journal-reconciliation.service.js';
 import {
   BillingCashReconciliationService,
@@ -346,99 +347,19 @@ async function main(): Promise<void> {
         };
         process.once('SIGINT', stop);
         process.once('SIGTERM', stop);
+        // The same pass the API's in-process scheduler runs, metrics included: this worker is optional scale-out.
+        const recovery = new BillingRecoveryScheduler(ledger, metrics, {
+          environment: billingEnvironment,
+          intervalMilliseconds: pollMilliseconds,
+          limit,
+        });
         let consecutiveFailures = 0;
         try {
           while (!shutdown.signal.aborted) {
-            let failed = 0;
-            let fullBatch = false;
-            for (const pool of ['primary', 'helper'] as const) {
-              const startedAt = Date.now();
-              const attributes = {
-                'deployment.environment': billingEnvironment,
-                'tau.billing.capacity_pool': pool,
-              } as const;
-              metrics.billingFundedOperationRecoveries.add(1, {
-                ...attributes,
-                'tau.billing.recovery.outcome': 'attempted',
-              });
-              try {
-                // oxlint-disable-next-line no-await-in-loop -- the two disjoint capacity pools share one bounded DB connection
-                const result = await ledger.recoverDueLlmOperations({
-                  environment: billingEnvironment,
-                  limit,
-                  pool,
-                });
-                failed += result.failedOperationIds.length;
-                fullBatch ||= result.claimed === limit;
-                if (result.claimed > 0) {
-                  metrics.billingFundedOperationRecoveries.add(result.claimed, {
-                    ...attributes,
-                    'tau.billing.recovery.outcome': 'claimed',
-                  });
-                }
-                if (result.resolved > 0) {
-                  metrics.billingFundedOperationRecoveries.add(result.resolved, {
-                    ...attributes,
-                    'tau.billing.recovery.outcome': 'resolved',
-                  });
-                }
-                if (result.failedOperationIds.length > 0) {
-                  metrics.billingFundedOperationRecoveries.add(result.failedOperationIds.length, {
-                    ...attributes,
-                    'tau.billing.recovery.outcome': 'failed',
-                  });
-                }
-                metrics.billingFundedOperationCurrent.record(result.pending, {
-                  ...attributes,
-                  'tau.billing.pending.state': 'pending',
-                });
-                metrics.billingFundedOperationCurrent.record(result.remainingDue, {
-                  ...attributes,
-                  'tau.billing.pending.state': 'due',
-                });
-                metrics.billingFundedOperationOldestDueAge.record(result.oldestDueAgeMilliseconds ?? 0, attributes);
-                metrics.billingFundedOperationRecoveryProviderExecutions.record(0, attributes);
-                metrics.billingFundedOperationRecoveryBatchDuration.record((Date.now() - startedAt) / 1000, {
-                  ...attributes,
-                  'tau.billing.recovery.batch.outcome': result.failedOperationIds.length === 0 ? 'succeeded' : 'failed',
-                });
-                console.log(
-                  JSON.stringify({
-                    event: 'billing.llm_recovery_batch',
-                    environment,
-                    pool,
-                    claimed: result.claimed,
-                    resolved: result.resolved,
-                    pending: result.pending,
-                    remainingDue: result.remainingDue,
-                    leasedDue: result.leasedDue,
-                    oldestDueAgeMilliseconds: result.oldestDueAgeMilliseconds,
-                    failed: result.failedOperationIds.length,
-                    providerExecutions: 0,
-                    durationMilliseconds: Date.now() - startedAt,
-                  }),
-                );
-              } catch (error) {
-                failed += 1;
-                metrics.billingFundedOperationRecoveries.add(1, {
-                  ...attributes,
-                  'tau.billing.recovery.outcome': 'failed',
-                });
-                metrics.billingFundedOperationRecoveryBatchDuration.record((Date.now() - startedAt) / 1000, {
-                  ...attributes,
-                  'tau.billing.recovery.batch.outcome': 'failed',
-                });
-                console.error(
-                  JSON.stringify({
-                    event: 'billing.llm_recovery_batch',
-                    environment,
-                    pool,
-                    outcome: 'failed',
-                    failureKind: error instanceof Error ? error.name : 'UnknownError',
-                    durationMilliseconds: Date.now() - startedAt,
-                  }),
-                );
-              }
+            // oxlint-disable-next-line no-await-in-loop -- the continuous worker runs one pass at a time
+            const { failed, fullBatch, batches } = await recovery.runOnce();
+            for (const batch of batches) {
+              (batch.outcome === 'failed' ? console.error : console.log)(JSON.stringify(batch));
             }
             consecutiveFailures = failed === 0 ? 0 : consecutiveFailures + 1;
             if (fullBatch && failed === 0) {
@@ -553,6 +474,7 @@ async function main(): Promise<void> {
         const purchaseScans = new BillingPurchaseReconciliationService(database, sourceStripe, sourceConfig);
         const supplier = new BillingSupplierReconciliationService(database, sourceConfig);
         // Each scheduled job owns its failure: one provider or data fault must not stop the others.
+        let passFailed = false;
         const runJob = async (event: string, run: () => Promise<unknown>): Promise<void> => {
           const jobStartedAt = Date.now();
           try {
@@ -564,6 +486,7 @@ async function main(): Promise<void> {
               ),
             );
           } catch (error) {
+            passFailed = true;
             console.error(
               JSON.stringify({
                 event,
@@ -593,6 +516,7 @@ async function main(): Promise<void> {
         try {
           while (!shutdown.signal.aborted) {
             const startedAt = Date.now();
+            passFailed = false;
             try {
               // oxlint-disable-next-line no-await-in-loop -- one worker serializes provider recovery on one DB connection
               const recovered = await payments.recoverPayments({ environment: billingEnvironment, limit });
@@ -607,6 +531,7 @@ async function main(): Promise<void> {
                 }),
               );
             } catch (error) {
+              passFailed = true;
               console.error(
                 JSON.stringify({
                   event: 'billing.payment_recovery_batch',
@@ -632,6 +557,7 @@ async function main(): Promise<void> {
                   }),
                 );
               } catch (error) {
+                passFailed = true;
                 console.error(
                   JSON.stringify({
                     event: 'billing.journal_reconciliation',
@@ -667,6 +593,12 @@ async function main(): Promise<void> {
             );
             if (Date.now() - lastScanAt >= scanIntervalMilliseconds) {
               lastScanAt = Date.now();
+              // Refused calls recorded as cost-unknown before the collector kept their kind: finalized
+              // at zero first, so the sweep closes their route-pausing cases instead of reopening them.
+              // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
+              await runJob('billing.rejected_supplier_repair', async () =>
+                ledger.finalizeRejectedSupplierLiabilities({ environment: billingEnvironment, limit: 100 }),
+              );
               // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
               await runJob('billing.supplier_sweep', async () =>
                 supplier.sweepSupplierUsage({ pageSize: 100, unresolvedMaximumAge: dayMilliseconds }),
@@ -695,40 +627,68 @@ async function main(): Promise<void> {
                 } catch (error) {
                   cash = error instanceof Error ? `failed:${error.message}` : 'failed';
                 }
-                const purchase = await purchaseScans.runScan({
-                  scanId,
-                  maximumObligations: 100,
-                  maximumGrants: 100,
-                  maximumSubscriptions: 100,
-                });
                 // A paid obligation with no grant (for example a lost success webhook) holds the customer's
-                // money without credit; the per-kind gauge is what the alert watches.
-                const openCases = await client<Array<{ kind: string; open: number }>>`
-                  SELECT kind, count(*)::int AS open FROM billing.billing_financial_case
-                  WHERE environment = ${billingEnvironment} AND state IN ('open', 'attention')
-                  GROUP BY kind`;
-                for (const kind of new Set([...cashBlockingFinancialCaseKinds, ...openCases.map((row) => row.kind)])) {
-                  caseMetrics.billingOpenFinancialCases.record(openCases.find((row) => row.kind === kind)?.open ?? 0, {
-                    kind,
+                // money without credit; the per-kind gauge is what the alert watches. It reports the case
+                // table, so it is recorded even when a Stripe scan fails: that is when the alert matters most.
+                const recordOpenCases = async (): Promise<void> => {
+                  const openCases = await client<Array<{ kind: string; open: number }>>`
+                    SELECT kind, count(*)::int AS open FROM billing.billing_financial_case
+                    WHERE environment = ${billingEnvironment} AND state IN ('open', 'attention')
+                    GROUP BY kind`;
+                  for (const kind of new Set([
+                    ...cashBlockingFinancialCaseKinds,
+                    ...openCases.map((row) => row.kind),
+                  ])) {
+                    caseMetrics.billingOpenFinancialCases.record(
+                      openCases.find((row) => row.kind === kind)?.open ?? 0,
+                      {
+                        kind,
+                      },
+                    );
+                  }
+                  const unfulfilled =
+                    openCases.find((row) => row.kind === 'unfulfilled_purchase_obligation')?.open ?? 0;
+                  if (unfulfilled > 0) {
+                    console.error(
+                      JSON.stringify({
+                        event: 'billing.alert',
+                        environment,
+                        kind: 'unfulfilled_purchase_obligation',
+                        open: unfulfilled,
+                      }),
+                    );
+                  }
+                };
+                let purchase: Awaited<ReturnType<typeof purchaseScans.runScan>>;
+                try {
+                  purchase = await purchaseScans.runScan({
+                    scanId,
+                    maximumObligations: 100,
+                    maximumGrants: 100,
+                    maximumSubscriptions: 100,
                   });
+                } catch (error) {
+                  // The gauge still records when the scan fails, but its own failure must not replace the
+                  // scan's error, which is the diagnosis the operator needs.
+                  await recordOpenCases().catch((gaugeError: unknown) => {
+                    console.error(
+                      JSON.stringify({ event: 'billing.case_gauge_failed', environment, error: String(gaugeError) }),
+                    );
+                  });
+                  throw error;
                 }
-                const unfulfilled = openCases.find((row) => row.kind === 'unfulfilled_purchase_obligation')?.open ?? 0;
-                if (unfulfilled > 0) {
-                  console.error(
-                    JSON.stringify({
-                      event: 'billing.alert',
-                      environment,
-                      kind: 'unfulfilled_purchase_obligation',
-                      open: unfulfilled,
-                    }),
-                  );
-                }
+                await recordOpenCases();
                 if (cash !== 'complete' && cash !== 'incomplete') {
                   throw new Error(`cash scan ${cash}; purchases ${purchase.status}`);
                 }
                 return { scanId, cash, purchases: purchase.status };
               });
             }
+            // F-10: one count per completed pass is the heartbeat a stalled or thrashing worker stops sending.
+            caseMetrics.billingWorkerPasses.add(1, {
+              'tau.worker': 'operations',
+              outcome: passFailed ? 'error' : 'ok',
+            });
             try {
               // oxlint-disable-next-line no-await-in-loop -- the continuous worker deliberately sleeps between polls
               await wait(pollMilliseconds, undefined, { signal: shutdown.signal });

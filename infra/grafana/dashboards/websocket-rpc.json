@@ -1,7 +1,7 @@
 {
   "uid": "tau-websocket-rpc",
-  "title": "WebSocket / RPC",
-  "tags": ["tau", "websocket", "rpc", "red"],
+  "title": "WebSocket Gateways",
+  "tags": ["tau", "websocket", "red"],
   "timezone": "browser",
   "refresh": "30s",
   "time": { "from": "now-1h", "to": "now" },
@@ -9,18 +9,19 @@
     "list": [
       {
         "name": "service",
-        "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(up, service_name)",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
         "current": { "text": "tau-api", "value": "tau-api" },
-        "includeAll": false,
-        "refresh": 1
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
       },
       {
         "name": "instance",
         "type": "query",
         "datasource": "Prometheus",
-        "query": "label_values(up{service_name=\"$service\"}, instance)",
+        "query": "label_values(process_uptime{service_name=\"$service\"}, instance)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",
@@ -33,14 +34,19 @@
       "title": "Active WS Connections",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-      "targets": [{ "expr": "ws_connections_active{service_name=~\"$service\"}" }],
+      "targets": [{ "expr": "sum(ws_connections_active{service_name=~\"$service\"})" }],
       "fieldConfig": { "defaults": { "unit": "short" } }
     },
     {
-      "title": "Active RPC Calls",
+      "title": "Upgrade Rejections (1h)",
+      "description": "WebSocket upgrades refused before a gateway admitted them (session, device credential, credit, route).",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "targets": [{ "expr": "rpc_server_active_calls{service_name=~\"$service\"}" }],
+      "targets": [
+        {
+          "expr": "sum(increase(ws_upgrade_rejections_total{service_name=~\"$service\"}[1h])) or vector(0)"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "short" } }
     },
     {
@@ -49,52 +55,47 @@
       "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 },
       "targets": [
         {
-          "expr": "rate(ws_disconnections_total{service_name=~\"$service\"}[5m])",
-          "legendFormat": "connections/s"
+          "expr": "sum by (ws_gateway) (rate(ws_disconnections_total{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{ws_gateway}}"
         }
-      ]
+      ],
+      "fieldConfig": { "defaults": { "unit": "cps" } }
     },
     {
-      "title": "RPC Call Rate by Method",
+      "title": "Frames by Gateway and Direction",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "targets": [
         {
-          "expr": "sum(rate(rpc_server_call_duration_count{service_name=~\"$service\"}[5m])) by (rpc_method)",
-          "legendFormat": "{{rpc_method}}"
+          "expr": "sum by (ws_gateway, ws_direction) (rate(ws_message_size_count{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{ws_gateway}} {{ws_direction}}"
         }
-      ]
+      ],
+      "fieldConfig": { "defaults": { "unit": "cps" } }
     },
     {
-      "title": "RPC Latency (p50 / p95 / p99)",
+      "title": "Upgrade Rejections by Reason",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(rpc_server_call_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
-          "legendFormat": "p50"
-        },
-        {
-          "expr": "histogram_quantile(0.95, sum(rate(rpc_server_call_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
-          "legendFormat": "p95"
-        },
-        {
-          "expr": "histogram_quantile(0.99, sum(rate(rpc_server_call_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
-          "legendFormat": "p99"
+          "expr": "sum by (ws_gateway, reason) (rate(ws_upgrade_rejections_total{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{ws_gateway}} {{reason}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "fieldConfig": { "defaults": { "unit": "cps" } }
     },
     {
-      "title": "RPC Error Rate by Method",
+      "title": "Connections by Gateway",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "targets": [
         {
-          "expr": "sum(rate(rpc_server_call_duration_count{service_name=~\"$service\",rpc_status=\"error\"}[5m])) by (rpc_method, error_type)",
-          "legendFormat": "{{rpc_method}} ({{error_type}})"
+          "expr": "sum by (ws_gateway) (ws_connections_active{service_name=~\"$service\"})",
+          "legendFormat": "{{ws_gateway}}"
         }
-      ]
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
     },
     {
       "title": "Disconnections by Reason",
@@ -102,41 +103,30 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "targets": [
         {
-          "expr": "sum(rate(ws_disconnections_total{service_name=~\"$service\",ws_close_reason!=\"\"}[5m])) by (ws_close_reason)",
-          "legendFormat": "{{ws_close_reason}}"
+          "expr": "sum by (ws_gateway, ws_close_reason) (rate(ws_disconnections_total{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{ws_gateway}} {{ws_close_reason}}"
         }
-      ]
+      ],
+      "fieldConfig": { "defaults": { "unit": "cps" } }
     },
     {
       "title": "WS Message Size (p95)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(ws_message_size_bucket{service_name=~\"$service\"}[5m])) by (le, rpc_method))",
-          "legendFormat": "{{rpc_method}}"
+          "expr": "histogram_quantile(0.95, sum by (le, ws_gateway, ws_direction) (rate(ws_message_size_bucket{service_name=~\"$service\"}[5m])))",
+          "legendFormat": "{{ws_gateway}} {{ws_direction}}"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes" } }
-    },
-    {
-      "title": "SSE Active Connections",
-      "type": "stat",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
-      "targets": [
-        {
-          "expr": "sse_connections_active{service_name=~\"$service\"}",
-          "legendFormat": "active"
-        }
-      ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
     },
     {
       "title": "Error Logs",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} |= \"level\" | json | level = \"error\"", "refId": "A" }],
+      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
       "options": {
         "showTime": true,
         "showLabels": true,

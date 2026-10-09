@@ -1,0 +1,30 @@
+# Panels api:grafana:check may find empty locally, one `Dashboard › Panel` per line. Each depends only
+# on series the exercise harness cannot produce: Fly's own metrics and the
+# gen_ai_* token, spend and terminal-evidence series, which need a funded call that succeeds (a local
+# route paused by an open supplier case answers 503). Agent panels fill from the harness's synthetic
+# agent ingest, which validates the ingest path, not agent execution. Delete a line when it fills; the
+# checker reports lines that have data again.
+
+Agents & Codex Usage › User-Charged LLM Spend by Surface (USD/h)
+Agents & Codex Usage › Tokens by Model and Type
+AI Agent › Token Usage (Input / Output / Cache Read)
+AI Agent › Prompt cache hit rate
+AI Agent › User-Charged LLM Spend (USD/h)
+AI Agent › Model Usage Distribution
+AI Agent › TTFT (p50 / p95)
+Billing & Credit Ledger › User-Charged LLM Spend by Model (USD/h)
+Billing & Credit Ledger › Daily User-Charged LLM Spend by Activity (USD)
+Billing & Credit Ledger › Funded LLM Terminal Evidence (1h)
+Infrastructure › CPU Usage (Fly.io)
+Infrastructure › Memory Usage (Fly.io)
+Infrastructure › Network I/O (Fly.io)
+Runtime & Machines (Fly-equivalent) › Fly CPU by Machine
+Runtime & Machines (Fly-equivalent) › Fly Memory Used by Machine
+Runtime & Machines (Fly-equivalent) › Fly Load (1m) by Machine
+Runtime & Machines (Fly-equivalent) › Fly Network I/O
+Runtime & Machines (Fly-equivalent) › Fly Edge Responses by Status
+Runtime & Machines (Fly-equivalent) › Fly Edge Response Time p95
+Runtime & Machines (Fly-equivalent) › Fly Concurrency by Machine
+Runtime & Machines (Fly-equivalent) › Fly Volume Used
+SLO / Executive › User-Charged LLM Spend (24h)
+System Overview › LLM Token Throughput

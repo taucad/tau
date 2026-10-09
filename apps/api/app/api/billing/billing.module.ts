@@ -1,5 +1,5 @@
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
-import { recoverAndCancelStripeClosure } from '#api/billing/billing-account-closure-stripe.js';
+import { createStripeClosureAdapter } from '#api/billing/billing-account-closure-stripe.js';
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Stripe } from 'stripe';
@@ -91,32 +91,32 @@ const providerUpstreamFetch =
     },
     {
       provide: BillingAccountClosureService,
-      inject: [DatabaseService, stripeReadClientKey, stripeClientKey, ConfigService],
-      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves four distinct provider tokens.
+      inject: [DatabaseService, stripeReadClientKey, stripeClientKey, ConfigService, BillingPaymentsService],
+      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves five distinct provider tokens.
       useFactory(
         database: DatabaseService,
         sourceStripe: Stripe,
         protectedStripe: Stripe,
         config: ConfigService<Environment, true>,
+        payments: BillingPaymentsService,
       ): BillingAccountClosureService {
         const parsed = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
         const environment = parsed.success ? parsed.data : 'development';
         return new BillingAccountClosureService(
           database,
-          {
-            recoverAndCancel: async (input) =>
-              recoverAndCancelStripeClosure(
-                {
-                  database: database.database,
-                  sourceStripe,
-                  protectedStripe,
-                  environment,
-                  stripeAccountId: config.get('STRIPE_ACCOUNT_ID', { infer: true }),
-                  livemode: config.get('STRIPE_LIVEMODE', { infer: true }),
-                },
-                input,
-              ),
-          },
+          // Carries `describeAction`, which the closure card's copy depends on; the PostgreSQL closure case builds its
+          // service through this same factory.
+          createStripeClosureAdapter(
+            {
+              database: database.database,
+              sourceStripe,
+              protectedStripe,
+              environment,
+              stripeAccountId: config.get('STRIPE_ACCOUNT_ID', { infer: true }),
+              livemode: config.get('STRIPE_LIVEMODE', { infer: true }),
+            },
+            payments,
+          ),
           environment,
         );
       },
@@ -157,10 +157,14 @@ const providerUpstreamFetch =
     },
     {
       provide: BillingRecoveryScheduler,
-      inject: [CreditLedgerService, ConfigService],
-      useFactory(ledger: CreditLedgerService, config: ConfigService<Environment, true>): BillingRecoveryScheduler {
+      inject: [CreditLedgerService, MetricsService, ConfigService],
+      useFactory(
+        ledger: CreditLedgerService,
+        metrics: MetricsService,
+        config: ConfigService<Environment, true>,
+      ): BillingRecoveryScheduler {
         const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
-        return new BillingRecoveryScheduler(ledger, {
+        return new BillingRecoveryScheduler(ledger, metrics, {
           environment: environment.success ? environment.data : 'development',
           intervalMilliseconds: config.get('BILLING_RECOVERY_INTERVAL_MS', { infer: true }),
           limit: recoveryPassLimit,

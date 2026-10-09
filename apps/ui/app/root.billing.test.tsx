@@ -95,20 +95,28 @@ describe('billing payment return', () => {
     expect(payment.followPaymentRedirect).toHaveBeenCalledOnce();
   });
 
-  it('GETs a redirect and resumes it only after the explicit action is clicked', async () => {
+  it('GETs a redirect, recovers it once and resumes it only after the explicit action is clicked', async () => {
     const action = {
       actionId: 'topup_1',
       ownerId: 'user-a',
       subjectId: 'account-a',
       environment: 'development',
+      purpose: 'manual_topup',
       state: 'redirect_required',
       redirectUrl: 'https://checkout.example/resume',
     };
     payment.getPaymentAction.mockResolvedValue(action);
+    // An open Checkout comes back unchanged from recovery; a paid one would settle here instead.
+    payment.recoverPaymentAction.mockResolvedValue(action);
     render(returnAt('?payment_action=topup_1'));
     await waitFor(() => {
       expect(warning).toHaveBeenCalledOnce();
     });
+    expect(payment.recoverPaymentAction).toHaveBeenCalledOnce();
+    expect(payment.recoverPaymentAction).toHaveBeenCalledWith(
+      expect.objectContaining({ subjectId: 'account-a' }),
+      'topup_1',
+    );
     expect(payment.followPaymentRedirect).not.toHaveBeenCalled();
     const options = warning.mock.calls[0]?.[1] as {
       action: { label: string; onClick: () => void };
@@ -116,6 +124,23 @@ describe('billing payment return', () => {
     expect(options.action.label).toBe('Resume Checkout');
     options.action.onClick();
     expect(payment.followPaymentRedirect).toHaveBeenCalledWith(action);
+  });
+
+  it('leaves a redirect that is not a purchase Checkout unrecovered on return', async () => {
+    const portal = {
+      actionId: 'portal_1',
+      ownerId: 'user-a',
+      subjectId: 'account-a',
+      environment: 'development',
+      purpose: 'billing_portal',
+      state: 'redirect_required',
+      redirectUrl: 'https://billing.example/portal',
+    };
+    payment.getPaymentAction.mockResolvedValue(portal);
+    render(returnAt('?payment_action=portal_1'));
+    await waitFor(() => {
+      expect(warning).toHaveBeenCalledOnce();
+    });
     expect(payment.recoverPaymentAction).not.toHaveBeenCalled();
   });
 

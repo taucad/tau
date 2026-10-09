@@ -90,4 +90,20 @@ describe('CadPreviewViewer', () => {
     expect(screen.getByTestId('cad-viewer')).toBeInTheDocument();
     expect(screen.getByRole('alert', { name: 'CAD runtime error' })).toHaveTextContent('preview rerender sentinel');
   });
+
+  it('should not hand an artifact over its byte cap to the viewer', () => {
+    cadPreviewMocks.artifact = { mimeType: 'model/gltf-binary', content: new Uint8Array(4) };
+    cadPreviewMocks.artifactHash = 'large';
+    cadPreviewMocks.status = 'ready';
+
+    const view = render(<CadPreviewViewer className='size-full' maxArtifactBytes={3} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Too large to preview. Open the project to view it.');
+    expect(screen.queryByTestId('cad-viewer')).not.toBeInTheDocument();
+
+    view.rerender(<CadPreviewViewer className='size-full' maxArtifactBytes={4} />);
+
+    expect(screen.getByTestId('cad-viewer')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
 });

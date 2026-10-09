@@ -21,6 +21,8 @@ import { ConfigService } from '@nestjs/config';
 import type { Environment } from '#config/environment.config.js';
 import { storageHealthProbeKey, storageNamespacePrefixes } from '#storage/storage.constants.js';
 import type { StorageNamespace } from '#storage/storage.constants.js';
+import { instrumentStorageClient } from '#storage/storage-metrics.js';
+import { MetricsService } from '#telemetry/metrics.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK command inputs use PascalCase fields */
 
@@ -268,6 +270,8 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     private readonly configService: ConfigService<Environment, true>,
     // oxlint-disable-next-line eslint/new-cap -- Nest's Optional decorator is a function by contract.
     @Optional() scopedAccount?: StorageAccount,
+    // oxlint-disable-next-line eslint/new-cap -- Nest's Optional decorator is a function by contract.
+    @Optional() private readonly metrics?: MetricsService,
   ) {
     const configuredEndpoint = this.configService.get('TAU_S3_ENDPOINT', { infer: true });
     const configuredRegion = this.configService.get('TAU_S3_REGION', { infer: true });
@@ -318,6 +322,11 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     }
 
     this.client = new S3Client(clientConfig);
+    if (this.metrics !== undefined) {
+      instrumentStorageClient(this.client, this.metrics, (bucket) =>
+        scopedAccount === undefined ? (bucket === this.privateBucket ? 'private' : 'public') : 'account',
+      );
+    }
     this.signingClient = this.client as unknown as Parameters<typeof getSignedUrl>[0];
   }
 
@@ -334,7 +343,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
       return this;
     }
 
-    return new ObjectStorageService(this.configService, account);
+    return new ObjectStorageService(this.configService, account, this.metrics);
   }
 
   public async putBlob(args: PutBlobArgs): Promise<PutBlobResult> {

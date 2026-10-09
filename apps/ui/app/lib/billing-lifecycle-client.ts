@@ -12,7 +12,21 @@ export class BillingAddressRequired extends Error {
   }
 }
 
-const parseAddressRefusal = async (response: Response): Promise<BillingAddressRequired | undefined> => {
+/** Account closure waits until no payment action can still settle; the customer finishes or cancels it first. */
+export class AccountClosurePaymentPending extends Error {
+  /** The pending payment as the customer sees it; its wire state says whether they can end it or must wait. */
+  public readonly action: WirePaymentAction | undefined;
+
+  public constructor(action?: WirePaymentAction) {
+    super('payment_action_pending');
+    this.name = 'AccountClosurePaymentPending';
+    this.action = action;
+  }
+}
+
+const parseConflictRefusal = async (
+  response: Response,
+): Promise<BillingAddressRequired | AccountClosurePaymentPending | undefined> => {
   if (response.status !== 409) {
     return undefined;
   }
@@ -20,8 +34,14 @@ const parseAddressRefusal = async (response: Response): Promise<BillingAddressRe
     .clone()
     .json()
     .catch(() => undefined);
-  const code = body && typeof body === 'object' ? (body as { code?: unknown }).code : undefined;
-  return code === 'customer_tax_location_invalid' ? new BillingAddressRequired() : undefined;
+  const refusal = body && typeof body === 'object' ? (body as { code?: unknown; action?: unknown }) : undefined;
+  const code = refusal?.code;
+  const action = wirePaymentActionSchema.safeParse(refusal?.action);
+  return code === 'customer_tax_location_invalid'
+    ? new BillingAddressRequired()
+    : code === 'payment_action_pending'
+      ? new AccountClosurePaymentPending(action.success ? action.data : undefined)
+      : undefined;
 };
 
 const base = (binding: PaymentActionBinding): string => `${binding.apiBaseUrl.replace(/\/$/u, '')}/v1/billing`;
@@ -39,7 +59,7 @@ const request = async (binding: PaymentActionBinding, path: string, init?: Reque
   if (!response.ok) {
     throw (
       (await parseCollectionRefusal(response)) ??
-      (await parseAddressRefusal(response)) ??
+      (await parseConflictRefusal(response)) ??
       new Error(`Billing lifecycle request failed with ${response.status}`)
     );
   }

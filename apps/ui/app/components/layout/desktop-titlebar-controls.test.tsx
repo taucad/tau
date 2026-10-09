@@ -46,7 +46,13 @@ describe('DesktopTitlebarControls', () => {
     expect(titlebar).toHaveClass('h-9', 'w-(--titlebar-controls-width)', 'bg-transparent');
     expect(titlebar).not.toHaveClass('border-b');
     // 16 px from the last traffic light to the first control, and the row ends 4 px before the width it declares.
-    expect(controls).toHaveClass('h-9', 'bg-transparent', 'pl-20', 'pr-1', '[app-region:no-drag]');
+    expect(controls).toHaveClass(
+      'h-9',
+      'bg-transparent',
+      'pl-(--desktop-titlebar-inset)',
+      'pr-1',
+      '[app-region:no-drag]',
+    );
     expect(controls).not.toHaveClass('pl-22', 'pr-2');
     expect(controls).not.toHaveClass('border-b', '[app-region:drag]');
     expect(sidebar).toHaveAttribute('data-has-resize', 'true');

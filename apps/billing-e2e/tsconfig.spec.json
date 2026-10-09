@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "outDir": "./out-tsc/spec",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "vitest.staging.config.ts"]
+}

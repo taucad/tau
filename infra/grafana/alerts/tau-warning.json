@@ -3,40 +3,6 @@
   "interval": 60,
   "rules": [
     {
-      "uid": "rpc-failure-rate",
-      "title": "P1: RPC Failure Rate Spike",
-      "condition": "rpc_errors_high",
-      "data": [
-        {
-          "refId": "rpc_errors_high",
-          "queryType": "",
-          "relativeTimeRange": {
-            "from": 300,
-            "to": 0
-          },
-          "datasourceUid": "prometheus",
-          "model": {
-            "expr": "sum(rate(rpc_server_call_duration_count{service_name=\"tau-api\",rpc_status=\"error\"}[5m])) / sum(rate(rpc_server_call_duration_count{service_name=\"tau-api\"}[5m])) > 0.1",
-            "intervalMs": 15000,
-            "maxDataPoints": 20,
-            "refId": "rpc_errors_high"
-          }
-        }
-      ],
-      "noDataState": "OK",
-      "execErrState": "OK",
-      "for": "5m",
-      "annotations": {
-        "runbook_url": "docs/handbooks/cloud/playbooks/api-5xx.md",
-        "summary": "RPC error rate exceeds 10% over 5 minutes."
-      },
-      "labels": {
-        "severity": "warning",
-        "service": "tau-api",
-        "component": "rpc"
-      }
-    },
-    {
       "uid": "ws-disconnect-storm",
       "title": "P1: WebSocket Disconnect Storm",
       "condition": "ws_disconnect_spike",
@@ -50,7 +16,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "rate(ws_disconnections_total{service_name=\"tau-api\",ws_close_reason=~\"transport close|transport error|ping timeout\"}[5m]) > 1",
+            "expr": "sum(rate(ws_disconnections_total{service_name=\"tau-api\",ws_close_reason=\"error\"}[5m])) > 1",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "ws_disconnect_spike"
@@ -62,7 +28,7 @@
       "for": "2m",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/playbooks/api-5xx.md",
-        "summary": "High rate of abnormal WebSocket disconnections detected."
+        "summary": "More than one abnormal WebSocket close (close-code class `error`) per second across the hosts and kernels gateways."
       },
       "labels": {
         "severity": "warning",
@@ -118,7 +84,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum(rate(http_server_duration_count{service_name=\"tau-api\",http_status_code=~\"5..\"}[5m])) / sum(rate(http_server_duration_count{service_name=\"tau-api\"}[5m])) > 0.05",
+            "expr": "(sum(rate(http_server_request_duration_count{service_name=\"tau-api\",http_response_status_code=~\"5..\"}[5m])) or vector(0)) / sum(rate(http_server_request_duration_count{service_name=\"tau-api\"}[5m])) > 0.05",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "http_5xx_high"
@@ -152,7 +118,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "(\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n  /\n  (\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n    +\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m]))\n  )\n) < 0.4\nand\nsum by (gen_ai_request_model, gen_ai_provider_name) (increase(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m])) >= 200000",
+            "expr": "(\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n  /\n  (\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n    +\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=~\"input|cache_write\"}[30m]))\n  )\n) < 0.4\nand\nsum by (gen_ai_request_model, gen_ai_provider_name) (increase(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m])) >= 200000",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "cache_hit_rate_low"
@@ -310,7 +276,7 @@
       }
     },
     {
-      "uid": "billing-funded-operation-recovery-provider-execution",
+      "uid": "billing-recovery-provider-execution",
       "title": "P1: Provider Execution During Recovery",
       "condition": "billing_funded_operation_recovery_provider_execution",
       "data": [
@@ -341,6 +307,40 @@
         "severity": "warning",
         "service": "tau-api",
         "component": "billing"
+      }
+    },
+    {
+      "uid": "tau-process-restarting",
+      "title": "P1: Tau Process Crash-Looping",
+      "condition": "process_restarting",
+      "data": [
+        {
+          "refId": "process_restarting",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app, instance, tau_process) (resets(process_uptime{service_name=\"tau-api\"}[30m])) > 2",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "process_restarting"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/paid-not-credited.md",
+        "summary": "A Tau process (app or billing worker) restarted more than twice in 30 min: it is crash-looping (F-10: billing-operations OOM-kills on a 256 MB Machine, before its first pass completes). Reads process_uptime, which exists from the first scrape. A deploy restarts it once."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "runtime"
       }
     }
   ]

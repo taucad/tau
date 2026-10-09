@@ -1,0 +1,15 @@
+{
+  "name": "@taucad/billing-e2e",
+  "version": "0.0.1",
+  "description": "Billing go-live matrix against a deployed Tau stack: real accounts, the real API and Stripe hosted Checkout in test mode.",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "devDependencies": {
+    "@taucad/billing": "workspace:*"
+  }
+}

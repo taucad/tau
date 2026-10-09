@@ -302,7 +302,12 @@ export function BillingSettings(): React.JSX.Element {
         <AutoReloadSettings binding={binding} />
       </SettingsItem>
       <SettingsItem settingId='close-account'>
-        <AccountClosureSettings binding={binding} />
+        <AccountClosureSettings
+          binding={binding}
+          onReviewPayment={() => {
+            setIsTopupOpen(true);
+          }}
+        />
       </SettingsItem>
 
       <TopupModal isOpen={isTopupOpen} onOpenChange={setIsTopupOpen} />

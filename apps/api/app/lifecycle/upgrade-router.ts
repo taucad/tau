@@ -3,9 +3,20 @@ import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { Injectable, Optional } from '@nestjs/common';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import type { WsGateway, WsUpgradeRejection } from '#telemetry/metrics.js';
 
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node's `upgrade` event hands the handler a Buffer
 export type UpgradeHandler = (request: IncomingMessage, socket: Duplex, head: Buffer) => void;
+
+export type UpgradeRoute = {
+  /** The `ws.gateway` label for refusals on this route. */
+  readonly gateway: WsGateway;
+  /** Whether this route owns a request path. Also runs on upgrades refused during shutdown, so it must be cheap and side-effect free. */
+  readonly matches: (pathname: string) => boolean;
+  /** Takes over the socket. */
+  readonly handle: UpgradeHandler;
+};
 
 const refuse = (socket: Duplex, status: string): void => {
   socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`, () => {
@@ -27,25 +38,27 @@ const refuse = (socket: Duplex, status: string): void => {
  */
 @Injectable()
 export class UpgradeRouter {
-  readonly #routes: Array<{ readonly matches: (pathname: string) => boolean; readonly handle: UpgradeHandler }> = [];
+  readonly #routes: UpgradeRoute[] = [];
   readonly #sockets = new Set<Duplex>();
   #server: HttpServer | undefined;
 
-  public constructor(@Optional() private readonly shutdown: ShutdownService = new ShutdownService()) {}
+  public constructor(
+    @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
+    @Optional() private readonly metrics: MetricsService = new MetricsService(),
+  ) {}
 
   /**
    * Routes upgrades whose path `matches` to `handle`.
    *
    * @param server - The API's HTTP server; the first route attaches the listener.
-   * @param matches - Whether this route owns a request path.
-   * @param handle - Takes over the socket.
+   * @param route - The gateway, path filter and handler.
    */
-  public route(server: HttpServer, matches: (pathname: string) => boolean, handle: UpgradeHandler): void {
+  public route(server: HttpServer, route: UpgradeRoute): void {
     if (this.#server === undefined) {
       this.#server = server;
       server.on('upgrade', this.#dispatch);
     }
-    this.#routes.push({ matches, handle });
+    this.#routes.push(route);
   }
 
   /**
@@ -61,19 +74,35 @@ export class UpgradeRouter {
     return count;
   }
 
+  /** A URL `new URL` cannot parse is claimed by no route, so it still reaches a clean refusal. */
+  #find(request: IncomingMessage): UpgradeRoute | undefined {
+    let pathname: string;
+    try {
+      ({ pathname } = new URL(request.url ?? '/', 'http://localhost'));
+    } catch {
+      return undefined;
+    }
+    return this.#routes.find((candidate) => candidate.matches(pathname));
+  }
+
+  #reject(gateway: WsUpgradeRejection['ws.gateway'], reason: 'server_shutdown' | 'unknown_route'): void {
+    this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': gateway, reason } satisfies WsUpgradeRejection);
+  }
+
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node's `upgrade` event hands the handler a Buffer
   readonly #dispatch = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
     this.#sockets.add(socket);
     socket.once('close', () => {
       this.#sockets.delete(socket);
     });
+    const route = this.#find(request);
     if (this.shutdown.signal.aborted) {
+      this.#reject(route?.gateway ?? 'none', 'server_shutdown');
       refuse(socket, '503 Service Unavailable');
       return;
     }
-    const { pathname } = new URL(request.url ?? '/', 'http://localhost');
-    const route = this.#routes.find((candidate) => candidate.matches(pathname));
     if (route === undefined) {
+      this.#reject('none', 'unknown_route');
       refuse(socket, '404 Not Found');
       return;
     }

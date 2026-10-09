@@ -48,6 +48,7 @@ function seedRepository(files: Map<string, Uint8Array<ArrayBuffer>>, tag = 'v1')
   const git = (...args: readonly string[]): void => {
     const result = spawnSync('git', ['-c', 'user.name=Tau', '-c', 'user.email=tau@test.invalid', ...args], {
       cwd: repositoryPath,
+      env: isolatedGit,
     });
     if (result.status !== 0) {
       throw new Error(`git ${args.join(' ')} failed: ${String(result.stderr)}`);
@@ -477,6 +478,16 @@ function allocZeros(byteLength: number): Uint8Array<ArrayBuffer> {
 function validWebpSignature(): Uint8Array<ArrayBuffer> {
   return new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
 }
+
+// A developer's global git config (e.g. `commit.gpgsign`) must not reach fixture commits: signing
+// through a busy gpg-agent fails intermittently under parallel test load.
+/* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+const isolatedGit = {
+  PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_SYSTEM: '/dev/null',
+} as unknown as NodeJS.ProcessEnv;
+/* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
 
 describe('publication tree rules', () => {
   it('publishes nothing the project keeps to itself', () => {

@@ -9,18 +9,19 @@
     "list": [
       {
         "name": "service",
-        "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(up, service_name)",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
         "current": { "text": "tau-api", "value": "tau-api" },
-        "includeAll": false,
-        "refresh": 1
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
       },
       {
         "name": "instance",
         "type": "query",
         "datasource": "Prometheus",
-        "query": "label_values(up{service_name=\"$service\"}, instance)",
+        "query": "label_values(process_uptime{service_name=\"$service\"}, instance)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",
@@ -35,7 +36,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
       "targets": [
         {
-          "expr": "(1 - (sum(rate(http_server_duration_count{service_name=~\"$service\",http_status_code=~\"5..\"}[24h])) / clamp_min(sum(rate(http_server_duration_count{service_name=~\"$service\"}[24h])), 1e-10))) * 100"
+          "expr": "(1 - ((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[24h])), 1e-10))) * 100"
         }
       ],
       "fieldConfig": {
@@ -55,12 +56,12 @@
       }
     },
     {
-      "title": "RPC Success Rate (24h)",
+      "title": "Tau Sync Availability (24h)",
       "type": "gauge",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
       "targets": [
         {
-          "expr": "(sum(rate(rpc_server_call_duration_count{service_name=~\"$service\",rpc_status=\"ok\"}[24h])) / clamp_min(sum(rate(rpc_server_call_duration_count{service_name=~\"$service\"}[24h])), 1e-10)) * 100"
+          "expr": "(1 - ((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[24h])), 1e-10))) * 100"
         }
       ],
       "fieldConfig": {
@@ -85,20 +86,20 @@
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_duration_bucket{service_name=~\"$service\"}[24h])) by (le))"
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_bucket{service_name=~\"$service\"}[24h])) by (le))"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
+          "unit": "s",
           "min": 0,
-          "max": 2000,
+          "max": 2,
           "thresholds": {
             "steps": [
               { "value": 0, "color": "green" },
-              { "value": 300, "color": "#73BF69" },
-              { "value": 500, "color": "yellow" },
-              { "value": 1000, "color": "red" }
+              { "value": 0.3, "color": "#73BF69" },
+              { "value": 0.5, "color": "yellow" },
+              { "value": 1, "color": "red" }
             ]
           }
         }
@@ -110,17 +111,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
         {
-          "expr": "ws_connections_active{service_name=~\"$service\"}",
-          "legendFormat": "WebSocket"
-        },
-        {
-          "expr": "sse_connections_active{service_name=~\"$service\"}",
-          "legendFormat": "SSE (Chat)"
+          "expr": "sum by (ws_gateway) (ws_connections_active{service_name=~\"$service\"})",
+          "legendFormat": "WebSocket {{ws_gateway}}"
         }
       ]
     },
     {
-      "title": "Total LLM Cost (24h)",
+      "title": "User-Charged LLM Spend (24h)",
+      "description": "User-charged: what Tau bills the user for the call (priced from the model catalog), not the supplier invoice.",
       "type": "stat",
       "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
       "targets": [
@@ -153,7 +151,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
       "targets": [
         {
-          "expr": "1 - (sum(rate(http_server_duration_count{service_name=~\"$service\",http_status_code=~\"5..\"}[$__range])) / clamp_min(sum(rate(http_server_duration_count{service_name=~\"$service\"}[$__range])), 1e-10) / 0.001)",
+          "expr": "1 - ((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[$__range])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[$__range])), 1e-10) / 0.001)",
           "legendFormat": "Error Budget Remaining",
           "refId": "A"
         }
@@ -175,12 +173,12 @@
       }
     },
     {
-      "title": "RPC Error Budget Remaining",
+      "title": "Tau Sync Error Budget Remaining",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
       "targets": [
         {
-          "expr": "1 - (sum(rate(rpc_server_call_duration_count{service_name=~\"$service\",rpc_status=\"error\"}[$__range])) / clamp_min(sum(rate(rpc_server_call_duration_count{service_name=~\"$service\"}[$__range])), 1e-10) / 0.001)",
+          "expr": "1 - ((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[$__range])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[$__range])), 1e-10)) / 0.001",
           "legendFormat": "Error Budget Remaining",
           "refId": "A"
         }
@@ -208,7 +206,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
       "targets": [
         {
-          "expr": "(sum(rate(http_server_duration_count{service_name=~\"$service\",http_status_code=~\"5..\"}[1h])) / clamp_min(sum(rate(http_server_duration_count{service_name=~\"$service\"}[1h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[1h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[1h])), 1e-10)) / 0.001",
           "refId": "A"
         }
       ],
@@ -233,7 +231,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 18 },
       "targets": [
         {
-          "expr": "(sum(rate(http_server_duration_count{service_name=~\"$service\",http_status_code=~\"5..\"}[6h])) / clamp_min(sum(rate(http_server_duration_count{service_name=~\"$service\"}[6h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[6h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[6h])), 1e-10)) / 0.001",
           "refId": "A"
         }
       ],
@@ -258,7 +256,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 18 },
       "targets": [
         {
-          "expr": "(sum(rate(http_server_duration_count{service_name=~\"$service\",http_status_code=~\"5..\"}[24h])) / clamp_min(sum(rate(http_server_duration_count{service_name=~\"$service\"}[24h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[24h])), 1e-10)) / 0.001",
           "refId": "A"
         }
       ],
@@ -277,13 +275,13 @@
       }
     },
     {
-      "title": "RPC Burn Rate (6h)",
-      "description": "6-hour RPC error budget consumption rate.",
+      "title": "Tau Sync Burn Rate (6h)",
+      "description": "6h Tau Sync (hosted git and project sync) error budget consumption rate. >1 means burning faster than sustainable.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 18 },
       "targets": [
         {
-          "expr": "(sum(rate(rpc_server_call_duration_count{rpc_status=\"error\",service_name=~\"$service\"}[6h])) / clamp_min(sum(rate(rpc_server_call_duration_count{service_name=~\"$service\"}[6h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[6h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[6h])), 1e-10)) / 0.001",
           "refId": "A"
         }
       ],
@@ -302,13 +300,13 @@
       }
     },
     {
-      "title": "RPC Burn Rate (24h)",
-      "description": "24-hour RPC error budget consumption rate.",
+      "title": "Tau Sync Burn Rate (24h)",
+      "description": "24h Tau Sync (hosted git and project sync) error budget consumption rate. >1 means burning faster than sustainable.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 18 },
       "targets": [
         {
-          "expr": "(sum(rate(rpc_server_call_duration_count{rpc_status=\"error\",service_name=~\"$service\"}[24h])) / clamp_min(sum(rate(rpc_server_call_duration_count{service_name=~\"$service\"}[24h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[24h])), 1e-10)) / 0.001",
           "refId": "A"
         }
       ],
@@ -331,7 +329,7 @@
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} |= \"level\" | json | level = \"error\"", "refId": "A" }],
+      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
       "options": {
         "showTime": true,
         "showLabels": true,

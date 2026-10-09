@@ -14,8 +14,11 @@ import { asBuffer, hostFrameMaxPayload } from '#api/hosts/host-frame-relay.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
 import { absorbSocketErrors } from '#api/websocket/socket-error.js';
+import { trackSocket } from '#api/websocket/socket-metrics.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import type { WsUpgradeRejection } from '#telemetry/metrics.js';
 
 const controlPath = '/v1/agents/control';
 const sessionPathPrefix = '/v1/agents/sessions/';
@@ -33,6 +36,8 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly upgradeRouter: UpgradeRouter = new UpgradeRouter(),
     // oxlint-disable-next-line new-cap -- NestJS decorator
     @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
+    // oxlint-disable-next-line new-cap -- NestJS decorator
+    @Optional() private readonly metrics: MetricsService = new MetricsService(),
   ) {}
 
   public async onModuleInit(): Promise<void> {
@@ -49,17 +54,17 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
     const socketServer = new WebSocketServer({ noServer: true, maxPayload: hostFrameMaxPayload });
     this.socketServer = socketServer;
     const fastify = this.httpAdapterHost.httpAdapter.getInstance<FastifyInstance>();
-    this.upgradeRouter.route(
-      fastify.server,
-      (pathname) => pathname === controlPath || pathname.startsWith(sessionPathPrefix),
-      (request, socket, head) => {
+    this.upgradeRouter.route(fastify.server, {
+      gateway: 'hosts',
+      matches: (pathname) => pathname === controlPath || pathname.startsWith(sessionPathPrefix),
+      handle: (request, socket, head) => {
         socketServer.handleUpgrade(request, socket, head, (accepted) => {
           absorbSocketErrors(accepted);
           socketServer.emit('connection', accepted, request);
           void this.closeOnHandleFailure(accepted, request);
         });
       },
-    );
+    });
     /* `HostsService` departs the sockets it has registered; this also reaches
      * one still in admission, which would otherwise register after the stop and
      * stay open until the cut. */
@@ -119,6 +124,7 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
    * handshake, with nothing listening to what it sent.
    */
   private async handle(socket: WebSocket, request: IncomingMessage): Promise<void> {
+    trackSocket(this.metrics, 'hosts', socket);
     socket.pause();
     try {
       await this.route(socket, request);
@@ -157,6 +163,10 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
     if (pathname === controlPath) {
       const device = await this.hostsService.authenticateDevice(request.headers.authorization);
       if (!device) {
+        this.metrics.wsUpgradeRejections.add(1, {
+          'ws.gateway': 'hosts',
+          reason: 'unauthenticated',
+        } satisfies WsUpgradeRejection);
         socket.close(4401, 'device credential rejected');
         return;
       }
@@ -177,6 +187,10 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
       (side !== 'browser' && side !== 'host') ||
       (route !== 'runtime' && route !== 'fs' && route !== 'agent')
     ) {
+      this.metrics.wsUpgradeRejections.add(1, {
+        'ws.gateway': 'hosts',
+        reason: 'unknown_route',
+      } satisfies WsUpgradeRejection);
       socket.close(1008, 'unknown host route');
       return;
     }
@@ -191,6 +205,10 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
     }
     const session = await this.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
     if (!session) {
+      this.metrics.wsUpgradeRejections.add(1, {
+        'ws.gateway': 'hosts',
+        reason: 'unauthenticated',
+      } satisfies WsUpgradeRejection);
       socket.close(4401, 'browser session required');
       return;
     }

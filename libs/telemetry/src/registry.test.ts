@@ -6,7 +6,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(57);
+    expect(metrics).toHaveLength(64);
   });
 
   it('should bound funded-operation telemetry to content-free dimensions', () => {
@@ -53,6 +53,19 @@ describe('TauMetrics', () => {
         'tau.billing.capacity_pool': 'primary',
         'tau.billing.recovery.batch.outcome': 'provider supplied text',
       }).success,
+    ).toBe(false);
+  });
+
+  it('should expose the WebSocket upgrade-rejection counter with a bounded label set', () => {
+    expect(TauMetrics.wsUpgradeRejections.name).toBe('ws.upgrade.rejections');
+    expect(TauMetrics.wsUpgradeRejections.type).toBe('counter');
+    expect(TauMetrics.wsUpgradeRejections.unit).toBe('{connection}');
+    expect(
+      TauMetrics.wsUpgradeRejections.attributes.safeParse({ 'ws.gateway': 'hosts', reason: 'user-123' }).success,
+    ).toBe(false);
+    expect(
+      TauMetrics.wsDisconnections.attributes.safeParse({ 'ws.gateway': 'hosts', 'ws.close.reason': 'transport close' })
+        .success,
     ).toBe(false);
   });
 

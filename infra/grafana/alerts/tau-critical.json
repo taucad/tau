@@ -27,7 +27,7 @@
       "execErrState": "OK",
       "for": "1m",
       "annotations": {
-        "summary": "Redis connection is down. Chat RPC, session management, and adapter services are degraded.",
+        "summary": "Redis connection is down. Host relay presence, session routing and adapter services are degraded.",
         "runbook_url": "docs/handbooks/cloud/playbooks/redis-loss.md"
       },
       "labels": {
@@ -50,7 +50,7 @@
           },
           "datasourceUid": "loki",
           "model": {
-            "expr": "sum(count_over_time({service_name=\"tau-api\"} |~ \"Database (connectivity probe|migration) failed\" [5m]))",
+            "expr": "sum(count_over_time({service_name=\"tau-api\"} |~ \"Database (connectivity probe|schema compatibility check) failed\" [5m]))",
             "intervalMs": 15000,
             "maxDataPoints": 43200,
             "queryType": "range",
@@ -103,7 +103,7 @@
       "execErrState": "Error",
       "for": "0s",
       "annotations": {
-        "summary": "Database probe or migration failed during API startup. Inspect Loki for `Database connectivity probe failed` / `Database migration failed` lines and act on the structured `hint` field (paused provider, DNS, TCP timeout, role rotation, pooler exhaustion, privilege).",
+        "summary": "Database probe or schema compatibility check failed during API startup. Inspect Loki for `Database connectivity probe failed` / `Database schema compatibility check failed` lines and act on the structured `hint` field (paused provider, DNS, TCP timeout, role rotation, pooler exhaustion, privilege).",
         "runbook_url": "docs/handbooks/cloud/playbooks/postgres-saturation.md"
       },
       "labels": {
@@ -161,6 +161,108 @@
       "annotations": {
         "summary": "SUM(credit_transaction.deltaMicro) disagrees with materialised balances (C12). Money invariant broken \u2014 treat as a page, not a log line. Runbook: repos/tau-cloud/docs/stripe-iac-runbook.md.",
         "runbook_url": "docs/handbooks/cloud/playbooks/ledger-drift.md"
+      },
+      "labels": {
+        "severity": "critical",
+        "service": "tau-api",
+        "component": "billing"
+      }
+    },
+    {
+      "uid": "supplier-auth-failure",
+      "title": "P0: Supplier Rejected Tau's Key",
+      "condition": "supplier_auth",
+      "data": [
+        {
+          "refId": "supplier_auth",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app, gen_ai_provider_name) (increase(gen_ai_client_operation_duration_count{service_name=\"tau-api\",error_type=\"upstream_auth\"}[5m])) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "supplier_auth"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/supplier-outage.md",
+        "summary": "A supplier answered a funded call with 401/403 (F-11). The key is Tau's, so every funded call to that supplier fails as PROVIDER_UNAVAILABLE until the key is replaced. A new process fires from its second rejection: increase() cannot see a series' first sample. Grouped by Fly `app`, so staging (tau-api-staging) and prod (tau-api) fire separately. Same event as tau_billing_provider_account_refusals_total{reason=\"credential_rejected\"}."
+      },
+      "labels": {
+        "severity": "critical",
+        "service": "tau-api",
+        "component": "billing"
+      }
+    },
+    {
+      "uid": "supplier-credit-exhausted",
+      "title": "P0: Supplier Account Out of Credit",
+      "condition": "supplier_credit",
+      "data": [
+        {
+          "refId": "supplier_credit",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app, providerId) (increase(tau_billing_provider_account_refusals_total{service_name=\"tau-api\",reason!=\"credential_rejected\"}[5m])) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "supplier_credit"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/supplier-outage.md",
+        "summary": "A supplier refused a funded call because Tau's account with it is out of credit (BIL-11). Funded calls to that supplier fail until it is topped up. Credential rejections are excluded here; supplier-auth-failure pages for them."
+      },
+      "labels": {
+        "severity": "critical",
+        "service": "tau-api",
+        "component": "billing"
+      }
+    },
+    {
+      "uid": "billing-worker-stalled",
+      "title": "P0: Billing Worker Stalled",
+      "condition": "worker_stalled",
+      "data": [
+        {
+          "refId": "worker_stalled",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app, tau_worker) (max_over_time(tau_billing_worker_passes_total{service_name=\"tau-api\"}[24h])) unless sum by (app, tau_worker) (increase(tau_billing_worker_passes_total{service_name=\"tau-api\",outcome=\"ok\"}[15m]) > 0)",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "worker_stalled"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "5m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/paid-not-credited.md",
+        "summary": "A billing worker seen in the last 24 h has completed no successful pass in 15 min: hung, dead or failing every pass (F-10). operations stalled means paid purchases are not credited; recovery stalled means no API replica is completing its in-process recovery pass, so funded operations stay held (see chat-llm-failing.md). Grouped by Fly `app` and `tau_worker`. A worker scaled to 0 on purpose also fires until 24 h pass, so silence it."
       },
       "labels": {
         "severity": "critical",

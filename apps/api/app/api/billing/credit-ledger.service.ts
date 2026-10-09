@@ -12,7 +12,7 @@ import { calculatePreliminarySupplierCost } from '#api/billing/billable-model-co
 import { routeSkuFamily } from '#api/billing/billable-model-qualification.js';
 import { parseCommercialPolicyDocument, resolvePolicyRoute } from '#api/billing/billing-policy.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, desc, eq, gt, inArray, lt, ne, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
@@ -23,6 +23,7 @@ import {
 } from '@taucad/billing';
 import type { FinancialActivityKind } from '@taucad/billing';
 import { DatabaseService } from '#database/database.service.js';
+import { MetricsService } from '#telemetry/metrics.js';
 import { BillingPolicyService, PolicyRouteUnavailableError } from '#api/billing/billing-policy.service.js';
 import {
   billingFinancialCase,
@@ -236,6 +237,11 @@ export const serializeInvocationEvidence = (
             quantity: item.quantity.toString(),
           })),
   });
+/** Source revision of the zero-cost final supplier evidence a refusal with a status proves. */
+export const rejectedSupplierSourceRevision = 'provider_rejected_v1';
+/** The ledger's own proof digest for a refusal it finalizes without the gateway's evidence digest. */
+const rejectedProofDigest = (operationId: string): string =>
+  createHash('sha256').update(`provider-rejected:${operationId}`).digest('hex');
 export const invocationEvidenceDigest = (evidence: z.infer<typeof persistedInvocationEvidenceSchema>): string => {
   const payload = JSON.stringify(evidence);
   if (Buffer.byteLength(payload) > 32_768) {
@@ -374,12 +380,48 @@ const hasConstraint = (error: unknown, constraint: string): boolean => {
   return false;
 };
 
+const genAiTokenTypes = new Map([
+  ['uncached_input', 'input'],
+  ['cache_read', 'cache_read'],
+  ['cache_write', 'cache_write'],
+  ['output', 'output'],
+]);
+/** One credit atom is one micro-USD. */
+const creditAtomsPerUsd = 1_000_000;
+
+/**
+ * Records the tokens and charged USD of one settled operation, written together so the two series
+ * reconcile. Both the live terminal and recovery's settlement call this; the labels are the
+ * operation's pinned model, provider, surface and activity, so cardinality stays that of admission.
+ */
+/* eslint-disable max-params-no-constructor/max-params-no-constructor -- one settled operation */
+export const recordSettledGenAiUsage = (
+  metrics: Pick<MetricsService, 'genAiCost' | 'genAiTokenUsage'> | undefined,
+  attributes: Record<'gen_ai.request.model' | 'gen_ai.provider.name' | 'tau.surface' | 'tau.activity', string>,
+  evidence: TerminalEvidence,
+  chargedAtoms: bigint,
+): void => {
+  metrics?.genAiCost.add(Number(chargedAtoms) / creditAtomsPerUsd, attributes);
+  // An absorbed turn's partial meters are not usage it was charged for.
+  const meterItems =
+    evidence.kind === 'provider_rejected' || evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
+  for (const item of meterItems) {
+    const tokenType = genAiTokenTypes.get(item.dimension);
+    if (tokenType !== undefined) {
+      metrics?.genAiTokenUsage.record(Number(item.quantity), { ...attributes, 'gen_ai.token.type': tokenType });
+    }
+  }
+};
+/* eslint-enable max-params-no-constructor/max-params-no-constructor -- one settled operation */
+
 @Injectable()
 export class CreditLedgerService {
   public constructor(
     @Inject(DatabaseService)
     private readonly databaseService: Pick<DatabaseService, 'database'>,
     private readonly policyService: BillingPolicyService,
+    // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   /** Creates stable financial identity before a financial transaction takes budget locks. */
@@ -1418,6 +1460,16 @@ export class CreditLedgerService {
               usageOccurredAt: retained.usageOccurredAt,
               meterItems: retained.meterItems,
             };
+          } else if (stored.kind === 'provider_rejected') {
+            // The supplier refused before running the call: a restart between the gateway's
+            // proof and its receipt still releases the turn rather than absorbing it.
+            evidence = {
+              kind: 'provider_rejected',
+              executionStatus: 'rejected',
+              ...(retained.normalizationEvidence === undefined
+                ? {}
+                : { normalizationEvidence: retained.normalizationEvidence }),
+            };
           } else {
             evidence = {
               ...retained,
@@ -1440,40 +1492,11 @@ export class CreditLedgerService {
         }
         await this.recordInvocationEvidence({ ...claim, evidence });
         if (operation.dispatchIntentAt === null) {
-          const outcome = await this.appendSupplierEvidence({
-            operationId: operation.id,
+          await this.finalizeZeroSupplierCost(operation, {
             environment: input.environment,
-            provider: operation.providerId ?? 'undispatched',
-            credentialAccount: operation.invocation?.credentialAccount ?? 'undispatched',
-            sourceObjectId: operation.id,
+            expectedGeneration: claim.generation,
             sourceRevision: 'proved_no_dispatch_v1',
             payloadDigest: createHash('sha256').update(`no-dispatch:${operation.id}`).digest('hex'),
-            currency: 'usd',
-            numerator: 0n,
-            denominator: 1n,
-            completeness: 'complete',
-            finality: 'final',
-            receivedAt: new Date(),
-          });
-          if (outcome === 'conflict') {
-            throw new Error('Conflicting no-dispatch proof');
-          }
-          const [supplierEvidence] = await this.databaseService.database
-            .select({ id: supplierCostEvidence.id })
-            .from(supplierCostEvidence)
-            .where(
-              and(
-                eq(supplierCostEvidence.operationId, operation.id),
-                eq(supplierCostEvidence.sourceRevision, 'proved_no_dispatch_v1'),
-              ),
-            );
-          if (!supplierEvidence) {
-            throw new Error('No-dispatch proof was not retained');
-          }
-          await this.finalizeSupplier({
-            ...claim,
-            evidenceId: supplierEvidence.id,
-            expectedGeneration: claim.generation,
           });
         } else {
           if (operation.invocation !== null && evidence.kind === 'final_usage') {
@@ -1518,6 +1541,14 @@ export class CreditLedgerService {
               evidenceId: finalSupplierEvidence.id,
               expectedGeneration: claim.generation,
             });
+          } else if (evidence.kind === 'provider_rejected') {
+            // The gateway's own proof did not land before the restart; the refusal proves it anyway.
+            await this.finalizeZeroSupplierCost(operation, {
+              environment: input.environment,
+              expectedGeneration: claim.generation,
+              sourceRevision: rejectedSupplierSourceRevision,
+              payloadDigest: rejectedProofDigest(operation.id),
+            });
           }
         }
         // Time to live: the turn reported nothing at all, so it writes off revenue and
@@ -1539,13 +1570,24 @@ export class CreditLedgerService {
             detail: `Expired ${recoveryGraceMinutes} minutes after due_at with no retained evidence`,
           });
         }
-        await this.terminalizeOperation({
+        const receipt = await this.terminalizeOperation({
           ...claim,
           expectedGeneration: claim.generation,
           evidence,
           resolvedAt: new Date(),
           expireSpendHold: expired,
         });
+        recordSettledGenAiUsage(
+          this.metrics,
+          {
+            'gen_ai.request.model': operation.modelId,
+            'gen_ai.provider.name': operation.providerId ?? 'unknown',
+            'tau.surface': operation.surface,
+            'tau.activity': operation.activity,
+          },
+          evidence,
+          receipt.chargedAtoms,
+        );
         resolved += 1;
       } catch (error) {
         // Never retry provider execution: classify, then either back off or absorb this claim.
@@ -1930,6 +1972,54 @@ export class CreditLedgerService {
       throw new Error('Qualified final supplier evidence not found');
     }
     return this.finalizeSupplier({ ...input, evidenceId: evidence.id });
+  }
+
+  /**
+   * Finalizes at zero the supplier side of operations a supplier refused before running them.
+   *
+   * Until the collector kept a refusal's own kind, a refused call was absorbed as cost-unknown
+   * and left `unresolved`, which the supplier sweep turned into a route-pausing case a day
+   * later. A refusal with a status proves zero cost, so each such operation gets the same final
+   * zero evidence the live path records now, and the next sweep closes its case. Idempotent:
+   * a replay finds the retained proof and the already-final operation.
+   */
+  public async finalizeRejectedSupplierLiabilities(input: {
+    environment: BillingEnvironment;
+    limit: number;
+  }): Promise<{ readonly repaired: number; readonly failedOperationIds: readonly string[] }> {
+    const operations = await this.databaseService.database
+      .select()
+      .from(creditOperation)
+      .where(
+        and(
+          eq(creditOperation.environment, input.environment),
+          eq(creditOperation.supplierState, 'unresolved'),
+          eq(creditOperation.customerState, 'absorbed'),
+          eq(creditOperation.meteringStatus, 'unavailable'),
+          sql`${creditOperation.normalizationEvidence}->>'terminalReason' = 'provider_rejected'`,
+        ),
+      )
+      .orderBy(asc(creditOperation.id))
+      .limit(input.limit);
+    let repaired = 0;
+    const failedOperationIds: string[] = [];
+    for (const operation of operations) {
+      try {
+        const state = await this.finalizeZeroSupplierCost(operation, {
+          environment: input.environment,
+          expectedGeneration: operation.generation,
+          sourceRevision: rejectedSupplierSourceRevision,
+          payloadDigest: rejectedProofDigest(operation.id),
+        });
+        if (state === 'final') {
+          repaired += 1;
+        }
+      } catch {
+        // One row's fault must not hold the rows after it: the job reports the id and the next pass retries.
+        failedOperationIds.push(operation.id);
+      }
+    }
+    return { repaired, failedOperationIds };
   }
 
   /** Applies qualified supplier finality independently of the customer receipt. */
@@ -3238,6 +3328,62 @@ export class CreditLedgerService {
       debt -= repayment;
     }
     return { assets: next, debtAtoms: debt };
+  }
+
+  /**
+   * Retains final zero-cost supplier evidence for an operation the supplier never ran, and
+   * finalizes the supplier side on it. Idempotent: a retained proof is found again, and an
+   * operation already final replays.
+   */
+  private async finalizeZeroSupplierCost(
+    operation: Pick<
+      typeof creditOperation.$inferSelect,
+      'id' | 'accountId' | 'requestDigest' | 'providerId' | 'invocation'
+    >,
+    input: {
+      environment: BillingEnvironment;
+      expectedGeneration: bigint;
+      sourceRevision: string;
+      payloadDigest: string;
+    },
+  ): Promise<'final' | 'unresolved' | 'replay'> {
+    const outcome = await this.appendSupplierEvidence({
+      operationId: operation.id,
+      environment: input.environment,
+      provider: operation.providerId ?? 'undispatched',
+      credentialAccount: operation.invocation?.credentialAccount ?? 'undispatched',
+      sourceObjectId: operation.id,
+      sourceRevision: input.sourceRevision,
+      payloadDigest: input.payloadDigest,
+      currency: 'usd',
+      numerator: 0n,
+      denominator: 1n,
+      completeness: 'complete',
+      finality: 'final',
+      receivedAt: new Date(),
+    });
+    if (outcome === 'conflict') {
+      throw new Error(`Conflicting ${input.sourceRevision} proof`);
+    }
+    const [evidence] = await this.databaseService.database
+      .select({ id: supplierCostEvidence.id })
+      .from(supplierCostEvidence)
+      .where(
+        and(
+          eq(supplierCostEvidence.operationId, operation.id),
+          eq(supplierCostEvidence.sourceRevision, input.sourceRevision),
+        ),
+      );
+    if (!evidence) {
+      throw new Error(`${input.sourceRevision} proof was not retained`);
+    }
+    return this.finalizeSupplier({
+      evidenceId: evidence.id,
+      operationId: operation.id,
+      accountId: operation.accountId,
+      requestDigest: operation.requestDigest,
+      expectedGeneration: input.expectedGeneration,
+    });
   }
 
   /** Charges what a hold still reserves to its budget; capacity is never handed back on absorption. */

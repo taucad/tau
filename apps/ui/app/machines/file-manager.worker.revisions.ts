@@ -31,6 +31,7 @@ import type {
   TurnFailedEvent,
   TurnFinalizedEvent,
 } from '@taucad/revisions/revision-effects';
+import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import {
   sameRevisionStatus,
@@ -81,6 +82,7 @@ import { createTurnPlacementPort } from '@taucad/revisions/turn-placement';
 import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { reportToApi } from '#runtime/observability/report-to-api.js';
 import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '#lib/geospec-candidate-git.js';
 
 /**
@@ -884,6 +886,20 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   };
   actor.start();
   published = selectRevisionStatus(actor.getSnapshot());
+  /* W36 D1: each settled push or pull, on the existing telemetry ingest. The desktop's disk host reports its own. */
+  actor.getSnapshot().children.sync?.on('syncAttempt', (attempt: SyncMachineEmitted & { type: 'syncAttempt' }) => {
+    const apiBaseUrl = options.apiBaseUrl?.();
+    if (apiBaseUrl === undefined || isDesktopTarget()) {
+      return;
+    }
+    const { type: _type, durationMilliseconds, ...detail } = attempt;
+    reportToApi({
+      reportUrl: `${apiBaseUrl}/v1/telemetry/ingest`,
+      name: 'observability.syncAttempt',
+      duration: durationMilliseconds,
+      detail: { ...detail, placement: 'browser' },
+    });
+  });
   /* After `start`, because the invoked children exist only once the root runs.
    * Restore's toasts are the one thing in this tree that needs a person to see
    * them, so they cross the port rather than being re-derived on the page. */

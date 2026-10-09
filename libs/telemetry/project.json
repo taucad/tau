@@ -3,5 +3,15 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/telemetry",
   "projectType": "library",
-  "tags": ["scope:shared", "type:lib"]
+  "tags": ["scope:shared", "type:lib"],
+  "targets": {
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/infra/grafana/**/*",
+        "{workspaceRoot}/apps/api/app/telemetry/otel.ts"
+      ]
+    }
+  }
 }

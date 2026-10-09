@@ -17,10 +17,18 @@ import type { DatabaseService } from '#database/database.service.js';
 import type { RedisService } from '#redis/redis.service.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
+import { MetricsService } from '#telemetry/metrics.js';
 
 /** A `ws` socket as the gateway uses one: it closes, listens, and holds its frames while paused. */
 const routeSocket = (): WebSocket =>
-  ({ close: vi.fn(), on: vi.fn(), pause: vi.fn(), resume: vi.fn() }) as unknown as WebSocket;
+  ({
+    close: vi.fn(),
+    on: vi.fn(),
+    once: vi.fn(),
+    send: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+  }) as unknown as WebSocket;
 
 /**
  * Drives the gateway through its dev-mode prefix registration so the admitted prefix and the route
@@ -73,7 +81,17 @@ describe('HostsGateway session routes', () => {
       }),
       ensureStarted: vi.fn(async () => undefined),
     } as unknown as DevWebSocketService;
-    const gateway = new HostsGateway(hostsService, devWebSocketService, {} as Auth, {} as HttpAdapterHost);
+    const metrics = new MetricsService();
+    const rejections = vi.spyOn(metrics.wsUpgradeRejections, 'add');
+    const gateway = new HostsGateway(
+      hostsService,
+      devWebSocketService,
+      { api: { getSession: vi.fn(async () => null) } } as unknown as Auth,
+      {} as HttpAdapterHost,
+      undefined,
+      undefined,
+      metrics,
+    );
     await gateway.onModuleInit();
 
     const agentSocket = routeSocket();
@@ -90,6 +108,16 @@ describe('HostsGateway session routes', () => {
       headers: { host: 'localhost', authorization: 'Bearer grant' },
     } as unknown as IncomingMessage);
     expect(unknownSocket.close).toHaveBeenCalledWith(1008, 'unknown host route');
+    expect(rejections).toHaveBeenLastCalledWith(1, { 'ws.gateway': 'hosts', reason: 'unknown_route' });
+
+    const browserSocket = routeSocket();
+    await handler?.(browserSocket, {
+      url: '/v1/agents/sessions/as_abc/browser/agent',
+      headers: { host: 'localhost' },
+    } as unknown as IncomingMessage);
+    expect(browserSocket.close).toHaveBeenCalledWith(4401, 'browser session required');
+    expect(rejections).toHaveBeenLastCalledWith(1, { 'ws.gateway': 'hosts', reason: 'unauthenticated' });
+    expect(rejections).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -408,6 +436,8 @@ describe('HostsGateway control message failures', () => {
               frames.push(listener);
             }
           }),
+          once: vi.fn(),
+          send: vi.fn(),
           pause: vi.fn(),
           resume: vi.fn(),
         } as unknown as WebSocket;

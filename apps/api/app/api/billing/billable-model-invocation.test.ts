@@ -59,6 +59,14 @@ const qualification = (): QualifiedBillableInvocation => ({
   },
 });
 
+/** The gen_ai instruments the funded terminal records on every invocation. */
+const genAiMetrics = () => ({
+  genAiTokenUsage: { record: vi.fn() },
+  genAiOperationDuration: { record: vi.fn() },
+  genAiTimeToFirstToken: { record: vi.fn() },
+  genAiCost: { add: vi.fn() },
+});
+
 const intent = (signal = new AbortController().signal): BillableInvocationIntent => ({
   environment: 'development',
   authUserId: 'user',
@@ -90,9 +98,10 @@ const exhaustedProviderBody = {
 /* The real 200 stream OpenAI sent on 2026-09-19 with an exhausted organisation balance. */
 const exhaustedCapture = readFileSync(new URL('../llm/provider-account-stream.fixture.sse', import.meta.url), 'utf8');
 
-/** One admitted operation whose supplier answers a provider-account refusal. */
+/** One admitted operation whose supplier answer each test sets (a refusal, a stream or a success). */
 const exhaustionHarness = (qualified: QualifiedBillableInvocation) => {
   const metrics = {
+    ...genAiMetrics(),
     billingFundedOperationTerminals: { add: vi.fn() },
     billingProviderAccountRefusals: { add: vi.fn() },
   };
@@ -117,7 +126,7 @@ const exhaustionHarness = (qualified: QualifiedBillableInvocation) => {
     markDispatchAccepted: vi.fn(async () => true),
     getDispatchTimeRemaining: vi.fn(async () => 30_000),
     recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
-    terminalizeOperation: vi.fn(),
+    terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
   };
   const service = new BillableModelInvocationService(
     ledger as unknown as CreditLedgerService,
@@ -556,7 +565,10 @@ describe('BillableModelInvocationService', () => {
           }),
         ),
     );
-    const metrics = { billingFundedOperationTerminals: { add: vi.fn() } };
+    const metrics = {
+      ...genAiMetrics(),
+      billingFundedOperationTerminals: { add: vi.fn() },
+    };
     const row = {
       ...qualified,
       id: 'operation',
@@ -578,7 +590,7 @@ describe('BillableModelInvocationService', () => {
       markDispatchAccepted: vi.fn(async () => true),
       getDispatchTimeRemaining: vi.fn(async () => 30_000),
       recordInvocationEvidence: vi.fn(),
-      terminalizeOperation: vi.fn(),
+      terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
     };
     const service = new BillableModelInvocationService(
       ledger as unknown as CreditLedgerService,
@@ -668,7 +680,7 @@ describe('BillableModelInvocationService', () => {
       getDispatchTimeRemaining: vi.fn(async () => 30_000),
       recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
       recordCancellation: vi.fn(),
-      terminalizeOperation: vi.fn(),
+      terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
     };
     const service = new BillableModelInvocationService(
       ledger as unknown as CreditLedgerService,
@@ -743,7 +755,7 @@ describe('BillableModelInvocationService', () => {
         getDispatchTimeRemaining: vi.fn(async () => 30_000),
         recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
         recordCancellation: vi.fn(),
-        terminalizeOperation: vi.fn(),
+        terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
       };
       const service = new BillableModelInvocationService(
         ledger as unknown as CreditLedgerService,
@@ -824,7 +836,10 @@ describe('BillableModelInvocationService', () => {
         jointInputMaximum: { version: 'joint-input-v1', quantity: '10' },
       },
     };
-    const metrics = { billingFundedOperationTerminals: { add: vi.fn() } };
+    const metrics = {
+      ...genAiMetrics(),
+      billingFundedOperationTerminals: { add: vi.fn() },
+    };
     const row = {
       ...qualified,
       id: 'operation',
@@ -850,7 +865,7 @@ describe('BillableModelInvocationService', () => {
       markDispatchAccepted: vi.fn(async () => true),
       getDispatchTimeRemaining: vi.fn(async () => 30_000),
       recordInvocationEvidence: vi.fn(),
-      terminalizeOperation: vi.fn(),
+      terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
     };
     const service = new BillableModelInvocationService(
       ledger as unknown as CreditLedgerService,
@@ -895,6 +910,7 @@ describe('BillableModelInvocationService', () => {
   it('recovers an expired owner pool and retries the same admission once before dispatch', async () => {
     const qualified = qualification();
     const metrics = {
+      ...genAiMetrics(),
       billingFundedOperationRecoveries: { add: vi.fn() },
       billingFundedOperationTerminals: { add: vi.fn() },
     };
@@ -930,7 +946,7 @@ describe('BillableModelInvocationService', () => {
       markDispatchAccepted: vi.fn(async () => true),
       getDispatchTimeRemaining: vi.fn(async () => 30_000),
       recordInvocationEvidence: vi.fn(),
-      terminalizeOperation: vi.fn(),
+      terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
     };
     const service = new BillableModelInvocationService(
       ledger as unknown as CreditLedgerService,
@@ -975,6 +991,7 @@ describe('BillableModelInvocationService', () => {
   ] as const)('returns the trusted %s pool failsafe only after recovery and one retry', async (activity, code) => {
     const qualified = qualification();
     const metrics = {
+      ...genAiMetrics(),
       billingFundedOperationRecoveries: { add: vi.fn() },
       billingFundedOperationDenials: { add: vi.fn() },
     };
@@ -1061,7 +1078,10 @@ describe('BillableModelInvocationService', () => {
 
   it('should answer a voided attempt key with 409 ATTEMPT_VOIDED and never dispatch it', async () => {
     const qualified = qualification();
-    const metrics = { billingVoidedAdmissions: { add: vi.fn() } };
+    const metrics = {
+      ...genAiMetrics(),
+      billingVoidedAdmissions: { add: vi.fn() },
+    };
     const ledger = {
       getOperationForAttempt: vi.fn(async () => undefined),
       issueCurrentPromotion: vi.fn(),
@@ -1088,6 +1108,7 @@ describe('BillableModelInvocationService', () => {
   it('returns recovery-unavailable while another claimant owns an expired operation', async () => {
     const qualified = qualification();
     const metrics = {
+      ...genAiMetrics(),
       billingFundedOperationRecoveries: { add: vi.fn() },
       billingFundedOperationDenials: { add: vi.fn() },
     };
@@ -1167,7 +1188,8 @@ describe('BillableModelInvocationService', () => {
    * settles as provider_rejected, so the customer is charged nothing for it. */
   it('should refuse with the opaque provider-account code when the supplier account is exhausted before the stream', async () => {
     const qualified = qualification();
-    const failed = vi.fn(() => ({ kind: 'absorbed_unknown' }) as const);
+    const rejected = { kind: 'provider_rejected', executionStatus: 'rejected' } as const;
+    const failed = vi.fn(() => rejected);
     qualified.adapter.createEvidenceCollector = () => ({
       accept: vi.fn(),
       complete: () => ({ kind: 'absorbed_unknown' }),
@@ -1199,15 +1221,56 @@ describe('BillableModelInvocationService', () => {
       });
     }
     expect(failed).toHaveBeenCalledWith('provider_rejected');
-    expect(ledger.recordInvocationEvidence).toHaveBeenCalledWith(
-      expect.objectContaining({ evidence: { kind: 'absorbed_unknown' } }),
+    expect(ledger.recordInvocationEvidence).toHaveBeenCalledWith(expect.objectContaining({ evidence: rejected }));
+    // A refusal is settled now, not left to recovery: nothing can price a call that never ran.
+    expect(ledger.terminalizeOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ evidence: rejected }),
     );
     // W7: the refusal is counted by provider, never by customer or sentence.
     expect(metrics.billingProviderAccountRefusals.add).toHaveBeenCalledWith(1, {
       'deployment.environment': 'development',
       providerId: 'openai',
+      reason: 'credit_exhausted',
     });
   });
+
+  /* F-11: through the funded gateway the upstream key is Tau's, so a 401 is a supplier-account
+   * failure that pages, while the caller sees the same opaque supplier-account answer as an
+   * exhausted account: resuming cannot change it, so the host never offers to. */
+  it.each([401, 403])(
+    'should count an upstream %i as a credential_rejected supplier refusal and answer PROVIDER_ACCOUNT_EXHAUSTED',
+    async (status) => {
+      const qualified = qualification();
+      qualified.adapter.executeOnce = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: { type: 'authentication_error', message: 'invalid x-api-key' } }), {
+            status,
+            headers: { 'content-type': 'application/json' },
+          }),
+      );
+      const { metrics, service } = exhaustionHarness(qualified);
+
+      const error: unknown = await service.invoke(intent()).catch((error: unknown) => error);
+
+      expect(error).toBeInstanceOf(LlmGatewayError);
+      expect((error as LlmGatewayError).getStatus()).toBe(503);
+      expect((error as LlmGatewayError).getResponse()).toEqual({
+        type: 'error',
+        error: {
+          type: 'PROVIDER_ACCOUNT_EXHAUSTED',
+          // The supplier's own sentence never leaves the API.
+          message: "The model provider's account is unavailable.",
+          details: { providerId: 'openai', providerCode: 'credential_rejected', accountOwner: 'tau' },
+        },
+      });
+      expect(metrics.billingProviderAccountRefusals.add).toHaveBeenCalledOnce();
+      expect(metrics.billingProviderAccountRefusals.add).toHaveBeenCalledWith(1, {
+        'deployment.environment': 'development',
+        providerId: 'openai',
+        reason: 'credential_rejected',
+      });
+    },
+  );
 
   /* W3: the funded refusal branch logs what the operator needs and classifies the status
    * through the same function the self-host path uses, so the two cannot drift. */
@@ -1372,5 +1435,162 @@ describe('BillableModelInvocationService', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  describe('gen_ai telemetry at the funded terminal', () => {
+    const labels = { 'gen_ai.request.model': 'model', 'gen_ai.provider.name': 'openai', 'tau.surface': 'gateway' };
+
+    const settle = async (
+      meterItems: Extract<TerminalEvidence, { kind: 'final_usage' }>['meterItems'],
+      stream?: boolean,
+    ) => {
+      const qualified = qualification();
+      qualified.normalizedRequest = {
+        body: { model: 'model', ...(stream === undefined ? {} : { stream }) },
+        headers: {},
+      };
+      // Two supplier chunks, so a second chunk must not record time to first token again.
+      qualified.adapter.executeOnce = vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array<ArrayBuffer>>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('first'));
+                controller.enqueue(new TextEncoder().encode('second'));
+                controller.close();
+              },
+            }),
+          ),
+      );
+      qualified.adapter.createEvidenceCollector = () => ({
+        accept: vi.fn(),
+        complete: () => ({ kind: 'final_usage', usageOccurredAt: new Date(), meterItems }),
+        failed: () => ({ kind: 'absorbed_unknown' }),
+      });
+      const harness = exhaustionHarness(qualified);
+      harness.ledger.terminalizeOperation.mockResolvedValue({ chargedAtoms: 2500n });
+      const result = await harness.service.invoke(intent());
+      if (result.state !== 'streaming') {
+        throw new Error('Invocation did not stream');
+      }
+      await result.response.text();
+      await result.completion;
+      return harness.metrics;
+    };
+
+    it('records tokens, the charged USD and a successful duration', async () => {
+      const metrics = await settle([
+        { dimension: 'uncached_input', tier: null, quantity: 7n },
+        { dimension: 'output', tier: null, quantity: 5n },
+      ]);
+
+      expect(metrics.genAiTokenUsage.record).toHaveBeenCalledWith(7, {
+        ...labels,
+        'gen_ai.token.type': 'input',
+        'tau.activity': 'agent',
+      });
+      expect(metrics.genAiTokenUsage.record).toHaveBeenCalledWith(5, {
+        ...labels,
+        'gen_ai.token.type': 'output',
+        'tau.activity': 'agent',
+      });
+      expect(metrics.genAiCost.add).toHaveBeenCalledExactlyOnceWith(0.0025, { ...labels, 'tau.activity': 'agent' });
+      expect(metrics.genAiOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+        ...labels,
+        'error.type': '',
+      });
+    });
+
+    it('records time to first token once for a streaming request and never for a non-streaming one', async () => {
+      const usage = [{ dimension: 'uncached_input', tier: null, quantity: 1n }];
+      const streamed = await settle(usage, true);
+      const buffered = await settle(usage);
+
+      expect(streamed.genAiTimeToFirstToken.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), labels);
+      expect(buffered.genAiTimeToFirstToken.record).not.toHaveBeenCalled();
+    });
+
+    it('records neither tokens nor cost for an operation left pending for recovery', async () => {
+      const qualified = qualification();
+      qualified.adapter.createEvidenceCollector = () => ({
+        accept: vi.fn(),
+        complete: () => ({
+          kind: 'absorbed_unknown',
+          meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 9n }],
+        }),
+        failed: () => ({ kind: 'absorbed_unknown' }),
+      });
+      const { ledger, metrics, service } = exhaustionHarness(qualified);
+      const result = await service.invoke(intent());
+      if (result.state !== 'streaming') {
+        throw new Error('Invocation did not stream');
+      }
+      await result.response.text();
+      await result.completion;
+
+      expect(ledger.terminalizeOperation).not.toHaveBeenCalled();
+      expect(metrics.genAiTokenUsage.record).not.toHaveBeenCalled();
+      expect(metrics.genAiCost.add).not.toHaveBeenCalled();
+    });
+
+    it('records cache reads and writes as their own token types', async () => {
+      const metrics = await settle([
+        { dimension: 'uncached_input', tier: null, quantity: 1n },
+        { dimension: 'cache_read', tier: null, quantity: 900n },
+        { dimension: 'cache_write', tier: '5m', quantity: 40n },
+        { dimension: 'output', tier: null, quantity: 2n },
+      ]);
+
+      expect(metrics.genAiTokenUsage.record).toHaveBeenCalledWith(
+        900,
+        expect.objectContaining({ 'gen_ai.token.type': 'cache_read' }),
+      );
+      expect(metrics.genAiTokenUsage.record).toHaveBeenCalledWith(
+        40,
+        expect.objectContaining({ 'gen_ai.token.type': 'cache_write' }),
+      );
+    });
+
+    it('records a refused admission as one errored duration with no tokens or cost', async () => {
+      const qualified = qualification();
+      const { ledger, metrics, service } = exhaustionHarness(qualified);
+      ledger.admitOperation.mockResolvedValue({ status: 'denied', reason: 'budget_unavailable' } as unknown as Awaited<
+        ReturnType<typeof ledger.admitOperation>
+      >);
+
+      await expect(service.invoke(intent())).rejects.toBeInstanceOf(LlmGatewayError);
+
+      expect(metrics.genAiOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+        ...labels,
+        'error.type': 'budget_unavailable',
+      });
+      expect(metrics.genAiTokenUsage.record).not.toHaveBeenCalled();
+      expect(metrics.genAiCost.add).not.toHaveBeenCalled();
+      expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [401, 'upstream_auth'],
+      [403, 'upstream_auth'],
+      [429, 'upstream_429'],
+      [400, 'upstream_4xx'],
+      [502, 'upstream_5xx'],
+    ])('records a supplier %i refusal as error.type %s', async (status, errorType) => {
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+        // Test-local logger sink.
+      });
+      const qualified = qualification();
+      qualified.adapter.executeOnce = vi.fn(
+        async () => new Response(JSON.stringify({ error: { type: 'refused' } }), { status }),
+      );
+      const { metrics, service } = exhaustionHarness(qualified);
+
+      await expect(service.invoke(intent())).rejects.toBeInstanceOf(LlmGatewayError);
+
+      expect(metrics.genAiOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+        ...labels,
+        'error.type': errorType,
+      });
+    });
   });
 });

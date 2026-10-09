@@ -93,6 +93,7 @@ describe('billing authenticated reporting endpoints', () => {
     const payments = mock<BillingPaymentsService>();
     const usage = mock<BillingUsageService>();
     const auth = mockDeep<Auth>();
+    const closure = mock<BillingAccountClosureService>();
     auth.api.getSession.mockResolvedValue(null);
     usage.getUsage.mockResolvedValue(emptyUsage);
     usage.getOpenHolds.mockResolvedValue(openHolds);
@@ -105,7 +106,7 @@ describe('billing authenticated reporting endpoints', () => {
         { provide: BillingService, useValue: billing },
         { provide: BillingUsageService, useValue: usage },
         { provide: BillingPaymentsService, useValue: payments },
-        { provide: BillingAccountClosureService, useValue: mock<BillingAccountClosureService>() },
+        { provide: BillingAccountClosureService, useValue: closure },
         { provide: BillingEstimatesService, useValue: mock<BillingEstimatesService>() },
       ],
     }).compile();
@@ -219,6 +220,23 @@ describe('billing authenticated reporting endpoints', () => {
       expect(conflict.json()).toMatchObject({
         code: 'action_already_pending',
         action: pendingAction,
+      });
+      // Account closure refuses with the same shape, so the global filter forwards the pending payment to the UI.
+      closure.prepare.mockRejectedValueOnce(
+        new ConflictException({
+          code: 'payment_action_pending',
+          action: { ...pendingAction, actionId: 'action-pending' },
+        }),
+      );
+      const refusedClosure = await app.inject({
+        method: 'POST',
+        url: '/v1/billing/account-closure',
+        payload: { requestId: 'closure-request-a' },
+      });
+      expect(refusedClosure.statusCode).toBe(409);
+      expect(refusedClosure.json()).toMatchObject({
+        code: 'payment_action_pending',
+        action: { actionId: 'action-pending', state: 'redirect_required' },
       });
       payments.prepareTopup.mockRejectedValueOnce(new ConflictException({ code: 'request_payload_conflict' }));
       const changed = await app.inject({

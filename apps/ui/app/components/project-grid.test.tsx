@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -247,6 +247,35 @@ describe('CommunityProjectGrid', () => {
     expect(screen.getByTestId('cad-preview-provider')).toHaveAttribute('data-project-id', 'second-project');
     expect(firstToggle).toHaveAttribute('aria-pressed', 'false');
     expect(secondToggle).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('should tear down a live preview when its card scrolls out of view', async () => {
+    let reportIntersection: ((isIntersecting: boolean) => void) | undefined;
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        public observe = vi.fn();
+        public disconnect = vi.fn();
+
+        public constructor(callback: (entries: Array<{ isIntersecting: boolean }>) => void) {
+          reportIntersection = (isIntersecting) => {
+            callback([{ isIntersecting }]);
+          };
+        }
+      },
+    );
+    renderGrid();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview model' }));
+    expect(await screen.findByTestId('cad-preview-provider')).toBeInTheDocument();
+
+    act(() => {
+      reportIntersection?.(false);
+    });
+
+    expect(screen.queryByTestId('cad-preview-provider')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview model' })).toHaveAttribute('aria-pressed', 'false');
+    vi.unstubAllGlobals();
   });
 
   it('should Remix through the example page flow: location dialog, fork suffix and toast', async () => {

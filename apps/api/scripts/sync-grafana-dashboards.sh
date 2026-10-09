@@ -59,7 +59,7 @@ ensure_folder() {
     echo -e "${CYAN}·${NC} Folder exists:  ${title}"
   else
     echo -e "${RED}✗${NC} Folder failed:  ${title} (HTTP ${status})"
-    ((errors++))
+    errors=$((errors + 1))
   fi
 }
 
@@ -92,7 +92,7 @@ sync_dashboards() {
     else
       echo -e "${RED}✗${NC} Dashboard: ${title} (${uid}) — HTTP ${status}"
       echo "  ${body}" | head -3
-      ((errors++))
+      errors=$((errors + 1))
     fi
   done
 }
@@ -137,7 +137,7 @@ sync_alert_rule_groups() {
     else
       echo -e "${RED}✗${NC} Alert group: ${group_name} — HTTP ${status}"
       echo "  ${body}" | head -3
-      ((errors++))
+      errors=$((errors + 1))
     fi
   done
 }

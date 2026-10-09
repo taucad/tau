@@ -1010,7 +1010,9 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
                   <ChatStreamingStopButton
                     variant='compact'
                     formattedCancelKeyCombination={formattedCancelKeyCombination}
-                    onCancel={stop}
+                    onCancel={() => {
+                      stop('message-stop');
+                    }}
                   />
                 </div>
               ) : null}

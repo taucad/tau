@@ -1,0 +1,127 @@
+# Verify an already-built signed macOS desktop archive, without rebuilding it.
+#
+# `release-build.yml` uploads `desktop-darwin-arm64` (Tau-macos-arm64.zip)
+# before it verifies the package, so the archive survives a failed verify for
+# 7 days. Dispatch this with that run's ID to rerun `verify-macos-package.mts
+# --release` on a fresh macos-15 runner in minutes instead of a ~2 h signed
+# build. Dispatch it from a branch to try verifier changes against the same
+# signed app.
+#
+# `--release` checks the bundle against expectations in the checkout
+# (quick-look-formats.json, the fuse wire, fixtures, the generated format
+# manifest), so pass `source-ref` (for example the release tag) when those have
+# moved on since the archive was built. It defaults to the dispatched ref.
+#
+# `runner` picks the macOS image, to tell an OS-version behaviour from a VM
+# one. `extension-entitlements` switches to a Quick Look experiment instead of
+# the full verifier: it ad-hoc re-signs only the Quick Look extensions with
+# that entitlements file (a path in the checkout), registers them and runs the
+# thumbnail probe on cube.step, printing the unified log either way. The outer
+# app's seal no longer matches after that, so this mode proves nothing about
+# the shipped signature; it only isolates the extension's sandbox.
+#
+# It needs no signing secrets and publishes nothing: it only reads the
+# artifact and the checked-out sources.
+name: Verify desktop macOS archive
+run-name: Verify desktop macOS archive from run ${{ inputs.run-id }} on ${{ inputs.runner }}${{ inputs.extension-entitlements && format(' with {0}{1}', inputs.extension-entitlements, !inputs.hardened-runtime && ' (no hardened runtime)' || '') || '' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: 'release-build.yml run ID whose desktop-darwin-arm64 artifact to verify'
+        required: true
+        type: string
+      source-ref:
+        description: 'Ref whose verifier and fixtures to check the archive against (default: the dispatched ref)'
+        required: false
+        type: string
+      runner:
+        description: 'macOS runner image'
+        required: false
+        type: string
+        default: macos-15
+      extension-entitlements:
+        description: 'Quick Look experiment: entitlements file to ad-hoc re-sign the extensions with (default: run the full verifier)'
+        required: false
+        type: string
+      hardened-runtime:
+        description: 'Quick Look experiment: sign the extensions with the hardened runtime'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify:
+    name: Verify the signed package
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    env:
+      TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.source-ref || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        if: inputs.extension-entitlements == ''
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+
+      - name: Download the signed archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-darwin-arm64
+          run-id: ${{ inputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/archive
+
+      # ditto keeps the signature, extended attributes and notarization ticket.
+      - name: Unpack Tau.app
+        run: |
+          mkdir -p "$TAU_MACOS_PACKAGE_OUTPUT_ROOT/Tau-darwin-arm64"
+          ditto -x -k "$RUNNER_TEMP/archive/Tau-macos-arm64.zip" "$TAU_MACOS_PACKAGE_OUTPUT_ROOT/Tau-darwin-arm64"
+          test -d "$TAU_MACOS_PACKAGE_OUTPUT_ROOT/Tau-darwin-arm64/Tau.app"
+
+      - name: Verify the signed package
+        if: inputs.extension-entitlements == ''
+        run: pnpm nx run desktop:verify-macos-release
+
+      - name: Quick Look thumbnail experiment
+        if: inputs.extension-entitlements != ''
+        env:
+          ENTITLEMENTS: ${{ inputs.extension-entitlements }}
+          HARDENED: ${{ inputs.hardened-runtime }}
+        run: |
+          set -uo pipefail
+          sw_vers
+          app="$TAU_MACOS_PACKAGE_OUTPUT_ROOT/Tau-darwin-arm64/Tau.app"
+          options=()
+          if [ "$HARDENED" = true ]; then options=(--options runtime); fi
+          for appex in "$app"/Contents/PlugIns/*.appex; do
+            # macOS bash 3.2 treats an empty array as unset under `set -u`.
+            codesign --force --sign - ${options[@]+"${options[@]}"} --entitlements "$ENTITLEMENTS" "$appex"
+            codesign -d --entitlements - "$appex"
+            pluginkit -a "$appex"
+          done
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app"
+          pluginkit -m -A -D -i com.taucad.tau.desktop.quicklook-thumbnail
+          xcrun swiftc -O apps/desktop/scripts/quick-look-thumbnail-probe.swift -o "$RUNNER_TEMP/thumbnail-probe"
+          work=$(mktemp -d)
+          cp packages/plugins/brep/src/fixtures/cube.step "$work/cube-$RANDOM.step"
+          status=1
+          for _ in 1 2; do
+            if "$RUNNER_TEMP/thumbnail-probe" "$work"/cube-*.step "$work/thumbnail.png" 128 1; then status=0; break; fi
+            sleep 2
+          done
+          /usr/bin/log show --last 3m --info --style compact --predicate 'subsystem == "com.taucad.tau.desktop" OR process BEGINSWITH "TauQuickLook" OR process == "pkd" OR (process == "kernel" AND eventMessage CONTAINS "Sandbox") OR eventMessage CONTAINS[c] "TauQuickLook"' \
+            | grep -E 'Sandbox|com.taucad.tau.desktop:|TauQuickLookError|terminated' | tail -100 || true
+          if [ "$status" = 0 ]; then echo "THUMBNAIL OK"; sips -g pixelWidth -g pixelHeight "$work/thumbnail.png"; else echo "THUMBNAIL FAILED"; fi
+          exit "$status"

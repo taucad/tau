@@ -260,10 +260,13 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
   const frozen = visibleAction?.frozen;
   const terminal =
     visibleAction?.state === 'fulfilled' || visibleAction?.state === 'failed' || visibleAction?.state === 'canceled';
+  // Reached only through a refused top-up that carried it: its worker confirms or closes it, never this dialog.
+  const automatic = visibleAction?.purpose === 'automatic_topup';
   const amountIsValid = amountCents >= minCents && amountCents <= maxCents;
 
+  // Ends a quote or an open hosted Checkout; the server expires the Checkout session so nothing can be paid later.
   const discardQuote = async (): Promise<void> => {
-    if (visibleAction?.state !== 'prepared') {
+    if (visibleAction?.state !== 'prepared' && visibleAction?.state !== 'redirect_required') {
       return;
     }
     const startedGeneration = generationValue;
@@ -275,9 +278,27 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
         return;
       }
       startNew();
-    } catch {
+    } catch (error) {
       if (scopeRef.current.value === startedGeneration) {
-        toast.warning('Could not discard the quote. Try again.');
+        if (error instanceof BillingPaymentConflict && error.code === 'action_not_cancelable') {
+          // The Checkout already closed on Stripe's side, so retrying cannot help; show where the payment stands.
+          toast.warning('This payment can no longer be cancelled.');
+          const current = await getPaymentAction(visibleBinding!, visibleAction.actionId).catch(() => undefined);
+          // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the modal may have moved on during the GET
+          if (current !== undefined && scopeRef.current.value === startedGeneration) {
+            actionGenerationRef.current = startedGeneration;
+            setAction(current);
+            if (current.state === 'fulfilled') {
+              void queryClient.invalidateQueries({ queryKey: ['billing'] });
+            }
+          }
+        } else {
+          toast.warning(
+            visibleAction.state === 'prepared'
+              ? 'Could not discard the quote. Try again.'
+              : 'Could not cancel the payment. Try again.',
+          );
+        }
       }
     } finally {
       if (scopeRef.current.value === startedGeneration) {
@@ -426,7 +447,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
               {frozen.paymentMethod ? (
                 <div className='flex items-center justify-between rounded-md border px-3 py-2 text-sm'>
                   <PaymentMethod method={frozen.paymentMethod} />
-                  {visibleAction.state === 'prepared' ? (
+                  {visibleAction.state === 'prepared' && !automatic ? (
                     <span className='text-xs text-muted-foreground'>Discard this quote to change the card.</span>
                   ) : undefined}
                 </div>
@@ -434,7 +455,12 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
             </>
           ) : undefined}
 
-          {visibleAction?.state === 'prepared' ? (
+          {visibleAction?.state === 'prepared' && automatic ? (
+            <p className='text-sm' role='status'>
+              Automatic reload is handling this purchase. It finishes or clears on its own.
+            </p>
+          ) : undefined}
+          {visibleAction?.state === 'prepared' && !automatic ? (
             <div className='flex gap-2'>
               <Button
                 className='flex-1'
@@ -453,7 +479,14 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
           {visibleAction?.state === 'redirect_required' ? (
             <div className='flex flex-col gap-2 text-sm'>
               <p>Checkout is ready. Continue when you are ready.</p>
-              <Button onClick={() => followPaymentRedirect(visibleAction)}>Resume Checkout</Button>
+              <div className='flex gap-2'>
+                <Button className='flex-1' disabled={visibleBusy} onClick={() => followPaymentRedirect(visibleAction)}>
+                  Resume Checkout
+                </Button>
+                <Button variant='outline' disabled={visibleBusy} onClick={discardQuote}>
+                  Cancel payment
+                </Button>
+              </div>
             </div>
           ) : undefined}
           {visibleAction && settlingStates.has(visibleAction.state) ? (

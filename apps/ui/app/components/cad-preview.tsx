@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { cn } from '@taucad/ui/utils/cn';
 import { useSelector } from '@xstate/react';
 import { ModelViewer, RuntimeStatusOverlay } from '#components/model-viewer.js';
 import type { ModelViewerGraphicsOptions, ModelViewerState } from '#components/model-viewer.js';
@@ -19,6 +20,8 @@ type CadPreviewViewerProps = {
   readonly initialVerticalFieldOfView?: number;
   readonly stageOptions?: StageOptions;
   readonly graphicsOptions?: CadPreviewGraphicsOptions;
+  /** A larger artifact is not handed to three.js; a notice asks to open the project instead. */
+  readonly maxArtifactBytes?: number;
 };
 
 const cadPreviewStatusToViewerState = (status: CadPreviewStatus, hasArtifact: boolean): ModelViewerState => {
@@ -55,6 +58,7 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
   initialVerticalFieldOfView,
   stageOptions,
   graphicsOptions,
+  maxArtifactBytes,
 }: CadPreviewViewerProps): React.JSX.Element {
   const { artifact, artifactHash, graphicsRef, status, error } = useCadPreview();
   const enableLines = useSelector(graphicsRef, (state) => state.context.enableLines);
@@ -63,6 +67,17 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
   const enableGizmo = useSelector(graphicsRef, (state) => state.context.enableGizmo);
   const enableGrid = useSelector(graphicsRef, (state) => state.context.enableGrid);
   const enableAxes = useSelector(graphicsRef, (state) => state.context.enableAxes);
+
+  if (artifact && maxArtifactBytes !== undefined && artifact.content.length > maxArtifactBytes) {
+    return (
+      <p
+        role='status'
+        className={cn('flex items-center justify-center p-4 text-center text-sm text-muted-foreground', className)}
+      >
+        Too large to preview. Open the project to view it.
+      </p>
+    );
+  }
 
   return (
     <ModelViewer

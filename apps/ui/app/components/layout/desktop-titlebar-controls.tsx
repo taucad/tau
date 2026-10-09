@@ -77,8 +77,7 @@ export const DesktopTitlebarControls = ({
     >
       <div
         data-slot='desktop-titlebar-controls'
-        // `pl-20` leaves 16 px after the traffic lights (they end near 65 px under `hiddenInset`).
-        className='flex h-9 items-center gap-1 bg-transparent pr-1 pl-20 [app-region:no-drag] [&_button]:[app-region:no-drag]'
+        className='flex h-9 items-center gap-1 bg-transparent pr-1 pl-(--desktop-titlebar-inset) [app-region:no-drag] [&_button]:[app-region:no-drag]'
       >
         <SidebarTrigger aria-label='Toggle Sidebar' onSidebarResize={onSidebarResize} />
         <HistoryButton direction='Back' isDisabled={!availability.back} />

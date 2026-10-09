@@ -110,15 +110,15 @@ describe('closeGracefully', () => {
     );
     // A route that, unlike the real gateways, never closes its sockets at stop.
     sockets = new WebSocketServer({ noServer: true });
-    app.get(UpgradeRouter).route(
-      app.getHttpServer(),
-      (pathname) => pathname === '/socket',
-      (request, socket, head) => {
+    app.get(UpgradeRouter).route(app.getHttpServer(), {
+      gateway: 'hosts',
+      matches: (pathname) => pathname === '/socket',
+      handle: (request, socket, head) => {
         sockets.handleUpgrade(request, socket, head, (accepted) => {
           sockets.emit('connection', accepted, request);
         });
       },
-    );
+    });
     await app.listen(0, '127.0.0.1');
     base = await app.getUrl();
     port = Number(new URL(base).port);

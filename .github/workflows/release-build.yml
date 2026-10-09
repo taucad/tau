@@ -387,9 +387,8 @@ jobs:
       - name: Package, sign and notarize
         run: pnpm nx run desktop:package-macos-release --parallel=1
 
-      - name: Verify the signed package
-        run: pnpm nx run desktop:verify-macos-release
-
+      # Uploaded before verification so a failed verify leaves the signed app
+      # for verify-desktop-macos.yml. Publishing still needs this whole job.
       - name: Upload the macOS archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -397,6 +396,9 @@ jobs:
           path: ${{ env.TAU_MACOS_PACKAGE_OUTPUT_ROOT }}/Tau-macos-arm64.zip
           if-no-files-found: error
           retention-days: 7
+
+      - name: Verify the signed package
+        run: pnpm nx run desktop:verify-macos-release
 
       - name: Delete the signing keychain
         if: always()

@@ -94,7 +94,8 @@
         "{workspaceRoot}/packages/plugins/*/README.md",
         "{workspaceRoot}/packages/core/*/README.md",
         "{workspaceRoot}/packages/plugins/*/src/index.ts",
-        "{workspaceRoot}/packages/core/*/src/index.ts"
+        "{workspaceRoot}/packages/core/*/src/index.ts",
+        "{workspaceRoot}/**/*"
       ]
     },
     "test:e2e": {
@@ -184,6 +185,13 @@
       "cache": false,
       "options": {
         "command": "node scripts/src/plan-geospec-ci.ts"
+      }
+    },
+    "validate-grafana": {
+      "executor": "nx:run-commands",
+      "inputs": ["{projectRoot}/src/validate-grafana.ts", "{workspaceRoot}/infra/grafana/**/*"],
+      "options": {
+        "command": "node scripts/src/validate-grafana.ts"
       }
     },
     "validate-workflows": {

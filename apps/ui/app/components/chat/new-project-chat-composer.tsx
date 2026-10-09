@@ -39,8 +39,8 @@ export function NewProjectChatComposer({
     textareaRef.current?.focus();
   }, []);
 
-  /* Mount autofocus alone misses a return to an already-mounted Home
-   * ("New Project" or ⌃N while on `/`), so honour the navigation request too. */
+  /* Mount autofocus alone misses a return to an already-mounted Home, so honour a
+   * navigation that asks for focus (`state.focusChatComposer`) too. */
   const { key: locationKey, state: locationState } = useLocation() as { key: string; state: unknown };
   // Each navigation that asks for focus is its own request, identified by its location key.
   const focusRequestKey =

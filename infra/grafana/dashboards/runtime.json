@@ -1,0 +1,398 @@
+{
+  "uid": "tau-runtime",
+  "title": "Runtime & Machines (Fly-equivalent)",
+  "tags": ["tau", "runtime", "fly", "infrastructure"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
+        "current": { "text": "tau-api", "value": "tau-api" },
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
+      },
+      {
+        "name": "app",
+        "label": "Fly app",
+        "type": "custom",
+        "query": "tau-api,tau-api-staging",
+        "current": { "text": "tau-api", "value": "tau-api" },
+        "includeAll": false
+      }
+    ]
+  },
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "title": "Processes — API and billing workers (per Fly process group)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "title": "Processes Up",
+      "type": "stat",
+      "description": "Scrape health of each Tau process: the local stand-in for Fly's health checks. Expected 2 (app, billing-operations), 3 if the optional billing-recovery target runs.",
+      "targets": [{ "expr": "count(process_uptime{service_name=~\"$service\"}) or vector(0)" }],
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 }
+    },
+    {
+      "title": "Restarts (1h)",
+      "type": "stat",
+      "description": "A process restart resets its CPU counter.",
+      "targets": [
+        { "expr": "sum(resets(process_cpu_time_total{service_name=~\"$service\",cpu_mode=\"user\"}[1h])) or vector(0)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 }
+    },
+    {
+      "title": "Min Uptime",
+      "type": "stat",
+      "targets": [{ "expr": "min(process_uptime{service_name=~\"$service\"})" }],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 }
+    },
+    {
+      "title": "API RSS",
+      "type": "stat",
+      "targets": [{ "expr": "max(process_memory_usage{service_name=~\"$service\",tau_process=\"app\"})" }],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 }
+    },
+    {
+      "title": "API CPU",
+      "type": "stat",
+      "description": "Cores busy; 1.0 = one full core (Fly shared-cpu-1x)",
+      "targets": [{ "expr": "sum(rate(process_cpu_time_total{service_name=~\"$service\",tau_process=\"app\"}[1m]))" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.7 },
+              { "color": "red", "value": 0.9 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 }
+    },
+    {
+      "title": "HTTP 5xx (5m)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[5m])) or vector(0)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 }
+    },
+    {
+      "title": "CPU by Process (cores)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_process) (rate(process_cpu_time_total{service_name=~\"$service\"}[1m]))",
+          "legendFormat": "{{tau_process}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 }
+    },
+    {
+      "title": "Memory (RSS) by Process",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "max by (tau_process) (process_memory_usage{service_name=~\"$service\"})",
+          "legendFormat": "{{tau_process}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 }
+    },
+    {
+      "title": "HTTP Requests by Status Class",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"2..\"}[5m])) or vector(0)",
+          "legendFormat": "2xx",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"3..\"}[5m])) or vector(0)",
+          "legendFormat": "3xx",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"4..\"}[5m])) or vector(0)",
+          "legendFormat": "4xx",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[5m])) or vector(0)",
+          "legendFormat": "5xx",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 20 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 }
+    },
+    {
+      "title": "HTTP Response Time",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(http_server_request_duration_bucket{service_name=~\"$service\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_bucket{service_name=~\"$service\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_bucket{service_name=~\"$service\"}[5m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 }
+    },
+    {
+      "title": "Heap Used by Process",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_process) (v8js_memory_heap_used{service_name=~\"$service\"})",
+          "legendFormat": "{{tau_process}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 }
+    },
+    {
+      "title": "Event Loop Utilization by Process",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "max by (tau_process) (nodejs_eventloop_utilization{service_name=~\"$service\"})",
+          "legendFormat": "{{tau_process}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 }
+    },
+    {
+      "title": "Machine — local Docker VM (cloud: the Fly Machine row below)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 30 },
+      "panels": []
+    },
+    {
+      "title": "CPU Busy",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "1 - sum(rate(system_cpu_time_seconds_total{state=\"idle\"}[1m])) / sum(rate(system_cpu_time_seconds_total[1m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.7 },
+              { "color": "red", "value": 0.9 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 31 }
+    },
+    {
+      "title": "Memory Used",
+      "type": "stat",
+      "targets": [{ "expr": "sum(system_memory_usage_bytes{state=\"used\"}) / sum(system_memory_usage_bytes)" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.8 },
+              { "color": "red", "value": 0.95 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 31 }
+    },
+    {
+      "title": "Load (1m)",
+      "type": "stat",
+      "targets": [{ "expr": "max(system_cpu_load_average_1m)" }],
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 31 }
+    },
+    {
+      "title": "Disk I/O",
+      "type": "stat",
+      "targets": [{ "expr": "sum(rate(system_disk_io_bytes_total[1m]))" }],
+      "fieldConfig": { "defaults": { "unit": "Bps" } },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 31 }
+    },
+    {
+      "title": "Load Average",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "max(system_cpu_load_average_1m)", "legendFormat": "1m" },
+        { "expr": "max(system_cpu_load_average_5m)", "legendFormat": "5m" },
+        { "expr": "max(system_cpu_load_average_15m)", "legendFormat": "15m" }
+      ],
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 36 }
+    },
+    {
+      "title": "Network I/O",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (direction) (rate(system_network_io_bytes_total{device!=\"lo\"}[1m]))",
+          "legendFormat": "{{direction}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 36 }
+    },
+    {
+      "title": "Disk I/O",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "sum by (direction) (rate(system_disk_io_bytes_total[1m]))", "legendFormat": "{{direction}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 36 }
+    },
+    {
+      "title": "Fly Machines — live only (Fly Prometheus federation, phase 3)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 44 },
+      "panels": []
+    },
+    {
+      "title": "Fly CPU by Machine",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (instance) (rate(fly_instance_cpu{app=\"$app\",mode!=\"idle\"}[1m])) / sum by (instance) (rate(fly_instance_cpu{app=\"$app\"}[1m]))",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 45 }
+    },
+    {
+      "title": "Fly Memory Used by Machine",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "fly_instance_memory_mem_total{app=\"$app\"} - fly_instance_memory_mem_available{app=\"$app\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 45 }
+    },
+    {
+      "title": "Fly Load (1m) by Machine",
+      "type": "timeseries",
+      "targets": [{ "expr": "fly_instance_load_average{app=\"$app\",minutes=\"1\"}", "legendFormat": "{{instance}}" }],
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 45 }
+    },
+    {
+      "title": "Fly Network I/O",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "sum(rate(fly_instance_net_recv_bytes{app=\"$app\",device=\"eth0\"}[1m]))", "legendFormat": "recv" },
+        { "expr": "sum(rate(fly_instance_net_sent_bytes{app=\"$app\",device=\"eth0\"}[1m]))", "legendFormat": "sent" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 53 }
+    },
+    {
+      "title": "Fly Edge Responses by Status",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(fly_app_http_responses_count{app=\"$app\"}[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 53 }
+    },
+    {
+      "title": "Fly Edge Response Time p95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(fly_app_http_response_time_seconds_bucket{app=\"$app\"}[5m])))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 53 }
+    },
+    {
+      "title": "Fly Concurrency by Machine",
+      "type": "timeseries",
+      "targets": [{ "expr": "fly_app_concurrency{app=\"$app\"}", "legendFormat": "{{instance}}" }],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 61 }
+    },
+    {
+      "title": "Fly Volume Used",
+      "type": "timeseries",
+      "targets": [{ "expr": "fly_volume_used_pct{app=\"$app\"}", "legendFormat": "{{instance}}" }],
+      "fieldConfig": { "defaults": { "unit": "percent" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 61 }
+    }
+  ]
+}

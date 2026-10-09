@@ -28,6 +28,7 @@ import { and, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { storageLimitBytesByTier } from '@taucad/billing';
 import { DatabaseService } from '#database/database.service.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { MetricsService } from '#telemetry/metrics.js';
 import { project, projectGit, projectGitLfsObject, publication } from '#database/schema.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
@@ -328,6 +329,7 @@ export class GitRepositoryService {
     private readonly rateLimiter: PublicationRateLimiterService,
     private readonly durableEvents: DurableEventsService,
     @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
+    @Optional() private readonly metrics: MetricsService = new MetricsService(),
   ) {
     /* A crash restarts a Machine in place on the same rootfs, so boot is the
        first chance to give the dead worker's disk back (W10 defect 2). Tracked
@@ -648,11 +650,7 @@ export class GitRepositoryService {
     const release = await this.admitLease(access);
     let lease: RepositoryLease | undefined;
     try {
-      lease = await hydrateLease({
-        store: this.store,
-        locator: repositoryLocator({ ownerId: access.ownerId, projectId: access.projectId }),
-        parentDirectory: this.#leaseParent,
-      });
+      lease = await this.hydrate(access);
       return await work(lease);
     } catch (error) {
       throw this.refusalFor(error);
@@ -703,11 +701,7 @@ export class GitRepositoryService {
     const release = await this.admitLease(args.access);
     let lease: RepositoryLease | undefined;
     try {
-      lease = await hydrateLease({
-        store: this.store,
-        locator: repositoryLocator({ ownerId: args.access.ownerId, projectId: args.access.projectId }),
-        parentDirectory: this.#leaseParent,
-      });
+      lease = await this.hydrate(args.access);
       await this.repairDerivedState(args.access, lease);
       const held = lease;
       const child = this.spawnService({
@@ -798,7 +792,8 @@ export class GitRepositoryService {
          upload, and the client re-pushes against a Machine that is staying.
          One that has started finishes, because the drain waits for it. */
       this.refuseWhenStopping('This server is restarting; retry the push.');
-      const result = await commitLease({
+      this.metrics.syncPackBytes.record(request.counter.bytes, { 'tau.sync.operation': 'push' });
+      const result = await this.commit({
         store: this.store,
         lease,
         committedBy: args.committedBy,
@@ -912,7 +907,7 @@ export class GitRepositoryService {
             .where(eq(publication.id, affected.id));
         }
         await this.runGit(['update-ref', '-d', ref, held], lease.directory);
-        const result = await commitLease({
+        const result = await this.commit({
           store: this.store,
           lease,
           committedBy: args.committedBy,
@@ -977,6 +972,7 @@ export class GitRepositoryService {
     this.#sweeping.add(projectId);
     this.track(
       (async (): Promise<void> => {
+        let outcome: 'ok' | 'error' = 'error';
         try {
           const swept = await result.sweep();
           /* D18: the retired bytes the store still keeps, as this listing saw
@@ -988,7 +984,9 @@ export class GitRepositoryService {
               .set({ retainedBytes: swept.retainedBytes })
               .where(eq(projectGit.projectId, projectId));
           }
+          outcome = 'ok';
         } finally {
+          this.metrics.syncSweeps.add(1, { outcome });
           this.#sweeping.delete(projectId);
         }
       })(),
@@ -1179,6 +1177,39 @@ export class GitRepositoryService {
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
+    }
+  }
+
+  /** Hydrates a lease for `access`, timed as the `hydrate` lease phase. */
+  private async hydrate(access: Pick<GitAccess, 'ownerId' | 'projectId'>): Promise<RepositoryLease> {
+    const startedAt = performance.now();
+    try {
+      return await hydrateLease({
+        store: this.store,
+        locator: repositoryLocator({ ownerId: access.ownerId, projectId: access.projectId }),
+        parentDirectory: this.#leaseParent,
+      });
+    } finally {
+      this.metrics.syncLeaseDuration.record((performance.now() - startedAt) / 1000, {
+        'tau.sync.lease.phase': 'hydrate',
+      });
+    }
+  }
+
+  /** `commitLease`, timed as the `commit` lease phase, counting a lost conditional manifest write. */
+  private async commit(args: Parameters<typeof commitLease>[0]): ReturnType<typeof commitLease> {
+    const startedAt = performance.now();
+    try {
+      return await commitLease(args);
+    } catch (error) {
+      if (error instanceof RepositoryStoreError && error.code === 'lost') {
+        this.metrics.syncManifestConflicts.add(1);
+      }
+      throw error;
+    } finally {
+      this.metrics.syncLeaseDuration.record((performance.now() - startedAt) / 1000, {
+        'tau.sync.lease.phase': 'commit',
+      });
     }
   }
 

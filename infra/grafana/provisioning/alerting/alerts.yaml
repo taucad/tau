@@ -10,6 +10,11 @@
 
 apiVersion: 1
 
+# Rules removed from this file stay in an existing Grafana until deleted here.
+deleteRules:
+  - orgId: 1
+    uid: rpc-failure-rate # rpc_* lost its emitter in 15ef0677e
+
 groups:
   - orgId: 1
     name: tau-critical
@@ -31,41 +36,87 @@ groups:
               maxDataPoints: 20
         for: 1m
         annotations:
-          summary: Redis connection is down. Chat RPC, session management, and adapter services are degraded.
+          summary: Redis connection is down. Host relay presence, session routing and adapter services are degraded.
           runbook_url: ''
         labels:
           severity: critical
           service: tau-api
           component: redis
 
-  - orgId: 1
-    name: tau-warning
-    folder: Tau Alerts
-    interval: 1m
-    rules:
-      - uid: rpc-failure-rate
-        title: 'P1: RPC Failure Rate Spike'
-        condition: rpc_errors_high
+      - uid: supplier-auth-failure
+        title: "P0: Supplier Rejected Tau's Key"
+        condition: supplier_auth
         data:
-          - refId: rpc_errors_high
+          - refId: supplier_auth
             datasourceUid: prometheus
             relativeTimeRange:
               from: 300
               to: 0
             model:
               expr: >
-                sum(rate(rpc_server_call_duration_count{service_name="tau-api",rpc_status="error"}[5m]))
-                / sum(rate(rpc_server_call_duration_count{service_name="tau-api"}[5m])) > 0.1
+                sum by (app, gen_ai_provider_name) (increase(gen_ai_client_operation_duration_count{service_name="tau-api",error_type="upstream_auth"}[5m])) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: 'A supplier answered a funded call with 401/403 (F-11). The key is Tau''s, so every funded call to that supplier fails as PROVIDER_UNAVAILABLE until the key is replaced. A new process fires from its second rejection: increase() cannot see a series'' first sample. Grouped by Fly `app`, so staging (tau-api-staging) and prod (tau-api) fire separately. Same event as tau_billing_provider_account_refusals_total{reason="credential_rejected"}.'
+          runbook_url: docs/handbooks/cloud/playbooks/supplier-outage.md
+        labels:
+          severity: critical
+          service: tau-api
+          component: billing
+
+      - uid: supplier-credit-exhausted
+        title: 'P0: Supplier Account Out of Credit'
+        condition: supplier_credit
+        data:
+          - refId: supplier_credit
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: >
+                sum by (app, providerId) (increase(tau_billing_provider_account_refusals_total{service_name="tau-api",reason!="credential_rejected"}[5m])) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: "A supplier refused a funded call because Tau's account with it is out of credit (BIL-11). Funded calls to that supplier fail until it is topped up. Credential rejections are excluded here; supplier-auth-failure pages for them."
+          runbook_url: docs/handbooks/cloud/playbooks/supplier-outage.md
+        labels:
+          severity: critical
+          service: tau-api
+          component: billing
+
+      - uid: billing-worker-stalled
+        title: 'P0: Billing Worker Stalled'
+        condition: worker_stalled
+        data:
+          - refId: worker_stalled
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              expr: >
+                sum by (app, tau_worker) (max_over_time(tau_billing_worker_passes_total{service_name="tau-api"}[24h])) unless sum by (app, tau_worker) (increase(tau_billing_worker_passes_total{service_name="tau-api",outcome="ok"}[15m]) > 0)
               intervalMs: 15000
               maxDataPoints: 20
         for: 5m
         annotations:
-          summary: RPC error rate exceeds 10% over 5 minutes.
+          summary: 'A billing worker seen in the last 24 h has completed no successful pass in 15 min: hung, dead or failing every pass (F-10). operations stalled means paid purchases are not credited; recovery stalled means no API replica is completing its in-process recovery pass, so funded operations stay held (see chat-llm-failing.md). Grouped by Fly `app` and `tau_worker`. A worker scaled to 0 on purpose also fires until 24 h pass, so silence it.'
+          runbook_url: docs/handbooks/cloud/playbooks/paid-not-credited.md
         labels:
-          severity: warning
+          severity: critical
           service: tau-api
-          component: rpc
+          component: billing
 
+  - orgId: 1
+    name: tau-warning
+    folder: Tau Alerts
+    interval: 1m
+    rules:
       - uid: ws-disconnect-storm
         title: 'P1: WebSocket Disconnect Storm'
         condition: ws_disconnect_spike
@@ -77,12 +128,12 @@ groups:
               to: 0
             model:
               expr: >
-                rate(ws_disconnections_total{service_name="tau-api",ws_close_reason=~"transport close|transport error|ping timeout"}[5m]) > 1
+                sum(rate(ws_disconnections_total{service_name="tau-api",ws_close_reason="error"}[5m])) > 1
               intervalMs: 15000
               maxDataPoints: 20
         for: 2m
         annotations:
-          summary: High rate of abnormal WebSocket disconnections detected.
+          summary: More than one abnormal WebSocket close (close-code class `error`) per second across the hosts and kernels gateways.
         labels:
           severity: warning
           service: tau-api
@@ -122,8 +173,8 @@ groups:
               to: 0
             model:
               expr: >
-                sum(rate(http_server_duration_count{service_name="tau-api",http_status_code=~"5.."}[5m]))
-                / sum(rate(http_server_duration_count{service_name="tau-api"}[5m])) > 0.05
+                (sum(rate(http_server_request_duration_count{service_name="tau-api",http_response_status_code=~"5.."}[5m])) or vector(0))
+                / sum(rate(http_server_request_duration_count{service_name="tau-api"}[5m])) > 0.05
               intervalMs: 15000
               maxDataPoints: 20
         for: 5m
@@ -222,7 +273,7 @@ groups:
           service: tau-api
           component: billing
 
-      - uid: billing-funded-operation-recovery-provider-execution
+      - uid: billing-recovery-provider-execution
         title: 'P1: Provider Execution During Recovery'
         condition: billing_funded_operation_recovery_provider_execution
         data:
@@ -243,3 +294,26 @@ groups:
           severity: warning
           service: tau-api
           component: billing
+
+      - uid: tau-process-restarting
+        title: 'P1: Tau Process Crash-Looping'
+        condition: process_restarting
+        data:
+          - refId: process_restarting
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              expr: >
+                sum by (app, instance, tau_process) (resets(process_uptime{service_name="tau-api"}[30m])) > 2
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: 'A Tau process (app or billing worker) restarted more than twice in 30 min: it is crash-looping (F-10: billing-operations OOM-kills on a 256 MB Machine, before its first pass completes). Reads process_uptime, which exists from the first scrape. A deploy restarts it once.'
+          runbook_url: docs/handbooks/cloud/playbooks/paid-not-credited.md
+        labels:
+          severity: warning
+          service: tau-api
+          component: runtime

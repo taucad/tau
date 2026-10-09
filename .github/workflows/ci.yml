@@ -187,10 +187,12 @@ jobs:
         id: prepare
         uses: ./.github/actions/geospec-producer
 
+      # Named per run, not per attempt: "Re-run failed jobs" keeps this job's attempt-1 result
+      # and the rerun lanes download it, while `overwrite` lets a full rerun replace it.
       - name: Upload complete current-source transport
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          name: geospec-ci-${{ github.sha }}
           path: |
             packages/geospec-engine-native/bindings/node/generated/index.d.ts
             packages/geospec-engine-native/bindings/node/generated/index.js
@@ -199,6 +201,7 @@ jobs:
             packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm
             out/artifacts/geospec-native-engine/ci
           if-no-files-found: error
+          overwrite: true
           retention-days: 7
 
       - name: Keep the products for later runs of this closure
@@ -307,7 +310,7 @@ jobs:
         if: needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached != 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          name: geospec-ci-${{ github.sha }}
           path: .
 
       - &restore-geospec
@@ -956,7 +959,7 @@ jobs:
         if: steps.gate.outputs.enabled == 'true' && needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached != 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          name: geospec-ci-${{ github.sha }}
           path: .
 
       - name: Restore GeoSpec engine products from an earlier run

@@ -7,6 +7,7 @@
  * Required env vars: TAU_E2E_DESKTOP_EXECUTABLE (absolute packaged Tau executable path).
  * Optional env vars: PATH, HOME, TMPDIR, DOCKER_HOST (tool discovery only); TAU_E2E_PROJECTION_IMPORT_ROOT,
  * TAU_E2E_PROJECTION_ARTIFACT_ROOT, and the explicitly validated projection manual selectors below.
+ * DEBUG=pw:protocol enables redacted test-child protocol diagnostics; other DEBUG values are not forwarded.
  * Usage: pnpm nx run desktop-e2e:test:e2e:desktop:completed-artifact [--args='--test-name-pattern="pattern" [--isolated-cloud-gateway]']
  * Exit codes: 0 when package tests pass; non-zero on preflight, infrastructure, migration, or test failure.
  */
@@ -25,11 +26,61 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
+import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import process from 'node:process';
-import { parseArgs } from 'node:util';
+import { parseArgs, stripVTControlCharacters } from 'node:util';
 import { z } from 'zod';
+
+/** Retain protocol command correlation without scripts, credentials or result values. */
+const redactProtocolLine = (line: string): string => {
+  const plain = stripVTControlCharacters(line);
+  if (!plain.includes('pw:protocol')) {
+    return line;
+  }
+  const direction = plain.includes('SEND ►') ? 'send' : plain.includes('◀ RECV') ? 'receive' : 'unknown';
+  const receipt: Record<string, string | number | boolean> = { protocol: true, direction };
+  try {
+    // Debug adds a timing suffix; JSON itself is a single line, possibly truncated.
+    const message: unknown = JSON.parse(plain.slice(plain.indexOf('{'), plain.lastIndexOf('}') + 1));
+    if (!message || typeof message !== 'object') {
+      throw new Error('Invalid protocol message');
+    }
+    if ('id' in message && typeof message.id === 'number' && Number.isSafeInteger(message.id)) {
+      receipt['id'] = message.id;
+      if (direction === 'receive') {
+        receipt['completion'] = 'error' in message ? 'error' : 'result';
+      }
+    }
+    if (
+      'sessionId' in message &&
+      typeof message.sessionId === 'string' &&
+      /^[A-Za-z0-9_-]{1,128}$/u.test(message.sessionId)
+    ) {
+      receipt['sessionId'] = message.sessionId;
+    }
+    if (
+      'method' in message &&
+      typeof message.method === 'string' &&
+      /^[A-Za-z]+\.[A-Za-z0-9]+$/u.test(message.method)
+    ) {
+      receipt['method'] = message.method;
+    }
+    if (
+      'error' in message &&
+      message.error &&
+      typeof message.error === 'object' &&
+      'code' in message.error &&
+      typeof message.error.code === 'number'
+    ) {
+      receipt['errorCode'] = message.error.code;
+    }
+  } catch {
+    receipt['redactedMalformed'] = true;
+  }
+  return JSON.stringify(receipt);
+};
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const desktopE2ERoot = resolve(import.meta.dirname, '..');
@@ -463,6 +514,7 @@ const main = async (): Promise<void> => {
     };
     writeFileSync(join(resultDirectory, 'selection.json'), JSON.stringify(selection, null, 2));
     console.info('Completed-artifact selection', JSON.stringify(selection));
+    const protocolDiagnostic = process.env['DEBUG'] === 'pw:protocol';
     const vitest = spawn(
       resolve(workspaceRoot, 'node_modules/.bin/vitest'),
       [
@@ -478,15 +530,23 @@ const main = async (): Promise<void> => {
       ],
       {
         cwd: desktopE2ERoot,
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Test environment contains only run-owned service credentials.
-        env: environment as NodeJS.ProcessEnv,
-        stdio: 'inherit',
+        env: { ...environment, ...(protocolDiagnostic ? { DEBUG: 'pw:protocol' } : {}) },
+        stdio: protocolDiagnostic ? ['inherit', 'pipe', 'pipe'] : 'inherit',
       },
     );
+    if (protocolDiagnostic) {
+      for (const stream of [vitest.stdout, vitest.stderr]) {
+        if (stream) {
+          createInterface({ input: stream }).on('line', (line) => {
+            process.stdout.write(`${redactProtocolLine(line)}\n`);
+          });
+        }
+      }
+    }
     activeChild = vitest;
     const status = await new Promise<number>((resolve, reject) => {
       vitest.once('error', reject);
-      vitest.once('exit', (code, signal) => {
+      vitest.once('close', (code, signal) => {
         resolve(code ?? (signal ? 1 : 0));
       });
     });

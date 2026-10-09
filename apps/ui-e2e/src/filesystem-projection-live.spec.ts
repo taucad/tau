@@ -1,4 +1,5 @@
-import { base64ToUint8Array } from 'uint8array-extras';
+import type { ProjectionDirectoryReceipt } from '#support/projection-fixture-validation.js';
+import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
 import {
   agentLogEventSchema,
   emptyChatLedger,
@@ -26,6 +27,7 @@ import {
   captureProjectionTurn,
   exportProjectionProjectClosure,
   importProjectionProjectClosure,
+  importProjectionProjectDirectory,
   armProjectionGestureMeasurement,
   projectionGestureMeasurement,
   createProjectionHistory,
@@ -39,6 +41,64 @@ import {
   replaceProjectionLog,
   restoreProjectionDelivery,
 } from '#support/filesystem-projection.js';
+
+test.skipIf(
+  (import.meta as ImportMeta & { readonly env: Readonly<Record<string, string | undefined>> }).env[
+    'VITE_TAU_E2E_PROJECTION_DIAGNOSTICS'
+  ] !== 'true',
+)('records bounded startup RPC success, failure and absent responses without payloads', async () => {
+  await installProjectionDeliveryControl(true);
+  await target.navigate('/__e2e/project-creation-location?fixture=health-check');
+  await target.evaluate(async () => {
+    const channel = new MessageChannel();
+    try {
+      await new Promise<void>((resolve) => {
+        let received = 0;
+        channel.port1.addEventListener('message', () => {
+          received += 1;
+          if (received === 2) {
+            resolve();
+          }
+        });
+        channel.port2.addEventListener('message', (event: MessageEvent<{ i: string }>) => {
+          const { i } = event.data;
+          if (i !== 'diagnostic-absent') {
+            channel.port2.postMessage({ k: 'rs', i, o: i === 'diagnostic-success' ? 1 : 0 });
+          }
+        });
+        channel.port1.start();
+        channel.port2.start();
+        for (const result of ['success', 'error', 'absent']) {
+          channel.port1.postMessage({ k: 'rq', i: `diagnostic-${result}`, n: 'diagnostic-control' });
+        }
+      });
+    } finally {
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
+  const evidence = await projectionDeliveryEvidence();
+  const calls = evidence.startupRpc?.calls.filter((call) => call.method === 'diagnostic-control');
+  expect(calls?.map((call) => call.response)).toEqual(['success', 'error', 'absent']);
+  expect(calls?.slice(0, 2).every((call) => call.respondedAt !== undefined)).toBe(true);
+  expect(calls?.at(-1)?.respondedAt).toBeUndefined();
+  expect(calls?.every((call) => !('payload' in call) && !('error' in call))).toBe(true);
+  await target.evaluate(async () => {
+    const response = await fetch('/favicon.ico?diagnostic-only=redacted');
+    await response.arrayBuffer();
+  });
+  await expect
+    .poll(async () => {
+      const delivery = await projectionDeliveryEvidence();
+      return delivery.resources?.entries.some((entry) => entry.path === '/favicon.ico');
+    })
+    .toBe(true);
+  const { resources } = await projectionDeliveryEvidence();
+  expect(resources?.status).toBe('observing');
+  expect(resources?.entries.every((entry) => !entry.path.includes('?') && !entry.origin.includes('?'))).toBe(true);
+  expect(resources?.entries.length).toBeLessThanOrEqual(256);
+  expect(resources?.deliveredEntries).toBe((resources?.entries.length ?? 0) + (resources?.evictedEntries ?? 0));
+});
 
 test('renders distinct held current-turn chunks and qualifies actual delivery without navigation', async () => {
   await installProjectionDeliveryControl();
@@ -980,6 +1040,15 @@ test.describe.skipIf(
   });
 });
 
+type ToolMatrixCase = {
+  id: string;
+  file: string;
+  format?: 'directory-v1';
+  seedBytes: number;
+  seedSha256: string;
+  expected: { fixtureSha256: string; historySha256: string; turns: number };
+};
+
 const importedClosurePath = (import.meta as ImportMeta & { readonly env: Readonly<Record<string, string | undefined>> })
   .env['VITE_TAU_E2E_PROJECTION_IMPORT_FILE'];
 
@@ -1009,50 +1078,135 @@ test.skipIf(importedClosurePath === undefined)(
         }),
       );
     };
+    const environment = (import.meta as ImportMeta & { readonly env: Readonly<Record<string, string | undefined>> })
+      .env;
+    const matrixPath = environment['VITE_TAU_E2E_PROJECTION_CASE_MANIFEST'];
+    let matrixCase: ToolMatrixCase | undefined;
+    if (matrixPath === undefined) {
+      expect(environment['VITE_TAU_E2E_PROJECTION_CASE_ID']).toBeUndefined();
+      expect(environment['VITE_TAU_E2E_PROJECTION_CASE_MANIFEST_SHA256']).toBeUndefined();
+    } else {
+      const expectedManifestSha256 = environment['VITE_TAU_E2E_PROJECTION_CASE_MANIFEST_SHA256'];
+      const caseId = environment['VITE_TAU_E2E_PROJECTION_CASE_ID'];
+      expect(expectedManifestSha256).toMatch(/^[a-f0-9]{64}$/u);
+      expect(caseId).toBeDefined();
+      const manifestText = await target.readFixtureText(matrixPath);
+      const manifestSha256 = [
+        ...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(manifestText))),
+      ]
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
+      expect(manifestSha256).toBe(expectedManifestSha256);
+      const matrix = JSON.parse(manifestText) as { version: number; complete: boolean; cases: ToolMatrixCase[] };
+      expect(matrix.version).toBe(1);
+      expect(matrix.complete).toBe(true);
+      expect(matrix.cases.map((entry) => `${entry.seedBytes}:${entry.expected.turns}`).sort()).toEqual([
+        '256:10',
+        '256:100',
+        '256:1000',
+        '65536:10',
+        '65536:100',
+        '65536:1000',
+      ]);
+      matrixCase = matrix.cases.find((entry) => entry.id === caseId);
+      expect(matrixCase).toBeDefined();
+      expect(importedClosurePath!.endsWith(`/${matrixCase!.file}`)).toBe(true);
+    }
+    const turnCount = matrixCase?.expected.turns ?? 1000;
+    const latestMarker = `Fixture turn ${turnCount} of ${turnCount}.`;
+    const latestAnswer = matrixCase
+      ? `Completed authentic ${matrixCase.seedBytes} byte projection tool seed.`
+      : 'Canonical projection benchmark answer.';
+    const latestTurnSelector = `[data-index="${turnCount - 1}"]`;
+    const assertRenderedToolOrder = async (): Promise<void> => {
+      if (matrixCase === undefined) {
+        return;
+      }
+      const latest = selectors.getByCss(latestTurnSelector);
+      await target.expectVisible(latest.getByText(latestAnswer, { exact: true }));
+      await target.expectVisible(latest.getByText('Created', { exact: true }));
+      const readGroup = latest.getByRole('button', { name: 'Read files', exact: true });
+      const groupedRead = await target.isVisible(readGroup);
+      if (groupedRead) {
+        await target.click(readGroup);
+      }
+      try {
+        await target.expectVisible(latest.getByText('Read', { exact: true }));
+        const rendered = await target.evaluate((selector) => {
+          const turn = document.querySelector(selector);
+          return {
+            operations: [...(turn?.querySelectorAll('span') ?? [])]
+              .map((node) => node.textContent)
+              .filter((text) => text === 'Created' || text === 'Read'),
+            text: turn?.textContent,
+          };
+        }, latestTurnSelector);
+        expect(rendered.operations).toEqual(['Created', 'Read']);
+        expect(rendered.text).toContain('projection-tool-seed.txt');
+        expect(rendered.text).toContain(latestMarker);
+        expect(rendered.text).toContain(latestAnswer);
+      } finally {
+        if (groupedRead) {
+          await target.click(readGroup);
+        }
+      }
+    };
     await phase('before-node-canonical-proof');
-    const canonicalProof = await target.validateProjectionFixture(importedClosurePath!);
+    const directoryFormat = matrixCase?.format === 'directory-v1';
+    const canonicalProof = directoryFormat
+      ? await target.validateProjectionDirectory(importedClosurePath!, matrixCase!.expected)
+      : await target.validateProjectionFixture(importedClosurePath!, matrixCase?.expected);
     await phase('after-node-canonical-proof', canonicalProof.historyByteLength);
     await phase('before-fixture-read');
-    const fixtureText = await target.readFixtureText(importedClosurePath!);
+    const fixtureText = await target.readFixtureText(
+      directoryFormat ? `${importedClosurePath}/receipt.json` : importedClosurePath!,
+    );
     phaseFacts.fixtureTextCodeUnits = fixtureText.length;
     await phase('after-fixture-read');
-    const importedFixture = JSON.parse(fixtureText) as ProjectionBenchmarkFixture;
-    phaseFacts.chatId = importedFixture.chatId;
-    await phase('after-fixture-json-parse');
-    const { closure } = importedFixture;
-    expect({
-      version: closure.version,
-      project: closure.project,
-      directories: closure.directories,
-      files: closure.files.map(({ path, byteLength, sha256 }) => ({ path, byteLength, sha256 })),
-    }).toEqual(canonicalProof.manifest);
-    const history = closure.files.find((file) => file.path === canonicalProof.historyPath);
+    const rawReceipt = directoryFormat ? (JSON.parse(fixtureText) as ProjectionDirectoryReceipt) : undefined;
+    const importedFixture = directoryFormat ? undefined : (JSON.parse(fixtureText) as ProjectionBenchmarkFixture);
+    const closure = importedFixture?.closure;
+    const metadata = rawReceipt
+      ? {
+          version: 2,
+          project: rawReceipt.project,
+          directories: rawReceipt.directories,
+          files: rawReceipt.files.map(({ path, byteLength, sha256 }) => ({ path, byteLength, sha256 })),
+        }
+      : {
+          version: closure!.version,
+          project: closure!.project,
+          directories: closure!.directories,
+          files: closure!.files.map(({ path, byteLength, sha256 }) => ({ path, byteLength, sha256 })),
+        };
+    expect(metadata).toEqual(canonicalProof.manifest);
+    const history = metadata.files.find((file) => file.path === canonicalProof.historyPath);
     if (!history) {
       throw new Error('The exact canonical history is absent from the imported closure.');
     }
     const { chatId } = canonicalProof;
-    expect(importedFixture.chatId).toBe(chatId);
-    expect(canonicalProof).toMatchObject({ turnCount: 1000, historyIntact: true, anomalyCount: 0 });
-    const manifest = JSON.parse(
-      new TextDecoder().decode(decodeProjectionFile(closure.files.find((file) => file.path === 'tau.json')!)),
-    ) as { name: string };
-    const chatRecord = JSON.parse(
-      new TextDecoder().decode(
-        decodeProjectionFile(closure.files.find((file) => file.path === `.tau/chats/${chatId}/chat.json`)!),
-      ),
-    ) as { name: string };
+    phaseFacts.chatId = chatId;
+    expect(rawReceipt?.chatId ?? importedFixture?.chatId).toBe(chatId);
+    expect(canonicalProof).toMatchObject({ turnCount, historyIntact: true, anomalyCount: 0 });
+    const readSmallRecord = async (path: string): Promise<string> =>
+      rawReceipt
+        ? target.readFixtureText(`${importedClosurePath}/rooted-project/${path}`)
+        : new TextDecoder().decode(decodeProjectionFile(closure!.files.find((file) => file.path === path)!));
+    const manifest = JSON.parse(await readSmallRecord('tau.json')) as { name: string };
+    const chatRecord = JSON.parse(await readSmallRecord(`.tau/chats/${chatId}/chat.json`)) as { name: string };
     await phase('after-small-manifest-proof-binding', history.byteLength);
-    await installProjectionDeliveryControl();
+    await installProjectionDeliveryControl(diagnostics);
     await target.installAgentHostGatewayFixture([
       reply('', { textChunks: ['Imported stream alpha.', ' Imported stream beta.'], gateChunks: true }),
     ]);
     await target.navigate('/projects');
     await phase('before-rooted-closure-import', history.byteLength);
-    const importedClosure = await importProjectionProjectClosure(closure);
+    if (rawReceipt) {
+      await importProjectionProjectDirectory(importedClosurePath!, rawReceipt);
+    } else {
+      expect(await importProjectionProjectClosure(closure!)).toEqual(closure);
+    }
     await phase('after-rooted-closure-import', history.byteLength);
-    await phase('before-rooted-closure-deep-equality', history.byteLength);
-    expect(importedClosure).toEqual(closure);
-    await phase('after-rooted-closure-deep-equality', history.byteLength);
     // A new document starts at the library, before this project's connector or chat attachments exist.
     await phase('before-fresh-library-document');
     await target.reload();
@@ -1063,14 +1217,14 @@ test.skipIf(importedClosurePath === undefined)(
     expect(before.requestedChats).not.toContain(chatId);
     expect(before.deliveredFrames.some((frame) => frame.chatId === chatId)).toBe(false);
     const discoveredHref = await target.getAttribute(project, 'href');
-    expect(importedFixture.chatId).toBe(chatId);
-    expect(closure.files.filter((file) => file.path.endsWith('/chat.json'))).toHaveLength(1);
+    expect(rawReceipt?.chatId ?? importedFixture?.chatId).toBe(chatId);
+    expect(metadata.files.filter((file) => file.path.endsWith('/chat.json'))).toHaveLength(1);
     await armProjectionGestureMeasurement(
       'imported-project-first-connection',
       `Open ${manifest.name}`,
-      'Fixture turn 1000 of 1000.',
+      latestMarker,
       chatRecord.name,
-      'Canonical projection benchmark answer.',
+      latestAnswer,
     );
     if (diagnostics) {
       await target.startCpuProfile();
@@ -1094,7 +1248,7 @@ test.skipIf(importedClosurePath === undefined)(
     await target.click(project);
     await phase('after-cold-project-card-gesture', history.byteLength);
     try {
-      await target.expectVisible(selectors.getByText(/Fixture turn 1000 of 1000\./u), 120_000);
+      await target.expectVisible(selectors.getByText(latestMarker, { exact: false }), 120_000);
     } catch (error) {
       if (diagnostics) {
         await target.stopCpuProfile('projection-imported-browser-cold-renderer.cpuprofile');
@@ -1105,7 +1259,7 @@ test.skipIf(importedClosurePath === undefined)(
           {
             diagnostics,
             fixture: importedClosurePath,
-            project: closure.project,
+            project: metadata.project,
             chatId,
             preGesture: before,
             gesture: await projectionGestureMeasurement(),
@@ -1135,6 +1289,20 @@ test.skipIf(importedClosurePath === undefined)(
       await target.screenshot(undefined, 'projection-imported-browser-open-failure.png');
       throw error;
     }
+    if (diagnostics) {
+      const delivery = await projectionDeliveryEvidence();
+      await target.writeArtifact(
+        'projection-imported-browser-cold-receipts.json',
+        JSON.stringify({
+          chatId,
+          streams: delivery.catchUpStreams.filter((stream) => stream.chatId === chatId),
+          startupRpc: delivery.startupRpc,
+          resources: delivery.resources,
+          scope:
+            'Early renderer receipt timestamps per port/RPC capture; not fold/render completion or cold worker transport.',
+        }),
+      );
+    }
     try {
       await expect
         .poll(async () => {
@@ -1148,7 +1316,10 @@ test.skipIf(importedClosurePath === undefined)(
         JSON.stringify(
           {
             measurement: await projectionGestureMeasurement(),
-            finalTurn: await target.evaluate(() => document.querySelector('[data-index="999"]')?.outerHTML),
+            finalTurn: await target.evaluate(
+              (selector) => document.querySelector(selector)?.outerHTML,
+              latestTurnSelector,
+            ),
           },
           null,
           2,
@@ -1172,19 +1343,21 @@ test.skipIf(importedClosurePath === undefined)(
           chatId,
           firstConnection,
           preGesture: before,
-          finalTurn: await target.evaluate(() => ({
-            html: document.querySelector('[data-index="999"]')?.outerHTML,
-            articles: [...document.querySelectorAll('[data-index="999"] article')].map((node) => node.textContent),
-          })),
+          finalTurn: await target.evaluate(
+            (selector) => ({
+              html: document.querySelector(selector)?.outerHTML,
+              articles: [...document.querySelectorAll(`${selector} article`)].map((node) => node.textContent),
+            }),
+            latestTurnSelector,
+          ),
         },
         null,
         2,
       ),
     );
+    await assertRenderedToolOrder();
     await target.screenshot(undefined, 'projection-imported-browser-cold-visible.png');
-    await target.expectVisible(
-      selectors.getByCss('[data-index="999"]').getByText('Canonical projection benchmark answer.', { exact: true }),
-    );
+    await target.expectVisible(selectors.getByCss(latestTurnSelector).getByText(latestAnswer, { exact: true }));
     await expect
       .poll(async () => new URL(await target.currentUrl()).searchParams.get('chat'), { timeout: 60_000 })
       .toBe(chatId);
@@ -1205,7 +1378,7 @@ test.skipIf(importedClosurePath === undefined)(
         .poll(
           async () =>
             target.evaluate(
-              ({ emptyChatId }) => {
+              ({ emptyChatId, latestMarker }) => {
                 const active = [...document.querySelectorAll<HTMLElement>('[data-slot="chat-trigger"]')]
                   .find((row) => row.dataset['active'] === 'true')
                   ?.querySelector('a');
@@ -1216,11 +1389,11 @@ test.skipIf(importedClosurePath === undefined)(
                   new URL(location.href).searchParams.get('chat') === emptyChatId &&
                   activeChatId === emptyChatId &&
                   ![...document.querySelectorAll('[aria-label="Chat history"] article [role="button"] p')].some(
-                    (node) => node.textContent.includes('Fixture turn 1000 of 1000.'),
+                    (node) => node.textContent.includes(latestMarker),
                   )
                 );
               },
-              { emptyChatId },
+              { emptyChatId, latestMarker },
             ),
           { timeout: 60_000 },
         )
@@ -1234,12 +1407,15 @@ test.skipIf(importedClosurePath === undefined)(
             capturedAt: Date.now(),
             href: await target.currentUrl(),
             delivery: await projectionDeliveryEvidence(),
-            dom: await target.evaluate(() => ({
-              text: document.body.textContent.slice(-12_000),
-              priorPromptCount: [...document.querySelectorAll('article p')].filter(
-                (node) => node.textContent === 'Fixture turn 1000 of 1000.',
-              ).length,
-            })),
+            dom: await target.evaluate(
+              (latestMarker) => ({
+                text: document.body.textContent.slice(-12_000),
+                priorPromptCount: [...document.querySelectorAll('article p')].filter(
+                  (node) => node.textContent === latestMarker,
+                ).length,
+              }),
+              latestMarker,
+            ),
           },
           null,
           2,
@@ -1250,9 +1426,9 @@ test.skipIf(importedClosurePath === undefined)(
     await armProjectionGestureMeasurement(
       'imported-browser-warm',
       historyLabel,
-      'Fixture turn 1000 of 1000.',
+      latestMarker,
       historyLabel,
-      'Canonical projection benchmark answer.',
+      latestAnswer,
     );
     if (diagnostics) {
       await target.startCpuProfile();
@@ -1356,24 +1532,26 @@ test.skipIf(importedClosurePath === undefined)(
     if (diagnostics) {
       await target.stopCpuProfile('projection-imported-browser-warm-renderer.cpuprofile');
     }
+    await assertRenderedToolOrder();
     await target.writeArtifact(
       'projection-imported-browser-first-connection.json',
       JSON.stringify(
         {
           diagnostics,
           fixture: importedClosurePath,
-          project: closure.project,
+          project: metadata.project,
+          matrixCase,
           workerFlowInstalled,
           workerFlow: await readWorkerFlow(),
           firstConnection,
           warmSwitch,
           discoveredHref,
-          excludedChatDirectories: importedFixture.excludedChatDirectories,
+          excludedChatDirectories: importedFixture?.excludedChatDirectories ?? [],
           importedChatId: chatId,
           preGestureRequests: before.requestedChats,
           coldQualification:
             'fresh library document, no matching agent delivery before actual project-card gesture; first connection, not same-project sidebar first selection',
-          revisionClosure: closure.files.map(({ path, sha256 }) => ({ path, sha256 })),
+          revisionClosure: metadata.files.map(({ path, sha256 }) => ({ path, sha256 })),
           tracing: 'must be disabled by TAU_E2E_TRACE=false for comparable sampling',
         },
         null,
@@ -1464,13 +1642,62 @@ test.skipIf(!multichatDiagnostic)(
     }
     expect(new Set(histories.map(({ chatId }) => chatId)).size).toBe(6);
     // Stop the connected producer before replacing its logs; the fixture writer never writes through an active writer.
-    await target.click(
-      selectors
-        .getByCss('[data-slot="project-trigger"]')
-        .first()
-        .getByRole('button', { name: /^More actions for /u }),
-    );
-    await target.click(selectors.getByRole('menuitem', { name: /^Close /u }));
+    try {
+      await target.hover(selectors.getByCss('[data-slot="project-trigger"]').first());
+      await target.click(
+        selectors
+          .getByCss('[data-slot="project-trigger"]')
+          .first()
+          .getByRole('button', { name: /^More actions for /u }),
+      );
+      await target.click(selectors.getByRole('menuitem', { name: /^Close /u }));
+    } catch (error) {
+      try {
+        const state = await target.evaluate(() => {
+          const url = new URL(location.href);
+          return {
+            url: { protocol: url.protocol, host: url.host, pathname: url.pathname },
+            projectTriggers: [...document.querySelectorAll<HTMLElement>('[data-slot="project-trigger"]')]
+              .slice(0, 8)
+              .map((row) => ({
+                text: row.textContent.slice(0, 512),
+                active: row.dataset['active'],
+                buttons: [...row.querySelectorAll('button')].slice(0, 12).map((button) => {
+                  const rect = button.getBoundingClientRect();
+                  const style = getComputedStyle(button);
+                  return {
+                    text: button.textContent.slice(0, 128),
+                    label: button.getAttribute('aria-label'),
+                    expanded: button.getAttribute('aria-expanded'),
+                    disabled: button.disabled,
+                    display: style.display,
+                    visibility: style.visibility,
+                    opacity: style.opacity,
+                    width: rect.width,
+                    height: rect.height,
+                  };
+                }),
+                inputs: [...row.querySelectorAll('input')].slice(0, 4).map((input) => ({
+                  value: input.value.slice(0, 128),
+                  label: input.getAttribute('aria-label'),
+                  focused: document.activeElement === input,
+                })),
+              })),
+          };
+        });
+        await target.writeArtifact(
+          'projection-six-history-close-failure.json',
+          JSON.stringify({
+            error: error instanceof Error ? error.message : String(error),
+            state,
+          }),
+        );
+        await target.screenshot(undefined, 'projection-six-history-close-failure.png');
+      } catch (captureError) {
+        console.error('Six-history close failure capture failed', captureError);
+      }
+      throw error;
+    }
     await target.navigate('/projects');
     await expect
       .poll(
@@ -1569,6 +1796,7 @@ test.skipIf(!multichatDiagnostic)(
       await target.expectVisible(selectors.getByText('Hidden history suffix completed.', { exact: true }), 60_000);
       await expectLogInvariant(hidden.chatId, { runs: 251 });
       await checkpoint('hidden-suffix-current');
+      await target.hover(selectors.getByCss('[data-slot="project-trigger"]').first());
       await target.click(selectors.getByRole('button', { name: `More actions for ${manifest.name}`, exact: true }));
       await target.click(selectors.getByRole('menuitem', { name: `Close ${manifest.name}`, exact: true }));
       await target.navigate('/projects');
@@ -1583,6 +1811,31 @@ test.skipIf(!multichatDiagnostic)(
         .toBe(0);
       await target.delay(2100);
       await checkpoint('connector-closed-after-retirement');
+    } catch (error) {
+      const failure = {
+        error: error instanceof Error ? error.message : String(error),
+        expected: histories.map(({ chatId, rows }) => ({ chatId, rows })),
+      };
+      try {
+        await target.writeArtifact('projection-multichat-failure.json', JSON.stringify(failure));
+        const [delivery, workers, workerFlow, liveness] = await Promise.allSettled([
+          projectionDeliveryEvidence(),
+          target.workers(),
+          target.workerCatchUpFlow(false),
+          target.evaluate(() => {
+            const scope = globalThis as typeof globalThis &
+              Partial<Record<'__TAU_CHAT_SESSION_LIVENESS__', () => unknown>>;
+            return scope.__TAU_CHAT_SESSION_LIVENESS__?.();
+          }),
+        ]);
+        await target.writeArtifact(
+          'projection-multichat-failure.json',
+          JSON.stringify({ ...failure, delivery, workers, workerFlow, liveness }),
+        );
+      } catch (captureError) {
+        console.error('Six-history scalar failure capture failed', captureError);
+      }
+      throw error;
     } finally {
       await target.stopCpuProfile('projection-multichat-profile.cpuprofile');
     }
@@ -1671,77 +1924,216 @@ for (const byteLength of [256, 65_536]) {
 const toolSeedDirectory = (import.meta as ImportMeta & { readonly env: Readonly<Record<string, string | undefined>> })
   .env['VITE_TAU_E2E_PROJECTION_TOOL_SEED_DIRECTORY'];
 
-for (const seed of [
-  { bytes: 256, sha256: 'a0d1e0d76752f77e3b5814e704a66203ade349e9902a9fa442c1369f271bb078' },
-  { bytes: 65_536, sha256: 'c02202230f323ee62fa2ab0dc38d73065fddb1c00bd3e450eb82486e4893c3da' },
-]) {
-  test.skipIf(!toolSeedDirectory)(
-    `validates two authentic projection tool turns from ${seed.bytes} byte seed`,
-    async () => {
-      const digest = async (text: string): Promise<string> =>
-        [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
-          .map((byte) => byte.toString(16).padStart(2, '0'))
-          .join('');
-      const sourceText = await target.readFixtureText(
-        `${toolSeedDirectory}/projection-tool-seed-${seed.bytes}-closure.json`,
-      );
-      expect(await digest(sourceText)).toBe(seed.sha256);
-      const source = JSON.parse(sourceText) as ProjectionClosure;
-      const histories = source.files.filter((file) => /^\.tau\/chats\/[^/]+\/events\.jsonl$/u.test(file.path));
-      expect(histories).toHaveLength(1);
-      const historyPath = histories[0]!.path;
-      const chatId = historyPath.split('/')[2]!;
-      const original = new TextDecoder().decode(decodeProjectionFile(histories[0]!));
-      const sourceMessages = reduceEventLog(parseEventLog(original));
-      expect(sourceMessages).toHaveLength(8);
-      const history = createProjectionHistory(original, 2);
-      expect(history).toMatchObject({ turns: 2, rows: 34, messages: 16 });
-      const rows = parseEventLog(history.text);
-      const messages = reduceEventLog(rows);
-      const ledger = foldChatLedger(emptyChatLedger, rows);
-      expect(ledger.historyIntact).toBe(true);
-      expect(ledger.anomalies).toEqual([]);
-      expect(Object.keys(ledger.runs)).toHaveLength(2);
-      expect(rows.filter((row) => row.type === 'turn.finalized')).toHaveLength(2);
-      expect(rows.filter((row) => row.type === 'message.envelope-replaced')).toHaveLength(8);
-      const outputs = messages.filter((message) => message.role === 'tool-output');
-      const originalOutputs = sourceMessages.filter((message) => message.role === 'tool-output');
-      const inputs = messages.filter((message) => message.role === 'tool-input');
-      expect(inputs.map((message) => message.toolName)).toEqual([
-        'create_file',
-        'read_file',
-        'create_file',
-        'read_file',
-      ]);
-      expect(outputs.map((message) => message.toolCallId)).toEqual(inputs.map((message) => message.toolCallId));
-      expect(new Set(messages.map((message) => message.id)).size).toBe(16);
-      expect(outputs).toHaveLength(4);
-      expect(new Set(outputs.map((message) => message.toolCallId)).size).toBe(4);
-      expect(outputs.map((message) => message.content)).toEqual([
-        ...originalOutputs.map((message) => message.content),
-        ...originalOutputs.map((message) => message.content),
-      ]);
-      const fixture = await createProjectionBenchmarkFixture(source, chatId, history);
-      expect(fixture.excludedChatDirectories).toEqual([]);
-      expect(fixture.closure.files.filter((file) => file.path !== historyPath)).toEqual(
-        source.files
-          .filter((file) => file.path !== historyPath)
-          .sort((left, right) => left.path.localeCompare(right.path)),
-      );
-      const fixtureText = JSON.stringify(fixture);
-      const artifactName = `projection-tool-${seed.bytes}-two-turns.json`;
-      await target.writeArtifact(artifactName, fixtureText);
-      const expected = {
-        fixtureSha256: await digest(fixtureText),
-        historySha256: await digest(history.text),
-        turns: 2,
-      };
-      const proof = await target.validateProjectionFixture(artifactName, expected);
-      expect(proof).toMatchObject({ turnCount: 2, rowCount: 34, historyIntact: true, anomalyCount: 0 });
-      await target.writeArtifact(
-        `projection-tool-${seed.bytes}-two-turns-proof.json`,
-        JSON.stringify({ seed, expected, proof }),
-      );
-    },
-  );
+const generateToolMatrix =
+  (import.meta as ImportMeta & { readonly env: Readonly<Record<string, string | undefined>> }).env[
+    'VITE_TAU_E2E_PROJECTION_GENERATE_MATRIX'
+  ] === 'true';
+const generatedCases: ToolMatrixCase[] = [];
+
+for (const turns of generateToolMatrix ? [10, 100, 1000] : [2]) {
+  for (const seed of [
+    { bytes: 256, sha256: 'a0d1e0d76752f77e3b5814e704a66203ade349e9902a9fa442c1369f271bb078' },
+    { bytes: 65_536, sha256: 'c02202230f323ee62fa2ab0dc38d73065fddb1c00bd3e450eb82486e4893c3da' },
+  ]) {
+    test.skipIf(!toolSeedDirectory)(
+      `validates ${turns === 2 ? 'two' : turns} authentic projection tool turns from ${seed.bytes} byte seed`,
+      async () => {
+        if (generateToolMatrix) {
+          const caseId = `projection-tool-${seed.bytes}-${turns}-turns`;
+          const priorHistoryHashes: Readonly<Record<string, string>> = {
+            '256:10': '5e1dddc3587b6677f3b36df42eb295ab1af209fecc46ab6471f99512b84226bc',
+            '256:100': '001681c6c042e0e4f3df7307dcb6fb42c83f4034f661abc7f7987293d8e0770c',
+            '256:1000': '1e7fa698299c06b490a0776fd16f395b65b8932e1f32f3a70b0077685d8ccc87',
+            '65536:10': '503c1f3a8017a43d23d9635601d3c3190dd4e5112a8ba62c99c2e478a3ef45dd',
+            '65536:100': '11cf89641959e8e64aeb39d08156a09ed961097e91eab118fb33b4ababa48f2b',
+          };
+          const prior = priorHistoryHashes[`${seed.bytes}:${turns}`];
+          if (prior === undefined) {
+            expect(generatedCases).toHaveLength(5);
+          }
+          const { receipt, proof, expected } = await target.generateProjectionDirectory(
+            `${toolSeedDirectory}/projection-tool-seed-${seed.bytes}-closure.json`,
+            seed.sha256,
+            turns,
+            caseId,
+          );
+          expect(proof).toMatchObject({ turnCount: turns, rowCount: 17 * turns, historyIntact: true, anomalyCount: 0 });
+          expect(receipt.toolProof).toMatchObject({
+            messages: 8 * turns,
+            rows: 17 * turns,
+            finalized: turns,
+            replacements: 4 * turns,
+          });
+          if (prior !== undefined) {
+            expect(proof.historySha256).toBe(prior);
+          }
+          await target.writeArtifact(
+            `${caseId}-proof.json`,
+            JSON.stringify({ seed, expected, proof, format: 'directory-v1' }),
+          );
+          generatedCases.push({
+            id: caseId,
+            file: caseId,
+            format: 'directory-v1',
+            seedBytes: seed.bytes,
+            seedSha256: seed.sha256,
+            expected,
+          });
+          await target.writeArtifact(
+            'projection-tool-matrix-manifest.json',
+            JSON.stringify({ version: 1, complete: generatedCases.length === 6, cases: generatedCases }, null, 2),
+          );
+          return;
+        }
+        const digest = async (text: string): Promise<string> =>
+          [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
+            .map((byte) => byte.toString(16).padStart(2, '0'))
+            .join('');
+        const sourceText = await target.readFixtureText(
+          `${toolSeedDirectory}/projection-tool-seed-${seed.bytes}-closure.json`,
+        );
+        expect(await digest(sourceText)).toBe(seed.sha256);
+        const source = JSON.parse(sourceText) as ProjectionClosure;
+        const histories = source.files.filter((file) => /^\.tau\/chats\/[^/]+\/events\.jsonl$/u.test(file.path));
+        expect(histories).toHaveLength(1);
+        const historyPath = histories[0]!.path;
+        const chatId = historyPath.split('/')[2]!;
+        const original = new TextDecoder().decode(decodeProjectionFile(histories[0]!));
+        const sourceMessages = reduceEventLog(parseEventLog(original));
+        expect(sourceMessages).toHaveLength(8);
+        const history = createProjectionHistory(original, turns);
+        expect(history).toMatchObject({ turns, rows: 17 * turns, messages: 8 * turns });
+        const rows = parseEventLog(history.text);
+        const messages = reduceEventLog(rows);
+        const ledger = foldChatLedger(emptyChatLedger, rows);
+        expect(ledger.historyIntact).toBe(true);
+        expect(ledger.anomalies).toEqual([]);
+        expect(Object.keys(ledger.runs)).toHaveLength(turns);
+        expect(rows.filter((row) => row.type === 'turn.finalized')).toHaveLength(turns);
+        expect(rows.filter((row) => row.type === 'message.envelope-replaced')).toHaveLength(4 * turns);
+        const outputs = messages.filter((message) => message.role === 'tool-output');
+        const originalOutputs = sourceMessages.filter((message) => message.role === 'tool-output');
+        const inputs = messages.filter((message) => message.role === 'tool-input');
+        expect(inputs.map((message) => message.toolName)).toEqual(
+          Array.from({ length: turns }, () => ['create_file', 'read_file']).flat(),
+        );
+        expect(outputs.map((message) => message.toolCallId)).toEqual(inputs.map((message) => message.toolCallId));
+        expect(new Set(messages.map((message) => message.id)).size).toBe(8 * turns);
+        expect(outputs).toHaveLength(2 * turns);
+        expect(new Set(outputs.map((message) => message.toolCallId)).size).toBe(2 * turns);
+        expect(outputs.map((message) => message.content)).toEqual(
+          Array.from({ length: turns }, () => originalOutputs.map((message) => message.content)).flat(),
+        );
+        const fixture = await createProjectionBenchmarkFixture(source, chatId, history);
+        expect(fixture.excludedChatDirectories).toEqual([]);
+        expect(fixture.closure.files.filter((file) => file.path !== historyPath)).toEqual(
+          source.files
+            .filter((file) => file.path !== historyPath)
+            .sort((left, right) => left.path.localeCompare(right.path)),
+        );
+        const fixtureText = JSON.stringify(fixture);
+        const caseId = `projection-tool-${seed.bytes}-${turns === 2 ? 'two-turns' : `${turns}-turns`}`;
+        const artifactName = `${caseId}.json`;
+        await target.writeArtifact(artifactName, fixtureText);
+        const expected = {
+          fixtureSha256: await digest(fixtureText),
+          historySha256: await digest(history.text),
+          turns,
+        };
+        const proof = await target.validateProjectionFixture(artifactName, expected);
+        expect(proof).toMatchObject({ turnCount: turns, rowCount: 17 * turns, historyIntact: true, anomalyCount: 0 });
+        await target.writeArtifact(`${caseId}-proof.json`, JSON.stringify({ seed, expected, proof }));
+      },
+    );
+  }
 }
+
+/* oxlint-disable no-await-in-loop -- Each bounded chunk must complete before the next append and physical proof. */
+test.skipIf(
+  (import.meta as ImportMeta & { readonly env: Readonly<Record<string, string | undefined>> }).env[
+    'VITE_TAU_E2E_PROJECTION_IMPORT_WORK'
+  ] !== 'true',
+)('qualifies worker OPFS import work and physical hashes at 1, 2 and 4 MiB', async () => {
+  await target.navigate('/__e2e/project-creation-location?fixture=health-check');
+  const moduleUrl = new URL('support/filesystem-projection-writer.ts', import.meta.url).href;
+  const digest = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
+    [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  const results = [];
+  for (const mib of [1, 2, 4]) {
+    const id = crypto.randomUUID().replaceAll('-', '').slice(0, 21);
+    const bytes = new Uint8Array(mib * 1024 * 1024);
+    for (let index = 0; index < bytes.length; index++) {
+      bytes[index] = 65 + (index % 26);
+    }
+    const chunkSha256: string[] = [];
+    for (let offset = 0; offset < bytes.length; offset += 65_536) {
+      chunkSha256.push(await digest(bytes.slice(offset, offset + 65_536)));
+    }
+    const receipt: ProjectionDirectoryReceipt = {
+      version: 1,
+      chatId: 'import-work-control',
+      turns: 0,
+      seedSha256: '0'.repeat(64),
+      project: {
+        projectId: `proj_${id}`,
+        backend: 'opfs',
+        providerBasePath: `projection-import-work-${id}`,
+        databasePrefix: `projection-import-work-${id}`,
+      },
+      directories: [],
+      files: [
+        { path: 'projection-import-work.bin', byteLength: bytes.length, sha256: await digest(bytes), chunkSha256 },
+      ],
+    };
+    const workerUrl = await target.commands.uiEvaluateTarget(
+      'async ({ moduleUrl, receipt }) => { const writer = await import(moduleUrl); globalThis.__tauProjectionDirectoryImport = await writer.openProjectionDirectoryImport(receipt); return globalThis.__tauProjectionDirectoryImport.workerUrl; }',
+      { moduleUrl, receipt },
+    );
+    expect(typeof workerUrl).toBe('string');
+    if (typeof workerUrl !== 'string') {
+      throw new TypeError('Import control did not expose its actual worker identity.');
+    }
+    let probeInstalled = false;
+    try {
+      await target.commands.uiProjectionImportWork(true, workerUrl);
+      probeInstalled = true;
+      for (let offset = 0; offset < bytes.length; offset += 65_536) {
+        await target.commands.uiEvaluateTarget(
+          'async ({ path, offset, base64 }) => globalThis.__tauProjectionDirectoryImport.append(path, offset, base64)',
+          {
+            path: 'projection-import-work.bin',
+            offset,
+            base64: uint8ArrayToBase64(bytes.slice(offset, offset + 65_536)),
+          },
+        );
+      }
+      const physical = await target.commands.uiEvaluateTarget(
+        '() => globalThis.__tauProjectionDirectoryImport.finish()',
+      );
+      const work = await target.commands.uiProjectionImportWork(false, workerUrl);
+      probeInstalled = false;
+      results.push({ mib, project: receipt.project, file: receipt.files[0], physical, work });
+      await target.writeArtifact('projection-import-small-work.json', JSON.stringify(results));
+      expect(work.worker.syncAccessCalls).toBeGreaterThan(0);
+      expect(work.worker.syncWriteBytes).toBeGreaterThanOrEqual(bytes.length - 65_536);
+      expect(work.worker.syncWriteBytes).toBeLessThanOrEqual(bytes.length);
+      expect(work.worker.writableCalls).toBeLessThanOrEqual(1);
+      expect(work.worker.arrayBufferBytes).toBeLessThanOrEqual(bytes.length * 2);
+      expect(work.reader.streamRequestedBytes).toBe(bytes.length);
+      expect(work.reader.arrayBufferBytes).toBeLessThanOrEqual(bytes.length);
+    } finally {
+      try {
+        if (probeInstalled) {
+          await target.commands.uiProjectionImportWork(false, workerUrl);
+        }
+      } finally {
+        await target.commands.uiEvaluateTarget(
+          '() => { globalThis.__tauProjectionDirectoryImport?.dispose(); delete globalThis.__tauProjectionDirectoryImport; }',
+        );
+      }
+    }
+  }
+});
+/* oxlint-enable no-await-in-loop */

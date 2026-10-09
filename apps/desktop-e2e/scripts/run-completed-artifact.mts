@@ -101,6 +101,15 @@ const main = async (): Promise<void> => {
   const projectionInputs = z
     .object({
       TAU_E2E_TRACE_SNAPSHOTS: z.enum(['true', 'false']).optional(),
+      TAU_E2E_PROJECTION_CASE_MANIFEST: z.string().min(1).refine(isAbsolute).optional(),
+      TAU_E2E_PROJECTION_CASE_MANIFEST_SHA256: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/u)
+        .optional(),
+      TAU_E2E_PROJECTION_CASE_ID: z
+        .string()
+        .regex(/^projection-tool-(256|65536)-(10|100|1000)-turns$/u)
+        .optional(),
       TAU_E2E_PROJECTION_IMPORT_ROOT: z.string().min(1).refine(isAbsolute).optional(),
       TAU_E2E_PROJECTION_ARTIFACT_ROOT: z.string().min(1).refine(isAbsolute).optional(),
       TAU_E2E_NATIVE_CORE_MANUAL: z.enum(['true', 'false']).optional(),
@@ -119,6 +128,28 @@ const main = async (): Promise<void> => {
     Object.entries(projectionInputs).some(([key, value]) => key.endsWith('_MANUAL') && value !== 'false')
   ) {
     throw new Error('Manual completed-artifact runs require full tracing snapshots.');
+  }
+  const caseInputs = [
+    projectionInputs.TAU_E2E_PROJECTION_CASE_MANIFEST,
+    projectionInputs.TAU_E2E_PROJECTION_CASE_MANIFEST_SHA256,
+    projectionInputs.TAU_E2E_PROJECTION_CASE_ID,
+  ];
+  if (caseInputs.some((value) => value !== undefined)) {
+    if (
+      caseInputs.some((value) => value === undefined) ||
+      projectionInputs.TAU_E2E_PROJECTION_IMPORT_ROOT === undefined
+    ) {
+      throw new Error('Native matrix selection requires manifest path, SHA, case ID, and import root together.');
+    }
+    const manifest = realpathSync(projectionInputs.TAU_E2E_PROJECTION_CASE_MANIFEST!);
+    if (
+      !statSync(manifest).isFile() ||
+      createHash('sha256').update(readFileSync(manifest)).digest('hex') !==
+        projectionInputs.TAU_E2E_PROJECTION_CASE_MANIFEST_SHA256
+    ) {
+      throw new Error('Native matrix manifest identity mismatch.');
+    }
+    projectionInputs.TAU_E2E_PROJECTION_CASE_MANIFEST = manifest;
   }
   if (projectionInputs.TAU_E2E_PROJECTION_IMPORT_ROOT !== undefined) {
     const input = realpathSync(projectionInputs.TAU_E2E_PROJECTION_IMPORT_ROOT);

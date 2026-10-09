@@ -15,6 +15,7 @@ import type { CapturedChatLog } from '@taucad/formal/capture';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
 import type {
   AgentHostGatewayFixtureOptions,
+  ProjectionImportWork,
   TargetClickOptions,
   TargetCookie,
   TargetDiagnostics,
@@ -34,8 +35,12 @@ import { testBaseURL } from './base-url.ts';
 import { classifyWebGpuAdapter, webGpuLaunchArguments } from './webgpu-profile.ts';
 import { listTauServeChats, readTauServeFile, startTauServeFixture } from './tau-serve-fixture.ts';
 import type { TauServeFixture, TauServeFixtureOptions } from './tau-serve-fixture.ts';
-import { validateProjectionFixtureBytes } from './projection-fixture-validation.ts';
-import type { ProjectionFixtureProof } from './projection-fixture-validation.ts';
+import {
+  validateProjectionFixtureBytes,
+  generateProjectionDirectory,
+  validateProjectionDirectory,
+} from './projection-fixture-validation.ts';
+import type { ProjectionFixtureProof, ProjectionDirectoryReceipt } from './projection-fixture-validation.ts';
 import { browserHostScript, createGatewayScriptWalk } from './agent-host-gateway-script.ts';
 import type { GatewayScriptTurn, GatewayScriptWalk, GatewayTurnCount } from './agent-host-gateway-script.ts';
 
@@ -2440,6 +2445,139 @@ export const uiTargetWorkers: BrowserCommand<
     .toSorted((left, right) => left.identity.localeCompare(right.identity));
 };
 
+/** Count physical operations without substituting bytes or handles in the import control. */
+const projectionImportWork = (install: boolean): ProjectionImportWork => {
+  type SyncHandle = { write(data: AllowSharedBufferSource, options?: { at?: number }): number };
+  const scope = globalThis as typeof globalThis & {
+    FileSystemSyncAccessHandle?: { prototype: SyncHandle };
+    __tauProjectionImportWork?: { counts: ProjectionImportWork; restore(): void };
+  };
+  if (!install) {
+    const probe = scope.__tauProjectionImportWork;
+    if (!probe) {
+      throw new Error('Projection import work probe was not installed.');
+    }
+    probe.restore();
+    delete scope.__tauProjectionImportWork;
+    return probe.counts;
+  }
+  if (scope.__tauProjectionImportWork) {
+    throw new Error('Projection import work probe is already active.');
+  }
+  const counts: ProjectionImportWork = {
+    syncAccessCalls: 0,
+    syncWriteCalls: 0,
+    syncWriteBytes: 0,
+    writableCalls: 0,
+    getFileCalls: 0,
+    snapshotBytes: 0,
+    arrayBufferCalls: 0,
+    arrayBufferBytes: 0,
+    streamCalls: 0,
+    streamRequestedBytes: 0,
+  };
+  const selected = new WeakSet<object>();
+  const filePrototype = FileSystemFileHandle.prototype as FileSystemFileHandle & {
+    createSyncAccessHandle?: () => Promise<SyncHandle>;
+  };
+  const { getFile, createWritable, createSyncAccessHandle } = filePrototype;
+  const { slice, arrayBuffer, stream } = Blob.prototype;
+  const syncPrototype = scope.FileSystemSyncAccessHandle?.prototype;
+  const write = syncPrototype?.write;
+  const matches = (handle: FileSystemFileHandle) => handle.name === 'projection-import-work.bin';
+  filePrototype.getFile = async function () {
+    const file = await getFile.call(this);
+    if (matches(this)) {
+      selected.add(file);
+      counts.getFileCalls++;
+      counts.snapshotBytes += file.size;
+    }
+    return file;
+  };
+  filePrototype.createWritable = async function (...args) {
+    if (matches(this)) {
+      counts.writableCalls++;
+    }
+    return createWritable.apply(this, args);
+  };
+  if (createSyncAccessHandle) {
+    filePrototype.createSyncAccessHandle = async function () {
+      const handle = await createSyncAccessHandle.call(this);
+      if (matches(this)) {
+        counts.syncAccessCalls++;
+        selected.add(handle);
+      }
+      return handle;
+    };
+  }
+  if (syncPrototype && write) {
+    syncPrototype.write = function (...args) {
+      const written = write.apply(this, args);
+      if (selected.has(this)) {
+        counts.syncWriteCalls++;
+        counts.syncWriteBytes += written;
+      }
+      return written;
+    };
+  }
+  Blob.prototype.slice = function (...args) {
+    const result = slice.apply(this, args);
+    if (selected.has(this)) {
+      selected.add(result);
+    }
+    return result;
+  };
+  Blob.prototype.arrayBuffer = async function () {
+    const bytes = await arrayBuffer.call(this);
+    if (selected.has(this)) {
+      counts.arrayBufferCalls++;
+      counts.arrayBufferBytes += bytes.byteLength;
+    }
+    return bytes;
+  };
+  Blob.prototype.stream = function () {
+    if (selected.has(this)) {
+      counts.streamCalls++;
+      counts.streamRequestedBytes += this.size;
+    }
+    return stream.call(this);
+  };
+  scope.__tauProjectionImportWork = {
+    counts,
+    restore() {
+      filePrototype.getFile = getFile;
+      filePrototype.createWritable = createWritable;
+      if (createSyncAccessHandle) {
+        filePrototype.createSyncAccessHandle = createSyncAccessHandle;
+      }
+      if (syncPrototype && write) {
+        syncPrototype.write = write;
+      }
+      Blob.prototype.slice = slice;
+      Blob.prototype.arrayBuffer = arrayBuffer;
+      Blob.prototype.stream = stream;
+    },
+  };
+  return counts;
+};
+
+/** Read only the explicitly named independent import worker and its physical verification reader. */
+export const uiProjectionImportWork: BrowserCommand<
+  [install: boolean, workerUrl: string],
+  { worker: ProjectionImportWork; reader: ProjectionImportWork }
+> = async (commandContext, install, workerUrl) => {
+  const page = pageFor(sessionFor(commandContext));
+  const worker = page.workers().find((candidate) => candidate.url() === workerUrl);
+  if (!worker) {
+    throw new Error('The selected projection import worker is not running.');
+  }
+  const [workerWork, reader] = await Promise.all([
+    worker.evaluate(projectionImportWork, install),
+    page.evaluate(projectionImportWork, install),
+  ]);
+  return { worker: workerWork, reader };
+};
+
 /** Install/read a fixture-only probe on new catch-up ports in resident page-visible agent-host workers. */
 export const uiWorkerCatchUpFlow: BrowserCommand<
   [install: boolean, surface?: TargetSurface],
@@ -2688,6 +2826,39 @@ export const uiValidateProjectionFixture: BrowserCommand<
   return validateProjectionFixtureBytes(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), expected);
 };
 
+/** Generate exact raw fixture files in the existing artifact root, returning only their small proof. */
+export const uiGenerateProjectionDirectory: BrowserCommand<
+  [seedPath: string, seedSha256: string, turns: number, name: string],
+  {
+    receipt: ProjectionDirectoryReceipt;
+    proof: ProjectionFixtureProof;
+    expected: { fixtureSha256: string; historySha256: string; turns: number };
+  }
+> = async (_context, seedPath, seedSha256, turns, name) => {
+  if (!/^[a-z0-9-]+$/u.test(name)) {
+    throw new Error('Invalid projection directory artifact name.');
+  }
+  const directory = resolve(outputRoot, name);
+  await mkdir(outputRoot, { recursive: true });
+  const receipt = await generateProjectionDirectory({ seedPath, seedSha256, turns, destination: directory });
+  const expected = {
+    fixtureSha256: createHash('sha256')
+      .update(await readFile(resolve(directory, 'receipt.json')))
+      .digest('hex'),
+    historySha256: receipt.files.find((file) => file.path === `.tau/chats/${receipt.chatId}/events.jsonl`)!.sha256,
+    turns,
+  };
+  const proof = await validateProjectionDirectory(directory, expected);
+  return { receipt, proof, expected };
+};
+
+/** Qualify a raw fixture directory before any browser import or native discovery. */
+export const uiValidateProjectionDirectory: BrowserCommand<
+  [path: string, expected: { fixtureSha256: string; historySha256: string; turns: number }],
+  ProjectionFixtureProof
+> = async (_context, path, expected) =>
+  validateProjectionDirectory(isAbsolute(path) ? path : resolve(outputRoot, path), expected);
+
 /** Read immutable fixture input in bounded binary chunks, without WebSocket-sized whole-file replies. */
 export const uiReadFixtureChunk: BrowserCommand<
   [path: string, offset: number],
@@ -2789,6 +2960,8 @@ export const uiBrowserCommands = {
   uiWriteArtifactChunk,
   uiReadFixtureChunk,
   uiValidateProjectionFixture,
+  uiGenerateProjectionDirectory,
+  uiValidateProjectionDirectory,
   uiStartObservedDownloads,
   uiReadObservedDownloads,
   uiEmulateColorScheme,
@@ -2834,6 +3007,7 @@ export const uiBrowserCommands = {
   uiStartHostFixture,
   uiStartTauServeFixture,
   uiTargetWorkers,
+  uiProjectionImportWork,
   uiWorkerCatchUpFlow,
   uiStopTauServeFixture,
   uiReleaseTauServeGateway,

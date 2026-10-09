@@ -1,3 +1,10 @@
+import { createReadStream } from 'node:fs';
+/* eslint-disable @nx/enforce-module-boundaries -- The two integration harnesses share the selected canonical raw-directory proof; no production dependency is introduced. */
+// oxlint-disable-next-line no-restricted-imports -- Both backends independently prove the same harness-only raw fixture directory.
+import { validateProjectionDirectory } from '../../ui-e2e/src/support/projection-fixture-validation.ts';
+// oxlint-disable-next-line no-restricted-imports -- Raw fixture receipt is shared by the two integration harnesses only.
+import type { ProjectionDirectoryReceipt } from '../../ui-e2e/src/support/projection-fixture-validation.ts';
+/* eslint-enable @nx/enforce-module-boundaries -- Restore normal boundaries after the selected harness-only imports. */
 import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
@@ -502,6 +509,18 @@ test('diagnoses actual native 1000 turn possibly prewarmed selection warm and he
   }
 });
 
+/** Hash native physical bytes without retaining an expanded transcript in memory. */
+const nativeFixtureHash = async (path: string): Promise<string> => {
+  const hash = createHash('sha256');
+  for await (const bytes of createReadStream(path)) {
+    if (!(bytes instanceof Uint8Array)) {
+      throw new Error('Native fixture hash requires binary file chunks.');
+    }
+    hash.update(bytes);
+  }
+  return hash.digest('hex');
+};
+
 /** Hash every retained physical project/revision file; writer locks are deliberately outside the fixture. */
 const nativeFixtureFiles = async (root: string, prefix = ''): Promise<Record<string, string>> => {
   const children = await readdir(join(root, prefix), { withFileTypes: true });
@@ -515,9 +534,7 @@ const nativeFixtureFiles = async (root: string, prefix = ''): Promise<Record<str
         throw new Error(`Unsupported native fixture entry ${path}.`);
       }
       return {
-        [path]: createHash('sha256')
-          .update(await readFile(join(root, path)))
-          .digest('hex'),
+        [path]: await nativeFixtureHash(join(root, path)),
       };
     }),
   );
@@ -539,9 +556,9 @@ test.skipIf(!process.env['TAU_E2E_PROJECTION_IMPORT_ROOT'])(
   'diagnoses imported exact native workload through folder discovery',
   async () => {
     const artifactRoot = resolve(process.env['TAU_E2E_PROJECTION_IMPORT_ROOT']!);
-    const receipt = JSON.parse(await readFile(join(artifactRoot, 'receipt.json'), 'utf8')) as {
+    const sourceReceipt = JSON.parse(await readFile(join(artifactRoot, 'receipt.json'), 'utf8')) as {
       schema: string;
-      producerSpecSha256: string;
+      producerSpecSha256?: string;
       manifest: { id: string; name: string; sha256: string };
       slug: string;
       templateChat: string;
@@ -549,24 +566,79 @@ test.skipIf(!process.env['TAU_E2E_PROJECTION_IMPORT_ROOT'])(
       sha256: string;
       closureFiles: Record<string, string>;
     };
-    expect(receipt.schema).toBe('tau-native-projection-fixture-v1');
-    expect(receipt.producerSpecSha256).toMatch(/^[a-f0-9]{64}$/u);
+    const matrixPath = process.env['TAU_E2E_PROJECTION_CASE_MANIFEST'];
+    let turnCount = 1000;
+    let seedBytes: number | undefined;
+    let selectedExpected: { fixtureSha256: string; historySha256: string; turns: number } | undefined;
     const closure = join(artifactRoot, 'rooted-project');
     const manifestBytes = await readFile(join(closure, 'tau.json'));
     const manifest = projectManifestSchema.parse(JSON.parse(manifestBytes.toString('utf8')));
+    let receipt = sourceReceipt;
+    if (matrixPath === undefined) {
+      expect(receipt.schema).toBe('tau-native-projection-fixture-v1');
+      expect(receipt.producerSpecSha256).toMatch(/^[a-f0-9]{64}$/u);
+      const history = await readFile(join(artifactRoot, 'events.jsonl'), 'utf8');
+      expect(createHash('sha256').update(history).digest('hex')).toBe(receipt.sha256);
+      const ledger = foldChatLedger(emptyChatLedger, parseEventLog(history));
+      expect(ledger.historyIntact).toBe(true);
+      expect(ledger.anomalies).toEqual([]);
+      expect(Object.keys(ledger.runs)).toHaveLength(1000);
+    } else {
+      const matrixBytes = await readFile(matrixPath);
+      expect(createHash('sha256').update(matrixBytes).digest('hex')).toBe(
+        process.env['TAU_E2E_PROJECTION_CASE_MANIFEST_SHA256'],
+      );
+      const matrix = JSON.parse(matrixBytes.toString('utf8')) as {
+        version: number;
+        complete: boolean;
+        cases: Array<{
+          id: string;
+          file: string;
+          format: string;
+          seedBytes: number;
+          expected: { fixtureSha256: string; historySha256: string; turns: number };
+        }>;
+      };
+      expect(matrix.version).toBe(1);
+      expect(matrix.complete).toBe(true);
+      expect(matrix.cases.map((entry) => `${entry.seedBytes}:${entry.expected.turns}`).sort()).toEqual([
+        '256:10',
+        '256:100',
+        '256:1000',
+        '65536:10',
+        '65536:100',
+        '65536:1000',
+      ]);
+      const selected = matrix.cases.find((entry) => entry.id === process.env['TAU_E2E_PROJECTION_CASE_ID']);
+      expect(selected?.format).toBe('directory-v1');
+      expect(artifactRoot.endsWith(`/${selected!.file}`)).toBe(true);
+      selectedExpected = selected!.expected;
+      const proof = await validateProjectionDirectory(artifactRoot, selectedExpected);
+      const raw = JSON.parse(await readFile(join(artifactRoot, 'receipt.json'), 'utf8')) as ProjectionDirectoryReceipt;
+      expect(raw.project.projectId).toBe(manifest.id);
+      turnCount = selectedExpected.turns;
+      seedBytes = selected!.seedBytes;
+      receipt = {
+        schema: 'tau-raw-projection-fixture-v1',
+        manifest: {
+          id: manifest.id,
+          name: manifest.name,
+          sha256: createHash('sha256').update(manifestBytes).digest('hex'),
+        },
+        slug: raw.project.providerBasePath.split('/').findLast(Boolean)!,
+        templateChat: raw.chatId,
+        benchmarkChat: raw.chatId,
+        sha256: proof.historySha256,
+        closureFiles: Object.fromEntries(proof.manifest.files.map((file) => [file.path, file.sha256])),
+      };
+    }
     expect(createHash('sha256').update(manifestBytes).digest('hex')).toBe(receipt.manifest.sha256);
     expect(manifest.id).toBe(receipt.manifest.id);
     expect(manifest.name).toBe(receipt.manifest.name);
     expect(await nativeFixtureFiles(closure)).toEqual(receipt.closureFiles);
     expect(await readdir(join(closure, '.tau/chats'))).toEqual([receipt.benchmarkChat]);
     expect(receipt.benchmarkChat).toBe(receipt.templateChat);
-    const history = await readFile(join(artifactRoot, 'events.jsonl'), 'utf8');
-    expect(createHash('sha256').update(history).digest('hex')).toBe(receipt.sha256);
-    const rows = parseEventLog(history);
-    const ledger = foldChatLedger(emptyChatLedger, rows);
-    expect(ledger.historyIntact).toBe(true);
-    expect(ledger.anomalies).toEqual([]);
-    expect(Object.keys(ledger.runs)).toHaveLength(1000);
+    const latestMarker = new RegExp(`Fixture turn ${turnCount} of ${turnCount}\\.`, 'u');
     const next = Promise.withResolvers<void>();
     const fixture = await startGatewayFixture({
       toolCalls: [],
@@ -594,8 +666,8 @@ test.skipIf(!process.env['TAU_E2E_PROJECTION_IMPORT_ROOT'])(
       const importedRoot = join(session.pickedDirectory, receipt.slug);
       await cp(closure, importedRoot, { recursive: true });
       expect(await nativeFixtureFiles(importedRoot)).toEqual(receipt.closureFiles);
-      expect(await readFile(join(importedRoot, '.tau/chats', receipt.benchmarkChat, 'events.jsonl'), 'utf8')).toBe(
-        history,
+      expect(await nativeFixtureHash(join(importedRoot, '.tau/chats', receipt.benchmarkChat, 'events.jsonl'))).toBe(
+        receipt.sha256,
       );
       // Observe the fresh document before even registering the folder, not after potential discovery prewarm.
       await page.addInitScript((benchmarkChat: string) => {
@@ -671,7 +743,7 @@ test.skipIf(!process.env['TAU_E2E_PROJECTION_IMPORT_ROOT'])(
       await project.click();
       await page.waitForURL(/\/w\//u, { timeout: 60_000 });
       await expect.poll(() => activeChatId(page), { timeout: 60_000 }).toBe(receipt.benchmarkChat);
-      await expectVisible(page.getByRole('button', { name: /Fixture turn 1000 of 1000\./u }).last(), 120_000);
+      await expectVisible(page.getByRole('button', { name: latestMarker }).last(), 120_000);
       /** Milliseconds. */
       const coldOpen = performance.now() - coldStarted;
       const readsAfterCard = await page.evaluate(() => ({
@@ -686,6 +758,33 @@ test.skipIf(!process.env['TAU_E2E_PROJECTION_IMPORT_ROOT'])(
       expect(readsAfterCard.firstTargetRequestAt).toBeGreaterThanOrEqual(readsAfterCard.gestureAt!);
       /** Milliseconds. */
       const trustedGestureToObserved = readsAfterCard.observedAt - readsAfterCard.gestureAt!;
+      if (seedBytes !== undefined) {
+        const latest = page.locator(`[data-index="${turnCount - 1}"]`);
+        await expectVisible(
+          latest.getByText(`Completed authentic ${seedBytes} byte projection tool seed.`, { exact: true }),
+          60_000,
+        );
+        await expectVisible(latest.getByText('Created', { exact: true }), 60_000);
+        const group = latest.getByRole('button', { name: 'Read files', exact: true });
+        const grouped = await group.isVisible();
+        if (grouped) {
+          await group.click();
+        }
+        try {
+          await expectVisible(latest.getByText('Read', { exact: true }), 60_000);
+          expect(
+            await latest
+              .locator('span')
+              .allTextContents()
+              .then((labels) => labels.filter((label) => label === 'Created' || label === 'Read')),
+          ).toEqual(['Created', 'Read']);
+          expect(await latest.textContent()).toContain('projection-tool-seed.txt');
+        } finally {
+          if (grouped) {
+            await group.click();
+          }
+        }
+      }
       await page.locator('[data-slot="project-trigger"]').first().hover();
       await page
         .getByRole('button', { name: /^New chat in /u })
@@ -694,7 +793,7 @@ test.skipIf(!process.env['TAU_E2E_PROJECTION_IMPORT_ROOT'])(
       await expect.poll(() => activeChatId(page), { timeout: 60_000 }).not.toBe(receipt.benchmarkChat);
       const warmStarted = performance.now();
       await page.locator(`a[href*="chat=${receipt.benchmarkChat}"]`).first().click();
-      await expectVisible(page.getByRole('button', { name: /Fixture turn 1000 of 1000\./u }).last(), 120_000);
+      await expectVisible(page.getByRole('button', { name: latestMarker }).last(), 120_000);
       /** Milliseconds. */
       const warmSwitch = performance.now() - warmStarted;
       await selectChatModel(page, gatewayFixtureModelName);
@@ -716,11 +815,12 @@ test.skipIf(!process.env['TAU_E2E_PROJECTION_IMPORT_ROOT'])(
       );
       expect(outputRoot === artifactRoot || outputRoot.startsWith(`${artifactRoot}/`)).toBe(false);
       expect(await nativeFixtureFiles(closure)).toEqual(receipt.closureFiles);
-      expect(
-        createHash('sha256')
-          .update(await readFile(join(artifactRoot, 'events.jsonl')))
-          .digest('hex'),
-      ).toBe(receipt.sha256);
+      expect(await nativeFixtureHash(join(closure, '.tau/chats', receipt.benchmarkChat, 'events.jsonl'))).toBe(
+        receipt.sha256,
+      );
+      if (selectedExpected) {
+        await validateProjectionDirectory(artifactRoot, selectedExpected);
+      }
       await mkdir(outputRoot, { recursive: true });
       await writeFile(
         join(outputRoot, 'import-receipt.json'),
@@ -729,6 +829,9 @@ test.skipIf(!process.env['TAU_E2E_PROJECTION_IMPORT_ROOT'])(
             schema: 'tau-native-projection-import-v1',
             source: artifactRoot,
             producerSpecSha256: receipt.producerSpecSha256,
+            selectedExpected,
+            turnCount,
+            seedBytes,
             importerSpecSha256: createHash('sha256')
               .update(await readFile(import.meta.filename))
               .digest('hex'),

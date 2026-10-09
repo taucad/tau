@@ -3,10 +3,24 @@ import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
 import { expect, inject } from 'vitest';
 import type { Locator } from 'vitest/browser';
 import { locators, server as vitestServer } from 'vitest/browser';
-import type { ProjectionFixtureProof } from '#support/projection-fixture-validation.js';
+import type { ProjectionFixtureProof, ProjectionDirectoryReceipt } from '#support/projection-fixture-validation.js';
 import type { GatewayScriptTurn, GatewayTurnCount } from '#support/agent-host-gateway-script.js';
 
 export type TargetSurface = 'primary' | 'secondary';
+/** Bounded actual byte work for the fixture import's single opaque control file. */
+export type ProjectionImportWork = {
+  syncAccessCalls: number;
+  syncWriteCalls: number;
+  syncWriteBytes: number;
+  writableCalls: number;
+  getFileCalls: number;
+  snapshotBytes: number;
+  arrayBufferCalls: number;
+  arrayBufferBytes: number;
+  streamCalls: number;
+  streamRequestedBytes: number;
+};
+
 export type TargetWorkerFlowEvidence = {
   readonly url: string;
   readonly available: boolean;
@@ -223,6 +237,20 @@ export type UiBrowserCommands = {
     path: string,
     expected?: { fixtureSha256: string; historySha256: string; turns: number },
   ): Promise<ProjectionFixtureProof>;
+  uiGenerateProjectionDirectory(
+    seedPath: string,
+    seedSha256: string,
+    turns: number,
+    name: string,
+  ): Promise<{
+    receipt: ProjectionDirectoryReceipt;
+    proof: ProjectionFixtureProof;
+    expected: { fixtureSha256: string; historySha256: string; turns: number };
+  }>;
+  uiValidateProjectionDirectory(
+    path: string,
+    expected: { fixtureSha256: string; historySha256: string; turns: number },
+  ): Promise<ProjectionFixtureProof>;
   uiReadFixtureChunk(path: string, offset: number): Promise<{ readonly base64: string; readonly eof: boolean }>;
   uiStartObservedDownloads(): Promise<void>;
   uiReadObservedDownloads(): Promise<readonly TargetDownload[]>;
@@ -301,6 +329,10 @@ export type UiBrowserCommands = {
   uiReadTauServeFile(relativePath: string): Promise<string | undefined>;
   uiListTauServeChats(): Promise<readonly string[]>;
   uiWorkerCatchUpFlow(install: boolean, surface?: TargetSurface): Promise<readonly TargetWorkerFlowEvidence[]>;
+  uiProjectionImportWork(
+    install: boolean,
+    workerUrl: string,
+  ): Promise<{ worker: ProjectionImportWork; reader: ProjectionImportWork }>;
   uiTargetWorkers(urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]>;
   uiTypeTarget(selector: string, value: string, surface?: TargetSurface): Promise<void>;
   uiWaitForTarget(source: string, argument?: unknown, timeout?: number, surface?: TargetSurface): Promise<void>;
@@ -504,6 +536,21 @@ export const validateProjectionFixture = (
   path: string,
   expected?: { fixtureSha256: string; historySha256: string; turns: number },
 ): Promise<ProjectionFixtureProof> => server.commands.uiValidateProjectionFixture(path, expected);
+
+/** Produce a raw directory fixture without transporting expanded history through the browser. */
+export const generateProjectionDirectory = (
+  seedPath: string,
+  seedSha256: string,
+  turns: number,
+  name: string,
+): ReturnType<UiBrowserCommands['uiGenerateProjectionDirectory']> =>
+  server.commands.uiGenerateProjectionDirectory(seedPath, seedSha256, turns, name);
+
+/** Independently reopen raw physical bytes and validate the anchored receipt. */
+export const validateProjectionDirectory = (
+  path: string,
+  expected: { fixtureSha256: string; historySha256: string; turns: number },
+): Promise<ProjectionFixtureProof> => server.commands.uiValidateProjectionDirectory(path, expected);
 
 /** Read exact immutable fixture UTF8 through bounded binary replies. */
 export const readFixtureText = async (path: string): Promise<string> => {

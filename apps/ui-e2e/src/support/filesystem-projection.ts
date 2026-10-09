@@ -1,7 +1,11 @@
-import { decodeProjectionFile, encodeProjectionFile } from '#support/filesystem-projection-writer.js';
+import type { ProjectionDirectoryReceipt } from '#support/projection-fixture-validation.js';
+import {
+  decodeProjectionFile,
+  encodeProjectionFile,
+  iterateProjectionHistory,
+} from '#support/filesystem-projection-writer.js';
 import { randomUuid } from '@taucad/utils/id';
-import { emptyChatLedger, foldChatLedger, parseEventLog, parseLogEvent, reduceEventLog } from '@taucad/agent-host';
-import type { AgentLogEvent } from '@taucad/agent-host';
+import { emptyChatLedger, foldChatLedger, parseEventLog, reduceEventLog } from '@taucad/agent-host';
 import { seededChatIds } from '#support/chat-attachments.js';
 import * as target from '#support/external-target.js';
 import { readProjectStorageState, readPhysicalDatabasePrefix } from '#support/project-storage-state.js';
@@ -67,113 +71,15 @@ export type ProjectionHistoryFixture = {
 
 /** Build accumulated histories from one real completed turn, preserving real revision references. */
 export const createProjectionHistory = (template: string, turns: number): ProjectionHistoryFixture => {
-  const source = parseEventLog(template);
-  const sourceMessages = reduceEventLog(source);
-  if (source.filter((row) => row.type === 'turn.history-projection-committed').length !== 1) {
-    throw new Error('A benchmark template must contain exactly one complete committed turn.');
-  }
-  const identities = new Set<string>();
-  const protectedIdentities = new Set<string>();
-  const identityFields = new Set([
-    'id',
-    'runId',
-    'messageId',
-    'userMessageId',
-    'requestMessageId',
-    'commandId',
-    'attemptId',
-    'operationId',
-    'toolCallId',
-    'leaseId',
-    'turnId',
-    'requestId',
-    'invocationId',
-    'interactionId',
-    'bindingId',
-    'receiptId',
-    'stepId',
-    'parentMessageId',
-    'responseId',
-  ]);
-  const collect = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const child of value) {
-        collect(child);
-      }
-    } else if (typeof value === 'object' && value !== null) {
-      for (const [key, child] of Object.entries(value)) {
-        if (
-          ['model', 'provider', 'project', 'checkout', 'host'].includes(key) &&
-          typeof child === 'object' &&
-          child !== null &&
-          'id' in child &&
-          typeof child.id === 'string'
-        ) {
-          const identity = String(child.id);
-          protectedIdentities.add(identity);
-        }
-        if (
-          typeof child === 'string' &&
-          (/revisionId$/iu.test(key) ||
-            ['projectId', 'chatId', 'checkoutId', 'modelId', 'providerId', 'hostId'].includes(key))
-        ) {
-          protectedIdentities.add(child);
-        }
-        if (identityFields.has(key) && typeof child === 'string') {
-          identities.add(child);
-        }
-        collect(child);
-      }
-    }
-  };
-  for (const row of source) {
-    collect(row);
-  }
-  for (const protectedIdentity of protectedIdentities) {
-    identities.delete(protectedIdentity);
-  }
-  const rows: AgentLogEvent[] = [];
-  const prompts: string[] = [];
-  const retained: string[] = [];
-  for (let turn = 0; turn < turns; turn += 1) {
-    const replacements = new Map([...identities].map((id) => [id, `${id}:projection:${turn}`]));
-    const rewrite = (value: unknown): unknown => {
-      if (typeof value === 'string') {
-        return replacements.get(value) ?? value;
-      }
-      if (Array.isArray(value)) {
-        return value.map((child) => rewrite(child));
-      }
-      if (typeof value === 'object' && value !== null) {
-        return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, rewrite(child)]));
-      }
-      return value;
-    };
-    for (const row of source) {
-      const rewritten = rewrite(row) as Record<string, unknown>;
-      rewritten['leaderEpoch'] = source[0]!.leaderEpoch;
-      rewritten['epoch'] = source[0]!.epoch;
-      rewritten['sequence'] = rows.length;
-      if (row.type === 'turn.history-projection-committed') {
-        rewritten['retainedMessageIds'] = [...retained];
-        const message = rewritten['message'] as { content: unknown };
-        const marker = `Fixture turn ${turn + 1} of ${turns}.`;
-        message.content =
-          typeof message.content === 'string'
-            ? `${message.content} ${marker}`
-            : [...(message.content as unknown[]), { type: 'text', text: marker }];
-        prompts.push(marker);
-      }
-      rows.push(parseLogEvent(rewritten));
-    }
-    retained.push(...sourceMessages.map((message) => replacements.get(message.id) ?? message.id));
-  }
+  const rows = [...iterateProjectionHistory(template, turns)];
+  const expectedMessages = reduceEventLog(parseEventLog(template)).length * turns;
+  const prompts = Array.from({ length: turns }, (_, index) => `Fixture turn ${index + 1} of ${turns}.`);
   const messages = reduceEventLog(rows);
   const ledger = foldChatLedger(emptyChatLedger, rows);
   if (
     !ledger.historyIntact ||
     ledger.anomalies.length > 0 ||
-    messages.length !== retained.length ||
+    messages.length !== expectedMessages ||
     Object.keys(ledger.runs).length !== turns
   ) {
     throw new Error('Generated history failed canonical reducer/ledger qualification.');
@@ -317,6 +223,34 @@ export const replaceProjectionLog = async (chatId: string, content?: string): Pr
 
 /** Evidence from the actual agent worker connection whose delivery the control holds. */
 export type ProjectionDeliveryEvidence = {
+  readonly resources?: {
+    readonly status: 'observing' | 'unsupported' | 'failed';
+    readonly timeOrigin: number;
+    readonly installedAt: number;
+    readonly observedAt: number;
+    readonly deliveredEntries: number;
+    readonly evictedEntries: number;
+    readonly nativeBufferFullEvents: number;
+    readonly entries: ReadonlyArray<{
+      readonly origin: string;
+      readonly path: string;
+      readonly initiator: string;
+      readonly startedAt: number;
+      readonly responseEnd: number;
+    }>;
+  };
+  readonly startupRpc?: {
+    readonly droppedRequests: number;
+    readonly droppedStartupRequests: number;
+    readonly calls: ReadonlyArray<{
+      readonly port: number;
+      readonly id: string;
+      readonly method: string;
+      readonly requestedAt: number;
+      respondedAt?: number;
+      response: 'absent' | 'success' | 'error' | 'invalid';
+    }>;
+  };
   readonly requestedChats: readonly string[];
   readonly requested: number;
   readonly readRequests: number;
@@ -338,6 +272,15 @@ export type ProjectionDeliveryEvidence = {
     lastOutgoingAt?: number;
     lastIncomingAt?: number;
     lastCursor?: number;
+    /** Renderer receipt milliseconds relative to this document's performance time origin; not fold completion. */
+    receipt?: {
+      requestedAt: number;
+      sourceGeneration?: string;
+      firstPageAt?: number;
+      lastPageAt?: number;
+      validatedAt?: number;
+      maxInterPageGap: number;
+    };
   }>;
   readonly catchUpPageFrames: number;
   readonly catchUpRequests: ReadonlyArray<{ port: number; id: string; chatId: string; at: number }>;
@@ -419,10 +362,71 @@ type DeliveryControl = {
   evidence(): ProjectionDeliveryEvidence;
 };
 
+type DeliveryOptions = { probeSeed: string; captureReceiptTiming: boolean };
+
 /** Install a reversible control on actual agent read/live frames before the document starts. */
-export const installProjectionDeliveryControl = async (): Promise<void> => {
-  await target.addInitScript((probeSeed: string) => {
+export const installProjectionDeliveryControl = async (captureReceiptTiming = false): Promise<void> => {
+  const options: DeliveryOptions = { probeSeed: randomUuid(), captureReceiptTiming };
+  await target.addInitScript((options: DeliveryOptions) => {
+    const { probeSeed, captureReceiptTiming } = options;
     let probeSequence = 0;
+    type ResourceEvidence = NonNullable<ProjectionDeliveryEvidence['resources']>;
+    const resourceEntries: Array<ResourceEvidence['entries'][number]> = [];
+    let resourceObserver: PerformanceObserver | undefined;
+    let resourceStatus: ResourceEvidence['status'] = 'unsupported';
+    const resourceInstalledAt = captureReceiptTiming ? performance.now() : 0;
+    let deliveredResourceEntries = 0;
+    let evictedResourceEntries = 0;
+    let nativeBufferFullEvents = 0;
+    const collectResources = (entries: readonly PerformanceEntry[]): void => {
+      for (const entry of entries) {
+        if (!(entry instanceof PerformanceResourceTiming) || !/^https?:/u.test(entry.name)) {
+          continue;
+        }
+        const url = new URL(entry.name);
+        deliveredResourceEntries += 1;
+        if (resourceEntries.length === 256) {
+          resourceEntries.shift();
+          evictedResourceEntries += 1;
+        }
+        resourceEntries.push({
+          origin: url.origin,
+          path: url.pathname,
+          initiator: entry.initiatorType,
+          startedAt: entry.startTime,
+          responseEnd: entry.responseEnd,
+        });
+      }
+    };
+    if (captureReceiptTiming && typeof PerformanceObserver !== 'undefined') {
+      try {
+        resourceObserver = new PerformanceObserver((list) => {
+          collectResources(list.getEntries());
+        });
+        resourceObserver.observe({ type: 'resource', buffered: true });
+        resourceStatus = 'observing';
+        performance.addEventListener('resourcetimingbufferfull', () => {
+          nativeBufferFullEvents += 1;
+        });
+        addEventListener('pagehide', () => resourceObserver?.disconnect(), { once: true });
+      } catch {
+        resourceStatus = 'failed';
+        resourceObserver?.disconnect();
+      }
+    }
+    const resourceEvidence = (): ResourceEvidence => {
+      collectResources(resourceObserver?.takeRecords() ?? []);
+      return {
+        status: resourceStatus,
+        timeOrigin: performance.timeOrigin,
+        installedAt: resourceInstalledAt,
+        observedAt: performance.now(),
+        deliveredEntries: deliveredResourceEntries,
+        evictedEntries: evictedResourceEntries,
+        nativeBufferFullEvents,
+        entries: [...resourceEntries],
+      };
+    };
     type Frame = {
       s?: number;
       e?: { m?: string };
@@ -439,6 +443,12 @@ export const installProjectionDeliveryControl = async (): Promise<void> => {
     const catchUpRequests: Array<ProjectionDeliveryEvidence['catchUpRequests'][number]> = [];
     const catchUpFrames: Array<ProjectionDeliveryEvidence['catchUpFrames'][number]> = [];
     const capturedCatchUp = new WeakSet<Event>();
+    const startupCalls = new Map<string, NonNullable<ProjectionDeliveryEvidence['startupRpc']>['calls'][number]>();
+    let droppedRequests = 0;
+    let droppedStartupRequests = 0;
+    let startupRequestCount = 0;
+    let otherRequestCount = 0;
+    const startupMethods = new Set(['init', 'provide', 'capabilities', 'connect', 'open', 'hello']);
     let catchUpPageFrames = 0;
     const calls = new WeakMap<MessagePort, Map<string, string>>();
     const methods = new WeakMap<MessagePort, Map<string, string>>();
@@ -488,6 +498,32 @@ export const installProjectionDeliveryControl = async (): Promise<void> => {
       options?: Transferable[] | StructuredSerializeOptions,
     ): void {
       const frame = message as Frame | undefined;
+      if (captureReceiptTiming && frame?.k === 'rq' && frame.i && frame.n) {
+        if (!identities.has(this)) {
+          identities.set(this, ++nextPort);
+        }
+        const port = identities.get(this)!;
+        const startup = startupMethods.has(frame.n);
+        if (startup ? startupRequestCount < 64 : otherRequestCount < 192) {
+          if (startup) {
+            startupRequestCount += 1;
+          } else {
+            otherRequestCount += 1;
+          }
+          startupCalls.set(`${port}:${frame.i}`, {
+            port,
+            id: frame.i.slice(0, 256),
+            method: frame.n.slice(0, 128),
+            requestedAt: performance.now(),
+            response: 'absent',
+          });
+        } else {
+          droppedRequests += 1;
+          if (startup) {
+            droppedStartupRequests += 1;
+          }
+        }
+      }
       if (frame?.i && frame.n === 'catchUp' && frame.a?.chatId) {
         let captures = catchUpCalls.get(this);
         if (captures === undefined) {
@@ -521,6 +557,7 @@ export const installProjectionDeliveryControl = async (): Promise<void> => {
           sn: 0,
           sc: 0,
           se: 0,
+          ...(captureReceiptTiming ? { receipt: { requestedAt: performance.now(), maxInterPageGap: 0 } } : {}),
         });
 
         if (catchUpRequests.length === 16) {
@@ -594,6 +631,13 @@ export const installProjectionDeliveryControl = async (): Promise<void> => {
       }
       const wrapped: EventListener = (event) => {
         const frame = (event as MessageEvent<Frame | undefined>).data;
+        if (captureReceiptTiming && frame?.k === 'rs' && frame.i) {
+          const call = startupCalls.get(`${identities.get(this)}:${frame.i}`);
+          if (call?.response === 'absent') {
+            call.respondedAt = performance.now();
+            call.response = frame.o === 1 ? 'success' : frame.o === 0 ? 'error' : 'invalid';
+          }
+        }
         const method = frame?.i ? methods.get(this)?.get(frame.i) : undefined;
         const deliver = (): void => {
           if (method === 'read' && frame?.k === 'rs' && !deliveredReads.has(event)) {
@@ -636,6 +680,24 @@ export const installProjectionDeliveryControl = async (): Promise<void> => {
           if (stream !== undefined) {
             stream[frame.k] += 1;
             stream.lastIncomingAt = Date.now();
+            if (stream.receipt !== undefined && frame.k === 'sn') {
+              if (typeof position?.sourceGeneration === 'string') {
+                stream.receipt.sourceGeneration = position.sourceGeneration;
+              }
+              if (value?.type === 'page') {
+                const receivedAt = performance.now();
+                if (stream.receipt.lastPageAt !== undefined) {
+                  stream.receipt.maxInterPageGap = Math.max(
+                    stream.receipt.maxInterPageGap,
+                    receivedAt - stream.receipt.lastPageAt,
+                  );
+                }
+                stream.receipt.firstPageAt ??= receivedAt;
+                stream.receipt.lastPageAt = receivedAt;
+              } else if (value?.type === 'validated') {
+                stream.receipt.validatedAt = performance.now();
+              }
+            }
             if (typeof value?.answer?.nextCursor === 'number') {
               stream.lastCursor = value.answer.nextCursor;
             } else if (typeof position?.cursor === 'number') {
@@ -865,6 +927,16 @@ export const installProjectionDeliveryControl = async (): Promise<void> => {
         }
       },
       evidence: () => ({
+        ...(captureReceiptTiming
+          ? {
+              resources: resourceEvidence(),
+              startupRpc: {
+                droppedRequests,
+                droppedStartupRequests,
+                calls: [...startupCalls.values()].map((call) => ({ ...call })),
+              },
+            }
+          : {}),
         held: heldCount,
         restored,
         delivered,
@@ -894,7 +966,7 @@ export const installProjectionDeliveryControl = async (): Promise<void> => {
       }),
     };
     Object.assign(globalThis, { __tauProjectionDeliveryControl: control });
-  }, randomUuid());
+  }, options);
 };
 
 /** Hold actual read/live delivery for exactly one chat. */
@@ -1249,3 +1321,34 @@ export const createProjectionBenchmarkFixture = async (
   await validateProjectionClosure(closure);
   return { closure, chatId, turns: history.turns, excludedChatDirectories };
 };
+
+/* oxlint-disable no-await-in-loop -- Bound each fixture transport frame and await its rooted physical append before sending the next. */
+/** Import an independently Node-proved raw directory without reconstructing its expanded JSON history. */
+export const importProjectionProjectDirectory = async (
+  directory: string,
+  receipt: ProjectionDirectoryReceipt,
+): Promise<void> => {
+  const moduleUrl = new URL('filesystem-projection-writer.ts', import.meta.url).href;
+  await target.commands.uiEvaluateTarget(
+    'async ({ moduleUrl, receipt }) => { if (globalThis.__tauProjectionDirectoryImport) throw new Error("Projection directory import already active"); const writer = await import(moduleUrl); globalThis.__tauProjectionDirectoryImport = await writer.openProjectionDirectoryImport(receipt); }',
+    { moduleUrl, receipt },
+  );
+  try {
+    for (const file of receipt.files) {
+      for (let offset = 0; offset < file.byteLength || offset === 0; offset += 65_536) {
+        const chunk = await target.commands.uiReadFixtureChunk(`${directory}/rooted-project/${file.path}`, offset);
+        await target.commands.uiEvaluateTarget(
+          'async ({ path, offset, base64 }) => globalThis.__tauProjectionDirectoryImport.append(path, offset, base64)',
+          { path: file.path, offset, base64: chunk.base64 },
+        );
+      }
+    }
+    await target.commands.uiEvaluateTarget('() => globalThis.__tauProjectionDirectoryImport.finish()');
+  } finally {
+    await target.commands.uiEvaluateTarget(
+      '() => { globalThis.__tauProjectionDirectoryImport?.dispose(); delete globalThis.__tauProjectionDirectoryImport; }',
+    );
+  }
+};
+
+/* oxlint-enable no-await-in-loop */

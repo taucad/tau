@@ -59,6 +59,7 @@ const state = vi.hoisted(() => ({
     machineId: 'workshop-x1c',
   })),
   servicesStreaming: vi.fn(async (_boundMilliseconds: number): Promise<readonly string[]> => []),
+  servicesResumeStarts: vi.fn(),
   runtimePrewarm: vi.fn(),
   runtimeMaxUtilities: undefined as number | undefined,
   servicesQuiesce: vi.fn(
@@ -288,6 +289,7 @@ vi.mock('#main/services-broker.js', () => ({
       connect: state.servicesConnect,
       completeMachineBinding: state.servicesCompleteBinding,
       streamingMachines: state.servicesStreaming,
+      resumeMachineStarts: state.servicesResumeStarts,
       quiesce: state.servicesQuiesce,
       dispose: state.servicesDispose,
       computeProjectRoot: (root: string) =>
@@ -695,7 +697,8 @@ describe('desktop main compute owner', () => {
     bootMilliseconds,
   );
 
-  /* The utility reads again before it closes anything: a stream begun after main asked still holds the quit. */
+  /* The utility reads again before it closes anything when its store opened after main asked: a stream found then
+   * still holds the quit, and the machines start jobs again. */
   it(
     'should refuse to quit when the utility finds a stream that began after the first question',
     async () => {
@@ -713,6 +716,7 @@ describe('desktop main compute owner', () => {
         message: 'A program is streaming to LongMill; stop it first.',
       });
       expect(state.servicesQuiesce).toHaveBeenCalledWith(expect.any(Number), { quitIfStreamingUnknown: false });
+      expect(state.servicesResumeStarts).toHaveBeenCalledOnce();
       expect(state.servicesDispose).not.toHaveBeenCalled();
       expect(app.quit).not.toHaveBeenCalled();
     },
@@ -744,6 +748,11 @@ describe('desktop main compute owner', () => {
       });
       expect(app.quit).not.toHaveBeenCalled();
       expect(state.servicesDispose).not.toHaveBeenCalled();
+      /* B3H-3: the renderer let go and the person kept Tau open: the machines it asks about start jobs again. */
+      expect(state.sentToRenderer).toContain(quitChannels.ask);
+      await vi.waitFor(() => {
+        expect(state.servicesResumeStarts).toHaveBeenCalledOnce();
+      });
       /* The outcome itself is logged, not just its name, so what refused to
        * settle is recoverable from the log. */
       expect(state.log).toHaveBeenCalledWith('error', 'main.quiesce', {

@@ -132,12 +132,16 @@ export type ServicesBroker = {
   completeMachineBinding(input: MachineBindingCompletion, boundMilliseconds: number): Promise<MachineBindingOutcome>;
   /**
    * The machines a streamed run is feeding now, by name, so quit can refuse before anything is quiesced
-   * (Q-streamed-host). No utility, no stream.
+   * (Q-streamed-host). No utility, no stream. From this question the utility starts no machine job until it closes or
+   * {@link ServicesBroker.resumeMachineStarts} calls the quit off, so an empty answer still holds once the renderer
+   * has quiesced.
    *
    * @param boundMilliseconds - How long to wait for the utility's answer before rejecting.
    * @returns The machines' names.
    */
   streamingMachines(boundMilliseconds: number): Promise<readonly string[]>;
+  /** Quit was called off after {@link ServicesBroker.streamingMachines}: the utility starts machine jobs again. */
+  resumeMachineStarts(): void;
   /** Send a control frame (root admission, credential updates) to the utility. */
   post(message: unknown): void;
   /** Original project identity retained for an admitted execution root. */
@@ -722,6 +726,9 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         clearTimeout(bound);
         streamingWaiters.delete(requestId);
       }
+    },
+    resumeMachineStarts() {
+      utility?.postMessage({ type: 'machines-resume' });
     },
     post(message) {
       const { type } = message as { type?: unknown };

@@ -411,6 +411,16 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   let disposed = false;
   let quiescing = false;
   let quiescence: Promise<void> | undefined;
+  /* Main's quit question holds the machine host's starts from its read until quit closes the host or main calls the
+   * quit off (`machines-resume`), so the "nothing streams" main acts on before the renderer quiesces stays true:
+   * the utility's quiesce then has nothing new to find and never refuses after the renderer let go. */
+  let heldStarts: (() => void) | undefined;
+  /* Counts main's quit questions and call-offs, so a hold that lands after its quit was called off lets go at once. */
+  let quitAttempt = 0;
+  const releaseHeldStarts = (): void => {
+    heldStarts?.();
+    heldStarts = undefined;
+  };
   let authToken: string | undefined;
   /** The signed-in account's user id, which main reads from `get-session` and sends with the bearer. */
   let sessionPrincipal: string | undefined;
@@ -1155,13 +1165,46 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         }
         // async-iife: bootstrap -- a control frame has no caller to await the directory read.
         void (async () => {
+          quitAttempt += 1;
+          const attempt = quitAttempt;
+          let resume: (() => void) | undefined;
+          /* Lets go of this question's own hold only; `resume` does nothing twice. */
+          const letGo = (): void => {
+            if (heldStarts === resume) {
+              heldStarts = undefined;
+            }
+            resume?.();
+          };
           try {
-            machinesStreaming?.(requestId, await streamingMachines());
+            const opened = machineHost;
+            if (opened !== undefined) {
+              const { host } = await opened;
+              resume = await host.quiesce();
+              if (attempt !== quitAttempt) {
+                letGo();
+                return;
+              }
+              releaseHeldStarts();
+              heldStarts = resume;
+            }
+            const machines = await streamingMachines();
+            if (machines.length > 0) {
+              /* Main refuses this quit; starts go on. */
+              letGo();
+            }
+            machinesStreaming?.(requestId, machines);
           } catch (error) {
+            letGo();
             /* Unanswered, main's bound decides; the reason stays in the log. */
             log('machines.streaming-unread', error instanceof Error ? error.message : String(error), 'warn');
           }
         })();
+        return;
+      }
+      case 'machines-resume': {
+        /* Main called its quit off after asking: admit starts again. */
+        quitAttempt += 1;
+        releaseHeldStarts();
         return;
       }
       case 'machine-binding-complete': {
@@ -1320,10 +1363,14 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   const beginQuiesce = async (quitIfStreamingUnknown: boolean): Promise<void> => {
     quiescing = true;
-    /* Q-streamed-host, authoritative: read again here, with no new session admitted, because a stream may have begun
-     * since main asked. Closing the machine host would cut it mid-run, so nothing closes; a later quit asks again.
-     * The machine host starts no job from here on, so none begins between this read and its close. */
-    let resumeStarts = (): void => undefined;
+    /* Q-streamed-host, authoritative. When main's question held starts and found nothing streaming, that answer
+     * still holds: nothing to read again. Otherwise (the store opened since, or a quiesce main did not ask before)
+     * read here, with starts held, because a stream may have begun. Closing the machine host would cut it mid-run,
+     * so nothing closes; a later quit asks again. The machine host starts no job from here on, so none begins
+     * between the answer and its close. */
+    const held = heldStarts;
+    heldStarts = undefined;
+    let resumeStarts = held ?? ((): void => undefined);
     const refuse = (refusal: QuiesceRefusal): never => {
       resumeStarts();
       quiescing = false;
@@ -1333,11 +1380,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     let streaming: readonly string[] = [];
     try {
       const opened = machineHost;
-      if (opened !== undefined) {
+      if (held === undefined && opened !== undefined) {
         const { host } = await opened;
-        resumeStarts = host.quiesce();
+        resumeStarts = await host.quiesce();
       }
-      streaming = await streamingMachines();
+      streaming = held === undefined ? await streamingMachines() : [];
     } catch (error) {
       if (!quitIfStreamingUnknown) {
         refuse({

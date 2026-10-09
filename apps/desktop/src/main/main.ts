@@ -1367,8 +1367,17 @@ const bootstrapElectronApp = async (): Promise<void> => {
          * streamed program line by line for its whole run, so quitting would
          * stop the machine mid-run. There is no *Quit anyway*; the person
          * stops the program first. An unanswered question asks the person.
-         * The utility checks again before it closes anything (below).
+         * From this question the utility starts no machine job until it
+         * closes or `keepOpen` calls the quit off, so "nothing streams" stays
+         * true while the renderer quiesces, which it cannot undo.
          */
+        /* Quit is called off: Tau stays open, and the utility starts machine jobs again (its streaming answer held
+         * them, so the renderer could quiesce on an answer that stays true). */
+        const keepOpen = (): void => {
+          services.resumeMachineStarts();
+          quitting = false;
+          shutdown = undefined;
+        };
         let streaming: readonly string[] | undefined;
         try {
           streaming = await services.streamingMachines(machineStreamingMilliseconds);
@@ -1380,8 +1389,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
           if (streaming !== undefined) {
             await refuseWhileStreaming(streaming);
           }
-          quitting = false;
-          shutdown = undefined;
+          keepOpen();
           return;
         }
         /*
@@ -1397,8 +1405,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
           rendererOutcome === 'timeout' &&
           !(await askToQuitAnyway('This window did not finish closing its projects.'))
         ) {
-          quitting = false;
-          shutdown = undefined;
+          keepOpen();
           return;
         }
         forced ||= rendererOutcome === 'timeout';
@@ -1413,8 +1420,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
           if (utilityOutcome.status === 'streaming') {
             await refuseWhileStreaming(utilityOutcome.machines);
           }
-          quitting = false;
-          shutdown = undefined;
+          keepOpen();
           return;
         }
         log.log(
@@ -1428,8 +1434,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
           utilityOutcome.status !== 'no-utility' &&
           !(await askToQuitAnyway('Tau could not finish saving every open project.'))
         ) {
-          quitting = false;
-          shutdown = undefined;
+          keepOpen();
           return;
         }
         try {

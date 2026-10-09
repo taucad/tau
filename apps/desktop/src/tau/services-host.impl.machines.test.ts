@@ -37,9 +37,9 @@ vi.mock('@taucad/runtime/host/node', async (importOriginal) => {
       const host = await actual.createNodeMachineHost(input);
       return {
         ...host,
-        quiesce: () => {
+        quiesce: async () => {
           gate.push('quiesce');
-          const resume = host.quiesce();
+          const resume = await host.quiesce();
           return () => {
             gate.push('resume');
             resume();
@@ -458,9 +458,12 @@ describe('createServicesHost — machines', () => {
 
       listed.entries = undefined;
       listed.error = new Error('The store is busy.');
+      gate.length = 0;
       await expect(machines.host.quiesce()).rejects.toMatchObject({
         refusal: { reason: 'streaming-unknown', message: 'The store is busy.' },
       });
+      /* Unread is not "none": starts go again, as when a stream refuses the quit. */
+      expect(gate).toEqual(['quiesce', 'list', 'resume']);
       await expect(client.list({})).resolves.toMatchObject({ entries: [expect.anything()] });
 
       /* The person chose to quit anyway: the machine host closes with the rest, starting nothing first. */
@@ -471,6 +474,34 @@ describe('createServicesHost — machines', () => {
     } finally {
       listed.entries = undefined;
       listed.error = undefined;
+      await machines.cleanup();
+    }
+  }, 30_000);
+
+  /* B3H-3: the renderer quiesces between main's question and the utility's quiesce, and cannot resume. */
+  it("should hold starts from main's quit question until quit closes, so the utility then refuses nothing, or until main calls it off", async () => {
+    const machines = await machinesHarness();
+    try {
+      const client = machines.connect();
+      await machines.bindSimulator(client);
+      listed.entries = [];
+      gate.length = 0;
+
+      await expect(machines.streaming('kept-open')).resolves.toEqual([]);
+      expect(gate).toEqual(['quiesce', 'list']);
+      /* The person kept Tau open: starts go again, so the window can still start a job. */
+      machines.host.handleMessage(frame({ type: 'machines-resume' }));
+      expect(gate).toEqual(['quiesce', 'list', 'resume']);
+
+      gate.length = 0;
+      await expect(machines.streaming('quit')).resolves.toEqual([]);
+      /* A stream the store now reported could not have begun under the hold: the answer main acted on stands. */
+      listed.entries = [{ name: 'Router', snapshot: { run: { delivery: 'streamed', state: 'running' } } }];
+      await machines.host.quiesce();
+      expect(gate).toEqual(['quiesce', 'list']);
+      await expect(client.list({})).rejects.toThrow();
+    } finally {
+      listed.entries = undefined;
       await machines.cleanup();
     }
   }, 30_000);

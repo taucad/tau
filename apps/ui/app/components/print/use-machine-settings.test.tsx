@@ -14,7 +14,7 @@ afterEach(() => {
 });
 const manifest = mock<MachineManifest>({ identity: mock<MachineManifest['identity']>({ typeId: 'bambu.x1c' }) });
 // The hook reads the provider's manifest and its own settings form; this provider declares none.
-const provider = { manifest } as MachineProvider;
+const provider = mock<MachineProvider>({ manifest, settingsConfiguration: undefined });
 
 describe('mounted machine settings acquisition', () => {
   it('should keep closed observation health when a queued dirty save acknowledges', async () => {

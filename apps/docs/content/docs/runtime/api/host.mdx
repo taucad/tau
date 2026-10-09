@@ -25,6 +25,8 @@ Import portable admission contracts from `@taucad/runtime/host`; Node machine ho
 
 `createNodeMachineHost` opens one exclusive store root using `CreateNodeMachineHostInput`: host and authority ids, admission authority, provider definitions, optional `NodeMachineRuntime`, and error handling. It returns a `NodeMachineHost` that issues machines-route sessions, serves channels, completes and removes bindings, and closes its store. A second writer cannot silently share the root.
 
+`NodeMachineHost.quiesce()` refuses job approvals and starts with `MACHINE_HOST_CLOSING` until the returned resume function runs; reads, stops, holds, actions and started runs carry on. A launcher calls it before checking for a streamed run and closing, so no run starts in between, and resumes if it stays open. The host lists a serial provider as `unavailable` when its runtime has no serial access.
+
 `createNodeMachineSerial` wraps a host application's native `NodeMachineSerialDriver` as the serial half of a `NodeMachineRuntime`: its `listSerialPorts` normalizes each `NodeMachineSerialPortInfo` for discovery, and its `openSerial` opens one port as a stream bounded by the request's byte limits and signal. Opening a port may reset the controller behind it.
 
 `IssueNodeMachineSessionInput` carries actor and machine-route grants. `ServeNodeMachineChannelInput` pairs an authenticated session with a channel endpoint; `NodeMachineChannelHandle` reports closure and supports disposal. `CompleteNodeMachineBindingInput` supplies trusted native credential and service trust for a pending ceremony; `RemoveNodeMachineBindingInput` names the binding to remove. These trusted inputs are not browser request payloads.

@@ -31,7 +31,7 @@ A `MachineManifest` has `version: 3` and these parts:
 
 Declare a standard family with `standardMachineAction` or a provider-owned `<vendor>.<area>.<verb>` action with `defineMachineAction`. Each returns a `MachineActionDefinition`: a `MachineActionDescriptor` plus the schema the host validates parameters with. A provider may narrow a family's schema, never widen it, and may only raise its authority. Every action stays `designed` until the provider names a qualification profile; a person can try it only in Testing mode. `machineJogHold` declares the standard held jog as a `MachineHoldDefinition` with this machine's lease and bound. `machineActionDescriptorOf` strips the schema from either definition.
 
-`jobs` is `unsupported` or `MachineJobFacts`: each accepted container (`MachineAcceptedContainer`, a semantic contract, not a filename extension), `stored` or `streamed` delivery, a `remote` or `at-machine` start, attestations a person makes before a start, and the start's safety floor. `stop` is a `MachineHaltOutcome`: what motion, spindle and heaters do, whether position is kept, and the recovery remedies.
+`jobs` is `unsupported` or `MachineJobFacts`: each accepted container (`MachineAcceptedContainer`, a semantic contract and media type; optional `extensions`, lower case with the leading dot, name the files a consumer offers), `stored` or `streamed` delivery, a `remote` or `at-machine` start, attestations a person makes before a start, and the start's safety floor. `stop` is a `MachineHaltOutcome`: what motion, spindle and heaters do, whether position is kept, and the recovery remedies.
 
 ```ts
 import { defineConfiguration } from '@taucad/runtime/configuration';
@@ -75,7 +75,7 @@ export const binding = defineConfiguration({
 
 ## Host services
 
-The provider never receives a general filesystem, socket or secret grant. `discover` receives `MachineDiscoveryInput` and a `MachineDiscoveryRuntime`: `listenDatagrams` admits a user-initiated listener (`MachineDatagramListenInput`) yielding `MachineDatagram` values with peer evidence, and `listSerialPorts` lists each `MachineSerialPort`. It yields `MachineDiscoveryEvent` values.
+The provider never receives a general filesystem, socket or secret grant. `discover` receives `MachineDiscoveryInput`, whose optional `endpoint` names where a person says the machine is (search only there), and a `MachineDiscoveryRuntime`: `listenDatagrams` admits a user-initiated listener (`MachineDatagramListenInput`) yielding `MachineDatagram` values with peer evidence, and `listSerialPorts` lists each `MachineSerialPort`. It yields `MachineDiscoveryEvent` values.
 
 `connect` receives `MachineConnectInput`, whose `MachineConnectionContext` carries a host-local secret reference and each service's `MachineTransportTrust` (`system` or a pinned digest), and a `MachineConnectionRuntime`. That runtime opens a bounded `MachineNetworkStream` for a `MachineNetworkRequest` or a `MachineSerialRequest`, streams an immutable `MachineArtifactReference` in chunks through `MachineArtifactReadInput`, captures one authenticated JPEG for `MachineNetworkStillInput`, and uploads with `MachineFileUploadInput`, returning `MachineFileUploadReceipt`. `MachineClock` is the host's time source; `MachineLogEntry` is redacted provider telemetry.
 

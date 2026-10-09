@@ -2,7 +2,7 @@
 title: Machines API
 description: Bind physical machines, watch their state, and apply actions, holds, stop and jobs through one admitted machines client.
 docType: reference
-wordBudgetOverride: 1700
+wordBudgetOverride: 1760
 ---
 
 # Machines API
@@ -11,7 +11,7 @@ Import browser-safe contracts from `@taucad/runtime/machine`. `MachineClient` is
 
 ## Discovery and binding
 
-`listProviders` takes `MachineListProvidersInput` and returns the admitted `MachineProvider` descriptors. `discover` takes `MachineDiscoverInput` for one provider and configuration; its `MachineDiscoveryFrame` stream carries `MachineDiscoveryEvent` values. A `MachineCandidate` holds a transient `MachineCandidateEndpoint` and an untrusted `MachineClaimedIdentity`. `beginBinding` takes `MachineBeginBindingInput`, a non-secret ceremony, and returns `MachineBindingOutcome`; native code completes credentials and trust. `removeBinding` takes `MachineRemoveBindingInput` and returns `MachineBindingRemoval`; it is refused while a job of that machine is between preparation and start. `machineCredentialReference` creates the host-local reference to a saved credential, not a portable secret. `isSimulatedMachine` reads a provider's manifest: a provider whose every qualification is in simulation drives a simulator. Never test a provider id instead.
+`listProviders` takes `MachineListProvidersInput` and returns the admitted `MachineProvider` descriptors. Show a provider the host marks `unavailable` with its reason, not as a choice; `discover` refuses it with `MACHINE_PROVIDER_UNAVAILABLE`. `discover` takes `MachineDiscoverInput` for one provider and configuration; its `MachineDiscoveryFrame` stream carries `MachineDiscoveryEvent` values. An optional `endpoint`, a `MachineEndpoint` (network address, or serial path), searches only there; another transport is refused with `MACHINE_DISCOVERY_ENDPOINT_INVALID`. A `MachineCandidate` holds a transient `MachineCandidateEndpoint` (a `MachineEndpoint` plus its network interface) and an untrusted `MachineClaimedIdentity`. `beginBinding` takes `MachineBeginBindingInput`, a non-secret ceremony, and returns `MachineBindingOutcome`; native code completes credentials and trust. `removeBinding` takes `MachineRemoveBindingInput` and returns `MachineBindingRemoval`; it is refused while a job of that machine is between preparation and start. `machineCredentialReference` creates the host-local reference to a saved credential, not a portable secret. `isSimulatedMachine` reads a provider's manifest: a provider whose every qualification is in simulation drives a simulator. Never test a provider id instead.
 
 Import `prepareMachineWebSocket`, `PrepareMachineWebSocketInput` and `PreparedMachineWebSocket` from `@taucad/runtime/transport/websocket`. The helper probes an exact authenticated HTTP(S) endpoint. A `204` yields a `RuntimeTransportFacet` whose `connect()` opens a fresh channel; `403` returns `not-granted` and `404` returns `unsupported`. Redirects and URL credentials are refused.
 
@@ -27,7 +27,7 @@ Each `ComponentObservation` has its own receive time and validity, and either a 
 
 ## Actions
 
-A `MachineActionDescriptor` names its component, a standard family or a `<vendor>.<area>.<verb>` id, a version, a parameters form, its `MachineActionEffect` values (from `machineActionEffects`), a scope (`idle`, `run` or `any`), the statuses it applies in, a `MachineActionSafety` floor, a `MachineActionQualification`, the observation groups that must be fresh, and how its effect is confirmed. An action that pauses or ends a run declares its `MachineHaltOutcome`; a blocked action names a `MachineRemedy`. `standardMachineActions` lists the standard families by `StandardMachineActionId`, with parameters typed by `StandardMachineActionParameters`.
+A `MachineActionDescriptor` names its component, a standard family or a `<vendor>.<area>.<verb>` id, a version, a parameters form, its `MachineActionEffect` values (from `machineActionEffects`), a scope (`idle`, `run` or `any`), the statuses it applies in, a `MachineActionSafety` floor, a `MachineActionQualification`, the observation groups that must be fresh, and how its effect is confirmed. An action that pauses or ends a run declares its `MachineHaltOutcome`; a blocked action names a `MachineRemedy`: an action, a person's step, or `stop` with its `consequence` when only Stop ends the effect early. `standardMachineActions` lists the standard families by `StandardMachineActionId`, with parameters typed by `StandardMachineActionParameters`.
 
 Before offering or sending, run `checkMachineAction` with a `MachineActionCheckInput` over a `MachineActionCheckEntry`; `machineActionOf` finds the installed descriptor. The pure `MachineActionCheck` is `available`, `approval-required` (an agent asks, a person approves this exact intent) or `unavailable` with a `MachineFailure` and remedy. The check is advisory: the host repeats every step with facts only it has.
 

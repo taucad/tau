@@ -267,6 +267,74 @@ export const tryAgain = async (): Promise<void> => {
   await target.click(continueAction);
 };
 
+/** The sentence Tau's gateway refuses a paused route with; the card must never show it (IS3). */
+export const routePausedGatewaySentence = "This model route is paused by Tau's operators.";
+
+/** The paused-route card, found by its page-owned heading (W6). */
+export const routePausedCard = selectors.getByRole('alert').filter({ hasText: 'This model is paused' });
+
+/** The error card's model switch, which opens the composer's own picker. */
+export const switchModelAction = selectors.getByRole('button', { name: 'Switch model', exact: true });
+
+/**
+ * Pause the fixture's model route the way an operator pause reaches the browser
+ * host (W6, T-E1): every provider call is refused with the gateway's own
+ * `MODEL_ROUTE_PAUSED` 503, which is what admission answers while
+ * `billing-command pause-route` holds the route. No operator, API or database
+ * is needed — the host reads the refusal off the gateway wire exactly as it
+ * reads a live one. The fixture refuses every call while armed, so a row lifts
+ * the pause with {@link resumeModelRoute} before it recovers on another model,
+ * and proves the recovery went elsewhere from the captured request bodies.
+ *
+ * @returns Nothing.
+ */
+export const pauseModelRoute = async (): Promise<void> => {
+  await target.setAgentHostGatewayFailure({
+    status: 503,
+    message: routePausedGatewaySentence,
+    type: 'MODEL_ROUTE_PAUSED' satisfies RefusalCode,
+  });
+};
+
+/**
+ * Lift the fixture's paused route.
+ *
+ * @returns Nothing.
+ */
+export const resumeModelRoute = async (): Promise<void> => {
+  await target.setAgentHostGatewayFailure();
+};
+
+/**
+ * Choose another model from the error card's *Switch model* picker.
+ *
+ * The browser-host fixture serves Tau's Anthropic wire only, so the search
+ * narrows the catalog to that provider's routes; the first one that is not
+ * `current` is the other route. The row's assertions read which model the
+ * next request named, so this helper picks no model by name.
+ *
+ * @param current - The catalog name of the paused model.
+ * @returns Nothing.
+ */
+export const switchToAnotherGatewayModel = async (current: string): Promise<void> => {
+  await target.click(switchModelAction.last());
+  const search = selectors.getByPlaceholder('Search models…').last();
+  await target.expectVisible(search, 30_000);
+  await target.type(search, 'anthropic');
+  await target.click(selectors.getByRole('option').filter({ hasNotText: current }).first());
+  await target.expectHidden(search, 30_000);
+};
+
+/**
+ * The model each captured provider call named, oldest first.
+ *
+ * @returns One model identifier per call, refused calls included.
+ */
+export const gatewayRequestModels = async (): Promise<ReadonlyArray<string | undefined>> => {
+  const requests = (await target.readAgentHostGatewayRequests()) as ReadonlyArray<Readonly<{ model?: string }>>;
+  return requests.map((request) => request.model);
+};
+
 /**
  * Click the named chat in the sidebar and wait for it to become the active row.
  *

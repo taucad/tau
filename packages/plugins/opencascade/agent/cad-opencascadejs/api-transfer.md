@@ -1,6 +1,6 @@
 # libcascade — Transfer
 
-28 top-level symbols. Signatures are verbatim typescript.
+27 top-level symbols. Signatures are verbatim typescript.
 
 Transfer_ActorDispatch: declare class Transfer_ActorDispatch extends Transfer_ActorOfTransientProcess
 
@@ -1108,7 +1108,23 @@ Transfer_SimpleBinderOfTransient: declare class Transfer_SimpleBinderOfTransient
 
 Transfer_StatusExec: typeof Transfer_StatusExec[keyof typeof Transfer_StatusExec]
 
+  readonly Transfer_StatusInitial: 'Transfer_StatusInitial'
+
+  readonly Transfer_StatusRun: 'Transfer_StatusRun'
+
+  readonly Transfer_StatusDone: 'Transfer_StatusDone'
+
+  readonly Transfer_StatusError: 'Transfer_StatusError'
+
+  readonly Transfer_StatusLoop: 'Transfer_StatusLoop'
+
 Transfer_StatusResult: typeof Transfer_StatusResult[keyof typeof Transfer_StatusResult]
+
+  readonly Transfer_StatusVoid: 'Transfer_StatusVoid'
+
+  readonly Transfer_StatusDefined: 'Transfer_StatusDefined'
+
+  readonly Transfer_StatusUsed: 'Transfer_StatusUsed'
 
 Transfer_TransferDeadLoop: declare class Transfer_TransferDeadLoop extends Transfer_TransferFailure
 
@@ -1174,72 +1190,4 @@ Transfer_TransferInput: declare class Transfer_TransferInput
   delete(): void;
 
   // Transfer_TransferInput.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-Transfer_TransferIterator: declare class Transfer_TransferIterator
-
-  // Transfer_TransferIterator.constructor (constructor)
-  constructor();
-
-  // Transfer_TransferIterator.AddItem (method)
-  AddItem(atr: Transfer_Binder): void;
-
-  // Transfer_TransferIterator.SelectBinder (method)
-  SelectBinder(atype: Standard_Type, keep: boolean): void;
-
-  // Transfer_TransferIterator.SelectResult (method)
-  SelectResult(atype: Standard_Type, keep: boolean): void;
-
-  // Transfer_TransferIterator.SelectUnique (method)
-  SelectUnique(keep: boolean): void;
-
-  // Transfer_TransferIterator.SelectItem (method)
-  SelectItem(num: number, keep: boolean): void;
-
-  // Transfer_TransferIterator.Number (method)
-  Number(): number;
-
-  // Transfer_TransferIterator.Start (method)
-  Start(): void;
-
-  // Transfer_TransferIterator.More (method)
-  More(): boolean;
-
-  // Transfer_TransferIterator.Next (method)
-  Next(): void;
-
-  // Transfer_TransferIterator.Value (method)
-  Value(): Transfer_Binder;
-
-  // Transfer_TransferIterator.HasResult (method)
-  HasResult(): boolean;
-
-  // Transfer_TransferIterator.HasUniqueResult (method)
-  HasUniqueResult(): boolean;
-
-  // Transfer_TransferIterator.ResultType (method)
-  ResultType(): Standard_Type;
-
-  // Transfer_TransferIterator.HasTransientResult (method)
-  HasTransientResult(): boolean;
-
-  // Transfer_TransferIterator.TransientResult (method)
-  TransientResult(): Standard_Transient;
-
-  // Transfer_TransferIterator.Status (method)
-  Status(): Transfer_StatusExec;
-
-  // Transfer_TransferIterator.HasFails (method)
-  HasFails(): boolean;
-
-  // Transfer_TransferIterator.HasWarnings (method)
-  HasWarnings(): boolean;
-
-  // Transfer_TransferIterator.Check (method)
-  Check(): Interface_Check;
-
-  // Transfer_TransferIterator.delete (method)
-  delete(): void;
-
-  // Transfer_TransferIterator.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

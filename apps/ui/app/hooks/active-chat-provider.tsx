@@ -56,7 +56,7 @@ import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
 import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import type { ChatSession } from '#services/chat-session-store.js';
+import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
@@ -179,7 +179,7 @@ export type ChatComposerContextValue = {
    * Cancel-in-flight callback. No-op under the composer provider;
    * sends one keyed host cancel through the session store under the session provider.
    */
-  stop: () => void;
+  stop: (origin: StopOrigin) => void;
   /** Continue a failed host run while it can still be resumed. */
   resume: (() => void) | undefined;
   /**
@@ -740,11 +740,14 @@ function useSessionAgentActivity(session: ChatSession): ChatAgentActivity {
 /**
  * Stable `stop()` callback for the active session's projected host run.
  */
-function useSessionStop(session: ChatSession): () => void {
+function useSessionStop(session: ChatSession): (origin: StopOrigin) => void {
   const store = useChatSessionStore();
-  return useCallback(() => {
-    store.stopRun(session.chatId);
-  }, [session.chatId, store]);
+  return useCallback(
+    (origin: StopOrigin) => {
+      store.stopRun(session.chatId, origin);
+    },
+    [session.chatId, store],
+  );
 }
 
 /** Offer Resume only for a settled, resumable host failure. */

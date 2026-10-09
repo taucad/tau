@@ -4,13 +4,13 @@ import { getSchemaType } from '@rjsf/utils';
 import { projectParameterField, resolveParameterBinding } from '@taucad/parameters';
 import { admitUnit } from '@taucad/units/unit';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
-import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
+import { ParametersNumber, toDisplayValue, toNativeValue } from '#components/geometry/parameters/parameters-number.js';
 import { ParametersNumberOrString, ParametersString } from '#components/geometry/parameters/parameters-string.js';
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import { toUcumLengthCode } from '#constants/length-units.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 import { toInstancePointer, useRenderedFieldPath } from '#components/geometry/parameters/rjsf-field-path.js';
-import { Input } from '@taucad/ui/components/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@taucad/ui/components/input-group';
 import { validateParameterInputValue } from '#components/geometry/parameters/parameter-field.js';
 import { toast } from '#components/ui/sonner.js';
 
@@ -178,41 +178,54 @@ export function ParametersWidget(
       const step = numericConstraint(constraints, 'multipleOf');
 
       if (!Number.isFinite(numericValue)) {
+        // An unset field still shows its unit and takes what is typed in that unit.
         return (
-          <Input
-            id={id}
-            type='number'
-            value=''
-            disabled={disabled}
-            readOnly={readonly}
-            autoFocus={autofocus}
-            placeholder={Number.isFinite(defaultNumericValue) ? String(defaultNumericValue) : undefined}
-            aria-label={`Input for ${prettyLabel}`}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            onChange={(event) => {
-              const next = event.target.valueAsNumber;
-              if (!Number.isFinite(next)) {
-                handleChange(undefined);
-                return;
+          <InputGroup className='h-8'>
+            <InputGroupInput
+              id={id}
+              type='number'
+              value=''
+              disabled={disabled}
+              readOnly={readonly}
+              autoFocus={autofocus}
+              placeholder={
+                Number.isFinite(defaultNumericValue)
+                  ? String(toDisplayValue(fieldProjection, defaultNumericValue))
+                  : undefined
               }
-              // The raw fallback input admits values through the same rules as the numeric editor.
-              const diagnostic = validateParameterInputValue(
-                {
-                  representation: fieldProjection.representation ?? 'binary64',
-                  constraints: {
-                    ...(min === undefined ? {} : { minimum: min }),
-                    ...(max === undefined ? {} : { maximum: max }),
-                    ...(step === undefined ? {} : { multipleOf: step }),
+              aria-label={`Input for ${prettyLabel}`}
+              onFocus={handleFocus}
+              onBlur={handleBlur}
+              onChange={(event) => {
+                const next = event.target.valueAsNumber;
+                if (!Number.isFinite(next)) {
+                  handleChange(undefined);
+                  return;
+                }
+                // An integer field is checked as typed, so a fraction is refused rather than rounded.
+                const native =
+                  fieldProjection.representation === 'safe-integer' ? next : toNativeValue(fieldProjection, next);
+                // The raw fallback input admits values through the same rules as the numeric editor.
+                const diagnostic = validateParameterInputValue(
+                  {
+                    representation: fieldProjection.representation ?? 'binary64',
+                    constraints: {
+                      ...(min === undefined ? {} : { minimum: min }),
+                      ...(max === undefined ? {} : { maximum: max }),
+                      ...(step === undefined ? {} : { multipleOf: step }),
+                    },
                   },
-                },
-                next,
-              );
-              if (diagnostic === undefined) {
-                handleChange(next);
-              }
-            }}
-          />
+                  native,
+                );
+                if (diagnostic === undefined) {
+                  handleChange(native);
+                }
+              }}
+            />
+            {fieldProjection.adornment ? (
+              <InputGroupAddon align='inline-end'>{fieldProjection.adornment}</InputGroupAddon>
+            ) : null}
+          </InputGroup>
         );
       }
 

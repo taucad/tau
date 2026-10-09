@@ -2,6 +2,35 @@
 
 90 top-level symbols. Signatures are verbatim typescript.
 
+// One GeoSpec test file executed by a worker-style runner
+GeoSpecRunnerFileResult: {
+    /** Absolute or project-relative GeoSpec test file path supplied to the runner. */
+    file: string;
+    /** Low-level module execution result for this file. */
+    result: GeoSpecRunResult;
+    /** Wall-clock cost of executing this file, in milliseconds (R1). */
+    durationMs?: number;
+    /** First deterministic model-load cache key observed in this file (R9 affinity telemetry). */
+    primaryLoadKey?: string;
+    /** Executing worker's isolate-resident memory at file completion, in bytes (R15 memory-class telemetry). */
+    workerMemoryBytes?: number;
+}
+
+  // Absolute or project-relative GeoSpec test file path supplied to the runner
+  file: string
+
+  // Low-level module execution result for this file
+  result: GeoSpecRunResult
+
+  // Wall-clock cost of executing this file, in milliseconds (R1)
+  durationMs?: number
+
+  // First deterministic model-load cache key observed in this file (R9 affinity telemetry)
+  primaryLoadKey?: string
+
+  // Executing worker's isolate-resident memory at file completion, in bytes (R15 memory-class telemetry)
+  workerMemoryBytes?: number
+
 // Shared options for Node and browser GeoSpec runner factories
 GeoSpecRunnerOptions: {
     /** Filesystem containing the project and test modules. */
@@ -24,22 +53,22 @@ GeoSpecRunnerOptions: {
   filesystem: VmFileSystem
 
   // Model loader exposed to authored tests through `geospec/model`
-  modelLoader: RunGeoSpecModuleOptions['modelLoader']
+  modelLoader?: RunGeoSpecModuleOptions['modelLoader']
 
   // Protocol-3 assertion client used by explicitly native runners
-  nativeAssertions: RunGeoSpecModuleOptions['nativeAssertions']
+  nativeAssertions?: RunGeoSpecModuleOptions['nativeAssertions']
 
   // Managed native model loader released after each settled run
-  nativeModelLoader: ManagedGeoSpecNativeModelLoader
+  nativeModelLoader?: ManagedGeoSpecNativeModelLoader
 
   // STEP loader exposed to authored tests through `geospec/step`
-  stepLoader: RunGeoSpecModuleOptions['stepLoader']
+  stepLoader?: RunGeoSpecModuleOptions['stepLoader']
 
   // Additional in-memory modules made available to the VM
-  builtinModules: RunGeoSpecModuleOptions['builtinModules']
+  builtinModules?: RunGeoSpecModuleOptions['builtinModules']
 
   // Internal profile counters used by opt-in benchmark tooling
-  internalProfile: GeoSpecRunProfile
+  internalProfile?: GeoSpecRunProfile
 
 // Aggregate result returned by GeoSpec worker-style runners
 GeoSpecRunnerResult: {
@@ -79,16 +108,16 @@ GeoSpecRunnerResult: {
   files: GeoSpecRunnerFileResult[]
 
   // Run-level issues such as aborts or empty filter selections
-  issues: VmIssue[]
+  issues?: VmIssue[]
 
   // Wall-clock cost of the whole run, in milliseconds (R1)
-  durationMs: number
+  durationMs?: number
 
   // Complete requested-file accounting
-  accounting: GeoSpecRunnerAccounting
+  accounting?: GeoSpecRunnerAccounting
 
   // Coherence of the consumed source graphs, not a geometry verdict
-  lineageStatus: 'complete' | 'unavailable' | 'mixed'
+  lineageStatus?: 'complete' | 'unavailable' | 'mixed'
 
 // Options accepted by a GeoSpec worker-style runner run
 GeoSpecRunnerRunOptions: {
@@ -113,19 +142,19 @@ GeoSpecRunnerRunOptions: {
   files: readonly string[]
 
   // JavaScript regular expression matched against full `suite > test` names
-  testNamePattern: string | RegExp
+  testNamePattern?: string | RegExp
 
   // Timeout for each async test callback, in milliseconds
-  testTimeout: number
+  testTimeout?: number
 
   // Non-verdict matcher wall backstop
-  matcherWallBackstop: number
+  matcherWallBackstop?: number
 
   // Emit structured forensic measurements for this run
-  forensic: boolean
+  forensic?: boolean
 
   // Stop after the first failing file (R1)
-  bail: boolean
+  bail?: boolean
 
 // One parsed segment of a selector path (`name`, `name[3]`, or selector-side `name[*]`)
 SelectorPathSegment: {
@@ -141,10 +170,10 @@ SelectorPathSegment: {
   name: string
 
   // 1-based member index when the segment is `name[n]`
-  index: number
+  index?: number
 
   // True when the segment is the selector-side wildcard `name[*]`
-  wildcard: boolean
+  wildcard?: boolean
 
 // Tolerance vocabulary consumed by selector predicates
 SelectorTolerances: {
@@ -180,31 +209,31 @@ AxisQuery: {
 }
 
   // Axis direction parallelism
-  axis: DirectionPredicate
+  axis?: DirectionPredicate
 
-  radius: NumericRange
+  radius?: NumericRange
 
-  near: Partial<Vec3Record> & {
+  near?: Partial<Vec3Record> & {
           tolerance?: number;
       }
 
-  containsPoint: Vec3
+  containsPoint?: Vec3
 
-  nearestTo: Vec3
+  nearestTo?: Vec3
 
-  within: GeometrySelector
+  within?: GeometrySelector
 
-  orderBy: 'radius' | 'offsetAlong'
+  orderBy?: 'radius' | 'offsetAlong'
 
-  along: Vec3
+  along?: Vec3
 
-  pick: 'first' | 'last' | number
+  pick?: 'first' | 'last' | number
 
-  allOf: AxisQuery[]
+  allOf?: AxisQuery[]
 
-  anyOf: AxisQuery[]
+  anyOf?: AxisQuery[]
 
-  not: AxisQuery
+  not?: AxisQuery
 
 // Axis selector resolved from cylindrical/conical face facts
 AxisSelector: {
@@ -216,11 +245,11 @@ AxisSelector: {
 
   kind: 'axis'
 
-  of: string | RegExp
+  of?: string | RegExp
 
-  query: AxisQuery
+  query?: AxisQuery
 
-  expect: Cardinality
+  expect?: Cardinality
 
 // Body query predicates over available source facts
 BodyQuery: {
@@ -238,27 +267,27 @@ BodyQuery: {
     not?: BodyQuery;
 }
 
-  area: NumericRange
+  area?: NumericRange
 
-  near: Partial<Vec3Record> & {
+  near?: Partial<Vec3Record> & {
           tolerance?: number;
       }
 
-  nearestTo: Vec3
+  nearestTo?: Vec3
 
-  within: GeometrySelector
+  within?: GeometrySelector
 
-  orderBy: 'area' | 'offsetAlong'
+  orderBy?: 'area' | 'offsetAlong'
 
-  along: Vec3
+  along?: Vec3
 
-  pick: 'first' | 'last' | number
+  pick?: 'first' | 'last' | number
 
-  allOf: BodyQuery[]
+  allOf?: BodyQuery[]
 
-  anyOf: BodyQuery[]
+  anyOf?: BodyQuery[]
 
-  not: BodyQuery
+  not?: BodyQuery
 
 // Body selector over source-backed solid evidence
 BodySelector: {
@@ -272,11 +301,11 @@ BodySelector: {
   kind: 'body'
 
   // STEP occurrence scope, or the exact retained mesh primitive label including any ordinal suffix
-  of: string | RegExp
+  of?: string | RegExp
 
-  query: BodyQuery
+  query?: BodyQuery
 
-  expect: Cardinality
+  expect?: Cardinality
 
 // Ranked candidate reported on ambiguous/unmatched resolutions, with the disambiguating facts and — for near-misses — the excluding predicate
 CandidateEntity: ResolvedEntity & {
@@ -292,21 +321,21 @@ CandidateEntity: ResolvedEntity & {
 
   entityType: ResolvedEntityType
 
-  occurrencePath: string
+  occurrencePath?: string
 
   facts: GeometryFacts
 
   // Snapshot topology ref (`'#o1.2.f7'`) for diagnostics and pinning
-  topologyRef: string
+  topologyRef?: string
 
   // 1-based deterministic rank
   rank: number
 
   // Name of the predicate that excluded this near-miss candidate
-  excludedBy: string
+  excludedBy?: string
 
   // Probe distance in millimetres, when a probe ranked this candidate
-  distance: number
+  distance?: number
 
 // Cardinality expectation for a selector resolution (master catalog G7)
 Cardinality: 'one' | 'many' | {
@@ -329,9 +358,9 @@ DatumSelector: {
   // Full datum name, or part-relative name when `of` scopes an occurrence
   name: string
 
-  of: string | RegExp
+  of?: string | RegExp
 
-  expect: Cardinality
+  expect?: Cardinality
 
 // Direction predicate with optional angular tolerance in degrees
 DirectionPredicate: {
@@ -341,7 +370,7 @@ DirectionPredicate: {
 
   direction: Vec3
 
-  angularToleranceDegrees: number
+  angularToleranceDegrees?: number
 
 // Face query predicates (master catalog G1/G2)
 FaceQuery: {
@@ -377,52 +406,52 @@ FaceQuery: {
     not?: FaceQuery;
 }
 
-  surfaceType: SelectorSurfaceType
+  surfaceType?: SelectorSurfaceType
 
   // Face normal parallelism (planar faces)
-  normal: DirectionPredicate
+  normal?: DirectionPredicate
 
   // Rotation-axis parallelism (cylindrical/conical faces)
-  axis: DirectionPredicate
+  axis?: DirectionPredicate
 
-  radius: NumericRange
+  radius?: NumericRange
 
-  area: NumericRange
+  area?: NumericRange
 
   // Plane offset band
-  offset: NumericRange
+  offset?: NumericRange
 
   // Centroid coordinate bands, per-axis
-  near: Partial<Vec3Record> & {
+  near?: Partial<Vec3Record> & {
           tolerance?: number;
       }
 
   // Probe
-  containsPoint: Vec3
+  containsPoint?: Vec3
 
   // Probe
-  nearestTo: Vec3
+  nearestTo?: Vec3
 
   // Probe
-  hitByRay: RayPredicate
+  hitByRay?: RayPredicate
 
   // Restrict candidates to entities resolved by another selector
-  within: GeometrySelector
+  within?: GeometrySelector
 
   // Deterministic ordering
-  orderBy: 'area' | 'radius' | 'offsetAlong'
+  orderBy?: 'area' | 'radius' | 'offsetAlong'
 
   // Projection direction for `orderBy
-  along: Vec3
+  along?: Vec3
 
   // Deterministic pick after ordering
-  pick: 'first' | 'last' | number
+  pick?: 'first' | 'last' | number
 
-  allOf: FaceQuery[]
+  allOf?: FaceQuery[]
 
-  anyOf: FaceQuery[]
+  anyOf?: FaceQuery[]
 
-  not: FaceQuery
+  not?: FaceQuery
 
 // Face selector resolved via query/probe predicates
 FaceSelector: {
@@ -434,11 +463,11 @@ FaceSelector: {
 
   kind: 'face'
 
-  of: string | RegExp
+  of?: string | RegExp
 
-  query: FaceQuery
+  query?: FaceQuery
 
-  expect: Cardinality
+  expect?: Cardinality
 
 // Typed geometric facts carried by a resolved entity — full `Vec3` normals/axes in the subject frame, never principal-axis projections
 GeometryFacts: {
@@ -468,45 +497,45 @@ GeometryFacts: {
     memberCount?: number;
 }
 
-  surfaceType: SelectorSurfaceType
+  surfaceType?: SelectorSurfaceType
 
-  normal: Vec3
+  normal?: Vec3
 
-  offset: number
+  offset?: number
 
-  axisOrigin: Vec3
+  axisOrigin?: Vec3
 
-  axisDirection: Vec3
+  axisDirection?: Vec3
 
-  radius: number
+  radius?: number
 
-  area: number
+  area?: number
 
-  centroid: Vec3
+  centroid?: Vec3
 
-  bounds: {
+  bounds?: {
           min: Vec3;
           max: Vec3;
       }
 
   // Datum frame origin (subject frame)
-  origin: Vec3
+  origin?: Vec3
 
   // Datum frame x axis (subject frame)
-  xAxis: Vec3
+  xAxis?: Vec3
 
   // Datum frame z axis (subject frame)
-  zAxis: Vec3
+  zAxis?: Vec3
 
   // Occurrence placement transform (4x4 row-major, part-local → subject)
-  transform: number[]
+  transform?: number[]
 
-  productName: string
+  productName?: string
 
-  faceIndex: number
+  faceIndex?: number
 
   // Group member count
-  memberCount: number
+  memberCount?: number
 
 // Structured result of resolving one selector against a selector index
 GeometrySelection: {
@@ -536,7 +565,7 @@ GeometrySelection: {
   stability: GeometrySelectionStability
 
   // Ranked candidates with facts — ambiguous/unmatched repair data
-  candidates: CandidateEntity[]
+  candidates?: CandidateEntity[]
 
   diagnostics: GeometryDiagnostic[]
 
@@ -566,9 +595,9 @@ GroupSelector: {
   // Full group prefix, or part-relative prefix when `of` scopes an occurrence
   name: string
 
-  of: string | RegExp
+  of?: string | RegExp
 
-  expect: Cardinality
+  expect?: Cardinality
 
 // Interface selector
 InterfaceSelector: {
@@ -584,9 +613,9 @@ InterfaceSelector: {
   // Full interface name, or part-relative name when `of` scopes an occurrence
   name: string
 
-  of: string | RegExp
+  of?: string | RegExp
 
-  expect: Cardinality
+  expect?: Cardinality
 
 // Inclusive numeric band
 NumericRange: number | {
@@ -607,12 +636,12 @@ OccurrenceSelector: {
   kind: 'occurrence'
 
   // Product or instance name to match
-  name: string | RegExp
+  name?: string | RegExp
 
   // Occurrence path (dot-joined instance segments, root omitted) to match
-  path: string | RegExp
+  path?: string | RegExp
 
-  expect: Cardinality
+  expect?: Cardinality
 
 // Plane query predicates over planar face facts
 PlaneQuery: {
@@ -633,33 +662,33 @@ PlaneQuery: {
     not?: PlaneQuery;
 }
 
-  normal: DirectionPredicate
+  normal?: DirectionPredicate
 
-  offset: NumericRange
+  offset?: NumericRange
 
-  area: NumericRange
+  area?: NumericRange
 
-  near: Partial<Vec3Record> & {
+  near?: Partial<Vec3Record> & {
           tolerance?: number;
       }
 
-  containsPoint: Vec3
+  containsPoint?: Vec3
 
-  nearestTo: Vec3
+  nearestTo?: Vec3
 
-  within: GeometrySelector
+  within?: GeometrySelector
 
-  orderBy: 'area' | 'offsetAlong'
+  orderBy?: 'area' | 'offsetAlong'
 
-  along: Vec3
+  along?: Vec3
 
-  pick: 'first' | 'last' | number
+  pick?: 'first' | 'last' | number
 
-  allOf: PlaneQuery[]
+  allOf?: PlaneQuery[]
 
-  anyOf: PlaneQuery[]
+  anyOf?: PlaneQuery[]
 
-  not: PlaneQuery
+  not?: PlaneQuery
 
 // Plane selector resolved from planar face facts
 PlaneSelector: {
@@ -671,11 +700,11 @@ PlaneSelector: {
 
   kind: 'plane'
 
-  of: string | RegExp
+  of?: string | RegExp
 
-  query: PlaneQuery
+  query?: PlaneQuery
 
-  expect: Cardinality
+  expect?: Cardinality
 
 // Ray probe predicate (world-space origin and direction, millimetres)
 RayPredicate: {
@@ -701,12 +730,12 @@ ResolvedEntity: {
 
   entityType: ResolvedEntityType
 
-  occurrencePath: string
+  occurrencePath?: string
 
   facts: GeometryFacts
 
   // Snapshot topology ref (`'#o1.2.f7'`) for diagnostics and pinning
-  topologyRef: string
+  topologyRef?: string
 
 // Entity kind a resolved entity denotes
 ResolvedEntityType: 'occurrence' | 'body' | 'face' | 'axis' | 'plane' | 'datum' | 'interface' | 'group'
@@ -732,15 +761,15 @@ SelectorFaceFacts: {
 
   surfaceType: SelectorSurfaceType
 
-  normal: Vec3
+  normal?: Vec3
 
-  offset: number
+  offset?: number
 
-  axisOrigin: Vec3
+  axisOrigin?: Vec3
 
-  axisDirection: Vec3
+  axisDirection?: Vec3
 
-  radius: number
+  radius?: number
 
   area: number
 
@@ -810,9 +839,9 @@ SelectorBodyRow: {
   area: number
 
   // Area-weighted centroid of the occurrence's faces
-  centroid: Vec3
+  centroid?: Vec3
 
-  bounds: {
+  bounds?: {
           min: Vec3;
           max: Vec3;
       }
@@ -955,7 +984,7 @@ SelectorInterfaceRow: {
   // True when the named `faceIndex` no longer exists in the geometry
   dangling: boolean
 
-  face: SelectorFaceRow
+  face?: SelectorFaceRow
 
 // One placed occurrence row in the selector index
 SelectorOccurrenceRow: {
@@ -978,7 +1007,7 @@ SelectorOccurrenceRow: {
 
   productName: string
 
-  instanceName: string
+  instanceName?: string
 
   // 4x4 row-major placement transform (part-local frame → subject frame)
   transform: number[]
@@ -989,7 +1018,7 @@ SelectorOccurrenceRow: {
   ordinalPath: number[]
 
   // Union of the occurrence's face bounds (subject frame), when faces exist
-  bounds: {
+  bounds?: {
           min: Vec3;
           max: Vec3;
       }
@@ -1015,10 +1044,10 @@ SelectorDiagnosticOptions: {
   suggestion: string
 
   // Ranked candidates or near-misses with disambiguating facts
-  candidates: CandidateEntity[]
+  candidates?: CandidateEntity[]
 
   // Extra structured payload merged into `details`
-  details: Record<string, unknown>
+  details?: Record<string, unknown>
 
 // A configured STEP loader
 GeoSpecStepLoader: (options: LoadStepOptions) => Promise<GeometrySubject>
@@ -1030,27 +1059,27 @@ BrepFacetName: 'summary' | 'massProperties' | 'validity' | 'faceFeatures' | 'wal
 // Defaults accepted by {@link import ('./load-step.js').createStepLoader}
 CreateStepLoaderOptions: Omit<LoadStepOptions, 'source'>
 
-  mesh: boolean
+  mesh?: boolean
 
-  path: string
+  path?: string
 
-  name: string
+  name?: string
 
-  unit: GeoSpecUnit
+  unit?: GeoSpecUnit
 
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
-  streaming: StepStreamingMode
+  streaming?: StepStreamingMode
 
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
-  maxBytes: number
+  maxBytes?: number
 
-  signal: AbortSignal
+  signal?: AbortSignal
 
-  onProgress: (event: StepLoadProgressEvent) => void
+  onProgress?: (event: StepLoadProgressEvent) => void
 
 // Options for loading STEP/XDE/BRep evidence
 LoadStepOptions: {
@@ -1070,27 +1099,27 @@ LoadStepOptions: {
 
   source: StepSource
 
-  unit: GeoSpecUnit
+  unit?: GeoSpecUnit
 
-  streaming: StepStreamingMode
+  streaming?: StepStreamingMode
 
-  mesh: boolean
+  mesh?: boolean
 
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
-  maxBytes: number
+  maxBytes?: number
 
-  signal: AbortSignal
+  signal?: AbortSignal
 
-  onProgress: (event: StepLoadProgressEvent) => void
+  onProgress?: (event: StepLoadProgressEvent) => void
 
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
-  path: string
+  path?: string
 
-  name: string
+  name?: string
 
 // Progress event emitted while GeoSpec normalizes a STEP source
 StepLoadProgressEvent: {
@@ -1100,7 +1129,7 @@ StepLoadProgressEvent: {
 
   phase: 'read-source' | 'parse-step' | 'mesh-brep'
 
-  bytesRead: number
+  bytesRead?: number
 
 // STEP source forms accepted by {@link import ('./load-step.js').loadStep}
 StepSource: string | URL | Uint8Array<ArrayBuffer> | ArrayBuffer | Blob | File | ReadableStream<Uint8Array<ArrayBuffer>> | AsyncIterable<Uint8Array<ArrayBuffer>>
@@ -1164,7 +1193,7 @@ XdeOccurrence: {
 
   productName: string
 
-  instanceName: string
+  instanceName?: string
 
   // 4x4 row-major placement transform (part-local frame -> subject frame)
   transform: number[]
@@ -1173,7 +1202,7 @@ XdeOccurrence: {
   shapeIndex: number
 
   // Analytic axis-aligned bounds of the placed occurrence in subject space
-  bounds: {
+  bounds?: {
           min: [number, number, number];
           max: [number, number, number];
       }
@@ -1228,7 +1257,7 @@ XdeSemanticDatum: {
   label: string
 
   // DATUM_FEATURE name when the file authored one
-  featureName: string
+  featureName?: string
 
   // Attached faces in the owning product's deterministic face traversal order
   faceIndexes: number[]
@@ -1291,23 +1320,23 @@ GeoSpecAssertionClientOptions: {
     readonly workUnitLimit?: number;
 }
 
-  claimId: (matcher: GeoSpecMatcherName, sequence: number) => string
+  readonly claimId?: (matcher: GeoSpecMatcherName, sequence: number) => string
 
-  engine: GeoSpecNativeEngine
+  readonly engine: GeoSpecNativeEngine
 
   // Success-evidence profile of every claim and query
-  evidenceProfile: GeoSpecNativeEvidenceProfile
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
 
-  subjectSlot: string
+  readonly subjectSlot?: string
 
-  workUnitLimit: number
+  readonly workUnitLimit?: number
 
 // Standalone native matcher chain, including core-owned negation
 GeoSpecAssertionMatchers: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport> & {
     readonly not: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>;
 }
 
-  not: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>
+  readonly not: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>
 
 // One authored call shared by the collector and native assertion client
 GeoSpecAuthoringInvocation: {
@@ -1319,17 +1348,17 @@ GeoSpecAuthoringInvocation: {
     readonly subject: unknown;
 }
 
-  arguments: readonly unknown[]
+  readonly arguments: readonly unknown[]
 
-  expected: unknown
+  readonly expected: unknown
 
-  kind: GeoSpecAssertion['kind']
+  readonly kind: GeoSpecAssertion['kind']
 
-  matcher: GeoSpecMatcherName
+  readonly matcher: GeoSpecMatcherName
 
-  polarity: GeoSpecClaimPolarity
+  readonly polarity: GeoSpecClaimPolarity
 
-  subject: unknown
+  readonly subject: unknown
 
 // Matcher methods derived mechanically from the existing GeoSpec registry
 GeoSpecMatcherMethods: {
@@ -1345,13 +1374,13 @@ GeoSpecQueryOptions: {
     readonly subject: GeoSpecNativeSubject;
 }
 
-  capability: GeoSpecQueryCapability
+  readonly capability: GeoSpecQueryCapability
 
-  claimId: string
+  readonly claimId?: string
 
-  payload: unknown
+  readonly payload?: unknown
 
-  subject: GeoSpecNativeSubject
+  readonly subject: GeoSpecNativeSubject
 
 // Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
 MinimumDistanceFact: {
@@ -1366,23 +1395,23 @@ MinimumDistanceFact: {
     readonly points: readonly [readonly [number, number, number], readonly [number, number, number]];
 }
 
-  source: 'ap242'
+  readonly source: 'ap242'
 
-  assurance: 'exact-brep'
+  readonly assurance: 'exact-brep'
 
-  unit: 'mm'
+  readonly unit: 'mm'
 
-  coordinateSystem: 'z-up'
+  readonly coordinateSystem: 'z-up'
 
-  subjectHash: string
+  readonly subjectHash: string
 
-  algorithmProfile: 'geospec-minimum-distance-v1'
+  readonly algorithmProfile: 'geospec-minimum-distance-v1'
 
-  occurrences: readonly [string, string]
+  readonly occurrences: readonly [string, string]
 
-  distance: number
+  readonly distance: number
 
-  points: readonly [readonly [number, number, number], readonly [number, number, number]]
+  readonly points: readonly [readonly [number, number, number], readonly [number, number, number]]
 
 // Complete AP242 minimum over two subject-bound occurrence paths
 MinimumDistanceQuery: {
@@ -1397,11 +1426,11 @@ MinimumDistanceQuery: {
     };
 }
 
-  capability: 'minimumDistance'
+  readonly capability: 'minimumDistance'
 
-  subject: GeoSpecNativeSubject
+  readonly subject: GeoSpecNativeSubject
 
-  payload: {
+  readonly payload: {
           readonly pair: readonly [{
               readonly occurrencePath: string;
           }, {
@@ -1423,7 +1452,7 @@ MinimumDistanceResult: {
     readonly message: string;
 }
 
-  status: 'complete'
+  readonly status: 'complete'
 
 // Flat native query transport options
 GeoSpecNativeQueryOptions: Omit<GeoSpecNativeClaimOptions, 'arguments' | 'capability' | 'kind' | 'polarity'> & {
@@ -1431,21 +1460,21 @@ GeoSpecNativeQueryOptions: Omit<GeoSpecNativeClaimOptions, 'arguments' | 'capabi
     readonly payload?: unknown;
 }
 
-  subject: GeoSpecNativeSubject
+  readonly subject: GeoSpecNativeSubject
 
-  engine: GeoSpecNativeEngine
+  readonly engine: GeoSpecNativeEngine
 
-  claimId: string
+  readonly claimId: string
 
-  evidenceProfile: GeoSpecNativeEvidenceProfile
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
 
-  subjectSlot: string
+  readonly subjectSlot: string
 
-  workUnitLimit: number
+  readonly workUnitLimit: number
 
-  capability: GeoSpecQueryCapability | 'minimumDistance'
+  readonly capability: GeoSpecQueryCapability | 'minimumDistance'
 
-  payload: unknown
+  readonly payload?: unknown
 
 // Existing positive-only ancillary operations owned by the native core
 GeoSpecQueryCapability: Exclude<(typeof geoSpecQueryCapabilities)[number], 'minimumDistance'>
@@ -1457,11 +1486,11 @@ GeoSpecPmiField: {
     readonly reason: string | null;
 }
 
-  status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported'
+  readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported'
 
-  value: Value | null
+  readonly value: Value | null
 
-  reason: string | null
+  readonly reason: string | null
 
 // Original Part21 entity ID and exact source argument tokens
 GeoSpecPmiRawEntity: {
@@ -1470,11 +1499,11 @@ GeoSpecPmiRawEntity: {
     readonly arguments: readonly string[];
 }
 
-  sourceId: number
+  readonly sourceId: number
 
-  kind: string
+  readonly kind: string
 
-  arguments: readonly string[]
+  readonly arguments: readonly string[]
 
 // Source-authored scalar and Rust-normalized reduced rational millimetres
 GeoSpecPmiNumber: {
@@ -1486,17 +1515,17 @@ GeoSpecPmiNumber: {
     readonly name: string;
 }
 
-  sourceId: number
+  readonly sourceId: number
 
-  authoredText: string
+  readonly authoredText: string
 
-  unitId: number
+  readonly unitId: number
 
-  unitRecords: readonly GeoSpecPmiRawEntity[]
+  readonly unitRecords: readonly GeoSpecPmiRawEntity[]
 
-  millimetres: string
+  readonly millimetres: string
 
-  name: string
+  readonly name: string
 
 // A uniquely forward-transferred face
 GeoSpecPmiFaceAssociation: {
@@ -1506,13 +1535,13 @@ GeoSpecPmiFaceAssociation: {
     readonly publicFaceOrdinal: number;
 }
 
-  sourceFaceId: number
+  readonly sourceFaceId: number
 
-  occurrenceRoute: readonly number[]
+  readonly occurrenceRoute: readonly number[]
 
-  occurrence: number | null
+  readonly occurrence: number | null
 
-  publicFaceOrdinal: number
+  readonly publicFaceOrdinal: number
 
 // One ordered role reference, including incomplete source/transfer evidence
 GeoSpecPmiShapeReference: {
@@ -1523,15 +1552,15 @@ GeoSpecPmiShapeReference: {
     readonly associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>;
 }
 
-  sourceAspectId: number | null
+  readonly sourceAspectId: number | null
 
-  sourceUsageIds: readonly number[]
+  readonly sourceUsageIds: readonly number[]
 
-  sourceItemIds: readonly number[]
+  readonly sourceItemIds: readonly number[]
 
-  requestedRoute: GeoSpecPmiField<readonly number[]>
+  readonly requestedRoute: GeoSpecPmiField<readonly number[]>
 
-  associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>
+  readonly associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>
 
 // Normalized authored limits
 GeoSpecPmiLimits: {
@@ -1540,11 +1569,11 @@ GeoSpecPmiLimits: {
     readonly basis: 'authored-limits' | 'nominal-plus-minus';
 }
 
-  lowerMillimetres: string
+  readonly lowerMillimetres: string
 
-  upperMillimetres: string
+  readonly upperMillimetres: string
 
-  basis: 'authored-limits' | 'nominal-plus-minus'
+  readonly basis: 'authored-limits' | 'nominal-plus-minus'
 
 // Source record preserving semantic/presentation separation and ordered roles
 GeoSpecPmiRecord: {
@@ -1561,27 +1590,27 @@ GeoSpecPmiRecord: {
     readonly raw: readonly GeoSpecPmiRawEntity[];
 }
 
-  sourceId: number
+  readonly sourceId: number
 
-  family: 'dimension' | 'datum' | 'tolerance' | 'presentation'
+  readonly family: 'dimension' | 'datum' | 'tolerance' | 'presentation'
 
-  channel: 'semantic' | 'presentation'
+  readonly channel: 'semantic' | 'presentation'
 
-  kind: string
+  readonly kind: string
 
-  name: GeoSpecPmiField<string>
+  readonly name: GeoSpecPmiField<string>
 
-  first: readonly GeoSpecPmiShapeReference[]
+  readonly first: readonly GeoSpecPmiShapeReference[]
 
-  second: readonly GeoSpecPmiShapeReference[]
+  readonly second: readonly GeoSpecPmiShapeReference[]
 
-  numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>
+  readonly numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>
 
-  limits: GeoSpecPmiField<GeoSpecPmiLimits>
+  readonly limits: GeoSpecPmiField<GeoSpecPmiLimits>
 
-  interpretation: GeoSpecPmiField<string>
+  readonly interpretation: GeoSpecPmiField<string>
 
-  raw: readonly GeoSpecPmiRawEntity[]
+  readonly raw: readonly GeoSpecPmiRawEntity[]
 
 // Positive-only inventory value inside the ordinary canonical query report
 GeoSpecPmiInventory: {
@@ -1592,15 +1621,15 @@ GeoSpecPmiInventory: {
     readonly records: readonly GeoSpecPmiRecord[];
 }
 
-  contract: 'geospec.pmi.inventory/v1'
+  readonly contract: 'geospec.pmi.inventory/v1'
 
-  status: 'semantic' | 'graphical-only' | 'empty'
+  readonly status: 'semantic' | 'graphical-only' | 'empty'
 
-  fileSchema: string
+  readonly fileSchema: string
 
-  editionValidation: 'not-validated'
+  readonly editionValidation: 'not-validated'
 
-  records: readonly GeoSpecPmiRecord[]
+  readonly records: readonly GeoSpecPmiRecord[]
 
 // Strict inventory output limits
 GeoSpecPmiQueryPayload: {
@@ -1608,9 +1637,9 @@ GeoSpecPmiQueryPayload: {
     readonly maxOutputBytes?: number;
 }
 
-  maxRecords: number
+  readonly maxRecords?: number
 
-  maxOutputBytes: number
+  readonly maxOutputBytes?: number
 
 // Complete inventory value
 GeoSpecPmiQueryValue: {
@@ -1619,11 +1648,11 @@ GeoSpecPmiQueryValue: {
     readonly provenance: Readonly<Record<string, unknown>>;
 }
 
-  inventory: GeoSpecPmiInventory
+  readonly inventory: GeoSpecPmiInventory
 
-  subjectHash: string
+  readonly subjectHash: string
 
-  provenance: Readonly<Record<string, unknown>>
+  readonly provenance: Readonly<Record<string, unknown>>
 
 // Full native assertion result with the exact core-owned bytes retained
 GeoSpecCanonicalClaimReport: {
@@ -1639,25 +1668,25 @@ GeoSpecCanonicalClaimReport: {
     readonly status: GeoSpecCanonicalClaimStatus;
 }
 
-  canonicalClaim: Uint8Array<ArrayBuffer>
+  readonly canonicalClaim: Uint8Array<ArrayBuffer>
 
-  canonicalPlan: Uint8Array<ArrayBuffer>
+  readonly canonicalPlan: Uint8Array<ArrayBuffer>
 
-  canonicalResult: Uint8Array<ArrayBuffer>
+  readonly canonicalResult: Uint8Array<ArrayBuffer>
 
-  claim: Readonly<Record<string, JSONValue>>
+  readonly claim: Readonly<Record<string, JSONValue>>
 
-  claimId: string
+  readonly claimId: string
 
-  diagnostics: readonly JSONValue[]
+  readonly diagnostics: readonly JSONValue[]
 
-  evidence: JSONValue
+  readonly evidence?: JSONValue
 
-  polarity: GeoSpecClaimPolarity
+  readonly polarity: GeoSpecClaimPolarity
 
-  result: Readonly<Record<string, JSONValue>>
+  readonly result: Readonly<Record<string, JSONValue>>
 
-  status: GeoSpecCanonicalClaimStatus
+  readonly status: GeoSpecCanonicalClaimStatus
 
 // Exact core bytes of one claim evaluated in one engine call
 GeoSpecNativeClaimEvaluation: {
@@ -1666,11 +1695,11 @@ GeoSpecNativeClaimEvaluation: {
     readonly canonicalResult: Uint8Array<ArrayBuffer>;
 }
 
-  canonicalClaim: Uint8Array<ArrayBuffer>
+  readonly canonicalClaim: Uint8Array<ArrayBuffer>
 
-  canonicalPlan: Uint8Array<ArrayBuffer>
+  readonly canonicalPlan: Uint8Array<ArrayBuffer>
 
-  canonicalResult: Uint8Array<ArrayBuffer>
+  readonly canonicalResult: Uint8Array<ArrayBuffer>
 
 // Byte-only engine surface consumed by the runner-independent assertion client
 GeoSpecNativeEngine: {
@@ -1693,9 +1722,9 @@ GeoSpecNativeSubject: {
     readonly subjectHash?: string;
 }
 
-  contentHash: string
+  readonly contentHash?: string
 
-  subjectHash: string
+  readonly subjectHash?: string
 
 // A canonical fixed-contract matcher
 GeoSpecFixedMatcherDescriptor: {
@@ -1704,11 +1733,11 @@ GeoSpecFixedMatcherDescriptor: {
     readonly mode: 'sync';
 }
 
-  contract: 'geospec.plate-two-windows/v1' | 'geospec.pmi.parallel-plane-distance/v1'
+  readonly contract: 'geospec.plate-two-windows/v1' | 'geospec.pmi.parallel-plane-distance/v1'
 
-  expected: 'true'
+  readonly expected: 'true'
 
-  mode: 'sync'
+  readonly mode: 'sync'
 
 // Installed Vitest matcher map and lifecycle settlement hook
 GeoSpecVitestAdapter: {
@@ -1716,7 +1745,7 @@ GeoSpecVitestAdapter: {
     flush(): Promise<void>;
 }
 
-  matchers: GeoSpecVitestMatcherMap
+  readonly matchers: GeoSpecVitestMatcherMap
 
   // GeoSpecVitestAdapter.flush (method)
   flush(): Promise<void>;
@@ -1729,12 +1758,12 @@ ExportTauProjectArtifactOptions: {
     readonly signal?: AbortSignal;
 }
 
-  descriptor: GeoSpecTauProjectDescriptor
+  readonly descriptor: GeoSpecTauProjectDescriptor
 
   // Called twice so source discovery and export use separate runtime lifetimes
-  createRuntime: () => GeoSpecTauProjectRuntime | Promise<GeoSpecTauProjectRuntime>
+  readonly createRuntime: () => GeoSpecTauProjectRuntime | Promise<GeoSpecTauProjectRuntime>
 
-  signal: AbortSignal
+  readonly signal?: AbortSignal
 
 // Finalized geometry bytes and the exact source/export metadata that produced them
 GeoSpecTauProjectArtifact: {
@@ -1762,21 +1791,21 @@ GeoSpecTauProjectArtifact: {
     };
 }
 
-  format: 'step' | 'glb'
+  readonly format: 'step' | 'glb'
 
-  name: string
+  readonly name: string
 
-  mimeType: string
+  readonly mimeType: string
 
-  bytes: Uint8Array<ArrayBuffer>
+  readonly bytes: Uint8Array<ArrayBuffer>
 
-  frame: {
+  readonly frame: {
           readonly coordinateSystem: 'z-up';
           readonly lengthUnit: 'millimeter';
           readonly sourceUnit: 'mm';
       }
 
-  source: {
+  readonly source: {
           readonly manifestPath: string;
           readonly manifestBytes: Uint8Array<ArrayBuffer>;
           readonly manifest: ProjectManifest;
@@ -1786,7 +1815,7 @@ GeoSpecTauProjectArtifact: {
           readonly files: readonly RuntimeSourceSnapshotFile[];
       }
 
-  export: {
+  readonly export: {
           readonly options: Readonly<Record<string, unknown>>;
           readonly route: NonNullable<GeometryExportIntent['route']>;
       }
@@ -1810,44 +1839,3 @@ GeoSpecTauProjectRuntime: RuntimeClientWithRoutes & Pick<RuntimeClient, 'shutdow
   bestRouteFor(format: string, options?: {
           readonly kernelId?: string;
       }): GeoSpecExportRoute | undefined;
-
-// Trusted project configuration using existing discovery and runner options
-// Remarks: Omitted values keep their existing owner's defaults. Defined overrides replace whole fields, including empty arrays, false and the subjects map. Existing discovery currently treats an absent or empty include array as its default pattern. Preserving [] here does not change that consumer behavior. This is configuration data, not a canonical engine plan or a geometry result.
-GeoSpecConfig: {
-    include?: readonly string[];
-    exclude?: readonly string[];
-    testNamePattern?: string;
-    /** Positive finite milliseconds; the runner owns its default. */
-    testTimeout?: number;
-    /** Positive finite milliseconds; does not define a geometry verdict. */
-    matcherWallBackstop?: number;
-    bail?: boolean;
-    forensic?: boolean;
-    cache?: boolean;
-    /** Requested cache location only; loading configuration creates no store. */
-    cacheDirectory?: string;
-    subjects?: Readonly<Record<string, GeoSpecTauProjectDescriptor>>;
-}
-
-  include: readonly string[]
-
-  exclude: readonly string[]
-
-  testNamePattern: string
-
-  // Positive finite milliseconds
-  testTimeout: number
-
-  // Positive finite milliseconds
-  matcherWallBackstop: number
-
-  bail: boolean
-
-  forensic: boolean
-
-  cache: boolean
-
-  // Requested cache location only
-  cacheDirectory: string
-
-  subjects: Readonly<Record<string, GeoSpecTauProjectDescriptor>>

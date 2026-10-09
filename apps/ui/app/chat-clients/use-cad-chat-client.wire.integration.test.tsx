@@ -70,6 +70,8 @@ vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proj_
 vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
 /* ChatTurnHost composes a registration only once the project's revision root is connected (W8 TS-S5). */
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionClient: () => ({}) }));
+/* ChatTurnHost reads the usage-metrics preference through react-query; this scope has no query client. */
+vi.mock('#hooks/use-privacy-preferences.js', () => ({ usePrivacyPreferences: () => ({ preferences: undefined }) }));
 
 const noop = (): void => undefined;
 const contextPayloadMock = useContextPayload as unknown as ReturnType<typeof vi.fn>;

@@ -1,6 +1,6 @@
 # libcascade — StepVisual (2)
 
-54 top-level symbols. Signatures are verbatim typescript.
+53 top-level symbols. Signatures are verbatim typescript.
 
 StepVisual_DraughtingAnnotationOccurrence: declare class StepVisual_DraughtingAnnotationOccurrence extends StepVisual_AnnotationOccurrence
 
@@ -507,6 +507,20 @@ StepVisual_MarkerSelect: declare class StepVisual_MarkerSelect extends StepData_
 
 StepVisual_MarkerType: typeof StepVisual_MarkerType[keyof typeof StepVisual_MarkerType]
 
+  readonly StepVisual_mtDot: 'StepVisual_mtDot'
+
+  readonly StepVisual_mtX: 'StepVisual_mtX'
+
+  readonly StepVisual_mtPlus: 'StepVisual_mtPlus'
+
+  readonly StepVisual_mtAsterisk: 'StepVisual_mtAsterisk'
+
+  readonly StepVisual_mtRing: 'StepVisual_mtRing'
+
+  readonly StepVisual_mtSquare: 'StepVisual_mtSquare'
+
+  readonly StepVisual_mtTriangle: 'StepVisual_mtTriangle'
+
 StepVisual_MechanicalDesignGeometricPresentationArea: declare class StepVisual_MechanicalDesignGeometricPresentationArea extends StepVisual_PresentationArea
 
   // StepVisual_MechanicalDesignGeometricPresentationArea.constructor (constructor)
@@ -548,6 +562,8 @@ StepVisual_MechanicalDesignGeometricPresentationRepresentation: declare class St
   [Symbol.dispose](): void;
 
 StepVisual_NullStyle: typeof StepVisual_NullStyle[keyof typeof StepVisual_NullStyle]
+
+  readonly StepVisual_Null: 'StepVisual_Null'
 
 StepVisual_NullStyleMember: declare class StepVisual_NullStyleMember extends StepData_SelectInt
 
@@ -1322,6 +1338,14 @@ StepVisual_RepositionedTessellatedItem: declare class StepVisual_RepositionedTes
 
 StepVisual_ShadingSurfaceMethod: typeof StepVisual_ShadingSurfaceMethod[keyof typeof StepVisual_ShadingSurfaceMethod]
 
+  readonly StepVisual_ssmConstantShading: 'StepVisual_ssmConstantShading'
+
+  readonly StepVisual_ssmColourShading: 'StepVisual_ssmColourShading'
+
+  readonly StepVisual_ssmDotShading: 'StepVisual_ssmDotShading'
+
+  readonly StepVisual_ssmNormalShading: 'StepVisual_ssmNormalShading'
+
 StepVisual_StyleContextSelect: declare class StepVisual_StyleContextSelect extends StepData_SelectType
 
   // StepVisual_StyleContextSelect.constructor (constructor)
@@ -1343,50 +1367,4 @@ StepVisual_StyleContextSelect: declare class StepVisual_StyleContextSelect exten
   delete(): void;
 
   // StepVisual_StyleContextSelect.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-StepVisual_StyledItem: declare class StepVisual_StyledItem extends StepRepr_RepresentationItem
-
-  // StepVisual_StyledItem.constructor (constructor)
-  constructor();
-
-  // StepVisual_StyledItem.Init (method)
-  Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
-  Init(aName: TCollection_HAsciiString): void;
-
-  // StepVisual_StyledItem.SetStyles (method)
-  SetStyles(aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment): void;
-
-  // StepVisual_StyledItem.Styles (method)
-  Styles(): NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment;
-
-  // StepVisual_StyledItem.StylesValue (method)
-  StylesValue(num: number): StepVisual_PresentationStyleAssignment;
-
-  // StepVisual_StyledItem.NbStyles (method)
-  NbStyles(): number;
-
-  // StepVisual_StyledItem.SetItem (method)
-  SetItem(aItem: StepRepr_RepresentationItem): void;
-  SetItem(aItem: StepVisual_StyledItemTarget): void;
-
-  // StepVisual_StyledItem.Item (method)
-  Item(): StepRepr_RepresentationItem;
-
-  // StepVisual_StyledItem.ItemAP242 (method)
-  ItemAP242(): StepVisual_StyledItemTarget;
-
-  // StepVisual_StyledItem.get_type_name (method)
-  static get_type_name(): string;
-
-  // StepVisual_StyledItem.get_type_descriptor (method)
-  static get_type_descriptor(): Standard_Type;
-
-  // StepVisual_StyledItem.DynamicType (method)
-  DynamicType(): Standard_Type;
-
-  // StepVisual_StyledItem.delete (method)
-  delete(): void;
-
-  // StepVisual_StyledItem.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

@@ -1,14 +1,14 @@
-import type { SupplierFinalityClassification } from '#api/billing/billable-model-invocation.types.js';
-import type { SupplierValuation, SupplierValuationRate, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
+import type {
+  NormalizedMeterItem,
+  SupplierCostUnpricedReason,
+  SupplierValuation,
+  SupplierValuationRate,
+} from '#api/billing/credit-ledger.types.js';
 
-const gcd = (left: bigint, right: bigint): bigint => {
-  let a = left < 0n ? -left : left;
-  let b = right < 0n ? -right : right;
-  while (b !== 0n) {
-    [a, b] = [b, a % b];
-  }
-  return a;
-};
+/** A supplier cost estimate in pico-USD, or why the usage could not be priced. */
+export type SupplierCost =
+  | { readonly picoUsd: bigint }
+  | { readonly unpriced: Exclude<SupplierCostUnpricedReason, 'absorbed'> };
 
 const unsigned = (value: string): bigint | undefined => {
   if (!/^(0|[1-9][0-9]*)$/u.test(value) || value.length > 78) {
@@ -20,91 +20,60 @@ const unsigned = (value: string): bigint | undefined => {
 const key = ({ dimension, tier }: Pick<SupplierValuationRate, 'dimension' | 'tier'>): string =>
   `${dimension}:${tier ?? ''}`;
 
-/** Derives exact preliminary USD from complete usage and its independently pinned valuation schedule. */
-export const calculatePreliminarySupplierCost = (input: {
-  invocation: { supplierValuation?: SupplierValuation };
-  evidence: TerminalEvidence;
-  payloadDigest: string;
-}): SupplierFinalityClassification['supplierEvidence'] => {
-  const valuation = input.invocation.supplierValuation;
-  if (input.evidence.kind !== 'final_usage' || valuation?.version !== 'supplier-valuation-v1') {
-    return undefined;
-  }
-  const baseKeys = new Set(valuation.baseRates.map((rate) => key(rate)));
-  const meterKeys = new Set(input.evidence.meterItems.map((item) => key(item)));
-  if (
-    valuation.sourceRevision.length === 0 ||
-    baseKeys.size === 0 ||
-    baseKeys.size !== valuation.baseRates.length ||
-    meterKeys.size !== input.evidence.meterItems.length ||
-    baseKeys.size !== meterKeys.size ||
-    [...baseKeys].some((rateKey) => !meterKeys.has(rateKey))
-  ) {
-    return undefined;
-  }
+const inputDimensions = new Set(['uncached_input', 'cache_read', 'cache_write']);
 
-  let selectedRates = valuation.baseRates;
-  if (valuation.longContextMinimumInputTokens !== null) {
+/**
+ * Prices reported usage at the supplier valuation pinned on the operation.
+ *
+ * The result is `ceil(Σ quantity × numeratorPicoUsd ÷ denominatorUnits)` over every meter, so
+ * rounding happens once, on the exact sum. A reported meter the valuation has no rate for is
+ * `missing_rate`; a schedule that prices a meter the supplier did not report is
+ * `dimension_mismatch`. Neither changes what the customer is charged.
+ *
+ * @param input - The pinned valuation, absent on a route without one, and the reported meters.
+ * @returns The supplier cost estimate, or the reason it is unpriced.
+ */
+export const calculateSupplierCost = (input: {
+  readonly valuation: SupplierValuation | undefined;
+  readonly meterItems: readonly NormalizedMeterItem[];
+}): SupplierCost => {
+  const { valuation, meterItems } = input;
+  if (valuation?.version !== 'supplier-valuation-v1' || valuation.sourceRevision.length === 0) {
+    return { unpriced: 'missing_rate' };
+  }
+  let rates = valuation.baseRates;
+  if (valuation.longContextMinimumInputTokens !== null && valuation.longContextRates !== null) {
     const minimum = unsigned(valuation.longContextMinimumInputTokens);
-    const longRates = valuation.longContextRates;
-    if (minimum === undefined || minimum === 0n || longRates === null) {
-      return undefined;
+    if (minimum === undefined) {
+      return { unpriced: 'missing_rate' };
     }
-    const longKeys = new Set(longRates.map((rate) => key(rate)));
-    if (
-      longKeys.size !== longRates.length ||
-      longKeys.size !== baseKeys.size ||
-      [...longKeys].some((rateKey) => !baseKeys.has(rateKey))
-    ) {
-      return undefined;
-    }
-    const inputQuantity = input.evidence.meterItems
-      .filter(
-        ({ dimension }) => dimension === 'uncached_input' || dimension === 'cache_read' || dimension === 'cache_write',
-      )
+    const observedInput = meterItems
+      .filter(({ dimension }) => inputDimensions.has(dimension))
       .reduce((sum, item) => sum + item.quantity, 0n);
-    if (inputQuantity >= minimum) {
-      selectedRates = longRates;
+    if (observedInput >= minimum) {
+      rates = valuation.longContextRates;
     }
-  } else if (valuation.longContextRates !== null) {
-    return undefined;
+  } else if (valuation.longContextMinimumInputTokens !== null || valuation.longContextRates !== null) {
+    return { unpriced: 'missing_rate' };
   }
-
-  let numeratorPicoUsd = 0n;
+  const byKey = new Map(rates.map((rate) => [key(rate), rate]));
+  if (byKey.size !== rates.length || meterItems.some((item) => !byKey.has(key(item)) || item.quantity < 0n)) {
+    return { unpriced: 'missing_rate' };
+  }
+  if (new Set(meterItems.map((item) => key(item))).size !== meterItems.length || meterItems.length !== byKey.size) {
+    return { unpriced: 'dimension_mismatch' };
+  }
+  let numerator = 0n;
   let denominator = 1n;
-  try {
-    for (const item of input.evidence.meterItems) {
-      const rate = selectedRates.find((candidate) => key(candidate) === key(item));
-      if (!rate || item.quantity < 0n) {
-        return undefined;
-      }
-      const rateNumerator = unsigned(rate.numeratorPicoUsd);
-      const rateDenominator = unsigned(rate.denominatorUnits);
-      if (rateNumerator === undefined || rateDenominator === undefined || rateDenominator === 0n) {
-        return undefined;
-      }
-      const nextNumerator = numeratorPicoUsd * rateDenominator + item.quantity * rateNumerator * denominator;
-      const nextDenominator = denominator * rateDenominator;
-      const divisor = gcd(nextNumerator, nextDenominator);
-      numeratorPicoUsd = nextNumerator / divisor;
-      denominator = nextDenominator / divisor;
+  for (const item of meterItems) {
+    const rate = byKey.get(key(item));
+    const rateNumerator = rate === undefined ? undefined : unsigned(rate.numeratorPicoUsd);
+    const rateDenominator = rate === undefined ? undefined : unsigned(rate.denominatorUnits);
+    if (rateNumerator === undefined || rateDenominator === undefined || rateDenominator === 0n) {
+      return { unpriced: 'missing_rate' };
     }
-  } catch {
-    return undefined;
+    numerator = numerator * rateDenominator + item.quantity * rateNumerator * denominator;
+    denominator *= rateDenominator;
   }
-  const usdDenominator = denominator * 1_000_000_000_000n;
-  const divisor = gcd(numeratorPicoUsd, usdDenominator);
-  const numerator = numeratorPicoUsd / divisor;
-  const normalizedDenominator = usdDenominator / divisor;
-  if (numerator.toString().length > 78 || normalizedDenominator.toString().length > 78) {
-    return undefined;
-  }
-  return {
-    sourceRevision: `${valuation.sourceRevision}:normalized-usage:${input.payloadDigest}`,
-    payloadDigest: input.payloadDigest,
-    currency: 'usd',
-    numerator: numerator.toString(),
-    denominator: normalizedDenominator.toString(),
-    completeness: 'complete',
-  };
+  return { picoUsd: (numerator + denominator - 1n) / denominator };
 };

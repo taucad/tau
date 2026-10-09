@@ -2013,6 +2013,9 @@ export class BillingPaymentsService {
           payload: claim.payload,
           dedupeKey: claim.dedupeKey,
         });
+        /* This update and the failure update below find the claim by its generation alone, which every
+         * re-claim bumps. Requiring an unexpired lease as well would leave a send that outlasted it unrecorded
+         * and `processing`, and the next pass would email the owner again. */
         const changed = await this.databaseService.database
           .update(billingRecoveryNotice)
           .set({
@@ -2028,7 +2031,6 @@ export class BillingPaymentsService {
               eq(billingRecoveryNotice.id, claim.id),
               eq(billingRecoveryNotice.generation, claim.generation),
               eq(billingRecoveryNotice.state, 'processing'),
-              sql`${billingRecoveryNotice.leaseUntil} > clock_timestamp()`,
             ),
           )
           .returning({ id: billingRecoveryNotice.id });
@@ -2054,7 +2056,6 @@ export class BillingPaymentsService {
               eq(billingRecoveryNotice.id, claim.id),
               eq(billingRecoveryNotice.generation, claim.generation),
               eq(billingRecoveryNotice.state, 'processing'),
-              sql`${billingRecoveryNotice.leaseUntil} > clock_timestamp()`,
             ),
           )
           .returning({ id: billingRecoveryNotice.id });

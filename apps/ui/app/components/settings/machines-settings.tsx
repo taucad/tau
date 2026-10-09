@@ -1,28 +1,34 @@
 /**
  * Machines settings card (D10).
  *
- * Printers belong to this computer, not a project: the host behind the app's
- * machines facet owns every binding, so a printer set up here is available in
- * every project, and the card works with no project open. It discovers through
- * that facet, begins a binding through it, and completes the ceremony through
- * the desktop shell, so a typed access code goes to the host, which keeps it in
- * the OS keychain, and never into page state. A printer whose code is already saved binds without
- * one. The simulated X1C binds without an address or a code; it is the dry-run
- * device, and its demo settings come from its own binding declaration. Each
- * bound machine opens to its Testing switch and its provider's manifest
- * (`MachineDetails`); the row itself stays one line, with its Remove action beside it.
+ * Machines belong to this computer, not a project: the host behind the app's
+ * machines facet owns every binding, so a machine set up here is available in
+ * every project, and the card works with no project open. Everything it offers
+ * comes from the providers the host serves: a real machine's model, where it is
+ * (an address on the network or a serial port, by the manifest's transport),
+ * its binding fields and whether it takes an access code all come from its
+ * provider. It discovers through that facet, begins a binding through it, and
+ * completes the ceremony through the desktop shell, so a typed access code goes
+ * to the host, which keeps it in the OS keychain, and never into page state. A
+ * machine whose code is already saved binds without one. A simulator binds
+ * without an address or a code; its demo settings come from its own binding
+ * declaration. Each bound machine opens to its Testing switch and its
+ * provider's manifest (`MachineDetails`); the row itself stays one line, with
+ * its Remove action beside it.
  */
 
 import { memo, useCallback, useId, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { ChevronDown, CircleAlert, LoaderCircle, Trash2 } from 'lucide-react';
+import { fffProcessOf, isSimulatedMachine } from '@taucad/runtime/machine';
 import type {
   MachineBindingOutcome,
   MachineCandidate,
   MachineClient,
   MachineDirectoryEntry,
   MachineDiscoverInput,
+  MachineManifest,
   MachineProvider,
 } from '@taucad/runtime/machine';
 import { Button } from '@taucad/ui/components/button';
@@ -31,58 +37,57 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { Label } from '@taucad/ui/components/label';
 import { PasswordInput } from '@taucad/ui/components/password-input';
 import { Switch } from '@taucad/ui/components/switch';
-import { isSimulatedProvider } from '#components/print/machine-facts.js';
-import { ConfigurationFields, MachineDetails } from '#components/settings/machine-details.js';
+import { ConfigurationFields, MachineDetails, fieldNames } from '#components/settings/machine-details.js';
 import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { useKeybinding } from '#hooks/use-keyboard.js';
 import { printersInUseElsewhere, useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
-
-const bambuProviderId = 'bambu';
-const miniProviderId = 'bambu-a1-mini';
-/* Display names by simulator provider; the host slugs each to its id (`simulated-x1c`, blueprint D3), which names its folder. */
-const simulatorNames: ReadonlyMap<string, string> = new Map([
-  ['bambu-simulator', 'Simulated X1C'],
-  ['bambu-a1-mini-simulator', 'Simulated A1 mini'],
-  ['grbl-simulator', 'Simulated LongMill'],
-  ['makera-carvera-simulator', 'Simulated Carvera'],
-]);
 
 type BindInput = {
   readonly providerId: string;
+  /** The name the person gives the machine; the host slugs it to the machine's id (blueprint D3). */
   readonly name: string;
-  readonly address?: string;
-  readonly serial?: string;
-  /** The code the person typed, `''` when they left it empty; absent for a binding that needs none (the simulator). */
+  /** Binding fields chosen through the provider's own declaration, without the name. */
+  readonly fields: Readonly<Record<string, unknown>>;
+  /** The code the person typed, `''` when they left it empty; absent for a provider whose binding takes none. */
   readonly accessCode?: string;
-  /** Binding fields chosen through the provider's own declaration. */
-  readonly fields?: Readonly<Record<string, unknown>>;
 };
+
+/** A discovered candidate with the provider that yielded it: the provider it binds through. */
+type HeardCandidate = Readonly<{ providerId: string; candidate: MachineCandidate }>;
+
+type Transport = MachineManifest['connection']['transport'];
+
+/** The binding field that says where a machine is, by how its provider reaches it. */
+const endpointFields: Readonly<Record<Transport, string>> = { network: 'address', serial: 'port' };
+const endpointLabels: Readonly<Record<Transport, string>> = { network: 'address', serial: 'serial port' };
+
+const endpointFieldOf = (provider: MachineProvider): string => endpointFields[provider.manifest.connection.transport];
+
+/** Whether binding takes an access code: the host's ceremony asks one only of a real machine that authenticates. */
+const takesCode = (manifest: MachineManifest): boolean =>
+  !isSimulatedMachine(manifest) && manifest.connection.identity === 'authenticated';
+
+/** What the card calls one of this provider's machines. */
+const nounOf = (manifest: MachineManifest): 'printer' | 'machine' =>
+  fffProcessOf(manifest) === undefined ? 'machine' : 'printer';
 
 /** The bind flow names the machine itself, so its binding form does not offer the logical id. */
 const flowFilledFields: readonly string[] = ['logicalId'];
-const bindTitles = { logicalId: 'Name', address: 'Address', serial: 'Serial (optional)' } as const;
+const bindTitles = { logicalId: 'Name' } as const;
 
 /**
  * What a person reads for the host's binding and removal refusals, by code; `undefined` means say nothing.
  * The machine channel carries the code as the message and the desktop shell's invoke wraps it in its own,
- * so the code is looked for anywhere in the message.
+ * so the code is looked for anywhere in the message. A provider's own refusal is shown in its own words.
  */
 const refusals: ReadonlyMap<string, string | undefined> = new Map([
-  ['MACHINE_CREDENTIAL_REQUIRED', 'Enter the access code shown on the printer.'],
+  ['MACHINE_CREDENTIAL_REQUIRED', 'Enter the access code shown on the machine.'],
   [
     'MACHINE_CREDENTIAL_TRUST_CHANGED',
-    "The printer's certificate changed since the code was saved. Enter the access code to bind it again.",
+    "The machine's certificate changed since the code was saved. Enter the access code to bind it again.",
   ],
-  ['BAMBU_MANUAL_ADDRESS_INVALID', 'Enter a valid IP address or printer hostname.'],
-  [
-    'BAMBU_SERIAL_INVALID',
-    'The serial does not match the selected printer model. Check Printer details or find it on the network.',
-  ],
-  [
-    'BAMBU_SERIAL_REQUIRED',
-    'Open Printer details and enter the serial, or find the printer on the network to fill it automatically.',
-  ],
-  ['MACHINE_BINDING_BUSY', "Resolve this printer's open jobs first."],
+  ['MACHINE_BINDING_BUSY', "Resolve this machine's open jobs first."],
   ['MACHINE_CREDENTIAL_SAVE_FAILED', 'Tau could not save the access code to your Keychain.'],
   ['SECRET_VAULT_UNAVAILABLE', 'Tau could not reach your Keychain.'],
   /* The ceremony's second half goes through the desktop shell, not the facet that words these for every other call. */
@@ -98,7 +103,11 @@ const asksForCode: ReadonlySet<string | undefined> = new Set([
   'MACHINE_CREDENTIAL_TRUST_CHANGED',
 ]);
 
-const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+/** The desktop shell's invoke prefixes what the utility threw; the person reads only the latter. */
+const shellPrefix = /^Error invoking remote method '[^']*': (?:\w*Error: )?/u;
+
+const errorMessage = (error: unknown): string =>
+  (error instanceof Error ? error.message : String(error)).replace(shellPrefix, '');
 
 const refusalCode = (error: unknown): string | undefined => {
   const message = errorMessage(error);
@@ -109,7 +118,7 @@ const refusalCode = (error: unknown): string | undefined => {
  * The one mapping from a binding or removal failure to what the card says.
  *
  * @param error - What `bind` or `removeBinding` threw.
- * @returns The copy for a known refusal (`undefined` when it needs none), else the error's own message.
+ * @returns The copy for a known host refusal (`undefined` when it needs none), else the error's own message.
  */
 const describeRefusal = (error: unknown): string | undefined => {
   const code = refusalCode(error);
@@ -119,11 +128,11 @@ const describeRefusal = (error: unknown): string | undefined => {
 /**
  * Bind one machine end to end: discover it, begin the host-local ceremony and,
  * when the host asks for the operator's half, complete it through the shell.
- * Discovery here is addressed: "Find on network" has already picked the LAN
- * candidate and filled its address, so the first answer is the machine. A
- * typed code always wins; with none, the host reuses the code it saved for
- * that printer, and when nothing is saved either, the person is asked for the
- * code before any ceremony begins.
+ * Discovery here is addressed: the form names where the machine is ("Find
+ * machines" fills it from the candidate picked), so the first answer is the
+ * machine. A typed code always wins; with none, the host reuses the code it
+ * saved for that machine, and when nothing is saved either, the person is
+ * asked for the code before any ceremony begins.
  *
  * @param client - This computer's machines facet.
  * @param input - What the person typed.
@@ -132,13 +141,8 @@ const describeRefusal = (error: unknown): string | undefined => {
 const bind = async (client: MachineClient, input: BindInput): Promise<MachineBindingOutcome> => {
   // SAFETY: the Parameters form writes JSON values only, and the host validates the whole configuration
   // against the provider's binding schema before discovery.
-  const fields = (input.fields ?? {}) as Readonly<Record<string, MachineDiscoverInput['configuration']>>;
-  const configuration = {
-    ...fields,
-    logicalId: input.name,
-    ...(input.address ? { address: input.address } : {}),
-    ...(input.serial ? { serial: input.serial } : {}),
-  };
+  const fields = input.fields as Readonly<Record<string, MachineDiscoverInput['configuration']>>;
+  const configuration = { ...fields, logicalId: input.name };
   const abort = new AbortController();
   let candidate;
   try {
@@ -152,7 +156,7 @@ const bind = async (client: MachineClient, input: BindInput): Promise<MachineBin
     abort.abort();
   }
   if (candidate === undefined) {
-    throw new Error('No machine answered. Check the address and that the printer is in LAN mode.');
+    throw new Error('No machine answered there. Check it is switched on and reachable from this computer.');
   }
   if (input.accessCode === '' && candidate.credential !== 'saved') {
     throw new Error('MACHINE_CREDENTIAL_REQUIRED');
@@ -165,29 +169,30 @@ const bind = async (client: MachineClient, input: BindInput): Promise<MachineBin
   if (bridge === undefined) {
     throw new Error('This runtime cannot complete the binding ceremony; use the Tau desktop app.');
   }
+  /* The shell pins from the endpoint the provider connects to, so only the ceremony and a typed code travel. */
   return bridge.machines.completeBinding({
     ceremonyId: outcome.ceremonyId,
-    ...(input.address ? { address: input.address } : {}),
     ...(input.accessCode ? { accessCode: input.accessCode } : {}),
   });
 };
 
 /**
- * Listen for the printers advertising on this LAN; the host bounds the pass (Bambu: 11 s on UDP 2021,
- * two advertisement periods). Nothing is sent to a printer: discovery only hears broadcasts.
+ * Ask every real machine provider for what it can find: network providers listen for advertisements, serial
+ * providers read this computer's ports. The host bounds each pass; nothing is sent to a machine. One provider's
+ * failure does not end the others' passes.
  *
  * @param client - This computer's machines facet.
- * @param providerIds - Physical Bambu models offered by this host.
+ * @param providerIds - The real machine providers this host serves.
  * @param onHeard - Every distinct candidate so far, each time a new one is heard.
- * @returns Every distinct candidate heard, latest advertisement winning.
+ * @returns Every distinct candidate heard, latest answer winning, each with its provider, and the first failure.
  */
-const findOnNetwork = async (
+const findMachines = async (
   client: MachineClient,
   providerIds: readonly string[],
-  onHeard: (candidates: readonly MachineCandidate[]) => void,
-): Promise<readonly MachineCandidate[]> => {
-  const found = new Map<string, MachineCandidate>();
-  await Promise.all(
+  onHeard: (candidates: readonly HeardCandidate[]) => void,
+): Promise<Readonly<{ heard: readonly HeardCandidate[]; failure?: unknown }>> => {
+  const found = new Map<string, HeardCandidate>();
+  const passes = await Promise.allSettled(
     providerIds.map(async (providerId) => {
       for await (const frame of client.discover({
         providerId,
@@ -195,8 +200,9 @@ const findOnNetwork = async (
         signal: AbortSignal.timeout(20_000),
       })) {
         if (frame.type === 'found' || frame.type === 'updated') {
-          const isNew = !found.has(frame.candidate.id);
-          found.set(frame.candidate.id, frame.candidate);
+          const key = `${providerId}\n${frame.candidate.id}`;
+          const isNew = !found.has(key);
+          found.set(key, { providerId, candidate: frame.candidate });
           if (isNew) {
             onHeard([...found.values()]);
           }
@@ -204,15 +210,31 @@ const findOnNetwork = async (
       }
     }),
   );
-  return [...found.values()];
+  const failed = passes.find((pass) => pass.status === 'rejected');
+  return { heard: [...found.values()], ...(failed === undefined ? {} : { failure: failed.reason }) };
 };
 
-const listeningForMore = 'Listening for more printers…';
+const lookingForMachines = 'Looking for machines…';
+const listeningForMore = 'Listening for more machines…';
 
 const describeOutcome = (name: string, outcome: MachineBindingOutcome): string =>
   outcome.status === 'bound'
     ? `${name} is bound as ${outcome.machineId}.`
-    : `${name} is waiting on the printer (ceremony ${outcome.ceremonyId}).`;
+    : `${name} is waiting on the machine (ceremony ${outcome.ceremonyId}).`;
+
+const escapeKey = { key: 'Escape' } as const;
+
+/** What removing a machine does, as its manifest says: a stored job runs on without Tau, a streamed one cannot. */
+const removalConsequence = (manifest: MachineManifest): string => {
+  const { jobs } = manifest;
+  const keepsRunning = !isSimulatedMachine(manifest) && jobs.type === 'supported' && jobs.delivery === 'stored';
+  return [
+    takesCode(manifest) ? 'Tau stops watching it and forgets its saved access code.' : 'Tau stops watching it.',
+    keepsRunning ? `A job in progress keeps running on the ${nounOf(manifest)}.` : undefined,
+  ]
+    .filter((sentence) => sentence !== undefined)
+    .join(' ');
+};
 
 /** Who turns Testing on or off from this card: the person at this computer. */
 const operator = { kind: 'user', id: 'operator', label: 'You' } as const;
@@ -261,10 +283,12 @@ function TestingSwitch({
         </div>
         <span className='flex shrink-0 items-center gap-2'>
           {isPending ? (
-            <LoaderCircle
-              aria-label='Saving'
-              className='size-3.5 animate-spin text-muted-foreground motion-reduce:animate-none'
-            />
+            <span role='status' aria-label='Saving' aria-busy='true'>
+              <LoaderCircle
+                aria-hidden
+                className='size-3.5 animate-spin text-muted-foreground motion-reduce:animate-none'
+              />
+            </span>
           ) : null}
           <Switch
             aria-label={`Testing for ${entry.name}`}
@@ -308,6 +332,7 @@ const BoundMachine = memo(function BoundMachine({
   const [isRemoving, setIsRemoving] = useState(false);
   const [refusal, setRefusal] = useState<string>();
   const removeButton = useRef<HTMLButtonElement>(null);
+  const confirmation = useRef<HTMLDivElement>(null);
   const questionId = useId();
   const consequenceId = useId();
   const { name } = entry;
@@ -321,6 +346,13 @@ const BoundMachine = memo(function BoundMachine({
     setRefusal(undefined);
     removeButton.current?.focus();
   }, []);
+  /* Escape answers the question in place. The settings dialog hears Escape on the document, so the binding is
+   * global (taken on the window, first) and only while focus is in the question. */
+  useKeybinding(escapeKey, cancel, {
+    scope: 'global',
+    enabled: () => confirmation.current?.contains(document.activeElement) === true,
+  });
+  const simulated = provider !== undefined && isSimulatedMachine(provider.manifest);
   const remove = useCallback(async () => {
     setIsRemoving(true);
     setRefusal(undefined);
@@ -340,7 +372,7 @@ const BoundMachine = memo(function BoundMachine({
             <span className='font-medium'>{name}</span>{' '}
             <span className='text-xs text-muted-foreground'>
               {entry.descriptor.vendor} {entry.descriptor.model}
-              {isSimulatedProvider(entry.providerId) ? ' · Simulated' : ''}
+              {simulated ? ' · Simulated' : ''}
               {entry.freshness === 'stale' ? ' · Stale' : ''}
             </span>
             <ChevronDown
@@ -364,6 +396,7 @@ const BoundMachine = memo(function BoundMachine({
         </div>
         {isConfirming ? (
           <div
+            ref={confirmation}
             role='alertdialog'
             aria-labelledby={questionId}
             aria-describedby={consequenceId}
@@ -373,9 +406,7 @@ const BoundMachine = memo(function BoundMachine({
               Remove {name}?
             </p>
             <p id={consequenceId}>
-              {isSimulatedProvider(entry.providerId)
-                ? 'Tau stops watching it.'
-                : 'Tau stops watching it and forgets its saved access code. A print in progress keeps running on the printer.'}
+              {provider === undefined ? 'Tau stops watching it.' : removalConsequence(provider.manifest)}
             </p>
             {refusal === undefined ? null : (
               <p role='alert' className='flex items-start gap-1.5'>
@@ -409,20 +440,70 @@ const BoundMachine = memo(function BoundMachine({
   );
 });
 
+/** The person's binding values as the host takes them: strings trimmed, and a field left empty not sent. */
+const chosenFields = (values: Readonly<Record<string, unknown>>): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(values).flatMap(([key, value]) => {
+      const kept = typeof value === 'string' ? value.trim() : value;
+      return kept === '' || kept === undefined ? [] : [[key, kept]];
+    }),
+  );
+
+/** How the bind form lays out one provider's fields: the name and where it is up front, the rest under details. */
+const formLayout = (
+  provider: MachineProvider | undefined,
+): Readonly<{
+  noun: 'printer' | 'machine';
+  details: string;
+  primary: readonly string[];
+  others: readonly string[];
+}> => {
+  if (provider === undefined) {
+    return { noun: 'machine', details: 'Machine details', primary: [], others: [] };
+  }
+  const primary = ['logicalId', endpointFieldOf(provider)];
+  const noun = nounOf(provider.manifest);
+  return {
+    noun,
+    details: noun === 'printer' ? 'Printer details' : 'Machine details',
+    primary,
+    others: fieldNames(provider.bindingConfiguration).filter((field) => !primary.includes(field)),
+  };
+};
+
+/** The code typed in the form, `''` when left empty; absent when the provider's binding takes none. */
+const typedCode = (form: HTMLFormElement, manifest: MachineManifest): string | undefined => {
+  if (!takesCode(manifest)) {
+    return undefined;
+  }
+  const value = new FormData(form).get('accessCode');
+  return typeof value === 'string' ? value : '';
+};
+
+/** What the status line says once a find pass ends: why nothing came, or nothing over a progress line. */
+const statusAfterFind = (current: string | undefined, heardNothing: boolean): string | undefined => {
+  if (heardNothing) {
+    return 'No machine answered. Check it is switched on and on this network or plugged in, or enter where it is.';
+  }
+  return current === listeningForMore || current === lookingForMachines ? undefined : current;
+};
+
 function MachinesPanel({ client }: { readonly client: MachineClient }): React.JSX.Element {
   const directory = useMachineDirectory(client);
   const { refresh } = directory;
+  /* What happened, for the polite live region; a refusal is said apart, as an alert. */
   const [status, setStatus] = useState<string>();
+  const [refusal, setRefusal] = useState<string>();
   const [busy, setBusy] = useState(false);
-  /* Its own flag: a heard printer can be bound while the pass still listens for others. */
+  /* Its own flag: a heard machine can be bound while the pass still listens for others. */
   const [finding, setFinding] = useState(false);
-  /* The host holds a code for the picked printer and the person has not chosen to type another; never the code. */
+  /* The host holds a code for the picked machine and the person has not chosen to type another; never the code. */
   const [isCodeSaved, setIsCodeSaved] = useState(false);
   const [simulatorFields, setSimulatorFields] = useState<Readonly<Record<string, Record<string, unknown>>>>({});
-  const [selectedProviderId, setSelectedProviderId] = useState(bambuProviderId);
+  const [selectedProviderId, setSelectedProviderId] = useState<string>();
   const [isBinding, setIsBinding] = useState(false);
   const [bindFields, setBindFields] = useState<Record<string, unknown>>({});
-  const [candidates, setCandidates] = useState<readonly MachineCandidate[]>();
+  const [candidates, setCandidates] = useState<readonly HeardCandidate[]>();
   const bindForm = useRef<HTMLFormElement>(null);
   const bindButton = useRef<HTMLButtonElement>(null);
   const entries = directory.snapshot?.entries ?? [];
@@ -430,19 +511,25 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     () => new Map(directory.providers.map((provider) => [provider.id, provider])),
     [directory.providers],
   );
-  const simulators = directory.providers.filter(({ id }) => simulatorNames.has(id));
-  const bambu = providers.get(selectedProviderId);
-  const physicalProviders = directory.providers.filter(({ id }) => id === bambuProviderId || id === miniProviderId);
+  const simulators = directory.providers.filter(({ manifest }) => isSimulatedMachine(manifest));
+  const physicalProviders = directory.providers.filter(({ manifest }) => !isSimulatedMachine(manifest));
+  /* Until the person picks a model, the first one the host serves. */
+  const selected = selectedProviderId === undefined ? physicalProviders[0] : providers.get(selectedProviderId);
+
+  const say = (outcome: string | undefined, refused?: string): void => {
+    setStatus(outcome);
+    setRefusal(refused);
+  };
 
   /** Bind and say how it went; `true` when the host answered with an outcome rather than a refusal. */
   const run = async (name: string, input: BindInput): Promise<boolean> => {
     setBusy(true);
     try {
-      setStatus(describeOutcome(name, await bind(client, input)));
+      say(describeOutcome(name, await bind(client, input)));
       refresh();
       return true;
     } catch (error) {
-      setStatus(describeRefusal(error));
+      say(undefined, describeRefusal(error));
       if (asksForCode.has(refusalCode(error))) {
         setIsCodeSaved(false);
       }
@@ -472,25 +559,35 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     return element instanceof HTMLInputElement ? element : undefined;
   };
 
-  /** Fill the form from one heard printer, leaving only the access code to type unless the host holds it. */
-  const pick = (candidate: MachineCandidate): void => {
-    const isSaved = candidate.credential === 'saved';
-    /* Rendered now, so whichever control comes next exists to take focus. */
-    flushSync(() => {
-      setIsCodeSaved(isSaved);
-      setSelectedProviderId(candidate.claimedIdentity.model === 'A1 mini' ? miniProviderId : bambuProviderId);
-      setIsBinding(true);
-    });
+  const clearCode = (): void => {
     const codeField = formInput('accessCode');
     if (codeField) {
       codeField.value = '';
     }
-    setBindFields({
-      logicalId: candidate.name.slice(0, 64),
-      address: candidate.endpoint.address,
-      serial: candidate.claimedIdentity.serial ?? '',
+  };
+
+  /** Fill the form from one heard machine, through the provider that heard it, leaving only a code to type. */
+  const pick = ({ providerId, candidate }: HeardCandidate): void => {
+    const provider = providers.get(providerId);
+    if (provider === undefined) {
+      return;
+    }
+    const isSaved = candidate.credential === 'saved';
+    /* Rendered now, so whichever control comes next exists to take focus. */
+    flushSync(() => {
+      setIsCodeSaved(isSaved);
+      setSelectedProviderId(providerId);
+      setIsBinding(true);
     });
-    (isSaved ? bindButton.current : formInput('accessCode'))?.focus();
+    clearCode();
+    const declared = new Set(fieldNames(provider.bindingConfiguration));
+    const heard: Record<string, string | undefined> = {
+      logicalId: candidate.name.slice(0, 64),
+      [endpointFieldOf(provider)]: candidate.endpoint.address,
+      serial: candidate.claimedIdentity.serial,
+    };
+    setBindFields(chosenFields(Object.fromEntries(Object.entries(heard).filter(([key]) => declared.has(key)))));
+    (isSaved || !takesCode(provider.manifest) ? bindButton.current : formInput('accessCode'))?.focus();
   };
 
   const enterDifferentCode = (): void => {
@@ -503,59 +600,43 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
   const onFind = async (): Promise<void> => {
     setFinding(true);
     setCandidates(undefined);
-    setStatus('Listening for printers on this network…');
-    try {
-      // Advertisements never overwrite the printer the operator is configuring.
-      const heard = await findOnNetwork(
-        client,
-        physicalProviders.map(({ id }) => id),
-        (sofar) => {
-          setCandidates(sofar);
-          setStatus(listeningForMore);
-        },
-      );
-      setCandidates(heard);
-      // A bind finished meanwhile keeps its own message.
-      setStatus((current) =>
-        heard.length === 0
-          ? 'No printer answered. Check it is on this network with LAN mode on, or enter its address.'
-          : current === listeningForMore
-            ? undefined
-            : current,
-      );
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setFinding(false);
+    say(lookingForMachines);
+    // Answers never overwrite the machine the operator is configuring.
+    const { heard, failure } = await findMachines(
+      client,
+      physicalProviders.map(({ id }) => id),
+      (sofar) => {
+        setCandidates(sofar);
+        setStatus(listeningForMore);
+      },
+    );
+    setCandidates(heard);
+    // A bind finished meanwhile keeps its own message.
+    setStatus((current) => statusAfterFind(current, heard.length === 0 && failure === undefined));
+    if (failure !== undefined) {
+      setRefusal(describeRefusal(failure));
     }
+    setFinding(false);
   };
 
   const onBindSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const field = (key: string): string => {
-      const value = bindFields[key];
-      return typeof value === 'string' ? value.trim() : '';
-    };
-    const input = {
-      providerId: selectedProviderId,
-      name: field('logicalId'),
-      address: field('address'),
-      serial: field('serial'),
-    };
-    if (!input.name || !input.address) {
-      setStatus('Enter a name and address for the printer.');
+    if (selected === undefined) {
       return;
     }
-    const accessCodeValue = data.get('accessCode');
-    const accessCode = typeof accessCodeValue === 'string' ? accessCodeValue : '';
-    /* The code leaves the document before the ceremony runs; it is never state. The rest stays for a retry. */
-    const codeField = formInput('accessCode');
-    if (codeField) {
-      codeField.value = '';
+    const form = event.currentTarget;
+    const { transport } = selected.manifest.connection;
+    const { logicalId: name, ...fields } = chosenFields(bindFields);
+    if (typeof name !== 'string' || fields[endpointFields[transport]] === undefined) {
+      say(undefined, `Enter a name and ${endpointLabels[transport]} for the ${nounOf(selected.manifest)}.`);
+      return;
     }
-    if (await run(input.name, { ...input, accessCode })) {
+    const accessCode = typedCode(form, selected.manifest);
+    /* The code leaves the document before the ceremony runs; it is never state. The rest stays for a retry. */
+    clearCode();
+    if (
+      await run(name, { providerId: selected.id, name, fields, ...(accessCode === undefined ? {} : { accessCode }) })
+    ) {
       form.reset();
       setBindFields({});
       setIsCodeSaved(false);
@@ -563,15 +644,17 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     }
   };
 
+  const { noun: selectedNoun, details, primary: primaryFields, others: otherFields } = formLayout(selected);
+
   return (
     <>
       <p className='text-xs text-muted-foreground'>
-        Printers set up here are available in every project on this computer. Their access codes are kept in your
+        Machines set up here are available in every project on this computer. Their access codes are kept in your
         Keychain.
       </p>
       {/* Without a snapshot the list is unknown (loading, or the store is held elsewhere), not empty. */}
       {directory.snapshot !== undefined && entries.length === 0 ? (
-        <p className='text-sm text-muted-foreground'>No printers yet.</p>
+        <p className='text-sm text-muted-foreground'>No machines yet.</p>
       ) : undefined}
       {entries.length === 0 ? undefined : (
         <ul aria-label='Bound machines' className='flex flex-col gap-2'>
@@ -593,7 +676,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
       )}
       <section aria-labelledby='machines-add-title' className='flex flex-col gap-2 border-t pt-4'>
         <h3 id='machines-add-title' className='text-sm font-medium'>
-          Add a printer
+          Add a machine
         </h3>
         <div className='flex flex-wrap gap-2'>
           <Button
@@ -604,8 +687,8 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
             disabled={busy || finding || physicalProviders.length === 0}
             onClick={onFind}
           >
-            {finding ? <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' /> : null}Find on
-            network
+            {finding ? <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' /> : null}Find
+            machines
           </Button>
           <Button
             type='button'
@@ -619,26 +702,28 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
               setIsCodeSaved(false);
             }}
           >
-            Enter address
+            Enter details
           </Button>
         </div>
-        {candidates?.map((candidate) => {
+        {candidates?.map((heard) => {
+          const { candidate } = heard;
+          const model = providers.get(heard.providerId)?.manifest.identity.displayName ?? heard.providerId;
           const existing = entries.some((entry) => entry.descriptor.id === candidate.claimedIdentity.serial);
           return (
             <Button
-              key={candidate.id}
+              key={`${heard.providerId}\n${candidate.id}`}
               type='button'
               variant='outline'
               className='h-auto min-h-9 max-w-full justify-start text-left whitespace-normal'
               disabled={busy || existing}
               onClick={() => {
-                pick(candidate);
+                pick(heard);
               }}
             >
               <span className='flex flex-wrap items-baseline gap-x-2'>
                 <span>{candidate.name}</span>
                 <span className='text-xs text-muted-foreground'>
-                  {candidate.claimedIdentity.model} · {candidate.endpoint.address}
+                  {model} · {candidate.endpoint.address}
                   {existing ? ' · Already added' : ''}
                 </span>
               </span>
@@ -646,7 +731,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
           );
         })}
       </section>
-      {isBinding ? (
+      {isBinding && selected !== undefined ? (
         <form
           ref={bindForm}
           className='grid gap-3 border-t pt-4 lg:grid-cols-2'
@@ -654,85 +739,87 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
           onSubmit={onBindSubmit}
         >
           <h3 id='machines-bind-title' className='text-sm font-medium lg:col-span-2'>
-            Connect a Bambu Lab printer
+            Connect a {selected.vendor} {selectedNoun}
           </h3>
           <div className='grid gap-1.5 lg:col-span-2'>
-            <Label htmlFor='machines-bind-model'>Printer model</Label>
+            <Label htmlFor='machines-bind-model'>Model</Label>
             <select
               id='machines-bind-model'
               className='min-h-8 rounded-md border bg-background px-2 text-sm'
-              value={selectedProviderId}
+              value={selected.id}
               onChange={(event) => {
+                const next = providers.get(event.target.value);
                 setSelectedProviderId(event.target.value);
-                setBindFields((current) => ({ ...current, serial: '' }));
+                /* The name and where it is carry over; every other field belongs to the model left behind. */
+                const endpoint = next === undefined ? undefined : endpointFieldOf(next);
+                setBindFields(({ logicalId, ...rest }) =>
+                  chosenFields({ logicalId, ...(endpoint === undefined ? {} : { [endpoint]: rest[endpoint] }) }),
+                );
                 setIsCodeSaved(false);
-                const codeField = formInput('accessCode');
-                if (codeField) {
-                  codeField.value = '';
-                }
+                clearCode();
               }}
             >
               {physicalProviders.map((provider) => (
                 <option key={provider.id} value={provider.id}>
-                  {provider.manifest.identity.displayName}
+                  {provider.vendor} {provider.manifest.identity.displayName}
                 </option>
               ))}
             </select>
           </div>
-          {bambu ? (
-            <div className='min-w-0 lg:col-span-2' role='group' aria-label='Printer binding fields'>
-              <ConfigurationFields
-                providerId={selectedProviderId}
-                name='binding'
-                configuration={bambu.bindingConfiguration}
-                values={bindFields}
-                omit={['serial', 'wireForm']}
-                titles={bindTitles}
-                presentation='embedded'
-                onChange={setBindFields}
-              />
-            </div>
-          ) : null}
-          {bambu ? (
+          <div className='min-w-0 lg:col-span-2' role='group' aria-label='Binding fields'>
+            <ConfigurationFields
+              providerId={selected.id}
+              name='binding'
+              configuration={selected.bindingConfiguration}
+              values={bindFields}
+              omit={otherFields}
+              titles={bindTitles}
+              presentation='embedded'
+              onChange={setBindFields}
+            />
+          </div>
+          {otherFields.length === 0 ? null : (
             <Collapsible className='lg:col-span-2'>
               <CollapsibleTrigger className='flex min-h-8 items-center gap-2 text-xs text-muted-foreground'>
-                Printer details
+                {details}
                 <ChevronDown aria-hidden className='size-3.5' />
               </CollapsibleTrigger>
               <CollapsibleContent>
                 <ConfigurationFields
-                  providerId={selectedProviderId}
+                  providerId={selected.id}
                   name='binding'
-                  configuration={bambu.bindingConfiguration}
+                  configuration={selected.bindingConfiguration}
                   values={bindFields}
-                  omit={['logicalId', 'address']}
+                  omit={primaryFields}
                   titles={bindTitles}
                   presentation='embedded'
                   onChange={setBindFields}
                 />
               </CollapsibleContent>
             </Collapsible>
-          ) : null}
-          {isCodeSaved ? (
-            <div role='group' aria-labelledby='machines-bind-access-code-label' className='grid gap-1.5'>
-              <p id='machines-bind-access-code-label' className='text-sm leading-none font-medium'>
-                Access code
-              </p>
-              <p className='flex min-h-8 flex-wrap items-center gap-2 text-sm'>
-                Saved in your Keychain
-                <Button type='button' size='xs' variant='outline' onClick={enterDifferentCode}>
-                  Use a different code
-                </Button>
-              </p>
-            </div>
-          ) : (
-            <div className='grid gap-1.5'>
-              <Label htmlFor='machines-bind-access-code'>Access code</Label>
-              <PasswordInput id='machines-bind-access-code' name='accessCode' maxLength={64} autoComplete='off' />
-            </div>
           )}
+          {takesCode(selected.manifest) ? (
+            isCodeSaved ? (
+              <div role='group' aria-labelledby='machines-bind-access-code-label' className='grid gap-1.5'>
+                <p id='machines-bind-access-code-label' className='text-sm leading-none font-medium'>
+                  Access code
+                </p>
+                <p className='flex min-h-8 flex-wrap items-center gap-2 text-sm'>
+                  Saved in your Keychain
+                  <Button type='button' size='xs' variant='outline' onClick={enterDifferentCode}>
+                    Use a different code
+                  </Button>
+                </p>
+              </div>
+            ) : (
+              <div className='grid gap-1.5'>
+                <Label htmlFor='machines-bind-access-code'>Access code</Label>
+                <PasswordInput id='machines-bind-access-code' name='accessCode' maxLength={64} autoComplete='off' />
+              </div>
+            )
+          ) : null}
           <div className='lg:col-span-2'>
-            <Button ref={bindButton} type='submit' size='sm' disabled={busy || bambu === undefined}>
+            <Button ref={bindButton} type='submit' size='sm' disabled={busy}>
               {busy ? 'Connecting…' : 'Bind'}
             </Button>
             <Button
@@ -752,7 +839,8 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
         </form>
       ) : null}
       {simulators.map((simulator) => {
-        const name = simulatorNames.get(simulator.id) ?? simulator.name;
+        /* The provider's own name; the host slugs it to the machine's id (`simulated-x1c`, blueprint D3). */
+        const { name } = simulator;
         const titleId = `machines-simulator-title-${simulator.id}`;
         const fields = simulatorFields[simulator.id] ?? {};
         return (
@@ -795,6 +883,12 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
         );
       })}
 
+      {refusal === undefined ? null : (
+        <p role='alert' className='flex items-start gap-1.5 text-xs'>
+          <CircleAlert aria-hidden className='mt-px size-3.5 shrink-0 text-feature' />
+          {refusal}
+        </p>
+      )}
       <p role='status' aria-live='polite' className='text-xs text-muted-foreground'>
         {status}
       </p>
@@ -807,7 +901,7 @@ export function MachinesSettings(): React.JSX.Element {
   return (
     <SettingsSectionCard aria-labelledby='machines-title'>
       <CardHeader>
-        <CardTitle id='machines-title'>Printers</CardTitle>
+        <CardTitle id='machines-title'>Machines</CardTitle>
       </CardHeader>
       <CardContent className='flex flex-col gap-4'>
         {facet.available ? (

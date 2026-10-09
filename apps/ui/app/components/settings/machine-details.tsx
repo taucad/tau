@@ -24,7 +24,7 @@ import type { LucideIcon } from 'lucide-react';
 import { compileParameterManifest } from '@taucad/parameters';
 import type { ParameterManifest } from '@taucad/parameters';
 import type { ConfigurationManifestV1 } from '@taucad/runtime/configuration';
-import { fffProcessOf, millingProcessOf } from '@taucad/runtime/machine';
+import { fffProcessOf, isSimulatedMachine, millingProcessOf } from '@taucad/runtime/machine';
 import type {
   MachineActionDescriptor,
   MachineActionEffect,
@@ -44,9 +44,8 @@ import { isRecord } from '@taucad/utils/schema';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
 import type { ParameterEdit, Units } from '#components/geometry/parameters/rjsf-context.js';
 import { rjsfDefaultFormStateBehavior } from '#components/geometry/parameters/rjsf-utils.js';
-import { describeOutcome, isSimulatedProvider } from '#components/print/machine-facts.js';
+import { describeOutcome, formatQuantity } from '#components/print/machine-facts.js';
 import { rjsfValidator } from '#lib/rjsf-validator.js';
-import { formatQuantity } from '#routes/w.$workspace.$project/chat-print-summary.js';
 
 type Geometry = MachineFffProcess['geometry'];
 type QualificationStatus = MachineActionDescriptor['qualification']['status'];
@@ -164,7 +163,13 @@ const listed = (items: readonly string[], none: string, separator = ', '): strin
 const formatStaleAfter = (staleAfter: number): string =>
   staleAfter < 60_000 ? `${staleAfter / 1000} s` : `${staleAfter / 60_000} min`;
 
-const fieldNames = (configuration: ConfigurationManifestV1): readonly string[] => {
+/**
+ * The fields a provider configuration declares, by key.
+ *
+ * @param configuration - The declared configuration.
+ * @returns Its top-level field keys; none when its schema cannot be read.
+ */
+export const fieldNames = (configuration: ConfigurationManifestV1): readonly string[] => {
   const projection = configuration.parameters.input;
   const properties = projection.status === 'usable' ? projection.declaration.schema['properties'] : undefined;
   return typeof properties === 'object' && properties !== null ? Object.keys(properties) : [];
@@ -709,7 +714,7 @@ export const MachineDetails = memo(function MachineDetails({
           <Fact label='Model id'>
             <Identifier>{identity.model}</Identifier>
           </Fact>
-          {isSimulatedProvider(provider.id) ? <Fact label='Hardware'>Simulated, no machine attached</Fact> : null}
+          {isSimulatedMachine(manifest) ? <Fact label='Hardware'>Simulated, no machine attached</Fact> : null}
           <Fact label='Firmware'>
             {firmware}{' '}
             <span className='inline-flex items-center gap-1.5 text-xs text-muted-foreground'>
@@ -842,7 +847,7 @@ export const MachineDetails = memo(function MachineDetails({
       >
         <div className='flex flex-col gap-2'>
           <p className='text-xs text-muted-foreground'>
-            {isSimulatedProvider(provider.id) ? 'Only the simulator reads these; they are not printer settings. ' : ''}
+            {isSimulatedMachine(manifest) ? 'Only the simulator reads these; they are not machine settings. ' : ''}
             Chosen when this machine was bound; the host reports neither the chosen values nor a way to change them, so
             these are the declared fields. Declared by{' '}
             <Identifier>{`${provider.bindingConfiguration.source.id} ${provider.bindingConfiguration.source.version}`}</Identifier>

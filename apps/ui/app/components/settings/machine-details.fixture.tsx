@@ -1,8 +1,8 @@
 /**
- * Fixtures for the machine details and Machines settings tests: the `bambu`, `bambu-a1-mini` and
- * `bambu-simulator` providers over the shared v3 manifests (`#components/print/testing/machines.fixture.js`),
+ * Fixtures for the machine details and Machines settings tests: the `bambu`, `bambu-a1-mini`,
+ * `bambu-simulator` and `grbl` providers over the shared v3 manifests (`#components/print/testing/machines.fixture.js`),
  * with the binding configurations those providers declare, admitted through the same `parseMachineProvider` the
- * machines channel applies to `listProviders()`. `apps/ui` does not depend on `@taucad/bambu`, so the facts are
+ * machines channel applies to `listProviders()`. `apps/ui` depends on no provider package, so the facts are
  * mirrored here. Nothing here touches hardware.
  *
  * @module
@@ -12,7 +12,12 @@ import { z } from 'zod';
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { parseMachineManifest, parseMachineProvider } from '@taucad/runtime/machine';
 import type { MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
-import { a1MiniManifest, machineEntry, x1cManifest } from '#components/print/testing/machines.fixture.js';
+import {
+  a1MiniManifest,
+  machineEntry,
+  routerManifest,
+  x1cManifest,
+} from '#components/print/testing/machines.fixture.js';
 
 const bindingConfiguration = defineConfiguration({
   id: 'bambu.machine.binding',
@@ -47,7 +52,6 @@ export const x1cProvider: MachineProvider = parseMachineProvider({
   vendor: 'Bambu Lab',
   manifest: x1cManifest,
   bindingConfiguration: bindingConfiguration.manifest,
-  queries: {},
 });
 
 /** The `bambu-a1-mini` LAN provider: the A1 mini manifest under the same binding form. */
@@ -80,7 +84,28 @@ export const simulatorProvider: MachineProvider = parseMachineProvider({
     ],
   }),
   bindingConfiguration: simulatorBindingConfiguration.manifest,
-  queries: {},
+});
+
+const grblBindingConfiguration = defineConfiguration({
+  id: 'grbl.machine.binding',
+  version: '1.0.0',
+  schema: z.object({
+    logicalId: z.string().min(1).max(64),
+    port: z.string().min(1).max(512).optional().meta({ title: 'Serial port' }),
+    baudRate: z.number().int().positive().default(115_200).meta({ title: 'Baud rate' }),
+  }),
+  ui: { version: 1, rjsf: {} },
+});
+
+/** The `grbl` provider: a LongMill on a serial port, whose identity is only claimed, so it binds with no code. */
+export const grblProvider: MachineProvider = parseMachineProvider({
+  id: 'grbl',
+  name: 'Grbl LongMill MK2',
+  version: '1.0.0',
+  protocolVersion: 2,
+  vendor: 'Sienci Labs',
+  manifest: routerManifest,
+  bindingConfiguration: grblBindingConfiguration.manifest,
 });
 
 /**

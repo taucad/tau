@@ -1,6 +1,6 @@
 # geospec — Types (2)
 
-76 top-level symbols. Signatures are verbatim typescript.
+75 top-level symbols. Signatures are verbatim typescript.
 
 // Structured payload when `boundingBox` fails
 BoundingBoxFailure: {
@@ -458,8 +458,8 @@ ManagedGeoSpecModelLoader: GeoSpecModelLoader & {
   dispose(): Promise<void>;
 
 // Runtime client surface consumed by `geospec/model`
-// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL.
-GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & {
+// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL. A client with `shutdown` is awaited through it when GeoSpec releases an owned runtime, so its host resources are closed before the caller (for example a worker thread) exits.
+GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & Partial<Pick<RuntimeClient, 'shutdown'>> & {
     open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
     on?(event: 'telemetry', handler: (batch: {
         readonly entries: ReadonlyArray<{
@@ -1688,32 +1688,3 @@ GeoSpecRunnerEvent: {
 }
 
   type: 'forensic'
-
-// One GeoSpec test file executed by a worker-style runner
-GeoSpecRunnerFileResult: {
-    /** Absolute or project-relative GeoSpec test file path supplied to the runner. */
-    file: string;
-    /** Low-level module execution result for this file. */
-    result: GeoSpecRunResult;
-    /** Wall-clock cost of executing this file, in milliseconds (R1). */
-    durationMs?: number;
-    /** First deterministic model-load cache key observed in this file (R9 affinity telemetry). */
-    primaryLoadKey?: string;
-    /** Executing worker's isolate-resident memory at file completion, in bytes (R15 memory-class telemetry). */
-    workerMemoryBytes?: number;
-}
-
-  // Absolute or project-relative GeoSpec test file path supplied to the runner
-  file: string
-
-  // Low-level module execution result for this file
-  result: GeoSpecRunResult
-
-  // Wall-clock cost of executing this file, in milliseconds (R1)
-  durationMs?: number
-
-  // First deterministic model-load cache key observed in this file (R9 affinity telemetry)
-  primaryLoadKey?: string
-
-  // Executing worker's isolate-resident memory at file completion, in bytes (R15 memory-class telemetry)
-  workerMemoryBytes?: number

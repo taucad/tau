@@ -2,6 +2,35 @@
 
 90 top-level symbols. Signatures are verbatim typescript.
 
+// One GeoSpec test file executed by a worker-style runner
+GeoSpecRunnerFileResult: {
+    /** Absolute or project-relative GeoSpec test file path supplied to the runner. */
+    file: string;
+    /** Low-level module execution result for this file. */
+    result: GeoSpecRunResult;
+    /** Wall-clock cost of executing this file, in milliseconds (R1). */
+    durationMs?: number;
+    /** First deterministic model-load cache key observed in this file (R9 affinity telemetry). */
+    primaryLoadKey?: string;
+    /** Executing worker's isolate-resident memory at file completion, in bytes (R15 memory-class telemetry). */
+    workerMemoryBytes?: number;
+}
+
+  // Absolute or project-relative GeoSpec test file path supplied to the runner
+  file: string
+
+  // Low-level module execution result for this file
+  result: GeoSpecRunResult
+
+  // Wall-clock cost of executing this file, in milliseconds (R1)
+  durationMs?: number
+
+  // First deterministic model-load cache key observed in this file (R9 affinity telemetry)
+  primaryLoadKey?: string
+
+  // Executing worker's isolate-resident memory at file completion, in bytes (R15 memory-class telemetry)
+  workerMemoryBytes?: number
+
 // Shared options for Node and browser GeoSpec runner factories
 GeoSpecRunnerOptions: {
     /** Filesystem containing the project and test modules. */
@@ -1810,44 +1839,3 @@ GeoSpecTauProjectRuntime: RuntimeClientWithRoutes & Pick<RuntimeClient, 'shutdow
   bestRouteFor(format: string, options?: {
           readonly kernelId?: string;
       }): GeoSpecExportRoute | undefined;
-
-// Trusted project configuration using existing discovery and runner options
-// Remarks: Omitted values keep their existing owner's defaults. Defined overrides replace whole fields, including empty arrays, false and the subjects map. Existing discovery currently treats an absent or empty include array as its default pattern. Preserving [] here does not change that consumer behavior. This is configuration data, not a canonical engine plan or a geometry result.
-GeoSpecConfig: {
-    include?: readonly string[];
-    exclude?: readonly string[];
-    testNamePattern?: string;
-    /** Positive finite milliseconds; the runner owns its default. */
-    testTimeout?: number;
-    /** Positive finite milliseconds; does not define a geometry verdict. */
-    matcherWallBackstop?: number;
-    bail?: boolean;
-    forensic?: boolean;
-    cache?: boolean;
-    /** Requested cache location only; loading configuration creates no store. */
-    cacheDirectory?: string;
-    subjects?: Readonly<Record<string, GeoSpecTauProjectDescriptor>>;
-}
-
-  include?: readonly string[]
-
-  exclude?: readonly string[]
-
-  testNamePattern?: string
-
-  // Positive finite milliseconds
-  testTimeout?: number
-
-  // Positive finite milliseconds
-  matcherWallBackstop?: number
-
-  bail?: boolean
-
-  forensic?: boolean
-
-  cache?: boolean
-
-  // Requested cache location only
-  cacheDirectory?: string
-
-  subjects?: Readonly<Record<string, GeoSpecTauProjectDescriptor>>

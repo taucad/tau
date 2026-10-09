@@ -953,15 +953,15 @@ GeoSpecRunner (type) [4 members] — Public GeoSpec runner lifecycle surface
   GeoSpecRunner.close (method) — Close the runner and release owned resources
 GeoSpecRunnerEvent (type) [1 members] — Lifecycle event emitted by GeoSpec worker-style runners
   GeoSpecRunnerEvent.type (property)
+
+## Types (3) — `public-api-types-3.md`
+
 GeoSpecRunnerFileResult (type) [5 members] — One GeoSpec test file executed by a worker-style runner
   GeoSpecRunnerFileResult.file (property) — Absolute or project-relative GeoSpec test file path supplied to the…
   GeoSpecRunnerFileResult.result (property) — Low-level module execution result for this file
   GeoSpecRunnerFileResult.durationMs (property) — Wall-clock cost of executing this file, in milliseconds (R1)
   GeoSpecRunnerFileResult.primaryLoadKey (property) — First deterministic model-load cache key observed in this file (R9…
   GeoSpecRunnerFileResult.workerMemoryBytes (property) — Executing worker's isolate-resident memory at file completion, in bytes (R15…
-
-## Types (3) — `public-api-types-3.md`
-
 GeoSpecRunnerOptions (type) [7 members] — Shared options for Node and browser GeoSpec runner factories
   GeoSpecRunnerOptions.filesystem (property) — Filesystem containing the project and test modules
   GeoSpecRunnerOptions.modelLoader (property) — Model loader exposed to authored tests through `geospec/model`
@@ -1448,6 +1448,9 @@ GeoSpecTauProjectRuntime (type) [3 members] — Runtime surface required to snap
   GeoSpecTauProjectRuntime.open (property)
   GeoSpecTauProjectRuntime.on (method)
   GeoSpecTauProjectRuntime.bestRouteFor (method)
+
+## Types (4) — `public-api-types-4.md`
+
 GeoSpecConfig (type) [10 members] — Trusted project configuration using existing discovery and runner options
   GeoSpecConfig.include (property)
   GeoSpecConfig.exclude (property)
@@ -1459,9 +1462,6 @@ GeoSpecConfig (type) [10 members] — Trusted project configuration using existi
   GeoSpecConfig.cache (property)
   GeoSpecConfig.cacheDirectory (property) — Requested cache location only
   GeoSpecConfig.subjects (property)
-
-## Types (4) — `public-api-types-4.md`
-
 GeoSpecTauProjectDescriptor (type) [5 members] — Imported Tau project data for later host resolution
   GeoSpecTauProjectDescriptor.kind (property)
   GeoSpecTauProjectDescriptor.manifestPath (property) — Normalized project-relative POSIX path identifying the imported manifest

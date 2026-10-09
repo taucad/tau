@@ -369,7 +369,25 @@ Message_ExecStatus: declare class Message_ExecStatus
 
 Message_ExecStatus_StatusRange: typeof Message_ExecStatus_StatusRange[keyof typeof Message_ExecStatus_StatusRange]
 
+  readonly FirstStatus: 'FirstStatus'
+
+  readonly StatusesPerType: 'StatusesPerType'
+
+  readonly NbStatuses: 'NbStatuses'
+
+  readonly LastStatus: 'LastStatus'
+
 Message_Gravity: typeof Message_Gravity[keyof typeof Message_Gravity]
+
+  readonly Message_Trace: 'Message_Trace'
+
+  readonly Message_Info: 'Message_Info'
+
+  readonly Message_Warning: 'Message_Warning'
+
+  readonly Message_Alarm: 'Message_Alarm'
+
+  readonly Message_Fail: 'Message_Fail'
 
 Message_Level: declare class Message_Level
 
@@ -392,6 +410,32 @@ Message_Level: declare class Message_Level
   [Symbol.dispose](): void;
 
 Message_MetricType: typeof Message_MetricType[keyof typeof Message_MetricType]
+
+  readonly Message_MetricType_None: 'Message_MetricType_None'
+
+  readonly Message_MetricType_ThreadCPUUserTime: 'Message_MetricType_ThreadCPUUserTime'
+
+  readonly Message_MetricType_ThreadCPUSystemTime: 'Message_MetricType_ThreadCPUSystemTime'
+
+  readonly Message_MetricType_ProcessCPUUserTime: 'Message_MetricType_ProcessCPUUserTime'
+
+  readonly Message_MetricType_ProcessCPUSystemTime: 'Message_MetricType_ProcessCPUSystemTime'
+
+  readonly Message_MetricType_WallClock: 'Message_MetricType_WallClock'
+
+  readonly Message_MetricType_MemPrivate: 'Message_MetricType_MemPrivate'
+
+  readonly Message_MetricType_MemVirtual: 'Message_MetricType_MemVirtual'
+
+  readonly Message_MetricType_MemWorkingSet: 'Message_MetricType_MemWorkingSet'
+
+  readonly Message_MetricType_MemWorkingSetPeak: 'Message_MetricType_MemWorkingSetPeak'
+
+  readonly Message_MetricType_MemSwapUsage: 'Message_MetricType_MemSwapUsage'
+
+  readonly Message_MetricType_MemSwapUsagePeak: 'Message_MetricType_MemSwapUsagePeak'
+
+  readonly Message_MetricType_MemHeapUsage: 'Message_MetricType_MemHeapUsage'
 
 Message_Msg: declare class Message_Msg
 
@@ -732,7 +776,273 @@ Message_Report: declare class Message_Report extends Standard_Transient
 
 Message_Status: typeof Message_Status[keyof typeof Message_Status]
 
+  readonly Message_None: 'Message_None'
+
+  readonly Message_Done1: 'Message_Done1'
+
+  readonly Message_Done2: 'Message_Done2'
+
+  readonly Message_Done3: 'Message_Done3'
+
+  readonly Message_Done4: 'Message_Done4'
+
+  readonly Message_Done5: 'Message_Done5'
+
+  readonly Message_Done6: 'Message_Done6'
+
+  readonly Message_Done7: 'Message_Done7'
+
+  readonly Message_Done8: 'Message_Done8'
+
+  readonly Message_Done9: 'Message_Done9'
+
+  readonly Message_Done10: 'Message_Done10'
+
+  readonly Message_Done11: 'Message_Done11'
+
+  readonly Message_Done12: 'Message_Done12'
+
+  readonly Message_Done13: 'Message_Done13'
+
+  readonly Message_Done14: 'Message_Done14'
+
+  readonly Message_Done15: 'Message_Done15'
+
+  readonly Message_Done16: 'Message_Done16'
+
+  readonly Message_Done17: 'Message_Done17'
+
+  readonly Message_Done18: 'Message_Done18'
+
+  readonly Message_Done19: 'Message_Done19'
+
+  readonly Message_Done20: 'Message_Done20'
+
+  readonly Message_Done21: 'Message_Done21'
+
+  readonly Message_Done22: 'Message_Done22'
+
+  readonly Message_Done23: 'Message_Done23'
+
+  readonly Message_Done24: 'Message_Done24'
+
+  readonly Message_Done25: 'Message_Done25'
+
+  readonly Message_Done26: 'Message_Done26'
+
+  readonly Message_Done27: 'Message_Done27'
+
+  readonly Message_Done28: 'Message_Done28'
+
+  readonly Message_Done29: 'Message_Done29'
+
+  readonly Message_Done30: 'Message_Done30'
+
+  readonly Message_Done31: 'Message_Done31'
+
+  readonly Message_Done32: 'Message_Done32'
+
+  readonly Message_Warn1: 'Message_Warn1'
+
+  readonly Message_Warn2: 'Message_Warn2'
+
+  readonly Message_Warn3: 'Message_Warn3'
+
+  readonly Message_Warn4: 'Message_Warn4'
+
+  readonly Message_Warn5: 'Message_Warn5'
+
+  readonly Message_Warn6: 'Message_Warn6'
+
+  readonly Message_Warn7: 'Message_Warn7'
+
+  readonly Message_Warn8: 'Message_Warn8'
+
+  readonly Message_Warn9: 'Message_Warn9'
+
+  readonly Message_Warn10: 'Message_Warn10'
+
+  readonly Message_Warn11: 'Message_Warn11'
+
+  readonly Message_Warn12: 'Message_Warn12'
+
+  readonly Message_Warn13: 'Message_Warn13'
+
+  readonly Message_Warn14: 'Message_Warn14'
+
+  readonly Message_Warn15: 'Message_Warn15'
+
+  readonly Message_Warn16: 'Message_Warn16'
+
+  readonly Message_Warn17: 'Message_Warn17'
+
+  readonly Message_Warn18: 'Message_Warn18'
+
+  readonly Message_Warn19: 'Message_Warn19'
+
+  readonly Message_Warn20: 'Message_Warn20'
+
+  readonly Message_Warn21: 'Message_Warn21'
+
+  readonly Message_Warn22: 'Message_Warn22'
+
+  readonly Message_Warn23: 'Message_Warn23'
+
+  readonly Message_Warn24: 'Message_Warn24'
+
+  readonly Message_Warn25: 'Message_Warn25'
+
+  readonly Message_Warn26: 'Message_Warn26'
+
+  readonly Message_Warn27: 'Message_Warn27'
+
+  readonly Message_Warn28: 'Message_Warn28'
+
+  readonly Message_Warn29: 'Message_Warn29'
+
+  readonly Message_Warn30: 'Message_Warn30'
+
+  readonly Message_Warn31: 'Message_Warn31'
+
+  readonly Message_Warn32: 'Message_Warn32'
+
+  readonly Message_Alarm1: 'Message_Alarm1'
+
+  readonly Message_Alarm2: 'Message_Alarm2'
+
+  readonly Message_Alarm3: 'Message_Alarm3'
+
+  readonly Message_Alarm4: 'Message_Alarm4'
+
+  readonly Message_Alarm5: 'Message_Alarm5'
+
+  readonly Message_Alarm6: 'Message_Alarm6'
+
+  readonly Message_Alarm7: 'Message_Alarm7'
+
+  readonly Message_Alarm8: 'Message_Alarm8'
+
+  readonly Message_Alarm9: 'Message_Alarm9'
+
+  readonly Message_Alarm10: 'Message_Alarm10'
+
+  readonly Message_Alarm11: 'Message_Alarm11'
+
+  readonly Message_Alarm12: 'Message_Alarm12'
+
+  readonly Message_Alarm13: 'Message_Alarm13'
+
+  readonly Message_Alarm14: 'Message_Alarm14'
+
+  readonly Message_Alarm15: 'Message_Alarm15'
+
+  readonly Message_Alarm16: 'Message_Alarm16'
+
+  readonly Message_Alarm17: 'Message_Alarm17'
+
+  readonly Message_Alarm18: 'Message_Alarm18'
+
+  readonly Message_Alarm19: 'Message_Alarm19'
+
+  readonly Message_Alarm20: 'Message_Alarm20'
+
+  readonly Message_Alarm21: 'Message_Alarm21'
+
+  readonly Message_Alarm22: 'Message_Alarm22'
+
+  readonly Message_Alarm23: 'Message_Alarm23'
+
+  readonly Message_Alarm24: 'Message_Alarm24'
+
+  readonly Message_Alarm25: 'Message_Alarm25'
+
+  readonly Message_Alarm26: 'Message_Alarm26'
+
+  readonly Message_Alarm27: 'Message_Alarm27'
+
+  readonly Message_Alarm28: 'Message_Alarm28'
+
+  readonly Message_Alarm29: 'Message_Alarm29'
+
+  readonly Message_Alarm30: 'Message_Alarm30'
+
+  readonly Message_Alarm31: 'Message_Alarm31'
+
+  readonly Message_Alarm32: 'Message_Alarm32'
+
+  readonly Message_Fail1: 'Message_Fail1'
+
+  readonly Message_Fail2: 'Message_Fail2'
+
+  readonly Message_Fail3: 'Message_Fail3'
+
+  readonly Message_Fail4: 'Message_Fail4'
+
+  readonly Message_Fail5: 'Message_Fail5'
+
+  readonly Message_Fail6: 'Message_Fail6'
+
+  readonly Message_Fail7: 'Message_Fail7'
+
+  readonly Message_Fail8: 'Message_Fail8'
+
+  readonly Message_Fail9: 'Message_Fail9'
+
+  readonly Message_Fail10: 'Message_Fail10'
+
+  readonly Message_Fail11: 'Message_Fail11'
+
+  readonly Message_Fail12: 'Message_Fail12'
+
+  readonly Message_Fail13: 'Message_Fail13'
+
+  readonly Message_Fail14: 'Message_Fail14'
+
+  readonly Message_Fail15: 'Message_Fail15'
+
+  readonly Message_Fail16: 'Message_Fail16'
+
+  readonly Message_Fail17: 'Message_Fail17'
+
+  readonly Message_Fail18: 'Message_Fail18'
+
+  readonly Message_Fail19: 'Message_Fail19'
+
+  readonly Message_Fail20: 'Message_Fail20'
+
+  readonly Message_Fail21: 'Message_Fail21'
+
+  readonly Message_Fail22: 'Message_Fail22'
+
+  readonly Message_Fail23: 'Message_Fail23'
+
+  readonly Message_Fail24: 'Message_Fail24'
+
+  readonly Message_Fail25: 'Message_Fail25'
+
+  readonly Message_Fail26: 'Message_Fail26'
+
+  readonly Message_Fail27: 'Message_Fail27'
+
+  readonly Message_Fail28: 'Message_Fail28'
+
+  readonly Message_Fail29: 'Message_Fail29'
+
+  readonly Message_Fail30: 'Message_Fail30'
+
+  readonly Message_Fail31: 'Message_Fail31'
+
+  readonly Message_Fail32: 'Message_Fail32'
+
 Message_StatusType: typeof Message_StatusType[keyof typeof Message_StatusType]
+
+  readonly Message_DONE: 'Message_DONE'
+
+  readonly Message_WARN: 'Message_WARN'
+
+  readonly Message_ALARM: 'Message_ALARM'
+
+  readonly Message_FAIL: 'Message_FAIL'
 
 Message_ListOfAlert: NCollection_List_handle_Message_Alert
 

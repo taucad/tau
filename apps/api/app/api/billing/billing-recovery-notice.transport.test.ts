@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import type { DatabaseService } from '#database/database.service.js';
-import type { EmailService } from '#email/email.service.js';
 
 type OwnerRows = ReadonlyArray<{ readonly email: string }>;
 
@@ -21,13 +20,13 @@ const databaseReturning = (rows: OwnerRows): Pick<DatabaseService, 'database'> =
 };
 
 const createTransport = (rows: OwnerRows) => {
-  const sendPaymentFailed = vi.fn(async () => undefined);
-  const transport = new BillingRecoveryNoticeEmailTransport(
-    databaseReturning(rows),
-    { sendPaymentFailed } as unknown as EmailService,
-    'https://tau.new',
-  );
-  return { transport, sendPaymentFailed };
+  const email = {
+    sendPaymentFailed: vi.fn(async () => undefined),
+    sendAutoReloadDisabled: vi.fn(async () => undefined),
+    sendAutoReloadActionRequired: vi.fn(async () => undefined),
+  };
+  const transport = new BillingRecoveryNoticeEmailTransport(databaseReturning(rows), email, 'https://tau.new');
+  return { transport, email };
 };
 
 const payload = {
@@ -40,11 +39,16 @@ const payload = {
 
 describe('BillingRecoveryNoticeEmailTransport', () => {
   it('sends the dunning email to the account owner with the rows the payload carried', async () => {
-    const { transport, sendPaymentFailed } = createTransport([{ email: 'owner@example.com' }]);
+    const { transport, email } = createTransport([{ email: 'owner@example.com' }]);
 
-    const result = await transport.deliver({ kind: 'renewal_failed', payload, dedupeKey: 'renewal-failed:in_1' });
+    const result = await transport.deliver({
+      kind: 'renewal_failed',
+      accountId: 'acct_1',
+      payload,
+      dedupeKey: 'renewal-failed:in_1',
+    });
 
-    expect(sendPaymentFailed).toHaveBeenCalledWith({
+    expect(email.sendPaymentFailed).toHaveBeenCalledWith({
       email: 'owner@example.com',
       billingUrl: 'https://tau.new/?settings=billing',
       amount: '$20.00',
@@ -54,21 +58,45 @@ describe('BillingRecoveryNoticeEmailTransport', () => {
     expect(result.receipt).toBe('email:renewal-failed:in_1');
   });
 
+  it.each([
+    ['consent_disabled', 'sendAutoReloadDisabled', 'consent-disabled:consent_1'],
+    ['authentication_required', 'sendAutoReloadActionRequired', 'authentication-required:purchase_1'],
+  ] as const)('sends the %s email to the owner of the notice account', async (kind, sender, dedupeKey) => {
+    const { transport, email } = createTransport([{ email: 'owner@example.com' }]);
+
+    // These notices carry no account in their payload; the row's own account names the owner.
+    const result = await transport.deliver({
+      kind,
+      accountId: 'acct_1',
+      payload: { consentId: 'consent_1', actionId: 'purchase_1' },
+      dedupeKey,
+    });
+
+    expect(email[sender]).toHaveBeenCalledExactlyOnceWith({
+      email: 'owner@example.com',
+      billingUrl: 'https://tau.new/?settings=billing',
+    });
+    expect(email.sendPaymentFailed).not.toHaveBeenCalled();
+    expect(result.receipt).toBe(`email:${dedupeKey}`);
+  });
+
   it('throws without sending when the account has no active owner, so the notice stays pending', async () => {
-    const { transport, sendPaymentFailed } = createTransport([]);
+    const { transport, email } = createTransport([]);
 
     await expect(
-      transport.deliver({ kind: 'renewal_failed', payload, dedupeKey: 'renewal-failed:in_1' }),
+      transport.deliver({ kind: 'renewal_failed', accountId: 'acct_1', payload, dedupeKey: 'renewal-failed:in_1' }),
     ).rejects.toThrow(/no active account owner/iu);
-    expect(sendPaymentFailed).not.toHaveBeenCalled();
+    expect(email.sendPaymentFailed).not.toHaveBeenCalled();
   });
 
   it('refuses a kind it does not own rather than sending the wrong email', async () => {
-    const { transport, sendPaymentFailed } = createTransport([{ email: 'owner@example.com' }]);
+    const { transport, email } = createTransport([{ email: 'owner@example.com' }]);
 
     await expect(
-      transport.deliver({ kind: 'reload_failed', payload, dedupeKey: 'reload-failed:pi_1' }),
+      transport.deliver({ kind: 'reload_failed', accountId: 'acct_1', payload, dedupeKey: 'reload-failed:pi_1' }),
     ).rejects.toThrow(/unsupported/iu);
-    expect(sendPaymentFailed).not.toHaveBeenCalled();
+    expect(email.sendPaymentFailed).not.toHaveBeenCalled();
+    expect(email.sendAutoReloadDisabled).not.toHaveBeenCalled();
+    expect(email.sendAutoReloadActionRequired).not.toHaveBeenCalled();
   });
 });

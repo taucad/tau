@@ -50,6 +50,12 @@ Geom2dConvert_ApproxArcsSegments: declare class Geom2dConvert_ApproxArcsSegments
 
 Geom2dConvert_ApproxArcsSegments_Status: typeof Geom2dConvert_ApproxArcsSegments_Status[keyof typeof Geom2dConvert_ApproxArcsSegments_Status]
 
+  readonly StatusOK: 'StatusOK'
+
+  readonly StatusNotDone: 'StatusNotDone'
+
+  readonly StatusError: 'StatusError'
+
 Geom2dConvert_ApproxCurve: declare class Geom2dConvert_ApproxCurve
 
   // Geom2dConvert_ApproxCurve.constructor (constructor)

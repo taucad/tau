@@ -3,10 +3,6 @@
   "environment": "development",
   "series": "development",
   "markupBps": 3000,
-  "budgets": {
-    "spendBudgetId": "development-spend",
-    "riskBudgetId": "development-risk"
-  },
   "offers": [
     {
       "offerId": "pro-monthly-v1",

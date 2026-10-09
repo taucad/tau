@@ -51,7 +51,7 @@ geometries
 
       transforms: Mat4
 
-      color: Color
+      color?: Color
 
   geom3
 
@@ -103,7 +103,7 @@ geometries
 
       transforms: Mat4
 
-      color: Color
+      color?: Color
 
   path2
 
@@ -114,15 +114,15 @@ geometries
 
       endpoint: Vec2
 
-      radius: Vec2
+      radius?: Vec2
 
-      xaxisrotation: number
+      xaxisrotation?: number
 
-      clockwise: boolean
+      clockwise?: boolean
 
-      large: boolean
+      large?: boolean
 
-      segments: number
+      segments?: number
 
     // geometries.path2.appendBezier (function)
     declare function appendBezier(options: AppendBezierOptions, geometry: Path2): Path2
@@ -131,7 +131,7 @@ geometries
 
       controlPoints: Array<Vec2 | null>
 
-      segments: number
+      segments?: number
 
     // geometries.path2.appendPoints (function)
     declare function appendPoints(points: Array<Vec2>, geometry: Path2): Path2
@@ -156,7 +156,7 @@ geometries
 
     FromPointsOptions: export interface FromPointsOptions
 
-      closed: boolean
+      closed?: boolean
 
     // geometries.path2.fromCompactBinary (function)
     declare function fromCompactBinary(data: Array<number> | Float32Array | Float64Array): Path2
@@ -190,7 +190,7 @@ geometries
 
       transforms: Mat4
 
-      color: Color
+      color?: Color
 
   poly2
 
@@ -265,6 +265,6 @@ geometries
 
       vertices: Array<Vec3>
 
-      color: Color
+      color?: Color
 
-      plane: Plane
+      plane?: Plane

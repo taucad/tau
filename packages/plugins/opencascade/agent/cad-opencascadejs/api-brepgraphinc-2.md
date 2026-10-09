@@ -751,6 +751,16 @@ BRepGraphInc_Storage: declare class BRepGraphInc_Storage
 
 BRepGraphInc_Storage_WireCoEdgeOrderStatus: typeof BRepGraphInc_Storage_WireCoEdgeOrderStatus[keyof typeof BRepGraphInc_Storage_WireCoEdgeOrderStatus]
 
+  readonly Connected: 'Connected'
+
+  readonly Reordered: 'Reordered'
+
+  readonly ToleranceOrdered: 'ToleranceOrdered'
+
+  readonly Partial: 'Partial'
+
+  readonly InvalidInput: 'InvalidInput'
+
 BRepGraphInc_Storage_CachedShape: interface BRepGraphInc_Storage_CachedShape
 
   Shape: TopoDS_Shape

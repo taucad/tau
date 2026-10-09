@@ -39,8 +39,10 @@ const routeSchema = z
     meterContractId: financialIdentitySchema,
     rateIds: z.array(financialIdentitySchema).min(1),
     enabled: z.boolean(),
-    spendBudgetId: financialIdentitySchema.nullable(),
-    riskBudgetId: financialIdentitySchema.nullable(),
+    /* Retired supplier budget pins. Stored documents are immutable and hashed as written, and a publisher
+     * may still send them, so they parse and round-trip; nothing reads them. */
+    spendBudgetId: financialIdentitySchema.nullable().optional(),
+    riskBudgetId: financialIdentitySchema.nullable().optional(),
     markupBps: z.number().int().min(0).max(10_000).optional(),
   })
   .strict();
@@ -205,9 +207,6 @@ const refineCommercialPolicy = (policy: PolicyDocument, context: z.RefinementCtx
     const requiredDimensions = qualifyRoutes ? qualifiedMeterContracts.get(route.meterContractId) : undefined;
     const isConsistent =
       route.enabled &&
-      route.spendBudgetId !== null &&
-      route.riskBudgetId !== null &&
-      route.spendBudgetId !== route.riskBudgetId &&
       compatibleContracts.has(route.meterContractId) &&
       routeRates.every((rate) => rate?.meterContractId === route.meterContractId) &&
       new Set(coveredDimensions).size === coveredDimensions.length;

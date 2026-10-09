@@ -5,6 +5,7 @@ import { ConflictException, Injectable, ServiceUnavailableException } from '@nes
 import { and, eq, sql } from 'drizzle-orm';
 import type { Stripe } from 'stripe';
 import { z } from 'zod';
+import { financialEnvironmentSchema } from '@taucad/billing';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingTaxService } from '#api/billing/billing-tax.service.js';
@@ -148,8 +149,11 @@ const protectedRefundCapabilitySchema = z.strictObject({
   stripeAccountId: z.string().min(1),
   livemode: z.boolean(),
 });
+/** Longest operator reason a reviewed refund records; the lifecycle command enforces the same cap. */
+export const maximumRefundReasonLength = 2000;
 const reviewedRefundRequestSchema = z.strictObject({
-  environment: z.enum(['development', 'staging', 'production']),
+  // The deployment names (`prod-us`, `prod-eu`), not a generic `production`: a refund is scoped to one of them.
+  environment: financialEnvironmentSchema,
   accountId: z.string().min(1).max(255),
   reversalCaseId: z.string().min(1).max(255),
   requestedPrincipalMinor: z.string().regex(/^(0|[1-9][0-9]*)$/u),
@@ -157,7 +161,7 @@ const reviewedRefundRequestSchema = z.strictObject({
   approvedMaximumGrossMinor: z.string().regex(/^(0|[1-9][0-9]*)$/u),
   reviewActorId: z.string().min(1).max(255),
   reviewedAt: z.date(),
-  reason: z.string().min(1).max(500),
+  reason: z.string().min(1).max(maximumRefundReasonLength),
   requestId: z.string().min(1).max(255),
 });
 const refundLegRequestSchema = z.strictObject({

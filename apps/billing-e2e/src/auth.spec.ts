@@ -1,12 +1,47 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { wireBalanceExplanationSchema, wireEntitlementsSchema } from '@taucad/billing';
-import { closeAccount, createAccount, verificationMail } from '#support/account.js';
+import { closeAccount, createAccount, magicLinkMail, signIn, verificationMail } from '#support/account.js';
 import type { Account } from '#support/account.js';
-import { apiUrl, baseUrl, ok, retryAfterSeconds } from '#support/api.js';
+import { apiUrl, baseUrl, createApi, ok, retryAfterSeconds } from '#support/api.js';
 import { screenshot, toasts, waitForToast, withBrowser } from '#support/checkout.js';
+import type { Page } from '#support/checkout.js';
 import { listMail, waitForMail } from '#support/mailbox.js';
+import { isShown, pageText, usagePage } from '#support/pages.js';
 import { matrixRow } from '#support/results.js';
+
+/**
+ * Usage snapshots the app keeps for offline viewing (`tau-billing` → `usageSnapshots`): the count, or a negative
+ * number when the database or store does not exist yet.
+ */
+const savedUsageScript = `(async () => {
+  const names = (await indexedDB.databases()).map((database) => database.name);
+  if (!names.includes('tau-billing')) return -1;
+  return await new Promise((resolve) => {
+    const open = indexedDB.open('tau-billing');
+    open.onerror = () => resolve(-3);
+    open.onsuccess = () => {
+      const database = open.result;
+      if (!database.objectStoreNames.contains('usageSnapshots')) {
+        database.close();
+        resolve(-2);
+        return;
+      }
+      const count = database.transaction('usageSnapshots', 'readonly').objectStore('usageSnapshots').count();
+      count.onsuccess = () => { database.close(); resolve(count.result); };
+      count.onerror = () => { database.close(); resolve(-3); };
+    };
+  });
+})()`;
+
+const savedUsage = async (page: Page): Promise<number> => z.number().parse(await page.evaluate(savedUsageScript));
+
+/** What the signed-in browser's own session read answers (`null` once signed out). */
+const browserSession = async (page: Page): Promise<unknown> =>
+  page.evaluate(
+    `fetch(${JSON.stringify(`${apiUrl}/v1/auth/get-session`)}, { credentials: 'include' }).then((response) => response.json())`,
+  );
 
 describe('auth and onboarding', () => {
   const accounts: Account[] = [];
@@ -84,6 +119,111 @@ describe('auth and onboarding', () => {
     }),
   );
 
+  it(
+    'should sign in through an emailed magic link [AU-03 P1]',
+    matrixRow('AU-03', 'P1', async (evidence) => {
+      const account = await createAccount('au03');
+      accounts.push(account);
+      const inbox = await listMail(account.mailbox);
+      const seen = new Set(inbox.map(({ id }) => id));
+      // Requested signed out, as the sign-in form's magic-link option does.
+      const requested = await createApi().request('POST', '/v1/auth/sign-in/magic-link', {
+        body: { email: account.email, callbackURL: `${baseUrl}/` },
+      });
+      expect(requested.status).toBe(200);
+      const mail = await magicLinkMail(account, seen);
+      evidence.push(
+        `magic-link request ${requested.status}; mail ${mail.id} from ${mail.from} links ${mail.link.origin}${mail.link.pathname}`,
+      );
+      const landed = await withBrowser(undefined, async ({ context, page }) => {
+        // Every API answer while the page verifies: the verify call, and where its redirect led.
+        const answers: string[] = [];
+        page.on('response', (response) => {
+          if (response.url().startsWith(apiUrl)) {
+            const { pathname } = new URL(response.url());
+            const { location, 'request-id': requestId } = response.headers();
+            answers.push(
+              `${response.request().method()} ${pathname} ${response.status()}${
+                location === undefined ? '' : ` → ${location}`
+              } (${requestId ?? 'no request id'})`,
+            );
+          }
+        });
+        await page.goto(mail.link.href);
+        const verified = await isShown(page.getByText('Magic link verified'), 60_000);
+        if (verified) {
+          await page.waitForURL((url) => !url.pathname.startsWith('/auth/'), { timeout: 30_000 });
+        }
+        evidence.push(
+          `API answers ${answers.join(', ')}`,
+          `page "${await pageText(page, 160)}"`,
+          await screenshot(page, 'au-03-verify'),
+        );
+        // Whatever the page said, does the browser now hold a session?
+        const browser = createApi();
+        for (const cookie of await context.cookies(apiUrl)) {
+          browser.jar.set(cookie.name, cookie.value);
+        }
+        return { verified, session: await browser.request('GET', '/v1/auth/get-session') };
+      });
+      const signedIn = z
+        .object({ user: z.object({ id: z.string(), email: z.string() }) })
+        .safeParse(landed.session.body);
+      evidence.push(
+        signedIn.success ? `browser holds a session for ${signedIn.data.user.id}` : 'browser holds no session',
+      );
+      expect(mail.link.origin).toBe(baseUrl);
+      if (!landed.verified) {
+        return {
+          outcome: 'fail',
+          defect: 'unclassified',
+          evidence: [...evidence, '"Magic link verified" never showed'],
+        };
+      }
+      expect(signedIn.success && signedIn.data.user.id).toBe(account.userId);
+      return { outcome: 'pass', evidence };
+    }),
+  );
+
+  it(
+    'should clear the saved billing state on sign-out [AU-06 P1]',
+    matrixRow('AU-06', 'P1', async (evidence) => {
+      const account = await createAccount('au06');
+      accounts.push(account);
+      const observed = await withBrowser(account, async ({ page }) => {
+        await usagePage(page).open();
+        let before = await savedUsage(page);
+        const deadline = Date.now() + 20_000;
+        while (before <= 0 && Date.now() < deadline) {
+          // oxlint-disable-next-line no-await-in-loop -- bounded polling for the offline save
+          await page.waitForTimeout(1000);
+          // oxlint-disable-next-line no-await-in-loop -- bounded polling for the offline save
+          before = await savedUsage(page);
+        }
+        await page.goto(`${baseUrl}/auth/sign-out`);
+        await page.waitForURL((url) => url.pathname.startsWith('/auth/sign-in'), { timeout: 30_000 });
+        await page.waitForTimeout(2000);
+        return {
+          before,
+          after: await savedUsage(page),
+          session: await browserSession(page),
+          shot: await screenshot(page, 'au-06-signed-out'),
+        };
+      });
+      evidence.push(
+        `saved usage snapshots before sign-out ${observed.before}, after ${observed.after} (negative: no store)`,
+        `browser session afterwards ${JSON.stringify(observed.session)}`,
+        observed.shot,
+      );
+      // Signing the browser out revoked the session the harness shares with it; cleanup needs its own.
+      evidence.push(`harness sign-in again ${(await signIn(account)) ? 'ok' : 'refused'}`);
+      expect(observed.before).toBeGreaterThan(0);
+      expect(observed.after).toBeLessThanOrEqual(0);
+      expect(observed.session).toBeNull();
+      return { outcome: 'pass', evidence };
+    }),
+  );
+
   // Last in this file: the burst fills the sign-in window, and the wait below drains it before the next row signs
   // in (a later file that meets a leftover 429 retries it through api.ts).
   it(
@@ -108,7 +248,7 @@ describe('auth and onboarding', () => {
         const statuses = [...new Set(responses.map(({ status }) => status))].join('/');
         return {
           outcome: 'fail',
-          defect: 'F-25',
+          defect: 'unclassified',
           evidence: [`101 wrong-password sign-ins answered ${statuses} and never 429: sign-in is not rate limited`],
         };
       }

@@ -819,6 +819,46 @@ Geom2dGcc_QualifiedCurve: declare class Geom2dGcc_QualifiedCurve
 
 Geom2dGcc_Type1: typeof Geom2dGcc_Type1[keyof typeof Geom2dGcc_Type1]
 
+  readonly Geom2dGcc_CuCuCu: 'Geom2dGcc_CuCuCu'
+
+  readonly Geom2dGcc_CiCuCu: 'Geom2dGcc_CiCuCu'
+
+  readonly Geom2dGcc_CiCiCu: 'Geom2dGcc_CiCiCu'
+
+  readonly Geom2dGcc_CiLiCu: 'Geom2dGcc_CiLiCu'
+
+  readonly Geom2dGcc_LiLiCu: 'Geom2dGcc_LiLiCu'
+
+  readonly Geom2dGcc_LiCuCu: 'Geom2dGcc_LiCuCu'
+
 Geom2dGcc_Type2: typeof Geom2dGcc_Type2[keyof typeof Geom2dGcc_Type2]
 
+  readonly Geom2dGcc_CuCuOnCu: 'Geom2dGcc_CuCuOnCu'
+
+  readonly Geom2dGcc_CiCuOnCu: 'Geom2dGcc_CiCuOnCu'
+
+  readonly Geom2dGcc_LiCuOnCu: 'Geom2dGcc_LiCuOnCu'
+
+  readonly Geom2dGcc_CuPtOnCu: 'Geom2dGcc_CuPtOnCu'
+
+  readonly Geom2dGcc_CuCuOnLi: 'Geom2dGcc_CuCuOnLi'
+
+  readonly Geom2dGcc_CiCuOnLi: 'Geom2dGcc_CiCuOnLi'
+
+  readonly Geom2dGcc_LiCuOnLi: 'Geom2dGcc_LiCuOnLi'
+
+  readonly Geom2dGcc_CuPtOnLi: 'Geom2dGcc_CuPtOnLi'
+
+  readonly Geom2dGcc_CuCuOnCi: 'Geom2dGcc_CuCuOnCi'
+
+  readonly Geom2dGcc_CiCuOnCi: 'Geom2dGcc_CiCuOnCi'
+
+  readonly Geom2dGcc_LiCuOnCi: 'Geom2dGcc_LiCuOnCi'
+
+  readonly Geom2dGcc_CuPtOnCi: 'Geom2dGcc_CuPtOnCi'
+
 Geom2dGcc_Type3: typeof Geom2dGcc_Type3[keyof typeof Geom2dGcc_Type3]
+
+  readonly Geom2dGcc_CuCu: 'Geom2dGcc_CuCu'
+
+  readonly Geom2dGcc_CiCu: 'Geom2dGcc_CiCu'

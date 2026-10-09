@@ -63,8 +63,8 @@ selectorDiagnosticCodes: {
     readonly unsupportedEvidence: "GEOSPEC_SELECTOR_UNSUPPORTED_EVIDENCE";
 }
 
-  unmatched: "GEOSPEC_SELECTOR_UNMATCHED"
+  readonly unmatched: "GEOSPEC_SELECTOR_UNMATCHED"
 
-  ambiguous: "GEOSPEC_SELECTOR_AMBIGUOUS"
+  readonly ambiguous: "GEOSPEC_SELECTOR_AMBIGUOUS"
 
-  unsupportedEvidence: "GEOSPEC_SELECTOR_UNSUPPORTED_EVIDENCE"
+  readonly unsupportedEvidence: "GEOSPEC_SELECTOR_UNSUPPORTED_EVIDENCE"

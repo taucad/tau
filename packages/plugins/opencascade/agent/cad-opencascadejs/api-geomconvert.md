@@ -263,6 +263,12 @@ GeomConvert_CompCurveToBSplineCurve: declare class GeomConvert_CompCurveToBSplin
 
 GeomConvert_ConvType: typeof GeomConvert_ConvType[keyof typeof GeomConvert_ConvType]
 
+  readonly GeomConvert_Target: 'GeomConvert_Target'
+
+  readonly GeomConvert_Simplest: 'GeomConvert_Simplest'
+
+  readonly GeomConvert_MinGap: 'GeomConvert_MinGap'
+
 GeomConvert_CurveToAnaCurve: declare class GeomConvert_CurveToAnaCurve
 
   // GeomConvert_CurveToAnaCurve.constructor (constructor)

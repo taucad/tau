@@ -1,0 +1,1306 @@
+{
+  "slug": "cad-build123d",
+  "sources": {
+    "workspaceFiles": 21,
+    "exampleFiles": 2,
+    "transcriptRuns": 4
+  },
+  "symbols": [
+    {
+      "id": "python:build123d.topology.shape_core.Shape",
+      "name": "Shape",
+      "score": 12,
+      "workspace": 10,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.__init__",
+      "name": "__init__",
+      "score": 12,
+      "workspace": 10,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.geometry.Color",
+      "name": "Color",
+      "score": 9,
+      "workspace": 7,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Color.__init__",
+      "name": "__init__",
+      "score": 9,
+      "workspace": 7,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.color",
+      "name": "color",
+      "score": 9,
+      "workspace": 7,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_part.Cylinder",
+      "name": "Cylinder",
+      "score": 7,
+      "workspace": 6,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_part.Cylinder.__init__",
+      "name": "__init__",
+      "score": 7,
+      "workspace": 6,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.translate",
+      "name": "translate",
+      "score": 6,
+      "workspace": 4,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Axis",
+      "name": "Axis",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Axis.__init__",
+      "name": "__init__",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Plane",
+      "name": "Plane",
+      "score": 5,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.geometry.Plane.__init__",
+      "name": "__init__",
+      "score": 5,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_part.Box",
+      "name": "Box",
+      "score": 5,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.objects_part.Box.__init__",
+      "name": "__init__",
+      "score": 5,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.operations_part.extrude",
+      "name": "extrude",
+      "score": 5,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "python:build123d.topology.one_d.Wire",
+      "name": "Wire",
+      "score": 5,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.one_d.Wire.__init__",
+      "name": "__init__",
+      "score": 5,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.three_d.Solid",
+      "name": "Solid",
+      "score": 5,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.three_d.Solid.__init__",
+      "name": "__init__",
+      "score": 5,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.geometry.Location",
+      "name": "Location",
+      "score": 4,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.geometry.Location.__init__",
+      "name": "__init__",
+      "score": 4,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.geometry.Vector.length",
+      "name": "length",
+      "score": 4,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.composite.Compound.extrude",
+      "name": "extrude",
+      "score": 4,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 2
+    },
+    {
+      "id": "python:build123d.topology.one_d.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Edge.__init__",
+      "name": "__init__",
+      "score": 4,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Edge.extrude",
+      "name": "extrude",
+      "score": 4,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 2
+    },
+    {
+      "id": "python:build123d.topology.one_d.Wire.extrude",
+      "name": "extrude",
+      "score": 4,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 2
+    },
+    {
+      "id": "python:build123d.topology.three_d.Solid.extrude",
+      "name": "extrude",
+      "score": 4,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 2
+    },
+    {
+      "id": "python:build123d.topology.two_d.Face.extrude",
+      "name": "extrude",
+      "score": 4,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 2
+    },
+    {
+      "id": "python:build123d.topology.two_d.Face.length",
+      "name": "length",
+      "score": 4,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.build_enums.Align",
+      "name": "Align",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.build_enums.Align.CENTER",
+      "name": "CENTER",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Axis.X",
+      "name": "X",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Axis.Z",
+      "name": "Z",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.objects_part.Sphere",
+      "name": "Sphere",
+      "score": 3,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_part.Sphere.__init__",
+      "name": "__init__",
+      "score": 3,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_part.Torus",
+      "name": "Torus",
+      "score": 3,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_part.Torus.__init__",
+      "name": "__init__",
+      "score": 3,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.operations_generic.fillet",
+      "name": "fillet",
+      "score": 3,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.composite.Part",
+      "name": "Part",
+      "score": 3,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.one_d.Edge.make_three_point_arc",
+      "name": "make_three_point_arc",
+      "score": 3,
+      "workspace": 1,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.extrude",
+      "name": "extrude",
+      "score": 3,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.fuse",
+      "name": "fuse",
+      "score": 3,
+      "workspace": 1,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.rotate",
+      "name": "rotate",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.ShapeList.edges",
+      "name": "edges",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.three_d.Solid.make_loft",
+      "name": "make_loft",
+      "score": 3,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.three_d.Solid.revolve",
+      "name": "revolve",
+      "score": 3,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.two_d.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 1,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.two_d.Face.__init__",
+      "name": "__init__",
+      "score": 3,
+      "workspace": 1,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.two_d.Face.revolve",
+      "name": "revolve",
+      "score": 3,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.two_d.Shell.extrude",
+      "name": "extrude",
+      "score": 3,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "python:build123d.topology.zero_d.Vertex.extrude",
+      "name": "extrude",
+      "score": 3,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "python:build123d.build_common.PolarLocations",
+      "name": "PolarLocations",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.build_common.PolarLocations.__init__",
+      "name": "__init__",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.build_common.edges",
+      "name": "edges",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.build_enums.Align.MIN",
+      "name": "MIN",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.build_part.BuildPart",
+      "name": "BuildPart",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.build_part.BuildPart.__init__",
+      "name": "__init__",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.build_sketch.BuildSketch",
+      "name": "BuildSketch",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.build_sketch.BuildSketch.__init__",
+      "name": "__init__",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.geometry.Plane.offset",
+      "name": "offset",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.geometry.Vector",
+      "name": "Vector",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Vector.__init__",
+      "name": "__init__",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Vector.rotate",
+      "name": "rotate",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.objects_curve.Airfoil",
+      "name": "Airfoil",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_curve.Airfoil.__init__",
+      "name": "__init__",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.operations_generic.chamfer",
+      "name": "chamfer",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.operations_generic.offset",
+      "name": "offset",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.operations_generic.scale",
+      "name": "scale",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.operations_part.section",
+      "name": "section",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.composite.Compound",
+      "name": "Compound",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.composite.Compound.__init__",
+      "name": "__init__",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Edge.make_circle",
+      "name": "make_circle",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Edge.make_line",
+      "name": "make_line",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Mixin1D.extrude",
+      "name": "extrude",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "python:build123d.topology.one_d.Mixin1D.length",
+      "name": "length",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Wire.make_circle",
+      "name": "make_circle",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Wire.make_polygon",
+      "name": "make_polygon",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.cut",
+      "name": "cut",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.edges",
+      "name": "edges",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.three_d.Mixin3D.chamfer",
+      "name": "chamfer",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.three_d.Mixin3D.extrude",
+      "name": "extrude",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "python:build123d.topology.three_d.Mixin3D.fillet",
+      "name": "fillet",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.three_d.Solid.make_box",
+      "name": "make_box",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.three_d.Solid.make_cylinder",
+      "name": "make_cylinder",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.two_d.Face.width",
+      "name": "width",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.two_d.Mixin2D.extrude",
+      "name": "extrude",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "python:build123d.topology.two_d.Shell.revolve",
+      "name": "revolve",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.build_common.GridLocations",
+      "name": "GridLocations",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.build_common.GridLocations.__init__",
+      "name": "__init__",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.build_common.edge",
+      "name": "edge",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.build_common.face",
+      "name": "face",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.build_enums.Align.MAX",
+      "name": "MAX",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.build_enums.Mode",
+      "name": "Mode",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.build_enums.Mode.SUBTRACT",
+      "name": "SUBTRACT",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.build_part.BuildPart.part",
+      "name": "part",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Axis.Y",
+      "name": "Y",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Axis.location",
+      "name": "location",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Location.center",
+      "name": "center",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Matrix",
+      "name": "Matrix",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.geometry.Matrix.__init__",
+      "name": "__init__",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.geometry.OrientedBoundBox.size",
+      "name": "size",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Plane.XY",
+      "name": "XY",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Plane.location",
+      "name": "location",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Plane.move",
+      "name": "move",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Vector.X",
+      "name": "X",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Vector.Z",
+      "name": "Z",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.geometry.Vector.center",
+      "name": "center",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.joints.RigidJoint",
+      "name": "RigidJoint",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.joints.RigidJoint.__init__",
+      "name": "__init__",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.objects_curve.Bezier",
+      "name": "Bezier",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_curve.Bezier.__init__",
+      "name": "__init__",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_curve.Helix",
+      "name": "Helix",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_curve.Helix.__init__",
+      "name": "__init__",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_curve.Spline",
+      "name": "Spline",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_curve.Spline.__init__",
+      "name": "__init__",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_part.Cone",
+      "name": "Cone",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.objects_part.Cone.__init__",
+      "name": "__init__",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.objects_sketch.Circle",
+      "name": "Circle",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.objects_sketch.Circle.__init__",
+      "name": "__init__",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.objects_sketch.Ellipse",
+      "name": "Ellipse",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_sketch.Ellipse.__init__",
+      "name": "__init__",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_sketch.Polygon",
+      "name": "Polygon",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_sketch.Polygon.__init__",
+      "name": "__init__",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.objects_sketch.Rectangle",
+      "name": "Rectangle",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.objects_sketch.Rectangle.__init__",
+      "name": "__init__",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.operations_generic.add",
+      "name": "add",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.operations_part.revolve",
+      "name": "revolve",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.operations_sketch.make_face",
+      "name": "make_face",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.composite.Compound.center",
+      "name": "center",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Edge.make_bezier",
+      "name": "make_bezier",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Edge.make_ellipse",
+      "name": "make_ellipse",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Edge.make_spline",
+      "name": "make_spline",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Wire.edges",
+      "name": "edges",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Wire.fillet_2d",
+      "name": "fillet_2d",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.one_d.Wire.make_ellipse",
+      "name": "make_ellipse",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.bounding_box",
+      "name": "bounding_box",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.located",
+      "name": "located",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.location",
+      "name": "location",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.move",
+      "name": "move",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.scale",
+      "name": "scale",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.shell",
+      "name": "shell",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.transform_geometry",
+      "name": "transform_geometry",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.transform_shape",
+      "name": "transform_shape",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.shape_core.Shape.wire",
+      "name": "wire",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.ShapeList",
+      "name": "ShapeList",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.shape_core.ShapeList.center",
+      "name": "center",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.ShapeList.filter_by",
+      "name": "filter_by",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.ShapeList.shell",
+      "name": "shell",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.shape_core.ShapeList.solids",
+      "name": "solids",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.shape_core.ShapeList.vertices",
+      "name": "vertices",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.three_d.Mixin3D.offset_3d",
+      "name": "offset_3d",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.three_d.Solid.sweep",
+      "name": "sweep",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.two_d.Face.center",
+      "name": "center",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.two_d.Face.fillet_2d",
+      "name": "fillet_2d",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.two_d.Face.make_surface",
+      "name": "make_surface",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.two_d.Face.sweep",
+      "name": "sweep",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.two_d.Face.wire",
+      "name": "wire",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.utils.polar",
+      "name": "polar",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.zero_d.Vertex.center",
+      "name": "center",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "python:build123d.topology.zero_d.Vertex.transform_shape",
+      "name": "transform_shape",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "python:build123d.topology.zero_d.Vertex.vertices",
+      "name": "vertices",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    }
+  ]
+}

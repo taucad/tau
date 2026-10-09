@@ -36,6 +36,7 @@
         "{projectRoot}/runtime/**/*",
         "{projectRoot}/scripts/**/*",
         "{projectRoot}/quick-look-formats.json",
+        "{workspaceRoot}/apps/desktop/src/shared/quick-look.ts",
         "{workspaceRoot}/tsconfig.base.json",
         "^production"
       ],
@@ -48,11 +49,16 @@
       "cache": true,
       "executor": "nx:run-commands",
       "dependsOn": ["^copy-assets"],
-      "inputs": ["{projectRoot}/runtime/**/*", "{projectRoot}/quick-look-formats.json", "^production"],
+      "inputs": [
+        "{projectRoot}/runtime/**/*",
+        "{projectRoot}/quick-look-formats.json",
+        "{workspaceRoot}/apps/desktop/src/shared/quick-look.ts",
+        "^production"
+      ],
       "outputs": ["{projectRoot}/generated/runtime"],
       "options": {
         "cwd": ".",
-        "command": "vite build --config apps/desktop/macos/runtime/vite.config.ts"
+        "command": "ql=$(node --import @oxc-node/core/register apps/desktop/scripts/quick-look-enabled.mts) || exit 1; if [ \"$ql\" = enabled ]; then vite build --config apps/desktop/macos/runtime/vite.config.ts; else echo 'Quick Look is disabled; its runtime is not built.'; fi"
       }
     },
     "build-extensions": {
@@ -65,13 +71,14 @@
         "{projectRoot}/Config/*",
         "{projectRoot}/generated/*",
         "{projectRoot}/scripts/build-quick-look-extensions.mts",
+        "{workspaceRoot}/apps/desktop/src/shared/quick-look.ts",
         { "runtime": "xcodebuild -version" },
         { "dependentTasksOutputFiles": "**/*" }
       ],
       "outputs": ["{projectRoot}/dist/extensions"],
       "options": {
         "cwd": ".",
-        "command": "node --import @oxc-node/core/register apps/desktop/macos/scripts/build-quick-look-extensions.mts"
+        "command": "ql=$(node --import @oxc-node/core/register apps/desktop/scripts/quick-look-enabled.mts) || exit 1; if [ \"$ql\" = enabled ]; then node --import @oxc-node/core/register apps/desktop/macos/scripts/build-quick-look-extensions.mts; else rm -rf apps/desktop/macos/dist/extensions && echo 'Quick Look is disabled; no extensions built.'; fi"
       }
     }
   }

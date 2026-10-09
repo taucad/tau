@@ -307,6 +307,8 @@ describe('grbl session against the virtual controller', () => {
       status: 'ready',
       program: { facts: { process: 'milling', tools: [{ number: 1 }], uses: ['tool-change'] } },
     });
+    // A streamed program is never stored on the controller, so it has no name there.
+    expect(preparation).not.toHaveProperty('remoteName');
     const before = machineAt(await connected.report());
     expect(await start(connected, 'sign.gcode')).toMatchObject({ status: 'accepted', runId: 'run-start-sign.gcode' });
     report = await connected.until((current) => current.state.status === 'held');

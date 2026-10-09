@@ -967,7 +967,6 @@ export class GrblController {
         revision: `r${String(this.offsetRevision)}`,
         tool: this.tool ?? null,
       },
-      remoteName: name,
       parser: { id: 'grbl.gcode', version: '1' },
       providerData: { lines: program.summary.facts.lines },
       observedAt: this.now(),

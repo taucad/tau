@@ -11,7 +11,7 @@ import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import { chatStoreBinding, createChatStore } from '#launchers/chat-store.js';
 import { createNodeChatStore } from '#node.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
-import type { ToolRegistry } from '#waist/ports.js';
+import type { SourceLiveEvent, ToolRegistry } from '#waist/ports.js';
 import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import { parseReplayEventLogBytes } from '#log/serialization.js';
 import { foldClassifiedChatLedger } from '#log/chat-ledger.js';
@@ -510,10 +510,12 @@ describe('launcher replay source ownership', () => {
     });
   });
 
-  it('shares exact captured views but refuses a thirty-third distinct active lease until release', async () => {
+  it.each([false, true])('preserves capture capacity and qualified retry with live ownership %s', async (liveOwned) => {
     const reader = await makeLauncher();
     const iterators: Array<AsyncIterator<CatchUpFrame>> = [];
     const firstAbort = new AbortController();
+    const liveAbort = new AbortController();
+    let liveNext: Promise<unknown> | undefined;
     try {
       for (let index = 0; index < 33; index++) {
         const chatId = `catch-up-capacity-${index}`;
@@ -544,6 +546,16 @@ describe('launcher replay source ownership', () => {
       const same = reader.catchUp({ chatId: 'catch-up-capacity-31', limit: 1, maxBytes: 1024 })[Symbol.asyncIterator]();
       iterators.push(same);
       await expect(same.next()).resolves.toMatchObject({ value: { type: 'page' } });
+      if (liveOwned) {
+        liveNext = reader
+          .liveEvents({ chatId: 'catch-up-capacity-32', signal: liveAbort.signal })
+          [Symbol.asyncIterator]()
+          .next();
+      }
+      const beforeRefusal = await read(reader, 'catch-up-capacity-32');
+      if (beforeRefusal.status !== 'batch') {
+        throw new Error('Expected a qualified source before capacity refusal.');
+      }
       const refused = reader
         .catchUp({ chatId: 'catch-up-capacity-32', limit: 1, maxBytes: 1024 })
         [Symbol.asyncIterator]();
@@ -551,6 +563,20 @@ describe('launcher replay source ownership', () => {
         value: { type: 'refused', answer: { reason: 'capacity-exceeded' } },
       });
       await refused.return?.();
+      const parsedBeforeRetry = vi.mocked(parseReplayEventLogBytes).mock.calls.length;
+      const afterRefusal = await reader.read({
+        chatId: 'catch-up-capacity-32',
+        cursor: beforeRefusal.nextCursor,
+        sourceGeneration: beforeRefusal.sourceGeneration,
+        limit: 1,
+        maxBytes: 1024,
+      });
+      expect(afterRefusal).toMatchObject(
+        liveOwned
+          ? { status: 'batch', sourceGeneration: beforeRefusal.sourceGeneration }
+          : { status: 'refused', reason: 'identity-mismatch' },
+      );
+      expect(vi.mocked(parseReplayEventLogBytes).mock.calls.length - parsedBeforeRetry).toBe(liveOwned ? 0 : 1);
       firstAbort.abort();
       const admitted = reader
         .catchUp({ chatId: 'catch-up-capacity-32', limit: 1, maxBytes: 1024 })
@@ -558,6 +584,8 @@ describe('launcher replay source ownership', () => {
       iterators.push(admitted);
       await expect(admitted.next()).resolves.toMatchObject({ value: { type: 'page' } });
     } finally {
+      liveAbort.abort();
+      await liveNext;
       for (const iterator of iterators) {
         // oxlint-disable-next-line no-await-in-loop -- sequential acquisition/release preserves the bounded ownership schedule under test.
         await iterator.return?.();
@@ -824,6 +852,298 @@ describe('launcher replay source ownership', () => {
     await captured.return?.();
     await expect(read(reader, 'catch-up-writer')).resolves.toMatchObject({ status: 'batch', endCursor: 1 });
   });
+
+  it.each(['capture', 'ordinary'] as const)(
+    'keeps a live-owned normal source usable across a channel %s handoff while a large sibling read is parked',
+    async (route) => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-normal-follow-'));
+      roots.push(workspaceRoot);
+      const base = chatStoreBinding(createNodeChatStore({ workspaceRoot }));
+      const row = (sequence: number) =>
+        new TextEncoder().encode(
+          JSON.stringify({
+            version: 1,
+            leaderEpoch: 'normal-follow',
+            sequence,
+            recordedAt: '2026-10-08T00:00:00.000Z',
+            runId: 'r',
+            type: 'future.row',
+          }) + '\n',
+        );
+      // Each source is below the normal 32 MiB budget; their combined bytes exceed it.
+      const bytes = new Uint8Array(17 * 1024 * 1024).fill(32);
+      bytes.set(row(0));
+      bytes[bytes.length - row(1).length - 1] = 10;
+      bytes.set(row(1), bytes.length - row(1).length);
+      const siblingAcquired = Promise.withResolvers<void>();
+      let siblingReads = 0;
+      launcher = createAgentLauncher({
+        chats: createChatStore({
+          ...base,
+          readBytes: async (chatId) => {
+            if (chatId === 'pinned-sibling' && ++siblingReads === 2) {
+              siblingAcquired.resolve();
+            }
+            return bytes;
+          },
+          observeBytes: async () => () => undefined,
+        }),
+        modelTransport: createTauCloudGatewayModelTransport({
+          baseUrl: 'https://gateway.example',
+          model,
+          auth: () => 'daemon-bearer',
+          fetch: scriptedGateway(),
+        }),
+        credential: () => ({ mode: 'session' }),
+        systemPrompt: 'You are Tau.',
+        model,
+        toolRegistry: emptyTools,
+      });
+      const reader = launcher;
+      const channel = new MessageChannel();
+      const server = serveAgentChannel(channel.port1, reader, { build: 'owned-handoff' });
+      const client = createAgentChannelClient({ connect: () => agentChannelPort(channel.port2) });
+      const liveAdmission = vi.spyOn(reader, 'liveEvents');
+      const liveController = new AbortController();
+      const live = client
+        .liveEvents({ chatId: 'handed-source', signal: liveController.signal })
+        [Symbol.asyncIterator]();
+      const liveNext = live.next();
+      onTestFinished(async () => {
+        liveController.abort();
+        client.close();
+        server.dispose();
+        await Promise.allSettled([liveNext]);
+        channel.port1.close();
+        channel.port2.close();
+      });
+      await vi.waitFor(() => {
+        expect(
+          liveAdmission.mock.calls.some(
+            ([input]) => input.chatId === 'handed-source' && input.signal instanceof AbortSignal,
+          ),
+        ).toBe(true);
+      });
+      const firstSibling = await read(reader, 'pinned-sibling');
+      if (firstSibling.status !== 'batch') {
+        throw new Error('The sibling must establish its initial source.');
+      }
+      const controller = new AbortController();
+      let siblingSettled = false;
+      const sibling = (async () => {
+        const answer = await reader.read({
+          chatId: 'pinned-sibling',
+          cursor: firstSibling.nextCursor,
+          sourceGeneration: firstSibling.sourceGeneration,
+          sourceHealth: firstSibling.sourceHealth,
+          limit: 16,
+          maxBytes: 1024,
+          signal: controller.signal,
+        });
+        siblingSettled = true;
+        return answer;
+      })();
+      await siblingAcquired.promise;
+      try {
+        let position: { cursor: number; sourceGeneration: string };
+        if (route === 'capture') {
+          const capture = client
+            .catchUp({ chatId: 'handed-source', limit: 16, maxBytes: 1024 })
+            [Symbol.asyncIterator]();
+          await expect(capture.next()).resolves.toMatchObject({ value: { type: 'page' } });
+          const marker = await capture.next();
+          if (marker.done === true || marker.value.type !== 'validated') {
+            throw new Error('The unchanged source must finish a valid capture.');
+          }
+          position = marker.value.position;
+          await expect(capture.next()).resolves.toMatchObject({ done: true });
+        } else {
+          const first = await client.read({ chatId: 'handed-source', cursor: 0, limit: 1, maxBytes: 1024 });
+          if (first.status !== 'batch' || first.sourceGeneration === undefined) {
+            throw new Error('The unchanged source must return its first ordinary page.');
+          }
+          position = { cursor: first.nextCursor, sourceGeneration: first.sourceGeneration };
+        }
+        expect(siblingSettled).toBe(false);
+        // No health echo: the next fresh observation must answer, even at the captured end.
+        const next = await client.read({ chatId: 'handed-source', ...position, limit: 16, maxBytes: 1024 });
+        expect.soft(next.status === 'refused' ? next.reason : undefined).toBeUndefined();
+        expect(next).toMatchObject({
+          status: 'batch',
+          sourceGeneration: position.sourceGeneration,
+          cursor: position.cursor,
+          nextCursor: 2,
+          endCursor: 2,
+        });
+        // Retention owns identity, never freshness: a silent same-size rewrite still resets the reader.
+        const runOffset = new TextDecoder().decode(row(0)).indexOf('"runId":"r"') + '"runId":"'.length;
+        bytes[runOffset] = 115; // ASCII s changes the first opaque row's run ID without changing its size.
+        await expect(
+          client.read({ chatId: 'handed-source', ...position, limit: 16, maxBytes: 1024 }),
+        ).resolves.toMatchObject({ status: 'refused', reason: 'identity-mismatch' });
+      } finally {
+        controller.abort();
+        await expect(sibling).rejects.toMatchObject({ name: 'AbortError' });
+      }
+    },
+  );
+
+  it.each(['abort', 'return', 'pending-return', 'overflow', 'enqueue-failure', 'channel-close', 'close'] as const)(
+    'releases live retention on %s without subscribing I/O or leaking shared owners',
+    async (ending) => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-live-retention-'));
+      roots.push(workspaceRoot);
+      const base = chatStoreBinding(createNodeChatStore({ workspaceRoot }));
+      const released: string[] = [];
+      const row = new TextEncoder().encode(
+        JSON.stringify({
+          version: 1,
+          leaderEpoch: 'live-retention',
+          sequence: 0,
+          recordedAt: '2026-10-08T00:00:00.000Z',
+          runId: 'r',
+          type: 'future.row',
+        }) + '\n',
+      );
+      const acquire = vi.fn(async () => row);
+      const observe = vi.fn(async (chatId: string) => () => {
+        released.push(chatId);
+      });
+      let publish: (event: SourceLiveEvent) => void = () => {
+        throw new Error('Leadership must be initialized.');
+      };
+      launcher = createAgentLauncher({
+        chats: createChatStore({
+          ...base,
+          readBytes: acquire,
+          observeBytes: observe,
+          leadership: (host) => {
+            publish = host.publishLive;
+            return base.leadership(host);
+          },
+        }),
+        modelTransport: createTauCloudGatewayModelTransport({
+          baseUrl: 'https://gateway.example',
+          model,
+          auth: () => 'daemon-bearer',
+          fetch: scriptedGateway(),
+        }),
+        credential: () => ({ mode: 'session' }),
+        systemPrompt: 'You are Tau.',
+        model,
+        toolRegistry: emptyTools,
+      });
+      const reader = launcher;
+      const first = new AbortController();
+      const second = new AbortController();
+      const channel = new MessageChannel();
+      const server = serveAgentChannel(channel.port1, reader, { build: 'live-retirement' });
+      const client = createAgentChannelClient({ connect: () => agentChannelPort(channel.port2) });
+      const liveAdmission = vi.spyOn(reader, 'liveEvents');
+      onTestFinished(() => {
+        first.abort();
+        second.abort();
+        client.close();
+        server.dispose();
+        channel.port1.close();
+        channel.port2.close();
+      });
+      const stream = (ending === 'channel-close' ? client : reader)
+        .liveEvents({ chatId: 'owned', signal: first.signal })
+        [Symbol.asyncIterator]();
+      const peer = reader.liveEvents({ chatId: 'owned', signal: second.signal })[Symbol.asyncIterator]();
+      const pending = stream.next();
+      const peerPending = peer.next();
+      if (ending === 'channel-close') {
+        await vi.waitFor(() => {
+          expect(liveAdmission).toHaveBeenCalledTimes(2);
+        });
+      }
+      expect(acquire).not.toHaveBeenCalled();
+      expect(observe).not.toHaveBeenCalled();
+      const event: SourceLiveEvent = {
+        type: 'text-start',
+        chatId: 'owned',
+        runId: 'r',
+        messageId: 'm',
+        contentIndex: 0,
+        sourceGeneration: 'live-source',
+      };
+      publish(event);
+      await Promise.all([pending, peerPending]);
+      await read(reader, 'owned');
+      for (let index = 0; index < 32; index++) {
+        // oxlint-disable-next-line no-await-in-loop -- advance actual inactive LRU entries in order.
+        await read(reader, `idle-${index}`);
+      }
+      expect.soft(released).not.toContain('owned');
+      second.abort();
+      await peer.return?.();
+      expect.soft(released).not.toContain('owned');
+      switch (ending) {
+        case 'abort': {
+          first.abort();
+          break;
+        }
+        case 'return': {
+          await stream.return?.();
+          break;
+        }
+        case 'pending-return': {
+          const parkedNext = stream.next();
+          const returning = stream.return?.();
+          await vi.waitFor(() => {
+            expect(released).toContain('owned');
+          });
+          await Promise.all([parkedNext, returning]);
+          break;
+        }
+        case 'overflow': {
+          for (let index = 0; index < 1030; index++) {
+            publish(event);
+          }
+          await expect(stream.next()).rejects.toThrow('fell too far behind');
+          break;
+        }
+        case 'enqueue-failure': {
+          const enqueue = vi.spyOn(ReadableStreamDefaultController.prototype, 'enqueue').mockImplementationOnce(() => {
+            throw new Error('Disconnected stream controller');
+          });
+          try {
+            publish(event);
+          } finally {
+            enqueue.mockRestore();
+          }
+          break;
+        }
+        case 'channel-close': {
+          client.close();
+          await vi.waitFor(() => {
+            expect(released).toContain('owned');
+          });
+          break;
+        }
+        case 'close': {
+          await reader.close();
+          break;
+        }
+      }
+      expect(released.filter((chatId) => chatId === 'owned')).toHaveLength(1);
+      first.abort();
+      await stream.return?.();
+      expect(released.filter((chatId) => chatId === 'owned')).toHaveLength(1);
+      const acquisitions = acquire.mock.calls.length;
+      const cancelled = reader.liveEvents({ chatId: 'cancelled', signal: AbortSignal.abort() })[Symbol.asyncIterator]();
+      await expect(cancelled.next()).resolves.toMatchObject({ done: true });
+      if (ending === 'close') {
+        const late = reader
+          .liveEvents({ chatId: 'closed', signal: new AbortController().signal })
+          [Symbol.asyncIterator]();
+        await expect(late.next()).resolves.toMatchObject({ done: true });
+      }
+      expect(acquire).toHaveBeenCalledTimes(acquisitions);
+    },
+  );
 
   it('keeps an oversized validated marker usable immediately while an empty sibling ordinary read remains parked', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-catch-up-follow-'));
@@ -1688,7 +2008,7 @@ describe('launcher replay source ownership', () => {
     await expect(reader.read(input)).resolves.toMatchObject({ status: 'refused', reason: 'identity-mismatch' });
   });
 
-  it('resets an evicted source and keeps an unchanged warm source generation', async () => {
+  it('resets an unowned evicted source despite unused and never-started live iterators', async () => {
     const reader = await makeLauncher();
     const seed = async (chatId: string) => {
       const directory = join(currentRoot(), '.tau', 'chats', chatId);
@@ -1710,6 +2030,14 @@ describe('launcher replay source ownership', () => {
     if (first.status !== 'batch') {
       throw new Error('Expected source batch.');
     }
+    const liveAbort = new AbortController();
+    const unused = reader.liveEvents({ chatId: 'cache-0', signal: liveAbort.signal });
+    const neverStarted = reader.liveEvents({ chatId: 'cache-0', signal: liveAbort.signal })[Symbol.asyncIterator]();
+    await neverStarted.return?.();
+    onTestFinished(() => {
+      liveAbort.abort();
+    });
+    expect(unused[Symbol.asyncIterator]).toEqual(expect.any(Function));
     for (let index = 1; index <= 32; index++) {
       // oxlint-disable-next-line no-await-in-loop -- each acquisition advances the bounded LRU.
       await seed(`cache-${index}`);

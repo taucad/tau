@@ -4,7 +4,7 @@
  * way; only the store differs.
  *
  * Always-on is the defining property: `start` and `resume` return once the admission is durable, and the run then
- * continues with zero attached clients. Nothing here is tied to a connection's lifetime (D17).
+ * continues with zero attached clients. Run execution is independent of a connection's lifetime (D17).
  *
  * Reads never create a chat, take a lock or assume leadership (RH-R1): `read` and `attach` read the log's bytes as
  * they are, unless this process already writes the chat, whose host then answers the long poll from its writer.
@@ -157,21 +157,18 @@ export const iterateStream = async function* <Chunk>(stream: ReadableStream<Chun
 };
 
 /** A multi-subscriber fan-out of live deltas, one chat per subscriber, that never blocks the producer (SC-R15). */
-const createFanOut = <Event extends { readonly chatId: string }>() => {
-  const controllers = new Map<ReadableStreamDefaultController<Event>, string>();
+const createFanOut = <Event extends { readonly chatId: string }>(own: (chatId: string) => () => void) => {
+  const controllers = new Map<
+    ReadableStreamDefaultController<Event>,
+    { chatId: string; close: (reason?: Error) => void }
+  >();
+  let closed = false;
   const drop = (controller: ReadableStreamDefaultController<Event>, reason?: Error): void => {
-    controllers.delete(controller);
-    if (reason) {
-      try {
-        controller.error(reason);
-      } catch {
-        /* Already errored or closed; the removal above is the whole point. */
-      }
-    }
+    controllers.get(controller)?.close(reason);
   };
   return {
     publish: (event: Event): void => {
-      for (const [controller, chatId] of controllers) {
+      for (const [controller, { chatId }] of controllers) {
         if (chatId !== event.chatId) {
           continue;
         }
@@ -190,40 +187,62 @@ const createFanOut = <Event extends { readonly chatId: string }>() => {
     },
     subscribe: (signal: AbortSignal, chatId: string): AsyncIterable<Event> => {
       let cleanup = (): void => undefined;
-      const stream = new ReadableStream<Event>({
-        start(controller) {
-          let active = true;
-          const close = (): void => {
-            if (!active) {
+      const receive = async function* (): AsyncGenerator<Event> {
+        const stream = new ReadableStream<Event>({
+          start(controller) {
+            if (closed || signal.aborted) {
+              controller.close();
               return;
             }
-            active = false;
-            controllers.delete(controller);
-            try {
-              controller.close();
-            } catch {
-              /* A `drop` or the fan-out's close already ended this controller. */
-            }
-            signal.removeEventListener('abort', close);
-          };
-          cleanup = close;
-          controllers.set(controller, chatId);
-          if (signal.aborted) {
-            close();
-          } else {
-            signal.addEventListener('abort', close, { once: true });
-          }
-        },
-        cancel: () => {
-          cleanup();
-        },
-      });
-      return iterateStream(stream);
+            const release = own(chatId);
+            let active = true;
+            const close = (reason?: Error): void => {
+              if (!active) {
+                return;
+              }
+              active = false;
+              controllers.delete(controller);
+              try {
+                if (reason === undefined) {
+                  controller.close();
+                } else {
+                  controller.error(reason);
+                }
+              } catch {
+                /* A `drop` or the fan-out's close already ended this controller. */
+              }
+              signal.removeEventListener('abort', abort);
+              release();
+            };
+            const abort = (): void => {
+              close();
+            };
+            cleanup = close;
+            controllers.set(controller, { chatId, close });
+            signal.addEventListener('abort', abort, { once: true });
+          },
+          cancel: () => {
+            cleanup();
+          },
+        });
+        yield* iterateStream(stream);
+      };
+      const iterator = receive();
+      return {
+        [Symbol.asyncIterator]: () => ({
+          next: async () => iterator.next(),
+          return: async () => {
+            // Wake a parked next before the generator queues its return behind that read.
+            cleanup();
+            return iterator.return(undefined);
+          },
+        }),
+      };
     },
     close: (): void => {
-      for (const controller of controllers.keys()) {
-        controllers.delete(controller);
-        controller.close();
+      closed = true;
+      for (const { close } of controllers.values()) {
+        close();
       }
     },
   };
@@ -303,7 +322,21 @@ const runOf = async (chatId: string, view: ChatView): Promise<HostRunSnapshot | 
 export const createAgentLauncher = (options: AgentLauncherOptions): AgentLauncher => {
   const binding = chatStoreBinding(options.chats);
   const createId = options.createId ?? createPortableId;
-  const live = createFanOut<SourceLiveEvent>();
+  const liveOwners = new Map<string, number>();
+  const live = createFanOut<SourceLiveEvent>((chatId) => {
+    liveOwners.set(chatId, (liveOwners.get(chatId) ?? 0) + 1);
+    cancelRetirement(chatId);
+    return () => {
+      const remaining = (liveOwners.get(chatId) ?? 1) - 1;
+      if (remaining > 0) {
+        liveOwners.set(chatId, remaining);
+      } else {
+        liveOwners.delete(chatId);
+        pruneReplay();
+        retireOversized(chatId);
+      }
+    };
+  });
   /** Chats whose writer this process holds open: their reads are the host's long poll. */
   const writers = new Set<string>();
   const writerGenerations = new Map<string, string>();
@@ -375,11 +408,16 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
   };
 
   const pruneReplay = (): void => {
-    // Active oversized owners and one idle oversized view are additive to the normal budget.
+    // Active readers are additive to the inactive normal budget; one idle oversized view is retained separately.
     // The existing exact-owner idle timer retires that last view; pruning must not bypass it.
     let idleOversized: string | undefined;
     for (const [key, entry] of replay) {
-      if (entry.bytes.byteLength > replayByteLimit && !pinned.has(entry) && (activeReads.get(key) ?? 0) === 0) {
+      if (
+        entry.bytes.byteLength > replayByteLimit &&
+        !pinned.has(entry) &&
+        (activeReads.get(key) ?? 0) === 0 &&
+        !liveOwners.has(key)
+      ) {
         if (idleOversized !== undefined) {
           replay.delete(idleOversized);
           dropObservation(idleOversized);
@@ -387,15 +425,18 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         idleOversized = key;
       }
     }
-    const counted = [...replay].filter(([, entry]) => entry.bytes.byteLength <= replayByteLimit);
+    const counted = [...replay].filter(
+      ([key, entry]) =>
+        entry.bytes.byteLength <= replayByteLimit &&
+        !pinned.has(entry) &&
+        (activeReads.get(key) ?? 0) === 0 &&
+        !liveOwners.has(key),
+    );
     let retained = counted.reduce((total, [, entry]) => total + entry.bytes.byteLength, 0);
     let sources = counted.length;
     for (const [key, entry] of counted) {
       if (sources <= replayChatLimit && retained <= replayByteLimit) {
         break;
-      }
-      if (pinned.has(entry) || (activeReads.get(key) ?? 0) > 0) {
-        continue;
       }
       replay.delete(key);
       dropObservation(key);
@@ -413,6 +454,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       current === undefined ||
       current.bytes.byteLength <= replayByteLimit ||
       (activeReads.get(chatId) ?? 0) > 0 ||
+      liveOwners.has(chatId) ||
       acquiring.has(chatId)
     ) {
       return;
@@ -427,6 +469,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         replay.get(chatId) === current &&
         observations.get(chatId) === owner &&
         (activeReads.get(chatId) ?? 0) === 0 &&
+        !liveOwners.has(chatId) &&
         !acquiring.has(chatId)
       ) {
         replay.delete(chatId);
@@ -1153,7 +1196,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
             ? [...pinned.keys()].some((current) => current.bytes.byteLength > replayByteLimit)
             : normal.length >= replayChatLimit || normalBytes + captured.bytes.byteLength > replayByteLimit;
         if (exceeds) {
-          if (replay.get(chatId) === captured) {
+          if (replay.get(chatId) === captured && !liveOwners.has(chatId) && (activeReads.get(chatId) ?? 0) <= 1) {
             replay.delete(chatId);
             dropObservation(chatId);
           }

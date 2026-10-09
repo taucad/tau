@@ -723,19 +723,23 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
     } else {
         0
     };
+    // Only selected-face routes use the 256 KiB cylindrical-band/finite-contact
+    // capacity. Occurrence-to-occurrence contact, insertion and clearance use
+    // the selected continuous-domain proofs and their continuous output bound.
     let band_claim = prepared.relationships.iter().any(|relationship| {
-        matches!(relationship.kind, Kind::Contact | Kind::Insertion)
-            || (relationship.kind == Kind::Clearance
-                && relationship
-                    .resolved
-                    .as_ref()
-                    .is_some_and(|(subject, target)| {
-                        subject
-                            .entities
-                            .iter()
-                            .chain(&target.entities)
-                            .any(|entity| matches!(entity.face, Some(BrepEntity::Face { .. })))
-                    }))
+        matches!(
+            relationship.kind,
+            Kind::Contact | Kind::Insertion | Kind::Clearance
+        ) && relationship
+            .resolved
+            .as_ref()
+            .is_some_and(|(subject, target)| {
+                subject
+                    .entities
+                    .iter()
+                    .chain(&target.entities)
+                    .any(|entity| matches!(entity.face, Some(BrepEntity::Face { .. })))
+            })
     });
     let caller_reservation = if band_claim {
         let bytes = clearance_caller_reservation(prepared, context);
@@ -1401,13 +1405,9 @@ fn prove_contact(
     };
     let tolerance = relationship.tolerance.unwrap_or(DEFAULT_LINEAR_TOLERANCE);
     charge(context, continuous::FINITE_CONTACT_UNITS)?;
-    context
-        .check_cylindrical_band_capacity(&[
-            continuous::FINITE_CONTACT_RESERVATION_BYTES as u64,
-            2 * continuous::FINITE_CONTACT_OUTPUT_BYTES as u64,
-        ])
-        .map_err(ProofError::Refused)?;
     if let (BrepEntity::Occurrence(ai), BrepEntity::Occurrence(bi)) = (a.entity, b.entity) {
+        // Box-to-box contact is the continuous clearance proof; it never holds
+        // finite-contact records, so it is bounded like nominal box clearance.
         let da = context
             .selected_continuous_domain(ai)
             .map_err(ProofError::Refused)?;
@@ -1421,16 +1421,27 @@ fn prove_contact(
             maximum: Some(tolerance),
             tolerance: 0.,
         }) {
-            Outcome::Decided { positive, evidence } => Ok(contact_proof(
-                positive,
-                evidence.to_json(),
-                relationship,
-                subject,
-                target,
-            )),
+            Outcome::Decided { positive, evidence } => {
+                context
+                    .check_continuous_output(evidence.owned_bytes() as u64)
+                    .map_err(ProofError::Refused)?;
+                Ok(contact_proof(
+                    positive,
+                    evidence.to_json(),
+                    relationship,
+                    subject,
+                    target,
+                ))
+            }
             Outcome::Unsupported { reason, .. } => Err(finite_contact_failure(&reason.message)),
         };
     }
+    context
+        .check_cylindrical_band_capacity(&[
+            continuous::FINITE_CONTACT_RESERVATION_BYTES as u64,
+            2 * continuous::FINITE_CONTACT_OUTPUT_BYTES as u64,
+        ])
+        .map_err(ProofError::Refused)?;
     let ao = a
         .facts
         .face_index

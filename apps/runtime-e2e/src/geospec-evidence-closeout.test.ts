@@ -28,9 +28,10 @@ describe('GeoSpec evidence to LLM closeout', () => {
       `
       import { it, expectGeo } from 'geospec';
       import { loadModel } from 'geospec/model';
-      it('spatial clearance failure', async () => {
+      it('two spatial failures', async () => {
         const model = await loadModel({ source: ${JSON.stringify(step)}, format: 'step', mesh: false });
         await expectGeo(model).toHaveSpatialRelationships({ relationships: [
+          { id: 'seated', kind: 'contact', subject: 'cubeA', target: 'cubeB', tolerance: 0.02 },
           { id: 'gap', kind: 'clearance', subject: 'cubeA', target: 'cubeB', min: 0, max: 1 }
         ] });
       });
@@ -71,7 +72,7 @@ describe('GeoSpec evidence to LLM closeout', () => {
       const serialResult = await serial.run({ files: [file] });
       expect(serialResult).toMatchObject({ passed: 1, failed: 4, selectedTests: 5 });
       const output = runnerResultToTestModelOutput(serialResult, [file]);
-      expect(output.failures[0]?.diagnostics).toHaveLength(1);
+      expect(output.failures[0]?.diagnostics).toHaveLength(2);
       for (const diagnostic of output.failures[0]?.diagnostics ?? []) {
         expect(diagnostic.code).toBe('GEOSPEC_SPATIAL_RELATIONSHIP_MISMATCH');
         expect(diagnostic.spatial?.center).toHaveLength(3);

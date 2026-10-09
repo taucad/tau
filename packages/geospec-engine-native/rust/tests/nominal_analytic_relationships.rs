@@ -404,3 +404,58 @@ fn nominal_analytic_box_route_uses_max_pair_and_never_falls_back_after_bad_admis
         }
     }
 }
+
+#[test]
+fn occurrence_contact_is_not_charged_to_a_full_cylindrical_band_capacity() {
+    let mut subject = Subject::new("box-contact".into(), SubjectFormat::Step, "mm".into());
+    let identity = crate::identity::SubjectIdentity::step(
+        b"nominal-box-contact-control",
+        "millimetre",
+        1.0,
+        crate::backend::brep::BrepIdentityProfile {
+            ingest_profile: "core-control",
+            backend_profile: "core-control",
+        },
+        None,
+    )
+    .unwrap();
+    subject.content_hash = identity.primary_hash().into();
+    subject.semantic_identity.set(identity).unwrap();
+    subject.brep = Some(Box::new(BoxControl { bad: false }));
+    let subjects = [Rc::new(subject)];
+    let budget = Budget::new(1_000_000);
+    let normalized = Json::Null;
+    let mut context = EvaluationContext::new(
+        &subjects,
+        Capability::ToHaveSpatialRelationships,
+        "box-contact",
+        &normalized,
+        &budget,
+        None,
+    );
+    // Earlier band rows own exactly the whole 256 KiB band capacity.
+    let header = std::mem::size_of::<Vec<Rc<crate::backend::brep::NominalCylindricalBand>>>();
+    assert!(context
+        .set_cylindrical_band_output_bytes((256 * 1024 - header) as u64)
+        .is_ok());
+    let r = relationship("contact");
+    // Box-to-box contact proof bytes belong to the continuous output bound.
+    let Ok(proof) = prove_contact(&r, &[occurrence(0)], &[occurrence(1)], &mut context) else {
+        panic!("box contact must not be refused by cylindrical-band capacity");
+    };
+    assert_eq!(
+        json_field_ref(&proof.final_evidence, "method"),
+        Some(&Json::string("exact-nominal-finite-contact"))
+    );
+    // A selected-face contact still needs band capacity, and is refused first.
+    let face = endpoint(entity([0.; 3], [0., 0., 1.], true, false));
+    let Err(ProofError::Refused(Evaluation::Refused { diagnostics })) =
+        prove_contact(&r, &[face.clone()], &[face], &mut context)
+    else {
+        panic!("an oversized band claim must be refused");
+    };
+    assert_eq!(
+        diagnostics[0].message,
+        "Simultaneous cylindrical-band clearance capacity exceeds 256 KiB."
+    );
+}

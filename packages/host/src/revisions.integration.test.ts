@@ -330,7 +330,7 @@ const startTurn = async (
   if (
     answer.status === 'refused' &&
     answer.code === 'CHAT_RUN_LIVE' &&
-    answer.details?.state === 'settling' &&
+    answer.details?.['state'] === 'settling' &&
     Date.now() < until
   ) {
     await delay(50);

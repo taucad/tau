@@ -259,7 +259,18 @@ const directBytes = async (
     return new Uint8Array(await source.arrayBuffer());
   }
   if (readSource !== undefined) {
-    return readSource(source);
+    try {
+      return await readSource(source);
+    } catch (error) {
+      throw failure([
+        diagnostic({
+          code: 'GEOSPEC_NATIVE_SOURCE_READ_FAILED',
+          message: `The host source reader could not read ${typeof source === 'string' ? source : 'this source'}: ${error instanceof Error ? error.message : String(error)}`,
+          suggestion: 'Check that the source exists at a project-rooted path and is readable, then retry the load.',
+          ...(typeof source === 'string' ? { details: { source } } : {}),
+        }),
+      ]);
+    }
   }
   throw failure([
     diagnostic({

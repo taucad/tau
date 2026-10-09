@@ -969,25 +969,23 @@ export class FileTreeService {
   private handleDirectoryCreatedRelative(relativePath: string): void {
     this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
     const parent = this.paths.parentOf(relativePath);
-    if (!this.isDirectoryResolvedKey(parent)) {
+    if (!this.isDirectoryResolvedKey(parent) || this._tree.has(relativePath)) {
       return;
     }
     const newTree = new Map(this._tree);
-    if (!newTree.has(relativePath)) {
-      const name = relativePath.split('/').pop() ?? relativePath;
-      newTree.set(relativePath, {
-        path: relativePath,
-        name,
-        type: 'dir',
-        size: 0,
-        mtimeMs: Date.now(),
-        isLoaded: false,
-        isDirectoryResolved: true,
-      });
-      this._tree = newTree;
-      this.notifyTreeSubscribers();
-      this._listingPathSubscribers.notifyPath(parent, undefined);
-    }
+    const name = relativePath.split('/').pop() ?? relativePath;
+    newTree.set(relativePath, {
+      path: relativePath,
+      name,
+      type: 'dir',
+      size: 0,
+      mtimeMs: Date.now(),
+      isLoaded: false,
+      isDirectoryResolved: true,
+    });
+    this._tree = newTree;
+    this.notifyTreeSubscribers();
+    this._listingPathSubscribers.notifyPath(parent, undefined);
   }
 
   private handleDirectoryDeletedRelative(relativePath: string): void {

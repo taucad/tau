@@ -985,6 +985,67 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     disposeChannel();
   });
 
+  it('should process duplicate directory notifications without traversing the retained tree', () => {
+    const { tree, proxy, emitFileChanged, disposeChannel } = createTreeHarness({
+      initialEntries: [
+        directoryEntry('existing'),
+        ...Array.from({ length: 2048 }, (_, index) => textEntry(`file-${index}.ts`)),
+      ],
+    });
+    const snapshot = tree.getTreeSnapshot();
+    const existing = snapshot.get('existing');
+    const iterate = vi.spyOn(snapshot, Symbol.iterator);
+    const changed = vi.fn();
+    const unsubscribe = tree.subscribeTree(changed);
+    try {
+      for (let index = 0; index < 32; index++) {
+        emitFileChanged({ type: 'directoryCreated', path: 'existing', backend: 'indexeddb' });
+      }
+      expect(tree.getTreeSnapshot()).toBe(snapshot);
+      expect(tree.getTreeSnapshot().get('existing')).toBe(existing);
+      expect(changed).not.toHaveBeenCalled();
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+      // Work budget: redundant provider notifications cannot enumerate unrelated retained entries.
+      expect(iterate).not.toHaveBeenCalled();
+      iterate.mockRestore();
+      emitFileChanged({ type: 'directoryCreated', path: 'new-directory', backend: 'indexeddb' });
+      expect(tree.getTreeSnapshot().get('new-directory')).toMatchObject({ type: 'dir', path: 'new-directory' });
+      expect(changed).toHaveBeenCalledOnce();
+    } finally {
+      iterate.mockRestore();
+      unsubscribe();
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should invalidate a pending parent listing on an already retained directory notification', async () => {
+    const pending = Promise.withResolvers<FileTreeNode[]>();
+    const readDirectory = vi
+      .fn<ComposedViewClient['readDirectory']>()
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValue([directoryNode('existing'), textNode('current.ts')]);
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+      initialEntries: [directoryEntry('source'), directoryEntry('source/existing')],
+    });
+    const listing = tree.listDirectory('source');
+    try {
+      expect(readDirectory).toHaveBeenCalledOnce();
+      emitFileChanged({ type: 'directoryCreated', path: 'source/existing', backend: 'indexeddb' });
+      pending.resolve([directoryNode('existing'), textNode('stale.ts')]);
+      const entries = await listing;
+      expect(entries.map(({ name }) => name).toSorted()).toEqual(['current.ts', 'existing']);
+      expect(tree.getTreeSnapshot().has('source/stale.ts')).toBe(false);
+      expect(readDirectory).toHaveBeenCalledTimes(2);
+    } finally {
+      pending.resolve([]);
+      await listing;
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
   /* A thumbnail capture rewrites `thumbnail.webp` on every render; dropping the
    * stamp until the parent re-read redrew every file-tree row twice per commit. */
   it.each(['machine', 'user', 'editor'] as const)(

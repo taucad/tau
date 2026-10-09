@@ -237,6 +237,8 @@ const fffProcessSchema = z.strictObject({
   }),
   filamentDiameter: machineManifestQuantitySchema,
   bed: z.strictObject({
+    /** The heater component that heats the bed, when the machine declares one; a chamber heater is never it. */
+    heater: identifier.optional(),
     maximumTemperature: machineManifestQuantitySchema,
     plates: z
       .array(z.strictObject({ id: identifier, label }))
@@ -448,6 +450,26 @@ export const isSimulatedMachine = (manifest: Pick<MachineManifest, 'qualificatio
   manifest.qualifications.length > 0 &&
   manifest.qualifications.every((qualification) => qualification.environment === 'simulation');
 
+/**
+ * What only a person's own Print pane takes before a job on this machine is approved: the attestations the machine
+ * asks for and whether the person must say they are at the machine. A chat banner or an agent cannot collect either,
+ * so they send the person to the Print pane. The one place this rule lives.
+ * @param capabilities - The machine's installed capabilities (or its manifest).
+ * @returns What the person must confirm, or `undefined` when nothing is (or the machine runs no jobs).
+ * @public
+ */
+export const personOnlyJobApproval = (
+  capabilities: Pick<MachineManifest, 'jobs'>,
+):
+  | Readonly<{ attestations: Extract<MachineJobFacts, { type: 'supported' }>['attestations']; attended: boolean }>
+  | undefined => {
+  const { jobs } = capabilities;
+  if (jobs.type !== 'supported' || (jobs.attestations.length === 0 && !jobs.safety.attended)) {
+    return undefined;
+  }
+  return { attestations: jobs.attestations, attended: jobs.safety.attended };
+};
+
 /** Remedy and outcome shapes, for consumers that parse them. @internal */
 export const machineRemedySchema: z.ZodType<MachineRemedy> = remedySchema;
 /** @internal */
@@ -488,6 +510,10 @@ const assertReferences = (manifest: z.infer<typeof machineManifestSchema>): void
     if (component.kind === 'motion' && component.axes.some((axis) => !axes.has(axis))) {
       throw new TypeError(`parseMachineManifest: ${component.id} moves an undeclared axis.`);
     }
+  }
+  const bedHeater = fffProcessOf(manifest)?.bed.heater;
+  if (bedHeater !== undefined && components.get(bedHeater)?.kind !== 'heater') {
+    throw new TypeError(`parseMachineManifest: the bed heater ${bedHeater} is not a heater component.`);
   }
 };
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
-import { fffProcessOf, parseMachineManifest } from '#machines/machine-manifest.js';
+import { fffProcessOf, parseMachineManifest, personOnlyJobApproval } from '#machines/machine-manifest.js';
 
 const [light, pause] = machineManifestFixture.actions;
 const fff = fffProcessOf(machineManifestFixture);
@@ -26,6 +26,15 @@ describe('parseMachineManifest', () => {
     });
     expect(parsed.jobs.type === 'supported' && parsed.jobs.accepts[0]?.extensions).toEqual(['.gcode', '.nc']);
     expect(parsed.stop.recovery).toEqual([{ type: 'stop', consequence: 'Home the machine afterwards.' }]);
+  });
+
+  it('admits a bed heater that names a declared heater component', () => {
+    const parsed = parseMachineManifest({
+      ...machineManifestFixture,
+      components: [...machineManifestFixture.components, { id: 'bed', label: 'Bed', kind: 'heater' }],
+      processes: [{ ...fff, bed: { ...fff?.bed, heater: 'bed' } }],
+    });
+    expect(fffProcessOf(parsed)?.bed.heater).toBe('bed');
   });
 
   it.each(['gcode', '.GCODE', '.g code'])('refuses the accepted extension %j', (extension) => {
@@ -65,6 +74,14 @@ describe('parseMachineManifest', () => {
       },
     ],
     [
+      'a bed heater that is not a declared heater component',
+      { ...machineManifestFixture, processes: [{ ...fff, bed: { ...fff?.bed, heater: 'chamber-light' } }] },
+    ],
+    [
+      'a bed heater naming no component',
+      { ...machineManifestFixture, processes: [{ ...fff, bed: { ...fff?.bed, heater: 'bed' } }] },
+    ],
+    [
       'two slicing presets',
       {
         ...machineManifestFixture,
@@ -100,5 +117,26 @@ describe('parseMachineManifest', () => {
     ],
   ])('refuses %s', (_label, candidate) => {
     expect(() => parseMachineManifest(candidate)).toThrow();
+  });
+});
+
+describe('personOnlyJobApproval', () => {
+  const { jobs } = machineManifestFixture;
+  if (jobs.type !== 'supported') {
+    throw new Error('expected a job-capable fixture');
+  }
+  const unattended = { ...jobs, attestations: [], safety: { ...jobs.safety, attended: false } };
+
+  it('names the attestations and attendance only the Print pane takes', () => {
+    expect(personOnlyJobApproval({ jobs })).toEqual({ attestations: jobs.attestations, attended: false });
+    expect(personOnlyJobApproval({ jobs: { ...unattended, safety: { ...jobs.safety, attended: true } } })).toEqual({
+      attestations: [],
+      attended: true,
+    });
+  });
+
+  it('asks for nothing when the machine asks for nothing or runs no jobs', () => {
+    expect(personOnlyJobApproval({ jobs: unattended })).toBeUndefined();
+    expect(personOnlyJobApproval({ jobs: { type: 'unsupported' } })).toBeUndefined();
   });
 });

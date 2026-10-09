@@ -493,7 +493,9 @@ describe('machine channel', () => {
 
   it.each([
     { server: 'machines', protocolVersion: 1 },
-    { server: 'jobs', protocolVersion: 2 },
+    // A peer built before host-stamped qualifications and transport-tagged endpoints.
+    { server: 'machines', protocolVersion: 2 },
+    { server: 'jobs', protocolVersion: 3 },
   ])('should tell a person to update Tau when the host says hello as $server v$protocolVersion', async (hello) => {
     const ports = new MessageChannel();
     const client = connectMachineChannel(ports.port2);

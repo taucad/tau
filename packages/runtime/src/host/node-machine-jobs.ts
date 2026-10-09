@@ -423,10 +423,11 @@ export const createNodeMachineJobs = (
     code: 'MACHINE_HOST_CLOSING',
     message: 'Tau is closing and starts nothing new. Approve the job again once Tau carries on.',
   };
-  // Refused at the moment of sending: nothing was sent and the job still waits at `starting` for a person.
+  // Refused at the moment of sending: nothing was started, and the job fails rather than wait at `starting`, which no
+  // consumer offers a way forward from. Requesting it again costs a new transfer.
   const hostClosingAtStart: MachineFailure = {
     code: 'MACHINE_HOST_CLOSING',
-    message: 'Tau is closing, so the job did not start. It waits: approve it again once Tau carries on.',
+    message: 'Tau was closing, so the job did not start. Request it again.',
   };
 
   // Transfer (for a stored delivery) and start, each once, through the journal. Never resends.
@@ -593,11 +594,7 @@ export const createNodeMachineJobs = (
     }
     current = latest();
     if (current.state === 'starting' && receipt.status === 'rejected') {
-      // Refused before anything was sent: the start op was never journaled. A start refused because Tau is closing
-      // leaves the job `starting`, so a person approves it again (with full admission) once Tau carries on.
-      if (receipt.code === 'MACHINE_HOST_CLOSING') {
-        throw refusal(hostClosingAtStart);
-      }
+      // Refused before anything was sent: the start op was never journaled.
       return fail({ code: receipt.code, message: receipt.message });
     }
     return current;
@@ -860,10 +857,6 @@ export const createNodeMachineJobs = (
             return await drive(current, { admitted, signal: admitted.signal });
           } catch (error) {
             const latest = jobs.get(jobId) ?? current;
-            // Nothing was started; the job waits for a person to approve it again.
-            if (latest.state === 'starting' && failureOf(error).code === 'MACHINE_HOST_CLOSING') {
-              throw error;
-            }
             return terminalJobStates.has(latest.state)
               ? latest
               : commitJob({ ...latest, state: 'failed', failure: failureOf(error) });

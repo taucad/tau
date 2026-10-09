@@ -8,7 +8,7 @@ import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definiti
 import { machineManifestDefinitionFixture } from '#machines/machine-manifest.fixture.js';
 import { fixtureSession } from '#machines/machine-session.fixture.js';
 
-type Binding = Readonly<{ logicalId: string }>;
+type Binding = Readonly<{ serial: string }>;
 type Submission = Readonly<{ copies: number }>;
 
 const standardSchema = <Value>(
@@ -25,7 +25,7 @@ const standardSchema = <Value>(
 const bindingConfiguration = defineConfiguration({
   id: 'test.machine.binding',
   version: '1.0.0',
-  schema: standardSchema<Binding>({ type: 'object', properties: { logicalId: { type: 'string' } } }),
+  schema: standardSchema<Binding>({ type: 'object', properties: { serial: { type: 'string' } } }),
   ui: { version: 1, rjsf: {} },
 });
 const submissionConfiguration = defineConfiguration({
@@ -119,7 +119,7 @@ describe('defineMachine', () => {
     const trusted = await resolveRuntimePluginDefinition('machine', registration);
     const events = [];
     for await (const event of trusted.discover(
-      { configuration: { logicalId: 'workshop-x1c' }, signal: new AbortController().signal },
+      { configuration: { serial: '00M09A350100123' }, signal: new AbortController().signal },
       {
         clock: { now: () => 'now' },
         async *listenDatagrams() {
@@ -149,11 +149,12 @@ describe('defineMachine', () => {
     const session = await trusted.connect(
       {
         candidate,
-        configuration: { logicalId: 'workshop-x1c' },
+        configuration: { serial: '00M09A350100123' },
         connection: {
           secretRef: 'vault:printer-1',
           serviceTrust: { mqtt: { type: 'system' } },
         },
+        purpose: 'bind',
         signal: connectionSignal,
       },
       {

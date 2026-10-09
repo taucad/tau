@@ -259,6 +259,13 @@ const digest = z.custom<ContentDigest>((value) => typeof value === 'string' && /
 const operationKind = z.enum(['action', 'stop', 'hold', 'transfer', 'start']);
 const receiptBase = { operationId: identity, machineId: identity, observedAt: instant };
 
+/**
+ * How long a host's quiesce waits, by default, for job starts already past their checks before it gives up
+ * (`MACHINE_HOST_START_IN_FLIGHT`). A launcher bounds its own quit wait above this, so the host's answer lands first.
+ * @public
+ */
+export const machineStartWaitMilliseconds = 10_000;
+
 /** Strict schema of one requester. @internal */
 export const machineRequesterSchema = z.strictObject({
   kind: z.enum(['user', 'agent']),

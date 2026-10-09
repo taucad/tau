@@ -48,6 +48,7 @@ import {
 import type { MachineChannelEndpoint, MachineChannelHostOperations } from '#machines/machine-channel.js';
 import type { MachineBindingRemoval } from '#machines/machine-client.js';
 import { createMachineDirectory } from '#machines/machine-directory.js';
+import { machineStartWaitMilliseconds } from '#machines/machine-jobs.js';
 import type { MachineDirectory, MachineDirectoryEntry } from '#machines/machine-directory.js';
 import type { MachineJob } from '#machines/machine-jobs.js';
 import type { MachineAlert } from '#machines/machine-observation.js';
@@ -132,19 +133,45 @@ export type NodeMachineHost = Readonly<{
   removeBinding(input: RemoveNodeMachineBindingInput): Promise<MachineBindingRemoval>;
   /**
    * Begin quiescing: from this call until the returned `resume` is called (or the host closes), approving a job and
-   * the start of any job, stored or streamed, are refused `MACHINE_HOST_CLOSING`; a job refused at its start stays
-   * `starting` and is approved again. Reads, stops, holds and actions carry on, and a run already started keeps
-   * running. The promise settles once every start already past its check has settled, so its run, if any, is in the
-   * machine's report. A launcher awaits this before it checks whether a streamed run is feeding a machine and then
-   * closes, so none begins in between; when it keeps running after all, it calls `resume`.
-   * @param input - `startTimeout`: how long to wait for starts in flight, in milliseconds (default 10 s).
+   * the start of any job, stored or streamed, are refused `MACHINE_HOST_CLOSING`; a job refused at its start fails
+   * with that code and is requested again. Reads, stops, holds and actions carry on, and a run already started keeps
+   * running. The promise settles once every start already past its check has settled, so its run, if any, is on its
+   * job (and, for a streamed start, in the machine's report). A launcher awaits this before it checks whether a
+   * streamed run is feeding a machine and then closes, so none begins in between; when it keeps running after all, it
+   * calls `resume`.
+   * @param input - `startTimeout`: how long to wait for starts in flight, in milliseconds (default
+   * `machineStartWaitMilliseconds`).
    * @returns `resume`: admit starts again. Calling it more than once does nothing.
-   * @throws `MACHINE_HOST_START_IN_FLIGHT` when a start is still in flight after `startTimeout`; starts are then admitted
-   * again, as after `resume`, and the launcher cannot know whether a run is beginning.
+   * @throws {@link MachineHostStartInFlightError} when a start is still in flight after `startTimeout`. The gate stays
+   * up: a launcher that closes anyway just closes, and one that calls its close off calls the error's `resume`.
    */
   quiesce(input?: Readonly<{ /** Milliseconds. */ startTimeout?: number }>): Promise<() => void>;
   close(): Promise<void>;
 }>;
+
+/**
+ * `quiesce()` waited `startTimeout` and a start was still in flight, so the launcher cannot know whether a run is
+ * beginning. Starts stay refused until `resume` is called.
+ * @public
+ */
+export class MachineHostStartInFlightError extends Error {
+  /** Admit starts again, for a launcher that calls its close off. Calling it more than once does nothing. */
+  public readonly resume: () => void;
+
+  public constructor(resume: () => void) {
+    super('MACHINE_HOST_START_IN_FLIGHT');
+    this.name = 'MachineHostStartInFlightError';
+    this.resume = resume;
+  }
+
+  /**
+   * The failure code, beside the message.
+   * @returns `MACHINE_HOST_START_IN_FLIGHT`.
+   */
+  public get code(): 'MACHINE_HOST_START_IN_FLIGHT' {
+    return 'MACHINE_HOST_START_IN_FLIGHT';
+  }
+}
 
 const closeOwned = async (operations: ReadonlyArray<() => void | Promise<void>>): Promise<void> => {
   const errors: unknown[] = [];
@@ -832,7 +859,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     completeBinding: bindings.completeBinding,
     describeBinding: bindings.describeBinding,
     removeBinding: bindings.removeBinding,
-    async quiesce({ startTimeout = 10_000 } = {}) {
+    async quiesce({ startTimeout = machineStartWaitMilliseconds } = {}) {
       quiescers += 1;
       let resumed = false;
       const resume = (): void => {
@@ -849,8 +876,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       });
       try {
         if (await Promise.race([inFlight.then(() => false), timedOut])) {
-          resume();
-          throw new Error('MACHINE_HOST_START_IN_FLIGHT');
+          throw new MachineHostStartInFlightError(resume);
         }
       } finally {
         clearTimeout(timer);

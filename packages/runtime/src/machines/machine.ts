@@ -326,6 +326,12 @@ export type MachineConnectInput<Configuration> = Readonly<{
   candidate: MachineCandidate;
   configuration: Configuration;
   connection: MachineConnectionContext;
+  /**
+   * `bind`: a person's binding ceremony, the first connect to this endpoint, where a provider may insist on proof that
+   * the endpoint is the machine it claims. `reconnect`: the host keeping a binding connected; the endpoint was proven
+   * at bind, so silence or a busy answer is the machine being away or held, not a wrong address.
+   */
+  purpose: 'bind' | 'reconnect';
   signal: AbortSignal;
 }>;
 
@@ -515,6 +521,11 @@ export type MachineJobCapability<Configuration> =
       (
         | Readonly<{
             delivery: 'streamed';
+            /**
+             * Resolve `accepted` only once the run is in the session's report, and name it (`runId`): the host
+             * records that run on the job from this receipt, and a launcher deciding whether quitting would cut a
+             * stream reads both.
+             */
             start(input: MachineProviderStartInput<Configuration>): Promise<MachineCommandReceipt>;
           }>
         | Readonly<{

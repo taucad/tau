@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
@@ -13,7 +13,7 @@ import type { HostActor, HostRouteGrant } from '#host/host-admission.js';
 import { createNodeMachineEventLog } from '#host/node-machine-event-log.js';
 import { parseJournalEvent } from '#host/node-machine-operations.js';
 import { openNodeMachineStore } from '#host/node-machine-store.js';
-import { createNodeMachineHost } from '#host/node.js';
+import { createNodeMachineHost, MachineHostStartInFlightError } from '#host/node.js';
 import type { NodeMachineHost, NodeMachineRuntime } from '#host/node.js';
 import { connectMachineChannel } from '#machines/machine-channel.js';
 import type { MachineChannelClient, MachineChannelHostOperations } from '#machines/machine-channel.js';
@@ -1343,7 +1343,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     await fixture.close();
   });
 
-  it('should start no job while the host quiesces, and approve one again once it resumes', async () => {
+  it('should start no job while the host quiesces, and fail one it refuses at its start so it is requested again', async () => {
     const jobs = storedJobs();
     const fixture = await boundPrinter(jobs.facet);
     await request(fixture.client, 'job-1');
@@ -1352,23 +1352,30 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     await expect(fixture.client.listJobs({})).resolves.toMatchObject([{ jobId: 'job-1', state: 'awaiting-approval' }]);
     resume();
     resume();
-    // Quiescing that begins after the approval, while the program transfers, still refuses the start; the job keeps
-    // its transfer and waits at `starting`, so a quit that is refused (or never happens) loses nothing.
+    // Quiescing that begins after the approval, while the program transfers, still refuses the start. Nothing starts,
+    // and the job fails with a typed code rather than wait at `starting`, where no consumer offers a way forward.
     let quiescing: Promise<() => void> | undefined;
     jobs.transfer.mockImplementationOnce(async (input) => {
       quiescing = fixture.host.quiesce();
       return { status: 'accepted', transferId: `transfer-${input.operationId}`, observedAt };
     });
-    await expect(approve(fixture.client, 'job-1')).rejects.toThrow(
-      'Tau is closing, so the job did not start. It waits: approve it again once Tau carries on.',
-    );
+    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({
+      jobId: 'job-1',
+      state: 'failed',
+      failure: {
+        code: 'MACHINE_HOST_CLOSING',
+        message: 'Tau was closing, so the job did not start. Request it again.',
+      },
+    });
     expect(jobs.start).not.toHaveBeenCalled();
-    await expect(fixture.client.listJobs({})).resolves.toMatchObject([{ jobId: 'job-1', state: 'starting' }]);
-    // The quit is refused: Tau carries on, and the person approves the same job again.
+    // The quit is refused: Tau carries on, and the job requested again starts.
     (await quiescing)?.();
-    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({ state: 'started' });
-    expect(jobs.transfer).toHaveBeenCalledOnce();
+    await request(fixture.client, 'job-2');
+    await expect(approve(fixture.client, 'job-2')).resolves.toMatchObject({ state: 'started' });
+    expect(jobs.transfer).toHaveBeenCalledTimes(2);
     expect(jobs.start).toHaveBeenCalledOnce();
+    // Nothing the refusal left holds the binding.
+    await expect(fixture.client.removeBinding({ machineId })).resolves.toEqual({ status: 'removed', machineId });
     await fixture.close();
   });
 
@@ -1402,10 +1409,11 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     await expect(isSettled(quiesced)).resolves.toBe(false);
     prepared.resolve();
     const resume = await quiesced;
-    await expect(refused).rejects.toThrow('Tau is closing, so the job did not start.');
+    await expect(refused).resolves.toMatchObject({ state: 'failed', failure: { code: 'MACHINE_HOST_CLOSING' } });
     expect(jobs.start).not.toHaveBeenCalled();
     resume();
     // A start already sending when quiescing begins is waited for, so its run is known before quiescing settles.
+    await request(fixture.client, 'job-2');
     const sending = Promise.withResolvers<void>();
     const sent = Promise.withResolvers<void>();
     jobs.start.mockImplementationOnce(async (input) => {
@@ -1413,21 +1421,25 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
       await sent.promise;
       return { status: 'accepted', runId: `run-${input.operationId}`, observedAt };
     });
-    const started = approve(fixture.client, 'job-1');
+    const started = approve(fixture.client, 'job-2');
     await sending.promise;
     const waiting = fixture.host.quiesce();
     await expect(isSettled(waiting)).resolves.toBe(false);
     sent.resolve();
     const resumeAfterStart = await waiting;
-    await expect(fixture.client.listJobs({})).resolves.toMatchObject([
-      { jobId: 'job-1', state: 'started', run: { runId: 'run-start-job-1', outcome: 'running' } },
-    ]);
+    await expect(fixture.client.listJobs({})).resolves.toContainEqual(
+      expect.objectContaining({
+        jobId: 'job-2',
+        state: 'started',
+        run: { runId: 'run-start-job-2', outcome: 'running' },
+      }),
+    );
     await expect(started).resolves.toMatchObject({ state: 'started' });
     resumeAfterStart();
-    // Bounded: a start that does not settle in time fails quiescing, which admits starts again rather than keeping
-    // its gate up.
-    await request(fixture.client, 'job-2');
+    // Bounded: a start that does not settle in time fails quiescing, but its gate stays up until the launcher that
+    // calls its close off resumes.
     await request(fixture.client, 'job-3');
+    await request(fixture.client, 'job-4');
     const hanging = Promise.withResolvers<void>();
     const unhang = Promise.withResolvers<void>();
     jobs.start.mockImplementationOnce(async (input) => {
@@ -1435,13 +1447,20 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
       await unhang.promise;
       return { status: 'accepted', runId: `run-${input.operationId}`, observedAt };
     });
-    const second = approve(fixture.client, 'job-2');
-    await hanging.promise;
-    await expect(fixture.host.quiesce({ startTimeout: 10 })).rejects.toThrow('MACHINE_HOST_START_IN_FLIGHT');
     const third = approve(fixture.client, 'job-3');
+    await hanging.promise;
+    const timedOut = await fixture.host.quiesce({ startTimeout: 10 }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(timedOut).toBeInstanceOf(MachineHostStartInFlightError);
+    await expect(approve(fixture.client, 'job-4')).rejects.toThrow('Tau is closing and starts nothing new.');
     unhang.resolve();
-    await expect(second).resolves.toMatchObject({ state: 'started' });
     await expect(third).resolves.toMatchObject({ state: 'started' });
+    if (timedOut instanceof MachineHostStartInFlightError) {
+      timedOut.resume();
+    }
+    await expect(approve(fixture.client, 'job-4')).resolves.toMatchObject({ state: 'started' });
     await fixture.close();
   });
 
@@ -3027,6 +3046,64 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     });
     expect(oldSession.observe).not.toHaveBeenCalled();
     await expect(fixture.client.get(machine)).resolves.toMatchObject({ freshness: 'current' });
+    await fixture.close();
+  });
+
+  it('should keep watching the live session when confirming a binding cannot save its new address', async () => {
+    const seen: string[] = [];
+    const claimed = claimedProvider(async (candidate) => {
+      seen.push(candidate.id);
+      return fixtureSession();
+    });
+    const root = await storeRoot();
+    const fixture = await openServedHost(root, claimed, runtime);
+    await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+    const ceremonyId = await beginCeremony(fixture.client, 'candidate-b', machineId);
+    useFakeTimers();
+    // `machine.json` cannot be replaced while its directory is read-only.
+    await chmod(join(root, machineId), 0o500);
+    try {
+      await expect(
+        fixture.host.completeBinding({ ceremonyId, secretRef: 'vault:x1c', serviceTrust: {} }),
+      ).rejects.toThrow();
+    } finally {
+      await chmod(join(root, machineId), 0o700);
+    }
+    // The old session is still live and still watched: no reconnect over it, and no remedy for a working machine.
+    await vi.advanceTimersByTimeAsync(2000 + 5000 + 10_000 + 30_000 + 60_000);
+    expect(seen).toEqual(['candidate-a', 'candidate-b']);
+    await expect(fixture.client.get(machine)).resolves.toMatchObject({ snapshot: { alerts: [] } });
+    vi.useRealTimers();
+    await fixture.close();
+  });
+
+  it('should tell a provider whether it connects for a binding or to keep one connected', async () => {
+    const purposes: string[] = [];
+    const lose = Promise.withResolvers<void>();
+    const provider = fixtureProvider({
+      id: 'binding-provider',
+      candidates: [candidateA],
+      async connect({ purpose }) {
+        purposes.push(purpose);
+        if (purposes.length > 1) {
+          return fixtureSession();
+        }
+        return fixtureSession({
+          async *observe() {
+            yield { type: 'snapshot', snapshot: fixtureReport() };
+            await lose.promise;
+          },
+        });
+      },
+    });
+    const fixture = await openServedHost(await storeRoot(), provider, runtime);
+    await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+    useFakeTimers();
+    lose.resolve();
+    await vi.advanceTimersByTimeAsync(2000);
+    await until(() => purposes.length === 2);
+    expect(purposes).toEqual(['bind', 'reconnect']);
+    vi.useRealTimers();
     await fixture.close();
   });
 

@@ -162,6 +162,7 @@ export const createNodeMachineBindings = (
         candidate: pending.candidate,
         configuration: pending.configuration,
         connection,
+        purpose: 'bind',
         signal: abort.signal,
       },
       context.runtime.connection(),
@@ -253,9 +254,10 @@ export const createNodeMachineBindings = (
           ) {
             throw new Error('MACHINE_BINDING_BUSY');
           }
-          // The old reconnect loop ends first, so an attempt it has in flight (at the old endpoint) never attaches
-          // after this one; if this one fails, the machine goes back to supervision on the backoff.
-          supervisors.get(machineId)?.stop.abort();
+          // The old reconnect loop ends once the new endpoint is durable, still on this queue, so an attempt it has in
+          // flight (at the old endpoint) never attaches after this one. A failed write leaves it watching the live
+          // session; once it has stopped, a failure hands the machine back to supervision on the backoff.
+          let stopped = false;
           try {
             machine.record = await store.writeMachine({
               ...machine.record,
@@ -263,13 +265,17 @@ export const createNodeMachineBindings = (
               configuration: pending.configuration,
               connection,
             });
+            supervisors.get(machineId)?.stop.abort();
+            stopped = true;
             if (live) {
               connectedSessions.delete(machineId);
               sessionLost.emit(machineId);
             }
             await attach();
           } catch (error) {
-            supervise(machine.record, undefined);
+            if (stopped) {
+              supervise(machine.record, undefined);
+            }
             throw error;
           }
           connectedSessions.set(machineId, session);

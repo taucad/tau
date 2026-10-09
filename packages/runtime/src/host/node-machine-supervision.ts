@@ -159,7 +159,13 @@ export const createNodeMachineSupervision = (context: NodeMachineHostContext): N
     }
     const definition = await definitionOf(record.providerId);
     const session = await definition.connect(
-      { candidate: record.candidate, configuration: record.configuration, connection: record.connection, signal },
+      {
+        candidate: record.candidate,
+        configuration: record.configuration,
+        connection: record.connection,
+        purpose: 'reconnect',
+        signal,
+      },
       runtime.connection(),
     );
     const lost = Promise.withResolvers<void>();

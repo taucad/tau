@@ -4,7 +4,8 @@ export {
   machineManifestOf,
   parseMachineProvider,
 } from '#machines/machine.js';
-export { connectMachineChannel } from '#machines/machine-channel.js';
+export { connectMachineChannel, machineChannelProtocolVersion } from '#machines/machine-channel.js';
+export { machineStartWaitMilliseconds } from '#machines/machine-jobs.js';
 export { machineCredentialReference } from '#machines/machine-credential.js';
 export type { MachineChannelClient, MachineChannelEndpoint } from '#machines/machine-channel.js';
 export {
@@ -14,6 +15,7 @@ export {
   machineObservationGroups,
   millingProcessOf,
   parseMachineManifest,
+  personOnlyJobApproval,
 } from '#machines/machine-manifest.js';
 export type {
   MachineAxis,

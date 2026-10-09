@@ -7,7 +7,7 @@ import type { MachineProviderDefinition, MachineSession, MachineTransportTrust }
 import { machineManifestDefinitionFixture } from '#machines/machine-manifest.fixture.js';
 import type { MachineAlert } from '#machines/machine-observation.js';
 
-type Binding = Readonly<{ logicalId: string }>;
+type Binding = Readonly<{ serial: string }>;
 type Submission = Readonly<{ copies: number }>;
 type Schema<Value> = StandardSchemaV1<Value, Value> & StandardJSONSchemaV1<Value, Value>;
 

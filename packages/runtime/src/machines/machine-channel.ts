@@ -99,8 +99,16 @@ type WatchInput = Readonly<{ cursor?: MachineDirectoryCursor }>;
 type HoldBegun = MachineHold | (Readonly<{ status: 'rejected' }> & MachineFailure);
 type HoldRenewed = Readonly<{ status: 'held' | 'ended' }>;
 
+/**
+ * The machines channel's protocol version, said in the host's hello. A client refuses any other version with
+ * `MACHINE_CHANNEL_VERSION_MISMATCH`, so a wire change bumps it once. Version 3: host-stamped qualifications,
+ * transport-tagged endpoints and host-minted action approvals.
+ * @public
+ */
+export const machineChannelProtocolVersion = 3;
+
 type MachineChannelProtocol = {
-  readonly hello: Readonly<{ server: 'machines'; protocolVersion: 2 }>;
+  readonly hello: Readonly<{ server: 'machines'; protocolVersion: typeof machineChannelProtocolVersion }>;
   readonly calls: {
     readonly listProviders: { readonly args: EmptyInput; readonly result: readonly MachineProvider[] };
     readonly beginBinding: { readonly args: BeginBindingInput; readonly result: MachineBindingOutcome };
@@ -464,7 +472,7 @@ const cursorSchema = z.unknown().transform((value, context) => {
   }
 });
 const protocolSchemas: WireProtocolSchemas<MachineChannelProtocol> = {
-  hello: z.strictObject({ server: z.literal('machines'), protocolVersion: z.literal(2) }),
+  hello: z.strictObject({ server: z.literal('machines'), protocolVersion: z.literal(machineChannelProtocolVersion) }),
   calls: {
     listProviders: { args: emptySchema, result: providerListSchema },
     beginBinding: {
@@ -706,7 +714,7 @@ export const exposeMachineChannel = (input: {
   const server = createChannelServer<MachineChannelProtocol>({
     port: asPort(input.port),
     sessionKey,
-    hello: { server: 'machines', protocolVersion: 2 },
+    hello: { server: 'machines', protocolVersion: machineChannelProtocolVersion },
     protocolSchemas,
     streamFlowControl,
     impl: {

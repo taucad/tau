@@ -1405,7 +1405,7 @@ describe('Print pane jobs', () => {
     expect(fixture.resolveJob.mock.invocationCallOrder[0]).toBeLessThan(respond.mock.invocationCallOrder[0]!);
   });
 
-  it('denies through the paused chat, or directly when no chat waits', async () => {
+  it('denies on the person’s session, then answers the paused chat, or denies directly when no chat waits', async () => {
     const paused = createBridge({
       interruptId: 'interrupt-1',
       kind: 'approval',
@@ -1424,7 +1424,15 @@ describe('Print pane jobs', () => {
     await waitFor(() => {
       expect(paused.respond).toHaveBeenCalledExactlyOnceWith('interrupt-1', false);
     });
-    expect(first.resolveJob).not.toHaveBeenCalled();
+    // The person's own session records the denial before the chat is answered (R16), so the job ends denied by them.
+    expect(first.resolveJob).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ jobId: 'job-agent-1', decision: 'deny', resolvedBy: byPerson }),
+    );
+    expect(first.resolveJob.mock.invocationCallOrder[0]).toBeLessThan(paused.respond.mock.invocationCallOrder[0]!);
+    await expect(first.resolveJob.mock.results[0]?.value).resolves.toMatchObject({
+      state: 'denied',
+      resolvedBy: { kind: 'user', id: 'operator' },
+    });
     view.unmount();
 
     const fixture = createFixture({ jobs: [agentJob()] });

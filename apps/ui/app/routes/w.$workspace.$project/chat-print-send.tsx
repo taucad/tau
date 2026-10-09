@@ -238,15 +238,16 @@ function JobReview({
         await bridge.respond(pending.approvalId, true);
       }
     });
+  /* An agent's job is denied on the person's own session first, so the host records `denied` with the person as its
+   * resolver; then the paused chat is answered (R16). A person's own request is withdrawn. */
   const decline = async (): Promise<void> =>
     run(async () => {
-      if (pending) {
-        await bridge.respond(pending.approvalId, false);
-        return;
-      }
       await (isAgent
         ? client.resolveJob({ jobId: job.jobId, decision: 'deny', resolvedBy: operator })
         : client.withdrawJob({ jobId: job.jobId, resolvedBy: operator }));
+      if (pending) {
+        await bridge.respond(pending.approvalId, false);
+      }
     });
 
   return (

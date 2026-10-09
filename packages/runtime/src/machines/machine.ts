@@ -1,17 +1,21 @@
-import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { SettingsSchema, SettingsDefinition } from '#machines/settings.js';
 import type { CacheValue, ContentDigest } from '@taucad/cache-core';
 import { z } from 'zod';
 
 import { cloneBoundedJson } from '@taucad/parameters/json';
-import { admitConfigurationManifest, materializeConfigurationJsonSchema } from '#configuration/configuration.js';
-import type { ConfigurationDefinition, ConfigurationManifestV1, JsonSchema } from '#configuration/index.js';
-import { admitJsonSchema } from '@taucad/parameters/schema';
+import { admitConfigurationManifest } from '#configuration/configuration.js';
+import type { ConfigurationDefinition, ConfigurationManifestV1 } from '#configuration/index.js';
 import { machineManifestSchema, parseMachineManifest } from '#machines/machine-manifest.js';
 import type { MachineManifest } from '#machines/machine-manifest.js';
 import { machineActionDescriptorOf } from '#machines/machine-actions.js';
-import type { MachineActionDefinition, MachineFailure, MachineHoldDefinition } from '#machines/machine-actions.js';
-import type { MachineProgramSummary } from '#machines/machine-jobs.js';
+import type {
+  MachineActionDefinition,
+  MachineFailure,
+  MachineHoldDefinition,
+  MachineJobFailureCode,
+} from '#machines/machine-actions.js';
+import type { MachineProgramSummary, MachineRequester } from '#machines/machine-jobs.js';
 import type { MachineCheck, MachineObservation, MachineReport } from '#machines/machine-observation.js';
 import {
   attachRuntimePluginDefinition,
@@ -28,14 +32,8 @@ export type MachineAcceptedContainer = Readonly<{
   technology: string;
 }>;
 
-/** Serializable schema declaration for one provider-owned catalog query. @public */
-export type MachineQueryManifest = Readonly<{
-  inputSchema: JsonSchema;
-  resultSchema: JsonSchema;
-}>;
-
 /** Frozen serializable machine-provider registration metadata. @public */
-export type MachineProvider<Id extends string = string, QueryName extends string = string> = Readonly<{
+export type MachineProvider<Id extends string = string> = Readonly<{
   id: Id;
   name: string;
   version: string;
@@ -46,7 +44,6 @@ export type MachineProvider<Id extends string = string, QueryName extends string
   bindingConfiguration: ConfigurationManifestV1;
   /** Optional sparse preferences; observations and approvals never belong here. */
   settingsConfiguration?: ConfigurationManifestV1;
-  queries: Readonly<Record<QueryName, MachineQueryManifest>>;
 }>;
 
 /** Clock authority available to machine providers. @public */
@@ -111,7 +108,7 @@ export type MachineDatagram = Readonly<{
 }>;
 
 /**
- * A project artifact a print request names. The host finds the project by `projectId`, reads `path` from it and
+ * A project artifact a job names. The host finds the project by `projectId`, reads `path` from it and
  * re-verifies `length` and `digest` on every use, so the reference is never a copy of the bytes.
  * @public
  */
@@ -174,7 +171,7 @@ export type MachineConnectionRuntime = Readonly<{
   uploadFile?(input: MachineFileUploadInput): Promise<MachineFileUploadReceipt>;
 }>;
 
-/** Host-owned, bounded implicit-FTPS upload request. @public */
+/** Host-owned, bounded file upload to a machine's own storage. @public */
 export type MachineFileUploadInput = Readonly<{
   endpoint: Readonly<{ address: string; port: number }>;
   trust: MachineTransportTrust;
@@ -308,6 +305,11 @@ export type MachineProviderActionInput = Readonly<{
   // oxlint-disable-next-line typescript/no-restricted-types -- null is the caller's statement that it saw no run; absent would be no statement.
   expectedRunId: string | null;
   parameters: unknown;
+  /**
+   * Who asked, as the host admitted the session: never taken from the request. An agent's pause reports
+   * `paused.by: 'agent'`.
+   */
+  requestedBy: Readonly<{ kind: MachineRequester['kind'] }>;
   signal: AbortSignal;
 }>;
 
@@ -326,9 +328,11 @@ export type MachineActionCapability =
       apply(input: MachineProviderActionInput): Promise<MachineCommandReceipt>;
       /**
        * For an action whose descriptor confirms by `observation`: whether the latest report shows the effect. Reads
-       * only; never sends. The host asks after every observation until the answer is no longer `pending`.
+       * only; never sends. The host asks after every observation until the answer is no longer `pending`. For an
+       * operation this session never sent (a host restarted, a session replaced), the answer is `pending`: the host
+       * escalates it to attention and a person reconciles it; it is never `confirmed` or `refuted` by default.
        */
-      confirm(input: Omit<MachineProviderActionInput, 'signal'>): MachineActionConfirmation;
+      confirm(input: Omit<MachineProviderActionInput, 'signal' | 'requestedBy'>): MachineActionConfirmation;
     }>;
 
 /** A hold as the provider runs it. @public */
@@ -345,6 +349,8 @@ export type MachineProviderHoldInput = Readonly<{
   componentId: string;
   hold: string;
   parameters: unknown;
+  /** Who asked, as the host admitted the session. A hold is a person's, so this is always `user`. */
+  requestedBy: Readonly<{ kind: MachineRequester['kind'] }>;
   signal: AbortSignal;
 }>;
 
@@ -364,13 +370,13 @@ export type MachinePreparation =
       checks: readonly MachineCheck[];
       /** The facts of the setup this job relies on; the host fences the start with their digest. */
       setup: CacheValue;
-      /** The name the program will have on the machine, for a stored delivery. */
-      remoteName: string;
+      /** The name the program will have on the machine; only a stored delivery has one. */
+      remoteName?: string;
       parser: Readonly<{ id: string; version: string }>;
       providerData: CacheValue;
       observedAt: string;
     }>
-  | Readonly<{ status: 'refused'; code: string; message: string; observedAt: string }>;
+  | Readonly<{ status: 'refused'; code: MachineJobFailureCode; message: string; observedAt: string }>;
 
 /** One job step as the provider receives it. @public */
 export type MachineProviderJobInput<Configuration> = Readonly<{
@@ -381,31 +387,52 @@ export type MachineProviderJobInput<Configuration> = Readonly<{
   signal: AbortSignal;
 }>;
 
+/** A start as the provider receives it: the job step, its prepared data and the transfer it follows. @public */
+export type MachineProviderStartInput<Configuration> = MachineProviderJobInput<Configuration> &
+  Readonly<{ providerData: CacheValue; transferId?: string }>;
+
+/** What a start form's partial values are completed against: the program and what the person chose so far. @public */
+export type MachineCompleteConfigurationInput = Readonly<{
+  expectedMachineId: string;
+  artifact: MachineArtifactReference;
+  /** Partial start-form values; what is absent the provider fills from the machine's current setup. */
+  configuration: CacheValue;
+  signal: AbortSignal;
+}>;
+
 /**
  * Required facet: run programs. A stored machine receives the file and then one start command; a streamed machine
  * has no transfer, and `start` returns once the controller has taken the first block while the session keeps
  * feeding the rest. An `at-machine` start loads the program and returns `accepted` once the machine waits for its
- * own start button.
+ * own start button. Only a stored delivery names a file on the machine (`remoteName`).
  * @public
  */
 export type MachineJobCapability<Configuration> =
   | Readonly<{ type: 'unsupported' }>
   | (Readonly<{
       type: 'supported';
+      /**
+       * Read-only: complete a partial start form from what the machine reports (trays, plate, loaded material), in
+       * the provider's own submission keys, so no consumer writes vendor keys. The host validates the result
+       * before `prepare`. Absent, the host uses the values as given.
+       */
+      completeConfiguration?(input: MachineCompleteConfigurationInput): Promise<CacheValue>;
       /** Read-only: parse the program and check it against the setup. */
       prepare(input: MachineProviderJobInput<Configuration>): Promise<MachinePreparation>;
-      start(
-        input: MachineProviderJobInput<Configuration> &
-          Readonly<{ remoteName: string; providerData: CacheValue; transferId?: string }>,
-      ): Promise<MachineCommandReceipt>;
     }> &
       (
-        | Readonly<{ delivery: 'streamed' }>
+        | Readonly<{
+            delivery: 'streamed';
+            start(input: MachineProviderStartInput<Configuration>): Promise<MachineCommandReceipt>;
+          }>
         | Readonly<{
             delivery: 'stored';
             transfer(
               input: MachineProviderJobInput<Configuration> &
                 Readonly<{ remoteName: string; providerData: CacheValue }>,
+            ): Promise<MachineCommandReceipt>;
+            start(
+              input: MachineProviderStartInput<Configuration> & Readonly<{ remoteName: string }>,
             ): Promise<MachineCommandReceipt>;
           }>
       ));
@@ -446,6 +473,10 @@ export type MachineSession<SubmissionConfiguration = unknown> = Readonly<{
   stillCapture: MachineStillCaptureCapability;
   getDescriptor(input: MachineGetDescriptorInput): Promise<MachineProviderDescriptor>;
   getSnapshot(input: MachineGetSnapshotInput): Promise<MachineReport>;
+  /**
+   * Live reports. The first observation every subscriber receives is a `snapshot`; `changed` deltas follow only
+   * after it. Aborting the signal ends the iteration by returning, never by throwing.
+   */
   observe(input: MachineObserveInput): AsyncIterable<MachineObservation>;
   /** Stop now, ahead of anything queued. */
   stop(input: Readonly<{ operationId: string; signal: AbortSignal }>): Promise<MachineCommandReceipt>;
@@ -453,48 +484,6 @@ export type MachineSession<SubmissionConfiguration = unknown> = Readonly<{
   reconcile(input: MachineReconcileInput): Promise<MachineCommandReceipt>;
   close(): Promise<void>;
   dispose(): Promise<void>;
-}>;
-
-type ProviderSchema = StandardJSONSchemaV1 & StandardSchemaV1;
-
-/** One schema-declared provider catalog query. @public */
-export type MachineDeclaredQuery<
-  InputSchema extends ProviderSchema = ProviderSchema,
-  ResultSchema extends ProviderSchema = ProviderSchema,
-> = Readonly<{
-  inputSchema: InputSchema;
-  resultSchema: ResultSchema;
-  query(
-    input: StandardSchemaV1.InferOutput<InputSchema>,
-    runtime: MachineDiscoveryRuntime,
-  ): Promise<StandardSchemaV1.InferInput<ResultSchema>>;
-}>;
-
-/**
- * Preserve one query's correlated Standard Schema input and output types.
- * @param query - Schema-bearing catalog query and its implementation.
- * @returns The unchanged typed query.
- * @public
- */
-export const defineMachineQuery = <InputSchema extends ProviderSchema, ResultSchema extends ProviderSchema>(
-  query: MachineDeclaredQuery<InputSchema, ResultSchema>,
-): MachineDeclaredQuery<InputSchema, ResultSchema> => query;
-
-type MachineQuerySchemas = Readonly<{
-  inputSchema: ProviderSchema;
-  resultSchema: ProviderSchema;
-  query: unknown;
-}>;
-type QueryMap = Readonly<Record<string, MachineQuerySchemas>>;
-type MachineQueryDefinitionFor<Value> =
-  Value extends Readonly<{
-    inputSchema: infer InputSchema extends ProviderSchema;
-    resultSchema: infer ResultSchema extends ProviderSchema;
-  }>
-    ? MachineDeclaredQuery<InputSchema, ResultSchema>
-    : never;
-type MachineQueryDefinitions<Queries extends QueryMap> = Readonly<{
-  [Name in keyof Queries]: MachineQueryDefinitionFor<Queries[Name]>;
 }>;
 
 /**
@@ -516,7 +505,6 @@ export type MachineProviderDefinition<
   Id extends string,
   BindingSchema extends StandardSchemaV1,
   SubmissionSchema extends StandardSchemaV1,
-  Queries extends QueryMap = Readonly<Record<never, never>>,
   Settings extends SettingsSchema = SettingsSchema,
 > = Readonly<{
   id: Id;
@@ -528,7 +516,6 @@ export type MachineProviderDefinition<
   bindingConfiguration: ConfigurationDefinition<BindingSchema>;
   submissionConfiguration: ConfigurationDefinition<SubmissionSchema>;
   settingsConfiguration?: SettingsDefinition<Settings>;
-  queries?: Queries & MachineQueryDefinitions<Queries>;
   discover(
     input: MachineDiscoveryInput<StandardSchemaV1.InferOutput<BindingSchema>>,
     runtime: MachineDiscoveryRuntime,
@@ -540,10 +527,7 @@ export type MachineProviderDefinition<
 }>;
 
 /** Callable machine capability factory using the shared toolkit ABI. @public */
-export type MachineProviderFactory<Id extends string, QueryName extends string, Definition> = () => MachineProvider<
-  Id,
-  QueryName
-> &
+export type MachineProviderFactory<Id extends string, Definition> = () => MachineProvider<Id> &
   RuntimePluginDefinitionCarrier<Definition>;
 
 const assertIdentity = (value: string, field: string): void => {
@@ -560,23 +544,6 @@ const freezeJson = <Value>(value: Value): Value => {
     Object.freeze(value);
   }
   return value;
-};
-
-const queryManifest = (
-  query: Readonly<{
-    inputSchema: ProviderSchema;
-    resultSchema: ProviderSchema;
-  }>,
-): MachineQueryManifest => {
-  const inputSchema = materializeConfigurationJsonSchema(
-    query.inputSchema['~standard'].jsonSchema.input({ target: 'draft-07' }),
-  );
-  const resultSchema = materializeConfigurationJsonSchema(
-    query.resultSchema['~standard'].jsonSchema.output({ target: 'draft-07' }),
-  );
-  admitJsonSchema(inputSchema);
-  admitJsonSchema(resultSchema);
-  return { inputSchema, resultSchema };
 };
 
 const isCanonicalArchiveMember = (member: string): boolean =>
@@ -627,7 +594,6 @@ const assertDefinition = (definition: {
   readonly version: string;
   readonly vendor: string;
   readonly protocolVersion: number;
-  readonly queries?: Readonly<Record<string, unknown>>;
 }): void => {
   for (const [field, value] of [
     ['id', definition.id],
@@ -639,10 +605,6 @@ const assertDefinition = (definition: {
   }
   if (definition.protocolVersion !== 2) {
     throw new TypeError('defineMachine: protocolVersion must be 2.');
-  }
-  const queryNames = Object.keys(definition.queries ?? {});
-  if (queryNames.length > 128 || queryNames.some((name) => name.length === 0 || name.length > 256)) {
-    throw new TypeError('defineMachine: query names are invalid.');
   }
 };
 
@@ -671,7 +633,6 @@ const machineProviderSchema = z.strictObject({
   manifest: machineManifestSchema,
   bindingConfiguration: configurationManifestSchema,
   settingsConfiguration: configurationManifestSchema.optional(),
-  queries: z.record(providerIdentitySchema, z.strictObject({ inputSchema: z.unknown(), resultSchema: z.unknown() })),
 });
 
 const providerKeys = [
@@ -683,7 +644,6 @@ const providerKeys = [
   'manifest',
   'bindingConfiguration',
   'settingsConfiguration',
-  'queries',
 ] as const;
 
 const providerLimits = {
@@ -726,12 +686,6 @@ export const parseMachineProvider = (value: unknown): MachineProvider => {
   const candidate = machineProviderSchema.parse(cloneBoundedJson(providerWireValue(value), providerLimits));
   assertDefinition(candidate);
   parseMachineManifest(candidate.manifest);
-  for (const query of Object.values(candidate.queries)) {
-    // SAFETY: admitJsonSchema is the runtime proof for these unknown wire values.
-    admitJsonSchema(query.inputSchema as JsonSchema);
-    // SAFETY: admitJsonSchema is the runtime proof for these unknown wire values.
-    admitJsonSchema(query.resultSchema as JsonSchema);
-  }
   return freezeJson(candidate) as MachineProvider;
 };
 
@@ -770,7 +724,7 @@ export const machineActionDefinitionOf = (
 
 /**
  * Define one lazy schema-bearing physical-machine provider.
- * @param definition - Flat provider metadata, configuration, queries, discovery, and connection operations.
+ * @param definition - Flat provider metadata, configuration, discovery, and connection operations.
  * @returns A zero-argument toolkit capability factory.
  * @public
  */
@@ -778,19 +732,15 @@ export const defineMachine = <
   const Id extends string,
   BindingSchema extends StandardSchemaV1,
   SubmissionSchema extends StandardSchemaV1,
-  const Queries extends QueryMap = Readonly<Record<never, never>>,
   Settings extends SettingsSchema = SettingsSchema,
 >(
-  definition: MachineProviderDefinition<Id, BindingSchema, SubmissionSchema, Queries, Settings>,
-): MachineProviderFactory<Id, Extract<keyof Queries, string>, typeof definition> => {
+  definition: MachineProviderDefinition<Id, BindingSchema, SubmissionSchema, Settings>,
+): MachineProviderFactory<Id, typeof definition> => {
   assertDefinition(definition);
   if (definition.manifest.jobs.type === 'supported') {
     assertAccepted(definition.manifest.jobs.accepts);
   }
-  const queries = Object.fromEntries(
-    Object.entries(definition.queries ?? {}).map(([name, query]) => [name, queryManifest(query)]),
-  ) as Record<Extract<keyof Queries, string>, MachineQueryManifest>;
-  const descriptor: MachineProvider<Id, Extract<keyof Queries, string>> = {
+  const descriptor: MachineProvider<Id> = {
     id: definition.id,
     name: definition.name,
     version: definition.version,
@@ -799,9 +749,8 @@ export const defineMachine = <
     manifest: machineManifestOf(definition.manifest, definition.submissionConfiguration.manifest),
     bindingConfiguration: definition.bindingConfiguration.manifest,
     ...(definition.settingsConfiguration ? { settingsConfiguration: definition.settingsConfiguration.manifest } : {}),
-    queries,
   };
-  const owned = cloneBoundedJson(descriptor, providerLimits) as MachineProvider<Id, Extract<keyof Queries, string>>;
+  const owned = cloneBoundedJson(descriptor, providerLimits) as MachineProvider<Id>;
   const factory = () => freezeJson(attachRuntimePluginDefinition(structuredClone(owned), () => definition));
   return attachRuntimePluginFactoryOptions(factory, false);
 };

@@ -40,6 +40,33 @@ describe('parseMachineManifest', () => {
         processes: [{ ...fff, slicing: { ...fff?.slicing, presets: fff?.slicing.presets.slice(0, 2) } }],
       },
     ],
+    [
+      'two services under one name',
+      {
+        ...machineManifestFixture,
+        connection: {
+          ...machineManifestFixture.connection,
+          services: [
+            { id: 'mqtt', port: 8883, required: true },
+            { id: 'mqtt', port: 8884, required: false },
+          ],
+        },
+      },
+    ],
+    [
+      'a hold admissible during a run',
+      {
+        ...machineManifestFixture,
+        holds: machineManifestFixture.holds.map((hold) => ({ ...hold, when: ['active'] })),
+      },
+    ],
+    [
+      'an observation group neither standard nor namespaced',
+      {
+        ...machineManifestFixture,
+        observations: [{ group: 'positions', label: 'Positions', staleAfter: 1000, delivery: 'latest' }],
+      },
+    ],
   ])('refuses %s', (_label, candidate) => {
     expect(() => parseMachineManifest(candidate)).toThrow();
   });

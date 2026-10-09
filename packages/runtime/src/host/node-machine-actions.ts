@@ -27,6 +27,8 @@ import type { NodeMachineHostContext } from '#host/node-machine-context.js';
 import {
   applyOperationResult,
   confirmationWindow,
+  isReceiptOf,
+  journalVersion,
   machineError,
   operationInputDigest,
   operationReceipt,
@@ -35,7 +37,7 @@ import {
   providerFailure,
 } from '#host/node-machine-operations.js';
 import type { NodeMachineOperationPlanned, NodeMachineOperationState } from '#host/node-machine-operations.js';
-import type { AdmittedHostOperation } from '#host/host-admission.js';
+import type { AdmittedHostOperation, HostActor } from '#host/host-admission.js';
 import { parseMachineOperationReceipt } from '#machines/machine-channel.js';
 import type { MachineChannelHostOperations } from '#machines/machine-channel.js';
 import type { MachineApplyActionInput } from '#machines/machine-client.js';
@@ -44,6 +46,7 @@ import type {
   MachineOperation,
   MachineOperationKind,
   MachineOperationReceipt,
+  MachineReceipt,
   MachineRequester,
 } from '#machines/machine-jobs.js';
 import { machineActionDefinitionOf } from '#machines/machine.js';
@@ -62,9 +65,9 @@ export type NodeMachineAdmission =
     }>;
 
 /** One operation to run once. @internal */
-export type NodeMachineRunInput = Readonly<{
+export type NodeMachineRunInput<Kind extends MachineOperationKind = MachineOperationKind> = Readonly<{
   machineId: string;
-  kind: MachineOperationKind;
+  kind: Kind;
   operationId: string;
   /** What was asked; its digest makes the id idempotent. */
   intent: Readonly<Record<string, unknown>>;
@@ -81,9 +84,16 @@ export type NodeMachineRunInput = Readonly<{
 export type NodeMachineOperations = Readonly<{
   operations: Pick<
     MachineChannelHostOperations,
-    'applyAction' | 'stop' | 'beginHold' | 'renewHold' | 'endHold' | 'reconcileOperation' | 'setTesting'
+    | 'applyAction'
+    | 'approveAction'
+    | 'stop'
+    | 'beginHold'
+    | 'renewHold'
+    | 'endHold'
+    | 'reconcileOperation'
+    | 'setTesting'
   >;
-  run(input: NodeMachineRunInput): Promise<MachineOperationReceipt>;
+  run<Kind extends MachineOperationKind>(input: NodeMachineRunInput<Kind>): Promise<MachineReceipt<Kind>>;
   /** Publish a machine's recent operations into its directory entry. */
   publish(machineId: string): Promise<void>;
   /** End every hold of a machine (or of every machine), telling the provider to release. */
@@ -92,7 +102,14 @@ export type NodeMachineOperations = Readonly<{
 }>;
 
 const maximumRecent = 64;
+/** How long a person's approval or denial waits for the agent's call, in milliseconds. */
+const approvalLifetime = 10 * 60_000;
 const authorityRank: Readonly<Record<MachineAuthority, number>> = { agent: 0, 'approved-agent': 1, person: 2 };
+/** Each standard family's floor, by action id. */
+const standardFamilies: ReadonlyMap<string, Readonly<{ authority: MachineAuthority; attended: boolean }>> = new Map(
+  Object.entries(standardMachineActions),
+);
+const sameActor = (left: HostActor, right: HostActor): boolean => left.kind === right.kind && left.id === right.id;
 
 const caller = (admitted: AdmittedHostOperation, requestedBy: MachineRequester): 'person' | 'agent' =>
   admitted.actor.kind === 'agent' || requestedBy.kind === 'agent' ? 'agent' : 'person';
@@ -108,9 +125,7 @@ const effectiveSafety = (
   componentKind: string,
   descriptor: MachineActionDescriptor | MachineHoldDescriptor,
 ): MachineActionSafety => {
-  const family = (
-    standardMachineActions as Readonly<Record<string, { authority: MachineAuthority; attended: boolean }>>
-  )[descriptor.id];
+  const family = standardFamilies.get(descriptor.id);
   if (family === undefined || ('scope' in descriptor && isUnattendedAction(componentKind, descriptor))) {
     return descriptor.safety;
   }
@@ -124,14 +139,14 @@ const effectiveSafety = (
   };
 };
 
-// The entry with every descriptor at the floor the host admits it under, and testing only for a person.
-const admissionEntry = (entry: MachineDirectoryEntry, who: 'person' | 'agent'): MachineDirectoryEntry => {
+// The entry with every descriptor at the floor the host admits it under.
+const admissionEntry = (entry: MachineDirectoryEntry): MachineDirectoryEntry => {
   const { capabilities } = entry.descriptor;
   const kindOf = (componentId: string): string =>
     capabilities.components.find((component) => component.id === componentId)?.kind ?? '';
+  // Testing stays as reported: `checkMachineAction` refuses an agent a designed control whether or not it is on.
   return {
     ...entry,
-    testing: who === 'person' && entry.testing === true,
     descriptor: {
       ...entry.descriptor,
       capabilities: {
@@ -185,6 +200,7 @@ export const createNodeMachineOperations = (
     const { state, receipt, source } = result;
     const { log } = context.usableMachine(operation.planned.machineId, 'MACHINE_UNAVAILABLE');
     const event = parseJournalEvent({
+      version: journalVersion,
       type: 'machine-operation-result',
       operationId: operation.planned.operationId,
       source,
@@ -217,14 +233,23 @@ export const createNodeMachineOperations = (
       observedAt: now(),
     });
 
-  const run = async (input: NodeMachineRunInput): Promise<MachineOperationReceipt> => {
+  const run = async <Kind extends MachineOperationKind>(
+    input: NodeMachineRunInput<Kind>,
+  ): Promise<MachineReceipt<Kind>> => {
     const operationId = identity.parse(input.operationId);
     const machineId = identity.parse(input.machineId);
     const inputDigest = await operationInputDigest({ machineId, kind: input.kind, intent: input.intent });
     const queues = input.machineQueue
       ? [`operation:${operationId}`, `machine:${machineId}`]
       : [`operation:${operationId}`];
-    return effectQueue.queueForMany(queues, async () => {
+    // A receipt the journal holds under this id is of this kind once the kind check above has passed.
+    const ofKind = (receipt: MachineOperationReceipt): MachineReceipt<Kind> => {
+      if (!isReceiptOf(receipt, input.kind)) {
+        throw new Error('NODE_MACHINE_OPERATION_INVALID');
+      }
+      return receipt;
+    };
+    return effectQueue.queueForMany(queues, async (): Promise<MachineReceipt<Kind>> => {
       const existing = operations.get(operationId);
       if (
         existing &&
@@ -232,31 +257,36 @@ export const createNodeMachineOperations = (
           existing.planned.machineId !== machineId ||
           existing.planned.kind !== input.kind)
       ) {
-        return refusedReceipt(input, {
-          code: 'MACHINE_OPERATION_ID_CONFLICT',
-          message: 'This operation id was already used for something else.',
-        });
+        return ofKind(
+          refusedReceipt(input, {
+            code: 'MACHINE_OPERATION_ID_CONFLICT',
+            message: 'This operation id was already used for something else.',
+          }),
+        );
       }
       if (existing?.receipt) {
-        return existing.receipt;
+        return ofKind(existing.receipt);
       }
       if (existing && existing.state !== 'planned') {
         throw new Error('MACHINE_OPERATION_UNRESOLVED');
       }
       const machine = machines.get(machineId);
       if (!machine) {
-        return refusedReceipt(input, { code: 'MACHINE_UNAVAILABLE', message: 'This machine is not bound here.' });
+        return ofKind(
+          refusedReceipt(input, { code: 'MACHINE_UNAVAILABLE', message: 'This machine is not bound here.' }),
+        );
       }
       const { record: binding, log } = context.usableMachine(machineId, 'MACHINE_UNAVAILABLE');
       const admission = await input.admit();
       if ('refusal' in admission) {
-        return refusedReceipt(input, admission.refusal);
+        return ofKind(refusedReceipt(input, admission.refusal));
       }
       input.signal.throwIfAborted();
       input.admitted.assertCurrent();
       let operation = existing;
       if (!operation) {
         const planned = parseJournalEvent({
+          version: journalVersion,
           type: 'machine-operation-planned',
           machineId,
           providerId: binding.providerId,
@@ -278,14 +308,20 @@ export const createNodeMachineOperations = (
         operations.set(operationId, operation);
       }
       const sendingAt = now();
-      await log.append({ type: 'machine-operation-sending', operationId, observedAt: sendingAt });
+      await log.append({
+        version: journalVersion,
+        type: 'machine-operation-sending',
+        operationId,
+        observedAt: sendingAt,
+      });
       operation.state = 'sending';
       operation.updatedAt = sendingAt;
       await publish(machineId);
       let receipt: MachineOperationReceipt;
       try {
         receipt = operationReceipt(operation.planned, await admission.send());
-      } catch {
+      } catch (error) {
+        report(error);
         receipt = parseMachineOperationReceipt({
           operationId,
           machineId,
@@ -296,7 +332,7 @@ export const createNodeMachineOperations = (
         });
       }
       if (receipt.status === 'accepted' && admission.onAccepted === 'open') {
-        return receipt;
+        return ofKind(receipt);
       }
       await record(operation, {
         state:
@@ -308,12 +344,77 @@ export const createNodeMachineOperations = (
         receipt,
         source: 'attempt',
       });
-      return receipt;
+      return ofKind(receipt);
     });
   };
 
-  // Settle one operation from what the machine has reported; nothing is ever sent. Escalates one left unproven.
-  const settleNow = async (operation: NodeMachineOperationState, signal: AbortSignal): Promise<void> => {
+  // A stop is journaled as it is sent, never before: the planned and sending records, then the reply, each as far as
+  // the journal takes them. A journal that refuses is reported; the machine was told to stop either way.
+  const journalStop = async (
+    input: Readonly<{ machineId: string; operationId: string; requestedBy: MachineRequester; sentAt: string }>,
+    receipt: MachineReceipt<'stop'>,
+  ): Promise<void> => {
+    const { machineId, operationId } = input;
+    if (machines.get(machineId)?.operations.status !== 'open') {
+      return;
+    }
+    try {
+      await effectQueue.queueFor(`operation:${operationId}`, async () => {
+        const { record: binding, log } = context.usableMachine(machineId, 'MACHINE_UNAVAILABLE');
+        let operation = operations.get(operationId);
+        if (!operation) {
+          const planned = parseJournalEvent({
+            version: journalVersion,
+            type: 'machine-operation-planned',
+            machineId,
+            providerId: binding.providerId,
+            physicalMachineId: binding.physicalId,
+            operationId,
+            kind: 'stop',
+            inputDigest: await operationInputDigest({ machineId, kind: 'stop', intent: {} }),
+            intent: {},
+            requestedBy: input.requestedBy,
+            plannedAt: input.sentAt,
+          });
+          if (planned.type !== 'machine-operation-planned') {
+            throw new Error('NODE_MACHINE_OPERATION_INVALID');
+          }
+          await log.append(planned);
+          operation = { planned, state: 'planned', updatedAt: planned.plannedAt };
+          operations.set(operationId, operation);
+        }
+        if (operation.state === 'planned') {
+          await log.append({
+            version: journalVersion,
+            type: 'machine-operation-sending',
+            operationId,
+            observedAt: input.sentAt,
+          });
+          operation.state = 'sending';
+          operation.updatedAt = input.sentAt;
+        }
+        if (operation.state === 'sending') {
+          await record(operation, {
+            state:
+              receipt.status === 'rejected' ? 'rejected' : receipt.status === 'unknown' ? 'confirming' : 'accepted',
+            receipt,
+            source: 'attempt',
+          });
+        }
+      });
+    } catch (error) {
+      report(error);
+    }
+  };
+
+  // Settle one operation from what the machine has reported; nothing is ever sent. Escalates one left unproven. The
+  // provider lookup (`reconcile`) runs only when asked: from the escalation clock and `reconcileOperation`, never per
+  // report, so a chatty machine does not drive a lookup per report for every unproven operation.
+  const settleNow = async (
+    operation: NodeMachineOperationState,
+    signal: AbortSignal,
+    reconcile: boolean,
+  ): Promise<void> => {
     const { planned } = operation;
     if (operation.state !== 'confirming' && operation.state !== 'attention') {
       return;
@@ -358,7 +459,7 @@ export const createNodeMachineOperations = (
           return;
         }
       }
-    } else if (session && operation.receipt?.status === 'unknown' && planned.kind !== 'hold') {
+    } else if (reconcile && session && operation.receipt?.status === 'unknown' && planned.kind !== 'hold') {
       let reply: MachineCommandReceipt | undefined;
       try {
         reply = await session.reconcile({
@@ -367,14 +468,16 @@ export const createNodeMachineOperations = (
           ...(typeof intent['transferId'] === 'string' ? { transferId: intent['transferId'] } : {}),
           signal,
         });
-      } catch {
+      } catch (error) {
+        report(error);
         reply = undefined;
       }
       if (reply !== undefined && reply.status !== 'unknown') {
         let receipt: MachineOperationReceipt | undefined;
         try {
           receipt = operationReceipt(planned, reply);
-        } catch {
+        } catch (error) {
+          report(error);
           receipt = undefined;
         }
         if (receipt) {
@@ -401,12 +504,15 @@ export const createNodeMachineOperations = (
   const settling = new Map<string, Promise<void>>();
   /** Operations a report reached while their check was running; each is checked once more when it finishes. */
   const reportedWhileSettling = new Set<string>();
+  /** Operations the escalation clock asked to look up at the provider on their next check. */
+  const reconcileWanted = new Set<string>();
   const settleOne = async (operationId: string): Promise<void> => {
     try {
       await effectQueue.queueFor(`operation:${operationId}`, async () => {
         const operation = operations.get(operationId);
+        const reconcile = reconcileWanted.delete(operationId);
         if (operation && machines.get(operation.planned.machineId)?.operations.status === 'open') {
-          await settleNow(operation, settlement.signal);
+          await settleNow(operation, settlement.signal, reconcile);
         }
       });
     } catch (error) {
@@ -414,16 +520,19 @@ export const createNodeMachineOperations = (
     } finally {
       settling.delete(operationId);
       if (reportedWhileSettling.delete(operationId)) {
-        settleAll();
+        settleAll(false);
       }
     }
   };
   // ponytail: scans every operation on each report (several per second per machine); index the unsettled ones if a
   // store ever holds thousands.
-  function settleAll(): void {
+  function settleAll(reconcile: boolean): void {
     for (const [operationId, operation] of operations) {
       if (context.isClosed() || (operation.state !== 'confirming' && operation.state !== 'attention')) {
         continue;
+      }
+      if (reconcile) {
+        reconcileWanted.add(operationId);
       }
       if (settling.has(operationId)) {
         reportedWhileSettling.add(operationId);
@@ -432,9 +541,14 @@ export const createNodeMachineOperations = (
       settling.set(operationId, settleOne(operationId));
     }
   }
-  const stopSettling = context.commits.subscribe(settleAll);
-  // A silent machine still escalates: reports drive settling, and this clock drives the 180-second escalation.
-  const escalation = setInterval(settleAll, 5000);
+  const stopSettling = context.commits.subscribe(() => {
+    settleAll(false);
+  });
+  // A silent machine still escalates: reports drive the pure confirmation, and this clock drives the provider lookup
+  // and the 180-second escalation.
+  const escalation = setInterval(() => {
+    settleAll(true);
+  }, 5000);
   escalation.unref();
 
   // ───────────── Holds ─────────────
@@ -442,6 +556,9 @@ export const createNodeMachineOperations = (
   type ActiveHold = {
     operation: NodeMachineOperationState;
     provider: MachineProviderHold;
+    /** Who began it: the only actor whose renewals keep it. */
+    actor: HostActor;
+    /** Milliseconds. */
     lease: number;
     timer?: ReturnType<typeof setTimeout>;
   };
@@ -450,7 +567,8 @@ export const createNodeMachineOperations = (
     let receipt: MachineOperationReceipt;
     try {
       receipt = operationReceipt(hold.operation.planned, await hold.provider.release());
-    } catch {
+    } catch (error) {
+      report(error);
       receipt = parseMachineOperationReceipt({
         operationId: holdId,
         machineId: hold.operation.planned.machineId,
@@ -524,7 +642,6 @@ export const createNodeMachineOperations = (
     parameters: unknown;
     requestedBy: MachineRequester;
     attended?: boolean;
-    approval?: Readonly<{ approvedBy: MachineRequester; operationId: string }>;
     kind: 'action' | 'hold';
   }> &
     Admitted;
@@ -534,6 +651,54 @@ export const createNodeMachineOperations = (
     parameters: unknown;
     approvalRequired: boolean;
   }>;
+  // ───────────── Approvals ─────────────
+
+  /** A person's decision on one agent operation, by operation id: what it covers and until when. */
+  type ActionApproval = Readonly<{ decision: 'approve' | 'deny'; inputDigest: string; expiresAt: number }>;
+  // ponytail: in memory, pruned of expired records on each decision; a restart drops pending approvals (the person
+  // approves again). Bounded by what people decide in ten minutes.
+  const approvals = new Map<string, ActionApproval>();
+  // What an approval covers: the journal's digest over the action as the person saw it. The run fence is not part of
+  // it; admission checks the run when the action is sent.
+  const approvalDigest = async (
+    machineId: string,
+    intent: Readonly<{ componentId: string; action: string; version: number; parameters: unknown }>,
+  ): Promise<string> =>
+    operationInputDigest({
+      machineId,
+      kind: 'action',
+      intent: {
+        componentId: intent.componentId,
+        action: intent.action,
+        version: intent.version,
+        parameters: intent.parameters,
+      },
+    });
+  // Consume the person's decision on this operation, once: an approval of exactly this request admits it; a denial is
+  // returned to the agent; anything else still needs a person.
+  const takeApproval = async (asked: Asked, label: string): Promise<MachineFailure | undefined> => {
+    const record = approvals.get(asked.operationId);
+    if (!record || record.expiresAt <= Date.parse(now())) {
+      return { code: 'MACHINE_ACTION_APPROVAL_REQUIRED', message: `A person must approve “${label}” in Tau first.` };
+    }
+    const asking = await approvalDigest(asked.machineId, {
+      componentId: asked.componentId,
+      action: asked.id,
+      version: asked.version,
+      parameters: asked.parameters,
+    });
+    if (record.inputDigest !== asking) {
+      return {
+        code: 'MACHINE_ACTION_APPROVAL_REQUIRED',
+        message: `The approval of “${label}” was for other values. Ask a person again.`,
+      };
+    }
+    approvals.delete(asked.operationId);
+    return record.decision === 'deny'
+      ? { code: 'MACHINE_ACTION_APPROVAL_REQUIRED', message: `A person declined “${label}”.` }
+      : undefined;
+  };
+
   // The host's admission: `checkMachineAction`'s order over the host's own facts, then what only the host can check.
   const admit = async (asked: Asked): Promise<Readonly<{ refusal: MachineFailure }> | AdmittedAction> => {
     const who = caller(asked.admitted, asked.requestedBy);
@@ -557,7 +722,7 @@ export const createNodeMachineOperations = (
       };
     }
     const check = checkMachineAction({
-      entry: admissionEntry(entry, who),
+      entry: admissionEntry(entry),
       componentId: asked.componentId,
       action: asked.id,
       kind: asked.kind,
@@ -604,19 +769,10 @@ export const createNodeMachineOperations = (
       };
     }
     if (check.status === 'approval-required') {
-      const { approval } = asked;
-      // An agent session cannot carry a person's approval: external agents use only the unattended list.
-      if (
-        asked.admitted.actor.kind === 'agent' ||
-        approval?.operationId !== asked.operationId ||
-        approval.approvedBy.kind !== 'user'
-      ) {
-        return {
-          refusal: {
-            code: 'MACHINE_ACTION_APPROVAL_REQUIRED',
-            message: `A person must approve “${check.descriptor.label}” in Tau first.`,
-          },
-        };
+      // Only the host's own record counts: nothing in the request can claim a person's approval.
+      const refusal = await takeApproval(asked, check.descriptor.label);
+      if (refusal) {
+        return { refusal };
       }
     }
     return {
@@ -690,53 +846,104 @@ export const createNodeMachineOperations = (
                   version: input.version,
                   expectedRunId: input.expectedRunId,
                   parameters,
+                  requestedBy: { kind: input.admitted.actor.kind },
                   signal: input.signal,
                 }),
             };
           },
-        }) as Promise<Extract<MachineOperationReceipt, { kind: 'action' }>>;
+        });
+      },
+      async approveAction(input) {
+        const machineId = identity.parse(input.machineId);
+        const operationId = identity.parse(input.operationId);
+        // An agent never approves, its own request or another's: only a person's session records a decision.
+        if (input.admitted.actor.kind !== 'user') {
+          return {
+            status: 'refused',
+            code: 'MACHINE_ACTION_PERSON_REQUIRED',
+            message: 'Only a person can approve a machine action.',
+          };
+        }
+        const entry = await currentEntry(machineId);
+        if (!entry) {
+          return { status: 'refused', code: 'MACHINE_UNAVAILABLE', message: 'This machine is not bound here.' };
+        }
+        const { intent } = input;
+        if (
+          !entry.descriptor.capabilities.actions.some(
+            (action) => action.componentId === intent.componentId && action.id === intent.action,
+          )
+        ) {
+          return {
+            status: 'refused',
+            code: 'MACHINE_ACTION_UNDECLARED',
+            message: 'This machine does not declare this control.',
+          };
+        }
+        const inputDigest = await approvalDigest(machineId, intent);
+        const decidedAt = Date.parse(now());
+        for (const [id, record] of approvals) {
+          if (record.expiresAt <= decidedAt) {
+            approvals.delete(id);
+          }
+        }
+        const expiresAt = decidedAt + approvalLifetime;
+        approvals.set(operationId, { decision: input.decision, inputDigest, expiresAt });
+        return input.decision === 'approve'
+          ? { status: 'approved', operationId, expiresAt: new Date(expiresAt).toISOString() }
+          : { status: 'denied', operationId };
       },
       async stop(input) {
         const machineId = identity.parse(input.machineId);
         const operationId = identity.parse(input.operationId ?? randomUUID());
-        const session = connectedSessions.get(machineId);
-        const send = async (): Promise<MachineCommandReceipt> => {
-          if (!session) {
-            throw new Error('MACHINE_UNAVAILABLE');
+        const planned = { operationId, machineId, kind: 'stop' } as const;
+        const ofStop = (receipt: MachineOperationReceipt): MachineReceipt<'stop'> => {
+          if (!isReceiptOf(receipt, 'stop')) {
+            throw new Error('NODE_MACHINE_OPERATION_INVALID');
           }
-          return session.stop({ operationId, signal: input.signal });
+          return receipt;
         };
-        let receipt: MachineOperationReceipt;
-        if (machines.get(machineId)?.operations.status === 'open') {
-          receipt = await run({
-            machineId,
-            kind: 'stop',
-            operationId,
-            intent: {},
-            requestedBy: input.requestedBy,
-            machineQueue: false,
-            admitted: input.admitted,
-            signal: input.signal,
-            async admit() {
-              return session
-                ? { send }
-                : refuse('MACHINE_UNAVAILABLE', 'This machine is not connected, so nothing could be stopped.');
-            },
-          });
+        const existing = operations.get(operationId);
+        if (existing && (existing.planned.machineId !== machineId || existing.planned.kind !== 'stop')) {
+          return ofStop(
+            refusedReceipt(planned, {
+              code: 'MACHINE_OPERATION_ID_CONFLICT',
+              message: 'This operation id was already used for something else.',
+            }),
+          );
+        }
+        if (existing?.receipt) {
+          return ofStop(existing.receipt);
+        }
+        const session = connectedSessions.get(machineId);
+        let receipt: MachineReceipt<'stop'>;
+        if (session) {
+          // Nothing gates a stop and nothing queues ahead of it: it is sent first and journaled as far as the journal
+          // allows, so a full disk or a lost writer lock never keeps the machine running.
+          const sentAt = now();
+          let reply: MachineCommandReceipt;
+          try {
+            reply = await session.stop({ operationId, signal: input.signal });
+          } catch (error) {
+            report(error);
+            reply = {
+              status: 'unknown',
+              reason: 'The reply was lost after the command may have been sent.',
+              observedAt: now(),
+            };
+          }
+          receipt = ofStop(operationReceipt(planned, reply));
+          await journalStop({ machineId, operationId, requestedBy: input.requestedBy, sentAt }, receipt);
         } else {
-          // Stop is never gated: a machine whose journal cannot be written is still told to stop.
-          receipt = session
-            ? operationReceipt({ operationId, machineId, kind: 'stop' }, await send())
-            : refusedReceipt(
-                { machineId, kind: 'stop', operationId },
-                {
-                  code: 'MACHINE_UNAVAILABLE',
-                  message: 'This machine is not connected, so nothing could be stopped.',
-                },
-              );
+          receipt = ofStop(
+            refusedReceipt(planned, {
+              code: 'MACHINE_UNAVAILABLE',
+              message: 'This machine is not connected, so nothing could be stopped.',
+            }),
+          );
         }
         await releaseHolds(machineId);
-        return receipt as Extract<MachineOperationReceipt, { kind: 'stop' }>;
+        return receipt;
       },
       async beginHold(input) {
         if (!context.runtime) {
@@ -780,6 +987,7 @@ export const createNodeMachineOperations = (
                   componentId: input.componentId,
                   hold: input.hold,
                   parameters,
+                  requestedBy: { kind: input.admitted.actor.kind },
                   signal: input.signal,
                 });
                 if ('code' in held) {
@@ -803,14 +1011,29 @@ export const createNodeMachineOperations = (
             message: 'This hold has already ended. Press again to hold it.',
           };
         }
-        const hold: ActiveHold = { operation, provider, lease };
+        const hold: ActiveHold = { operation, provider, actor: input.admitted.actor, lease };
         holds.set(input.operationId, hold);
         arm(input.operationId, hold);
-        return { status: 'held', holdId: input.operationId, lease };
+        // The first segment goes out with the hold, not with the first renewal a lease later.
+        try {
+          await provider.extend();
+        } catch (error) {
+          report(error);
+          await endHold(input.operationId);
+          return {
+            status: 'rejected',
+            code: 'MACHINE_HOLD_ENDED',
+            message: 'The machine did not take the first move, so the hold ended.',
+          };
+        }
+        return holds.has(input.operationId)
+          ? { status: 'held', holdId: input.operationId, lease }
+          : { status: 'rejected', code: 'MACHINE_HOLD_ENDED', message: 'This hold has already ended.' };
       },
-      async renewHold({ holdId }) {
+      async renewHold({ holdId, admitted }) {
         const hold = holds.get(holdId);
-        if (!hold) {
+        // A hold is leased to the actor who began it: another session's renewal, or an agent's, keeps nothing.
+        if (!hold || !sameActor(hold.actor, admitted.actor)) {
           return { status: 'ended' };
         }
         arm(holdId, hold);
@@ -844,7 +1067,7 @@ export const createNodeMachineOperations = (
           if (operation?.planned.machineId !== machineId) {
             throw new Error('MACHINE_OPERATION_UNKNOWN');
           }
-          await settleNow(operation, input.signal);
+          await settleNow(operation, input.signal, true);
           return operationRecord(operation);
         });
       },

@@ -43,6 +43,7 @@ describe('WebSocket machines facet', () => {
       resolveJob: unused,
       withdrawJob: unused,
       applyAction: unused,
+      approveAction: unused,
       stop,
       beginHold: unused,
       renewHold: unused,

@@ -126,6 +126,7 @@ const open = ({
       status: 'ready',
       program: job.program,
       checks: job.checks,
+      configuration: job.configuration,
     })),
     requestJob: vi.fn<MachineChannelHostOperations['requestJob']>(async (input) => ({
       ...job,
@@ -145,6 +146,11 @@ const open = ({
       ...job,
       state: 'withdrawn',
       resolvedBy: input.resolvedBy,
+    })),
+    approveAction: vi.fn<MachineChannelHostOperations['approveAction']>(async (input) => ({
+      status: 'approved',
+      operationId: input.operationId,
+      expiresAt: '2026-09-06T00:10:00Z',
     })),
     applyAction: vi.fn<MachineChannelHostOperations['applyAction']>(async (input) => ({
       operationId: input.operationId,
@@ -230,6 +236,7 @@ describe('machine channel', () => {
         status: 'ready',
         program: job.program,
         checks: job.checks,
+        configuration: job.configuration,
       });
       await expect(
         fixture.client.requestJob({
@@ -271,14 +278,17 @@ describe('machine channel', () => {
           expectedRunId: null,
           parameters: { on: true },
           requestedBy: { kind: 'agent', id: 'agent-1', label: 'Tau agent' },
-          approval: { approvedBy: requester, operationId: 'light-1' },
         }),
       ).resolves.toMatchObject({ status: 'accepted', kind: 'action' });
       expect(fixture.operations.applyAction).toHaveBeenCalledWith(
-        expect.objectContaining({
-          parameters: { on: true },
-          approval: { approvedBy: requester, operationId: 'light-1' },
-        }),
+        expect.objectContaining({ parameters: { on: true } }),
+      );
+      const intent = { componentId: 'chamber-light', action: 'switch.set', version: 1, parameters: { on: true } };
+      await expect(
+        fixture.client.approveAction({ machineId: 'machine-1', operationId: 'light-1', intent, decision: 'approve' }),
+      ).resolves.toEqual({ status: 'approved', operationId: 'light-1', expiresAt: '2026-09-06T00:10:00Z' });
+      expect(fixture.operations.approveAction).toHaveBeenCalledWith(
+        expect.objectContaining({ operationId: 'light-1', intent, decision: 'approve' }),
       );
       await expect(fixture.client.stop({ machineId: 'machine-1', requestedBy: requester })).resolves.toMatchObject({
         status: 'accepted',

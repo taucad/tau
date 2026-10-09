@@ -37,6 +37,7 @@ export const hostAdmissionOperations = [
   'machines.resolveJob',
   'machines.withdrawJob',
   'machines.applyAction',
+  'machines.approveAction',
   'machines.stop',
   'machines.beginHold',
   'machines.renewHold',

@@ -11,8 +11,10 @@
  */
 
 import type { CacheValue, ContentDigest } from '@taucad/cache-core';
+import { z } from 'zod';
 
-import type { MachineFailure } from '#machines/machine-actions.js';
+import { machineFailureCodes } from '#machines/machine-actions.js';
+import type { MachineFailure, MachineJobFailureCode } from '#machines/machine-actions.js';
 import type { MachineArtifactReference } from '#machines/machine.js';
 import type { MachineCheck, MachineRunProgress } from '#machines/machine-observation.js';
 import type { MachineSettingsProvenance } from '#machines/settings.js';
@@ -91,6 +93,8 @@ export type MachineProgramSummary = Readonly<{
         layers?: number;
         /** Millimetres of filament. */
         filamentLength?: number;
+        /** The filaments the program uses, by its own index; `color` is `#RRGGBBAA`. */
+        filaments?: ReadonlyArray<Readonly<{ index: number; materialType: string; color: string }>>;
       }>
     | Readonly<{
         process: 'milling';
@@ -105,7 +109,10 @@ export type MachineProgramSummary = Readonly<{
         workOffsets: readonly string[];
         uses: ReadonlyArray<'tool-change' | 'coolant' | 'probing' | 'program-stop' | 'inverse-time-feed'>;
       }>
-    | Readonly<{ process: 'other' }>;
+    /** Not read yet, or nothing known about the program. */
+    | Readonly<{ process: 'other' }>
+    /** Any other process (a laser, a resin printer): its namespaced id, the version of its facts, and the facts. */
+    | Readonly<{ process: `${string}.${string}`; version: number; data: CacheValue }>;
 }>;
 
 /**
@@ -138,8 +145,8 @@ export type MachinePreparedJob = Readonly<{
   machineId: string;
   physicalMachineId: string;
   artifact: MachineArtifactReference;
-  /** The name the program will have on the machine, for a stored delivery. */
-  remoteName: string;
+  /** The name the program will have on the machine; only a stored delivery has one. */
+  remoteName?: string;
   parser: Readonly<{ id: string; version: string }>;
   preparedAt: string;
   expiresAt: string;
@@ -166,7 +173,7 @@ export type MachineJob = Readonly<{
   startOperationId?: string;
   transferId?: string;
   receipt?: MachineOperationReceipt;
-  failure?: Readonly<{ code: string; message: string }>;
+  failure?: Readonly<{ code: MachineJobFailureCode; message: string }>;
   resolvedBy?: MachineRequester;
   /** What became of the run, kept after the machine has forgotten it. */
   run?: Readonly<{
@@ -177,10 +184,19 @@ export type MachineJob = Readonly<{
   }>;
 }>;
 
-/** A read-only preflight: what the program is and whether this machine is ready for it. @public */
+/**
+ * A read-only preflight: what the program is and whether this machine is ready for it. `configuration` is the start
+ * form completed by the provider from what the machine reports; render the form from the schema with these values.
+ * @public
+ */
 export type MachineJobCheck =
-  | Readonly<{ status: 'ready' | 'blocked'; program: MachineProgramSummary; checks: readonly MachineCheck[] }>
-  | (Readonly<{ status: 'refused' }> & Readonly<{ code: string; message: string }>);
+  | Readonly<{
+      status: 'ready' | 'blocked';
+      program: MachineProgramSummary;
+      checks: readonly MachineCheck[];
+      configuration: CacheValue;
+    }>
+  | Readonly<{ status: 'refused'; code: MachineJobFailureCode; message: string }>;
 
 /** Ask for one job. The same `jobId` returns the existing job. @public */
 export type MachineRequestJobInput = Readonly<{
@@ -199,6 +215,7 @@ export type MachineRequestJobInput = Readonly<{
 export type MachineCheckJobInput = Readonly<{
   machineId: string;
   artifact: MachineArtifactReference;
+  /** Start-form values, possibly partial: the provider completes the rest from the machine's current setup. */
   configuration: CacheValue;
   signal?: AbortSignal;
 }>;
@@ -222,3 +239,74 @@ export type MachineResolveJobInput = Readonly<{
 
 /** Withdraw a job that has not started. @public */
 export type MachineWithdrawJobInput = Readonly<{ jobId: string; resolvedBy: MachineRequester; signal?: AbortSignal }>;
+
+// ───────────────────────────── Schemas ─────────────────────────────
+
+const identity = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((value) => value.isWellFormed());
+const text = z
+  .string()
+  .min(1)
+  .max(1024)
+  .refine((value) => value.isWellFormed());
+const instant = z.iso.datetime({ offset: true });
+const digest = z.custom<ContentDigest>((value) => typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value));
+const operationKind = z.enum(['action', 'stop', 'hold', 'transfer', 'start']);
+const receiptBase = { operationId: identity, machineId: identity, observedAt: instant };
+
+/** Strict schema of one requester. @internal */
+export const machineRequesterSchema = z.strictObject({
+  kind: z.enum(['user', 'agent']),
+  id: identity,
+  label: identity,
+});
+
+/** Strict schema of one operation receipt. @internal */
+export const machineOperationReceiptSchema: z.ZodType<MachineOperationReceipt> = z.union([
+  z.strictObject({
+    ...receiptBase,
+    kind: z.literal('action'),
+    status: z.literal('accepted'),
+    activityId: identity.optional(),
+  }),
+  z.strictObject({ ...receiptBase, kind: z.enum(['stop', 'hold']), status: z.literal('accepted') }),
+  z.strictObject({ ...receiptBase, kind: z.literal('transfer'), status: z.literal('accepted'), transferId: identity }),
+  z.strictObject({
+    ...receiptBase,
+    kind: z.literal('start'),
+    status: z.literal('accepted'),
+    runId: identity.optional(),
+  }),
+  z.strictObject({
+    ...receiptBase,
+    kind: operationKind,
+    status: z.literal('rejected'),
+    code: z.enum(machineFailureCodes),
+    message: text,
+    issues: z
+      .array(z.strictObject({ path: z.string().max(256), message: text }))
+      .max(32)
+      .optional(),
+  }),
+  z.strictObject({ ...receiptBase, kind: operationKind, status: z.literal('unknown'), reason: text }),
+]);
+
+/** Strict schema of one operation record. @internal */
+export const machineOperationSchema: z.ZodType<MachineOperation> = z.strictObject({
+  operationId: identity,
+  machineId: identity,
+  kind: operationKind,
+  inputDigest: digest,
+  state: z.enum(['planned', 'sending', 'accepted', 'rejected', 'confirming', 'attention']),
+  updatedAt: instant,
+  receipt: machineOperationReceiptSchema.optional(),
+  confirmingSince: instant.optional(),
+  requestedBy: machineRequesterSchema.optional(),
+  attended: z.boolean().optional(),
+  action: z
+    .strictObject({ componentId: identity, id: identity, label: identity, activityId: identity.optional() })
+    .optional(),
+});

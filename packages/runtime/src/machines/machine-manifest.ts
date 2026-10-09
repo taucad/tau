@@ -105,9 +105,13 @@ export const machineActionDescriptorSchema = z.strictObject({
   scope: z.enum(['idle', 'run', 'any']),
 });
 
-/** One declared hold, as a manifest carries it. @public */
+/**
+ * One declared hold, as a manifest carries it. Admissible only while `ready`: a hold during a run would cancel it.
+ * @public
+ */
 export const machineHoldDescriptorSchema = z.strictObject({
   ...actionDescriptorShape,
+  when: z.array(z.literal('ready')).length(1),
   lease: z.number().int().min(20).max(2000),
   bound: z.number().int().min(20).max(5000),
 });
@@ -202,7 +206,11 @@ const componentSchema = z.union([
     kind: z.literal('interlock'),
     guards: z.enum(['door', 'emergency-stop', 'limit', 'other']),
   }),
-  /** A part Tau does not know: it renders generically and takes the most restrictive safety floor. */
+  /**
+   * A part Tau does not know: it renders generically and takes the most restrictive safety floor. The vendor shape is
+   * `{ kind: 'vendor', type: '<vendor>.<name>' }` rather than a namespaced `kind`, so `kind` stays a closed
+   * discriminant; the same holds for a vendor component value.
+   */
   z.strictObject({ ...componentBase, kind: z.literal('vendor'), type: namespaced }),
 ]);
 
@@ -277,6 +285,31 @@ const processSchema = z.union([
   z.strictObject({ type: namespaced, version: z.number().int().min(1) }),
 ]);
 
+/**
+ * The observation groups every consumer reads by id. `state`: the controller's state readings; `position`: motion;
+ * `temperature`: heaters and chambers; `material`: the material system; `tools`: the tool table; `environment`:
+ * ambient and enclosure readings; `load`: spindle and axis loads; `accessories`: switches, levels and options;
+ * `inputs`: sensors and interlocks. A vendor's own group is namespaced `<vendor>.<name>` and is rendered by its
+ * label.
+ * @public
+ */
+export const machineObservationGroups = [
+  'state',
+  'position',
+  'temperature',
+  'material',
+  'tools',
+  'environment',
+  'load',
+  'accessories',
+  'inputs',
+] as const;
+
+/** One standard observation group id. @public */
+export type MachineObservationGroup = (typeof machineObservationGroups)[number];
+
+const observationGroupSchema = z.union([z.enum(machineObservationGroups), namespaced]);
+
 const acceptedContainerSchema = z.strictObject({
   contract: z.strictObject({ id: z.string().min(1).max(256), version: z.number().int().min(1) }),
   mediaType: z.string().min(1).max(256),
@@ -318,6 +351,14 @@ export const machineManifestSchema = z.strictObject({
     /** Many serial controllers restart when their port opens. */
     opening: z.enum(['nothing', 'resets-controller']),
     identity: z.enum(['authenticated', 'claimed']),
+    /**
+     * TLS services a binding pins on first use, each under the `serviceTrust` name the provider reads (`mqtt`,
+     * `camera`); a `required` one that does not answer refuses the binding. Absent: nothing is pinned.
+     */
+    services: z
+      .array(z.strictObject({ id: identifier, port: z.number().int().min(1).max(65_535), required: z.boolean() }))
+      .max(8)
+      .optional(),
   }),
   axes: z.array(axisSchema).max(9),
   components: z.array(componentSchema).min(1).max(64),
@@ -329,7 +370,7 @@ export const machineManifestSchema = z.strictObject({
   observations: z
     .array(
       z.strictObject({
-        group: identifier,
+        group: observationGroupSchema,
         label,
         /** Milliseconds after which an observation of this group is presented as stale. */
         staleAfter: z.number().int().positive().max(3_600_000),
@@ -387,6 +428,17 @@ export const fffProcessOf = (manifest: Pick<MachineManifest, 'processes'>): Mach
 export const millingProcessOf = (manifest: Pick<MachineManifest, 'processes'>): MachineMillingProcess | undefined =>
   manifest.processes.find((process): process is MachineMillingProcess => process.type === 'milling');
 
+/**
+ * Whether a provider drives a simulated machine: every qualification it declares is in the `simulation` environment.
+ * The one way to tell; never a provider-id test.
+ * @param manifest - The provider's manifest.
+ * @returns True for a simulator.
+ * @public
+ */
+export const isSimulatedMachine = (manifest: Pick<MachineManifest, 'qualifications'>): boolean =>
+  manifest.qualifications.length > 0 &&
+  manifest.qualifications.every((qualification) => qualification.environment === 'simulation');
+
 /** Remedy and outcome shapes, for consumers that parse them. @internal */
 export const machineRemedySchema: z.ZodType<MachineRemedy> = remedySchema;
 /** @internal */
@@ -398,6 +450,10 @@ const assertReferences = (manifest: z.infer<typeof machineManifestSchema>): void
   const components = new Map(manifest.components.map((component) => [component.id, component]));
   if (components.size !== manifest.components.length) {
     throw new TypeError('parseMachineManifest: component ids must be unique.');
+  }
+  const services = manifest.connection.services ?? [];
+  if (new Set(services.map(({ id }) => id)).size !== services.length) {
+    throw new TypeError('parseMachineManifest: service ids must be unique.');
   }
   const axes = new Set(manifest.axes.map((axis) => axis.id));
   if (axes.size !== manifest.axes.length) {

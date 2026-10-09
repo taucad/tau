@@ -2,7 +2,7 @@ import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/sp
 import { describe, expect, it, vi } from 'vitest';
 
 import { defineConfiguration } from '#configuration/configuration.js';
-import { defineMachine, defineMachineQuery } from '#machines/machine.js';
+import { defineMachine } from '#machines/machine.js';
 import type { MachineConnectionRuntime, MachineConnectInput, MachineSession } from '#machines/machine.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import { machineManifestDefinitionFixture } from '#machines/machine-manifest.fixture.js';
@@ -34,11 +34,6 @@ const submissionConfiguration = defineConfiguration({
   schema: standardSchema<Submission>({ type: 'object', properties: { copies: { type: 'integer', minimum: 1 } } }),
   ui: { version: 1, rjsf: {} },
 });
-const querySchema = standardSchema<Readonly<{ vendor: string }>>({
-  type: 'object',
-  properties: { vendor: { type: 'string' } },
-});
-
 const { jobs } = machineManifestDefinitionFixture;
 if (jobs.type !== 'supported') {
   throw new Error('The fixture runs jobs.');
@@ -83,15 +78,6 @@ describe('defineMachine', () => {
       manifest: machineManifestDefinitionFixture,
       bindingConfiguration,
       submissionConfiguration,
-      queries: {
-        materials: defineMachineQuery({
-          inputSchema: querySchema,
-          resultSchema: querySchema,
-          async query(input: Readonly<{ vendor: string }>) {
-            return input;
-          },
-        }),
-      },
       discover,
       async connect(
         input: MachineConnectInput<Binding>,
@@ -225,35 +211,5 @@ describe('defineMachine', () => {
     expect(() =>
       defineUnchecked({ ...base, manifest: withAccepts([{ ...accepted, payloadSelection: 'invalid' }]) }),
     ).toThrow();
-  });
-
-  it('rejects unsupported behavioral schemas declared by catalog queries', () => {
-    const unsafeQuery = defineMachineQuery({
-      inputSchema: standardSchema({ type: 'string', pattern: '(a+)+$' }),
-      resultSchema: querySchema,
-      async query() {
-        return { vendor: 'test' };
-      },
-    });
-    const defineUnchecked = defineMachine as unknown as (definition: unknown) => unknown;
-    expect(() =>
-      defineUnchecked({
-        id: 'unsafe-query',
-        name: 'Unsafe query',
-        version: '1.0.0',
-        protocolVersion: 2,
-        vendor: 'test',
-        manifest: machineManifestDefinitionFixture,
-        bindingConfiguration,
-        submissionConfiguration,
-        queries: { unsafe: unsafeQuery },
-        async *discover() {
-          yield* [];
-        },
-        async connect() {
-          throw new Error('not called');
-        },
-      }),
-    ).toThrow('UNSUPPORTED_KEYWORD');
   });
 });

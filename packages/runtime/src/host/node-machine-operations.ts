@@ -2,7 +2,9 @@
  * The operation journal each machine keeps in its `journal.jsonl`: one record before anything is sent (`planned`),
  * one as the send begins (`sending`), then each result as it is learned: the reply, a confirmation from the machine's
  * own reports, a reconciliation, or the 180-second escalation to `attention`. Replay folds the journal back into each
- * operation's latest state, and any record that breaks the replay rules makes the whole journal untrustworthy.
+ * operation's latest state, and any record that breaks the replay rules makes the whole journal untrustworthy. Every
+ * record carries `version: 1`; a record of another version, or of a type this host does not know, is refused, which
+ * marks the journal corrupt until a newer Tau reads it.
  *
  * @module
  */
@@ -15,12 +17,13 @@ import { cloneBoundedJson } from '@taucad/parameters/json';
 import type { MachineEventLog } from '#host/node-machine-event-log.js';
 import { machineFailureCodes } from '#machines/machine-actions.js';
 import type { MachineFailure, MachineFailureCode } from '#machines/machine-actions.js';
-import { machineRequesterSchema, parseMachineOperationReceipt } from '#machines/machine-channel.js';
+import { parseMachineOperationReceipt } from '#machines/machine-channel.js';
+import { machineRequesterSchema } from '#machines/machine-jobs.js';
 import type {
   MachineOperation,
   MachineOperationKind,
   MachineOperationReceipt,
-  MachineRequester,
+  MachineReceipt,
 } from '#machines/machine-jobs.js';
 import type { MachineCommandReceipt } from '#machines/machine.js';
 
@@ -51,6 +54,9 @@ export const receiptMessage = z
  */
 export const confirmationWindow = 180_000;
 
+/** The journal record version this host writes and reads; a newer version's reader also accepts this one. @internal */
+export const journalVersion = 1;
+
 const timestamp = z.iso.datetime({ offset: true });
 const intentLimits = {
   code: 'NODE_MACHINE_OPERATION_INPUT',
@@ -60,6 +66,7 @@ const intentLimits = {
 };
 const receiptSchema = z.unknown().transform((value) => parseMachineOperationReceipt(value));
 const plannedSchema = z.strictObject({
+  version: z.literal(journalVersion),
   type: z.literal('machine-operation-planned'),
   machineId: identity,
   providerId: identity,
@@ -82,11 +89,13 @@ const plannedSchema = z.strictObject({
   plannedAt: timestamp,
 });
 const sendingSchema = z.strictObject({
+  version: z.literal(journalVersion),
   type: z.literal('machine-operation-sending'),
   operationId: identity,
   observedAt: timestamp,
 });
 const resultSchema = z.strictObject({
+  version: z.literal(journalVersion),
   type: z.literal('machine-operation-result'),
   operationId: identity,
   source: z.enum(['attempt', 'confirmation', 'reconciliation', 'escalation', 'recovery']),
@@ -239,6 +248,18 @@ export const providerFailure = (refusal: Readonly<{ code: string; message: strin
 };
 
 /**
+ * Whether a receipt is of one operation kind, narrowing it without an assertion.
+ * @internal
+ * @param receipt - Any receipt.
+ * @param kind - The kind asked for.
+ * @returns Whether the receipt is of that kind.
+ */
+export const isReceiptOf = <Kind extends MachineOperationKind>(
+  receipt: MachineOperationReceipt,
+  kind: Kind,
+): receipt is MachineReceipt<Kind> => receipt.kind === kind;
+
+/**
  * The public receipt of one operation from its provider's reply.
  * @internal
  * @param planned - The operation.
@@ -302,7 +323,7 @@ export const operationRecord = (operation: NodeMachineOperationState): MachineOp
     updatedAt: operation.updatedAt,
     ...(operation.receipt ? { receipt: operation.receipt } : {}),
     ...(operation.confirmingSince === undefined ? {} : { confirmingSince: operation.confirmingSince }),
-    ...(planned.requestedBy === undefined ? {} : { requestedBy: planned.requestedBy as MachineRequester }),
+    ...(planned.requestedBy === undefined ? {} : { requestedBy: planned.requestedBy }),
     ...(planned.attended === undefined ? {} : { attended: planned.attended }),
     ...(planned.action === undefined
       ? {}

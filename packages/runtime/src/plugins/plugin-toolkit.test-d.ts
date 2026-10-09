@@ -81,7 +81,6 @@ const machine = () =>
       manifest: machineManifestFixture,
       bindingConfiguration: jobRegistration.configuration,
       submissionConfiguration: jobRegistration.configuration,
-      queries: {},
     } as const,
     () => ({
       async *discover() {},

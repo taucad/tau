@@ -50,6 +50,7 @@ export const createLazyMachineFacet = (
     resolveJob: async (input) => get().resolveJob(input),
     withdrawJob: async (input) => get().withdrawJob(input),
     applyAction: async (input) => get().applyAction(input),
+    approveAction: async (input) => get().approveAction(input),
     stop: async (input) => get().stop(input),
     beginHold: async (input) => get().beginHold(input),
     renewHold: async (input) => get().renewHold(input),

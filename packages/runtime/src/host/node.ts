@@ -25,7 +25,12 @@ import type {
 } from '#host/node-machine-context.js';
 import type { MachineEventLog } from '#host/node-machine-event-log.js';
 import { advanceJob, createNodeMachineJobs, terminalJobStates } from '#host/node-machine-jobs.js';
-import { applyOperationResult, parseJournalEvent, replayJournal } from '#host/node-machine-operations.js';
+import {
+  applyOperationResult,
+  journalVersion,
+  parseJournalEvent,
+  replayJournal,
+} from '#host/node-machine-operations.js';
 import type { NodeMachineJournalEvent, NodeMachineOperationState } from '#host/node-machine-operations.js';
 import { createNodeMachineSerial as createSerial } from '#host/node-machine-serial.js';
 import type {
@@ -45,6 +50,7 @@ import type { MachineBindingRemoval } from '#machines/machine-client.js';
 import { createMachineDirectory } from '#machines/machine-directory.js';
 import type { MachineDirectory, MachineDirectoryEntry } from '#machines/machine-directory.js';
 import type { MachineJob } from '#machines/machine-jobs.js';
+import type { MachineAlert } from '#machines/machine-observation.js';
 import { parseMachineProvider } from '#machines/machine.js';
 import type {
   MachineCandidate,
@@ -144,6 +150,15 @@ const closeOwned = async (operations: ReadonlyArray<() => void | Promise<void>>)
   }
 };
 
+/** What a binding whose provider this host does not serve is listed with: nothing works until a person acts. */
+const providerUnservedAlert: MachineAlert = {
+  code: 'MACHINE_PROVIDER_UNAVAILABLE',
+  severity: 'serious',
+  message: 'This Tau does not serve the provider this machine was bound with.',
+  blocks: 'everything',
+  remedies: [{ type: 'person', instruction: 'Update Tau, or remove this machine and bind it again.' }],
+};
+
 // Two descriptors name the same installation when they differ only in incarnation.
 const sameDescriptor = (left: MachineDescriptor, right: MachineDescriptor): boolean => {
   const comparable = (descriptor: MachineDescriptor): string =>
@@ -238,11 +253,28 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   if ((input.runtime === undefined) === (input.operations === undefined)) {
     throw new TypeError('NODE_MACHINE_HOST_REQUIRES_ONE_OPERATION_OWNER');
   }
-  const providerSources = new Map(input.providers.map((provider) => [provider.id, provider]));
-  if (providerSources.size !== input.providers.length) {
+  if (new Set(input.providers.map((provider) => provider.id)).size !== input.providers.length) {
     throw new TypeError('NODE_MACHINE_HOST_DUPLICATE_PROVIDER');
   }
-  const providers = Object.freeze(input.providers.map(parseMachineProvider));
+  // One provider this host cannot read (a newer manifest or protocol version) is refused alone: its bindings are
+  // listed stale with a remedy, and every other provider is served.
+  const providers = Object.freeze(
+    input.providers.flatMap((provider) => {
+      try {
+        return [parseMachineProvider(provider)];
+      } catch (error) {
+        report(
+          Object.assign(new Error('MACHINE_PROVIDER_REFUSED', { cause: error }), { providerId: String(provider.id) }),
+        );
+        return [];
+      }
+    }),
+  );
+  const providerSources = new Map(
+    input.providers
+      .filter((provider) => providers.some((served) => served.id === provider.id))
+      .map((provider) => [provider.id, provider]),
+  );
   const definitions = new Map<string, Promise<ExecutableMachineDefinition>>();
   const resolveDefinition = async (
     source: MachineProvider & RuntimePluginDefinitionCarrier<unknown>,
@@ -308,6 +340,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   let directory: MachineDirectory | undefined;
   const commits = new Topic<void>({ name: 'node-machine-directory-commits', onError });
   const jobCommits = new Topic<MachineJob>({ name: 'node-machine-jobs', onError });
+  const sessionLost = new Topic<string>({ name: 'node-machine-session-lost', onError });
   // The machine an operation is recorded against, refusing an unbound machine with `missing` and an unreadable journal.
   const usableMachine = (
     machineId: string,
@@ -367,6 +400,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     };
     const held = planned.kind === 'hold';
     const event = parseJournalEvent({
+      version: journalVersion,
       type: 'machine-operation-result',
       operationId: planned.operationId,
       source: 'recovery',
@@ -433,11 +467,23 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         jobs.set(job.jobId, job);
       }
     }
+    // Whether a job's pending transfer or start was ever sent; one still `planned` (or never journaled) was not.
+    const wasSent = (job: MachineJob): boolean => {
+      const operationId = job.state === 'transferring' ? job.transferOperationId : job.startOperationId;
+      const operation = operationId === undefined ? undefined : operations.get(operationId);
+      return operation !== undefined && operation.state !== 'planned';
+    };
     for (const job of jobs.values()) {
       const machine = machines.get(job.machineId);
       const delivery = machine?.record.last?.descriptor.capabilities.jobs;
       let next: MachineJob | undefined;
-      if (job.state === 'preparing' || job.state === 'approved') {
+      if (
+        job.state === 'preparing' ||
+        job.state === 'approved' ||
+        ((job.state === 'transferring' || job.state === 'starting') &&
+          machine?.operations.status === 'open' &&
+          !wasSent(job))
+      ) {
         next = {
           ...job,
           state: 'failed',
@@ -465,18 +511,18 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       authorityId,
       // Every binding is listed, stale until its machine reports; one that never has shows a placeholder.
       recovered: [...machines.values()].map(({ record }): MachineDirectoryEntry => {
-        const { descriptor, snapshot } =
-          record.last ??
-          unreportedIdentity(
-            record,
-            providers.find((provider) => provider.id === record.providerId),
-          );
+        const provider = providers.find((candidate) => candidate.id === record.providerId);
+        const { descriptor, snapshot } = record.last ?? unreportedIdentity(record, provider);
         return {
           machineId: record.id,
           name: record.name,
           providerId: record.providerId,
           descriptor,
-          snapshot: { ...snapshot, operations: [] },
+          snapshot: {
+            ...snapshot,
+            operations: [],
+            ...(provider === undefined ? { alerts: [...snapshot.alerts, providerUnservedAlert] } : {}),
+          },
           freshness: 'stale',
           ...(record.testing === true ? { testing: true } : {}),
         };
@@ -494,6 +540,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         () => {
           commits.dispose();
           jobCommits.dispose();
+          sessionLost.dispose();
         },
         async () => store.close(),
       ]);
@@ -518,6 +565,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     jobs,
     jobCommits,
     commits,
+    sessionLost,
     stillCaptureTimes,
     connectedSessions,
     supervisors,
@@ -549,6 +597,20 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       await previous;
       try {
         await ledger.observe();
+      } catch (error) {
+        report(error);
+      }
+    })();
+  });
+  // A lost session ends what only it could carry: every hold on the machine, and every streamed run it was feeding.
+  let losing = Promise.resolve();
+  const stopLossHandling = sessionLost.subscribe((machineId) => {
+    const previous = losing;
+    losing = (async (): Promise<void> => {
+      await previous;
+      try {
+        await journal.releaseHolds(machineId);
+        await ledger.interrupt(machineId);
       } catch (error) {
         report(error);
       }
@@ -690,6 +752,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       }
       closed = true;
       stopObservingRuns();
+      stopLossHandling();
       // No reconnect starts from here on: pending retries are cancelled and attempts in flight abandoned.
       const supervised = [...supervisors.values()];
       supervisors.clear();
@@ -714,6 +777,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         },
         async () => effectQueue.whenDrained(),
         async () => observing,
+        async () => losing,
         async () => ownedDirectory.close(),
         () => {
           connectedSessions.clear();
@@ -722,6 +786,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         () => {
           commits.dispose();
           jobCommits.dispose();
+          sessionLost.dispose();
         },
         async () => store.close(),
       ]);

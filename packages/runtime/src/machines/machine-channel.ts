@@ -21,10 +21,12 @@ import type {
   HostAdmissionOperation,
   HostSessionHandle,
 } from '#host/host-admission.js';
-import { machineFailureCodes } from '#machines/machine-actions.js';
+import { isMachineJobFailureCode, machineFailureCodes } from '#machines/machine-actions.js';
 import type { MachineFailure } from '#machines/machine-actions.js';
 import type {
+  MachineActionApproval,
   MachineApplyActionInput,
+  MachineApproveActionInput,
   MachineBeginBindingInput,
   MachineBeginHoldInput,
   MachineBindingRemoval,
@@ -65,6 +67,11 @@ import type {
   MachineResolveJobInput,
   MachineWithdrawJobInput,
 } from '#machines/machine-jobs.js';
+import {
+  machineOperationReceiptSchema as receiptSchema,
+  machineOperationSchema as operationSchema,
+  machineRequesterSchema as requesterSchema,
+} from '#machines/machine-jobs.js';
 import { machineCheckSchema } from '#machines/machine-observation.js';
 import { parseMachineProvider } from '#machines/machine.js';
 import type { MachineBindingOutcome, MachineProvider, MachineStill } from '#machines/machine.js';
@@ -81,6 +88,7 @@ type ListJobsInput = Args<MachineListJobsInput>;
 type ResolveJobInput = Args<MachineResolveJobInput>;
 type WithdrawJobInput = Args<MachineWithdrawJobInput>;
 type ApplyActionInput = Args<MachineApplyActionInput>;
+type ApproveActionInput = Args<MachineApproveActionInput>;
 type StopInput = Args<MachineStopInput>;
 type BeginHoldInput = Args<MachineBeginHoldInput>;
 type HoldInput = Readonly<{ holdId: string }>;
@@ -106,6 +114,7 @@ type MachineChannelProtocol = {
     readonly resolveJob: { readonly args: ResolveJobInput; readonly result: MachineJob };
     readonly withdrawJob: { readonly args: WithdrawJobInput; readonly result: MachineJob };
     readonly applyAction: { readonly args: ApplyActionInput; readonly result: MachineReceipt<'action'> };
+    readonly approveAction: { readonly args: ApproveActionInput; readonly result: MachineActionApproval };
     readonly stop: { readonly args: StopInput; readonly result: MachineReceipt<'stop'> };
     readonly beginHold: { readonly args: BeginHoldInput; readonly result: HoldBegun };
     readonly renewHold: { readonly args: HoldInput; readonly result: HoldRenewed };
@@ -211,7 +220,7 @@ const preparedJobSchema = z.strictObject({
   machineId: identitySchema,
   physicalMachineId: identitySchema,
   artifact: artifactSchema,
-  remoteName: identitySchema,
+  remoteName: identitySchema.optional(),
   parser: z.strictObject({ id: identitySchema, version: identitySchema }),
   preparedAt: timestampSchema,
   expiresAt: timestampSchema,
@@ -224,63 +233,29 @@ const failureShape = {
     .max(32)
     .optional(),
 };
-const operationKindSchema = z.enum(['action', 'stop', 'hold', 'transfer', 'start']);
-const receiptBase = { operationId: identitySchema, machineId: identitySchema, observedAt: timestampSchema };
-const receiptSchema = z.union([
-  z.strictObject({
-    ...receiptBase,
-    kind: z.literal('action'),
-    status: z.literal('accepted'),
-    activityId: identitySchema.optional(),
-  }),
-  z.strictObject({ ...receiptBase, kind: z.enum(['stop', 'hold']), status: z.literal('accepted') }),
-  z.strictObject({
-    ...receiptBase,
-    kind: z.literal('transfer'),
-    status: z.literal('accepted'),
-    transferId: identitySchema,
-  }),
-  z.strictObject({
-    ...receiptBase,
-    kind: z.literal('start'),
-    status: z.literal('accepted'),
-    runId: identitySchema.optional(),
-  }),
-  z.strictObject({ ...receiptBase, kind: operationKindSchema, status: z.literal('rejected'), ...failureShape }),
-  z.strictObject({ ...receiptBase, kind: operationKindSchema, status: z.literal('unknown'), reason: textSchema }),
-]);
-const requesterSchema = z.strictObject({ kind: z.enum(['user', 'agent']), id: identitySchema, label: identitySchema });
-const operationSchema = z.strictObject({
-  operationId: identitySchema,
-  machineId: identitySchema,
-  kind: operationKindSchema,
-  inputDigest: digestSchema,
-  state: z.enum(['planned', 'sending', 'accepted', 'rejected', 'confirming', 'attention']),
-  updatedAt: timestampSchema,
-  receipt: receiptSchema.optional(),
-  confirmingSince: timestampSchema.optional(),
-  requestedBy: requesterSchema.optional(),
-  attended: z.boolean().optional(),
-  action: z
-    .strictObject({
-      componentId: identitySchema,
-      id: identitySchema,
-      label: identitySchema,
-      activityId: identitySchema.optional(),
-    })
-    .optional(),
-});
+const configurationSchema = z.unknown().transform((value) => cloneBoundedJson(value, limits));
+const jobFailureCodeSchema = z.string().refine(isMachineJobFailureCode, 'Expected a machine job failure code.');
 const range = z.strictObject({ min: z.number(), max: z.number() });
 const programSchema = z.strictObject({
   name: identitySchema,
   estimatedDuration: z.number().nonnegative().optional(),
   producer: z.strictObject({ name: identitySchema, version: identitySchema.optional() }).optional(),
   preferences: machineSettingsProvenanceSchema.optional(),
-  facts: z.discriminatedUnion('process', [
+  facts: z.union([
     z.strictObject({
       process: z.literal('fff'),
       layers: z.number().int().nonnegative().optional(),
       filamentLength: z.number().nonnegative().optional(),
+      filaments: z
+        .array(
+          z.strictObject({
+            index: z.number().int().nonnegative(),
+            materialType: identitySchema,
+            color: z.string().regex(/^#[0-9A-F]{8}$/u),
+          }),
+        )
+        .max(32)
+        .optional(),
     }),
     z.strictObject({
       process: z.literal('milling'),
@@ -301,6 +276,13 @@ const programSchema = z.strictObject({
       uses: z.array(z.enum(['tool-change', 'coolant', 'probing', 'program-stop', 'inverse-time-feed'])).max(8),
     }),
     z.strictObject({ process: z.literal('other') }),
+    z.strictObject({
+      process: z
+        .templateLiteral([z.string(), '.', z.string()])
+        .refine((process) => process.length <= 64 && /^[a-z0-9-]+\.[a-z0-9.-]+$/u.test(process)),
+      version: z.number().int().min(1),
+      data: configurationSchema,
+    }),
   ]),
 });
 const progressSchema = z.strictObject({
@@ -319,7 +301,6 @@ const progressSchema = z.strictObject({
     )
     .max(8),
 });
-const configurationSchema = z.unknown().transform((value) => cloneBoundedJson(value, limits));
 const jobSchema = z.strictObject({
   version: z.literal(1),
   jobId: identitySchema,
@@ -356,7 +337,7 @@ const jobSchema = z.strictObject({
   startOperationId: identitySchema.optional(),
   transferId: identitySchema.optional(),
   receipt: receiptSchema.optional(),
-  failure: z.strictObject({ code: identitySchema, message: textSchema }).optional(),
+  failure: z.strictObject({ code: jobFailureCodeSchema, message: textSchema }).optional(),
   resolvedBy: requesterSchema.optional(),
   run: z
     .strictObject({
@@ -372,8 +353,9 @@ const jobCheckSchema = z.union([
     status: z.enum(['ready', 'blocked']),
     program: programSchema,
     checks: z.array(machineCheckSchema).max(64),
+    configuration: configurationSchema,
   }),
-  z.strictObject({ status: z.literal('refused'), code: identitySchema, message: textSchema }),
+  z.strictObject({ status: z.literal('refused'), code: jobFailureCodeSchema, message: textSchema }),
 ]);
 const stillSchema = z.strictObject({
   bytes: z
@@ -435,26 +417,20 @@ export const parseMachinePreparedJob = (value: unknown): MachinePreparedJob => f
  * @param value - Untrusted receipt.
  * @returns Detached, frozen receipt.
  */
-// SAFETY: the strict schema is the runtime proof of the receipt's shape.
 export const parseMachineOperationReceipt = (value: unknown): MachineOperationReceipt =>
-  freeze(receiptSchema.parse(value) as MachineOperationReceipt);
+  freeze(receiptSchema.parse(value));
 
 /** Admit one operation record. @internal
  * @param value - Untrusted operation.
  * @returns Detached, frozen operation.
  */
-// SAFETY: the strict schema is the runtime proof of the operation's shape.
-export const parseMachineOperation = (value: unknown): MachineOperation =>
-  freeze(operationSchema.parse(value) as unknown as MachineOperation);
+export const parseMachineOperation = (value: unknown): MachineOperation => freeze(operationSchema.parse(value));
 
 /** Admit one program summary, whole or partial. @internal
  * @param value - Untrusted summary.
  * @returns Detached, frozen summary.
  */
 export const parseMachineProgramSummary = (value: unknown): MachineProgramSummary => freeze(programSchema.parse(value));
-
-/** Admit one requester. @internal */
-export const machineRequesterSchema = requesterSchema;
 
 const validator = <Value>(parse: (value: unknown) => Value): WireValidator<Value> => ({
   safeParse(value) {
@@ -551,9 +527,28 @@ const protocolSchemas: WireProtocolSchemas<MachineChannelProtocol> = {
         parameters: configurationSchema,
         requestedBy: requesterSchema,
         attended: z.boolean().optional(),
-        approval: z.strictObject({ approvedBy: requesterSchema, operationId: identitySchema }).optional(),
       }),
       result: typed(receiptSchema),
+    },
+    approveAction: {
+      args: z.strictObject({
+        machineId: identitySchema,
+        operationId: identitySchema,
+        intent: z.strictObject({
+          componentId: identitySchema,
+          action: identitySchema,
+          version: z.number().int().min(1).max(1000),
+          parameters: configurationSchema,
+        }),
+        decision: z.enum(['approve', 'deny']),
+      }),
+      result: typed(
+        z.union([
+          z.strictObject({ status: z.literal('approved'), operationId: identitySchema, expiresAt: timestampSchema }),
+          z.strictObject({ status: z.literal('denied'), operationId: identitySchema }),
+          z.strictObject({ status: z.literal('refused'), ...failureShape }),
+        ]),
+      ),
     },
     stop: {
       args: z.strictObject({
@@ -804,6 +799,7 @@ export const connectMachineChannel = (port: MachineChannelEndpoint): MachineChan
     resolveJob: async ({ signal, ...input }) => channel.call('resolveJob', input, signal),
     withdrawJob: async ({ signal, ...input }) => channel.call('withdrawJob', input, signal),
     applyAction: async ({ signal, ...input }) => channel.call('applyAction', input, signal),
+    approveAction: async ({ signal, ...input }) => channel.call('approveAction', input, signal),
     stop: async ({ signal, ...input }) => channel.call('stop', input, signal),
     beginHold: async ({ signal, ...input }) => channel.call('beginHold', input, signal),
     renewHold: async (input) => channel.call('renewHold', input),

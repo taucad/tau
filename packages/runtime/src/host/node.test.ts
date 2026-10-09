@@ -18,8 +18,10 @@ import type { MachineChannelClient, MachineChannelHostOperations } from '#machin
 import { machineCredentialReference } from '#machines/machine-credential.js';
 import type { MachineApplyActionInput } from '#machines/machine-client.js';
 import type { MachineObservation, MachineRun } from '#machines/machine-observation.js';
+import { machineManifestDefinitionFixture } from '#machines/machine-manifest.fixture.js';
 import {
   fixtureDescriptor,
+  fixtureObservation,
   fixtureProvider,
   fixtureReport,
   fixtureSession,
@@ -134,6 +136,7 @@ const operations: MachineChannelHostOperations = {
   resolveJob: unavailable,
   withdrawJob: unavailable,
   applyAction: unavailable,
+  approveAction: unavailable,
   stop: unavailable,
   beginHold: unavailable,
   renewHold: unavailable,
@@ -699,7 +702,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
     await restarted.close();
   });
 
-  it("should send an agent's request that needs approval only with a person's approval of that exact operation", async () => {
+  it("should send an agent's request that needs approval only once a person approved exactly that operation", async () => {
     const run: MachineRun = {
       runId: 'run-1',
       origin: 'tau',
@@ -713,42 +716,66 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
       actions: { type: 'supported', apply, confirm: () => ({ status: 'confirmed' }) },
     });
     const agentClient = await fixture.serveAs(agentActor);
-    const cancel = (
-      operationId: string,
-      overrides: Partial<MachineApplyActionInput> = {},
-    ): MachineApplyActionInput => ({
+    const cancel = (operationId: string): MachineApplyActionInput => ({
       ...lightOn(fixture.revision, operationId),
       componentId: 'controller',
       action: 'run.cancel',
       expectedRunId: 'run-1',
       parameters: {},
-      ...overrides,
     });
+    const decide = async (
+      client: MachineChannelClient,
+      operationId: string,
+      { decision = 'approve', parameters = {} }: Readonly<{ decision?: 'approve' | 'deny'; parameters?: unknown }> = {},
+    ) =>
+      client.approveAction({
+        machineId,
+        operationId,
+        intent: { componentId: 'controller', action: 'run.cancel', version: 1, parameters },
+        decision,
+      });
+    const refused = { status: 'rejected', code: 'MACHINE_ACTION_APPROVAL_REQUIRED' } as const;
+    await expect(agentClient.applyAction(cancel('cancel-1'))).resolves.toMatchObject(refused);
+    // An agent approves nothing, its own request or another's.
+    await expect(decide(agentClient, 'cancel-1')).resolves.toMatchObject({
+      status: 'refused',
+      code: 'MACHINE_ACTION_PERSON_REQUIRED',
+    });
+    await expect(agentClient.applyAction(cancel('cancel-1'))).resolves.toMatchObject(refused);
+    // An approval of other values admits nothing, and is not used up by the attempt.
+    await decide(fixture.client, 'cancel-1', { parameters: { reason: 'other' } });
     await expect(agentClient.applyAction(cancel('cancel-1'))).resolves.toMatchObject({
-      status: 'rejected',
-      code: 'MACHINE_ACTION_APPROVAL_REQUIRED',
+      ...refused,
+      message: 'The approval of “Cancel” was for other values. Ask a person again.',
     });
-    // An agent's own session cannot carry an approval; nor can an approval of another operation.
-    await expect(
-      agentClient.applyAction(cancel('cancel-1', { approval: { approvedBy: operator, operationId: 'cancel-1' } })),
-    ).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_APPROVAL_REQUIRED' });
-    await expect(
-      fixture.client.applyAction(cancel('cancel-1', { approval: { approvedBy: operator, operationId: 'cancel-0' } })),
-    ).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_APPROVAL_REQUIRED' });
-    await expect(
-      fixture.client.applyAction(
-        cancel('cancel-2', { expectedRunId: 'run-0', approval: { approvedBy: operator, operationId: 'cancel-2' } }),
-      ),
-    ).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_STALE_RUN' });
+    // An approval waits ten minutes, no longer.
+    await decide(fixture.client, 'cancel-2');
+    currentTime.value += 10 * 60_000;
+    await expect(agentClient.applyAction(cancel('cancel-2'))).resolves.toMatchObject(refused);
+    // A denial reaches the agent's next call.
+    await expect(decide(fixture.client, 'cancel-3', { decision: 'deny' })).resolves.toEqual({
+      status: 'denied',
+      operationId: 'cancel-3',
+    });
+    await expect(agentClient.applyAction(cancel('cancel-3'))).resolves.toMatchObject({
+      ...refused,
+      message: 'A person declined “Cancel”.',
+    });
     expect(apply).not.toHaveBeenCalled();
-    await expect(
-      fixture.client.applyAction(cancel('cancel-1', { approval: { approvedBy: operator, operationId: 'cancel-1' } })),
-    ).resolves.toMatchObject({ status: 'accepted' });
+
+    await expect(decide(fixture.client, 'cancel-1')).resolves.toEqual({
+      status: 'approved',
+      operationId: 'cancel-1',
+      expiresAt: new Date(currentTime.value + 10 * 60_000).toISOString(),
+    });
+    await expect(agentClient.applyAction(cancel('cancel-1'))).resolves.toMatchObject({ status: 'accepted' });
     // Confirmed by acknowledgement: accepted when the printer accepts.
     await expect(fixture.client.reconcileOperation({ machineId, operationId: 'cancel-1' })).resolves.toMatchObject({
       state: 'accepted',
       requestedBy: agent,
     });
+    // Used once: the next operation needs its own approval.
+    await expect(agentClient.applyAction(cancel('cancel-4'))).resolves.toMatchObject(refused);
     expect(apply).toHaveBeenCalledOnce();
     await fixture.close();
   });
@@ -836,6 +863,95 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
     await fixture.close();
   });
 
+  /** A jog the operator holds at the machine. */
+  const jogOf = (capabilityRevision: string) =>
+    ({
+      machineId,
+      componentId: 'motion',
+      capabilityRevision,
+      operationId: 'jog-1',
+      hold: 'motion.jog',
+      version: 1,
+      parameters: { axis: 'x', direction: 1, feed: 600 },
+      requestedBy: operator,
+      attended: true,
+    }) as const;
+
+  it('should refuse a hold while the machine runs a program', async () => {
+    const begin = vi.fn(
+      async (): Promise<MachineProviderHold> => ({
+        extend: async () => undefined,
+        release: async () => ({ status: 'accepted', observedAt }),
+      }),
+    );
+    const feed = reportFeed();
+    const fixture = await boundPrinter({ holds: { type: 'supported', begin }, observe: feed.observe });
+    feed.push({
+      type: 'snapshot',
+      snapshot: fixtureReport({
+        state: { status: 'active' },
+        run: {
+          runId: 'run-1',
+          origin: 'external',
+          delivery: 'stored',
+          state: 'running',
+          progress: { basis: 'executed', counters: [] },
+        },
+      }),
+    });
+    await vi.waitFor(async () => {
+      await expect(fixture.client.get({ machineId })).resolves.toMatchObject({
+        snapshot: { state: { status: 'active' } },
+      });
+    });
+    await expect(fixture.client.beginHold(jogOf(fixture.revision))).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_PRECONDITION_FAILED',
+    });
+    expect(begin).not.toHaveBeenCalled();
+    await fixture.close();
+  });
+
+  it('should release a hold when the session that carried it is lost', async () => {
+    const lose = Promise.withResolvers<void>();
+    const release = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const fixture = await boundPrinter({
+      holds: { type: 'supported', begin: async () => ({ extend: async () => undefined, release }) },
+      async *observe() {
+        yield { type: 'snapshot', snapshot: fixtureReport() };
+        await lose.promise;
+      },
+    });
+    await expect(fixture.client.beginHold(jogOf(fixture.revision))).resolves.toMatchObject({ status: 'held' });
+    lose.resolve();
+    await vi.waitFor(() => {
+      expect(release).toHaveBeenCalledOnce();
+    });
+    await expect(fixture.client.renewHold({ holdId: 'jog-1' })).resolves.toEqual({ status: 'ended' });
+    await fixture.close();
+  });
+
+  it('should stop a printer whose journal refuses every write, and report the refusal', async () => {
+    const stop = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const first = await boundPrinter({ stop });
+    await first.close();
+    refusedAppends.add(join(await realpath(first.root), machineId));
+    try {
+      const fixture = await openServedHost(first.root, first.provider, runtimeAt(currentTimestamp));
+      await vi.waitFor(async () => {
+        await expect(fixture.client.get({ machineId })).resolves.toMatchObject({ freshness: 'current' });
+      });
+      await expect(
+        fixture.client.stop({ machineId, operationId: 'stop-1', requestedBy: operator }),
+      ).resolves.toMatchObject({ operationId: 'stop-1', kind: 'stop', status: 'accepted' });
+      expect(stop).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ operationId: 'stop-1' }));
+      expect(fixture.onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'FIXTURE_APPEND_REFUSED' }));
+      await fixture.close();
+    } finally {
+      refusedAppends.clear();
+    }
+  });
+
   it('should end a hold whose lease lapses and refuse a hold from an agent', async () => {
     const extend = vi.fn(async () => undefined);
     const release = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
@@ -858,9 +974,15 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
       code: 'MACHINE_ACTION_PERSON_REQUIRED',
       message: 'Only a person at the machine can hold a control.',
     });
+    const someoneElse = await fixture.serveAs({ kind: 'user', id: 'someone-else' });
     await expect(fixture.client.beginHold(jog)).resolves.toEqual({ status: 'held', holdId: 'jog-1', lease: 200 });
-    await expect(fixture.client.renewHold({ holdId: 'jog-1' })).resolves.toEqual({ status: 'held' });
+    // The first segment goes out with the hold, not a lease later.
     expect(extend).toHaveBeenCalledOnce();
+    // The lease is its beginner's: another session's renewal, or an agent's, keeps nothing moving.
+    await expect(someoneElse.renewHold({ holdId: 'jog-1' })).resolves.toEqual({ status: 'ended' });
+    await expect(agentClient.renewHold({ holdId: 'jog-1' })).resolves.toEqual({ status: 'ended' });
+    await expect(fixture.client.renewHold({ holdId: 'jog-1' })).resolves.toEqual({ status: 'held' });
+    expect(extend).toHaveBeenCalledTimes(2);
     // No renewal within the lease: the host tells the printer to release.
     await vi.waitFor(() => {
       expect(release).toHaveBeenCalledOnce();
@@ -921,6 +1043,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
 
   afterEach(() => {
     currentTime.value = Date.parse(observedAt);
+    vi.useRealTimers();
   });
 
   const boundPrinter = async (
@@ -1064,12 +1187,16 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     let setup: CacheValue = { plate: 'smooth' };
     jobs.prepare.mockImplementation(async (input) => readyPreparation(input, setup));
     let isProven = false;
-    const fixture = await boundPrinter(jobs.facet, {
-      reconcile: async (input) =>
+    const feed = reportFeed();
+    const reconcile = vi.fn(
+      async (input: Readonly<{ kind: string }>): Promise<MachineCommandReceipt> =>
         input.kind === 'start' && isProven
           ? { status: 'accepted', runId: 'run-late', observedAt }
           : { status: 'unknown', reason: 'no proof yet', observedAt },
-    });
+    );
+    // Only the escalation clock (held still here) or a person's look asks the printer.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const fixture = await boundPrinter(jobs.facet, { reconcile, observe: feed.observe });
     await request(fixture.client, 'job-1');
     setup = { plate: 'textured' };
     await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({
@@ -1086,6 +1213,14 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
       receipt: { operationId: 'start-job-2', status: 'unknown' },
     });
     await expect(approve(fixture.client, 'job-2')).rejects.toThrow('MACHINE_JOB_NOT_AWAITING');
+    // Reports settle only what they show; they never ask the printer.
+    const lit = fixtureObservation('chamber-light', 'accessories', { kind: 'switch', on: true });
+    feed.push({ type: 'snapshot', snapshot: fixtureReport({ components: [lit] }) });
+    await vi.waitFor(async () => {
+      const entry = await fixture.client.get({ machineId });
+      expect(entry.snapshot.components).toContainEqual(expect.objectContaining(lit));
+    });
+    expect(reconcile).not.toHaveBeenCalled();
     isProven = true;
     await expect(fixture.client.reconcileOperation({ machineId, operationId: 'start-job-2' })).resolves.toMatchObject({
       state: 'accepted',
@@ -1116,6 +1251,13 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
       },
     };
     const fixture = await boundPrinter(jobs.facet, { descriptor, observe: feed.observe });
+    // A loaded program nobody has started yet can still be withdrawn from Tau.
+    await request(fixture.client, 'job-0');
+    jobs.start.mockResolvedValueOnce({ status: 'accepted', observedAt });
+    await expect(approve(fixture.client, 'job-0')).resolves.toMatchObject({ state: 'awaiting-start' });
+    await expect(fixture.client.withdrawJob({ jobId: 'job-0', resolvedBy: operator })).resolves.toMatchObject({
+      state: 'withdrawn',
+    });
     await request(fixture.client, 'job-1');
     jobs.start.mockResolvedValueOnce({ status: 'accepted', observedAt });
     await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({ state: 'awaiting-start' });
@@ -1138,6 +1280,116 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
       const [latest] = await fixture.client.listJobs({});
       expect(latest).toMatchObject({ state: 'started', run: { runId: 'run-9', outcome: 'running' } });
     });
+    await fixture.close();
+  });
+
+  /** The fixture printer's descriptor with its job facts changed. */
+  type JobFacts = Extract<MachineProviderDescriptor['capabilities']['jobs'], { type: 'supported' }>;
+  const withJobFacts = (
+    change: (facts: JobFacts) => Partial<JobFacts>,
+    components: MachineProviderDescriptor['capabilities']['components'] = [],
+  ): MachineProviderDescriptor => {
+    const reported = fixtureDescriptor();
+    const facts = reported.capabilities.jobs;
+    if (facts.type !== 'supported') {
+      throw new Error('the fixture printer runs jobs');
+    }
+    return {
+      ...reported,
+      capabilities: {
+        ...reported.capabilities,
+        components: [...reported.capabilities.components, ...components],
+        jobs: { ...facts, ...change(facts) },
+      },
+    };
+  };
+
+  it("should hold a job's start to a person's approval even when the machine declares agent authority", async () => {
+    const jobs = storedJobs();
+    const descriptor = withJobFacts((facts) => ({ safety: { ...facts.safety, authority: 'agent' } }));
+    const fixture = await boundPrinter(jobs.facet, { descriptor });
+    const agentClient = await fixture.serveAs(agentActor);
+    await request(agentClient, 'job-1');
+    await expect(
+      agentClient.resolveJob({ jobId: 'job-1', decision: 'approve', resolvedBy: agent, attestations: ['plate-clear'] }),
+    ).rejects.toThrow('A person must approve this job in Tau.');
+    expect(jobs.transfer).not.toHaveBeenCalled();
+    await fixture.close();
+  });
+
+  it('should refuse to approve a job while an interlock it names is not safe', async () => {
+    const jobs = storedJobs();
+    const feed = reportFeed();
+    const descriptor = withJobFacts(
+      (facts) => ({ safety: { ...facts.safety, interlocks: ['cover'] } }),
+      [{ id: 'cover', label: 'Cover', kind: 'interlock', guards: 'door' }],
+    );
+    const cover = (state: 'safe' | 'unsafe') =>
+      fixtureReport({
+        components: [...fixtureReport().components, fixtureObservation('cover', 'state', { kind: 'interlock', state })],
+      });
+    const fixture = await boundPrinter(jobs.facet, { descriptor, observe: feed.observe });
+    feed.push({ type: 'snapshot', snapshot: cover('unsafe') });
+    await request(fixture.client, 'job-1');
+    await vi.waitFor(async () => {
+      await expect(approve(fixture.client, 'job-1')).rejects.toThrow(
+        'Cover is not safe. Make the cover safe at the machine.',
+      );
+    });
+    expect(jobs.transfer).not.toHaveBeenCalled();
+    feed.push({ type: 'snapshot', snapshot: cover('safe') });
+    await vi.waitFor(async () => {
+      await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({ state: 'started' });
+    });
+    await fixture.close();
+  });
+
+  it('should prepare a job again when it is approved after its preparation window', async () => {
+    const jobs = storedJobs();
+    const fixture = await boundPrinter(jobs.facet);
+    const requested = await request(fixture.client, 'job-1');
+    currentTime.value += 11 * 60_000;
+    const started = await approve(fixture.client, 'job-1');
+    expect(started).toMatchObject({ state: 'started' });
+    expect(started.prepared?.preparedId).not.toBe(requested.prepared?.preparedId);
+    // Requested, prepared again at approval, then checked once more by the start.
+    expect(jobs.prepare).toHaveBeenCalledTimes(3);
+    await fixture.close();
+  });
+
+  it('should record a streamed run as interrupted when the session that fed it is lost', async () => {
+    const lose = Promise.withResolvers<void>();
+    const prepare = vi.fn(async (input: Readonly<{ operationId: string }>) =>
+      readyPreparation(input, { plate: 'smooth' }),
+    );
+    const start = vi.fn(
+      async (input: Readonly<{ operationId: string }>): Promise<MachineCommandReceipt> => ({
+        status: 'accepted',
+        runId: `run-${input.operationId}`,
+        observedAt,
+      }),
+    );
+    const fixture = await boundPrinter(
+      { type: 'supported', delivery: 'streamed', prepare, start },
+      {
+        descriptor: withJobFacts(() => ({ delivery: 'streamed' })),
+        async *observe() {
+          yield { type: 'snapshot', snapshot: fixtureReport() };
+          await lose.promise;
+        },
+      },
+    );
+    await request(fixture.client, 'job-1');
+    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({
+      state: 'started',
+      run: { runId: 'run-start-job-1', outcome: 'running' },
+    });
+    lose.resolve();
+    await vi.waitFor(async () => {
+      const [latest] = await fixture.client.listJobs({});
+      expect(latest).toMatchObject({ state: 'started', run: { runId: 'run-start-job-1', outcome: 'interrupted' } });
+    });
+    expect(start).toHaveBeenCalledOnce();
     await fixture.close();
   });
 
@@ -1187,8 +1439,16 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
       await cp(root, copy, { recursive: true });
       crashes.set(name, copy);
     };
+    const prepare = jobs.prepare.getMockImplementation()!;
     const transfer = jobs.transfer.getMockImplementation()!;
     const start = jobs.start.getMockImplementation()!;
+    // The second preparation is the start's own check, before its operation is journaled.
+    jobs.prepare.mockImplementation(async (input) => {
+      if (jobs.prepare.mock.calls.length === 2) {
+        await crashCopy('start-admitted');
+      }
+      return prepare(input);
+    });
     jobs.transfer.mockImplementation(async (input) => {
       await crashCopy('transfer-sending');
       return transfer(input);
@@ -1202,6 +1462,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     await crashCopy('awaiting-approval');
     await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({ state: 'started' });
     await fixture.close();
+    jobs.prepare.mockImplementation(prepare);
     jobs.transfer.mockImplementation(transfer);
     jobs.start.mockImplementation(start);
 
@@ -1222,15 +1483,20 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     expect(jobs.transfer).toHaveBeenCalledOnce();
     await awaiting.close();
 
-    // A start follows only a proven transfer, so an unproven one started nothing and the job can be sent again.
+    // An unproven transfer keeps the job transferring until the journal settles it; nothing is sent again.
     const transferring = await restart('transfer-sending');
-    expect(transferring.job).toMatchObject({
-      state: 'failed',
-      failure: { code: 'MACHINE_TRANSFER_UNCONFIRMED' },
-      receipt: { operationId: 'transfer-job-1', kind: 'transfer', status: 'unknown' },
-    });
+    expect(transferring.job).toMatchObject({ state: 'transferring', transferOperationId: 'transfer-job-1' });
+    await expect(
+      transferring.client.reconcileOperation({ machineId, operationId: 'transfer-job-1' }),
+    ).resolves.toMatchObject({ state: 'confirming' });
     expect(jobs.transfer).not.toHaveBeenCalled();
     await transferring.close();
+
+    // A start that was never sent is not left looking in flight: the person is told to send it again.
+    const admitted = await restart('start-admitted');
+    expect(admitted.job).toMatchObject({ state: 'failed', failure: { code: 'HOST_RESTARTED' } });
+    expect(jobs.start).not.toHaveBeenCalled();
+    await admitted.close();
 
     const starting = await restart('start-sending');
     expect(starting.job).toMatchObject({
@@ -1493,7 +1759,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     await first.close();
     // A well-formed frame that breaks the replay rules: a send for an operation that was never planned.
     const log = await journalAt(join(root, 'printer-a'));
-    await log.append({ type: 'machine-operation-sending', operationId: 'orphan', observedAt });
+    await log.append({ version: 1, type: 'machine-operation-sending', operationId: 'orphan', observedAt });
     await log.close();
     const damaged = await readFile(join(root, 'printer-a', 'journal.jsonl'));
 
@@ -1561,6 +1827,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     // A light that may have left when the host stopped: recovery owes it a durable `unknown` before anything reconnects.
     const log = await journalAt(join(root, 'printer-a'));
     await log.append({
+      version: 1,
       type: 'machine-operation-planned',
       machineId: 'printer-a',
       providerId: 'binding-provider',
@@ -1571,7 +1838,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
       intent: { componentId: 'chamber-light', action: 'switch.set', version: 1, expectedRunId: null, parameters: {} },
       plannedAt: observedAt,
     });
-    await log.append({ type: 'machine-operation-sending', operationId: 'light-1', observedAt });
+    await log.append({ version: 1, type: 'machine-operation-sending', operationId: 'light-1', observedAt });
     await log.close();
     const pending = await readFile(join(root, 'printer-a', 'journal.jsonl'));
 
@@ -1602,6 +1869,77 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
       refusedAppends.clear();
     }
     expect(await readFile(join(root, 'printer-a', 'journal.jsonl'))).toEqual(pending);
+  });
+
+  it.each([
+    ['a newer record version', { version: 2, type: 'machine-operation-sending', operationId: 'later', observedAt }],
+    [
+      'a record type this Tau does not know',
+      { version: 1, type: 'machine-operation-annotated', operationId: 'later', observedAt },
+    ],
+  ])('should keep a journal holding %s unreadable until a newer Tau reads it', async (_case, record) => {
+    const root = await storeRoot();
+    const first = await openCredentialHost(root);
+    await bindAs(first, { candidateId: 'candidate-a', name: 'printer-a', secretRef: 'vault:a' });
+    await first.close();
+    const log = await journalAt(join(root, 'printer-a'));
+    await log.append(record);
+    await log.close();
+    const second = await openCredentialHost(root);
+    expect(second.onError).toHaveBeenCalledOnce();
+    expect(second.onError.mock.calls[0]?.[0]).toMatchObject({
+      message: 'MACHINE_OPERATIONS_LOG_CORRUPT',
+      cause: { message: 'MACHINE_EVENT_LOG_CORRUPT_RECORD' },
+    });
+    await second.close();
+  });
+
+  it('should refuse only a provider it cannot read and list its printers stale with a remedy', async () => {
+    const root = await storeRoot();
+    const first = await openCredentialHost(root);
+    await bindAs(first, { candidateId: 'candidate-a', name: 'printer-a', secretRef: 'vault:a' });
+    await first.close();
+    // A provider from a newer Tau: its protocol is one this host does not speak.
+    const newer = { ...provider };
+    Reflect.set(newer, 'protocolVersion', 3);
+    const second = await openServedHost(root, newer, runtime);
+    expect(second.onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'MACHINE_PROVIDER_REFUSED', providerId: 'binding-provider' }),
+    );
+    await expect(second.client.get({ machineId: 'printer-a' })).resolves.toMatchObject({
+      freshness: 'stale',
+      snapshot: {
+        alerts: [{ code: 'MACHINE_PROVIDER_UNAVAILABLE', remedies: [{ type: 'person' }] }],
+      },
+    });
+    await second.close();
+  });
+
+  it('should move a claimed printer to a new address only when a person binds it there again', async () => {
+    const root = await storeRoot();
+    const claimed = fixtureProvider({
+      id: 'binding-provider',
+      manifest: {
+        ...machineManifestDefinitionFixture,
+        connection: { ...machineManifestDefinitionFixture.connection, identity: 'claimed' },
+      },
+      candidates: [candidateA, candidateB],
+      async connect() {
+        return fixtureSession();
+      },
+    });
+    const fixture = await openServedHost(root, claimed, runtime);
+    const bound = await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+    // The same claimed identity answering at another address is the same printer once a person confirms it.
+    await expect(
+      bindAs(fixture, { candidateId: 'candidate-b', name: machineId, secretRef: 'vault:x1c' }),
+    ).resolves.toBe(bound);
+    expect(JSON.parse(await readFile(join(root, machineId, 'machine.json'), 'utf8'))).toMatchObject({
+      name: machineId,
+      candidate: { endpoint: { address: 'candidate-b.local' } },
+    });
+    await expect(fixture.client.list({})).resolves.toMatchObject({ entries: [{ machineId }] });
+    await fixture.close();
   });
 
   it('should import a legacy binding once and reconnect it as an ordinary printer', async () => {
@@ -1851,7 +2189,11 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     expect(vi.getTimerCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(connects).toHaveBeenCalledTimes(2);
-    await expect(fixture.client.get(machine)).resolves.toMatchObject({ freshness: 'stale' });
+    // Stale with what a person does about it.
+    await expect(fixture.client.get(machine)).resolves.toMatchObject({
+      freshness: 'stale',
+      snapshot: { alerts: [{ code: 'tau.rebind-required', remedies: [{ type: 'person' }] }] },
+    });
     vi.useRealTimers();
     await fixture.close();
 
@@ -1900,6 +2242,57 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     expect(vi.getTimerCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(connects).toHaveBeenCalledTimes(2);
+    await fixture.close();
+  });
+
+  it('should leave a printer stale for a person when reconnecting would reset a controller that was running', async () => {
+    const lose = Promise.withResolvers<void>();
+    const resets = vi.fn();
+    const running = fixtureReport({
+      state: { status: 'active' },
+      run: {
+        runId: 'run-1',
+        origin: 'external',
+        delivery: 'streamed',
+        state: 'running',
+        progress: { basis: 'executed', counters: [] },
+      },
+    });
+    const resetting = fixtureProvider({
+      id: 'binding-provider',
+      manifest: {
+        ...machineManifestDefinitionFixture,
+        connection: { ...machineManifestDefinitionFixture.connection, opening: 'resets-controller' },
+      },
+      candidates: [candidateA],
+      async connect() {
+        resets();
+        return fixtureSession({
+          getSnapshot: async () => running,
+          async *observe() {
+            yield { type: 'snapshot', snapshot: running };
+            await lose.promise;
+          },
+        });
+      },
+    });
+    const fixture = await openServedHost(await storeRoot(), resetting, runtime);
+    await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+    await expect(fixture.client.get(machine)).resolves.toMatchObject({ snapshot: { run: { state: 'running' } } });
+    useFakeTimers();
+    lose.resolve();
+    await until(() =>
+      fixture.onError.mock.calls.some(
+        ([error]: unknown[]) => (error as Error).message === 'MACHINE_RECONNECT_NEEDS_PERSON',
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(resets).toHaveBeenCalledOnce();
+    await expect(fixture.client.get(machine)).resolves.toMatchObject({
+      freshness: 'stale',
+      snapshot: { alerts: [{ code: 'tau.reconnect-required', remedies: [{ type: 'person' }] }] },
+    });
+    vi.useRealTimers();
     await fixture.close();
   });
 

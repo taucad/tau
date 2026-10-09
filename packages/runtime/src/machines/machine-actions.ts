@@ -150,8 +150,10 @@ export type MachineActionDescriptor = Readonly<{
  * the machine within that bound without any message arriving. Person only, attended, never an agent.
  * @public
  */
-export type MachineHoldDescriptor = Omit<MachineActionDescriptor, 'scope'> &
+export type MachineHoldDescriptor = Omit<MachineActionDescriptor, 'scope' | 'when'> &
   Readonly<{
+    /** A hold is admissible only while the machine is ready: never during a run, which it would cancel. */
+    when: ReadonlyArray<'ready'>;
     /** How often the pressing client must renew, at the longest. Milliseconds. */
     lease: number;
     /** The longest the machine can keep moving after the last renewal. Milliseconds. */
@@ -401,17 +403,36 @@ export type MachineJogHoldParameters = z.input<(typeof standardMachineHolds)['mo
  * The host's whole low-risk list: the only places an unattended agent may act, keyed by component kind and family.
  * Providers cannot add to it.
  */
-const unattended = new Set(['light:switch.set', 'light:level.set', 'speed-profile:option.set', 'controller:run.pause']);
+const unattended = new Set(['light:switch.set', 'light:level.set', 'speed-profile:option.set']);
+/** Low-risk only on a printer: pausing a print parks the head; pausing a cut leaves a spinning tool in the work. */
+const unattendedOnPrinter = new Set(['controller:run.pause']);
+const lowRisk = (entry: string): boolean => unattended.has(entry) || unattendedOnPrinter.has(entry);
 
 /**
  * Whether an agent may use an action without a person approving it.
  * @param componentKind - The kind of the component the action targets.
  * @param descriptor - The installed descriptor.
+ * @param processes - The machine's declared processes; pausing is unattended only with an `fff` process and no
+ * `milling`. Absent, no process is assumed and a pause needs approval.
  * @returns True only for the host's low-risk list, on a descriptor whose floor is `agent`.
  * @public
  */
-export const isUnattendedAction = (componentKind: string, descriptor: MachineActionDescriptor): boolean =>
-  descriptor.safety.authority === 'agent' && unattended.has(`${componentKind}:${descriptor.id}`);
+export const isUnattendedAction = (
+  componentKind: string,
+  descriptor: MachineActionDescriptor,
+  processes: ReadonlyArray<Readonly<{ type: string }>> = [],
+): boolean => {
+  if (descriptor.safety.authority !== 'agent') {
+    return false;
+  }
+  const entry = `${componentKind}:${descriptor.id}`;
+  return (
+    unattended.has(entry) ||
+    (unattendedOnPrinter.has(entry) &&
+      processes.some((process) => process.type === 'fff') &&
+      !processes.some((process) => process.type === 'milling'))
+  );
+};
 
 // ───────────────────────────── Authoring helpers ─────────────────────────────
 
@@ -473,7 +494,7 @@ export const standardMachineAction = (
   }>,
 ): MachineActionDefinition => {
   const base = standardMachineActions[input.id];
-  const floor = unattended.has(`${input.componentKind}:${input.id}`) ? 'agent' : base.authority;
+  const floor = lowRisk(`${input.componentKind}:${input.id}`) ? 'agent' : base.authority;
   const authority = raise(floor, input.safety?.authority);
   return defineMachineAction(
     {
@@ -533,7 +554,7 @@ export const machineJogHold = (
     },
     input.schema ?? standardMachineHolds['motion.jog'].schema,
   );
-  return Object.freeze({ ...definition, lease: input.lease, bound: input.bound });
+  return Object.freeze({ ...definition, when: ['ready'] as const, lease: input.lease, bound: input.bound });
 };
 
 const authorityRank: Readonly<Record<MachineAuthority, number>> = { agent: 0, 'approved-agent': 1, person: 2 };
@@ -584,10 +605,34 @@ export const machineFailureCodes = [
   'MACHINE_JOB_CHECK_BLOCKED',
   'MACHINE_JOB_ATTESTATION_REQUIRED',
   'MACHINE_JOB_SETUP_CHANGED',
+  'MACHINE_JOB_PREPARATION_EXPIRED',
+  'MACHINE_PREPARATION_FAILED',
+  'MACHINE_TRANSFER_UNCONFIRMED',
+  'HOST_RESTARTED',
 ] as const;
 
 /** One structured failure code. @public */
 export type MachineFailureCode = (typeof machineFailureCodes)[number];
+
+/**
+ * Why a job or a transfer failed: a host code, or a provider's own under `MACHINE_JOB_` or `MACHINE_TRANSFER_`. One
+ * shape for the job check's refusal, the job's `failure` and a provider's rejected receipt.
+ * @public
+ */
+export type MachineJobFailureCode = MachineFailureCode | `MACHINE_JOB_${string}` | `MACHINE_TRANSFER_${string}`;
+
+const failureCodes: ReadonlySet<string> = new Set(machineFailureCodes);
+/** A provider's own job code: upper case under `MACHINE_JOB_` or `MACHINE_TRANSFER_`, at most 64 characters. */
+const providerJobCode = /^MACHINE_(?:JOB|TRANSFER)_[A-Z0-9_]{1,48}$/u;
+
+/**
+ * Whether a code may name a job's or a job check's failure, so a host keeps it rather than mapping it to its own.
+ * @param code - Any code, such as a provider's refusal.
+ * @returns True for a host code or a provider's namespaced job code.
+ * @public
+ */
+export const isMachineJobFailureCode = (code: string): code is MachineJobFailureCode =>
+  failureCodes.has(code) || providerJobCode.test(code);
 
 /** A refusal a person or an agent can act on. @public */
 export type MachineFailure = Readonly<{

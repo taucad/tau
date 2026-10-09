@@ -80,6 +80,9 @@ describe('RuntimeClient TransportPlugin materialization', () => {
       async applyAction() {
         throw new Error('Unused fixture operation');
       },
+      async approveAction() {
+        throw new Error('Unused fixture operation');
+      },
       async stop() {
         throw new Error('Unused fixture operation');
       },

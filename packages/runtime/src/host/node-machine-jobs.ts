@@ -18,11 +18,13 @@ import type { NodeMachineOperations } from '#host/node-machine-actions.js';
 import { machineError } from '#host/node-machine-operations.js';
 import type { NodeMachineOperationState } from '#host/node-machine-operations.js';
 import type { AdmittedHostOperation } from '#host/host-admission.js';
+import { isMachineJobFailureCode } from '#machines/machine-actions.js';
 import type { MachineFailure } from '#machines/machine-actions.js';
 import { parseMachineProgramSummary } from '#machines/machine-channel.js';
 import type { MachineChannelHostOperations } from '#machines/machine-channel.js';
 import type { MachineDirectoryEntry } from '#machines/machine-directory.js';
 import type { MachineJob, MachinePreparedJob } from '#machines/machine-jobs.js';
+import { componentValue } from '#machines/machine-observation.js';
 import type { MachineRun } from '#machines/machine-observation.js';
 import type { MachineArtifactReference, MachinePreparation, MachineSession } from '#machines/machine.js';
 
@@ -75,20 +77,46 @@ const setupDigestOf = async (entry: MachineDirectoryEntry, setup: CacheValue): P
 const runOutcome = (state: MachineRun['state']): NonNullable<MachineJob['run']>['outcome'] =>
   state === 'completed' || state === 'cancelled' || state === 'failed' || state === 'unknown' ? state : 'running';
 
-const failureOf = (error: unknown): NonNullable<MachineJob['failure']> => {
+/**
+ * The first interlock a job's start names that is not `safe`, refused as `checkMachineAction` refuses an action's.
+ * @param entry - The machine as last observed.
+ * @param interlocks - The interlock components the job's safety names.
+ * @returns The refusal, or undefined when every interlock is safe.
+ */
+const interlockRefusal = (entry: MachineDirectoryEntry, interlocks: readonly string[]): MachineFailure | undefined => {
+  for (const interlock of interlocks) {
+    if (componentValue(entry.snapshot.components, interlock, 'interlock')?.state !== 'safe') {
+      const label =
+        entry.descriptor.capabilities.components.find((component) => component.id === interlock)?.label ?? interlock;
+      return {
+        code: 'MACHINE_ACTION_INTERLOCK',
+        message: `${label} is not safe. Make the ${label.toLowerCase()} safe at the machine.`,
+      };
+    }
+  }
+  return undefined;
+};
+
+/** Why a job failed, or why its check refused. */
+type JobFailure = NonNullable<MachineJob['failure']>;
+
+// A thrown job code (host or provider `MACHINE_JOB_*`/`MACHINE_TRANSFER_*`) is kept; anything else is a failed preparation.
+const failureOf = (error: unknown): JobFailure => {
   const code = error !== null && typeof error === 'object' && 'code' in error ? error.code : undefined;
   const message = error instanceof Error ? error.message : 'MACHINE_PREPARATION_FAILED';
-  if (typeof code === 'string' && identity.safeParse(code).success) {
+  if (typeof code === 'string' && isMachineJobFailureCode(code)) {
     return { code, message: receiptMessage.parse(message.slice(0, 1024) || code) };
   }
   return {
-    code: /^[A-Z][A-Z0-9_]{0,255}$/u.test(message) ? message : 'MACHINE_PREPARATION_FAILED',
+    code: isMachineJobFailureCode(message) ? message : 'MACHINE_PREPARATION_FAILED',
     message: receiptMessage.parse(message.slice(0, 1024) || 'MACHINE_PREPARATION_FAILED'),
   };
 };
 
 /**
- * Fold a job's transfer and start operations into its state.
+ * Fold a job's transfer and start operations into its state. An unproven transfer (`confirming`, `attention`) keeps
+ * the job `transferring` until the journal settles it; a start follows only a proven transfer, so a job settled
+ * `starting` after its approver's call returned is driven by approving it again.
  * @internal
  * @param job - Any job.
  * @param operations - Every recorded operation, by id.
@@ -105,19 +133,11 @@ export const advanceJob = (
     if (receipt.status === 'rejected') {
       return { ...job, state: 'failed', receipt, failure: { code: receipt.code, message: receipt.message } };
     }
-    if (transfer.state !== 'accepted' || receipt.status !== 'accepted' || receipt.kind !== 'transfer') {
-      // A start follows only a proven transfer, so an unproven one started nothing and the job can be sent again.
-      return {
-        ...job,
-        state: 'failed',
-        receipt,
-        failure: {
-          code: 'MACHINE_TRANSFER_UNCONFIRMED',
-          message: 'The program did not finish reaching the machine, so nothing was started. Send it again.',
-        },
-      };
+    if (transfer.state === 'accepted' && receipt.status === 'accepted' && receipt.kind === 'transfer') {
+      return { ...job, state: 'starting', transferId: receipt.transferId, receipt };
     }
-    return { ...job, state: 'starting', transferId: receipt.transferId, receipt };
+    // Unproven: the machine's reports or a provider lookup settle it later; nothing was started.
+    return undefined;
   }
   if (!['starting', 'confirming', 'unknown'].includes(job.state) || !start?.receipt) {
     return undefined;
@@ -157,7 +177,9 @@ export const observeJobRun = (job: MachineJob, entry: MachineDirectoryEntry): Ma
     !run ||
     entry.machineId !== job.machineId ||
     !['awaiting-start', 'confirming', 'unknown', 'started'].includes(job.state) ||
-    (run.jobId !== job.jobId && run.runId !== job.run?.runId)
+    (run.jobId !== job.jobId && run.runId !== job.run?.runId) ||
+    // A run this host stopped feeding is over; no later report restarts it.
+    job.run?.outcome === 'interrupted'
   ) {
     return undefined;
   }
@@ -197,6 +219,8 @@ export type NodeMachineJobs = Readonly<{
   sync(operation: NodeMachineOperationState): Promise<void>;
   /** Follow every job's run from the machines' latest reports. */
   observe(): Promise<void>;
+  /** Record every running streamed job of a machine as interrupted: the session that fed it is gone. */
+  interrupt(machineId: string): Promise<void>;
 }>;
 
 /**
@@ -210,8 +234,18 @@ export const createNodeMachineJobs = (
   context: NodeMachineHostContext,
   journal: NodeMachineOperations,
 ): NodeMachineJobs => {
-  const { commitJob, connectedSessions, currentEntry, definitionOf, effectQueue, jobCommits, jobs, machines, now } =
-    context;
+  const {
+    commitJob,
+    connectedSessions,
+    currentEntry,
+    definitionOf,
+    effectQueue,
+    jobCommits,
+    jobs,
+    machines,
+    now,
+    preparations,
+  } = context;
   const listJobs = (machineId: string | undefined, projectId: string | undefined): readonly MachineJob[] =>
     [...jobs.values()]
       .filter(
@@ -230,7 +264,7 @@ export const createNodeMachineJobs = (
       configuration: CacheValue;
       signal: AbortSignal;
     }>,
-  ): Promise<Readonly<{ refusal: Readonly<{ code: string; message: string }> }> | Prepared> => {
+  ): Promise<Readonly<{ refusal: JobFailure }> | Prepared> => {
     const machine = machines.get(input.machineId);
     const entry = await currentEntry(input.machineId);
     const session = connectedSessions.get(input.machineId);
@@ -256,7 +290,21 @@ export const createNodeMachineJobs = (
       };
     }
     const definition = await definitionOf(machine.record.providerId);
-    const validated = await definition.submissionConfiguration.schema['~standard'].validate(input.configuration);
+    // The provider fills what a partial start form leaves out from what the machine reports; the host validates it all.
+    let configuration: unknown = input.configuration;
+    if (session.jobs.completeConfiguration) {
+      try {
+        configuration = await session.jobs.completeConfiguration({
+          expectedMachineId: machine.record.physicalId,
+          artifact,
+          configuration: input.configuration,
+          signal: input.signal,
+        });
+      } catch (error) {
+        return { refusal: failureOf(error) };
+      }
+    }
+    const validated = await definition.submissionConfiguration.schema['~standard'].validate(configuration);
     if (validated.issues) {
       return { refusal: { code: 'MACHINE_ACTION_PARAMETERS_INVALID', message: 'The start settings are not valid.' } };
     }
@@ -285,6 +333,76 @@ export const createNodeMachineJobs = (
     };
   };
 
+  // Prepare one job for approval: the provider's read-only preflight, then the prepared record its transfer and start
+  // are fenced with. Nothing is sent; a refusal fails the job.
+  const prepareJob = async (job: MachineJob, signal: AbortSignal): Promise<MachineJob> => {
+    const { machineId, artifact } = job;
+    const checked = await prepare({ machineId, artifact, configuration: job.configuration, signal });
+    if ('refusal' in checked) {
+      return { ...job, state: 'failed', failure: checked.refusal };
+    }
+    try {
+      const { entry, preparation, session } = checked;
+      // Only a stored delivery names a file on the machine, and it must.
+      if (
+        preparation.remoteName === undefined &&
+        session.jobs.type === 'supported' &&
+        session.jobs.delivery === 'stored'
+      ) {
+        return {
+          ...job,
+          state: 'failed',
+          failure: {
+            code: 'MACHINE_PREPARATION_FAILED',
+            message: 'The machine did not name the program it would store.',
+          },
+        };
+      }
+      const providerData = cloneBoundedJson(preparation.providerData, {
+        code: 'NODE_MACHINE_PROVIDER_PREPARATION',
+        maximumDepth: 12,
+        maximumNodes: 1024,
+        maximumCharacters: 65_536,
+      });
+      const preparedAt = now();
+      const body = {
+        preparedId: randomUUID(),
+        machineId,
+        physicalMachineId: checked.physicalId,
+        artifact,
+        ...(preparation.remoteName === undefined ? {} : { remoteName: identity.parse(preparation.remoteName) }),
+        parser: preparation.parser,
+        configurationDigest: await digestOf(checked.configuration, 'NODE_MACHINE_PREPARATION_CONFIGURATION'),
+        providerDataDigest: await digestOf(providerData, 'NODE_MACHINE_PROVIDER_PREPARATION'),
+        setupDigest: await setupDigestOf(entry, preparation.setup),
+        preparedAt,
+        expiresAt: new Date(Date.parse(preparedAt) + 10 * 60_000).toISOString(),
+      };
+      const prepared: MachinePreparedJob = {
+        ...body,
+        preparedDigest: await digestOf(body, 'NODE_MACHINE_PREPARED_JOB'),
+      };
+      const record = await context.store.writePreparation({
+        version: 1,
+        prepared,
+        providerId: checked.providerId,
+        configuration: checked.configuration,
+        providerData,
+      });
+      preparations.set(prepared.preparedId, record);
+      // The host's own parse wins where both exist.
+      const program = parseMachineProgramSummary({ ...job.program, ...preparation.program });
+      return { ...job, state: 'awaiting-approval', program, checks: preparation.checks, prepared };
+    } catch (error) {
+      return { ...job, state: 'failed', failure: failureOf(error) };
+    }
+  };
+  // Whether a job's preparation is still held: one a restart purged, or older than its window, is made again.
+  const isPrepared = (job: MachineJob): boolean =>
+    job.prepared !== undefined &&
+    preparations.has(job.prepared.preparedId) &&
+    Date.parse(job.prepared.expiresAt) > Date.parse(now());
+
   const sync = async (operation: NodeMachineOperationState): Promise<void> => {
     const { operationId } = operation.planned;
     for (const job of jobs.values()) {
@@ -306,13 +424,16 @@ export const createNodeMachineJobs = (
     const latest = (): MachineJob => jobs.get(job.jobId) ?? job;
     let current = job;
     const { prepared } = current;
-    const preparation = prepared ? context.preparations.get(prepared.preparedId) : undefined;
-    const fail = async (failure: Readonly<{ code: string; message: string }>): Promise<MachineJob> =>
+    const preparation = prepared ? preparations.get(prepared.preparedId) : undefined;
+    const fail = async (failure: JobFailure): Promise<MachineJob> =>
       commitJob({ ...latest(), state: 'failed', failure: { code: failure.code, message: failure.message } });
+    // The setup digest, not a clock, fences the start: only a preparation a restart purged is missing here.
     if (!prepared || !preparation) {
-      return fail({ code: 'MACHINE_PREPARATION_EXPIRED', message: 'The preparation expired. Request the job again.' });
+      return fail({
+        code: 'MACHINE_JOB_PREPARATION_EXPIRED',
+        message: 'The preparation is gone. Request the job again.',
+      });
     }
-    const expired = (): boolean => Date.parse(prepared.expiresAt) <= Date.parse(now());
     if (current.state === 'transferring' && current.transferOperationId !== undefined) {
       const receipt = await journal.run({
         machineId: current.machineId,
@@ -325,16 +446,14 @@ export const createNodeMachineJobs = (
         async admit() {
           const session = connectedSessions.get(current.machineId);
           const entry = await currentEntry(current.machineId);
-          if (expired()) {
-            return {
-              refusal: {
-                code: 'MACHINE_JOB_SETUP_CHANGED',
-                message: 'The preparation expired. Request the job again.',
-              },
-            };
-          }
           if (!session || !entry || session.jobs.type === 'unsupported' || session.jobs.delivery !== 'stored') {
             return { refusal: { code: 'MACHINE_UNAVAILABLE', message: 'This machine is not connected.' } };
+          }
+          const { remoteName } = prepared;
+          if (remoteName === undefined) {
+            return {
+              refusal: { code: 'MACHINE_PREPARATION_FAILED', message: 'This job was prepared for another delivery.' },
+            };
           }
           const { jobs: facet } = session;
           return {
@@ -344,7 +463,7 @@ export const createNodeMachineJobs = (
                 expectedMachineId: prepared.physicalMachineId,
                 artifact: prepared.artifact,
                 configuration: preparation.configuration,
-                remoteName: prepared.remoteName,
+                remoteName,
                 providerData: preparation.providerData,
                 signal: input.signal,
               }),
@@ -380,11 +499,6 @@ export const createNodeMachineJobs = (
       machineQueue: true,
       ...input,
       async admit() {
-        if (expired()) {
-          return {
-            refusal: { code: 'MACHINE_JOB_SETUP_CHANGED', message: 'The preparation expired. Request the job again.' },
-          };
-        }
         const checked = await prepare({
           machineId: current.machineId,
           artifact: prepared.artifact,
@@ -415,24 +529,36 @@ export const createNodeMachineJobs = (
           return { refusal: { code: 'MACHINE_JOB_CHECK_BLOCKED', message: 'Something this job needs is not ready.' } };
         }
         const { jobs: facet } = session;
-        if (facet.type === 'unsupported') {
+        const startFacts = entry.descriptor.capabilities.jobs;
+        if (facet.type === 'unsupported' || startFacts.type === 'unsupported') {
           return {
             refusal: { code: 'MACHINE_JOB_UNSUPPORTED', message: 'This machine does not run programs from Tau.' },
           };
         }
-        return {
-          send: async () =>
-            facet.start({
-              operationId: startOperationId,
-              expectedMachineId: prepared.physicalMachineId,
-              artifact: prepared.artifact,
-              configuration: preparation.configuration,
-              remoteName: prepared.remoteName,
-              providerData: preparation.providerData,
-              ...(transferId === undefined ? {} : { transferId }),
-              signal: input.signal,
-            }),
+        // Checked again at the moment of sending, as an action's interlocks are.
+        const interlock = interlockRefusal(entry, startFacts.safety.interlocks);
+        if (interlock) {
+          return { refusal: interlock };
+        }
+        const step = {
+          operationId: startOperationId,
+          expectedMachineId: prepared.physicalMachineId,
+          artifact: prepared.artifact,
+          configuration: preparation.configuration,
+          providerData: preparation.providerData,
+          ...(transferId === undefined ? {} : { transferId }),
+          signal: input.signal,
         };
+        if (facet.delivery === 'streamed') {
+          return { send: async () => facet.start(step) };
+        }
+        const { remoteName } = prepared;
+        if (remoteName === undefined) {
+          return {
+            refusal: { code: 'MACHINE_PREPARATION_FAILED', message: 'This job was prepared for another delivery.' },
+          };
+        }
+        return { send: async () => facet.start({ ...step, remoteName }) };
       },
     });
     current = latest();
@@ -457,6 +583,22 @@ export const createNodeMachineJobs = (
         }
       }
     },
+    async interrupt(machineId) {
+      const listed = await context.directory.snapshot();
+      const facts =
+        listed.entries.find((entry) => entry.machineId === machineId)?.descriptor.capabilities.jobs ??
+        machines.get(machineId)?.record.last?.descriptor.capabilities.jobs;
+      if (facts?.type !== 'supported' || facts.delivery !== 'streamed') {
+        return;
+      }
+      for (const job of jobs.values()) {
+        if (job.machineId === machineId && job.state === 'started' && job.run?.outcome === 'running') {
+          // The session fed this run; without it the run is over, and the next start needs a person.
+          // oxlint-disable-next-line eslint/no-await-in-loop -- interrupted runs commit in order.
+          await commitJob({ ...job, run: { ...job.run, outcome: 'interrupted', endedAt: now() } });
+        }
+      }
+    },
     operations: {
       async checkJob(input) {
         const machineId = identity.parse(input.machineId);
@@ -464,8 +606,8 @@ export const createNodeMachineJobs = (
         if ('refusal' in checked) {
           return { status: 'refused', ...checked.refusal };
         }
-        const { preparation } = checked;
-        return { status: preparation.status, program: preparation.program, checks: preparation.checks };
+        const { preparation, configuration } = checked;
+        return { status: preparation.status, program: preparation.program, checks: preparation.checks, configuration };
       },
       async requestJob(input) {
         if (!context.runtime) {
@@ -501,7 +643,7 @@ export const createNodeMachineJobs = (
             facts: { process: 'other' },
             ...input.program,
           });
-          let job = await commitJob({
+          const job = await commitJob({
             version: 1,
             jobId,
             machineId,
@@ -514,57 +656,7 @@ export const createNodeMachineJobs = (
             program: requested,
             checks: [],
           });
-          const checked = await prepare({ machineId, artifact: input.artifact, configuration, signal: input.signal });
-          if ('refusal' in checked) {
-            return commitJob({ ...job, state: 'failed', failure: checked.refusal });
-          }
-          try {
-            const { entry, preparation } = checked;
-            const providerData = cloneBoundedJson(preparation.providerData, {
-              code: 'NODE_MACHINE_PROVIDER_PREPARATION',
-              maximumDepth: 12,
-              maximumNodes: 1024,
-              maximumCharacters: 65_536,
-            });
-            const preparedAt = now();
-            const body = {
-              preparedId: randomUUID(),
-              machineId,
-              physicalMachineId: checked.physicalId,
-              artifact: input.artifact,
-              remoteName: identity.parse(preparation.remoteName),
-              parser: preparation.parser,
-              configurationDigest: await digestOf(checked.configuration, 'NODE_MACHINE_PREPARATION_CONFIGURATION'),
-              providerDataDigest: await digestOf(providerData, 'NODE_MACHINE_PROVIDER_PREPARATION'),
-              setupDigest: await setupDigestOf(entry, preparation.setup),
-              preparedAt,
-              expiresAt: new Date(Date.parse(preparedAt) + 10 * 60_000).toISOString(),
-            };
-            const prepared: MachinePreparedJob = {
-              ...body,
-              preparedDigest: await digestOf(body, 'NODE_MACHINE_PREPARED_JOB'),
-            };
-            const record = await context.store.writePreparation({
-              version: 1,
-              prepared,
-              providerId: checked.providerId,
-              configuration: checked.configuration,
-              providerData,
-            });
-            context.preparations.set(prepared.preparedId, record);
-            // The host's own parse wins where both exist.
-            const program = parseMachineProgramSummary({ ...requested, ...preparation.program });
-            job = await commitJob({
-              ...job,
-              state: 'awaiting-approval',
-              program,
-              checks: preparation.checks,
-              prepared,
-            });
-          } catch (error) {
-            job = await commitJob({ ...job, state: 'failed', failure: failureOf(error) });
-          }
-          return job;
+          return commitJob(await prepareJob(job, input.signal));
         });
       },
       async listJobs(input) {
@@ -658,7 +750,9 @@ export const createNodeMachineJobs = (
                 message: 'Only a person can say they are at the machine.',
               });
             }
-            if (isAgent && (facts.safety.authority !== 'agent' || facts.safety.attended)) {
+            // The host owns the job floor: a start is never on the low-risk list, so a manifest declaring `agent`
+            // still needs a person's approval (`approved-agent` at the least).
+            if (isAgent) {
               throw refusal({
                 code: 'MACHINE_ACTION_APPROVAL_REQUIRED',
                 message: 'A person must approve this job in Tau.',
@@ -679,9 +773,21 @@ export const createNodeMachineJobs = (
                 message: missing ? `Confirm first: ${missing.label}` : 'Confirm only what this machine asks for.',
               });
             }
+            if (!isPrepared(current)) {
+              // Older than its window, or purged by a restart: made again, not refused, since the setup digest fences
+              // the start.
+              current = await commitJob(await prepareJob(current, input.signal));
+              if (current.state !== 'awaiting-approval') {
+                return current;
+              }
+            }
             const blocked = current.checks.find((check) => check.state === 'blocked');
             if (blocked) {
               throw refusal({ code: 'MACHINE_JOB_CHECK_BLOCKED', message: `${blocked.label}: not ready.` });
+            }
+            const interlock = interlockRefusal(entry, facts.safety.interlocks);
+            if (interlock) {
+              throw refusal(interlock);
             }
             const at = now();
             const stored = facts.delivery === 'stored';
@@ -690,7 +796,7 @@ export const createNodeMachineJobs = (
               state: stored ? 'transferring' : 'starting',
               resolvedBy: input.resolvedBy,
               attestations: [...made].map((id) => ({ id, by: input.resolvedBy, at })),
-              ...(isAgent ? {} : { attended: input.attended === true }),
+              attended: input.attended === true,
               ...(stored ? { transferOperationId: identity.parse(input.transferOperationId ?? randomUUID()) } : {}),
               startOperationId: identity.parse(input.startOperationId ?? randomUUID()),
             });
@@ -729,7 +835,9 @@ export const createNodeMachineJobs = (
           if (!job) {
             throw new Error('MACHINE_JOB_UNKNOWN');
           }
-          if (job.state !== 'awaiting-approval') {
+          // A loaded program the machine still waits to start can be withdrawn too; a start pressed after that is
+          // the machine's own run, which no job follows.
+          if (job.state !== 'awaiting-approval' && job.state !== 'awaiting-start') {
             throw new Error('MACHINE_JOB_NOT_AWAITING');
           }
           return commitJob({ ...job, state: 'withdrawn', resolvedBy: input.resolvedBy });

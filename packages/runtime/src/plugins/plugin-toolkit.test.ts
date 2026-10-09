@@ -84,7 +84,6 @@ const testMachine = attachRuntimePluginFactoryOptions(
         manifest: machineManifestFixture,
         bindingConfiguration: jobRegistration.configuration,
         submissionConfiguration: jobRegistration.configuration,
-        queries: {},
       } as const,
       () => ({ discover: vi.fn(), connect: vi.fn() }),
     ),

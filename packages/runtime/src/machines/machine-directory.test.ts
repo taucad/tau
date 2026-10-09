@@ -10,14 +10,34 @@ import {
 } from '#machines/machine-directory.js';
 import type { MachineDirectory, MachineDirectoryCursor, MachineDirectoryEntry } from '#machines/machine-directory.js';
 import type { MachineProviderDescriptor, MachineSession } from '#machines/machine.js';
-import type { MachineObservation, MachineReport } from '#machines/machine-observation.js';
+import type { ComponentObservation, MachineObservation, MachineReport } from '#machines/machine-observation.js';
 import type { ContentDigest } from '@taucad/cache-core';
 import type { MachineOperation } from '#machines/machine-jobs.js';
-import { fixtureDescriptor, fixtureObservation, fixtureReport } from '#machines/machine-session.fixture.js';
+import {
+  fixtureDescriptor,
+  fixtureObservation,
+  fixtureObservedAt,
+  fixtureReport,
+} from '#machines/machine-session.fixture.js';
 
 const descriptor: MachineProviderDescriptor = { ...fixtureDescriptor('provider-claimed-id'), firmware: '1' };
 const observation: MachineReport = fixtureReport({ observedAt: '2026-09-06T00:00:00Z' });
 const busy = { state: { status: 'active' } } as const;
+const at = (step: number): string => new Date(Date.parse(fixtureObservedAt) + step * 10).toISOString();
+/** The fixture's motion at `x`, received at `receivedAt`. */
+const position = (x: number, receivedAt: string): ComponentObservation => ({
+  ...fixtureObservation('motion', 'position', {
+    kind: 'motion',
+    homed: { x: true, y: true, z: true },
+    trust: 'homed',
+    position: { machine: { x, y: 0, z: 0 }, work: { x, y: 0, z: 0 } },
+    workOffset: { id: 'G54', revision: '1', origin: { x: 0, y: 0, z: 0 } },
+    mode: 'normal',
+    feed: 0,
+    limits: [],
+  }),
+  receivedAt,
+});
 const resources: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
@@ -218,7 +238,7 @@ describe('host-owned machine directory', () => {
     }
   });
 
-  it('should keep an idle machine current past its 15 s budget while it repeats itself, without store writes', async () => {
+  it('should keep an idle machine current past its 15 s budget while it repeats itself, without events', async () => {
     const { directory, attach, store } = fixture();
     const device = await attach();
     const { cursor } = await directory.snapshot();
@@ -236,14 +256,16 @@ describe('host-owned machine directory', () => {
       // The UI marks a machine stale once `now - snapshot.observedAt` exceeds its budget (15 s for the X1C), so 20 s
       // of unchanged reports must carry the latest report time, not the time of the last change.
       await expect(directory.snapshot()).resolves.toMatchObject({
-        cursor: { revision: 21 },
+        cursor: { revision: 1 },
         entries: [{ freshness: 'current', snapshot: { ...observation, observedAt: reportedAt(20) } }],
       });
+      // Only the report time moved: one coalesced frame carries the latest one, and nothing enters the resume tail.
       const frame = await watch.next();
-      expect(frame.value).toMatchObject({
-        type: 'event',
-        cursor: { revision: 2 },
-        event: { type: 'machine-directory-upserted', entry: { snapshot: { observedAt: reportedAt(1) } } },
+      expect(frame.value).toEqual({
+        type: 'observed',
+        machineId: 'selected-id',
+        observedAt: reportedAt(20),
+        components: [],
       });
       expect(store.persisted).toHaveLength(1);
     } finally {
@@ -262,7 +284,7 @@ describe('host-owned machine directory', () => {
       components: [
         {
           ...fixtureObservation('chamber-light', 'accessories', { kind: 'switch', on: true }),
-          receivedAt: '2026-09-06T00:03:00Z',
+          receivedAt: at(1),
         },
       ],
     });
@@ -279,6 +301,88 @@ describe('host-owned machine directory', () => {
     expect(components.map(({ componentId }) => componentId)).toEqual(['chamber-light', 'motion']);
     expect(components[0]).toMatchObject({ knowledge: 'known', value: { on: true } });
     expect(store.persisted).toHaveLength(1);
+  });
+
+  it('should coalesce latest groups into observed frames that never enter the resume tail', async () => {
+    const { directory } = fixture();
+    const device = sessionFixture();
+    await directory.attach({
+      machineId: 'one',
+      name: 'One',
+      providerId: 'provider',
+      observations: [{ group: 'position', label: 'Position', staleAfter: 1000, delivery: 'latest' }],
+      session: device.session,
+    });
+    await device.started;
+    const { cursor } = await directory.snapshot();
+    for (let step = 1; step <= 100; step += 1) {
+      device.change({ type: 'changed', observedAt: at(step), components: [position(step, at(step))] });
+    }
+    await vi.waitFor(() => {
+      expect(device.consumed).toHaveBeenCalledTimes(100);
+    });
+    // 100 deltas served no event, so the resume tail is untouched and a resuming watcher is not behind.
+    const after = await directory.snapshot();
+    expect(after.cursor).toEqual(cursor);
+    const abort = new AbortController();
+    const watch = directory.watch({ cursor, signal: abort.signal })[Symbol.asyncIterator]();
+    try {
+      const frame = await watch.next();
+      expect(frame.value).toMatchObject({
+        type: 'observed',
+        machineId: 'one',
+        observedAt: at(100),
+        components: [{ componentId: 'motion', group: 'position', value: { position: { machine: { x: 100 } } } }],
+      });
+      expect(parseMachineDirectoryFrame(frame.value)).toEqual(frame.value);
+      device.push({ ...observation, ...busy, observedAt: at(101) });
+      await expect(watch.next()).resolves.toMatchObject({
+        value: { type: 'event', event: { type: 'machine-directory-upserted', entry: { snapshot: busy } } },
+      });
+    } finally {
+      abort.abort();
+      await watch.return?.();
+    }
+  });
+
+  it('should drop a delta older than the report it follows', async () => {
+    const { directory, attach } = fixture();
+    const device = await attach();
+    const before = await directory.snapshot();
+    device.change({
+      type: 'changed',
+      observedAt: '2026-09-05T00:00:00Z',
+      components: [position(9, '2026-09-13T00:00:00.000Z')],
+    });
+    await vi.waitFor(() => {
+      expect(device.consumed).toHaveBeenCalledOnce();
+    });
+    await expect(directory.snapshot()).resolves.toEqual(before);
+  });
+
+  it('should degrade one unreadable component to unknown, report it once and keep observing', async () => {
+    const { directory, attach, errors } = fixture();
+    const device = await attach();
+    // A newer provider's value kind this host does not know.
+    const unreadable = {
+      ...fixtureObservation('chamber-light', 'accessories', { kind: 'switch', on: true }),
+      value: { kind: 'hologram', intensity: 1 },
+    } as unknown as ComponentObservation;
+    const components = [unreadable, ...observation.components.slice(1)];
+    device.push({ ...observation, components });
+    device.push({ ...observation, ...busy, components });
+    await vi.waitFor(() => {
+      expect(device.consumed).toHaveBeenCalledTimes(2);
+    });
+    const { entries } = await directory.snapshot();
+    expect(entries[0]?.snapshot).toMatchObject({
+      state: { status: 'active' },
+      components: [
+        { componentId: 'chamber-light', group: 'accessories', knowledge: 'unknown', reason: 'Unreadable report' },
+        { componentId: 'motion', group: 'position', knowledge: 'known' },
+      ],
+    });
+    expect(errors).toHaveBeenCalledOnce();
   });
 
   it("should derive each observation's validity from its group budget", async () => {
@@ -315,6 +419,32 @@ describe('host-owned machine directory', () => {
     await attach('one', undefined, { ...descriptor, capabilities: { ...descriptor.capabilities, holds: [] } });
     const third = await capabilities();
     expect(third?.revision).not.toBe(first?.revision);
+  });
+
+  it("should serve the host's own alerts after the provider's and replace them on update", async () => {
+    const { directory, attach } = fixture();
+    const device = await attach('one');
+    const vendor = { code: '0300-400C', blocks: 'nothing' } as const;
+    const reconnect = {
+      code: 'tau.reconnect-required',
+      blocks: 'everything',
+      remedies: [{ type: 'person', instruction: 'Check the machine, then reconnect it in Settings.' }],
+    } as const;
+    const alerts = async () => {
+      const { entries } = await directory.snapshot();
+      return entries[0]?.snapshot.alerts;
+    };
+    await directory.update({ machineId: 'one', alerts: [reconnect] });
+    device.push({ ...observation, ...busy, alerts: [vendor] });
+    await vi.waitFor(() => {
+      expect(device.consumed).toHaveBeenCalledOnce();
+    });
+    await expect(alerts()).resolves.toEqual([vendor, reconnect]);
+    await directory.update({ machineId: 'one', alerts: [] });
+    await expect(alerts()).resolves.toEqual([vendor]);
+    await expect(directory.update({ machineId: 'one', alerts: [vendor] })).rejects.toThrow(
+      'MACHINE_DIRECTORY_HOST_ALERT_CODE',
+    );
   });
 
   it("should serve the host's operations and testing flag beside every report, across sessions", async () => {
@@ -499,6 +629,8 @@ describe('host-owned machine directory', () => {
     for (let second = 1; second <= 257; second += 1) {
       device.push({
         ...observation,
+        // Every report changes the state, so every one is an event the tail must hold.
+        state: { status: second % 2 === 0 ? 'ready' : 'active' },
         observedAt: new Date(Date.parse(observation.observedAt) + second * 1000).toISOString(),
       });
     }

@@ -93,13 +93,33 @@ export type MachineApplyActionInput = Readonly<{
   requestedBy: MachineRequester;
   /** The person states they are at the machine. Refused from an agent. */
   attended?: boolean;
-  /**
-   * For an agent's request that needs a person's approval: the approval the person gave for exactly this intent.
-   * The host checks it names this operation id.
-   */
-  approval?: Readonly<{ approvedBy: MachineRequester; operationId: string }>;
   signal?: AbortSignal;
 }>;
+
+/**
+ * A person's answer to an agent's request that needs approval, recorded by the host against this operation id and
+ * intent. The agent then sends the same intent with the same `operationId`; the host admits it once while the
+ * approval is fresh and its intent matches. Only a person's session may approve.
+ * @public
+ */
+export type MachineApproveActionInput = Readonly<{
+  machineId: string;
+  /** The agent's caller-retained operation id. */
+  operationId: string;
+  /** Exactly what the person saw and approves. */
+  intent: Readonly<{ componentId: string; action: string; version: number; parameters: unknown }>;
+  decision: 'approve' | 'deny';
+  signal?: AbortSignal;
+}>;
+
+/**
+ * What the host recorded for one approval. `refused`: nothing was recorded (an agent's session, an unknown action).
+ * @public
+ */
+export type MachineActionApproval =
+  | Readonly<{ status: 'approved'; operationId: string; expiresAt: string }>
+  | Readonly<{ status: 'denied'; operationId: string }>
+  | (Readonly<{ status: 'refused' }> & MachineFailure);
 
 /** Stop the machine now. Anyone may call it; it needs neither a run nor a capability revision. @public */
 export type MachineStopInput = Readonly<{
@@ -182,6 +202,10 @@ export type MachineClient = Readonly<{
   checkJob(input: MachineCheckJobInput): Promise<MachineJobCheck>;
   requestJob(input: MachineRequestJobInput): Promise<MachineJob>;
   listJobs(input: MachineListJobsInput): Promise<readonly MachineJob[]>;
+  /**
+   * Every later change to the listed jobs. Completion (a host restart, a transport resync) means resync: list again,
+   * then watch again. There is no cursor; a change between the two arrives in the new list.
+   */
   watchJobs(input: MachineListJobsInput): AsyncIterable<MachineJob>;
   /** The only way a program is transferred or started. */
   resolveJob(input: MachineResolveJobInput): Promise<MachineJob>;
@@ -189,6 +213,8 @@ export type MachineClient = Readonly<{
 
   /** Apply one declared action once. Returns the latest receipt for this operation id; never repeats a send. */
   applyAction(input: MachineApplyActionInput): Promise<MachineReceipt<'action'>>;
+  /** A person approves or denies an agent's pending action. Person sessions only. */
+  approveAction(input: MachineApproveActionInput): Promise<MachineActionApproval>;
   /** Stop the machine now. */
   stop(input: MachineStopInput): Promise<MachineReceipt<'stop'>>;
   beginHold(input: MachineBeginHoldInput): Promise<MachineHold | (Readonly<{ status: 'rejected' }> & MachineFailure)>;

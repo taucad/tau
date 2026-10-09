@@ -11,9 +11,13 @@ import type {
   MachineFailure,
   MachineHoldDescriptor,
   MachineRemedy,
+  MachineStatus,
 } from '#machines/machine-actions.js';
+import type { MachineApplyActionInput } from '#machines/machine-client.js';
 import type { MachineDirectoryEntry } from '#machines/machine-directory.js';
 import { componentValue } from '#machines/machine-observation.js';
+import type { MachineReport } from '#machines/machine-observation.js';
+import type { MachineInstalledCapabilities } from '#machines/machine.js';
 
 /** The answer a surface shows before anything is sent. @public */
 export type MachineActionCheck =
@@ -27,9 +31,23 @@ export type MachineActionCheck =
     }> &
       MachineFailure);
 
+/**
+ * What the check reads of a machine: a directory entry, or a provider's own name, capabilities and latest report.
+ * @public
+ */
+export type MachineActionCheckEntry = Readonly<{
+  name: string;
+  /** A person let controls not yet qualified on this machine be tried. */
+  testing?: boolean;
+  descriptor: Readonly<{
+    capabilities: Pick<MachineInstalledCapabilities, 'actions' | 'holds' | 'components' | 'processes'>;
+  }>;
+  snapshot: MachineReport;
+}>;
+
 /** What the pure check reads. @public */
 export type MachineActionCheckInput = Readonly<{
-  entry: MachineDirectoryEntry;
+  entry: MachineActionCheckEntry;
   componentId: string;
   action: string;
   /** An action, or a hold (a control held down). */
@@ -51,6 +69,8 @@ const unavailable = (
   extra: Readonly<{ descriptor?: MachineActionDescriptor | MachineHoldDescriptor; remedy?: MachineRemedy }> = {},
 ): MachineActionCheck => ({ status: 'unavailable', code, message, ...extra });
 
+const recovers: ReadonlySet<string> = new Set(['motion.home', 'controller.wake', 'controller.unlock']);
+
 const statusWords: Readonly<Record<string, string>> = {
   ready: 'only while a job runs',
   active: 'not while the machine is busy',
@@ -68,7 +88,7 @@ const statusWords: Readonly<Record<string, string>> = {
  * @public
  */
 export const machineActionOf = (
-  entry: MachineDirectoryEntry,
+  entry: MachineActionCheckEntry,
   { componentId, action, kind = 'action' }: Readonly<{ componentId: string; action: string; kind?: 'action' | 'hold' }>,
 ): MachineActionDescriptor | MachineHoldDescriptor | undefined =>
   (kind === 'action' ? entry.descriptor.capabilities.actions : entry.descriptor.capabilities.holds).find(
@@ -102,10 +122,14 @@ export const checkMachineAction = (input: MachineActionCheckInput): MachineActio
   if (descriptor.qualification.status === 'unsupported') {
     return unavailable('MACHINE_ACTION_UNSUPPORTED', descriptor.qualification.reason, { descriptor });
   }
-  if (descriptor.qualification.status === 'designed' && entry.testing !== true) {
+  // Testing is a person's mode: an agent never sends a control that is not yet qualified, testing or not.
+  if (descriptor.qualification.status === 'designed' && (entry.testing !== true || caller === 'agent')) {
     return unavailable(
       'MACHINE_ACTION_UNQUALIFIED',
-      `${descriptor.label} is not yet qualified on this machine. Turn on testing in the machine’s settings to try it.`,
+      caller === 'agent'
+        ? `${descriptor.label} is not yet qualified on this machine; only a person testing it may try it.`
+        : `${descriptor.label} is not yet qualified on this machine. ` +
+            'Turn on testing in the machine’s settings to try it.',
       { descriptor },
     );
   }
@@ -118,7 +142,8 @@ export const checkMachineAction = (input: MachineActionCheckInput): MachineActio
       ...(provider.remedy === undefined ? {} : { remedy: provider.remedy }),
     });
   }
-  if (!descriptor.when.includes(snapshot.state.status)) {
+  const when: readonly MachineStatus[] = descriptor.when;
+  if (!when.includes(snapshot.state.status)) {
     const blocking = snapshot.alerts.find((alert) => alert.blocks !== 'nothing' && alert.remedies?.[0] !== undefined);
     return unavailable(
       'scope' in descriptor && descriptor.scope === 'idle' && snapshot.run !== undefined
@@ -153,7 +178,8 @@ export const checkMachineAction = (input: MachineActionCheckInput): MachineActio
   // A machine without homing (no `motion.home` installed) only ever works from its work zero; there is nothing to gate.
   const canHome =
     motion !== undefined && machineActionOf(entry, { componentId: motion.id, action: 'motion.home' }) !== undefined;
-  if (descriptor.effects.includes('motion') && motion !== undefined && canHome && action !== 'motion.home') {
+  // Homing, waking and unlocking are how a machine recovers its position, so they are never gated on it.
+  if (descriptor.effects.includes('motion') && motion !== undefined && canHome && !recovers.has(action)) {
     const trust = componentValue(snapshot.components, motion.id, 'motion')?.trust;
     if (trust === 'lost' || trust === 'unknown') {
       return unavailable(
@@ -184,11 +210,11 @@ export const checkMachineAction = (input: MachineActionCheckInput): MachineActio
         },
       );
     }
-    const componentKind =
-      entry.descriptor.capabilities.components.find((component) => component.id === componentId)?.kind ?? '';
+    const { components, processes } = entry.descriptor.capabilities;
+    const componentKind = components.find((component) => component.id === componentId)?.kind ?? '';
     return 'scope' in descriptor &&
       descriptor.qualification.status === 'qualified' &&
-      isUnattendedAction(componentKind, descriptor)
+      isUnattendedAction(componentKind, descriptor, processes)
       ? { status: 'available', descriptor }
       : { status: 'approval-required', descriptor };
   }
@@ -197,3 +223,66 @@ export const checkMachineAction = (input: MachineActionCheckInput): MachineActio
   }
   return { status: 'available', descriptor };
 };
+
+/**
+ * A provider's own admission at the moment of sending: the same check over its latest report, so no provider keeps
+ * a copy. Qualification, authority and attendance were the host's to admit and are not repeated; state, the run
+ * fence, freshness, homing, interlocks and the provider's own availability are.
+ * @param input - The provider's name for the machine, what is installed, its latest report and the intent.
+ * @returns The refusal to return as a rejected receipt, or undefined when the action may be sent.
+ * @public
+ */
+export const checkMachineActionAtSend = (
+  input: Readonly<{
+    name: string;
+    capabilities: MachineActionCheckEntry['descriptor']['capabilities'];
+    report: MachineReport;
+    componentId: string;
+    action: string;
+    kind?: 'action' | 'hold';
+    /** The run the caller saw, as the host passed it; null for an idle action. */
+    // oxlint-disable-next-line typescript/no-restricted-types -- null is the caller's statement that it saw no run.
+    expectedRunId: string | null;
+    /** The provider's clock. Milliseconds. */
+    now: number;
+  }>,
+): MachineFailure | undefined => {
+  const check = checkMachineAction({
+    entry: {
+      name: input.name,
+      testing: true,
+      descriptor: { capabilities: input.capabilities },
+      snapshot: input.report,
+    },
+    componentId: input.componentId,
+    action: input.action,
+    ...(input.kind === undefined ? {} : { kind: input.kind }),
+    expectedRunId: input.expectedRunId,
+    caller: 'person',
+    attended: true,
+    now: input.now,
+  });
+  return check.status === 'unavailable' ? { code: check.code, message: check.message } : undefined;
+};
+
+/**
+ * The complete request for one declared action as the caller saw it: its machine, revision, version and run.
+ * @param entry - The machine as shown.
+ * @param descriptor - The action, from that entry.
+ * @param intent - The caller-retained operation id, the parameters, who asks, and attendance.
+ * @returns The input `applyAction` takes.
+ * @public
+ */
+export const machineActionIntent = (
+  entry: MachineDirectoryEntry,
+  descriptor: MachineActionDescriptor,
+  intent: Pick<MachineApplyActionInput, 'operationId' | 'parameters' | 'requestedBy' | 'attended' | 'signal'>,
+): MachineApplyActionInput => ({
+  ...intent,
+  machineId: entry.machineId,
+  componentId: descriptor.componentId,
+  capabilityRevision: entry.descriptor.capabilities.revision,
+  action: descriptor.id,
+  version: descriptor.version,
+  expectedRunId: descriptor.scope === 'idle' ? null : (entry.snapshot.run?.runId ?? null),
+});

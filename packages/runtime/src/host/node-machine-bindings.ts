@@ -99,6 +99,7 @@ export const createNodeMachineBindings = (
     preparations,
     providerSources,
     report,
+    sessionLost,
     stillCaptureTimes,
     store,
     supervisors,
@@ -162,19 +163,30 @@ export const createNodeMachineBindings = (
       }
       // `machine.json` is written before the session attaches: a crash after this leaves a whole binding that
       // reconnects at the next start, never a live session the store does not know.
-      bound = await effectQueue.queueFor('bindings', async () => {
+      // `created`: this ceremony made the binding, so a failed attach discards it; a confirmed claimed one is kept.
+      const { record: boundRecord, created } = await effectQueue.queueFor('bindings', async () => {
         if (context.isClosed()) {
           throw new Error('MACHINE_BINDING_UNAVAILABLE');
         }
         // Identity is `{ providerId, physicalId }` in each `machine.json`, never a directory name.
-        if (
-          [...machines.values()].some(
-            ({ record }) => record.providerId === pending.providerId && record.physicalId === descriptor.id,
-          )
-        ) {
-          throw new Error('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CONFLICT');
+        const existing = [...machines.values()].find(
+          ({ record }) => record.providerId === pending.providerId && record.physicalId === descriptor.id,
+        );
+        if (existing) {
+          if (providerSources.get(pending.providerId)?.manifest.connection.identity !== 'claimed') {
+            throw new Error('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CONFLICT');
+          }
+          // A claimed identity is pinned to the endpoint it was bound at; this ceremony is the person confirming the
+          // same machine answers at another one, so the binding keeps its id and takes the new endpoint.
+          existing.record = await store.writeMachine({
+            ...existing.record,
+            candidate: pending.candidate,
+            configuration: pending.configuration,
+            connection,
+          });
+          return { record: existing.record, created: false };
         }
-        const created = await store.createMachine({
+        const made = await store.createMachine({
           name: pending.name,
           providerId: pending.providerId,
           physicalId: descriptor.id,
@@ -184,29 +196,36 @@ export const createNodeMachineBindings = (
           // The first report writes the last-known identity, with the revision the host derives.
           boundAt: now(),
         });
-        machines.set(created.record.id, {
-          record: created.record,
-          operations: { status: 'open', log: created.log },
+        machines.set(made.record.id, {
+          record: made.record,
+          operations: { status: 'open', log: made.log },
         });
-        return created.record;
+        return { record: made.record, created: true };
       });
+      bound = boundRecord;
+      const { id: machineId } = bound;
       try {
         await directory.attach({
-          machineId: bound.id,
+          machineId,
           name: bound.name,
           providerId: bound.providerId,
           observations: providerSources.get(bound.providerId)?.manifest.observations ?? [],
           session,
           onLost() {
+            sessionLost.emit(machineId);
             lost.resolve();
           },
         });
       } catch (error) {
-        machines.delete(bound.id);
-        await store.discardMachine(bound.id).catch(report);
+        if (created) {
+          machines.delete(machineId);
+          await store.discardMachine(machineId).catch(report);
+        }
         throw error;
       }
       connectedSessions.set(bound.id, session);
+      // Binding again is the person remedy for a moved or reset-prone machine: its host alerts end here.
+      await directory.update({ machineId, alerts: [] }).catch(report);
       supervise(bound, lost.promise);
       ceremonies.delete(ceremonyId);
       return Object.freeze({ status: 'bound', machineId: bound.id });

@@ -119,6 +119,8 @@ export type NodeMachineHostContext = Readonly<{
   jobCommits: Topic<MachineJob>;
   /** Emits after every directory change, including every observation. */
   commits: Topic<void>;
+  /** Emits a machine id each time its live session stops being live, before any reconnect; holds and streamed runs end on it. */
+  sessionLost: Topic<string>;
   /** When each machine's last still was requested, in epoch milliseconds. */
   stillCaptureTimes: Map<string, number>;
   /** The live session of each connected machine, by machine id. */

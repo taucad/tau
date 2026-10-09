@@ -1,12 +1,16 @@
 /**
  * Reconnect supervision: each bound machine is kept connected until it is removed, refused for good or the host
  * closes. A live session is waited out, a lost one is retried on a backoff, and a good connect starts the backoff over.
+ * A machine whose provider opens by resetting the controller is never reconnected by itself while its last report
+ * showed a run, and one whose identity or certificate changed is never retried; each stays stale with the host's own
+ * alert naming what a person does, until a good connect or a new binding clears it.
  *
  * @module
  */
 
 import type { NodeMachineHostContext } from '#host/node-machine-context.js';
 import type { MachineBindingRecord } from '#host/node-machine-store.js';
+import type { MachineAlert } from '#machines/machine-observation.js';
 
 /**
  * How long a binding without a live session waits before its next reconnect attempt: 2 s, 5 s, 10 s, 30 s, then
@@ -48,6 +52,24 @@ const pause = async (retryDelay: number, stopped: Promise<void>): Promise<void> 
   }
 };
 
+/** Listed on a machine whose controller may still be running when reconnecting would reset it. */
+const reconnectRequiredAlert: MachineAlert = {
+  code: 'tau.reconnect-required',
+  severity: 'serious',
+  message: 'Tau did not reconnect: opening the connection resets the controller, and a run may still be going.',
+  blocks: 'everything',
+  remedies: [{ type: 'person', instruction: 'When the machine is idle, restart Tau or bind the machine again.' }],
+};
+
+/** Listed on a machine whose address now answers as another machine, or with another certificate. */
+const rebindRequiredAlert: MachineAlert = {
+  code: 'tau.rebind-required',
+  severity: 'serious',
+  message: 'Something else answers at this machine’s address, so Tau stopped connecting to it.',
+  blocks: 'everything',
+  remedies: [{ type: 'person', instruction: 'Find the machine where it is now and bind it again to confirm it.' }],
+};
+
 /** What reconnect supervision serves. @internal */
 export type NodeMachineSupervision = Readonly<{
   /**
@@ -70,8 +92,35 @@ export type NodeMachineSupervision = Readonly<{
  * @returns Reconnect supervision.
  */
 export const createNodeMachineSupervision = (context: NodeMachineHostContext): NodeMachineSupervision => {
-  const { connectedSessions, definitionOf, directory, effectQueue, machines, providerSources, report, supervisors } =
-    context;
+  const {
+    connectedSessions,
+    definitionOf,
+    directory,
+    effectQueue,
+    machines,
+    providerSources,
+    report,
+    sessionLost,
+    supervisors,
+  } = context;
+  // Show (or, with none, clear) the host's own alert on a machine; a directory that is closing is reported, not thrown.
+  const listAlerts = async (machineId: string, alerts: readonly MachineAlert[]): Promise<void> => {
+    try {
+      await directory.update({ machineId, alerts });
+    } catch (error) {
+      report(error);
+    }
+  };
+  // Whether reconnecting would reset a controller that may still be running: the provider opens by resetting, and
+  // the machine's last report showed a run that had not ended.
+  const reconnectResetsRun = async (record: MachineBindingRecord): Promise<boolean> => {
+    if (providerSources.get(record.providerId)?.manifest.connection.opening !== 'resets-controller') {
+      return false;
+    }
+    const listed = await directory.snapshot();
+    const run = listed.entries.find((entry) => entry.machineId === record.id)?.snapshot.run;
+    return run !== undefined && !['completed', 'cancelled', 'failed'].includes(run.state);
+  };
   // Connect a bound machine, check that the same printer answers, and swap the session into the directory on the
   // machine's queue, so the session never changes under an in-flight transfer, start or action. `lost` settles once
   // the new session stops being live.
@@ -103,11 +152,14 @@ export const createNodeMachineSupervision = (context: NodeMachineHostContext): N
           observations: providerSources.get(record.providerId)?.manifest.observations ?? [],
           session,
           onLost() {
+            sessionLost.emit(record.id);
             lost.resolve();
           },
         });
         connectedSessions.set(record.id, session);
       });
+      // A good connect is what any earlier person remedy asked for.
+      await listAlerts(record.id, []);
     } catch (error) {
       await session.close().catch(() => undefined);
       throw error;
@@ -142,6 +194,15 @@ export const createNodeMachineSupervision = (context: NodeMachineHostContext): N
         // ponytail: a session lost right after connecting starts the backoff over, so a flapping printer is retried
         // every 2 s; hold the reset until a session has stayed up if that shows up on real hosts.
         attempts = 0;
+        if (isAborted()) {
+          return;
+        }
+        // oxlint-disable-next-line eslint/no-await-in-loop -- decided once per loss, before any attempt.
+        if (await reconnectResetsRun(record)) {
+          // Opening would reset a controller that may still be cutting: left stale for a person.
+          report(new Error('MACHINE_RECONNECT_NEEDS_PERSON'));
+          return listAlerts(record.id, [reconnectRequiredAlert]);
+        }
       }
       // oxlint-disable-next-line eslint/no-await-in-loop -- attempts are spaced by the backoff.
       await pause(reconnectDelay(attempts), stopped);
@@ -159,7 +220,7 @@ export const createNodeMachineSupervision = (context: NodeMachineHostContext): N
         }
         report(error);
         if (needsRebind(error)) {
-          return;
+          return listAlerts(record.id, [rebindRequiredAlert]);
         }
       }
     }
@@ -188,7 +249,12 @@ export const createNodeMachineSupervision = (context: NodeMachineHostContext): N
           ({ lost: live } = await connectBinding(machine.record, new AbortController().signal));
         } catch (error) {
           report(error);
-          if (needsRebind(error) || !providerSources.has(machine.record.providerId)) {
+          if (needsRebind(error)) {
+            // oxlint-disable-next-line eslint/no-await-in-loop -- recovered machines connect in id order.
+            await listAlerts(machine.record.id, [rebindRequiredAlert]);
+            continue;
+          }
+          if (!providerSources.has(machine.record.providerId)) {
             continue;
           }
         }

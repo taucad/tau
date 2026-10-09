@@ -1,6 +1,5 @@
 export {
   defineMachine,
-  defineMachineQuery,
   machineActionDefinitionOf,
   machineManifestOf,
   parseMachineProvider,
@@ -10,7 +9,9 @@ export { machineCredentialReference } from '#machines/machine-credential.js';
 export type { MachineChannelClient, MachineChannelEndpoint } from '#machines/machine-channel.js';
 export {
   fffProcessOf,
+  isSimulatedMachine,
   machineManifestSchema,
+  machineObservationGroups,
   millingProcessOf,
   parseMachineManifest,
 } from '#machines/machine-manifest.js';
@@ -22,10 +23,12 @@ export type {
   MachineJobFacts,
   MachineManifest,
   MachineMillingProcess,
+  MachineObservationGroup,
   MachineProcess,
 } from '#machines/machine-manifest.js';
 export {
   defineMachineAction,
+  isMachineJobFailureCode,
   isUnattendedAction,
   machineActionDescriptorOf,
   machineActionEffects,
@@ -48,6 +51,7 @@ export type {
   MachineHaltOutcome,
   MachineHoldDefinition,
   MachineHoldDescriptor,
+  MachineJobFailureCode,
   MachineJogHoldParameters,
   MachineQualificationProfile,
   MachineRemedy,
@@ -55,8 +59,13 @@ export type {
   StandardMachineActionId,
   StandardMachineActionParameters,
 } from '#machines/machine-actions.js';
-export { checkMachineAction, machineActionOf } from '#machines/machine-check.js';
-export type { MachineActionCheck, MachineActionCheckInput } from '#machines/machine-check.js';
+export {
+  checkMachineAction,
+  checkMachineActionAtSend,
+  machineActionIntent,
+  machineActionOf,
+} from '#machines/machine-check.js';
+export type { MachineActionCheck, MachineActionCheckEntry, MachineActionCheckInput } from '#machines/machine-check.js';
 export { componentValue, mergeComponentObservations } from '#machines/machine-observation.js';
 export type {
   CalibrationProfile,
@@ -101,7 +110,9 @@ export type {
   MachineWithdrawJobInput,
 } from '#machines/machine-jobs.js';
 export type {
+  MachineActionApproval,
   MachineApplyActionInput,
+  MachineApproveActionInput,
   MachineBeginBindingInput,
   MachineBeginHoldInput,
   MachineBindingRemoval,
@@ -139,12 +150,12 @@ export type {
   MachineClaimedIdentity,
   MachineClock,
   MachineCommandReceipt,
+  MachineCompleteConfigurationInput,
   MachineConnectInput,
   MachineConnectionContext,
   MachineConnectionRuntime,
   MachineDatagram,
   MachineDatagramListenInput,
-  MachineDeclaredQuery,
   MachineDescriptor,
   MachineDiscoveryEvent,
   MachineDiscoveryInput,
@@ -171,7 +182,7 @@ export type {
   MachineProviderHold,
   MachineProviderHoldInput,
   MachineProviderJobInput,
-  MachineQueryManifest,
+  MachineProviderStartInput,
   MachineReconcileInput,
   MachineSerialPort,
   MachineSerialRequest,

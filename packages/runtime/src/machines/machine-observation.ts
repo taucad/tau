@@ -63,9 +63,13 @@ export type MachineRun = Readonly<{
   origin: 'tau' | 'external';
   /** `streamed`: this host is feeding the program and must stay connected until the run ends. */
   delivery: 'stored' | 'streamed';
+  /**
+   * `unknown`: the machine no longer says, such as a streamed run whose feeding session was lost. The job that
+   * started it records that as `interrupted` (`MachineJob.run.outcome`); the run itself stays `unknown`.
+   */
   state: 'starting' | 'running' | 'paused' | 'finishing' | 'completed' | 'cancelled' | 'failed' | 'unknown';
-  /** Who or what paused it: a person, a stop in the program, or the machine itself. */
-  paused?: Readonly<{ by: 'person' | 'program' | 'machine'; reason?: string }>;
+  /** Who or what paused it: a person, an agent, a stop in the program, or the machine itself. */
+  paused?: Readonly<{ by: 'person' | 'agent' | 'program' | 'machine'; reason?: string }>;
   program?: Readonly<{ name: string }>;
   startedAt?: string;
   endedAt?: string;
@@ -538,7 +542,7 @@ const runSchema = z.strictObject({
   origin: z.enum(['tau', 'external']),
   delivery: z.enum(['stored', 'streamed']),
   state: z.enum(['starting', 'running', 'paused', 'finishing', 'completed', 'cancelled', 'failed', 'unknown']),
-  paused: z.strictObject({ by: z.enum(['person', 'program', 'machine']), reason: text.optional() }).optional(),
+  paused: z.strictObject({ by: z.enum(['person', 'agent', 'program', 'machine']), reason: text.optional() }).optional(),
   program: z.strictObject({ name: identity }).optional(),
   startedAt: instant.optional(),
   endedAt: instant.optional(),
@@ -603,6 +607,44 @@ export const machineReportSchema = z.strictObject({
 
 /** Strict schema of one component observation. @internal */
 export const componentObservationsSchema = z.array(componentObservationSchema).max(128);
+
+/** A provider report whose components are admitted one by one ({@link admitComponentObservations}). @internal */
+export const machineProviderReportSchema = machineReportSchema.extend({ components: z.array(z.unknown()).max(128) });
+
+const componentKeySchema = z.object({ componentId: identity, group: identity });
+
+/**
+ * Admit a provider's component observations one by one: an element the strict schema refuses (a newer value kind,
+ * an over-limit table, an unknown key) becomes `unknown` for that component and group, so one unreadable value
+ * never costs the rest of the report. An element without a readable component and group is dropped.
+ * @internal
+ * @param candidates - The provider's elements, already bounded in count.
+ * @param receivedAt - When the report holding them was observed.
+ * @returns The admitted observations, and each refused element's key with why it was refused.
+ */
+export const admitComponentObservations = (
+  candidates: readonly unknown[],
+  receivedAt: string,
+): Readonly<{
+  components: readonly ComponentObservation[];
+  refused: ReadonlyArray<Readonly<{ componentId?: string; group?: string; error: z.ZodError }>>;
+}> => {
+  const components: ComponentObservation[] = [];
+  const refused: Array<Readonly<{ componentId?: string; group?: string; error: z.ZodError }>> = [];
+  for (const candidate of candidates) {
+    const parsed = componentObservationSchema.safeParse(candidate);
+    if (parsed.success) {
+      components.push(parsed.data);
+      continue;
+    }
+    const key = componentKeySchema.safeParse(candidate);
+    refused.push({ ...(key.success ? key.data : {}), error: parsed.error });
+    if (key.success) {
+      components.push({ ...key.data, receivedAt, knowledge: 'unknown', reason: 'Unreadable report' });
+    }
+  }
+  return { components, refused };
+};
 
 /** Strict schema of one machine check. @internal */
 export const machineCheckSchema = checkSchema;

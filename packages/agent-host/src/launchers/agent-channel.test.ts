@@ -46,6 +46,7 @@ const recordingLauncher = (): AgentLauncher & { readonly seen: HostCommand[] } =
     },
     read: async ({ chatId }: { readonly chatId: string }) => ({
       status: 'batch',
+      sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
       chatId,
       cursor: 0,
       nextCursor: 0,
@@ -254,7 +255,15 @@ describe('serveAgentChannel', () => {
 
     await expect(
       portChannel.call('read', { chatId: 'chat-emitter', cursor: 0, limit: 4, maxBytes: 1024 }),
-    ).resolves.toEqual({ status: 'batch', chatId: 'chat-emitter', cursor: 0, nextCursor: 0, endCursor: 0, events: [] });
+    ).resolves.toEqual({
+      status: 'batch',
+      chatId: 'chat-emitter',
+      cursor: 0,
+      nextCursor: 0,
+      endCursor: 0,
+      events: [],
+      sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+    });
   });
 
   it('serves the host revision root over the same authenticated connection', async () => {

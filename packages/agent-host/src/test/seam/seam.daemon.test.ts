@@ -26,6 +26,7 @@ import { createNodeLauncher } from '#launchers/node-launcher.fixture.js';
 import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
+import { followChat } from '#log/follow-chat.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 import type { HostCommand } from '#wire/commands.schema.js';
 import type { ToolRegistry } from '#waist/ports.js';
@@ -376,12 +377,21 @@ describe('the seam on the daemon leg', () => {
     const seam = await harness();
     const client = seam.dial();
 
-    const waiting = client.read({ chatId, cursor: 0, limit: 16, maxBytes: 65_536 });
+    const waiting = (async () => {
+      for await (const page of followChat(async (input) => client.read(input), chatId, {
+        signal: AbortSignal.timeout(2000),
+      })) {
+        if (page.events.length > 0) {
+          return page;
+        }
+      }
+      throw new Error('The follower ended before a durable row');
+    })();
     await client.execute(startCommand('cmd-follow'));
 
-    await expect(waiting).resolves.toMatchObject({ status: 'batch', cursor: 0 });
     const page = await waiting;
-    expect(page.status === 'batch' && page.events.length > 0).toBe(true);
+    expect(page.ledger.position.cursor).toBeGreaterThan(0);
+    expect(page.events[0]).toMatchObject({ type: 'run.lifecycle', state: 'admitted' });
   });
 
   it('control: a re-send under a fresh key is not recognized as the same command (keys off)', async () => {
@@ -472,18 +482,6 @@ const v1Daemon = async (answer: (request: V1Request) => Promise<V1Response>) => 
   };
 };
 
-const v1Row = (sequence: number): AgentLogEvent =>
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- one seeded row.
-  ({
-    version: 1,
-    leaderEpoch: 'e01',
-    sequence,
-    recordedAt: '2026-09-26T00:00:00.000Z',
-    runId: 'run-1',
-    type: 'run.lifecycle',
-    state: 'admitted',
-  }) as AgentLogEvent;
-
 describe('mixed builds during the compatibility window (I32)', () => {
   it('v1 client, v2 daemon: should serve the v1 request call, and replay a keyless start by its run id', async () => {
     const seam = await harness();
@@ -516,13 +514,10 @@ describe('mixed builds during the compatibility window (I32)', () => {
     }).toEqual({ first: 'run-1', again: 'completed', admitted: 1, tailed: true });
   });
 
-  it('v2 client, v1 daemon: should speak v1, wake a read on the next row, and not re-send a lost command', async () => {
-    let end = 0;
+  it('v2 client, v1 daemon: refuses authoritative reads while preserving execute and lost-command behavior', async () => {
     const daemon = await v1Daemon(async (request) => {
       if (request.type === 'tail') {
-        const events = request.cursor < end ? [v1Row(request.cursor)] : [];
-        const cursor = Math.min(request.cursor, end);
-        return { type: 'tail', chatId, batch: { cursor, nextCursor: cursor + events.length, endCursor: end, events } };
+        return { type: 'tail', chatId, batch: { cursor: 0, nextCursor: 0, endCursor: 0, events: [] } };
       }
       if (request.type === 'steer') {
         return forever();
@@ -539,13 +534,9 @@ describe('mixed builds during the compatibility window (I32)', () => {
     });
 
     const cancel = await client.execute({ type: 'cancel', commandId: 'cmd-v1', payload: { chatId, runId: 'run-1' } });
-    const read = client.read({ chatId, cursor: 0, limit: 16, maxBytes: 65_536 });
-    await vi.waitFor(() => {
-      expect(daemon.received.filter((request) => request.type === 'tail').length).toBeGreaterThanOrEqual(2);
+    await expect(client.read({ chatId, cursor: 0, limit: 16, maxBytes: 65_536 })).rejects.toMatchObject({
+      code: 'WIRE_VERSION_UNSUPPORTED',
     });
-    end = 1;
-    daemon.push({ chatId, event: v1Row(0) });
-    const page = await read;
     const steer = client.execute({
       type: 'steer',
       commandId: 'cmd-steer',
@@ -559,22 +550,20 @@ describe('mixed builds during the compatibility window (I32)', () => {
       () => 'answered',
       (error: unknown) => (error instanceof ChannelClosedError ? 'lost' : String(error)),
     );
-    const reread = await client.read({ chatId, cursor: 0, limit: 16, maxBytes: 65_536 });
+    await expect(client.read({ chatId, cursor: 0, limit: 16, maxBytes: 65_536 })).rejects.toMatchObject({
+      code: 'WIRE_VERSION_UNSUPPORTED',
+    });
 
     expect({
       cancel: { status: cancel.status, effect: cancel.effect },
       sentCancel: daemon.received.find((request) => request.type === 'cancel'),
-      page: page.status === 'batch' ? page.events.length : 'refused',
       lost,
       steers: daemon.received.filter((request) => request.type === 'steer').length,
-      reread: reread.status === 'batch' ? reread.events.length : 'refused',
     }).toEqual({
       cancel: { status: 'applied', effect: 'durable' },
       sentCancel: { type: 'cancel', chatId, runId: 'run-1' },
-      page: 1,
       lost: 'lost',
       steers: 1,
-      reread: 1,
     });
   });
 });

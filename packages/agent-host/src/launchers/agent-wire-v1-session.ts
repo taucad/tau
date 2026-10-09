@@ -92,7 +92,7 @@ export const createV1Session = (
   const named = new Set<string>();
   const sourceGenerations = new Map<string, string>();
 
-  /** One read that never parks: a v1 `tail` answers at once, and clamps a cursor past the end. */
+  /** One read that never parks: omitting prior health requests a fresh observation; v1 tail still clamps. */
   const tail = async ({
     chatId,
     cursor,
@@ -105,7 +105,6 @@ export const createV1Session = (
         cursor: 0,
         limit: 1,
         maxBytes: batchBytes,
-        signal: AbortSignal.abort(),
       });
       if (initial.status === 'batch' && initial.sourceGeneration !== undefined) {
         sourceGenerations.set(chatId, initial.sourceGeneration);
@@ -117,7 +116,6 @@ export const createV1Session = (
       ...(sourceGenerations.has(chatId) ? { sourceGeneration: sourceGenerations.get(chatId)! } : {}),
       limit,
       maxBytes: Math.min(maxBytes, batchBytes),
-      signal: AbortSignal.abort(),
     });
     if (answer.status === 'batch') {
       if (answer.sourceGeneration !== undefined) {

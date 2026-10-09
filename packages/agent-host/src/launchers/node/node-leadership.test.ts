@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createNodeLauncher } from '#launchers/node-launcher.fixture.js';
 import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
+import { followChat } from '#log/follow-chat.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 import type { ToolRegistry } from '#waist/ports.js';
 
@@ -73,33 +74,14 @@ const launch = (workspaceRoot: string): AgentLauncher => {
 
 /** Wait for the chat's log to hold a terminal row, reading as a viewer would. */
 const terminalRow = async (launcher: AgentLauncher, chatId: string): Promise<AgentLogEvent | undefined> => {
-  let cursor = 0;
-  let sourceGeneration: string | undefined;
-  for (let attempt = 0; attempt < 50; attempt++) {
-    // oxlint-disable-next-line no-await-in-loop -- each read follows the last one's cursor.
-    const answer = await launcher.read({
-      chatId,
-      cursor,
-      ...(sourceGeneration === undefined ? {} : { sourceGeneration }),
-      limit: 16,
-      maxBytes: 1_048_576,
-      signal: AbortSignal.timeout(200),
-    });
-    if (answer.status !== 'batch') {
-      if (answer.reason === 'identity-mismatch') {
-        cursor = 0;
-        sourceGeneration = undefined;
-        continue;
-      }
-      return undefined;
-    }
-    const events = answer.events as readonly AgentLogEvent[];
+  for await (const page of followChat(async (input) => launcher.read(input), chatId, {
+    signal: AbortSignal.timeout(2000),
+  })) {
+    const events = page.events as readonly AgentLogEvent[];
     const terminal = events.find((event) => event.type === 'run.lifecycle' && event.state === 'failed');
     if (terminal) {
       return terminal;
     }
-    cursor = answer.nextCursor;
-    sourceGeneration = answer.sourceGeneration;
   }
   return undefined;
 };

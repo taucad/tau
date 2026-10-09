@@ -200,7 +200,7 @@ const settle = async (
 };
 
 const read = async (host: AgentLauncher, chatId: string, cursor = 0): Promise<ReadAnswer> =>
-  host.read({ chatId, cursor, limit: 16, maxBytes: 1_048_576, signal: AbortSignal.abort() });
+  host.read({ chatId, cursor, limit: 16, maxBytes: 1_048_576 });
 
 afterEach(async () => {
   await launcher?.close();
@@ -519,7 +519,6 @@ describe('createAgentLauncher', () => {
         cursor: 0,
         limit: 1,
         maxBytes: 1_048_576,
-        signal: AbortSignal.abort(),
       });
       expect(read.status).toBe('batch');
       if (read.status !== 'batch') {
@@ -924,13 +923,22 @@ describe('createAgentLauncher', () => {
 
   it('answers a read at the chat end once the next durable row lands (SC-R14)', async () => {
     const host = await makeLauncher(scriptedGateway());
-    const waiting = host.read({ chatId: 'chat-3', cursor: 0, limit: 16, maxBytes: 1_048_576 });
+    const waiting = (async () => {
+      for await (const page of followChat(async (input) => host.read(input), 'chat-3', {
+        signal: AbortSignal.timeout(2000),
+      })) {
+        if (page.events.length > 0) {
+          return page;
+        }
+      }
+      throw new Error('The follower ended before a durable row');
+    })();
 
     await start(host, { chatId: 'chat-3', runId: 'run-3' });
 
     const page = await waiting;
-    expect(page).toMatchObject({ status: 'batch', cursor: 0 });
-    expect(page.status === 'batch' && page.events[0]).toMatchObject({ type: 'run.lifecycle', state: 'admitted' });
+    expect(page.ledger.position.cursor).toBeGreaterThan(0);
+    expect(page.events[0]).toMatchObject({ type: 'run.lifecycle', state: 'admitted' });
   });
 
   /* T3 (W6.r1 round 3): a draining host refuses a new run with a retryable code, and serves every other verb. */

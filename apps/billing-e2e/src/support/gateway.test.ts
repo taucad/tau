@@ -5,6 +5,7 @@ import {
   finalUsage,
   gatewayErrorSchema,
   insufficientCreditDetailsSchema,
+  streamRefusal,
 } from '#support/gateway.js';
 
 const insufficient = {
@@ -74,5 +75,28 @@ describe('finalUsage', () => {
   it('should return undefined without a usage object', () => {
     expect(finalUsage(undefined)).toBeUndefined();
     expect(finalUsage('data: {"type":"response.created"}')).toBeUndefined();
+  });
+});
+
+describe('streamRefusal', () => {
+  it('should read the gateway refusal a relayed stream ended on', () => {
+    const stream =
+      'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1","status":"in_progress","error":null}}\n\n' +
+      'event: error\ndata: {"type":"error","code":"PROVIDER_ACCOUNT_EXHAUSTED","message":"The model provider\'s account is unavailable.","error":{"type":"tau_gateway","code":"PROVIDER_ACCOUNT_EXHAUSTED","message":"The model provider\'s account is unavailable.","details":{"providerId":"openai","providerCode":"credit_balance_exhausted","accountOwner":"tau"}}}\n\n' +
+      'event: response.failed\ndata: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"credit_balance_exhausted","message":"The model provider\'s account is unavailable."}}}\n\n';
+
+    expect(streamRefusal(stream)).toEqual({
+      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      providerCode: 'credit_balance_exhausted',
+    });
+  });
+
+  it('should report nothing for a stream that completed', () => {
+    const stream =
+      'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"tau_gateway"}\n\n' +
+      'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":5,"output_tokens":1}}}\n\n';
+
+    expect(streamRefusal(stream)).toBeUndefined();
+    expect(streamRefusal(undefined)).toBeUndefined();
   });
 });

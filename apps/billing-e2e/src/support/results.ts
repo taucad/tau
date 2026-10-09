@@ -18,7 +18,8 @@ export type Priority = 'P0' | 'P1' | 'P2';
  * allowance recorded in the run's output directory, so a re-run needs a new run id and output directory; H-07
  * (driver fixed after Run 1) Stripe's cancellation survey covered the portal's confirm button; H-08 (rows fixed after
  * Run 1) MK-01 and MK-03 read the served HTML, whose links name tau.new on every host until the site's own script
- * points them at this one.
+ * points them at this one; H-09 Tau's own supplier account refuses the route (out of credit), so a priced turn on it
+ * cannot be observed until the operator tops it up.
  */
 export type Verdict = { readonly outcome: Outcome; readonly defect?: string; readonly evidence: readonly string[] };
 

@@ -34,6 +34,7 @@ import {
   gatewayRoutes,
   insufficientCreditDetailsSchema,
   lookupAttempt,
+  streamRefusal,
   waitForTerminal,
 } from '#support/gateway.js';
 import type { GatewayCall } from '#support/gateway.js';
@@ -547,11 +548,38 @@ describe('funded journey', () => {
       );
       expect(call.status).toBe(200);
       expect(call.operationId).toBeDefined();
-      // The invocation deadline is 300 s: a turn whose usage billing cannot price settles only when that runs out.
-      const operation = await waitForTerminal(account.api, call.operationId ?? '', 330_000);
+      const refusal = streamRefusal(call.stream);
+      /* A stream the gateway ended with its own refusal (Tau's supplier account exhausted, a rate limit) ran nothing,
+       * so billing must release the hold at once, as it does a refusal before the stream (F-30). A stream with an
+       * answer settles when its usage is priced; the invocation deadline is 300 s, and a turn billing cannot price
+       * settles only when that runs out. */
+      const operation = await waitForTerminal(
+        account.api,
+        call.operationId ?? '',
+        refusal === undefined ? 330_000 : 60_000,
+      );
       const operationFile = `${evidenceStamp()}-fd-12-luna-operation.json`;
       await writeFile(join(runDirectory, operationFile), JSON.stringify(operation, null, 2));
       evidence.push(describeOperation(operation), operationFile);
+      if (refusal !== undefined) {
+        evidence.push(
+          `the gateway ended the stream with ${refusal.code}${refusal.providerCode === undefined ? '' : ` (${refusal.providerCode})`}`,
+        );
+        if (operation.state !== 'terminal') {
+          evidence.push('hold still open 60 s after the failed stream');
+          return { outcome: 'fail', defect: 'F-30', evidence };
+        }
+        if (operation.receipt.customerState !== 'released' || BigInt(operation.receipt.chargedCreditAtoms) !== 0n) {
+          evidence.push(
+            `a failed stream settled ${operation.receipt.customerState} at ${operation.receipt.chargedCreditAtoms} atoms instead of released at 0`,
+          );
+          return { outcome: 'fail', defect: 'F-30', evidence };
+        }
+        evidence.push(
+          "Tau's supplier account refuses the route, so a priced OpenAI turn cannot be observed until it is topped up",
+        );
+        return { outcome: 'blocked', defect: 'H-09', evidence };
+      }
       if (operation.state !== 'terminal') {
         evidence.push('still pending 330 s after the stream ended');
         return { outcome: 'fail', defect: 'F-30', evidence };

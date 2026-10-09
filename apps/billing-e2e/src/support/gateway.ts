@@ -22,6 +22,16 @@ export const gatewayErrorSchema = z
   .strict();
 export type GatewayError = z.infer<typeof gatewayErrorSchema>;
 
+/** The `error` event the gateway ends a relayed stream with: its own code and the supplier's details. */
+const gatewayErrorFrameSchema = z.object({
+  type: z.literal('error'),
+  error: z.object({
+    type: z.literal('tau_gateway'),
+    code: z.string().min(1),
+    details: z.record(z.string(), z.unknown()).optional(),
+  }),
+});
+
 /** The shortfall an `INSUFFICIENT_CREDIT` refusal carries for the credits card. */
 export const insufficientCreditDetailsSchema = z
   .object({
@@ -170,6 +180,34 @@ export const finalUsage = (stream: string | undefined): string | undefined => {
   } catch {
     return last;
   }
+};
+
+/**
+ * The Tau-coded refusal a relayed stream ended on, when it ended on one: the gateway replaces a supplier's in-stream
+ * failure (an exhausted account, a rate limit) with its own `error` event, so a 200 can still carry no answer.
+ *
+ * @param stream - The stream's text.
+ * @returns The gateway's code and the supplier's own code when the frame names one, or undefined for a stream that
+ * carried no such frame.
+ */
+export const streamRefusal = (
+  stream: string | undefined,
+): { readonly code: string; readonly providerCode?: string } | undefined => {
+  if (stream === undefined) {
+    return undefined;
+  }
+  for (const line of stream.split(/\r?\n/u)) {
+    if (!line.startsWith('data:') || !line.includes('"tau_gateway"')) {
+      continue;
+    }
+    // The relayed frame repeats the code and message beside its `error` member; only that member is read.
+    const parsed = gatewayErrorFrameSchema.safeParse(JSON.parse(line.slice(5).trim()) as unknown);
+    if (parsed.success) {
+      const providerCode = parsed.data.error.details?.['providerCode'];
+      return { code: parsed.data.error.code, ...(typeof providerCode === 'string' ? { providerCode } : {}) };
+    }
+  }
+  return undefined;
 };
 
 /** One evidence line for a gateway call. */

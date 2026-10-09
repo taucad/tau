@@ -701,7 +701,7 @@ const definition = (model: BambuModel): MachineManifestDefinition => {
       delivery: 'stored',
       start: 'remote',
       attestations: [{ id: 'work-area-clear', label: 'The build plate is clear' }],
-      safety: { authority: 'approved-agent', attended: false, interlocks: [] },
+      safety: { attended: false, interlocks: [] },
     },
     stop: halts,
     observations: [

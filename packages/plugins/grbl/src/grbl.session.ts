@@ -111,6 +111,8 @@ export type GrblRun = {
 };
 
 const maximumArtifactBytes = 32 * 1024 * 1024;
+/** How many operations a session remembers for repeats and confirmation, oldest forgotten first. */
+const retainedOperations = 256;
 const probeFeed = 75;
 const probeTravel = 50;
 const parkZ = -5;
@@ -583,9 +585,16 @@ export class GrblController {
             this.rejected('MACHINE_ACTION_PARAMETERS_INVALID', 'That is not one of the answers.'),
           );
         }
-        activity.answered.add(awaiting.promptId);
+        const { promptId } = awaiting;
+        activity.answered.add(promptId);
         activity.answer?.(answer);
-        return this.remember(operationId, this.accepted({ activityId: activity.view.activityId }));
+        return this.remember(
+          operationId,
+          this.accepted({ activityId: activity.view.activityId }),
+          this.after(
+            () => activity.view.awaiting?.kind !== 'confirmation' || activity.view.awaiting.promptId !== promptId,
+          ),
+        );
       }
       case 'controller:grbl-simulator.lid.press': {
         const parameters = parse(grblActionSchemas.lid, input.parameters);
@@ -783,13 +792,9 @@ export class GrblController {
         if (this.isRouterTimed) {
           return this.remember(operationId, this.rejected('MACHINE_ACTION_BUSY', 'The router is already on.'));
         }
-        // The relay switches on and the dwell and M5 are queued behind it, so the router stops by itself even when
-        // Tau goes away. A feed hold during the dwell suspends it with the router still on.
-        const reply = await this.send('M3');
-        if (reply.type === 'ok') {
-          void this.timeRouter(parameters.duration);
-        }
-        return this.remember(operationId, this.replied(reply));
+        // M3, the dwell and M5 go out together, so the router stops by itself even when Tau or the link goes away
+        // before M3 answers. A feed hold during the dwell suspends it with the router still on.
+        return this.remember(operationId, this.replied(await this.timeRouter(parameters.duration)));
       }
       case 'dust:switch.set': {
         const parameters = parse(standardMachineActions['switch.set'].schema, input.parameters);
@@ -948,8 +953,9 @@ export class GrblController {
     checks.push({
       id: 'idle',
       label: 'No other job is running',
-      state: isRunLive ? 'blocked' : 'passed',
+      state: isRunLive || this.isRouterTimed ? 'blocked' : 'passed',
       source: 'observed',
+      ...(this.isRouterTimed ? { detail: 'The router is on a timed run. Switch it off first.' } : {}),
     });
     return {
       status: checks.some((check) => check.state === 'blocked') ? 'blocked' : 'ready',
@@ -983,6 +989,13 @@ export class GrblController {
   ): Promise<MachineCommandReceipt> {
     if (this.run !== undefined && ['starting', 'running', 'paused', 'finishing'].includes(this.run.state)) {
       return this.remember(input.operationId, this.rejected('MACHINE_ACTION_RUN_ACTIVE', 'Another job is running.'));
+    }
+    // Grbl reports Idle during the dwell; the job's feed hold would suspend it with the router on and the M5 behind it.
+    if (this.isRouterTimed) {
+      return this.remember(
+        input.operationId,
+        this.rejected('MACHINE_ACTION_BUSY', 'The router is on a timed run. Switch it off first.'),
+      );
     }
     if (this.status?.state !== 'Idle' || this.isBusy) {
       return this.remember(
@@ -1520,6 +1533,13 @@ export class GrblController {
     if (confirm !== undefined) {
       this.confirmations.set(operationId, confirm);
     }
+    // ponytail: the oldest operation is forgotten past the limit; the host escalates anything still unproven after
+    // its 180-second window anyway, so a forgotten one reads `pending` there.
+    if (this.receipts.size > retainedOperations) {
+      const [oldest = ''] = this.receipts.keys();
+      this.receipts.delete(oldest);
+      this.confirmations.delete(oldest);
+    }
     return receipt;
   }
 
@@ -1566,14 +1586,21 @@ export class GrblController {
   }
 
   /**
-   * Hold the router on for a time: a dwell, then `M5`, both queued in the controller. Busy until the `M5` answers,
+   * Run the router for a time: `M3`, a dwell and `M5` queued in the controller together. Busy until the `M5` answers,
    * or a reset drops it.
    * @param seconds - How long.
+   * @returns The reply to `M3`.
    */
-  private async timeRouter(seconds: number): Promise<void> {
+  private async timeRouter(seconds: number): Promise<GrblReply> {
     this.isRouterTimed = true;
     this.notify();
-    void this.send(`G4P${format(seconds)}`);
+    const on = this.transmit('M3').reply;
+    void this.transmit(`G4P${format(seconds)}`).reply;
+    void this.routerOff();
+    return on;
+  }
+
+  private async routerOff(): Promise<void> {
     await this.send('M5');
     this.isRouterTimed = false;
     this.notify();

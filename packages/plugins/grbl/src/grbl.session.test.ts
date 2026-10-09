@@ -534,6 +534,97 @@ describe('grbl session stops, admission and observation', () => {
     ).toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_PROMPT_STALE' });
   });
 
+  it('queues the timed router run whole before M3 answers, then refuses a job without writing a feed hold', async () => {
+    const connected = await connect('G0X10\n');
+    await home(connected);
+    const text = (bytes: readonly number[]): string => new TextDecoder().decode(Uint8Array.from(bytes));
+    const received: number[] = [];
+    // From M3 on, the controller hears nothing until released: M3 stays unanswered.
+    let held: Array<Uint8Array<ArrayBuffer>> | 'released' | undefined;
+    const receive = connected.machine.receive.bind(connected.machine);
+    connected.machine.receive = (bytes) => {
+      received.push(...bytes);
+      if (held === undefined && text([...bytes]) === 'M3\n') {
+        held = [];
+      }
+      if (Array.isArray(held)) {
+        held.push(bytes);
+        return;
+      }
+      receive(bytes);
+    };
+    const switching = accept(connected, 'router:spindle.set', { mode: 'clockwise', duration: 60 });
+    await sleep(50);
+    // The dwell and M5 are already on the line, so the router stops on the controller even if Tau goes away now.
+    expect(text(received).replaceAll('?', '')).toMatch(/M3\nG4P60\nM5\n$/u);
+    for (const bytes of Array.isArray(held) ? held : []) {
+      receive(bytes);
+    }
+    held = 'released';
+    await switching;
+    await connected.until(() => connected.machine.spindle);
+    // Grbl reports Idle during a dwell.
+    const dwelling = await connected.report();
+    expect(dwelling.state.status).toBe('ready');
+    const preparation = await jobsOf(connected).prepare({
+      operationId: 'prepare-timed',
+      expectedMachineId: 'grbl-simulator',
+      artifact: artifact('jobs/timed.gcode'),
+      configuration: submission,
+      signal: new AbortController().signal,
+    });
+    expect(preparation).toMatchObject({ status: 'blocked' });
+    expect(await start(connected, 'jobs/timed.gcode')).toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_BUSY',
+    });
+    // No feed hold: it would suspend the dwell with the router on, and the M5 behind it would wait for Play.
+    expect(received).not.toContain(0x21);
+    expect(connected.machine.state).toBe('Idle');
+    expect(connected.machine.spindle).toBe(true);
+  });
+
+  it('confirms an answer once its question is no longer awaited', async () => {
+    const connected = await connect();
+    await home(connected);
+    await accept(connected, 'touch-plate:probe.run', { cycle: 'z', plateThickness: 15 });
+    const report = await connected.until((current) => current.activities[0]?.awaiting?.kind === 'confirmation');
+    const activity = report.activities[0]!;
+    const awaiting = activity.awaiting as Extract<NonNullable<typeof activity.awaiting>, { kind: 'confirmation' }>;
+    operation += 1;
+    const operationId = `op-${String(operation)}`;
+    await connected.controller.apply({
+      operationId,
+      componentId: 'controller',
+      action: 'interaction.respond',
+      version: 1,
+      expectedRunId: null,
+      parameters: { activityId: activity.activityId, promptId: awaiting.promptId, answer: 'cancel' },
+      requestedBy: { kind: 'user' },
+      signal: new AbortController().signal,
+    });
+    await connected.until(() => connected.controller.confirm(operationId).status === 'confirmed', 2000);
+  });
+
+  it('remembers only the latest 256 operations', async () => {
+    const connected = await connect();
+    for (let index = 0; index < 300; index += 1) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- operations are remembered in the order they were applied.
+      await connected.controller.apply({
+        operationId: `undeclared-${String(index)}`,
+        componentId: 'controller',
+        action: 'grbl.undeclared',
+        version: 1,
+        expectedRunId: null,
+        parameters: {},
+        requestedBy: { kind: 'user' },
+        signal: new AbortController().signal,
+      });
+    }
+    expect(connected.controller.receipt('undeclared-0')).toBeUndefined();
+    expect(connected.controller.receipt('undeclared-299')).toMatchObject({ status: 'rejected' });
+  });
+
   it('switches a timed router off by hold, settle and reset, keeping the work offset, with nothing queued behind it', async () => {
     const connected = await connect();
     await home(connected);

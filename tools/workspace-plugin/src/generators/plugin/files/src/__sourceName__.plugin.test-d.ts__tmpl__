@@ -51,8 +51,8 @@ void invalidJobConfiguration;
 
 const machineDefinition = await resolveRuntimePluginDefinition('machine', <%= machine.factoryName %>());
 type MachineBinding = Parameters<typeof machineDefinition.connect>[0]['configuration'];
-expectTypeOf<MachineBinding>().toEqualTypeOf<{ logicalId: string }>();
-// @ts-expect-error -- connection receives the admitted binding-schema output.
-const invalidMachineBinding: MachineBinding = { logicalId: 42 };
+expectTypeOf<MachineBinding>().toEqualTypeOf<Record<string, never>>();
+// @ts-expect-error -- connection receives the admitted binding-schema output; where the machine is is the endpoint.
+const invalidMachineBinding: MachineBinding = { address: '192.0.2.1' };
 void invalidMachineBinding;
 <% } %>

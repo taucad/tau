@@ -3,10 +3,12 @@ import { defineMachine } from '@taucad/runtime/machine';
 import type { MachineManifestDefinition } from '@taucad/runtime/machine';
 import { z } from 'zod';
 
+// Only what this provider needs to talk to the machine. Where it is (address or serial path) arrives as the discovery
+// endpoint, and its name comes from the person at bind.
 const bindingConfiguration = defineConfiguration({
   id: '<%= name %>.machine.binding',
   version: '1.0.0',
-  schema: z.object({ logicalId: z.string() }),
+  schema: z.object({}),
   ui: { version: 1, rjsf: {} },
 });
 
@@ -44,11 +46,11 @@ export const <%= alias %>Machine = defineMachine({
   bindingConfiguration,
   submissionConfiguration,
   async *discover(input) {
-    void input.configuration.logicalId;
+    void input.endpoint;
     yield* [];
   },
   async connect(input) {
-    void input.configuration.logicalId;
+    void input.candidate.endpoint;
     throw new Error('TODO: implement <%= name %> machine connection');
   },
 });

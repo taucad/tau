@@ -298,7 +298,8 @@ describe('plugin generator', () => {
     expect(machine).toContain("from '@taucad/runtime/configuration'");
     expect(machine).toContain("from '@taucad/runtime/machine'");
     expect(machine).toContain("from 'zod'");
-    expect(machine).toContain('input.configuration.logicalId');
+    expect(machine).toContain('schema: z.object({}),');
+    expect(machine).not.toContain('logicalId');
     expect(machine).toContain('TODO: implement manufacturing-fixture machine connection');
     expect(machine).toContain('const manifest: MachineManifestDefinition = {');
     /* Manifest v3 under provider ABI 2: no actions declared yet, no holds, no jobs, and a declared stop. */
@@ -339,7 +340,12 @@ describe('plugin generator', () => {
 
   it.each([
     { role: 'job', factory: 'jobFixtureJob', projection: 'ExpandPluginJobs', schemaField: 'enabled' },
-    { role: 'machine', factory: 'machineFixtureMachine', projection: 'ExpandPluginMachines', schemaField: 'logicalId' },
+    {
+      role: 'machine',
+      factory: 'machineFixtureMachine',
+      projection: 'ExpandPluginMachines',
+      schemaField: 'machine.binding',
+    },
   ] as const)(
     'generates a callable schema-bearing $role-only toolkit',
     async ({ role, factory, projection, schemaField }) => {

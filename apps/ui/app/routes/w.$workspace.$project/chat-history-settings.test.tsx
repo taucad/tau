@@ -3,7 +3,6 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
-import { mock } from 'vitest-mock-extended';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { MemoryRouter, useLocation } from 'react-router';
@@ -20,8 +19,8 @@ const chats = [{ id: 'chat_active', name: 'Bracket design' }];
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatContext: () => ({ chat: chatState.chat, activeChatId: chatState.activeChatId }),
-  useChatSelector: <Selection,>(selector: (state: CombinedChatState) => Selection): Selection =>
-    selector(mock<CombinedChatState>({ messages: chatState.messages })),
+  useChatSelector: <Selection,>(selector: (state: Pick<CombinedChatState, 'messages'>) => Selection): Selection =>
+    selector({ messages: chatState.messages }),
 }));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'proj_one' }),

@@ -17,6 +17,7 @@ import type {
   ProjectDiscoveryResult,
   ProjectLocator,
   StorageRootConfig,
+  WatchEvent,
 } from '@taucad/filesystem';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
 import { consumableBytes } from '@taucad/fs-bridge';
@@ -602,21 +603,115 @@ const pendingStorageToScope = async (storage: PendingProjectStorage): Promise<St
 
 /** Retain actual owner I/O, whose lifetime Query cancellation cannot shorten. */
 function createMetadataReadOwner(source: ReturnType<typeof createChatFileStore>) {
-  const pending = new Set<Promise<unknown>>();
+  const pending = new Map<Promise<unknown>, string | undefined>();
+  let registration = Promise.withResolvers<Error | undefined>();
+  let connection = Promise.withResolvers<{
+    readonly signal: AbortSignal;
+    project(id: string): ObservationService<void>;
+  }>();
   return {
-    async read<Value>(operation: (source: ReturnType<typeof createChatFileStore>) => Promise<Value>): Promise<Value> {
-      const promise = operation(source);
-      pending.add(promise);
+    connect(project: (id: string) => ObservationService<void>): () => void {
+      const abort = new AbortController();
+      connection.resolve({ project, signal: abort.signal });
+      return () => {
+        abort.abort(new Error('Chat observation was disposed.'));
+        connection = Promise.withResolvers();
+      };
+    },
+    hold(): void {
+      const previous = registration;
+      registration = Promise.withResolvers<Error | undefined>();
+      // A retired admission wakes its readers so they can follow the current registration.
+      previous.resolve(undefined);
+    },
+    ready(): void {
+      registration.resolve(undefined);
+    },
+    fail(error: Error): void {
+      const previous = registration;
+      registration = Promise.withResolvers<Error | undefined>();
+      previous.resolve(undefined);
+      registration.resolve(error);
+    },
+    async read<Value>(
+      operation: (source: ReturnType<typeof createChatFileStore>) => Promise<Value>,
+      projectId?: string,
+    ): Promise<Value> {
+      const owner = await connection.promise;
+      owner.signal.throwIfAborted();
+      const observation = projectId === undefined ? undefined : owner.project(projectId);
+      const lease = observation?.acquire();
       try {
-        return await promise;
+        if (lease) {
+          await new Promise<void>((resolve, reject) => {
+            let unsubscribe = (): void => undefined;
+            const cleanup = (): void => {
+              unsubscribe();
+              owner.signal.removeEventListener('abort', aborted);
+            };
+            const aborted = (): void => {
+              cleanup();
+              reject(
+                owner.signal.reason instanceof Error
+                  ? owner.signal.reason
+                  : new Error('Chat observation was disposed.'),
+              );
+            };
+            const check = (): void => {
+              const snapshot = lease.getSnapshot();
+              // Pending starts only after watch.ready; a query refetch must not wait for its own invalidation to finish.
+              if (snapshot.status === 'ready' || snapshot.status === 'pending') {
+                cleanup();
+                resolve();
+              } else if (snapshot.status === 'error' || snapshot.status === 'closed') {
+                cleanup();
+                reject(new Error(snapshot.error ?? 'Chat updates unavailable.'));
+              }
+            };
+            unsubscribe = lease.subscribe(check);
+            owner.signal.addEventListener('abort', aborted, { once: true });
+            check();
+          });
+        } else {
+          let admitted: typeof registration;
+          do {
+            admitted = registration;
+            // oxlint-disable-next-line eslint/no-await-in-loop -- Follow the current registration after replacement.
+            const error = await admitted.promise;
+            if (admitted === registration && error) {
+              throw error;
+            }
+          } while (admitted !== registration);
+        }
+        owner.signal.throwIfAborted();
+        const promise = operation(source);
+        pending.set(promise, projectId);
+        try {
+          const value = await promise;
+          owner.signal.throwIfAborted();
+          return value;
+        } finally {
+          pending.delete(promise);
+        }
       } finally {
-        pending.delete(promise);
+        lease?.release();
       }
     },
-    async settle(): Promise<void> {
-      while (pending.size > 0) {
+    async settle(projectId?: string): Promise<void> {
+      const relevant = (): Array<Promise<unknown>> => {
+        const reads: Array<Promise<unknown>> = [];
+        for (const [promise, id] of pending) {
+          if (projectId === undefined || id === projectId) {
+            reads.push(promise);
+          }
+        }
+        return reads;
+      };
+      let reads = relevant();
+      while (reads.length > 0) {
         // oxlint-disable-next-line eslint/no-await-in-loop -- Include reads admitted while a prior non-abortable owner read is settling.
-        await Promise.allSettled(pending);
+        await Promise.allSettled(reads);
+        reads = relevant();
       }
     },
   };
@@ -771,14 +866,108 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     });
     discoveryObservationRef.current = discovery;
     const resources = new Map<string, Set<string>>();
+    const projectMetadata = new Map<string, ObservationService<void>>();
+    const projectSource = (id: string): ObservationService<void> => {
+      let source = projectMetadata.get(id);
+      if (!source) {
+        source = new ObservationService<void>({
+          resource: `/projects/${id}/.tau/chats`,
+          watch: (invalidate, reset) => {
+            const watch = fileManager.watchRecordFile(
+              `/projects/${id}/.tau/chats`,
+              (event) => {
+                if (projectMetadata.get(id) !== source || source?.activeLeaseCount === 0) {
+                  return;
+                }
+                if (event.type === 'reset') {
+                  resources.set(id, new Set());
+                  reset();
+                  return;
+                }
+                const paths = event.type === 'rename' ? [event.oldPath, event.newPath] : [event.path];
+                const chats = resources.get(id) ?? new Set<string>();
+                let changed = false;
+                for (const path of paths) {
+                  const segments = path.split('/');
+                  if (
+                    segments[0] === '.tau' &&
+                    segments[1] === 'chats' &&
+                    (segments.length <= 3 || (segments.length === 4 && segments[3] === 'chat.json'))
+                  ) {
+                    if (segments[2]) {
+                      chats.add(segments[2]);
+                    }
+                    changed = true;
+                  }
+                }
+                if (changed) {
+                  resources.set(id, chats);
+                  invalidate();
+                }
+              },
+              { recursive: true },
+            );
+            return {
+              ready: watch.ready,
+              closed: watch.closed,
+              dispose: () => {
+                watch.dispose();
+                if (source?.activeLeaseCount === 0 && projectMetadata.get(id) === source) {
+                  projectMetadata.delete(id);
+                }
+              },
+            };
+          },
+          refresh: () => {
+            if (source?.getSnapshot().status !== 'registering') {
+              resources.set(id, new Set());
+            }
+          },
+          invalidate: () => {
+            if (
+              source?.activeLeaseCount === 0 ||
+              (!resources.has(id) && source?.getSnapshot().status === 'registering')
+            ) {
+              return;
+            }
+            void queryClient.cancelQueries({ queryKey: ['all-chats'] });
+            void queryClient.cancelQueries({ queryKey: ['chats', id] });
+            for (const chatId of resources.get(id) ?? []) {
+              void queryClient.cancelQueries({ queryKey: ['chat', chatId] });
+            }
+          },
+          read: async ({ isCurrent }) => {
+            const chats = resources.get(id);
+            if (!chats) {
+              return;
+            }
+            await metadataReadOwner.settle(id);
+            if (!isCurrent()) {
+              return;
+            }
+            resources.delete(id);
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: ['chats', id] }, { cancelRefetch: false }),
+              ...[...chats].map(async (chatId) =>
+                queryClient.invalidateQueries({ queryKey: ['chat', chatId] }, { cancelRefetch: false }),
+              ),
+            ]);
+            await metadataReadOwner.settle(id);
+          },
+        });
+        projectMetadata.set(id, source);
+      }
+      return source;
+    };
+    const disconnect = metadataReadOwner.connect(projectSource);
     let membership = false;
     const metadata = new ObservationService<void>({
       resource: 'workspace/chat-metadata',
       refresh: () => {
         membership = true;
       },
-      watch: (invalidate, reset) =>
-        channel.watchReady({ paths: [''], recursive: true }, (event) => {
+      watch: (invalidate, reset) => {
+        const onEvent = (event: WatchEvent): void => {
           if (event.type === 'reset') {
             membership = true;
             reset();
@@ -814,10 +1003,39 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             }
           }
           if (changed) {
+            for (const id of resources.keys()) {
+              projectMetadata.get(id)?.invalidate();
+            }
             invalidate();
           }
-        }),
+        };
+        const home = channel.watchReady({ paths: [''], recursive: true }, onEvent);
+        let listing = queryClient.getQueryData<ProjectListing>(['projects']);
+        const synchronize = (): void => {
+          const next = queryClient.getQueryData<ProjectListing>(['projects']);
+          if (next === listing) {
+            return;
+          }
+          listing = next;
+          membership = true;
+          invalidate();
+        };
+        const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+          if (event.query.queryKey.length === 1 && event.query.queryKey[0] === 'projects') {
+            synchronize();
+          }
+        });
+        return {
+          ready: home.ready,
+          closed: home.closed,
+          dispose: () => {
+            unsubscribe();
+            home.dispose();
+          },
+        };
+      },
       invalidate: () => {
+        metadataReadOwner.hold();
         void queryClient.cancelQueries({ queryKey: ['all-chats'] });
         if (membership) {
           void queryClient.cancelQueries({ queryKey: ['chats'] });
@@ -831,11 +1049,32 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           }
         }
       },
-      read: async ({ isCurrent }) => {
+      read: async (read) => {
+        const { isCurrent } = read;
+        const listing = queryClient.getQueryData<ProjectListing>(['projects']);
+        const ids = new Set(listing ? listing.projects.map(({ manifest }) => manifest.id) : resources.keys());
+        for (const id of resources.keys()) {
+          if (!ids.has(id)) {
+            resources.delete(id);
+          }
+        }
+        for (const [id, source] of projectMetadata) {
+          if (!ids.has(id) && source.activeLeaseCount === 0) {
+            projectMetadata.delete(id);
+          }
+        }
+        const changed = membership || resources.size > 0;
+        const results = await Promise.allSettled([...ids].map(async (id) => read.observe(projectSource(id))));
         if (!isCurrent()) {
           return;
         }
-        if (!membership && resources.size === 0) {
+        const failure = results.find((result) => result.status === 'rejected');
+        if (failure?.status === 'rejected') {
+          metadataReadOwner.fail(new Error(String(failure.reason)));
+        } else {
+          metadataReadOwner.ready();
+        }
+        if (!changed) {
           return;
         }
         await metadataReadOwner.settle();
@@ -848,13 +1087,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           pending.push(queryClient.invalidateQueries({ queryKey: ['chats'] }, { cancelRefetch: false }));
           pending.push(queryClient.invalidateQueries({ queryKey: ['chat'] }, { cancelRefetch: false }));
         }
-        for (const [resourceId, chatIds] of resources) {
-          pending.push(queryClient.invalidateQueries({ queryKey: ['chats', resourceId] }, { cancelRefetch: false }));
-          for (const chatId of chatIds) {
-            pending.push(queryClient.invalidateQueries({ queryKey: ['chat', chatId] }, { cancelRefetch: false }));
-          }
-        }
-        resources.clear();
         pending.push(queryClient.invalidateQueries({ queryKey: ['all-chats'] }, { cancelRefetch: false }));
         await Promise.all(pending);
         await metadataReadOwner.settle();
@@ -874,11 +1106,13 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       if (snapshot.status === 'ready') {
         setMetadataObservationError(undefined);
       } else if (snapshot.status === 'error' || snapshot.status === 'closed') {
+        metadataReadOwner.fail(new Error(snapshot.error ?? 'Chat updates unavailable.'));
         setMetadataObservationError(snapshot.error);
       }
     };
     const unsubscribeDiscovery = discovery.subscribe(updateDiscoveryHealth);
     const unsubscribeMetadata = metadata.subscribe(updateMetadataHealth);
+    metadataReadOwner.hold();
     const discoveryLease = discovery.acquire();
     const metadataLease = metadata.acquire();
     updateDiscoveryHealth();
@@ -894,8 +1128,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       }
       discoveryLease.release();
       metadataLease.release();
+      disconnect();
+      projectMetadata.clear();
+      metadataReadOwner.fail(new Error('Chat observation was disposed.'));
     };
-  }, [fileManager.workerChangeChannel, metadataReadOwner, queryClient]);
+  }, [fileManager.workerChangeChannel, fileManager.watchRecordFile, metadataReadOwner, queryClient]);
 
   // Select state from the machine
   const error = useSelector(actorRef, (state) => state.context.error);
@@ -2562,7 +2799,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const getChatsForResource = useCallback(
     async (resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]> => {
-      return metadataReadOwner.read(async (source) => source.getChatsForResource(resourceId, options));
+      return metadataReadOwner.read(async (source) => source.getChatsForResource(resourceId, options), resourceId);
     },
     [metadataReadOwner],
   );
@@ -2576,7 +2813,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const getChatRecordsForResource = useCallback(
     async (resourceId: string, options?: { includeDeleted?: boolean }): Promise<ChatRecord[]> =>
-      metadataReadOwner.read(async (source) => source.getChatRecordsForResource(resourceId, options)),
+      metadataReadOwner.read(async (source) => source.getChatRecordsForResource(resourceId, options), resourceId),
     [metadataReadOwner],
   );
 
@@ -2588,7 +2825,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const getChat = useCallback(
     async (chatId: string, projectId?: string): Promise<Chat | undefined> => {
-      return metadataReadOwner.read(async (source) => source.getChat(chatId, projectId));
+      return metadataReadOwner.read(async (source) => source.getChat(chatId, projectId), projectId);
     },
     [metadataReadOwner],
   );

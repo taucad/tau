@@ -1003,9 +1003,8 @@ export const createVirtualGrblStream = (controller: VirtualGrbl): MachineNetwork
 /** The simulator's binding: which LongMill to simulate. */
 const bindingConfiguration = defineConfiguration({
   id: 'grbl-simulator.machine.binding',
-  version: '1.0.0',
+  version: '1.1.0',
   schema: z.object({
-    logicalId: z.string().min(1).max(64),
     homingSwitches: z.boolean().default(false).meta({
       title: 'Homing switches',
       description: 'Simulate the optional homing kit. A stock LongMill has none and works from the work zero.',

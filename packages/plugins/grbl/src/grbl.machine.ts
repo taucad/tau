@@ -14,9 +14,8 @@ import { grblWorkOffsets, longMillManifest } from '#grbl.manifest.js';
 /** How to talk to the controller; where it is plugged in is the discovery endpoint's serial path. @internal */
 export const grblBindingConfiguration = defineConfiguration({
   id: 'grbl.machine.binding',
-  version: '2.0.0',
+  version: '2.1.0',
   schema: z.object({
-    logicalId: z.string().min(1).max(64),
     baudRate: z.number().int().positive().default(115_200).meta({ title: 'Baud rate' }),
   }),
   ui: { version: 1, rjsf: {} },

@@ -3,7 +3,7 @@ import type { MachineConnectionRuntime, MachineDiscoveryRuntime } from '@taucad/
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { describe, expect, it } from 'vitest';
 
-import { grblMachine } from '#grbl.machine.js';
+import { grblBindingConfiguration, grblMachine } from '#grbl.machine.js';
 import { VirtualGrbl, createVirtualGrblStream, grblSimulatorMachine } from '#grbl.simulator.js';
 
 const clock = { now: () => '2026-10-05T00:00:00.000Z' };
@@ -50,11 +50,13 @@ describe('grblMachine', () => {
   });
 
   it('offers likely Grbl serial ports, an entered port, or nothing on a host without serial access', async () => {
+    // Settings finds with an empty configuration; the name is given at bind, not here.
+    expect(grblBindingConfiguration.schema.parse({})).toEqual({ baudRate: 115_200 });
     const definition = await resolveRuntimePluginDefinition('machine', grblMachine());
     const { signal } = new AbortController();
     const listed = await collect(
       definition.discover(
-        { configuration: { logicalId: 'garage', baudRate: 115_200 }, signal },
+        { configuration: { baudRate: 115_200 }, signal },
         discovery(async () => [
           { path: '/dev/tty.usbmodem1101', vendorId: '2341', serialNumber: 'A1' },
           { path: '/dev/tty.Bluetooth-Incoming-Port', vendorId: '05ac' },
@@ -66,15 +68,13 @@ describe('grblMachine', () => {
         event.type === 'lost' ? undefined : [event.candidate.id, event.candidate.claimedIdentity],
       ),
     ).toEqual([['serial:/dev/tty.usbmodem1101', { serial: 'A1', model: 'longmill-mk2-30x30' }]]);
-    expect(
-      await collect(
-        definition.discover({ configuration: { logicalId: 'garage', baudRate: 115_200 }, signal }, discovery()),
-      ),
-    ).toEqual([]);
+    expect(await collect(definition.discover({ configuration: { baudRate: 115_200 }, signal }, discovery()))).toEqual(
+      [],
+    );
     const entered = await collect(
       definition.discover(
         {
-          configuration: { logicalId: 'garage', baudRate: 115_200 },
+          configuration: { baudRate: 115_200 },
           endpoint: { transport: 'serial', path: 'COM3' },
           signal,
         },
@@ -96,10 +96,13 @@ describe('grblMachine', () => {
     };
     const input = {
       candidate,
+      // As a binding an earlier build stored it, with `logicalId`: the host hands a stored configuration over
+      // without re-parsing it, and the provider reads only what it needs.
       configuration: { logicalId: 'garage', baudRate: 115_200 },
       connection: { secretRef: '', serviceTrust: {} },
+      purpose: 'reconnect',
       signal: new AbortController().signal,
-    };
+    } as const;
     const runtime: MachineConnectionRuntime = {
       clock,
       log: async () => undefined,

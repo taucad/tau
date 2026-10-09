@@ -425,7 +425,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "(max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\"}) > on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\"} offset 2h)) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\"}) > 0 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\"} offset 2h))",
+            "expr": "(max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=~\"missing_rate|dimension_mismatch\"}) > on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=~\"missing_rate|dimension_mismatch\"} offset 2h)) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=~\"missing_rate|dimension_mismatch\"}) > 0 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=~\"missing_rate|dimension_mismatch\"} offset 2h))",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "supplier_unpriced"
@@ -437,7 +437,41 @@
       "for": "0s",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/system/services/llm-suppliers.md",
-        "summary": "New settled operations carry no supplier-cost estimate (tau_billing_supplier_unpriced_operations grew, or a provider/SKU/reason appeared, in the last 2 h): `missing_rate` or `dimension_mismatch` means a route's supplier valuation is incomplete and needs a code fix; `absorbed` means cut streams. The gauge is a running total recorded hourly by billing-operations, so this rule watches its growth, not its level. Clears 2 h after the last increase."
+        "summary": "New settled operations carry no supplier-cost estimate because a route's supplier valuation is incomplete (tau_billing_supplier_unpriced_operations with reason `missing_rate` or `dimension_mismatch` grew, or a provider/SKU/reason appeared, in the last 2 h): it needs a code fix. Cut streams (`absorbed`) have their own rate rule, billing-supplier-absorbed-usage. The gauge is a running total recorded hourly by billing-operations, so this rule watches its growth, not its level. Clears 2 h after the last increase."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "billing"
+      }
+    },
+    {
+      "uid": "billing-supplier-absorbed-usage",
+      "title": "P1: Absorbed Supplier Usage Surge",
+      "condition": "supplier_absorbed",
+      "data": [
+        {
+          "refId": "supplier_absorbed",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "(max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=\"absorbed\"}) - on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=\"absorbed\"} offset 1h) > 10) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=\"absorbed\"}) > 10 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=\"absorbed\"} offset 1h))",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "supplier_absorbed"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/llm-suppliers.md",
+        "summary": "More than 10 settled operations in one provider/SKU were absorbed unpriced in the last hour (tau_billing_supplier_unpriced_operations with reason `absorbed` grew by more than 10, or appeared above 10): cut streams or expired recoveries at an unusual rate, so a client, the gateway or a provider is aborting turns. A single client abort is expected and does not fire. The gauge is a running total recorded hourly by billing-operations."
       },
       "labels": {
         "severity": "warning",

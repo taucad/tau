@@ -12,7 +12,14 @@ const mockUseChats = vi.fn();
 const mockUseChatRecords = vi.fn();
 const mockWarmMonaco = vi.hoisted(() => vi.fn());
 vi.mock('#lib/monaco-warmup.js', () => ({ warmMonaco: mockWarmMonaco }));
-const mockObserve = vi.hoisted(() => vi.fn(() => () => undefined));
+const { mockObserve, mockRelease, mockStore } = vi.hoisted(() => {
+  const release = vi.fn<(chatId: string) => void>();
+  const observe = vi.fn((chatId: string, _projectId: string) => () => {
+    release(chatId);
+  });
+  return { mockObserve: observe, mockRelease: release, mockStore: { observe } };
+});
+const mockUseChatSessionStore = vi.fn(() => mockStore);
 const mockNavigate = vi.fn();
 const mockLinkState = vi.fn();
 let search = '?chat=chat_12';
@@ -22,7 +29,7 @@ vi.mock('#hooks/use-chats.js', () => ({
   useChats: (...args: Parameters<typeof useChats>) => mockUseChats(...args) as ReturnType<typeof useChats>,
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({ observe: mockObserve }),
+  useChatSessionStore: () => mockUseChatSessionStore(),
 }));
 vi.mock('#hooks/use-chat-records.js', () => ({
   useChatRecords: (...args: Parameters<typeof useChatRecords>) =>
@@ -168,6 +175,7 @@ const { ProjectChatList, sortProjectChats } = await import('#components/nav/proj
 describe('ProjectChatList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseChatSessionStore.mockReturnValue(mockStore);
     search = '?chat=chat_12';
     pendingLocation = undefined;
     mockUseChats.mockReturnValue(defaultChatsResult);
@@ -204,6 +212,105 @@ describe('ProjectChatList', () => {
     expect(mockUseChatRecords).toHaveBeenCalledWith('proj_one');
     expect(mockUseChats).toHaveBeenCalledWith('proj_one', { enabled: false });
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it.each([true, false])(
+    'should retain all observation leases across metadata changes when expanded=%s',
+    (isExpanded) => {
+      const { rerender, unmount } = render(
+        <ProjectChatList project={project} isProjectActive={false} isExpanded={isExpanded} />,
+      );
+      expect(mockObserve.mock.calls).toEqual(defaultChatsResult.chats.map((entry) => [entry.id, project.id]));
+      expect(screen.queryAllByRole('link')).toHaveLength(isExpanded ? 5 : 0);
+
+      mockUseChatRecords.mockReturnValue({
+        ...defaultChatsResult,
+        chats: defaultChatsResult.chats.map((entry) => ({
+          ...entry,
+          name: `Renamed ${entry.id}`,
+          updatedAt: entry.updatedAt + 100,
+          recencyAt: entry.id === 'chat_1' ? 1000 : entry.updatedAt,
+        })),
+      });
+      rerender(<ProjectChatList project={project} isProjectActive={false} isExpanded={isExpanded} />);
+
+      expect(mockRelease).not.toHaveBeenCalled();
+      expect(mockObserve).toHaveBeenCalledTimes(12);
+      if (isExpanded) {
+        expect(screen.getAllByRole('link')[0]).toHaveAccessibleName('Renamed chat_1');
+      } else {
+        expect(screen.queryByRole('link')).not.toBeInTheDocument();
+      }
+      unmount();
+      expect(mockRelease.mock.calls.map(([chatId]) => chatId).sort()).toEqual(
+        defaultChatsResult.chats.map((entry) => entry.id).sort(),
+      );
+    },
+  );
+
+  it('should retain observation leases when metadata rows are reordered', () => {
+    const { rerender, unmount } = render(<ProjectChatList project={project} isProjectActive />);
+    mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [...defaultChatsResult.chats].reverse() });
+    rerender(<ProjectChatList project={project} isProjectActive />);
+
+    expect(mockRelease).not.toHaveBeenCalled();
+    expect(mockObserve).toHaveBeenCalledTimes(12);
+    expect(screen.getAllByRole('link')).toHaveLength(5);
+    unmount();
+    expect(mockRelease).toHaveBeenCalledTimes(12);
+  });
+
+  it('should change only observation leases whose chat membership changes', () => {
+    const { rerender, unmount } = render(
+      <ProjectChatList project={project} isProjectActive={false} isExpanded={false} />,
+    );
+    mockUseChatRecords.mockReturnValue({
+      ...defaultChatsResult,
+      chats: [...defaultChatsResult.chats.filter((entry) => entry.id !== 'chat_1'), chat(13)],
+    });
+    rerender(<ProjectChatList project={project} isProjectActive={false} isExpanded={false} />);
+
+    expect(mockRelease.mock.calls).toEqual([['chat_1']]);
+    expect(mockObserve).toHaveBeenCalledTimes(13);
+    expect(mockObserve).toHaveBeenLastCalledWith('chat_13', project.id);
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    unmount();
+    expect(mockRelease.mock.calls.map(([chatId]) => chatId).sort()).toEqual(
+      Array.from({ length: 13 }, (_, index) => `chat_${index + 1}`).sort(),
+    );
+  });
+
+  it('should release the old project leases before observing the replacement project', () => {
+    const { rerender, unmount } = render(
+      <ProjectChatList project={project} isProjectActive={false} isExpanded={false} />,
+    );
+    const replacement = { ...project, id: 'proj_replacement' };
+    rerender(<ProjectChatList project={replacement} isProjectActive={false} isExpanded={false} />);
+    expect(mockRelease).toHaveBeenCalledTimes(12);
+    expect(Math.max(...mockRelease.mock.invocationCallOrder)).toBeLessThan(mockObserve.mock.invocationCallOrder[12]!);
+    expect(mockObserve.mock.calls.slice(12)).toEqual(
+      defaultChatsResult.chats.map((entry) => [entry.id, replacement.id]),
+    );
+    unmount();
+    expect(mockRelease).toHaveBeenCalledTimes(24);
+  });
+
+  it('should transfer every observation when the store owner changes', () => {
+    const replacementRelease = vi.fn<(chatId: string) => void>();
+    const replacementObserve = vi.fn((chatId: string, _projectId: string) => () => {
+      replacementRelease(chatId);
+    });
+    const { rerender, unmount } = render(
+      <ProjectChatList project={project} isProjectActive={false} isExpanded={false} />,
+    );
+    mockUseChatSessionStore.mockReturnValue({ observe: replacementObserve });
+    rerender(<ProjectChatList project={project} isProjectActive={false} isExpanded={false} />);
+    expect(mockRelease).toHaveBeenCalledTimes(12);
+    expect(replacementObserve.mock.calls).toEqual(defaultChatsResult.chats.map((entry) => [entry.id, project.id]));
+    expect(replacementRelease).not.toHaveBeenCalled();
+    unmount();
+    expect(mockRelease).toHaveBeenCalledTimes(12);
+    expect(replacementRelease).toHaveBeenCalledTimes(12);
   });
 
   it('reads navigation rows from metadata even when the mutation hook has no chats', () => {

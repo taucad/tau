@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { Pencil, Square, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
@@ -54,13 +54,31 @@ export function ProjectChatList({
     [allChats],
   );
   const store = useChatSessionStore();
+  // Metadata and ordering do not retire leases; only membership or the owning project/store does.
+  const observations = useRef(new Map<string, () => void>());
   useEffect(() => {
-    const releases = chats.map((chat) => store.observe(chat.id, project.id));
+    const releases = observations.current;
     return () => {
-      for (const release of releases) {
+      for (const release of releases.values()) {
         release();
       }
+      releases.clear();
     };
+  }, [project.id, store]);
+  useEffect(() => {
+    const releases = observations.current;
+    const chatIds = new Set(chats.map((chat) => chat.id));
+    for (const [chatId, release] of releases) {
+      if (!chatIds.has(chatId)) {
+        release();
+        releases.delete(chatId);
+      }
+    }
+    for (const chatId of chatIds) {
+      if (!releases.has(chatId)) {
+        releases.set(chatId, store.observe(chatId, project.id));
+      }
+    }
   }, [chats, project.id, store]);
   const location = useLocation();
   const navigate = useNavigate();

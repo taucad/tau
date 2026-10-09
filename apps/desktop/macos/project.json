@@ -58,7 +58,7 @@
       "outputs": ["{projectRoot}/generated/runtime"],
       "options": {
         "cwd": ".",
-        "command": "if node --import @oxc-node/core/register apps/desktop/scripts/quick-look-enabled.mts; then vite build --config apps/desktop/macos/runtime/vite.config.ts; else echo 'Quick Look is disabled; its runtime is not built.'; fi"
+        "command": "ql=$(node --import @oxc-node/core/register apps/desktop/scripts/quick-look-enabled.mts) || exit 1; if [ \"$ql\" = enabled ]; then vite build --config apps/desktop/macos/runtime/vite.config.ts; else echo 'Quick Look is disabled; its runtime is not built.'; fi"
       }
     },
     "build-extensions": {
@@ -78,7 +78,7 @@
       "outputs": ["{projectRoot}/dist/extensions"],
       "options": {
         "cwd": ".",
-        "command": "if node --import @oxc-node/core/register apps/desktop/scripts/quick-look-enabled.mts; then node --import @oxc-node/core/register apps/desktop/macos/scripts/build-quick-look-extensions.mts; else rm -rf apps/desktop/macos/dist/extensions && echo 'Quick Look is disabled; no extensions built.'; fi"
+        "command": "ql=$(node --import @oxc-node/core/register apps/desktop/scripts/quick-look-enabled.mts) || exit 1; if [ \"$ql\" = enabled ]; then node --import @oxc-node/core/register apps/desktop/macos/scripts/build-quick-look-extensions.mts; else rm -rf apps/desktop/macos/dist/extensions && echo 'Quick Look is disabled; no extensions built.'; fi"
       }
     }
   }

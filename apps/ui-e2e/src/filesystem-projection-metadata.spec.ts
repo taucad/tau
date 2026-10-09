@@ -453,16 +453,50 @@ test('recovers one project metadata watch while a healthy sibling keeps convergi
   const siblingRoot = `/projects/${sibling.config.projectId}/.tau/chats`;
   const healthyList = selectors.getByCss(`[id="project-chats-${healthy.config.projectId}"]`);
   const siblingList = selectors.getByCss(`[id="project-chats-${sibling.config.projectId}"]`);
-  for (const name of ['Metadata healthy A', 'Metadata sibling B']) {
-    const expand = selectors.getByRole('button', { name: `Expand ${name}`, exact: true });
-    // oxlint-disable-next-line no-await-in-loop -- Each actual disclosure must be inspected before its gesture.
-    if (await target.isVisible(expand)) {
-      // oxlint-disable-next-line no-await-in-loop -- Expand the two independent sidebar owners in order.
-      await target.click(expand);
+  try {
+    await target.expectVisible(selectors.getByRole('button', { name: 'Collapse Metadata healthy A', exact: true }));
+    const expandSibling = selectors.getByRole('button', { name: 'Expand Metadata sibling B', exact: true });
+    await target.expectVisible(expandSibling);
+    await target.click(expandSibling);
+    await target.expectVisible(selectors.getByRole('button', { name: 'Collapse Metadata sibling B', exact: true }));
+    await target.expectVisible(healthyList.getByText('Metadata A retained', { exact: true }));
+    await target.expectVisible(siblingList.getByText('Metadata B retained', { exact: true }));
+  } catch (error) {
+    try {
+      const sidebar = await target.evaluate(() => ({
+        pathname: location.pathname,
+        capturedAt: Date.now(),
+        buttons: [...document.querySelectorAll('button[aria-controls], button[aria-expanded]')]
+          .slice(0, 64)
+          .map((button) => ({
+            label: button.getAttribute('aria-label'),
+            text: button.textContent.slice(0, 256),
+            controls: button.getAttribute('aria-controls'),
+            expanded: button.getAttribute('aria-expanded'),
+          })),
+        lists: [...document.querySelectorAll<HTMLElement>('[id^="project-chats-"]')].slice(0, 16).map((list) => ({
+          id: list.id,
+          text: list.textContent.slice(0, 4096),
+          hidden: list.getAttribute('hidden'),
+          state: list.dataset['state'],
+          height: list.getBoundingClientRect().height,
+        })),
+      }));
+      await target.writeArtifact(
+        'projection-metadata-pair-startup-failure.json',
+        JSON.stringify({ originalFailure: String(error), healthyRoot, siblingRoot, sidebar }, null, 2),
+      );
+      await target.screenshot(undefined, 'projection-metadata-pair-startup-failure.png');
+    } catch (diagnosticError) {
+      await target
+        .writeArtifact(
+          'projection-metadata-pair-capture-failure.json',
+          JSON.stringify({ originalFailure: String(error), diagnosticFailure: String(diagnosticError) }, null, 2),
+        )
+        .catch(() => undefined);
     }
+    throw error;
   }
-  await target.expectVisible(healthyList.getByText('Metadata A retained', { exact: true }));
-  await target.expectVisible(siblingList.getByText('Metadata B retained', { exact: true }));
   const evidence = async (): Promise<WorkbenchObservationEvidence> =>
     target.evaluate(() => {
       const control = (

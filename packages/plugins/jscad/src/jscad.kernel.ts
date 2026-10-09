@@ -12,8 +12,6 @@ import {
   asBuffer,
   jsonSchemaFromJson,
   defineKernel,
-  createKernelModuleShim,
-  createKernelModuleRegistryExpression,
   getModuleRegistry,
   isRecordObject,
   extractDefaultParameters,
@@ -29,6 +27,8 @@ import {
   deriveLocationFromFrames,
 } from '@taucad/runtime/kernel';
 import type { KernelServices } from '@taucad/runtime/kernel';
+
+import modelingPackage from '@jscad/modeling/package.json' with { type: 'json' };
 
 import { jscadExportSchemas } from '#jscad.schemas.js';
 
@@ -207,20 +207,17 @@ function registerJscadModules(runtime: KernelServices, modeling: JscadModeling):
   registerKernelModule(runtime, {
     name: '@jscad/modeling',
     exports: modeling,
-    version: '2.12.6',
+    package: modelingPackage,
     globalName: 'jscadModeling',
   });
 
   for (const subpath of jscadSubmodules) {
-    const submoduleName = `@jscad/modeling/${subpath}`;
     const submoduleExports: unknown = Reflect.get(modeling, subpath);
     if (isRecordObject(submoduleExports)) {
-      runtime.bundler.registerModule(submoduleName, {
-        code: createKernelModuleShim({
-          moduleExpression: `${createKernelModuleRegistryExpression('@jscad/modeling')}.${subpath}`,
-          exports: submoduleExports,
-        }),
-        version: '2.12.6',
+      registerKernelModule(runtime, {
+        name: `@jscad/modeling/${subpath}`,
+        exports: submoduleExports,
+        package: modelingPackage,
       });
     }
   }
@@ -272,6 +269,7 @@ export const jscadKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: jscadDetectPattern,
   builtinModuleNames: ['@jscad/modeling'],
+  builtinPackages: { '@jscad/modeling': modelingPackage },
   name: 'JscadKernel',
   version: '1.0.0',
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: ['includeEdges'] } },

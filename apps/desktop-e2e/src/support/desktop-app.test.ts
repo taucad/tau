@@ -172,3 +172,67 @@ describe('explicit automated trace snapshot accommodation', () => {
     }
   });
 });
+
+describe('initial main navigation readiness', () => {
+  it('should hold fixture setup until the initial document load finishes after DOM readiness', async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-load-test-'));
+    const loaded = Promise.withResolvers<void>();
+    const stopped = new Error('Fixture stops after initial load readiness.');
+    const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+    application.process.mockReturnValue(mockDeep<ReturnType<typeof application.process>>());
+    application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
+    const page = mockDeep<Awaited<ReturnType<typeof application.firstWindow>>>();
+    page.url.mockReturnValue('app://tau/');
+    page.waitForURL.mockImplementation(async () => {
+      await loaded.promise;
+    });
+    const context = mockDeep<ReturnType<typeof page.context>>();
+    context.tracing.start.mockRejectedValueOnce(stopped);
+    page.context.mockReturnValue(context);
+    application.firstWindow.mockResolvedValue(page);
+    const launch = vi.spyOn(electron, 'launch').mockResolvedValueOnce(application);
+    const observeLaunch = async (): Promise<unknown> => {
+      try {
+        return await launchDesktopApp({ token: 'fixture-token', profileRoot });
+      } catch (error) {
+        return error;
+      }
+    };
+    const pending = observeLaunch();
+    try {
+      await vi.waitFor(() => {
+        expect(page.waitForURL).toHaveBeenCalledOnce();
+      });
+      const [acceptUrl, loadOptions] = page.waitForURL.mock.calls[0]!;
+      if (typeof acceptUrl !== 'function') {
+        throw new TypeError('Expected the initial app document URL predicate.');
+      }
+      expect(acceptUrl(new URL('about:blank'))).toBe(false);
+      expect(acceptUrl(new URL('app://tau/'))).toBe(true);
+      expect(acceptUrl(new URL('app://tau/import?desktop-open=1'))).toBe(true);
+      expect(acceptUrl(new URL('https://foreign.example/'))).toBe(false);
+      expect(loadOptions).toEqual({ waitUntil: 'load' });
+      expect(page.waitForLoadState).toHaveBeenCalledWith('domcontentloaded');
+      expect(application.evaluate).not.toHaveBeenCalled();
+      expect(context.tracing.start).not.toHaveBeenCalled();
+      loaded.resolve();
+      const outcome = await pending;
+      expect(outcome).toBeInstanceOf(Error);
+      if (!(outcome instanceof Error)) {
+        throw new TypeError('Expected the fixture trace stop.');
+      }
+      expect(outcome.message).toContain('The desktop shell did not survive launch.');
+      expect(application.evaluate).toHaveBeenCalledOnce();
+      expect(context.tracing.start).toHaveBeenCalledOnce();
+    } finally {
+      loaded.resolve();
+      await pending;
+      const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+      launch.mockRestore();
+      await rm(profileRoot, { recursive: true, force: true });
+      if (picked) {
+        await rm(dirname(picked), { recursive: true, force: true });
+      }
+    }
+  });
+});

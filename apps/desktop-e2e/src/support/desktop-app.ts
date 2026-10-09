@@ -379,6 +379,10 @@ export const launchDesktopApp = async (options: {
     recordStartupPhase('domcontentloaded.before');
     await page.waitForLoadState('domcontentloaded');
     recordStartupPhase('domcontentloaded.after', page.url());
+    // Main bootstrap still awaits its initial loadURL after DOM readiness.
+    recordStartupPhase('initial-app-load.before', page.url());
+    await page.waitForURL((url) => url.protocol === 'app:' && url.host === 'tau', { waitUntil: 'load' });
+    recordStartupPhase('initial-app-load.after', page.url());
     if (options.windowTitle !== undefined) {
       const ownedWindow = await application.browserWindow(page);
       await ownedWindow.evaluate((window: BrowserWindow, title) => {

@@ -67,8 +67,9 @@ describe('composeTariff', () => {
       expect(route?.sku).toBe(`model:${meter.routeId}`);
       expect(route?.meterContractId).toBe(meter.meterContractId);
       expect(route?.enabled).toBe(true);
-      expect(route?.spendBudgetId).toBe(developmentOverlay.budgets.spendBudgetId);
-      expect(route?.riskBudgetId).toBe(developmentOverlay.budgets.riskBudgetId);
+      // Supplier spend is metered after settlement: a route pins no supplier budget.
+      expect(route).not.toHaveProperty('spendBudgetId');
+      expect(route).not.toHaveProperty('riskBudgetId');
       expect(route?.rateIds).toEqual(
         meter.rates.map((rate) => `${meter.routeId}:${rateKey(rate.dimension, rate.tier)}`),
       );
@@ -101,12 +102,13 @@ describe('composeTariff', () => {
     expect(retired.policy.routes.map((route) => route.routeId)).not.toContain(billableModelRouteMeters[0]!.routeId);
   });
 
-  it('refuses an overlay whose budget ids do not separate spend from risk', () => {
+  it('should accept an overlay that still carries retired budget pins and compose the same tariff', () => {
     const overlay: CommercialOverlay = {
       ...developmentOverlay,
-      budgets: { spendBudgetId: 'development-spend', riskBudgetId: 'development-spend' },
+      budgets: { spendBudgetId: 'development-spend', riskBudgetId: 'development-risk' },
     };
-    expect(() => composeTariff({ overlay })).toThrow('is not qualified');
+    expect(parseCommercialOverlay(JSON.stringify(overlay), 'development')).toEqual(overlay);
+    expect(composeTariff({ overlay }).contentHash).toBe(composeTariff({ overlay: developmentOverlay }).contentHash);
   });
 });
 
@@ -171,13 +173,9 @@ describe('sync command', () => {
     expect(service.publishPolicy).not.toHaveBeenCalled();
   });
 
-  it('seeds the development supplier budgets only in development', async () => {
+  it('should seed no supplier budgets in any environment', async () => {
     const replica = { schemaVersion: 1, meterContractIds: billableModelRouteMeters.map((r) => r.meterContractId) };
     await syncPolicy(service, database, { environment: 'development', overlay: developmentOverlay, replica });
-    // One insert for the funding row and one for the budget row.
-    expect(database.insert).toHaveBeenCalledTimes(2);
-
-    database.insert.mockClear();
     await syncPolicy(service, database, {
       environment: 'staging',
       overlay: { ...developmentOverlay, environment: 'staging' },

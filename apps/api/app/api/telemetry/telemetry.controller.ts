@@ -1,7 +1,7 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase */
 import { Body, Controller, Post, HttpCode, UseGuards } from '@nestjs/common';
 import { IngestEntryName, AttributeKey, knownAgentIds } from '@taucad/telemetry';
-import type { ClientMetricEntry } from '@taucad/telemetry';
+import type { AgentTurnContext, ClientMetricEntry } from '@taucad/telemetry';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { IngestPayloadDto } from '#api/telemetry/telemetry.dto.js';
@@ -142,11 +142,12 @@ export class TelemetryController {
     entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_TURN }>,
     durationSeconds: number,
   ): void {
-    const { placement, outcome, errorCode, timeToFirstUpdate, toolCalls, tokens } = entry.detail;
+    const { placement, outcome, errorCode, timeToFirstUpdate, toolCalls, tokens, context } = entry.detail;
     const agent = { [AttributeKey.AGENT_ID]: recordedAgentId(entry.detail.agentId) };
     const placed = { ...agent, [AttributeKey.AGENT_PLACEMENT]: placement };
     const turn = { ...placed, [AttributeKey.AGENT_OUTCOME]: outcome };
-    this.metrics.agentTurns.add(1, turn);
+    /* Q7: only the turn counter gains the kernel; a context-less turn keeps today's label set. */
+    this.metrics.agentTurns.add(1, context ? { ...turn, [AttributeKey.KERNEL_ID]: context.kernelId } : turn);
     this.metrics.agentTurnDuration.record(durationSeconds, turn);
     if (timeToFirstUpdate !== undefined) {
       this.metrics.agentTimeToFirstUpdate.record(timeToFirstUpdate / 1000, placed);
@@ -155,6 +156,7 @@ export class TelemetryController {
       this.metrics.agentToolCalls.add(call.count, {
         ...agent,
         [AttributeKey.AGENT_TOOL_KIND]: call.kind,
+        ...(call.tool === undefined ? {} : { [AttributeKey.AGENT_TOOL_NAME]: call.tool }),
         [AttributeKey.AGENT_TOOL_STATUS]: call.status,
       });
     }
@@ -174,6 +176,49 @@ export class TelemetryController {
     }
     if (errorCode !== undefined && (outcome === 'error' || outcome === 'refused')) {
       this.metrics.agentErrors.add(1, { ...agent, [AttributeKey.AGENT_ERROR_CODE]: errorCode });
+    }
+    if (context !== undefined) {
+      this.recordAgentContext(agent, context);
+    }
+  }
+
+  private recordAgentContext(agent: Readonly<Record<string, string>>, context: AgentTurnContext): void {
+    const kernel = { ...agent, [AttributeKey.KERNEL_ID]: context.kernelId };
+    if (context.callsBeforeFirstModelWrite !== undefined) {
+      this.metrics.agentCallsBeforeFirstWrite.record(context.callsBeforeFirstModelWrite, kernel);
+    }
+    if (context.timeToFirstModelWrite !== undefined) {
+      this.metrics.agentTimeToFirstWrite.record(context.timeToFirstModelWrite / 1000, kernel);
+    }
+    for (const { outcome, count } of context.referenceLookups) {
+      this.metrics.agentReferenceLookups.add(count, { ...kernel, [AttributeKey.AGENT_LOOKUP_OUTCOME]: outcome });
+    }
+    if (context.referenceBytesRead !== undefined) {
+      this.metrics.agentReferenceBytes.record(context.referenceBytesRead, kernel);
+    }
+    for (const skill of new Set(context.skillsActivated)) {
+      this.metrics.agentSkillActivations.add(1, { ...agent, [AttributeKey.AGENT_SKILL]: skill });
+    }
+    for (const evaluation of context.evaluations) {
+      this.metrics.agentEvaluations.add(evaluation.count, {
+        ...kernel,
+        [AttributeKey.AGENT_EVALUATION_CLASS]: evaluation.class,
+      });
+    }
+    this.metrics.agentCorrectionsAfterError.record(context.correctionsAfterError, kernel);
+    if (context.geospec !== undefined) {
+      const { passed, failed, runStatuses } = context.geospec;
+      for (const [result, count] of [
+        ['passed', passed],
+        ['failed', failed],
+      ] as const) {
+        if (count > 0) {
+          this.metrics.agentGeospecAssertions.add(count, { ...agent, [AttributeKey.AGENT_ASSERTION_RESULT]: result });
+        }
+      }
+      for (const { status, count } of runStatuses) {
+        this.metrics.agentGeospecRuns.add(count, { ...agent, [AttributeKey.AGENT_RUN_STATUS]: status });
+      }
     }
   }
 

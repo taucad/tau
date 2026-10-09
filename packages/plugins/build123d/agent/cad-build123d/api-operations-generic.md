@@ -2,120 +2,120 @@
 
 10 top-level symbols. Signatures are verbatim python.
 
-// Category: operations_generic
-// Generic Object
-// Remarks: Add an object to a builder. BuildPart: Edges and Wires are added to pending_edges. Compounds of Face are added to pending_faces. Solids or Compounds of Solid are combined into the part. BuildSketch: Edges and Wires are added to pending_edges. Compounds of Face are added to sketch. BuildLine: Edges and Wires are added to line.
-// build123d.operations_generic.add (function)
+# Category: operations_generic
+# Generic Object
+# Remarks: Add an object to a builder. BuildPart: Edges and Wires are added to pending_edges. Compounds of Face are added to pending_faces. Solids or Compounds of Solid are combined into the part. BuildSketch: Edges and Wires are added to pending_edges. Compounds of Face are added to sketch. BuildLine: Edges and Wires are added to line.
+# build123d.operations_generic.add (function)
 add(objects: AddType | Iterable[AddType], rotation: float | RotationLike | None = None, clean: bool = True, mode: Mode = Mode.ADD) -> Compound
-//   mode: combine mode
+#   mode: combine mode
 
-// Category: operations_generic
-// Generic Operation
-// Remarks: Applies to: BuildSketch and BuildPart Add the 2D or 3D bounding boxes of the object sequence
-// build123d.operations_generic.bounding_box (function)
+# Category: operations_generic
+# Generic Operation
+# Remarks: Applies to: BuildSketch and BuildPart Add the 2D or 3D bounding boxes of the object sequence
+# build123d.operations_generic.bounding_box (function)
 bounding_box(objects: Shape | Iterable[Shape] | None = None, mode: Mode = Mode.PRIVATE) -> Sketch | Part
-//   objects: objects to create bbox for
-//   mode: combination mode
+#   objects: objects to create bbox for
+#   mode: combination mode
 
-// Category: operations_generic
-// Generic Operation
-// Remarks: Applies to 2 and 3 dimensional objects. Chamfer the given sequence of edges or vertices.
-// Throws: ValueError: no objects provided
-// Throws: ValueError: objects must be Edges
-// Throws: ValueError: objects must be Vertices
-// Throws: ValueError: Only one of length2 or angle should be provided
-// Throws: ValueError: reference can only be used in conjunction with length2 or angle
-// build123d.operations_generic.chamfer (function)
+# Category: operations_generic
+# Generic Operation
+# Remarks: Applies to 2 and 3 dimensional objects. Chamfer the given sequence of edges or vertices.
+# Throws: ValueError: no objects provided
+# Throws: ValueError: objects must be Edges
+# Throws: ValueError: objects must be Vertices
+# Throws: ValueError: Only one of length2 or angle should be provided
+# Throws: ValueError: reference can only be used in conjunction with length2 or angle
+# build123d.operations_generic.chamfer (function)
 chamfer(objects: ChamferFilletType | Iterable[ChamferFilletType], length: float, length2: float | None = None, angle: float | None = None, reference: Edge | Face | None = None) -> Sketch | Part
-//   objects: edges or vertices to chamfer
-//   length: chamfer size
-//   length2: asymmetric chamfer size
-//   angle: chamfer angle in degrees
-//   reference: identifies the side where length is measured
+#   objects: edges or vertices to chamfer
+#   length: chamfer size
+#   length2: asymmetric chamfer size
+#   angle: chamfer angle in degrees
+#   reference: identifies the side where length is measured
 
-// Category: operations_generic
-// Generic Operation
-// Remarks: Applies to 2 and 3 dimensional objects. Fillet the given sequence of edges or vertices. Note that vertices on either end of an open line will be automatically skipped.
-// Throws: ValueError: no objects provided
-// Throws: ValueError: objects must be Edges
-// Throws: ValueError: objects must be Vertices
-// Throws: ValueError: nothing to fillet
-// build123d.operations_generic.fillet (function)
+# Category: operations_generic
+# Generic Operation
+# Remarks: Applies to 2 and 3 dimensional objects. Fillet the given sequence of edges or vertices. Note that vertices on either end of an open line will be automatically skipped.
+# Throws: ValueError: no objects provided
+# Throws: ValueError: objects must be Edges
+# Throws: ValueError: objects must be Vertices
+# Throws: ValueError: nothing to fillet
+# build123d.operations_generic.fillet (function)
 fillet(objects: ChamferFilletType | Iterable[ChamferFilletType], radius: float) -> Sketch | Part | Curve
-//   objects: edges or vertices to fillet
-//   radius: fillet size - must be less than 1/2 local width
+#   objects: edges or vertices to fillet
+#   radius: fillet size - must be less than 1/2 local width
 
-// Category: operations_generic
-// Generic Operation
-// Remarks: Applies to 1, 2, and 3 dimensional objects. Mirror a sequence of objects over the given plane.
-// Throws: ValueError: missing objects
-// build123d.operations_generic.mirror (function)
+# Category: operations_generic
+# Generic Operation
+# Remarks: Applies to 1, 2, and 3 dimensional objects. Mirror a sequence of objects over the given plane.
+# Throws: ValueError: missing objects
+# build123d.operations_generic.mirror (function)
 mirror(objects: MirrorType | Iterable[MirrorType] | None = None, about: Plane = Plane.XZ, mode: Mode = Mode.ADD) -> Curve | Sketch | Part | Compound
-//   objects: objects to mirror
-//   about: reference plane
-//   mode: combination mode
+#   objects: objects to mirror
+#   about: reference plane
+#   mode: combination mode
 
-// Category: operations_generic
-// Generic Operation
-// Remarks: Applies to 1, 2, and 3 dimensional objects. Offset the given sequence of Edges, Faces, Compound of Faces, or Solids. The kind parameter controls the shape of the transitions. For Solid objects, the openings parameter allows selected faces to be open, like a hollow box with no lid.
-// Throws: ValueError: missing objects
-// Throws: ValueError: Invalid object type
-// build123d.operations_generic.offset (function)
+# Category: operations_generic
+# Generic Operation
+# Remarks: Applies to 1, 2, and 3 dimensional objects. Offset the given sequence of Edges, Faces, Compound of Faces, or Solids. The kind parameter controls the shape of the transitions. For Solid objects, the openings parameter allows selected faces to be open, like a hollow box with no lid.
+# Throws: ValueError: missing objects
+# Throws: ValueError: Invalid object type
+# build123d.operations_generic.offset (function)
 offset(objects: OffsetType | Iterable[OffsetType] | None = None, amount: float = 0, openings: Face | list[Face] | None = None, kind: Kind = Kind.ARC, side: Side = Side.BOTH, closed: bool = True, min_edge_length: float | None = None, mode: Mode = Mode.REPLACE) -> Curve | Sketch | Part | Compound
-//   objects: objects to offset
-//   amount: positive values external, negative internal openings (list[Face], optional), sequence of faces to open in part
-//   kind: transition shape
-//   side: side to place offset
-//   closed: if Side!=BOTH, close the LEFT or RIGHT offset
-//   min_edge_length: repair degenerate edges generated by offset by eliminating edges of minimum length in offset wire
-//   mode: combination mode
+#   objects: objects to offset
+#   amount: positive values external, negative internal openings (list[Face], optional), sequence of faces to open in part
+#   kind: transition shape
+#   side: side to place offset
+#   closed: if Side!=BOTH, close the LEFT or RIGHT offset
+#   min_edge_length: repair degenerate edges generated by offset by eliminating edges of minimum length in offset wire
+#   mode: combination mode
 
-// Category: operations_generic
-// Generic Operation
-// Remarks: Applies to 0, 1, and 2 dimensional objects. Project the given objects or points onto a BuildLine or BuildSketch workplane in the direction of the normal of that workplane. When projecting onto a sketch a Face(s) are generated while Edges are generated for BuildLine. Will only use the first if BuildSketch has multiple active workplanes. In algebra mode a workplane must be provided and the output is either a Face, Curve, Sketch, Compound, or ShapeList[Vector]. Note that only if mode is not Mode.PRIVATE only Faces can be projected into BuildSketch and Edge/Wires into BuildLine.
-// Throws: ValueError: project doesn't accept group_by
-// Throws: ValueError: Either a workplane must be provided or a builder must be active
-// Throws: ValueError: Points and faces can only be projected in PRIVATE mode
-// Throws: ValueError: Edges, wires and points can only be projected in PRIVATE mode
-// Throws: RuntimeError: BuildPart doesn't have a project operation
-// build123d.operations_generic.project (function)
+# Category: operations_generic
+# Generic Operation
+# Remarks: Applies to 0, 1, and 2 dimensional objects. Project the given objects or points onto a BuildLine or BuildSketch workplane in the direction of the normal of that workplane. When projecting onto a sketch a Face(s) are generated while Edges are generated for BuildLine. Will only use the first if BuildSketch has multiple active workplanes. In algebra mode a workplane must be provided and the output is either a Face, Curve, Sketch, Compound, or ShapeList[Vector]. Note that only if mode is not Mode.PRIVATE only Faces can be projected into BuildSketch and Edge/Wires into BuildLine.
+# Throws: ValueError: project doesn't accept group_by
+# Throws: ValueError: Either a workplane must be provided or a builder must be active
+# Throws: ValueError: Points and faces can only be projected in PRIVATE mode
+# Throws: ValueError: Edges, wires and points can only be projected in PRIVATE mode
+# Throws: RuntimeError: BuildPart doesn't have a project operation
+# build123d.operations_generic.project (function)
 project(objects: ProjectType | Iterable[ProjectType] | None = None, workplane: Plane | None = None, target: Solid | Compound | Part | None = None, mode: Mode = Mode.ADD) -> Curve | Sketch | Compound | ShapeList[Vector]
-//   objects: objects or points to project
-//   workplane: screen workplane
-//   mode: combination mode
+#   objects: objects or points to project
+#   workplane: screen workplane
+#   mode: combination mode
 
-// Category: operations_generic
-// Generic Operation
-// Remarks: Applies to 1, 2, and 3 dimensional objects. Scale a sequence of objects. Note that when scaling non-uniformly across the three axes, the type of the underlying object may change to bspline from line, circle, etc.
-// Throws: ValueError: missing objects
-// build123d.operations_generic.scale (function)
+# Category: operations_generic
+# Generic Operation
+# Remarks: Applies to 1, 2, and 3 dimensional objects. Scale a sequence of objects. Note that when scaling non-uniformly across the three axes, the type of the underlying object may change to bspline from line, circle, etc.
+# Throws: ValueError: missing objects
+# build123d.operations_generic.scale (function)
 scale(objects: Shape | Iterable[Shape] | None = None, by: float | tuple[float, float, float] = 1, about: VectorLike | None = None, mode: Mode = Mode.REPLACE) -> Curve | Sketch | Part | Compound
-//   objects: objects to scale
-//   by: scale factor
-//   about: point to scale about
-//   mode: combination mode
+#   objects: objects to scale
+#   by: scale factor
+#   about: point to scale about
+#   mode: combination mode
 
-// Category: operations_generic
-// Generic Operation
-// Remarks: Applies to 1, 2, and 3 dimensional objects. Bisect object with plane and keep either top, bottom or both.
-// Throws: ValueError: missing objects
-// build123d.operations_generic.split (function)
+# Category: operations_generic
+# Generic Operation
+# Remarks: Applies to 1, 2, and 3 dimensional objects. Bisect object with plane and keep either top, bottom or both.
+# Throws: ValueError: missing objects
+# build123d.operations_generic.split (function)
 split(objects: SplitType | Iterable[SplitType] | None = None, bisect_by: Plane | Face | Shell = Plane.XZ, keep: Keep = Keep.TOP, mode: Mode = Mode.REPLACE)
-//   bisect_by: plane to segment part
-//   keep: selector for which segment to keep
-//   mode: combination mode
+#   bisect_by: plane to segment part
+#   keep: selector for which segment to keep
+#   mode: combination mode
 
-// Category: operations_generic
-// Generic Operation
-// Remarks: Sweep pending 1D or 2D objects along path.
-// build123d.operations_generic.sweep (function)
+# Category: operations_generic
+# Generic Operation
+# Remarks: Sweep pending 1D or 2D objects along path.
+# build123d.operations_generic.sweep (function)
 sweep(sections: SweepType | Iterable[SweepType] | None = None, path: Curve | Edge | Wire | Iterable[Edge] | None = None, multisection: bool = False, is_frenet: bool = False, transition: Transition = Transition.TRANSFORMED, normal: VectorLike | None = None, binormal: Edge | Wire | None = None, clean: bool = True, mode: Mode = Mode.ADD) -> Part | Sketch
-//   sections: cross sections to sweep into object
-//   path: path to follow
-//   multisection: sweep multiple on path
-//   is_frenet: use frenet algorithm
-//   transition: discontinuity handling option
-//   normal: fixed normal
-//   binormal: guide rotation along path
-//   clean: Remove extraneous internal structure
-//   mode: combination
+#   sections: cross sections to sweep into object
+#   path: path to follow
+#   multisection: sweep multiple on path
+#   is_frenet: use frenet algorithm
+#   transition: discontinuity handling option
+#   normal: fixed normal
+#   binormal: guide rotation along path
+#   clean: Remove extraneous internal structure
+#   mode: combination

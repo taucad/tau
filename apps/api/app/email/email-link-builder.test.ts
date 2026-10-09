@@ -114,24 +114,32 @@ describe('email link builder', () => {
     }).not.toThrow();
   });
 
-  it('accepts the billing deep link and rejects a plausible near-miss', () => {
-    const template = (billingUrl: string) =>
-      ({ kind: 'payment-failed', email: 'user@example.com', billingUrl }) as const;
+  it.each(['payment-failed', 'auto-reload-disabled', 'auto-reload-action-required'] as const)(
+    'accepts the %s billing deep link and rejects a plausible near-miss',
+    (kind) => {
+      const template = (billingUrl: string) => ({ kind, email: 'user@example.com', billingUrl });
 
-    expect(() => {
-      assertEmailTemplateUrlAllowed({
-        frontendURL: 'https://tau.new',
-        template: template('https://tau.new/?settings=billing'),
-      });
-    }).not.toThrow();
-    // Billing is a settings panel on the root route, not a page; a path link would 404 the recipient.
-    expect(() => {
-      assertEmailTemplateUrlAllowed({
-        frontendURL: 'https://tau.new',
-        template: template('https://tau.new/settings/billing'),
-      });
-    }).toThrow(/path/u);
-  });
+      expect(() => {
+        assertEmailTemplateUrlAllowed({
+          frontendURL: 'https://tau.new',
+          template: template('https://tau.new/?settings=billing'),
+        });
+      }).not.toThrow();
+      // Billing is a settings panel on the root route, not a page; a path link would 404 the recipient.
+      expect(() => {
+        assertEmailTemplateUrlAllowed({
+          frontendURL: 'https://tau.new',
+          template: template('https://tau.new/settings/billing'),
+        });
+      }).toThrow(/path/u);
+      expect(() => {
+        assertEmailTemplateUrlAllowed({
+          frontendURL: 'https://tau.new',
+          template: template('https://evil.example/?settings=billing'),
+        });
+      }).toThrow(/origin/u);
+    },
+  );
 
   it('accepts the forgot-password link the password-changed email sends', () => {
     expect(buildFrontendForgotPasswordUrl({ frontendURL: 'https://tau.new' })).toBe(

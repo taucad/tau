@@ -480,7 +480,7 @@ export function useChatTextareaLogic({
   }, []);
 
   const handleCancelClick = useCallback((): void => {
-    stop();
+    stop('stop-button');
   }, [stop]);
 
   // Register keyboard shortcut for cancellation
@@ -489,7 +489,7 @@ export function useChatTextareaLogic({
     () => {
       /* F7: the same condition that shows Stop. */
       if (status === 'streaming' || status === 'submitted') {
-        stop();
+        stop('stop-shortcut');
       }
     },
   );

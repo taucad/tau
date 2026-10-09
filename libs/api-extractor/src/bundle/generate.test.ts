@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { TauSkillsManifest } from '#bundle/bundle.types.js';
 import { skillsManifestFile } from '#bundle/bundle.types.js';
-import { bundleOwners, generateBundles } from '#bundle/generate.js';
+import { bundleOwners, generateBundles, usageRanking } from '#bundle/generate.js';
 import {
   maxSkillBodyTokens,
   maxSkillDescriptionChars,
@@ -71,7 +71,7 @@ describe('GeoSpec reference roles', () => {
     expect(supplemental?.entries.some((entry) => entry.name === 'GeoSpecAssertionClient')).toBe(true);
     expect(supplemental?.entries.some((entry) => entry.name === 'expectGeo')).toBe(true);
     expect(owner?.supplementalApi?.prefix).toBe('public');
-    expect(owner?.description).toContain('Python/pytest');
+    expect(owner?.description).toContain('TypeScript or JavaScript');
     const [classEntry] = primary?.entries.filter((entry) => entry.kind === 'class') ?? [];
     if (classEntry === undefined || owner?.groupBy === undefined) {
       throw new Error('Expected a public class');
@@ -176,6 +176,16 @@ describe('every committed bundle', () => {
       for (const file of entry.declaration?.files ?? []) {
         expect(statSync(join(bundleDirectory, file)).isFile(), `${file} is declared but missing`).toBe(true);
       }
+    },
+  );
+
+  it.each(declarations.map((entry) => [entry.owner.slug, entry] as const))(
+    '%s contains no text that electron-vite reads as a static import',
+    (_slug, entry) => {
+      // Electron-vite 6 `vite:esm-shim` (ESMStaticImportRe) splices a shim after the last match, strings included.
+      const esmStaticImport =
+        /(?<=\s|^|;)import\s*([\s"']*(?<imports>[\p{L}\p{M}\w\t\n\r $*,/{}@.]+)from\s*)?["']\s*(?<specifier>(?<="\s*)[^"]*[^\s"](?=\s*")|(?<='\s*)[^']*[^\s'](?=\s*'))\s*["'][\s;]*/mu;
+      expect(readFileSync(join(entry.agentDirectory, 'resources.js'), 'utf8')).not.toMatch(esmStaticImport);
     },
   );
 
@@ -331,13 +341,30 @@ describe('every committed bundle', () => {
       expect(properties).toHaveLength(count);
       expect(members?.map(({ name }) => name).sort()).toEqual(properties.map(({ name }) => name).sort());
     }
-    expect(corpus?.metadata.totalEntries).toBe(65_053 + 5118 + 5118 + 7 + 5);
+    // 2574: the values of `type E = typeof E[keyof typeof E]` enums, read from their `const E` twins.
+    expect(corpus?.metadata.totalEntries).toBe(65_053 + 5118 + 5118 + 7 + 5 + 2574);
 
     const serialized = JSON.stringify(corpus);
     expect(serialized).not.toContain('"docs"');
     expect(serialized).not.toContain('"description":');
     expect(serialized).not.toMatch(/"deprecated":"/u);
   }, 120_000);
+});
+
+describe('committed usage rankings', () => {
+  // A re-extraction that renames ids would otherwise drop their scores without a signal.
+  it.each(bundleOwners.filter((owner) => owner.core !== undefined).map((owner) => [owner.slug, owner] as const))(
+    '%s names only symbols its corpora still declare',
+    (slug, owner) => {
+      const corpora = [owner.corpus?.(), owner.supplementalApi?.corpus()].filter((corpus) => corpus !== undefined);
+      const declared = new Set(corpora.flatMap((corpus) => addressableEntries(corpus).map(({ id }) => id)));
+      const missing = usageRanking(slug)
+        .symbols.map(({ id }) => id)
+        .filter((id) => !declared.has(id));
+      expect(missing).toEqual([]);
+    },
+    120_000,
+  );
 });
 
 describe('skill declarations', () => {

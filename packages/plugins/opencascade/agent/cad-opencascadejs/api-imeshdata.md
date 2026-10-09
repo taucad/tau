@@ -164,6 +164,26 @@ IMeshData_Shape: declare class IMeshData_Shape extends Standard_Transient
 
 IMeshData_Status: typeof IMeshData_Status[keyof typeof IMeshData_Status]
 
+  readonly IMeshData_NoError: 'IMeshData_NoError'
+
+  readonly IMeshData_OpenWire: 'IMeshData_OpenWire'
+
+  readonly IMeshData_SelfIntersectingWire: 'IMeshData_SelfIntersectingWire'
+
+  readonly IMeshData_Failure: 'IMeshData_Failure'
+
+  readonly IMeshData_ReMesh: 'IMeshData_ReMesh'
+
+  readonly IMeshData_UnorientedWire: 'IMeshData_UnorientedWire'
+
+  readonly IMeshData_TooFewPoints: 'IMeshData_TooFewPoints'
+
+  readonly IMeshData_Outdated: 'IMeshData_Outdated'
+
+  readonly IMeshData_Reused: 'IMeshData_Reused'
+
+  readonly IMeshData_UserBreak: 'IMeshData_UserBreak'
+
 IMeshData_StatusOwner: declare class IMeshData_StatusOwner
 
   // IMeshData_StatusOwner.IsEqual (method)

@@ -115,7 +115,7 @@ export const assertEmailTemplateUrlAllowed = ({
   readonly template: EmailTemplate;
   readonly frontendURL: string;
 }): void => {
-  const rawUrl = template.kind === 'payment-failed' ? template.billingUrl : template.url;
+  const rawUrl = 'billingUrl' in template ? template.billingUrl : template.url;
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -136,9 +136,9 @@ export const assertEmailTemplateUrlAllowed = ({
     return;
   }
 
-  if (template.kind === 'payment-failed') {
+  if ('billingUrl' in template) {
     if (url.pathname !== '/' || url.searchParams.get('settings') !== 'billing') {
-      throw new Error('Invalid payment-failed email URL path');
+      throw new Error(`Invalid ${template.kind} email URL path`);
     }
 
     return;

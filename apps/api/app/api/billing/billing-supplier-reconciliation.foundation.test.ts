@@ -1,13 +1,10 @@
-/* oxlint-disable no-await-in-loop -- bounded sweep pages must run in order */
 import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '#database/schema.js';
 import {
-  billingBudget,
-  billingBudgetFunding,
   billingFinancialCase,
   creditAccount,
   creditOperation,
@@ -21,7 +18,7 @@ import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingSupplierReconciliationService } from '#api/billing/billing-supplier-reconciliation.service.js';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
 import { seedPaidPurchase, fulfillPaidFixture } from '#testing/billing-payment.fixture.js';
-import type { QualifiedAdmissionInput } from '#api/billing/credit-ledger.types.js';
+import type { QualifiedAdmissionInput, SupplierValuation, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (databaseUrl === undefined || process.env['BILLING_TEST_OWNED'] === undefined) {
@@ -29,63 +26,30 @@ if (databaseUrl === undefined || process.env['BILLING_TEST_OWNED'] === undefined
 }
 const client = postgres(databaseUrl, { max: 2, prepare: false });
 const database = drizzle(client, { schema });
-const policyService = new BillingPolicyService({ database });
-const ledger = new CreditLedgerService({ database }, policyService);
+const ledger = new CreditLedgerService({ database }, new BillingPolicyService({ database }));
 const config = { environment: 'development', stripeAccountId: 'acct_fixture', livemode: false } as const;
 const reconciliation = new BillingSupplierReconciliationService({ database }, config);
 afterAll(async () => client.end());
 
-const required = <T>(value: T | undefined, label: string): T => {
-  if (value === undefined) {
-    throw new Error(`${label} missing`);
-  }
-  return value;
+/** One pico-USD-per-token supplier valuation scaled by 1000, so each settled token meters 1000 pico-USD. */
+const valuation: SupplierValuation = {
+  version: 'supplier-valuation-v1',
+  sourceRevision: 'fixture-rates',
+  longContextMinimumInputTokens: null,
+  baseRates: [{ dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1000', denominatorUnits: '1' }],
+  longContextRates: null,
 };
 
-/** One admitted, terminalized operation whose supplier facts each test then shapes. */
+/** A funded account on its own route, provider and credential, so each test's meter is its own. */
 const createFixture = async () => {
   const suffix = randomUUID();
   const environment = 'development';
   const userId = `supplier-user-${suffix}`;
   const sku = `supplier-sku-${suffix}`;
   const meterContractId = `supplier-meter-${suffix}`;
-  const spendBudgetId = `supplier-spend-${suffix}`;
-  const riskBudgetId = `supplier-risk-${suffix}`;
-  const spendFundingId = `supplier-spend-funding-${suffix}`;
-  const riskFundingId = `supplier-risk-funding-${suffix}`;
-  const providerId = `provider-${suffix}`;
-  const credentialAccount = `credential-${suffix}`;
   await database
     .insert(user)
     .values({ id: userId, name: 'Supplier owner', email: `${suffix}@test.invalid`, emailVerified: true });
-  await database.insert(billingBudgetFunding).values([
-    { id: spendFundingId, environment, kind: 'spend', scope: suffix, fundedLifetime: 1_000_000n },
-    { id: riskFundingId, environment, kind: 'risk', scope: suffix, fundedLifetime: 1_000_000n },
-  ]);
-  await database.insert(billingBudget).values([
-    {
-      id: spendBudgetId,
-      environment,
-      fundingId: spendFundingId,
-      kind: 'spend',
-      scope: suffix,
-      periodStart: new Date('2020-01-01Z'),
-      periodEnd: new Date('2030-01-01Z'),
-      quantum: 'pico_usd',
-      approvedCap: 1_000_000n,
-    },
-    {
-      id: riskBudgetId,
-      environment,
-      fundingId: riskFundingId,
-      kind: 'risk',
-      scope: suffix,
-      periodStart: new Date('2020-01-01Z'),
-      periodEnd: new Date('2030-01-01Z'),
-      quantum: 'pico_usd',
-      approvedCap: 1_000_000n,
-    },
-  ]);
   const rateId = `supplier-rate-${suffix}`;
   qualifiedMeterContracts.set(meterContractId, new Set(['uncached_input:']));
   const policy = validateCommercialPolicy({
@@ -125,17 +89,7 @@ const createFixture = async () => {
         retailOverride: { numeratorCreditAtoms: '1', denominatorUnits: '1' },
       },
     ],
-    routes: [
-      {
-        routeId: `supplier-route-${suffix}`,
-        sku,
-        meterContractId,
-        rateIds: [rateId],
-        enabled: true,
-        spendBudgetId,
-        riskBudgetId,
-      },
-    ],
+    routes: [{ routeId: `supplier-route-${suffix}`, sku, meterContractId, rateIds: [rateId], enabled: true }],
   });
   await seedBillingFixturePolicy({ database, policy: policy.policy, activationId: `supplier-activation-${suffix}` });
   const accountId = await ledger.ensureAccountBinding({ environment, authUserId: userId });
@@ -145,15 +99,19 @@ const createFixture = async () => {
     userId,
     accountId,
     sku,
-    providerId,
-    credentialAccount,
+    providerId: `provider-${suffix}`,
+    credentialAccount: `credential-${suffix}`,
     replica: { schemaVersion: 1, meterContractIds: policy.policy.fleet.meterContractIds },
   };
 };
 
 type Fixture = Awaited<ReturnType<typeof createFixture>>;
 
-const admission = (fixture: Fixture, key: string): QualifiedAdmissionInput => ({
+const admission = (
+  fixture: Fixture,
+  key: string,
+  route: { readonly priced: boolean; readonly attributed: boolean },
+): QualifiedAdmissionInput => ({
   environment: 'development',
   authUserId: fixture.userId,
   surface: 'chat',
@@ -163,142 +121,96 @@ const admission = (fixture: Fixture, key: string): QualifiedAdmissionInput => ({
   category: 'llm',
   modelId: 'supplier-model',
   modelDisplayName: 'Supplier Model',
-  providerId: fixture.providerId,
   activity: 'agent',
   sku: fixture.sku,
   maximumQuantities: [{ dimension: 'uncached_input', tier: null, quantity: 10n }],
-  supplierMaximumPicoUsd: 10n,
   replica: fixture.replica,
   executionDeadline: new Date(Date.now() + 300_000),
-  invocation: {
-    contractVersion: 'supplier-contract-v1',
-    credentialAccount: fixture.credentialAccount,
-    supplierRatesValidUntil: null,
-    supplierRates: [{ dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' }],
-    executionTimeout: 300_000,
-  },
+  ...(route.attributed
+    ? {
+        providerId: fixture.providerId,
+        invocation: {
+          contractVersion: 'supplier-contract-v1',
+          credentialAccount: fixture.credentialAccount,
+          supplierRatesValidUntil: null,
+          supplierRates: [{ dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' }],
+          executionTimeout: 300_000,
+          ...(route.priced ? { supplierValuation: structuredClone(valuation) } : {}),
+        },
+      }
+    : {}),
 });
 
-/** Admits, records supplier evidence exactly as the invocation service does, then terminalizes. */
-const terminalOperation = async (
+/** Admits, records dispatch and invocation evidence exactly as the gateway does, then terminalizes. */
+const settle = async (
   fixture: Fixture,
-  key: string,
-  supplier?: { provider?: string; credentialAccount?: string; sourceObjectId?: string; numerator?: bigint },
-): Promise<{ operationId: string; evidenceId: string | undefined }> => {
-  const admitted = await ledger.admitOperation(admission(fixture, key));
+  input: { readonly evidence: TerminalEvidence; readonly priced?: boolean; readonly attributed?: boolean },
+): Promise<typeof creditOperation.$inferSelect> => {
+  const key = randomUUID();
+  const admitted = await ledger.admitOperation(
+    admission(fixture, key, { priced: input.priced ?? true, attributed: input.attributed ?? true }),
+  );
   if (admitted.status !== 'admitted') {
     throw new Error(`admission refused: ${admitted.status}`);
   }
-  let evidenceId: string | undefined;
-  if (supplier !== undefined) {
-    const sourceObjectId = supplier.sourceObjectId ?? admitted.operationId;
-    expect(
-      await ledger.appendSupplierEvidence({
-        operationId: admitted.operationId,
-        environment: 'development',
-        provider: supplier.provider ?? fixture.providerId,
-        credentialAccount: supplier.credentialAccount ?? fixture.credentialAccount,
-        sourceObjectId,
-        sourceRevision: 'final-1',
-        payloadDigest: `sha256:${randomUUID()}`,
-        currency: 'usd',
-        numerator: supplier.numerator ?? 1n,
-        denominator: 1_000_000_000_000n,
-        completeness: 'complete',
-        finality: 'final',
-        receivedAt: new Date(),
-      }),
-    ).toBe('inserted');
-    const [evidence] = await database
-      .select({ id: supplierCostEvidence.id })
-      .from(supplierCostEvidence)
-      .where(
-        and(
-          eq(supplierCostEvidence.operationId, admitted.operationId),
-          eq(supplierCostEvidence.sourceObjectId, sourceObjectId),
-        ),
-      );
-    evidenceId = required(evidence, 'supplier evidence').id;
-    expect(
-      await ledger.finalizeSupplier({
-        evidenceId,
-        operationId: admitted.operationId,
-        accountId: fixture.accountId,
-        requestDigest: `sha256:${key}`,
-        expectedGeneration: admitted.generation,
-      }),
-    ).toBe('final');
-  }
-  const evidence = {
-    kind: 'final_usage',
-    usageOccurredAt: new Date(),
-    executionStatus: 'succeeded',
-    meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 1n }],
-    normalizationEvidence: { version: 'test-v1', providerRequestId: `request-${key}`, fields: { input: '1' } },
-  } as const;
-  // GI-R2: a settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
-  await ledger.markDispatchIntent(admitted.operationId, admitted.generation);
-  // A pinned invocation makes durable invocation evidence a terminalization precondition.
-  await ledger.recordInvocationEvidence({
-    operationId: admitted.operationId,
-    accountId: fixture.accountId,
-    requestDigest: `sha256:${key}`,
-    evidence,
-  });
-  await ledger.terminalizeOperation({
-    operationId: admitted.operationId,
-    accountId: fixture.accountId,
-    requestDigest: `sha256:${key}`,
-    expectedGeneration: admitted.generation,
-    evidence,
-    resolvedAt: new Date(),
-  });
-  return { operationId: admitted.operationId, evidenceId };
-};
-
-/**
- * A supplier refusal as the ledger recorded it before the collector kept its kind: the gateway
- * retained `absorbed_unknown` with the refusal as its reason, then recovery absorbed the turn at
- * zero and expired its holds, leaving the supplier side `unresolved`.
- */
-const refusedOperationBeforeTheFix = async (fixture: Fixture, key: string): Promise<{ operationId: string }> => {
-  const admitted = await ledger.admitOperation(admission(fixture, key));
-  if (admitted.status !== 'admitted') {
-    throw new Error(`admission refused: ${admitted.status}`);
-  }
-  const evidence = {
-    kind: 'absorbed_unknown',
-    executionStatus: 'cancelled',
-    normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_rejected', fields: {} },
-  } as const;
   const claim = { operationId: admitted.operationId, accountId: fixture.accountId, requestDigest: `sha256:${key}` };
+  // A settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
   await ledger.markDispatchIntent(admitted.operationId, admitted.generation);
-  await ledger.recordInvocationEvidence({ ...claim, evidence });
-  const receipt = await ledger.terminalizeOperation({
+  await ledger.recordInvocationEvidence({ ...claim, evidence: input.evidence });
+  await ledger.terminalizeOperation({
     ...claim,
     expectedGeneration: admitted.generation,
-    evidence,
+    evidence: input.evidence,
     resolvedAt: new Date(),
-    expireSpendHold: true,
   });
-  expect(receipt).toMatchObject({ customerState: 'absorbed', chargedAtoms: 0n });
-  return { operationId: admitted.operationId };
+  return readOperation(admitted.operationId);
 };
 
-/** Runs complete bounded passes; peer suites leave their own operations in this database. */
-const sweepAll = async (/** Milliseconds. */ unresolvedMaximumAge: number): Promise<number> => {
-  let casesOpened = 0;
-  for (let page = 0; page < 50; page += 1) {
-    const result = await reconciliation.sweepSupplierUsage({ pageSize: 200, unresolvedMaximumAge });
-    casesOpened += result.casesOpened;
-    if (result.done) {
-      return casesOpened;
-    }
+const usage = (quantity: bigint): TerminalEvidence => ({
+  kind: 'final_usage',
+  usageOccurredAt: new Date(),
+  executionStatus: 'succeeded',
+  meterItems: [{ dimension: 'uncached_input', tier: null, quantity }],
+  normalizationEvidence: { version: 'test-v1', providerRequestId: `request-${randomUUID()}`, fields: {} },
+});
+
+const readOperation = async (operationId: string): Promise<typeof creditOperation.$inferSelect> => {
+  const [row] = await database.select().from(creditOperation).where(eq(creditOperation.id, operationId));
+  if (row === undefined) {
+    throw new Error('operation missing');
   }
-  throw new Error('supplier sweep did not finish a bounded pass');
+  return row;
 };
 
-const casesFor = async (kind: string, dedupeKey: string) =>
+/** The database clock, so the invoice period starts before this test's own dispatches and after every peer's. */
+const periodFromNow = async (): Promise<{ periodStart: string; periodEnd: string }> => {
+  const [now] = await client<Array<{ milliseconds: string }>>`
+    SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint::text AS milliseconds`;
+  const start = Number(now?.milliseconds);
+  return {
+    periodStart: new Date(start - 1).toISOString(),
+    periodEnd: new Date(start + 3_600_000).toISOString(),
+  };
+};
+
+const invoiceFor = (
+  fixture: Fixture,
+  invoicePeriod: { periodStart: string; periodEnd: string },
+  confirmed: string,
+) => ({
+  version: 'operator-supplier-invoice-total-v1',
+  environment: 'development',
+  provider: fixture.providerId,
+  credentialAccount: fixture.credentialAccount,
+  ...invoicePeriod,
+  currency: 'usd',
+  confirmedTotalPicoUsd: confirmed,
+  tolerancePicoUsd: '500',
+  source: 'operator-import:console-statement',
+  importedAt: new Date().toISOString(),
+});
+
+const invoiceCases = async (fixture: Fixture, invoicePeriod: { periodStart: string; periodEnd: string }) =>
   database
     .select()
     .from(billingFinancialCase)
@@ -307,198 +219,199 @@ const casesFor = async (kind: string, dedupeKey: string) =>
         eq(billingFinancialCase.environment, config.environment),
         eq(billingFinancialCase.stripeAccountId, config.stripeAccountId),
         eq(billingFinancialCase.livemode, config.livemode),
-        eq(billingFinancialCase.kind, kind),
-        eq(billingFinancialCase.dedupeKey, dedupeKey),
+        eq(billingFinancialCase.kind, 'supplier_invoice_total_mismatch'),
+        eq(
+          billingFinancialCase.dedupeKey,
+          `${fixture.providerId}:${fixture.credentialAccount}:${invoicePeriod.periodStart}/${invoicePeriod.periodEnd}`,
+        ),
       ),
     );
 
-describe('supplier usage reconciliation foundation', () => {
-  it('accepts matched evidence and cases missing, mismatched and unmatched supplier charges', async () => {
+const accountState = async (accountId: string) => {
+  const [account] = await database
+    .select({ revision: creditAccount.revision, purchased: creditAccount.purchasedAtoms })
+    .from(creditAccount)
+    .where(eq(creditAccount.id, accountId));
+  const [journal] = await database
+    .select({ rows: sql<string>`count(*)::text` })
+    .from(creditTransaction)
+    .where(eq(creditTransaction.accountId, accountId));
+  return { account, journal };
+};
+
+describe('supplier invoice reconciliation', () => {
+  it('should open no case when the invoice is within tolerance of the metered supplier cost', async () => {
     const fixture = await createFixture();
-    const matched = await terminalOperation(fixture, `matched-${randomUUID()}`, {});
-    const mismatched = await terminalOperation(fixture, `mismatched-${randomUUID()}`, {
-      provider: `foreign-${randomUUID()}`,
-    });
-    const drifted = await terminalOperation(fixture, `drifted-${randomUUID()}`);
-    // The supplier terminalizer can only reach `final` through qualified evidence; a
-    // forced state is the drift an independent sweep exists to find.
-    await database
-      .update(creditOperation)
-      .set({ supplierState: 'final' })
-      .where(eq(creditOperation.id, drifted.operationId));
-    const unmatchedSource = `charge-${randomUUID()}`;
-    expect(
-      await ledger.appendSupplierEvidence({
-        environment: 'development',
-        provider: fixture.providerId,
-        credentialAccount: fixture.credentialAccount,
-        sourceObjectId: unmatchedSource,
-        sourceRevision: 'invoice-line-1',
-        payloadDigest: `sha256:${randomUUID()}`,
-        currency: 'usd',
-        numerator: 7n,
-        denominator: 1_000_000_000_000n,
-        completeness: 'complete',
-        finality: 'final',
-        receivedAt: new Date(),
-      }),
-    ).toBe('inserted');
+    const invoicePeriod = await periodFromNow();
+    expect(await settle(fixture, { evidence: usage(3n) })).toMatchObject({ supplierCostPicoUsd: 3000n });
+    expect(await settle(fixture, { evidence: usage(4n) })).toMatchObject({ supplierCostPicoUsd: 4000n });
 
-    await sweepAll(86_400_000);
+    const result = await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '7400'));
 
-    expect(await casesFor('supplier_evidence_missing', matched.operationId)).toHaveLength(0);
-    expect(await casesFor('supplier_evidence_mismatched', matched.operationId)).toHaveLength(0);
-    const identityCases = await casesFor('supplier_evidence_mismatched', mismatched.operationId);
-    expect(identityCases).toHaveLength(1);
-    expect(required(identityCases[0], 'identity case')).toMatchObject({
-      state: 'open',
-      accountId: fixture.accountId,
-      owner: 'billing-operations',
-      sourceType: 'credit_operation',
+    expect(result).toEqual({
+      status: 'matched',
+      localEstimatePicoUsd: '7000',
+      confirmedTotalPicoUsd: '7400',
+      differencePicoUsd: '400',
+      operations: 2,
+      unpricedOperations: 0,
+      legacyOperations: 0,
+      unattributedOperations: 0,
     });
-    expect(required(identityCases[0], 'identity case').evidence['mismatches']).toEqual([
-      { evidenceId: mismatched.evidenceId, reason: 'provider' },
-    ]);
-    const missingCases = await casesFor('supplier_evidence_missing', drifted.operationId);
-    expect(missingCases).toHaveLength(1);
-    expect(required(missingCases[0], 'missing case').nextStep).toBe(
-      'recover_provider_usage_record_or_fund_as_supplier_risk',
-    );
-    const [unmatched] = await database
-      .select({ id: supplierCostEvidence.id })
-      .from(supplierCostEvidence)
-      .where(eq(supplierCostEvidence.sourceObjectId, unmatchedSource));
-    const unmatchedCases = await casesFor('supplier_charge_unmatched', required(unmatched, 'unmatched evidence').id);
-    expect(unmatchedCases).toHaveLength(1);
-    expect(required(unmatchedCases[0], 'unmatched case')).toMatchObject({ accountId: null, state: 'open' });
-    expect(required(unmatchedCases[0], 'unmatched case').evidence).toMatchObject({
-      allocation: 'aggregate_only',
-      costPicoUsd: '7',
-    });
-
-    // Checkpoint replay: a second complete pass re-affirms without duplicating.
-    await sweepAll(86_400_000);
-    expect(await casesFor('supplier_evidence_mismatched', mismatched.operationId)).toHaveLength(1);
-    expect(await casesFor('supplier_evidence_missing', drifted.operationId)).toHaveLength(1);
-    expect(await casesFor('supplier_charge_unmatched', required(unmatched, 'unmatched evidence').id)).toHaveLength(1);
-    expect(await casesFor('supplier_evidence_missing', matched.operationId)).toHaveLength(0);
+    expect(await invoiceCases(fixture, invoicePeriod)).toEqual([]);
   });
 
-  it('cases an unresolved supplier state only past its bounded age', async () => {
+  it('should open one aggregate case carrying both totals and the unpriced and unattributed counts', async () => {
     const fixture = await createFixture();
-    const stale = await terminalOperation(fixture, `stale-${randomUUID()}`, {});
-    await database
-      .update(creditOperation)
-      .set({ supplierState: 'unresolved' })
-      .where(eq(creditOperation.id, stale.operationId));
-
-    await sweepAll(86_400_000);
-    expect(await casesFor('supplier_state_unresolved', stale.operationId)).toHaveLength(0);
-
-    await sweepAll(0);
-    const cases = await casesFor('supplier_state_unresolved', stale.operationId);
-    expect(cases).toHaveLength(1);
-    expect(required(cases[0], 'unresolved case')).toMatchObject({ state: 'open', accountId: fixture.accountId });
-    expect(required(cases[0], 'unresolved case').evidence).toMatchObject({ supplierState: 'unresolved' });
-    expect(required(cases[0], 'unresolved case').evidence['oldestEvidenceAt']).toEqual(expect.any(String));
-  });
-
-  /* The staging Haiku 4.5 pause of 2026-10-08: a refused call absorbed as cost-unknown stayed
-   * `unresolved`, the sweep cased it, and the case paused the route; closing the case alone cannot
-   * hold, because the sweep reopens it while the operation stays unresolved. */
-  it('finalizes a refused operation at zero so its route-pausing case closes and stays closed', async () => {
-    const fixture = await createFixture();
-    const refused = await refusedOperationBeforeTheFix(fixture, `refused-${randomUUID()}`);
-    await sweepAll(0);
-    expect(await casesFor('supplier_state_unresolved', refused.operationId)).toMatchObject([{ state: 'open' }]);
-
-    const repair = await ledger.finalizeRejectedSupplierLiabilities({ environment: 'development', limit: 1000 });
-    expect(repair.repaired).toBeGreaterThanOrEqual(1);
-    const [operation] = await database
-      .select()
-      .from(creditOperation)
-      .where(eq(creditOperation.id, refused.operationId));
-    expect(required(operation, 'repaired operation').supplierState).toBe('final');
-    const proof = await database
-      .select()
-      .from(supplierCostEvidence)
-      .where(eq(supplierCostEvidence.operationId, refused.operationId));
-    expect(proof).toMatchObject([
-      { sourceRevision: 'provider_rejected_v1', numerator: 0n, completeness: 'complete', finality: 'final' },
-    ]);
-    // A second pass finds the retained proof and the final operation, and changes nothing.
-    await ledger.finalizeRejectedSupplierLiabilities({ environment: 'development', limit: 1000 });
-
-    await sweepAll(0);
-    expect(await casesFor('supplier_state_unresolved', refused.operationId)).toMatchObject([{ state: 'resolved' }]);
-    expect(await casesFor('supplier_evidence_missing', refused.operationId)).toHaveLength(0);
-  });
-
-  it('reconciles an aggregate invoice total without allocating cost to any account', async () => {
-    const fixture = await createFixture();
-    await terminalOperation(fixture, `invoice-a-${randomUUID()}`, { numerator: 3n });
-    await terminalOperation(fixture, `invoice-b-${randomUUID()}`, { numerator: 4n });
-    const invoice = {
-      version: 'operator-supplier-invoice-total-v1',
-      environment: 'development',
-      provider: fixture.providerId,
-      credentialAccount: fixture.credentialAccount,
-      periodStart: new Date(Date.now() - 3_600_000).toISOString(),
-      periodEnd: new Date(Date.now() + 3_600_000).toISOString(),
-      currency: 'usd',
-      confirmedTotalPicoUsd: '7',
-      tolerancePicoUsd: '0',
-      source: 'operator-import:console-statement',
-      importedAt: new Date().toISOString(),
-    };
-    const [accountBefore] = await database
-      .select({ revision: creditAccount.revision, purchased: creditAccount.purchasedAtoms })
-      .from(creditAccount)
-      .where(eq(creditAccount.id, fixture.accountId));
-    const [journalBefore] = await database
-      .select({ rows: sql<string>`count(*)::text` })
-      .from(creditTransaction)
-      .where(eq(creditTransaction.accountId, fixture.accountId));
-
-    const matchedTotal = await reconciliation.reconcileInvoiceTotal(invoice);
-    expect(matchedTotal).toMatchObject({ status: 'matched', localEstimatePicoUsd: '7', differencePicoUsd: '0' });
-    const dedupeKey = `${fixture.providerId}:${fixture.credentialAccount}:${invoice.periodStart}/${invoice.periodEnd}`;
-    expect(await casesFor('supplier_invoice_total_mismatch', dedupeKey)).toHaveLength(0);
-
-    const mismatchedTotal = await reconciliation.reconcileInvoiceTotal({
-      ...invoice,
-      confirmedTotalPicoUsd: '900',
+    const invoicePeriod = await periodFromNow();
+    await settle(fixture, { evidence: usage(3n) });
+    await settle(fixture, { evidence: usage(4n) });
+    // No pinned valuation: the receipt has no supplier cost, which the meter must not count as zero silently.
+    expect(await settle(fixture, { evidence: usage(5n), priced: false })).toMatchObject({
+      supplierCostPicoUsd: null,
+      supplierCostUnpricedReason: 'missing_rate',
     });
-    expect(mismatchedTotal).toMatchObject({
+    // Admitted with no provider or invocation: no credential can claim its cost.
+    await settle(fixture, { evidence: usage(2n), attributed: false });
+    const before = await accountState(fixture.accountId);
+
+    const result = await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '9000'));
+
+    expect(result).toEqual({
       status: 'mismatched',
-      localEstimatePicoUsd: '7',
-      confirmedTotalPicoUsd: '900',
-      differencePicoUsd: '893',
-      evidenceRows: 2,
-      foreignCurrencyRows: 0,
+      localEstimatePicoUsd: '7000',
+      confirmedTotalPicoUsd: '9000',
+      differencePicoUsd: '2000',
+      operations: 3,
+      unpricedOperations: 1,
+      legacyOperations: 0,
+      unattributedOperations: 1,
     });
-    const cases = await casesFor('supplier_invoice_total_mismatch', dedupeKey);
+    const cases = await invoiceCases(fixture, invoicePeriod);
     expect(cases).toHaveLength(1);
-    expect(required(cases[0], 'invoice case')).toMatchObject({
+    expect(cases[0]).toMatchObject({
       state: 'open',
       accountId: null,
       knownAmountMinor: null,
+      owner: 'billing-operations',
+      nextStep: 'compare_confirmed_invoice_with_local_estimate',
+      evidence: {
+        version: 'supplier-invoice-reconciliation-v2',
+        allocation: 'aggregate_only',
+        invoiceSource: 'operator-import:console-statement',
+        localEstimatePicoUsd: '7000',
+        confirmedTotalPicoUsd: '9000',
+        unpricedOperations: 1,
+        legacyOperations: 0,
+        unattributedOperations: 1,
+      },
     });
-    expect(required(cases[0], 'invoice case').evidence).toMatchObject({
-      allocation: 'aggregate_only',
-      invoiceSource: 'operator-import:console-statement',
-      localEstimatePicoUsd: '7',
-      confirmedTotalPicoUsd: '900',
+    // Aggregate only: no account balance or journal row moves.
+    expect(await accountState(fixture.accountId)).toEqual(before);
+  });
+
+  it('should count a receipt from before the supplier cost columns as legacy, not unpriced, and open no case', async () => {
+    const fixture = await createFixture();
+    const invoicePeriod = await periodFromNow();
+    await settle(fixture, { evidence: usage(3n) });
+    const legacy = await settle(fixture, { evidence: usage(4n) });
+    // A receipt terminalized before migration 0049 carries neither column; its terminal row is otherwise immutable.
+    await client.begin(async (transaction) => {
+      await transaction`SET LOCAL session_replication_role = replica`;
+      await transaction`UPDATE billing.credit_operation SET supplier_cost_pico_usd = NULL, supplier_cost_unpriced_reason = NULL
+        WHERE id = ${legacy.id}`;
     });
-    const [accountAfter] = await database
-      .select({ revision: creditAccount.revision, purchased: creditAccount.purchasedAtoms })
-      .from(creditAccount)
-      .where(eq(creditAccount.id, fixture.accountId));
-    const [journalAfter] = await database
-      .select({ rows: sql<string>`count(*)::text` })
-      .from(creditTransaction)
-      .where(eq(creditTransaction.accountId, fixture.accountId));
-    expect(accountAfter).toEqual(accountBefore);
-    expect(journalAfter).toEqual(journalBefore);
+
+    const result = await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '3000'));
+
+    expect(result).toEqual({
+      status: 'matched',
+      localEstimatePicoUsd: '3000',
+      confirmedTotalPicoUsd: '3000',
+      differencePicoUsd: '0',
+      operations: 2,
+      unpricedOperations: 0,
+      legacyOperations: 1,
+      unattributedOperations: 0,
+    });
+    expect(await invoiceCases(fixture, invoicePeriod)).toEqual([]);
+  });
+
+  it('should keep one case across a repeated import and resolve it when a later import matches', async () => {
+    const fixture = await createFixture();
+    const invoicePeriod = await periodFromNow();
+    await settle(fixture, { evidence: usage(6n) });
+
+    await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '1'));
+    await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '1'));
+    const reopened = await invoiceCases(fixture, invoicePeriod);
+    expect(reopened).toHaveLength(1);
+    expect(reopened[0]).toMatchObject({ state: 'open' });
+
+    const corrected = await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '6000'));
+
+    expect(corrected).toMatchObject({ status: 'matched', differencePicoUsd: '0' });
+    const resolved = await invoiceCases(fixture, invoicePeriod);
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]).toMatchObject({
+      state: 'resolved',
+      resolutionEvidence: { disposition: 'supplier_source_qualified', localEstimatePicoUsd: '6000' },
+    });
+  });
+
+  it('should refuse an invoice for another environment or an empty period', async () => {
+    const fixture = await createFixture();
+    const invoicePeriod = await periodFromNow();
+
+    await expect(
+      reconciliation.reconcileInvoiceTotal({ ...invoiceFor(fixture, invoicePeriod, '0'), environment: 'staging' }),
+    ).rejects.toThrow('invalid_supplier_invoice');
+    await expect(
+      reconciliation.reconcileInvoiceTotal({
+        ...invoiceFor(fixture, invoicePeriod, '0'),
+        periodEnd: invoicePeriod.periodStart,
+      }),
+    ).rejects.toThrow('invalid_supplier_invoice');
+    expect(await invoiceCases(fixture, invoicePeriod)).toEqual([]);
+  });
+
+  /* The staging pause of 2026-10-08: a refused call once became a cost-unknown liability that a
+   * sweep cased a day later, pausing the route for every account. A refusal is a known zero now. */
+  it('should meter a refused operation at zero, open no case for it and never revisit it', async () => {
+    const fixture = await createFixture();
+    const invoicePeriod = await periodFromNow();
+    const refused = await settle(fixture, {
+      evidence: {
+        kind: 'provider_rejected',
+        executionStatus: 'rejected',
+        normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_rejected', fields: {} },
+      },
+    });
+    expect(refused).toMatchObject({
+      customerState: 'released',
+      chargedAtoms: 0n,
+      supplierCostPicoUsd: 0n,
+      supplierCostUnpricedReason: null,
+    });
+
+    const result = await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '0'));
+
+    expect(result).toMatchObject({
+      status: 'matched',
+      localEstimatePicoUsd: '0',
+      operations: 1,
+      unpricedOperations: 0,
+    });
+    expect(
+      await database.select().from(supplierCostEvidence).where(eq(supplierCostEvidence.operationId, refused.id)),
+    ).toEqual([]);
+    expect(
+      await database
+        .select()
+        .from(billingFinancialCase)
+        .where(or(eq(billingFinancialCase.dedupeKey, refused.id), eq(billingFinancialCase.sourceId, refused.id))),
+    ).toEqual([]);
+    // Nothing repairs it: the receipt is exactly as the terminalizer wrote it.
+    expect(await readOperation(refused.id)).toEqual(refused);
   });
 });

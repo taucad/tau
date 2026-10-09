@@ -1,6 +1,8 @@
 # manifold-3d — Types
 
-12 top-level symbols. Signatures are verbatim typescript.
+14 top-level symbols. Signatures are verbatim typescript.
+
+AnimationMode: 'loop' | 'ping-pong'
 
 // A three dimensional box, aligned to the coordinate system
 Box: {
@@ -19,6 +21,8 @@ ErrorStatus: 'NoError'|'NonFiniteVertex'|'NotManifold'|
 'InvalidConstruction'
 
 FillRule: 'EvenOdd'|'NonZero'|'Positive'|'Negative'
+
+GLTFAttribute: 'POSITION' | 'NORMAL' | 'TANGENT' | 'TEXCOORD_0' | 'TEXCOORD_1' | 'COLOR_0' | 'JOINTS_0' | 'WEIGHTS_0' | 'SKIP_1' | 'SKIP_2' | 'SKIP_3' | 'SKIP_4'
 
 JoinType: 'Square'|'Round'|'Miter'
 

@@ -207,6 +207,18 @@ StepGeom_BSplineCurve: declare class StepGeom_BSplineCurve extends StepGeom_Boun
 
 StepGeom_BSplineCurveForm: typeof StepGeom_BSplineCurveForm[keyof typeof StepGeom_BSplineCurveForm]
 
+  readonly StepGeom_bscfPolylineForm: 'StepGeom_bscfPolylineForm'
+
+  readonly StepGeom_bscfCircularArc: 'StepGeom_bscfCircularArc'
+
+  readonly StepGeom_bscfEllipticArc: 'StepGeom_bscfEllipticArc'
+
+  readonly StepGeom_bscfParabolicArc: 'StepGeom_bscfParabolicArc'
+
+  readonly StepGeom_bscfHyperbolicArc: 'StepGeom_bscfHyperbolicArc'
+
+  readonly StepGeom_bscfUnspecified: 'StepGeom_bscfUnspecified'
+
 StepGeom_BSplineCurveWithKnots: declare class StepGeom_BSplineCurveWithKnots extends StepGeom_BSplineCurve
 
   // StepGeom_BSplineCurveWithKnots.constructor (constructor)
@@ -418,6 +430,28 @@ StepGeom_BSplineSurface: declare class StepGeom_BSplineSurface extends StepGeom_
   [Symbol.dispose](): void;
 
 StepGeom_BSplineSurfaceForm: typeof StepGeom_BSplineSurfaceForm[keyof typeof StepGeom_BSplineSurfaceForm]
+
+  readonly StepGeom_bssfPlaneSurf: 'StepGeom_bssfPlaneSurf'
+
+  readonly StepGeom_bssfCylindricalSurf: 'StepGeom_bssfCylindricalSurf'
+
+  readonly StepGeom_bssfConicalSurf: 'StepGeom_bssfConicalSurf'
+
+  readonly StepGeom_bssfSphericalSurf: 'StepGeom_bssfSphericalSurf'
+
+  readonly StepGeom_bssfToroidalSurf: 'StepGeom_bssfToroidalSurf'
+
+  readonly StepGeom_bssfSurfOfRevolution: 'StepGeom_bssfSurfOfRevolution'
+
+  readonly StepGeom_bssfRuledSurf: 'StepGeom_bssfRuledSurf'
+
+  readonly StepGeom_bssfGeneralisedCone: 'StepGeom_bssfGeneralisedCone'
+
+  readonly StepGeom_bssfQuadricSurf: 'StepGeom_bssfQuadricSurf'
+
+  readonly StepGeom_bssfSurfOfLinearExtrusion: 'StepGeom_bssfSurfOfLinearExtrusion'
+
+  readonly StepGeom_bssfUnspecified: 'StepGeom_bssfUnspecified'
 
 StepGeom_BSplineSurfaceWithKnots: declare class StepGeom_BSplineSurfaceWithKnots extends StepGeom_BSplineSurface
 

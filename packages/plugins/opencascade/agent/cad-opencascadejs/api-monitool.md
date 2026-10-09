@@ -688,4 +688,26 @@ MoniTool_TypedValue: declare class MoniTool_TypedValue extends Standard_Transien
 
 MoniTool_ValueType: typeof MoniTool_ValueType[keyof typeof MoniTool_ValueType]
 
+  readonly MoniTool_ValueMisc: 'MoniTool_ValueMisc'
+
+  readonly MoniTool_ValueInteger: 'MoniTool_ValueInteger'
+
+  readonly MoniTool_ValueReal: 'MoniTool_ValueReal'
+
+  readonly MoniTool_ValueIdent: 'MoniTool_ValueIdent'
+
+  readonly MoniTool_ValueVoid: 'MoniTool_ValueVoid'
+
+  readonly MoniTool_ValueText: 'MoniTool_ValueText'
+
+  readonly MoniTool_ValueEnum: 'MoniTool_ValueEnum'
+
+  readonly MoniTool_ValueLogical: 'MoniTool_ValueLogical'
+
+  readonly MoniTool_ValueSub: 'MoniTool_ValueSub'
+
+  readonly MoniTool_ValueHexa: 'MoniTool_ValueHexa'
+
+  readonly MoniTool_ValueBinary: 'MoniTool_ValueBinary'
+
 MoniTool_DataMapOfShapeTransient: NCollection_DataMap_TopoDS_Shape_handle_Standard_Transient_TopTools_ShapeMapHasher

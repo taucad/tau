@@ -1,6 +1,60 @@
 # libcascade — StepVisual (4)
 
-44 top-level symbols. Signatures are verbatim typescript.
+45 top-level symbols. Signatures are verbatim typescript.
+
+StepVisual_TextLiteral: declare class StepVisual_TextLiteral extends StepGeom_GeometricRepresentationItem
+
+  // StepVisual_TextLiteral.constructor (constructor)
+  constructor();
+
+  // StepVisual_TextLiteral.Init (method)
+  Init(aName: TCollection_HAsciiString, aLiteral: TCollection_HAsciiString, aPlacement: StepGeom_Axis2Placement, aAlignment: TCollection_HAsciiString, aPath: StepVisual_TextPath, aFont: StepVisual_FontSelect): void;
+  Init(aName: TCollection_HAsciiString): void;
+
+  // StepVisual_TextLiteral.SetLiteral (method)
+  SetLiteral(aLiteral: TCollection_HAsciiString): void;
+
+  // StepVisual_TextLiteral.Literal (method)
+  Literal(): TCollection_HAsciiString;
+
+  // StepVisual_TextLiteral.SetPlacement (method)
+  SetPlacement(aPlacement: StepGeom_Axis2Placement): void;
+
+  // StepVisual_TextLiteral.Placement (method)
+  Placement(): StepGeom_Axis2Placement;
+
+  // StepVisual_TextLiteral.SetAlignment (method)
+  SetAlignment(aAlignment: TCollection_HAsciiString): void;
+
+  // StepVisual_TextLiteral.Alignment (method)
+  Alignment(): TCollection_HAsciiString;
+
+  // StepVisual_TextLiteral.SetPath (method)
+  SetPath(aPath: StepVisual_TextPath): void;
+
+  // StepVisual_TextLiteral.Path (method)
+  Path(): StepVisual_TextPath;
+
+  // StepVisual_TextLiteral.SetFont (method)
+  SetFont(aFont: StepVisual_FontSelect): void;
+
+  // StepVisual_TextLiteral.Font (method)
+  Font(): StepVisual_FontSelect;
+
+  // StepVisual_TextLiteral.get_type_name (method)
+  static get_type_name(): string;
+
+  // StepVisual_TextLiteral.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // StepVisual_TextLiteral.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // StepVisual_TextLiteral.delete (method)
+  delete(): void;
+
+  // StepVisual_TextLiteral.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 StepVisual_TextOrCharacter: declare class StepVisual_TextOrCharacter extends StepData_SelectType
 
@@ -26,6 +80,14 @@ StepVisual_TextOrCharacter: declare class StepVisual_TextOrCharacter extends Ste
   [Symbol.dispose](): void;
 
 StepVisual_TextPath: typeof StepVisual_TextPath[keyof typeof StepVisual_TextPath]
+
+  readonly StepVisual_tpUp: 'StepVisual_tpUp'
+
+  readonly StepVisual_tpRight: 'StepVisual_tpRight'
+
+  readonly StepVisual_tpDown: 'StepVisual_tpDown'
+
+  readonly StepVisual_tpLeft: 'StepVisual_tpLeft'
 
 StepVisual_TextStyle: declare class StepVisual_TextStyle extends Standard_Transient
 

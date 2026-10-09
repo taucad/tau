@@ -477,7 +477,7 @@ export const carveraManifest = (profile?: MachineQualificationProfile): MachineM
         { id: 'cover-closed', label: 'The cover is closed and nothing is inside but the stock' },
         { id: 'work-area-clear', label: 'The previous part is removed' },
       ],
-      safety: { authority: 'person', attended: true, interlocks: ['cover', 'estop'] },
+      safety: { attended: true, interlocks: ['cover', 'estop'] },
     },
     // Stop is the realtime halt (0x18), never the queue-draining abort.
     stop: {

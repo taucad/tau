@@ -81,7 +81,7 @@ describe('carveraMachine', () => {
           extensions: ['.cnc', '.nc', '.gcode', '.ngc', '.tap'],
         },
       ],
-      safety: { authority: 'person', attended: true, interlocks: ['cover', 'estop'] },
+      safety: { attended: true, interlocks: ['cover', 'estop'] },
     });
   });
 

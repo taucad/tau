@@ -1,11 +1,12 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement, ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { entitlementsFromTier } from '@taucad/billing';
 import { GeneralSettings } from '#components/settings/general-settings.js';
 import type { ThemeOption } from '#hooks/use-theme.js';
 
+const clientEnvironment = globalThis.window.ENV;
 const useEntitlementsMock = vi.hoisted(() => vi.fn());
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
   useEntitlements: useEntitlementsMock,
@@ -160,6 +161,11 @@ describe('GeneralSettings', () => {
     mockAllowsUsageMetrics = true;
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    globalThis.window.ENV = clientEnvironment;
+  });
+
   it('replaces the consent toggle with the no-train guarantee on paid tiers (T15/AD15)', () => {
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('pro'));
 
@@ -179,7 +185,7 @@ describe('GeneralSettings', () => {
   });
 
   it.each(['free', 'pro'] as const)(
-    'links privacy details to the public website so desktop never opens a removed route (%s)',
+    'should link privacy details to the privacy page of the deployment serving the app (%s)',
     (tier) => {
       useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
 
@@ -188,8 +194,29 @@ describe('GeneralSettings', () => {
       const links = screen.getAllByRole('link', { name: 'Learn more' });
       expect(links.length).toBeGreaterThan(0);
       for (const link of links) {
-        expect(link).toHaveAttribute('href', 'https://tau.new/legal/privacy#9.2.1');
+        expect(link).toHaveAttribute('href', '/legal/privacy#9.2.1');
         expect(link).toHaveAttribute('target', '_blank');
+      }
+    },
+  );
+
+  it.each(['free', 'pro'] as const)(
+    'should link privacy details to the bound web deployment on desktop, which ships no legal pages (%s)',
+    (tier) => {
+      useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
+      vi.stubEnv('TAU_TARGET', 'desktop');
+      globalThis.window.ENV = {
+        ...clientEnvironment,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
+        TAU_FRONTEND_URL: 'https://taucad.dev',
+      };
+
+      render(<GeneralSettings />);
+
+      const links = screen.getAllByRole('link', { name: 'Learn more' });
+      expect(links.length).toBeGreaterThan(0);
+      for (const link of links) {
+        expect(link).toHaveAttribute('href', 'https://taucad.dev/legal/privacy#9.2.1');
       }
     },
   );

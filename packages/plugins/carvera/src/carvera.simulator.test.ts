@@ -82,6 +82,7 @@ const connect = async (simulator = createCarveraSimulator({ speed: 25, tickInter
       },
       configuration: { speed: 25 },
       connection: { secretRef: 'none', serviceTrust: {} },
+      purpose: 'bind',
       signal: new AbortController().signal,
     },
     runtimeFor(text),

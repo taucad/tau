@@ -91,8 +91,9 @@ export type CarveraSessionInput = Readonly<{
   /** Milliseconds to wait for the first status before deciding another app holds the machine. */
   firstStatusWait?: number;
   /**
-   * An endpoint a person entered, as `address:port`, that nothing has yet shown to be a Carvera. The first open must
-   * get a status from it; otherwise connecting fails, so nothing is bound and nothing dials it again.
+   * An endpoint a person entered, as `address:port`, that nothing has yet shown to be a Carvera; set only while
+   * binding. The first open must get a status from it; otherwise connecting fails, so nothing is bound and nothing
+   * dials it again. Reconnecting a bound machine leaves it unset, so silence there reads as another app holding it.
    */
   unprovenEndpoint?: string;
 }>;

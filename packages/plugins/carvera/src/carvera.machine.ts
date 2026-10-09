@@ -94,8 +94,11 @@ export const carveraMachine = defineMachine({
     return connectCarveraSession({
       id: input.candidate.id,
       name: input.candidate.name,
-      // A broadcast shows a Carvera is there; an entered address does not until it answers.
-      ...(endpoint.interface === 'manual' ? { unprovenEndpoint: `${endpoint.address}:${String(port)}` } : {}),
+      // A broadcast shows a Carvera is there; an entered address does not until it answers at bind. Once bound, a
+      // silent listener at that address is the machine held by another app, as for any reconnect.
+      ...(endpoint.interface === 'manual' && input.purpose === 'bind'
+        ? { unprovenEndpoint: `${endpoint.address}:${String(port)}` }
+        : {}),
       manifest: carveraManifest(),
       clock: runtime.clock,
       async *readArtifact(read) {

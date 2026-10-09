@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { parseMachineProvider } from '@taucad/runtime/machine';
 import type {
   MachineConnectionRuntime,
@@ -154,6 +154,7 @@ describe('carveraMachine', () => {
         candidate: found.candidate,
         configuration: {},
         connection: { secretRef: 'none', serviceTrust: {} },
+        purpose: 'bind',
         signal: new AbortController().signal,
       },
       {
@@ -173,11 +174,21 @@ describe('carveraMachine', () => {
     expect(requests).toMatchObject([{ endpoint: { address: '10.0.5.7', port: 2223 } }]);
   });
 
-  it('should refuse an entered address where no Carvera answers, sending only the status request and leaving nothing to redial', async () => {
+  /**
+   * Connect to an entered address where a listener takes the socket and says nothing, such as another controller's
+   * telnet port or a Carvera another app holds. Time is fake, so the first-status wait and the redial delays can be
+   * stepped past.
+   * @param purpose - Binding the address, or reconnecting a machine bound at it.
+   * @returns The connection attempt, every dial and every byte written.
+   */
+  const connectSilent = async (purpose: 'bind' | 'reconnect') => {
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const definition = await resolveRuntimePluginDefinition('machine', carveraMachine());
     const requests: MachineNetworkRequest[] = [];
     const written: number[] = [];
-    // Any listener that takes the socket and says nothing, such as another controller's telnet port.
     const silent = (): MachineNetworkStream => {
       const closed = Promise.withResolvers<void>();
       return {
@@ -207,6 +218,7 @@ describe('carveraMachine', () => {
         },
         configuration: {},
         connection: { secretRef: 'none', serviceTrust: {} },
+        purpose,
         signal: new AbortController().signal,
       },
       {
@@ -222,14 +234,35 @@ describe('carveraMachine', () => {
         resolveSecret: async () => '',
       },
     );
-    await expect(connecting).rejects.toMatchObject({
+    return { connecting, requests, written };
+  };
+
+  it('should refuse an entered address where no Carvera answers at bind, sending only the status request and leaving nothing to redial', async () => {
+    const { connecting, requests, written } = await connectSilent('bind');
+    const refused = expect(connecting).rejects.toMatchObject({
       code: 'MACHINE_UNAVAILABLE',
       message: expect.stringMatching(/^No Carvera answered at 10\.0\.5\.9:2222\./u) as unknown,
     });
+    await vi.advanceTimersByTimeAsync(3000);
+    await refused;
     expect(written).toEqual([...carveraRealtime('?')]);
-    // The session is gone: no reconnect timer is left to dial the address again.
+    // The session is gone: past every reconnect delay (2 s, 5 s), nothing dials the address again.
+    await vi.advanceTimersByTimeAsync(6000);
     expect(requests).toHaveLength(1);
-  }, 10_000);
+  });
+
+  it('should reconnect a machine bound by address that another app holds as occupied, and keep trying', async () => {
+    const { connecting, requests } = await connectSilent('reconnect');
+    await vi.advanceTimersByTimeAsync(3000);
+    const session = await connecting;
+    sessions.push(session);
+    await expect(session.getSnapshot({ signal: new AbortController().signal })).resolves.toMatchObject({
+      connection: 'occupied',
+    });
+    // It dials again once the other app may have let go.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(requests).toHaveLength(2);
+  });
 
   it('should connect over TCP 2222 to the bound address and identify the firmware', async () => {
     const simulator = createCarveraSimulator({ speed: 25, tickInterval: 10 });
@@ -260,6 +293,7 @@ describe('carveraMachine', () => {
         },
         configuration: {},
         connection: { secretRef: 'none', serviceTrust: {} },
+        purpose: 'bind',
         signal: new AbortController().signal,
       },
       runtime,

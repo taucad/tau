@@ -1290,15 +1290,17 @@ export const FileEditor = memo(function ({
     void contentService.resolve(filePath, { sizeLimit: Number.MAX_SAFE_INTEGER });
   }, [contentService, filePath]);
 
+  const textContent = result.kind === 'text' ? result.content : undefined;
+  const binarySize = result.kind === 'binary' ? result.size : undefined;
   const handleReadAll = useCallback(async (): Promise<Uint8Array<ArrayBuffer>> => {
-    if (result.kind === 'text') {
-      return new Uint8Array(result.content);
+    if (textContent !== undefined) {
+      return new Uint8Array(textContent);
     }
-    if (result.kind === 'binary' && contentService) {
-      return contentService.readRawBytes(filePath, { sizeLimit: result.size });
+    if (binarySize !== undefined && contentService) {
+      return contentService.readRawBytes(filePath, { sizeLimit: binarySize });
     }
     throw new Error(`File '${filePath}' is not available to a viewer`);
-  }, [contentService, filePath, result]);
+  }, [contentService, filePath, textContent, binarySize]);
 
   const handleCodeChange = useCallback(
     (value: ComponentProps<typeof CodeEditor>['value']) => {

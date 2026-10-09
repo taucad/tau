@@ -11,7 +11,7 @@ import { chatRunState, emptyChatLedger, foldChatLedger } from '#log/chat-ledger.
 import type { LogRowBody } from '#log/chat-ledger.js';
 import { isResumableRunFailure } from '#log/resumable.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
-import type { ExternalAgentPort } from '#host/external-agent.js';
+import type { ExternalAgentTurn, ExternalAgentPort } from '#host/external-agent.js';
 import type { TauAgentHost } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
@@ -20,6 +20,7 @@ import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-type
 import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
 import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
 import type { HostCompactionError } from '#harness/compaction.js';
+import * as sessionModule from '#harness/session.js';
 import { fundedFacet } from '#harness/harness.fixture.js';
 
 import {
@@ -2064,6 +2065,104 @@ the cancelled tools left the system unchanged.
     await host.close();
   });
 
+  it('refuses retired internal live deltas when the same run resumes under a replacement writer', async (context) => {
+    const file = createMemoryLogFile();
+    const started = Promise.withResolvers<void>();
+    const replacementStarted = Promise.withResolvers<void>();
+    const finishReplacement = Promise.withResolvers<void>();
+    const sinks: Array<NonNullable<sessionModule.CreateAgentSessionOptions['onLiveEvent']>> = [];
+    const build = sessionModule.createAgentSession;
+    const capture = vi.spyOn(sessionModule, 'createAgentSession').mockImplementation(async (options) => {
+      if (options.onLiveEvent) {
+        sinks.push(options.onLiveEvent);
+      }
+      return build(options);
+    });
+    context.onTestFinished(() => {
+      capture.mockRestore();
+      finishReplacement.resolve();
+    });
+    let calls = 0;
+    const published: string[] = [];
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          funding: { type: 'unfunded' },
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            calls++;
+            if (calls === 1) {
+              started.resolve();
+              if (!request.signal.aborted) {
+                await new Promise<void>((resolve) => {
+                  request.signal.addEventListener(
+                    'abort',
+                    () => {
+                      resolve();
+                    },
+                    { once: true },
+                  );
+                });
+              }
+              yield { type: 'text-delta', text: 'Retired writer suffix.' };
+              yield { type: 'completed', stopReason: 'aborted' };
+              return;
+            }
+            replacementStarted.resolve();
+            await finishReplacement.promise;
+            yield { type: 'text-delta', text: 'Recovered under the new generation.' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'generation',
+      }),
+      onLiveEvent: (event) => {
+        if (event.type === 'text-delta') {
+          published.push(event.delta);
+        }
+      },
+    });
+    context.onTestFinished(async () => {
+      await host.close();
+    });
+    host.assumeLeadership('chat-generation', 1);
+    const first = host.admit({
+      chatId: 'chat-generation',
+      runId: 'run-generation',
+      trigger: 'submit',
+      message: { id: 'turn-generation', role: 'user', content: 'Wait.' },
+    });
+    const firstFailure = expect(first).rejects.toMatchObject({ code: 'LEADERSHIP_LOST' });
+    await started.promise;
+    await host.relinquish('chat-generation');
+    await firstFailure;
+
+    host.assumeLeadership('chat-generation', 2);
+    const replacement = host.resume('chat-generation');
+    await replacementStarted.promise;
+    expect(sinks).toHaveLength(2);
+    await sinks[0]!({
+      type: 'text-delta',
+      chatId: 'chat-generation',
+      runId: 'run-generation',
+      messageId: 'generation-0',
+      contentIndex: 0,
+      delta: 'Retired callback on replacement.',
+    });
+    finishReplacement.resolve();
+    await replacement;
+    capture.mockRestore();
+    expect(published).toEqual(['Recovered under the new generation.']);
+    const log = await file.open();
+    const events = await log.read();
+    /* Each incarnation writes under its own term; the term's integer epoch is the ledger's (W6 RH-S3). */
+    const firstRow = events[0]!;
+    expect(events.at(-1)?.leaderEpoch).not.toBe(firstRow.leaderEpoch);
+    expect(events.at(-1)?.epoch).toBeGreaterThan(firstRow.epoch ?? 0);
+    await host.close();
+  });
+
   it('applies retry history-prefix semantics through an explicit rewind event and exposes bounded replay', async () => {
     const file = createMemoryLogFile();
     const host = createTauAgentHost(
@@ -2265,6 +2364,81 @@ the cancelled tools left the system unchanged.
         .map((message) => message.id),
     ).toEqual(['turn-first']);
     await host.close();
+  });
+
+  it('refuses a retained external live sink after its chat writer incarnation is replaced', async () => {
+    let file = createMemoryLogFile();
+    const replacementStarted = Promise.withResolvers<void>();
+    const finishReplacement = Promise.withResolvers<void>();
+    const turns: ExternalAgentTurn[] = [];
+    const published: string[] = [];
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: async () => file.open(),
+        transport: {
+          funding: { type: 'unfunded' },
+          stream: () => {
+            throw new Error('External only.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'retired-live',
+      }),
+      externalRunners: {
+        acp: {
+          list: () => ['stub-agent'],
+          run: async (turn) => {
+            turns.push(turn);
+            if (turns.length === 2) {
+              replacementStarted.resolve();
+              await finishReplacement.promise;
+            }
+          },
+        },
+      },
+      onLiveEvent: (event) => {
+        if (event.type === 'text-delta') {
+          published.push(event.delta);
+        }
+      },
+    });
+    const start = async (runId: string): Promise<void> => {
+      await host.admit({
+        chatId: 'chat-retired-live',
+        runId,
+        trigger: 'submit',
+        message: { id: `message-${runId}`, role: 'user', content: 'External.' },
+        config: { systemPrompt: 'external', toolChoice: 'none', agent: { kind: 'acp', id: 'stub-agent' } },
+      });
+      await host.cancel({ runId });
+    };
+    try {
+      host.assumeLeadership('chat-retired-live', 1);
+      await start('run-old');
+      await host.relinquish('chat-retired-live');
+      host.assumeLeadership('chat-retired-live', 2);
+      file = createMemoryLogFile();
+      const replacement = host.admit({
+        chatId: 'chat-retired-live',
+        runId: 'run-old',
+        trigger: 'submit',
+        message: { id: 'message-run-old', role: 'user', content: 'Fresh source, same run and attempt.' },
+        config: { systemPrompt: 'external', toolChoice: 'none', agent: { kind: 'acp', id: 'stub-agent' } },
+      });
+      await replacementStarted.promise;
+      expect(turns).toHaveLength(2);
+      expect(turns[0]!.runId).toBe(turns[1]!.runId);
+      expect(turns[0]!.attempt).toBe(turns[1]!.attempt);
+      const payload = { type: 'text-delta', messageId: 'retained', contentIndex: 0, delta: 'retired' } as const;
+      await turns[0]!.publishLive!(payload);
+      await turns[1]!.publishLive!({ ...payload, delta: 'current' });
+      finishReplacement.resolve();
+      await replacement;
+      expect(published).toEqual(['current']);
+    } finally {
+      finishReplacement.resolve();
+      await host.close();
+    }
   });
 
   it('hands the second turn of a chat the session the first one remembered', async () => {
@@ -2816,6 +2990,8 @@ describe('the host run ledger', () => {
     const file = createMemoryLogFile();
     await seedLog(file, orphanedFirstTurn);
     let raced = false;
+    const captured = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
     const host: TauAgentHost = createTauAgentHost(
       hostOptions({
         openEventLog: async () => {
@@ -2826,7 +3002,8 @@ describe('the host run ledger', () => {
               const answer = await log.readBatch(request);
               if (!raced && answer.status === 'batch' && answer.events.length === 0) {
                 raced = true;
-                await host.markAbandoned('chat-ledger');
+                captured.resolve();
+                await released.promise;
               }
               return answer;
             },
@@ -2847,13 +3024,19 @@ describe('the host run ledger', () => {
       parked.abort();
     }, 2000);
 
-    const answer = await host.read({
+    const pending = host.read({
       chatId: 'chat-ledger',
+      sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
       cursor: orphanedFirstTurn.length,
       limit: 16,
       maxBytes: 1_048_576,
       signal: parked.signal,
     });
+    await captured.promise;
+    const abandoning = host.markAbandoned('chat-ledger');
+    released.resolve();
+    const answer = await pending;
+    await abandoning;
     clearTimeout(timer);
 
     // Answered by the row's wake, not by the reader giving up and re-reading.
@@ -2862,6 +3045,90 @@ describe('the host run ledger', () => {
       answer: { status: 'batch', events: [{ type: 'run.lifecycle', state: 'failed' }] },
     });
     await host.close();
+  });
+
+  it('should reject a pre-aborted native read before opening its log', async () => {
+    const file = createMemoryLogFile();
+    const openEventLog = vi.fn(file.open);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog,
+        transport: {
+          funding: { type: 'unfunded' },
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'aborted-read',
+      }),
+    );
+    try {
+      await expect(
+        host.read({ chatId: 'chat-ledger', cursor: 0, limit: 16, maxBytes: 1024, signal: AbortSignal.abort() }),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      expect(openEventLog).not.toHaveBeenCalled();
+    } finally {
+      await host.close();
+    }
+  });
+
+  it('should qualify read health with the same log incarnation when eviction races a held batch', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const captured = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
+    let opens = 0;
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: async () => {
+          const log = await file.open();
+          const incarnation = ++opens;
+          return {
+            ...log,
+            readBatch: async (request) => {
+              const answer = await log.readBatch(request);
+              if (incarnation === 1) {
+                captured.resolve();
+                await released.promise;
+              }
+              return answer;
+            },
+            // The replacement port reports damage absent from the prior incarnation's captured rows.
+            historyIntact: async () => incarnation === 1 && (await log.historyIntact()),
+          };
+        },
+        transport: {
+          funding: { type: 'unfunded' },
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'health-incarnation',
+      }),
+    );
+    const pending = host.read({ chatId: 'chat-ledger', cursor: 0, limit: 16, maxBytes: 1_048_576 });
+    await captured.promise;
+    const evicted = host.evictChat('chat-ledger');
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    released.resolve();
+    try {
+      const answer = await pending;
+      expect(answer).toMatchObject({
+        status: 'batch',
+        endCursor: completedFirstTurn.length,
+        sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+      });
+      await evicted;
+      expect(opens).toBe(1);
+    } finally {
+      released.resolve();
+      await evicted;
+      await host.close();
+    }
   });
 
   // CL-S10 (L2a D18): eviction closes the chat's log and drops its ledger; the next use reopens and refolds.

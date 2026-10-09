@@ -14,7 +14,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import type { AgentLogEvent } from '@taucad/agent-host';
+import type { AgentLogEvent, ProjectionSourceHealth } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import { Box, Text, render, useApp, useInput, useStdin, useStdout } from 'ink';
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
@@ -304,10 +304,12 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
         // `attach` records a run a daemon restart left hanging; rows come only from `read`.
         await attachChat(client, chatId);
         let ledger = { ...emptyChatLedger, position: { cursor: from } };
+        let sourceHealth: ProjectionSourceHealth | undefined;
         for (;;) {
           // oxlint-disable-next-line no-await-in-loop -- a cursored replay is sequential by definition.
-          const page = await readNext({ client, chatId, ledger, signal: stop.signal });
+          const page = await readNext({ client, chatId, ledger, sourceHealth, signal: stop.signal });
           ledger = page.ledger;
+          sourceHealth = page.sourceHealth;
           if (stop.signal.aborted) {
             return;
           }

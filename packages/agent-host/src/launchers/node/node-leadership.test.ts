@@ -74,16 +74,23 @@ const launch = (workspaceRoot: string): AgentLauncher => {
 /** Wait for the chat's log to hold a terminal row, reading as a viewer would. */
 const terminalRow = async (launcher: AgentLauncher, chatId: string): Promise<AgentLogEvent | undefined> => {
   let cursor = 0;
+  let sourceGeneration: string | undefined;
   for (let attempt = 0; attempt < 50; attempt++) {
     // oxlint-disable-next-line no-await-in-loop -- each read follows the last one's cursor.
     const answer = await launcher.read({
       chatId,
       cursor,
+      ...(sourceGeneration === undefined ? {} : { sourceGeneration }),
       limit: 16,
       maxBytes: 1_048_576,
       signal: AbortSignal.timeout(200),
     });
     if (answer.status !== 'batch') {
+      if (answer.reason === 'identity-mismatch') {
+        cursor = 0;
+        sourceGeneration = undefined;
+        continue;
+      }
       return undefined;
     }
     const events = answer.events as readonly AgentLogEvent[];
@@ -92,6 +99,7 @@ const terminalRow = async (launcher: AgentLauncher, chatId: string): Promise<Age
       return terminal;
     }
     cursor = answer.nextCursor;
+    sourceGeneration = answer.sourceGeneration;
   }
   return undefined;
 };

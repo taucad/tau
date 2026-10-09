@@ -47,6 +47,10 @@ const revisionChannel = (
   read: async () => {
     throw new Error('The revision hook reads no chat log.');
   },
+  async *catchUp() {
+    yield* [];
+    throw new Error('The revision hook catches up no chat log.');
+  },
   async *liveEvents() {
     yield* [];
   },

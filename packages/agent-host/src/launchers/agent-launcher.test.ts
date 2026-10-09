@@ -5,21 +5,32 @@
  */
 
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { MessageChannel } from 'node:worker_threads';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createAgentChannelClient } from '#channel/agent-channel-client.js';
+import { agentChannelPort } from '#channel/endpoint.js';
+import { serveAgentChannel } from '#launchers/agent-channel.js';
+import { followChat } from '#log/follow-chat.js';
 import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import { createNodeLauncher } from '#launchers/node-launcher.fixture.js';
 import { createAgentLauncher, credentialPrincipal } from '#launchers/agent-launcher.js';
 import { chatStoreBinding, createChatStore } from '#launchers/chat-store.js';
 import { createNodeChatStore } from '#node.js';
 import type { AgentLauncher, CredentialState } from '#launchers/agent-launcher.js';
-import type { AgentLogEvent } from '#log/event-types.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
-import type { HostRunSnapshot, ToolRegistry, TurnPlacementFact, TurnPlacementPort } from '#waist/ports.js';
+import type {
+  HostRunSnapshot,
+  ModelStreamEvent,
+  SourceLiveEvent,
+  ToolRegistry,
+  TurnPlacementFact,
+  TurnPlacementPort,
+} from '#waist/ports.js';
 import type { CommandAnswer, CommandPayload } from '#wire/commands.schema.js';
 import type { ReadAnswer } from '#wire/frames.schema.js';
 import type * as TauAgentHostModule from '#host/tau-agent-host.js';
@@ -189,7 +200,7 @@ const settle = async (
 };
 
 const read = async (host: AgentLauncher, chatId: string, cursor = 0): Promise<ReadAnswer> =>
-  host.read({ chatId, cursor, limit: 16, maxBytes: 1_048_576, signal: AbortSignal.timeout(100) });
+  host.read({ chatId, cursor, limit: 16, maxBytes: 1_048_576, signal: AbortSignal.abort() });
 
 afterEach(async () => {
   await launcher?.close();
@@ -198,6 +209,330 @@ afterEach(async () => {
 });
 
 describe('createAgentLauncher', () => {
+  it('delivers held same-run Resume deltas over a reconnected actual channel and replacement writer', async (context) => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-resume-live-channel-'));
+    roots.push(workspaceRoot);
+    const resumed = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    let calls = 0;
+    const host = createAgentLauncher({
+      chats: createNodeChatStore({ workspaceRoot }),
+      model,
+      systemPrompt: 'You are Tau.',
+      toolRegistry: emptyTools,
+      turnPlacement: fakePlacement({ registry: emptyTools }).port,
+      credential: () => ({ mode: 'session' }),
+      modelTransport: {
+        funding: { type: 'unfunded' },
+        async *stream(): AsyncGenerator<ModelStreamEvent> {
+          calls += 1;
+          if (calls === 1) {
+            yield { type: 'text-delta', text: 'Retained before failure.' };
+            yield { type: 'tool-input', toolCallId: 'resume-tool', toolName: 'fixture_tool', input: {} };
+            yield { type: 'completed', stopReason: 'toolUse' };
+            return;
+          }
+          if (calls === 2) {
+            yield { type: 'completed', stopReason: 'aborted' };
+            return;
+          }
+          yield { type: 'text-delta', text: 'Held Resume alpha.' };
+          resumed.resolve();
+          await finish.promise;
+          yield { type: 'text-delta', text: ' Resume beta.' };
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      },
+    });
+    launcher = host;
+    const connections: Array<() => void> = [];
+    const listen = vi.spyOn(host, 'liveEvents');
+    context.onTestFinished(async () => {
+      finish.resolve();
+      for (const close of connections) {
+        close();
+      }
+      listen.mockRestore();
+    });
+    const connect = () => {
+      const channel = new MessageChannel();
+      const server = serveAgentChannel(channel.port1, host, { build: 'resume-live' });
+      const client = createAgentChannelClient({ connect: () => agentChannelPort(channel.port2) });
+      const controller = new AbortController();
+      const events: SourceLiveEvent[] = [];
+      const consume = (async () => {
+        for await (const event of client.liveEvents({ chatId: 'chat-resume-live', signal: controller.signal })) {
+          events.push(event);
+        }
+      })();
+      const close = () => {
+        controller.abort();
+        client.close();
+        server.dispose();
+        channel.port1.close();
+        channel.port2.close();
+      };
+      connections.push(close);
+      return { client, events, close, consume };
+    };
+    const first = connect();
+    try {
+      await vi.waitFor(() => {
+        expect(listen).toHaveBeenCalledTimes(1);
+      });
+      await first.client.execute({
+        type: 'start',
+        commandId: key(),
+        payload: {
+          chatId: 'chat-resume-live',
+          runId: 'run-resume-live',
+          trigger: 'submit',
+          message: { id: 'resume-user', role: 'user', content: 'Fail then Resume.' },
+        },
+      });
+      const failed = await settle(host, 'chat-resume-live', { states: ['failed'] });
+      expect({ calls, failed }).toMatchObject({ calls: 2, failed: { snapshot: { state: 'failed' } } });
+      await vi.waitFor(() => {
+        expect(first.events.some((event) => event.type === 'text-delta')).toBe(true);
+      });
+      const oldGeneration = first.events[0]!.sourceGeneration;
+      first.close();
+      await first.consume;
+      await host.host.relinquish('chat-resume-live');
+      host.host.assumeLeadership('chat-resume-live', 2);
+      const second = connect();
+      await vi.waitFor(() => {
+        expect(listen).toHaveBeenCalledTimes(2);
+      });
+      await second.client.execute({
+        type: 'resume',
+        commandId: key(),
+        payload: {
+          chatId: 'chat-resume-live',
+          runId: 'run-resume-live',
+        },
+      });
+      await resumed.promise;
+      await vi.waitFor(() => {
+        expect(second.events).toContainEqual(
+          expect.objectContaining({ type: 'text-delta', delta: 'Held Resume alpha.', runId: 'run-resume-live' }),
+        );
+      });
+      const answer = await second.client.read({
+        chatId: 'chat-resume-live',
+        cursor: 0,
+        limit: 16,
+        maxBytes: 1_048_576,
+      });
+      expect(answer.status).toBe('batch');
+      if (answer.status !== 'batch') {
+        throw new Error('Replacement writer read refused.');
+      }
+      expect(second.events[0]!.sourceGeneration).toBe(answer.sourceGeneration);
+      expect(answer.sourceGeneration).not.toBe(oldGeneration);
+      finish.resolve();
+      await settle(host, 'chat-resume-live');
+      second.close();
+      await second.consume;
+    } finally {
+      finish.resolve();
+      for (const close of connections) {
+        close();
+      }
+    }
+  });
+
+  it('delivers held same-run Resume deltas on the same actual channel across read owner fencing and replacement writer', async (context) => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-resume-live-channel-'));
+    roots.push(workspaceRoot);
+    const resumed = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    let calls = 0;
+    const host = createAgentLauncher({
+      chats: createNodeChatStore({ workspaceRoot }),
+      model,
+      systemPrompt: 'You are Tau.',
+      toolRegistry: emptyTools,
+      turnPlacement: fakePlacement({ registry: emptyTools }).port,
+      credential: () => ({ mode: 'session' }),
+      modelTransport: {
+        funding: { type: 'unfunded' },
+        async *stream(): AsyncGenerator<ModelStreamEvent> {
+          calls += 1;
+          if (calls === 1) {
+            yield { type: 'text-delta', text: 'Retained before failure.' };
+            yield { type: 'tool-input', toolCallId: 'resume-tool', toolName: 'fixture_tool', input: {} };
+            yield { type: 'completed', stopReason: 'toolUse' };
+            return;
+          }
+          if (calls === 2) {
+            yield { type: 'completed', stopReason: 'aborted' };
+            return;
+          }
+          yield { type: 'text-delta', text: 'Held Resume alpha.' };
+          resumed.resolve();
+          await finish.promise;
+          yield { type: 'text-delta', text: ' Resume beta.' };
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      },
+    });
+    launcher = host;
+    const connections: Array<() => void> = [];
+    const listen = vi.spyOn(host, 'liveEvents');
+    context.onTestFinished(async () => {
+      finish.resolve();
+      for (const close of connections) {
+        close();
+      }
+      listen.mockRestore();
+    });
+    const connect = () => {
+      const channel = new MessageChannel();
+      const server = serveAgentChannel(channel.port1, host, { build: 'resume-live' });
+      const client = createAgentChannelClient({ connect: () => agentChannelPort(channel.port2) });
+      const controller = new AbortController();
+      const events: SourceLiveEvent[] = [];
+      const consume = (async () => {
+        for await (const event of client.liveEvents({ chatId: 'chat-resume-live', signal: controller.signal })) {
+          events.push(event);
+        }
+      })();
+      const close = () => {
+        controller.abort();
+        client.close();
+        server.dispose();
+        channel.port1.close();
+        channel.port2.close();
+      };
+      connections.push(close);
+      return { client, events, close, consume };
+    };
+    const first = connect();
+    const readEntered = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<void>();
+    let restoreRead: (() => void) | undefined;
+    try {
+      await vi.waitFor(() => {
+        expect(listen).toHaveBeenCalledTimes(1);
+      });
+      await first.client.execute({
+        type: 'start',
+        commandId: key(),
+        payload: {
+          chatId: 'chat-resume-live',
+          runId: 'run-resume-live',
+          trigger: 'submit',
+          message: { id: 'resume-user', role: 'user', content: 'Fail then Resume.' },
+        },
+      });
+      const failed = await settle(host, 'chat-resume-live', { states: ['failed'] });
+      expect({ calls, failed }).toMatchObject({ calls: 2, failed: { snapshot: { state: 'failed' } } });
+      await vi.waitFor(() => {
+        expect(first.events.some((event) => event.type === 'text-delta')).toBe(true);
+      });
+      const oldGeneration = first.events[0]!.sourceGeneration;
+      const initial = await first.client.read({
+        chatId: 'chat-resume-live',
+        cursor: 0,
+        limit: 16,
+        maxBytes: 1_048_576,
+      });
+      if (initial.status !== 'batch' || initial.nextCursor !== initial.endCursor) {
+        throw new Error('The failed fixture must be fully read before parking its follower.');
+      }
+      const originalRead = host.host.read.bind(host.host);
+      const readOwner = vi.spyOn(host.host, 'read').mockImplementation(async (request) => {
+        readEntered.resolve();
+        await releaseRead.promise;
+        return originalRead(request);
+      });
+      restoreRead = () => {
+        readOwner.mockRestore();
+      };
+      const fencedRead = first.client.read({
+        chatId: 'chat-resume-live',
+        cursor: initial.endCursor,
+        sourceGeneration: initial.sourceGeneration,
+        limit: 16,
+        maxBytes: 1_048_576,
+      });
+      await readEntered.promise;
+      expect(readOwner).toHaveBeenCalledOnce();
+      await host.host.relinquish('chat-resume-live');
+      releaseRead.resolve();
+      const fencedAnswer = await fencedRead;
+      expect(fencedAnswer).toMatchObject({ status: 'refused', reason: 'owner-fenced' });
+      readOwner.mockRestore();
+      host.host.assumeLeadership('chat-resume-live', 2);
+      await first.client.execute({
+        type: 'resume',
+        commandId: key(),
+        payload: {
+          chatId: 'chat-resume-live',
+          runId: 'run-resume-live',
+        },
+      });
+      await resumed.promise;
+      await vi.waitFor(() => {
+        expect(first.events).toContainEqual(
+          expect.objectContaining({ type: 'text-delta', delta: 'Held Resume alpha.', runId: 'run-resume-live' }),
+        );
+      });
+      const answer = await first.client.read({ chatId: 'chat-resume-live', cursor: 0, limit: 16, maxBytes: 1_048_576 });
+      expect(answer.status).toBe('batch');
+      if (answer.status !== 'batch') {
+        throw new Error('Replacement writer read refused.');
+      }
+      expect(
+        first.events.find((event) => event.type === 'text-delta' && event.delta === 'Held Resume alpha.')
+          ?.sourceGeneration,
+      ).toBe(answer.sourceGeneration);
+      expect(listen).toHaveBeenCalledTimes(1);
+      expect(answer.sourceGeneration).not.toBe(oldGeneration);
+      finish.resolve();
+      await settle(host, 'chat-resume-live');
+      first.close();
+      await first.consume;
+    } finally {
+      releaseRead.resolve();
+      restoreRead?.();
+      finish.resolve();
+      for (const close of connections) {
+        close();
+      }
+    }
+  });
+
+  it('qualifies live deltas with the same generation as their actual writer read', async () => {
+    const host = await makeLauncher(scriptedGateway());
+    const controller = new AbortController();
+    const stream = host.liveEvents({ chatId: 'chat-qualified', signal: controller.signal })[Symbol.asyncIterator]();
+    const pending = stream.next();
+    try {
+      await start(host, { chatId: 'chat-qualified', runId: 'run-qualified' });
+      const first = await pending;
+      expect(first.done).toBe(false);
+      await settle(host, 'chat-qualified');
+      const read = await host.read({
+        chatId: 'chat-qualified',
+        cursor: 0,
+        limit: 1,
+        maxBytes: 1_048_576,
+        signal: AbortSignal.abort(),
+      });
+      expect(read.status).toBe('batch');
+      if (read.status !== 'batch') {
+        throw new Error('Writer read did not produce a batch.');
+      }
+      expect(first.value).toMatchObject({ sourceGeneration: read.sourceGeneration, runId: 'run-qualified' });
+      expect(read.sourceGeneration).toEqual(expect.any(String));
+    } finally {
+      controller.abort();
+      await stream.return?.();
+    }
+  });
+
   it('writes the workspace event log and replays a completed transcript from a read cursor', async () => {
     const host = await makeLauncher(scriptedGateway());
     const started = await start(host, { chatId: 'chat-1', runId: 'run-1' });
@@ -277,7 +612,7 @@ describe('createAgentLauncher', () => {
     const host = await makeLauncher(scriptedGateway());
     const chatId = '00000000-0000-4000-8000-000000000000';
 
-    await expect(read(host, chatId)).resolves.toEqual({
+    await expect(read(host, chatId)).resolves.toMatchObject({
       status: 'batch',
       chatId,
       cursor: 0,
@@ -328,6 +663,10 @@ describe('createAgentLauncher', () => {
     const lock = join(workspaceRoot, '.tau', 'chats', 'chat-idle', 'events.jsonl.lock');
     await start(host, { chatId: 'chat-idle', runId: 'run-idle' });
     await settle(host, 'chat-idle');
+    const writing = await read(host, 'chat-idle');
+    if (writing.status !== 'batch') {
+      throw new Error('Expected writer source.');
+    }
 
     await vi.waitFor(
       async () => {
@@ -335,10 +674,32 @@ describe('createAgentLauncher', () => {
       },
       { timeout: 5000, interval: 25 },
     );
+    await expect(
+      host.read({
+        chatId: 'chat-idle',
+        cursor: writing.nextCursor,
+        sourceGeneration: writing.sourceGeneration,
+        limit: 16,
+        maxBytes: 1_048_576,
+      }),
+    ).resolves.toMatchObject({ status: 'refused', reason: 'identity-mismatch' });
+    const viewing = await read(host, 'chat-idle');
+    if (viewing.status !== 'batch') {
+      throw new Error('Expected read-only source.');
+    }
     /* A fresh incarnation takes the writer again and admits the run (the fixture's one scripted turn is spent). */
     await expect(start(host, { chatId: 'chat-idle', runId: 'run-idle-2' })).resolves.toMatchObject({
       status: 'applied',
     });
+    await expect(
+      host.read({
+        chatId: 'chat-idle',
+        cursor: viewing.nextCursor,
+        sourceGeneration: viewing.sourceGeneration,
+        limit: 16,
+        maxBytes: 1_048_576,
+      }),
+    ).resolves.toMatchObject({ status: 'refused', reason: 'identity-mismatch' });
     await expect(settle(host, 'chat-idle', { states: ['completed', 'failed'] })).resolves.toMatchObject({
       snapshot: { runId: 'run-idle-2' },
     });
@@ -890,6 +1251,76 @@ describe('createAgentLauncher', () => {
     await expect(Promise.race([waiting, parked])).resolves.toMatchObject({ status: 'batch', chatId: 'chat-woken' });
   });
 
+  it('reacquires nonwriter bytes after a writer opens and closes while an old read is held', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-node-launcher-'));
+    roots.push(workspaceRoot);
+    const base = chatStoreBinding(createNodeChatStore({ workspaceRoot }));
+    const { observeBytes: _observeBytes, ...unobserved } = base;
+    const reading = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<void>();
+    let hold = true;
+    const fetchImplementation = scriptedGateway();
+    launcher = createAgentLauncher({
+      chats: createChatStore({
+        ...unobserved,
+        readBytes: async (chatId) => {
+          const bytes = await base.readBytes(chatId);
+          if (hold) {
+            hold = false;
+            reading.resolve();
+            await held.promise;
+          }
+          return bytes;
+        },
+      }),
+      modelTransport: createTauCloudGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        model,
+        auth: () => 'daemon-bearer',
+        fetch: fetchImplementation,
+      }),
+      credential: () => ({ mode: 'session' }),
+      systemPrompt: 'You are Tau.',
+      model,
+      toolRegistry: emptyTools,
+      delays: { idleEviction: 1000 },
+      turnPlacement: fakePlacement({ registry: emptyTools }).port,
+    });
+    const waiting = launcher.read({ chatId: 'chat-woken', cursor: 0, limit: 16, maxBytes: 1_048_576 });
+    await reading.promise;
+    await start(launcher, { chatId: 'chat-woken', runId: 'run-woken' });
+    await vi.waitFor(async () => {
+      expect(await readFile(join(workspaceRoot, '.tau', 'chats', 'chat-woken', 'events.jsonl'), 'utf8')).toContain(
+        '"state":"completed"',
+      );
+    });
+    const lock = join(workspaceRoot, '.tau', 'chats', 'chat-woken', 'events.jsonl.lock');
+    await vi.waitFor(
+      async () => {
+        await expect(stat(lock)).rejects.toMatchObject({ code: 'ENOENT' });
+      },
+      { timeout: 5000, interval: 25 },
+    );
+    const replacement = launcher.read({ chatId: 'chat-woken', cursor: 0, limit: 16, maxBytes: 1_048_576 });
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    held.resolve();
+
+    const parked = new Promise<'parked'>((resolve) => {
+      setTimeout(() => {
+        resolve('parked');
+      }, 2000);
+    });
+    const current = await Promise.race([replacement, parked]);
+    expect(current).toMatchObject({ status: 'batch', chatId: 'chat-woken' });
+    if (typeof current === 'string' || current.status !== 'batch') {
+      throw new Error('The new nonwriter did not receive current authoritative rows.');
+    }
+    expect(current.events.length).toBeGreaterThan(0);
+    await waiting;
+  });
+
   it('re-attaches to a run left non-terminal on a model-less launcher by reusing the committed model row', async () => {
     /* The previous host died mid-turn: its log holds the admission, the committed
      * turn context (which carries the model row) and a `running` marker. */
@@ -991,15 +1422,38 @@ describe('createAgentLauncher', () => {
     const tailed = await read(host, 'chat-viewer');
     expect(tailed).toMatchObject({ status: 'batch', endCursor: 3 });
     // The claim the read asked for abandons the run as its term's claiming append (I13).
-    const recorded = await host.read({
-      chatId: 'chat-viewer',
-      cursor: 3,
-      limit: 16,
-      maxBytes: 1_048_576,
+    // Acquiring leadership replaces the source incarnation; the shared follower resets and refolds its writer.
+    const recordedRows: unknown[] = [];
+    for await (const page of followChat(async (input) => host.read(input), 'chat-viewer', {
       signal: AbortSignal.timeout(2000),
-    });
-    const recordedRows = recorded.status === 'batch' ? (recorded.events as readonly AgentLogEvent[]) : [];
-    expect(recordedRows.map((event) => event.type === 'run.lifecycle' && event.state)).toContain('failed');
+      until: (ledger) => ledger.runs['run-viewer']?.lifecycle === 'failed',
+    })) {
+      recordedRows.push(...page.events);
+      if (
+        page.events.some(
+          (event) =>
+            typeof event === 'object' &&
+            event !== null &&
+            'type' in event &&
+            event.type === 'run.lifecycle' &&
+            'state' in event &&
+            event.state === 'failed',
+        )
+      ) {
+        break;
+      }
+    }
+    expect(
+      recordedRows.map(
+        (event) =>
+          typeof event === 'object' &&
+          event !== null &&
+          'type' in event &&
+          event.type === 'run.lifecycle' &&
+          'state' in event &&
+          event.state,
+      ),
+    ).toContain('failed');
     expect(await readFile(logPath, 'utf8')).not.toBe(seeded);
     // Exactly one recovery: the next attach observes a terminal run and takes nothing over.
     await expect(attach(host, 'chat-viewer')).resolves.toMatchObject({

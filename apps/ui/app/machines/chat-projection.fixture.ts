@@ -3,6 +3,9 @@
  * where the chat store's projection hears them.
  */
 
+import { agentLogEventSchema, projectionFactSchema } from '@taucad/agent-host';
+import type { ProjectionFact } from '@taucad/agent-host';
+import type { CatchUpFrame } from '@taucad/agent-host/wire';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 type ProjectionReader = Pick<ChatSessionStore, 'receiveHostReadAnswer'>;
@@ -74,5 +77,24 @@ export const publishLogPage = (
     nextCursor: cursor + rows.length,
     endCursor,
     events: rows,
+  });
+};
+
+/** Simulate the explicit in-memory writer owner for fixtures driven through ordinary read answers. */
+export const writerOwnedCatchUp = async function* ({ chatId }: { chatId: string }): AsyncIterable<CatchUpFrame> {
+  yield { type: 'refused', answer: { status: 'refused', chatId, reason: 'writer-owned' } };
+};
+
+/** Explicit lifecycle/message fixtures for current compact attachment frames; other rows require their own fixture. */
+export const compactRow = (input: unknown): ProjectionFact => {
+  const event = agentLogEventSchema.parse(input);
+  if ((event.type !== 'run.lifecycle' || 'admission' in event) && event.type !== 'message.appended') {
+    throw new Error('Use an explicit compact fact for this fixture event.');
+  }
+  const { version, leaderEpoch, sequence, recordedAt, runId, epoch, commandId, attempt, ...effect } = event;
+  return projectionFactSchema.parse({
+    classification: 'known',
+    row: { version, leaderEpoch, sequence, recordedAt, runId, epoch, commandId, attempt },
+    effect,
   });
 };

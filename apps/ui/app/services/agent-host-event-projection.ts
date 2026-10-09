@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { ProviderMetadata, UIMessageChunk } from 'ai';
-import type { AgentLiveEvent, AgentLogEvent, ProviderMessageMetadata } from '@taucad/agent-host';
+import type { AgentLiveEvent, AgentLogEvent, KnownProjectionEvent, ProviderMessageMetadata } from '@taucad/agent-host';
 import { userProviderMessageSchema } from '@taucad/agent-host';
 import { externalAgentStopSchema } from '@taucad/agent-host/wire';
 import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
@@ -11,6 +11,9 @@ import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@
 import { isRecord } from '@taucad/utils/schema';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
 import { normalizedErrorCategoryOf } from '#utils/chat-error-card.js';
+
+/** Presentation consumes canonical rows or distinct validated compact events. */
+type PresentationEvent = AgentLogEvent | KnownProjectionEvent;
 
 type ProviderMessage = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['message'];
 type AssistantProviderMessage = Extract<ProviderMessage, { readonly role: 'assistant' }>;
@@ -601,7 +604,7 @@ export type ProjectedTurnSettlement = TurnConflictedEvent | TurnFailedEvent | Tu
  * @returns The settlement, or `undefined` for every other record.
  * @public
  */
-export const projectTurnSettlement = (event: AgentLogEvent): ProjectedTurnSettlement | undefined => {
+export const projectTurnSettlement = (event: PresentationEvent): ProjectedTurnSettlement | undefined => {
   switch (event.type) {
     case 'turn.finalized': {
       return {
@@ -646,20 +649,20 @@ export const projectTurnSettlement = (event: AgentLogEvent): ProjectedTurnSettle
 };
 
 /** Read the finalized member used by revision cards. @public */
-export const projectTurnFinalized = (event: AgentLogEvent): TurnFinalizedEvent | undefined => {
+export const projectTurnFinalized = (event: PresentationEvent): TurnFinalizedEvent | undefined => {
   const settlement = projectTurnSettlement(event);
   return settlement?.type === 'turn.finalized' ? settlement : undefined;
 };
 
 /** Extract an authoritative admitted user, canonical user row, or authentic steering input. */
-export const projectAgentHostUserTurn = (event: AgentLogEvent): MyUIMessage | undefined => {
+export const projectAgentHostUserTurn = (event: PresentationEvent): MyUIMessage | undefined => {
   if (event.type === 'run.lifecycle' && event.state === 'admitted' && 'admission' in event) {
     const admission = isRecord(event.admission) ? event.admission : undefined;
-    const message = userProviderMessageSchema.safeParse(admission?.['message']);
+    const message = userProviderMessageSchema.safeParse(admission?.message);
     if (
-      (admission?.['kind'] === 'tau' || admission?.['kind'] === 'external') &&
+      (admission?.kind === 'tau' || admission?.kind === 'external') &&
       message.success &&
-      admission['turnId'] === message.data.id
+      admission.turnId === message.data.id
     ) {
       return projectAgentHostUserMessage(message.data, event.recordedAt);
     }
@@ -681,8 +684,14 @@ export const projectAgentHostUserTurn = (event: AgentLogEvent): MyUIMessage | un
 };
 
 /** Project one non-durable model delta while retaining its open content block. */
+type PresentationLiveEvent = AgentLiveEvent extends infer Event
+  ? Event extends AgentLiveEvent
+    ? Omit<Event, 'chatId'> & { readonly chatId?: string }
+    : never
+  : never;
+
 export const projectAgentHostLiveEvent = (
-  event: AgentLiveEvent,
+  event: PresentationLiveEvent,
   streamedBlocks: AgentHostLiveBlocks,
 ): readonly UIMessageChunk[] => {
   const tool = 'toolCallId' in event ? streamedBlocks.get(toolKey(event.runId, event.toolCallId)) : undefined;
@@ -836,7 +845,7 @@ const hasOpenBlock = (runId: string, streamedBlocks: AgentHostLiveBlocks | undef
 };
 
 const lifecycleChunks = (
-  event: Extract<AgentLogEvent, { readonly type: 'run.lifecycle' }>,
+  event: Extract<PresentationEvent, { readonly type: 'run.lifecycle' }>,
   streamedBlocks: AgentHostLiveBlocks | undefined,
 ): readonly UIMessageChunk[] => {
   const { state } = event;
@@ -1092,7 +1101,7 @@ export const parseAgentHostApproval = (input: unknown): AgentHostApproval | unde
   agentHostApprovalSchema.safeParse(input).data;
 
 const approvalChunks = (
-  event: Extract<AgentLogEvent, { readonly type: 'interrupt.recorded' }>,
+  event: Extract<PresentationEvent, { readonly type: 'interrupt.recorded' }>,
 ): readonly UIMessageChunk[] => {
   if (event.phase === 'resolved') {
     // `reason` carries the outcome verbatim on every host that writes one.
@@ -1129,7 +1138,7 @@ const approvalChunks = (
 
 /** Convert one durable browser-host event into the UI SDK chunk vocabulary used by API chat. */
 export const projectAgentHostEvent = (
-  event: AgentLogEvent,
+  event: PresentationEvent,
   streamedBlocks?: AgentHostLiveBlocks,
 ): readonly UIMessageChunk[] => {
   switch (event.type) {

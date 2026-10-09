@@ -239,12 +239,19 @@ const harness = async (): Promise<Harness> => {
 /** Follow the chat with long-poll reads until its run ends; returns every row read. */
 const followToEnd = async (client: AgentChannelClient): Promise<readonly unknown[]> => {
   const rows: unknown[] = [];
+  let sourceGeneration: string | undefined;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- each read starts at the last one's end.
-    const page = await client.read({ chatId, cursor: rows.length, limit: 16, maxBytes: 65_536 });
+    const page = await client.read({ chatId, cursor: rows.length, sourceGeneration, limit: 16, maxBytes: 65_536 });
     if (page.status !== 'batch') {
+      if (page.reason === 'identity-mismatch') {
+        rows.length = 0;
+        sourceGeneration = undefined;
+        continue;
+      }
       throw new Error(`Unexpected refusal: ${page.reason}`);
     }
+    sourceGeneration = page.sourceGeneration;
     rows.push(...page.events);
     /* A run ends at its attempt's settlement row, which M1 appends after the terminal one (W8 TS-S6). */
     const ended = page.events.some((row) => (row as AgentLogEvent).type === 'turn.finalized');
@@ -325,29 +332,42 @@ describe('the seam on the daemon leg', () => {
     await followToEnd(client);
     const rows = await seam.rows();
 
-    const ahead = await client.read({ chatId, cursor: rows.length + 5, limit: 16, maxBytes: 65_536 });
+    const first = await client.read({ chatId, cursor: 0, limit: 16, maxBytes: 65_536 });
+    if (first.status !== 'batch') {
+      throw new Error('Expected current source.');
+    }
+    const ahead = await client.read({
+      chatId,
+      cursor: rows.length + 5,
+      sourceGeneration: first.sourceGeneration,
+      limit: 16,
+      maxBytes: 65_536,
+    });
     expect(ahead).toEqual({ status: 'refused', chatId, reason: 'cursor-ahead', expected: { endCursor: rows.length } });
 
     const wrong = await client.read({
       chatId,
       cursor: 1,
       last: { leaderEpoch: 'not-this-term', sequence: 0 },
+      sourceGeneration: first.sourceGeneration,
       limit: 16,
       maxBytes: 65_536,
     });
     expect(wrong).toMatchObject({ status: 'refused', reason: 'identity-mismatch' });
 
     let cursor = 0;
+    let sourceGeneration: string | undefined;
     const paged: unknown[] = [];
     while (cursor < rows.length) {
       // oxlint-disable-next-line no-await-in-loop -- each page starts at the last one's end.
-      const page = await client.read({ chatId, cursor, limit: 16, maxBytes: 1 });
+      const page = await client.read({ chatId, cursor, sourceGeneration, limit: 16, maxBytes: 1 });
       expect(page).toMatchObject({ status: 'batch', cursor, nextCursor: cursor + 1 });
       if (page.status !== 'batch') {
         throw new Error('expected a batch');
       }
       paged.push(...page.events);
       cursor = page.nextCursor;
+      sourceGeneration = page.sourceGeneration;
     }
     expect(paged).toEqual(rows);
   });

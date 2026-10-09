@@ -10,19 +10,21 @@
  * they are, unless this process already writes the chat, whose host then answers the long poll from its writer.
  */
 
+import { sameSourceHealth } from '#log/projection-facts.js';
+import type { ProjectionSourceHealth } from '#log/projection-facts.js';
 import { isOrphaned } from '#host/chat-run.machine.js';
 import { createTauAgentHost } from '#host/tau-agent-host.js';
 import type { ExternalAgentPort } from '#host/external-agent.js';
 import type { CreateTauAgentHostOptions, TauAgentHost } from '#host/tau-agent-host.js';
 import { externalTurnOf, latestTurnId } from '#host/run-history.js';
 import { createPortableId, transportFailureOfRun } from '#harness/session-record.js';
-import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import { emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import type { ChatLedger } from '#log/chat-ledger.js';
 import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
 import type {
   AgentLiveEvent,
+  SourceLiveEvent,
   DurableEventLog,
   HostRunSnapshot,
   InterruptRequest,
@@ -30,9 +32,12 @@ import type {
   ToolRegistry,
 } from '#waist/ports.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
-import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
+import { catchUpRequestSchema } from '#wire/frames.schema.js';
+import type { CatchUpFrame, CatchUpInput, ReadAnswer, ReadInput } from '#wire/frames.schema.js';
 import type { RefusalCode } from '#wire/refusals.js';
 import { chatStoreBinding, requireChatPathSegment } from '#launchers/chat-store.js';
+import { createReplayView, isBytePrefix } from '#launchers/replay-view.js';
+import type { ReplayView } from '#launchers/replay-view.js';
 import type { ChatStore, LeadershipPort } from '#launchers/chat-store.js';
 
 /**
@@ -103,10 +108,12 @@ export type AgentLauncher = {
   execute(command: HostCommand): Promise<CommandAnswer>;
   /** One long-poll read (SC-R14). It never creates a chat, takes no lock and assumes no leadership (RH-R1). */
   read(input: ReadInput): Promise<ReadAnswer>;
+  /** Immutable provisional catch-up pages followed by exact current-byte validation; cancellation releases the lease. */
+  catchUp(input: CatchUpInput): AsyncIterable<CatchUpFrame>;
   /** Read the current leadership actor only; never requests a lock or sends a chat command. */
   stoppability(chatId: string): 'stoppable' | 'other-build' | 'background-window';
   /** Ephemeral model deltas for one chat, bounded per subscriber (SC-R15). */
-  liveEvents(input: Readonly<{ chatId: string; signal: AbortSignal }>): AsyncIterable<AgentLiveEvent>;
+  liveEvents(input: Readonly<{ chatId: string; signal: AbortSignal }>): AsyncIterable<SourceLiveEvent>;
   /** Unresolved approval requests for one run. */
   pendingInterrupts(runId: string): Promise<readonly InterruptRequest[]>;
   /**
@@ -231,32 +238,16 @@ const refused = (commandId: string, code: RefusalCode | string, message: string)
   message,
 });
 
-/** One read-only view of a chat: its rows as they are, folded once (RH-R21: one pass over its bytes). */
-type ChatView = Readonly<{ log: EventLogAppender; ledger: ChatLedger }>;
-
-/**
- * A read-only appender over bytes already read: the tolerant open, `readBatch` and `messages` without a writer.
- *
- * @param bytes - The chat's bytes.
- * @returns An appender whose writes are refused.
- */
-const viewOf = async (bytes: Uint8Array<ArrayBuffer>): Promise<ChatView> => {
-  const refuse = async (): Promise<never> => {
-    throw Object.assign(new Error('A read-only chat view never writes.'), { code: 'STORAGE_NOT_WRITABLE' });
-  };
-  const log = await createEventLogAppender({
-    read: async () => bytes,
-    append: refuse,
-    truncate: refuse,
-    close: async () => undefined,
-    size: async () => bytes.byteLength,
-    exclusive: async (section) => section(),
-  });
-  const rows = await log.read();
-  const folded = foldChatLedger(emptyChatLedger, rows);
-  const ledger = (await log.historyIntact()) ? folded : { ...folded, historyIntact: false };
-  return { log, ledger };
+type SourceObservation = {
+  ready: Promise<void>;
+  failure: AbortSignal;
+  failed: boolean;
+  references: number;
+  retained: boolean;
+  close(): void;
 };
+
+type ChatView = ReplayView;
 
 /**
  * The chat's run as a read sees it, the same projection `describeRun` answers.
@@ -312,32 +303,47 @@ const runOf = async (chatId: string, view: ChatView): Promise<HostRunSnapshot | 
 export const createAgentLauncher = (options: AgentLauncherOptions): AgentLauncher => {
   const binding = chatStoreBinding(options.chats);
   const createId = options.createId ?? createPortableId;
-  const live = createFanOut<AgentLiveEvent>();
+  const live = createFanOut<SourceLiveEvent>();
   /** Chats whose writer this process holds open: their reads are the host's long poll. */
   const writers = new Set<string>();
+  const writerGenerations = new Map<string, string>();
+  const replay = new Map<string, ReplayView>();
+  const pinned = new Map<ReplayView, number>();
+  const acquiring = new Map<string, Promise<ReplayView>>();
+  const observations = new Map<string, SourceObservation>();
+  const activeReads = new Map<string, number>();
+  const retirements = new Map<string, ReturnType<typeof setTimeout>>();
+  const replayChatLimit = 32;
+  const replayByteLimit = 32 * 1024 * 1024;
+  /** Milliseconds. */
+  const oversizedReplayIdle = 2000;
   /** A writer M2's `readView` opened, handed to the chat's next incarnation (one open, one read: RH-R9). */
   const views = new Map<string, Promise<EventLogAppender>>();
   /**
    * Reads parked on a chat this process does not write. A `writer` wake continues the long poll on this process's
    * writer; a `reroute` wake (the chat's holder changed) answers at once, so the reader's next read is routed anew.
    */
-  const parked = new Map<string, Set<(reason: 'writer' | 'reroute') => void>>();
+  const parked = new Map<string, Set<(reason: 'writer' | 'reroute' | 'source') => void>>();
   /**
    * The read passes over a chat's bytes in flight, and the wakes during them: a pass a wake overtook answers instead of
    * parking past it. An entry lives only while a pass does.
    */
-  const passes = new Map<string, { count: number; wakes: number }>();
+  const passes = new Map<string, { count: number; wakes: number; sourceWakes: number }>();
   /** Chats some verb has named: the first one checks for a run with no driver (RH-R1, RH-R15). */
   const named = new Set<string>();
+  const stopped = new AbortController();
   let closed = false;
   let closing: Promise<void> | undefined;
   /* Set once the leadership binding exists; the host's callbacks before then have no chat to report. */
   const leading: { port?: LeadershipPort } = {};
 
-  const wakeReads = (chatId: string, reason: 'writer' | 'reroute' = 'writer'): void => {
+  const wakeReads = (chatId: string, reason: 'writer' | 'reroute' | 'source' = 'writer'): void => {
     const pass = passes.get(chatId);
     if (pass !== undefined) {
       pass.wakes += 1;
+      if (reason === 'source') {
+        pass.sourceWakes += 1;
+      }
     }
     const waiting = parked.get(chatId);
     parked.delete(chatId);
@@ -346,12 +352,158 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     }
   };
 
+  const cancelRetirement = (chatId: string): void => {
+    const timer = retirements.get(chatId);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      retirements.delete(chatId);
+    }
+  };
+
+  const dropObservation = (chatId: string): void => {
+    cancelRetirement(chatId);
+    const observation = observations.get(chatId);
+    if (observation === undefined) {
+      return;
+    }
+    observation.retained = false;
+    if (observation.references === 0) {
+      observations.delete(chatId);
+      acquiring.delete(chatId);
+      observation.close();
+    }
+  };
+
+  const pruneReplay = (): void => {
+    // Active oversized owners and one idle oversized view are additive to the normal budget.
+    // The existing exact-owner idle timer retires that last view; pruning must not bypass it.
+    let idleOversized: string | undefined;
+    for (const [key, entry] of replay) {
+      if (entry.bytes.byteLength > replayByteLimit && !pinned.has(entry) && (activeReads.get(key) ?? 0) === 0) {
+        if (idleOversized !== undefined) {
+          replay.delete(idleOversized);
+          dropObservation(idleOversized);
+        }
+        idleOversized = key;
+      }
+    }
+    const counted = [...replay].filter(([, entry]) => entry.bytes.byteLength <= replayByteLimit);
+    let retained = counted.reduce((total, [, entry]) => total + entry.bytes.byteLength, 0);
+    let sources = counted.length;
+    for (const [key, entry] of counted) {
+      if (sources <= replayChatLimit && retained <= replayByteLimit) {
+        break;
+      }
+      if (pinned.has(entry) || (activeReads.get(key) ?? 0) > 0) {
+        continue;
+      }
+      replay.delete(key);
+      dropObservation(key);
+      retained -= entry.bytes.byteLength;
+      sources--;
+    }
+  };
+
+  // Retirement bounds inactive oversized retention; time never proves source equality.
+  const retireOversized = (chatId: string): void => {
+    cancelRetirement(chatId);
+    const current = replay.get(chatId);
+    if (
+      closed ||
+      current === undefined ||
+      current.bytes.byteLength <= replayByteLimit ||
+      (activeReads.get(chatId) ?? 0) > 0 ||
+      acquiring.has(chatId)
+    ) {
+      return;
+    }
+    const owner = observations.get(chatId);
+    const timer = setTimeout(() => {
+      if (retirements.get(chatId) !== timer) {
+        return;
+      }
+      retirements.delete(chatId);
+      if (
+        replay.get(chatId) === current &&
+        observations.get(chatId) === owner &&
+        (activeReads.get(chatId) ?? 0) === 0 &&
+        !acquiring.has(chatId)
+      ) {
+        replay.delete(chatId);
+        dropObservation(chatId);
+      }
+    }, oversizedReplayIdle);
+    retirements.set(chatId, timer);
+  };
+
+  const acquireObservation = (chatId: string): SourceObservation => {
+    const prior = observations.get(chatId);
+    if (prior !== undefined && !prior.failed) {
+      prior.references++;
+      return prior;
+    }
+    const controller = new AbortController();
+    const failure = new AbortController();
+    let release: (() => void) | undefined;
+    const observation: SourceObservation = {
+      ready: Promise.resolve(),
+      failure: failure.signal,
+      failed: false,
+      references: 1,
+      retained: false,
+      close: () => {
+        controller.abort();
+        release?.();
+        release = undefined;
+      },
+    };
+    observations.set(chatId, observation);
+    const fail = (): void => {
+      if (!controller.signal.aborted) {
+        observation.failed = true;
+        failure.abort();
+        if (observations.get(chatId) === observation) {
+          replay.delete(chatId);
+          acquiring.delete(chatId);
+          wakeReads(chatId, 'source');
+          dropObservation(chatId);
+        }
+      }
+    };
+    const observe = async (): Promise<void> => {
+      try {
+        const unsubscribe = await binding.observeBytes!(chatId, {
+          signal: controller.signal,
+          onChange: () => {
+            if (!controller.signal.aborted && observations.get(chatId) === observation) {
+              wakeReads(chatId, 'source');
+            }
+          },
+          onError: fail,
+        });
+        if (controller.signal.aborted) {
+          unsubscribe();
+        } else {
+          release = unsubscribe;
+        }
+      } catch {
+        fail();
+      }
+    };
+    observation.ready = observe();
+    return observation;
+  };
+
   const openEventLog = async (chatId: string): Promise<DurableEventLog> => {
     requireChatPathSegment(chatId);
     const handed = views.get(chatId);
     views.delete(chatId);
     const log = await (handed ?? binding.openWriter(chatId));
     writers.add(chatId);
+    writerGenerations.set(chatId, createPortableId());
+    acquiring.delete(chatId);
+    replay.delete(chatId);
+    dropObservation(chatId);
     wakeReads(chatId);
     return {
       append: async (candidate: AgentLogEvent) => {
@@ -380,6 +532,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       anomalies: async () => log.anomalies(),
       close: async () => {
         writers.delete(chatId);
+        writerGenerations.delete(chatId);
         await log.close();
       },
     };
@@ -400,8 +553,13 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     ...(options.delays === undefined ? {} : { delays: options.delays }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     onLiveEvent: (event: AgentLiveEvent) => {
-      live.publish(event);
-      leading.port?.liveEvent(event);
+      const sourceGeneration = writerGenerations.get(event.chatId);
+      if (sourceGeneration === undefined) {
+        return;
+      }
+      const qualified = { ...event, sourceGeneration };
+      live.publish(qualified);
+      leading.port?.liveEvent(qualified);
     },
     onChatQuiescent: (chatId, quiescent) => {
       leading.port?.quiescent(chatId, quiescent);
@@ -518,7 +676,47 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
   });
   leading.port = port;
 
-  const view = async (chatId: string): Promise<ChatView> => viewOf(await binding.readBytes(chatId));
+  const view = async (chatId: string): Promise<ChatView> => {
+    cancelRetirement(chatId);
+    const underway = acquiring.get(chatId);
+    if (underway !== undefined) {
+      return underway;
+    }
+    const source = observations.get(chatId);
+    const acquire = async (): Promise<ReplayView> => {
+      const bytes = await binding.readBytes(chatId);
+      if (acquiring.get(chatId) !== acquisition || observations.get(chatId) !== source || source?.failed === true) {
+        return createReplayView(bytes, createPortableId());
+      }
+      const prior = replay.get(chatId);
+      const prefix = prior !== undefined && isBytePrefix(prior.bytes, bytes);
+      const current = prefix
+        ? prior.bytes.byteLength === bytes.byteLength
+          ? prior
+          : prior.extend(bytes)
+        : createReplayView(bytes, createPortableId());
+      if (!closed && observations.get(chatId) === source) {
+        replay.delete(chatId);
+        replay.set(chatId, current);
+        const observation = observations.get(chatId);
+        if (observation !== undefined) {
+          observation.retained = true;
+        }
+        pruneReplay();
+      }
+      return current;
+    };
+    const acquisition = acquire();
+    acquiring.set(chatId, acquisition);
+    try {
+      return await acquisition;
+    } finally {
+      if (acquiring.get(chatId) === acquisition) {
+        acquiring.delete(chatId);
+        retireOversized(chatId);
+      }
+    }
+  };
 
   /* RH-R16, TS-R16: a lease the placement names is a chat to reconcile, queuing for its lock (`wait`). At open: every
    * held lease; then each `leaseHeld` fact, for this launcher's life. */
@@ -636,14 +834,18 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
   };
 
   /** Park until this process writes the chat, its holder changes, the reader lets go, or the launcher closes. */
-  const park = async (chatId: string, signal: AbortSignal | undefined): Promise<'writer' | 'reroute'> =>
-    new Promise<'writer' | 'reroute'>((resolve) => {
-      const waiting = parked.get(chatId) ?? new Set<(reason: 'writer' | 'reroute') => void>();
+  const park = async (chatId: string, signal: AbortSignal | undefined): Promise<'writer' | 'reroute' | 'source'> =>
+    new Promise<'writer' | 'reroute' | 'source'>((resolve) => {
+      if (signal?.aborted) {
+        resolve('reroute');
+        return;
+      }
+      const waiting = parked.get(chatId) ?? new Set<(reason: 'writer' | 'reroute' | 'source') => void>();
       parked.set(chatId, waiting);
       const aborted = (): void => {
         wake('reroute');
       };
-      const wake = (reason: 'writer' | 'reroute'): void => {
+      const wake = (reason: 'writer' | 'reroute' | 'source'): void => {
         waiting.delete(wake);
         if (waiting.size === 0 && parked.get(chatId) === waiting) {
           parked.delete(chatId);
@@ -656,21 +858,44 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     });
 
   /** A read this process serves: from its writer when it has one, else from the bytes as they are. */
-  const readLocal = async (input: ReadInput): Promise<ReadAnswer> => {
+  const readCurrent = async (input: ReadInput, health: { failed: boolean }): Promise<ReadAnswer> => {
     const { signal, ...request } = input;
     const { chatId } = request;
+    const sourceFailed = (): boolean => health.failed;
     for (;;) {
-      if (writers.has(chatId)) {
-        return host.read(input);
+      if (sourceFailed()) {
+        return { status: 'refused', chatId, reason: 'unreadable' };
       }
-      const pass = passes.get(chatId) ?? { count: 0, wakes: 0 };
+      if (writers.has(chatId)) {
+        const sourceGeneration = writerGenerations.get(chatId)!;
+        if (input.cursor > 0 && input.sourceGeneration !== sourceGeneration) {
+          return { status: 'refused', chatId, reason: 'identity-mismatch', expected: { sourceGeneration } };
+        }
+        // oxlint-disable-next-line no-await-in-loop -- the writer owns the long poll for this iteration.
+        const answer = await host.read(
+          input.sourceGeneration === sourceGeneration ? input : { ...input, sourceHealth: undefined },
+        );
+        return answer.status === 'batch' ? { ...answer, sourceGeneration } : answer;
+      }
+      const pass = passes.get(chatId) ?? { count: 0, wakes: 0, sourceWakes: 0 };
       passes.set(chatId, pass);
       pass.count += 1;
       const woken = pass.wakes;
       let answer: Awaited<ReturnType<ChatView['log']['readBatch']>>;
+      let sourceGeneration: string;
+      let sourceHealth: ProjectionSourceHealth;
       try {
         // oxlint-disable-next-line no-await-in-loop -- one pass over the bytes per wake.
         const chat = await view(chatId);
+        // A writer admitted while acquisition was suspended owns the answer, including an initially empty source.
+        if (writers.has(chatId)) {
+          continue;
+        }
+        sourceGeneration = chat.generation;
+        sourceHealth = chat.sourceHealth;
+        if (input.cursor > 0 && input.sourceGeneration !== sourceGeneration) {
+          return { status: 'refused', chatId, reason: 'identity-mismatch', expected: { sourceGeneration } };
+        }
         checkDriver(chatId, chat.ledger, false);
         // oxlint-disable-next-line no-await-in-loop -- the view answers at once.
         answer = await chat.log.readBatch(request);
@@ -680,12 +905,17 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
           passes.delete(chatId);
         }
       }
+      if (sourceFailed()) {
+        return { status: 'refused', chatId, reason: 'unreadable' };
+      }
       if (answer.status === 'refused') {
         return { status: 'refused', chatId, reason: answer.reason, expected: answer.expected };
       }
       const batch: ReadAnswer = {
         status: 'batch',
         chatId,
+        sourceGeneration,
+        sourceHealth,
         cursor: answer.cursor,
         nextCursor: answer.nextCursor,
         endCursor: answer.endCursor,
@@ -693,7 +923,14 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       };
       /* A wake while this pass read the bytes (a writer opened, or the holder changed) has no waiter to reach: answer
        * now, and the reader's next read is routed anew. */
-      if (answer.events.length > 0 || closed || signal?.aborted === true || pass.wakes !== woken) {
+      if (
+        answer.events.length > 0 ||
+        input.sourceGeneration !== sourceGeneration ||
+        !sameSourceHealth(input.sourceHealth, sourceHealth) ||
+        closed ||
+        signal?.aborted === true ||
+        pass.wakes !== woken
+      ) {
         return batch;
       }
       // oxlint-disable-next-line no-await-in-loop -- the park is the long poll.
@@ -703,9 +940,292 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     }
   };
 
+  const readObserved = async (input: ReadInput): Promise<ReadAnswer> => {
+    if (binding.observeBytes === undefined || writers.has(input.chatId) || input.signal?.aborted === true) {
+      return readCurrent(input, { failed: false });
+    }
+    const observation = acquireObservation(input.chatId);
+    const controller = new AbortController();
+    const ended = Promise.withResolvers<void>();
+    const failure = Promise.withResolvers<void>();
+    const failed = (): void => {
+      failure.resolve();
+    };
+    observation.failure.addEventListener('abort', failed, { once: true });
+    if (observation.failure.aborted) {
+      failed();
+    }
+    const abort = (): void => {
+      controller.abort();
+      ended.resolve();
+    };
+    input.signal?.addEventListener('abort', abort, { once: true });
+    stopped.signal.addEventListener('abort', abort, { once: true });
+    // Cancellation before observation cannot fabricate a generation-qualified health batch.
+    const cancelled = (): never => {
+      throw new DOMException('The read was aborted before an authoritative observation.', 'AbortError');
+    };
+
+    const unavailable = (): ReadAnswer => ({ status: 'refused', chatId: input.chatId, reason: 'unreadable' });
+    const finishAborted = async (): Promise<ReadAnswer> => {
+      await ended.promise;
+      return cancelled();
+    };
+    const finishFailed = async (): Promise<ReadAnswer> => {
+      await failure.promise;
+      return unavailable();
+    };
+    try {
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Observer acquisition invokes external callbacks which can abort after the initial guard.
+      if (stopped.signal.aborted || input.signal?.aborted) {
+        abort();
+      }
+      await Promise.race([observation.ready, ended.promise, failure.promise]);
+      if (observation.failed) {
+        return unavailable();
+      }
+      if (controller.signal.aborted) {
+        return cancelled();
+      }
+      return await Promise.race([
+        readCurrent({ ...input, signal: controller.signal }, observation),
+        finishAborted(),
+        finishFailed(),
+      ]);
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw error;
+      }
+      if (observations.get(input.chatId) === observation) {
+        replay.delete(input.chatId);
+        dropObservation(input.chatId);
+      }
+      return unavailable();
+    } finally {
+      observation.failure.removeEventListener('abort', failed);
+      abort();
+      observation.references--;
+      if (!observation.retained || observation.failed) {
+        if (observations.get(input.chatId) === observation) {
+          dropObservation(input.chatId);
+        } else if (observation.references === 0) {
+          observation.close();
+        }
+      }
+      input.signal?.removeEventListener('abort', abort);
+      stopped.signal.removeEventListener('abort', abort);
+    }
+  };
+
+  const readLocal = async (input: ReadInput): Promise<ReadAnswer> => {
+    if (input.signal?.aborted) {
+      throw new DOMException('The read was aborted.', 'AbortError');
+    }
+    const { chatId } = input;
+    cancelRetirement(chatId);
+    activeReads.set(chatId, (activeReads.get(chatId) ?? 0) + 1);
+    try {
+      return await readObserved(input);
+    } finally {
+      const remaining = (activeReads.get(chatId) ?? 1) - 1;
+      if (remaining === 0) {
+        activeReads.delete(chatId);
+        pruneReplay();
+        retireOversized(chatId);
+      } else {
+        activeReads.set(chatId, remaining);
+      }
+    }
+  };
+
+  const catchUp = async function* (input: CatchUpInput): AsyncGenerator<CatchUpFrame> {
+    const { signal, ...request } = input;
+    const { chatId, limit, maxBytes } = catchUpRequestSchema.parse(request);
+    requireChatPathSegment(chatId);
+    const refusal = (
+      reason: 'writer-owned' | 'capacity-exceeded' | 'identity-mismatch' | 'unreadable',
+    ): CatchUpFrame => ({ type: 'refused', answer: { status: 'refused', chatId, reason } });
+    if (closed) {
+      throw Object.assign(new Error('The Tau agent launcher is closed.'), {
+        code: 'HOST_CLOSED' satisfies RefusalCode,
+      });
+    }
+    if (signal?.aborted) {
+      return;
+    }
+    if (writers.has(chatId) || port.role(chatId).role === 'follower') {
+      yield refusal('writer-owned');
+      return;
+    }
+    const observation = binding.observeBytes === undefined ? undefined : acquireObservation(chatId);
+    const ended = Promise.withResolvers<void>();
+    const pass = passes.get(chatId) ?? { count: 0, wakes: 0, sourceWakes: 0 };
+    passes.set(chatId, pass);
+    pass.count++;
+    let captured: ReplayView | undefined;
+    let proof: ReplayView | undefined;
+    const captureReleased = (): boolean => captured === undefined;
+    let pinnedCapture = false;
+    let released = false;
+    const aborted = (): boolean => signal?.aborted === true || stopped.signal.aborted;
+    const unavailable = (): boolean => observation?.failed === true || observations.get(chatId) !== observation;
+    const release = (): void => {
+      if (released) {
+        return;
+      }
+      released = true;
+      if (captured !== undefined && pinnedCapture) {
+        const references = (pinned.get(captured) ?? 1) - 1;
+        if (references === 0) {
+          pinned.delete(captured);
+        } else {
+          pinned.set(captured, references);
+        }
+      }
+      captured = undefined;
+      proof = undefined;
+      signal?.removeEventListener('abort', stop);
+      stopped.signal.removeEventListener('abort', stop);
+      observation?.failure.removeEventListener('abort', stop);
+      pass.count--;
+      if (pass.count === 0) {
+        passes.delete(chatId);
+      }
+      if (observation !== undefined) {
+        observation.references--;
+        if (!observation.retained || observation.failed) {
+          if (observations.get(chatId) === observation) {
+            dropObservation(chatId);
+          } else if (observation.references === 0) {
+            observation.close();
+          }
+        }
+      }
+      const remaining = (activeReads.get(chatId) ?? 1) - 1;
+      if (remaining === 0) {
+        activeReads.delete(chatId);
+        pruneReplay();
+        retireOversized(chatId);
+      } else {
+        activeReads.set(chatId, remaining);
+      }
+    };
+    const stop = (): void => {
+      ended.resolve();
+      release();
+    };
+    signal?.addEventListener('abort', stop, { once: true });
+    stopped.signal.addEventListener('abort', stop, { once: true });
+    observation?.failure.addEventListener('abort', stop, { once: true });
+    activeReads.set(chatId, (activeReads.get(chatId) ?? 0) + 1);
+    cancelRetirement(chatId);
+    const acquireCurrent = async (): Promise<ReplayView | undefined> => {
+      if (aborted() || unavailable() || writers.has(chatId)) {
+        return undefined;
+      }
+      const current = await Promise.race([view(chatId), ended.promise.then(() => undefined)]);
+      if (current === undefined || aborted() || unavailable() || writers.has(chatId)) {
+        return undefined;
+      }
+      checkDriver(chatId, current.ledger, false);
+      return current;
+    };
+    try {
+      await Promise.race([observation?.ready ?? Promise.resolve(), ended.promise]);
+      const openingWakes = pass.sourceWakes;
+      captured = await acquireCurrent();
+      // One follow-up includes an acknowledged opening wake; a finite capture never waits for source quiescence.
+      if (captured !== undefined && openingWakes !== pass.sourceWakes) {
+        captured = await acquireCurrent();
+      }
+      if (aborted()) {
+        return;
+      }
+      if (captured === undefined) {
+        yield refusal(writers.has(chatId) ? 'identity-mismatch' : 'unreadable');
+        return;
+      }
+      if (!pinned.has(captured)) {
+        const normal = [...pinned.keys()].filter((current) => current.bytes.byteLength <= replayByteLimit);
+        const normalBytes = normal.reduce((sum, current) => sum + current.bytes.byteLength, 0);
+        const exceeds =
+          captured.bytes.byteLength > replayByteLimit
+            ? [...pinned.keys()].some((current) => current.bytes.byteLength > replayByteLimit)
+            : normal.length >= replayChatLimit || normalBytes + captured.bytes.byteLength > replayByteLimit;
+        if (exceeds) {
+          if (replay.get(chatId) === captured) {
+            replay.delete(chatId);
+            dropObservation(chatId);
+          }
+          captured = undefined;
+          yield refusal('capacity-exceeded');
+          return;
+        }
+      }
+      pinned.set(captured, (pinned.get(captured) ?? 0) + 1);
+      pinnedCapture = true;
+      const sourceGeneration = captured.generation;
+      const position = { ...captured.ledger.position, sourceGeneration };
+      let cursor = 0;
+      while (cursor < position.cursor) {
+        if (aborted()) {
+          return;
+        }
+        if (unavailable() || captureReleased()) {
+          yield refusal('unreadable');
+          return;
+        }
+        if (writers.has(chatId)) {
+          yield refusal('identity-mismatch');
+          return;
+        }
+        const answer = captured.projectionBatch({ chatId, cursor, limit, maxBytes });
+        if (aborted()) {
+          return;
+        }
+        yield { type: 'page', answer };
+        cursor = answer.nextCursor;
+      }
+      // This fresh byte acquisition and exact prefix comparison linearize validation; later wakes belong to the next read.
+      proof = await acquireCurrent();
+      if (aborted()) {
+        return;
+      }
+      if (unavailable()) {
+        yield refusal('unreadable');
+        return;
+      }
+      if (
+        writers.has(chatId) ||
+        proof === undefined ||
+        captureReleased() ||
+        proof.generation !== sourceGeneration ||
+        proof.ledger.position.cursor < position.cursor ||
+        !isBytePrefix(captured.bytes, proof.bytes)
+      ) {
+        yield refusal('identity-mismatch');
+        return;
+      }
+      yield {
+        type: 'validated',
+        position,
+        observedEndCursor: proof.ledger.position.cursor,
+        health: captured.sourceHealth,
+      };
+    } catch {
+      if (!aborted()) {
+        yield refusal('unreadable');
+      }
+    } finally {
+      release();
+      ended.resolve();
+    }
+  };
+
   return {
     host,
     execute,
+    catchUp,
     read: async (input) => {
       if (closed) {
         throw Object.assign(new Error('The Tau agent launcher is closed.'), {
@@ -731,6 +1251,17 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     close: async () => {
       closing ??= (async () => {
         closed = true;
+        stopped.abort();
+        for (const timer of retirements.values()) {
+          clearTimeout(timer);
+        }
+        retirements.clear();
+        for (const observation of observations.values()) {
+          observation.close();
+        }
+        observations.clear();
+        replay.clear();
+        writerGenerations.clear();
         placing.abort();
         await port.close();
         await host.close();

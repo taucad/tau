@@ -8,7 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { useChatContext } from '#hooks/use-chat.js';
+import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProject } from '#hooks/use-project.js';
 import { ChatOptionsMeta } from '#routes/w.$workspace.$project/chat-options-meta.js';
@@ -28,6 +28,7 @@ import { flagParameter } from '#utils/search-parameter.codecs.js';
  */
 export function ChatHistorySettings({ onRename }: { readonly onRename: () => void }): React.ReactNode {
   const { chat, activeChatId } = useChatContext();
+  const messages = useChatSelector((state) => state.messages);
   const { projectId } = useProject();
   const [, setArchivedChats] = useSearchParameter(searchParameterName.archivedChats, flagParameter, {
     history: 'push',
@@ -39,14 +40,14 @@ export function ChatHistorySettings({ onRename }: { readonly onRename: () => voi
     if (!chat) {
       return;
     }
-    const transcript = serializeTranscript(chat.messages, chatName);
+    const transcript = serializeTranscript(messages, chatName);
     const blob = new Blob([transcript], {
       type: 'text/markdown;charset=utf-8',
     });
     const timestamp = new Date().toISOString().slice(0, 16).replaceAll(':', '-');
     const snakeName = toSnakeCase(chatName) || 'chat_transcript';
     downloadBlob(blob, `${snakeName}_${timestamp}.md`);
-  }, [chat?.messages, chat, chatName]);
+  }, [messages, chat, chatName]);
 
   return (
     <DropdownMenu modal={false}>
@@ -67,7 +68,7 @@ export function ChatHistorySettings({ onRename }: { readonly onRename: () => voi
           <Pencil />
           Rename
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={!chat || chat.messages.length === 0} onSelect={handleExport}>
+        <DropdownMenuItem disabled={!chat || messages.length === 0} onSelect={handleExport}>
           <Download />
           Export transcript
         </DropdownMenuItem>

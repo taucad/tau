@@ -1,5 +1,6 @@
 import { EventLogError } from '#log/event-log-error.js';
 import { classifyLogRow, historyRowTypes } from '#log/event-schema.js';
+import type { ReadRow } from '#log/serialization.js';
 import { createEventSequence } from '#log/event-sequence.js';
 import type { SequenceAnomaly } from '#log/event-sequence.js';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
@@ -80,6 +81,8 @@ export const createEventLogReducer = (): {
    * readable while the host refuses to run it (`HISTORY_INVALID`, CL-R2).
    */
   replay(candidate: AgentLogEvent): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly };
+  /** Replay a parser-owned classification without revalidating the row. */
+  replayClassified(row: ReadRow): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly };
   messages(): readonly ProviderMessage[];
   /** `false` once a history row was rejected at replay. */
   historyIntact(): boolean;
@@ -252,8 +255,10 @@ export const createEventLogReducer = (): {
     };
   };
 
-  const replay = (candidate: AgentLogEvent): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly } => {
-    const { event, opaque } = reducerEvent(candidate);
+  const replayClassified = ({
+    event,
+    opaque,
+  }: ReadRow): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly } => {
     const replayed = sequence.replay(event);
     if (!replayed.duplicate && opaque && historyRowTypes.has(event.type)) {
       intact = false;
@@ -273,7 +278,13 @@ export const createEventLogReducer = (): {
     return replayed;
   };
 
-  return { prepare, replay, messages: () => [...messages], historyIntact: () => intact };
+  return {
+    prepare,
+    replay: (candidate) => replayClassified(reducerEvent(candidate)),
+    replayClassified,
+    messages: () => [...messages],
+    historyIntact: () => intact,
+  };
 };
 
 /**

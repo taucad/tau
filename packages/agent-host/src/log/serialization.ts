@@ -24,11 +24,9 @@ type ByteLine = { readonly start: number; readonly end: number; readonly termina
 const splitByteLines = (bytes: Uint8Array<ArrayBuffer>): ByteLine[] => {
   const lines: ByteLine[] = [];
   let start = 0;
-  for (let index = 0; index < bytes.byteLength; index++) {
-    if (bytes[index] === 10) {
-      lines.push({ start, end: index, terminated: true });
-      start = index + 1;
-    }
+  for (let end = bytes.indexOf(10, start); end !== -1; end = bytes.indexOf(10, start)) {
+    lines.push({ start, end, terminated: true });
+    start = end + 1;
   }
   if (start < bytes.byteLength) {
     lines.push({ start, end: bytes.byteLength, terminated: false });

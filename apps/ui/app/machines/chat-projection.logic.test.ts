@@ -4,6 +4,12 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createAgentLauncher } from '@taucad/agent-host/launcher';
+import { createNodeChatStore } from '@taucad/agent-host/node';
+import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createActor } from 'xstate';
@@ -112,6 +118,60 @@ const pageScan = () => {
 };
 
 describe('chatProjectionLogic (PV-S7)', () => {
+  it('publishes validated catch-up once while retaining the latest foreign projection', () => {
+    const actor = createActor(chatProjectionLogic).start();
+    try {
+      const base = actor.getSnapshot().context;
+      const staged = project([lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')], 1);
+      expect(actor.getSnapshot().context.ledger.position.cursor).toBe(0);
+      actor.send({
+        type: 'remote',
+        segments: [
+          {
+            deviceId: 'other-device',
+            bytes: new TextEncoder().encode(JSON.stringify(lifecycleRow(0, 'admitted', 'foreign-run')) + '\n'),
+          },
+        ],
+      });
+      const currentRemote = actor.getSnapshot().context.remote;
+      const commit = { type: 'catch-up', base, projection: staged } as const;
+      actor.send(commit);
+      expect(actor.getSnapshot().context.ledger.position.cursor).toBe(2);
+      expect(actor.getSnapshot().context.remote).toBe(currentRemote);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('retains a nonzero reset version when validated catch-up installs its private initial fold', () => {
+    const actor = createActor(chatProjectionLogic).start();
+    try {
+      actor.send({ type: 'reset' });
+      const base = actor.getSnapshot().context;
+      const staged = project([lifecycleRow(0, 'admitted')], 1);
+      const commit = { type: 'catch-up', base, projection: staged } as const;
+      actor.send(commit);
+      expect(actor.getSnapshot().context.ledger.position.cursor).toBe(1);
+      expect(actor.getSnapshot().context.resetVersion).toBe(base.resetVersion);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('rejects held catch-up after empty reset even when the empty ledger identity is reused', () => {
+    const actor = createActor(chatProjectionLogic).start();
+    try {
+      const base = actor.getSnapshot().context;
+      const staged = project([lifecycleRow(0, 'admitted')], 1);
+      actor.send({ type: 'reset' });
+      const commit = { type: 'catch-up', base, projection: staged } as const;
+      actor.send(commit);
+      expect(actor.getSnapshot().context.ledger.position.cursor).toBe(0);
+    } finally {
+      actor.stop();
+    }
+  });
+
   it('should preserve external admission before its canonical user arrives', async () => {
     const user = {
       id: 'external-user',
@@ -650,6 +710,175 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(selectTranscriptSource(projection).map((run) => run.runId)).toEqual(['r1']);
   });
 
+  it('should retain an earlier corrected envelope without keeping a later rewound message', async () => {
+    const assistant = (id: string, text: string, checkpoint = false) => ({
+      id,
+      role: 'assistant',
+      content: [{ type: 'text', text }],
+      ...(checkpoint ? { metadata: { tauInternal: { kind: 'stream', streamState: 'checkpoint' } } } : {}),
+    });
+    const rows = [
+      lifecycleRow(0, 'admitted', 'r1'),
+      logRow(1, { runId: 'r1', type: 'message.appended', message: { id: 'u1', role: 'user', content: 'x' } }),
+      lifecycleRow(2, 'running', 'r1'),
+      logRow(3, { runId: 'r1', type: 'message.appended', message: assistant('a1', 'first', true) }),
+      ...['first extended', 'first extended again', 'first extended again finally'].map((text, index) =>
+        logRow(index + 4, {
+          runId: 'r1',
+          type: 'message.envelope-replaced',
+          messageId: 'a1',
+          replacement: assistant('a1', text, true),
+        }),
+      ),
+      logRow(7, { runId: 'r1', type: 'message.appended', message: assistant('a2', 'later must disappear') }),
+      logRow(8, {
+        runId: 'r1',
+        type: 'message.envelope-replaced',
+        messageId: 'a1',
+        replacement: assistant('a1', 'corrected first'),
+      }),
+      logRow(9, { runId: 'r1', type: 'history.rewound', trigger: 'retry', retainedMessageIds: ['u1', 'a1'] }),
+    ];
+    const transcript = await materializeTranscript(project(rows, 1));
+    const reply = transcript.find((message) => message.role === 'assistant');
+    expect(reply?.parts.filter((part) => part.type === 'text').map((part) => part.text)).toEqual(['corrected first']);
+  });
+
+  it('should remove deleted blocks from an earlier envelope before rewinding its successor', async () => {
+    const assistant = (id: string, texts: readonly string[]) => ({
+      id,
+      role: 'assistant',
+      content: texts.map((text) => ({ type: 'text', text })),
+    });
+    const rows = [
+      lifecycleRow(0, 'admitted', 'r1'),
+      logRow(1, { runId: 'r1', type: 'message.appended', message: { id: 'u1', role: 'user', content: 'x' } }),
+      lifecycleRow(2, 'running', 'r1'),
+      logRow(3, { runId: 'r1', type: 'message.appended', message: assistant('a1', ['retained', 'removed']) }),
+      logRow(4, { runId: 'r1', type: 'message.appended', message: assistant('a2', ['rewound']) }),
+      logRow(5, {
+        runId: 'r1',
+        type: 'message.envelope-replaced',
+        messageId: 'a1',
+        replacement: assistant('a1', ['retained']),
+      }),
+      logRow(6, { runId: 'r1', type: 'history.rewound', trigger: 'retry', retainedMessageIds: ['u1', 'a1'] }),
+    ];
+    const transcript = await materializeTranscript(project(rows, 1));
+    const reply = transcript.find((message) => message.role === 'assistant');
+    expect(reply?.parts.filter((part) => part.type === 'text').map((part) => part.text)).toEqual(['retained']);
+  });
+
+  it.each([
+    {
+      name: 'array text to a shorter string',
+      before: [
+        { type: 'text', text: 'long original' },
+        { type: 'text', text: 'removed' },
+      ],
+      after: 'short',
+      expected: [{ type: 'text', text: 'short' }],
+    },
+    {
+      name: 'text to thinking at the same index and prefix',
+      before: [{ type: 'text', text: 'same prefix' }],
+      after: [{ type: 'thinking', thinking: 'same prefix' }],
+      expected: [{ type: 'reasoning', text: 'same prefix' }],
+    },
+  ])('should replace a checkpoint changing $name', async ({ before, after, expected }) => {
+    const assistant = (content: unknown) => ({
+      id: 'a1',
+      role: 'assistant',
+      content,
+      metadata: { tauInternal: { kind: 'stream', streamState: 'checkpoint' } },
+    });
+    const rows = [
+      lifecycleRow(0, 'admitted'),
+      logRow(1, { type: 'message.appended', message: { id: 'u1', role: 'user', content: 'x' } }),
+      lifecycleRow(2, 'running'),
+      logRow(3, { type: 'message.appended', message: assistant(before) }),
+      logRow(4, { type: 'message.envelope-replaced', messageId: 'a1', replacement: assistant(after) }),
+    ];
+    const transcript = await materializeTranscript(project(rows, 1));
+    const reply = transcript.find((message) => message.role === 'assistant');
+    expect(
+      reply?.parts
+        .filter((part) => part.type === 'text' || part.type === 'reasoning')
+        .map(({ type, text }) => ({ type, text })),
+    ).toEqual(expected);
+  });
+
+  it('should correct an envelope in a sealed steering segment without moving it to the active segment', async () => {
+    const assistant = (id: string, text: string) => ({ id, role: 'assistant', content: text });
+    const rows = [
+      lifecycleRow(0, 'admitted'),
+      logRow(1, { type: 'message.appended', message: { id: 'u1', role: 'user', content: 'Original prompt' } }),
+      lifecycleRow(2, 'running'),
+      logRow(3, { type: 'message.appended', message: assistant('a1', 'Original answer') }),
+      logRow(4, { type: 'message.appended', message: { id: 'steer:1', role: 'user', content: 'Steering' } }),
+      logRow(5, { type: 'message.appended', message: assistant('a2', 'Active answer') }),
+      logRow(6, {
+        type: 'message.envelope-replaced',
+        messageId: 'a1',
+        replacement: assistant('a1', 'Corrected answer'),
+      }),
+    ];
+    const transcript = await materializeTranscript(project(rows, 1));
+    expect(
+      transcript.map((message) =>
+        message.parts
+          .filter((part) => part.type === 'text')
+          .map((part) => part.text)
+          .join(''),
+      ),
+    ).toEqual(['Original prompt', 'Corrected answer', 'Steering', 'Active answer']);
+  });
+
+  it('should trim a rewind prefix ending inside a sealed steering segment', async () => {
+    const assistant = (id: string, text: string) => ({ id, role: 'assistant', content: text });
+    const rows = [
+      lifecycleRow(0, 'admitted'),
+      logRow(1, { type: 'message.appended', message: { id: 'u1', role: 'user', content: 'Original prompt' } }),
+      lifecycleRow(2, 'running'),
+      logRow(3, { type: 'message.appended', message: assistant('a1', 'Retained answer') }),
+      logRow(4, { type: 'message.appended', message: assistant('a2', 'Dropped answer') }),
+      logRow(5, { type: 'message.appended', message: { id: 'steer:1', role: 'user', content: 'Dropped steering' } }),
+      logRow(6, { type: 'message.appended', message: assistant('a3', 'Dropped active answer') }),
+      lifecycleRow(7, 'admitted', 'run_2'),
+      logRow(8, { runId: 'run_2', type: 'history.rewound', trigger: 'retry', retainedMessageIds: ['u1', 'a1'] }),
+    ];
+    const transcript = await materializeTranscript(project(rows, 1));
+    expect(
+      transcript
+        .filter((message) => message.role === 'assistant')
+        .flatMap((message) => message.parts.filter((part) => part.type === 'text').map((part) => part.text)),
+    ).toEqual(['Retained answer']);
+  });
+
+  it('should retain visible compaction-evicted messages inside a sealed steering segment', async () => {
+    const rows = [
+      lifecycleRow(0, 'admitted'),
+      logRow(1, { type: 'message.appended', message: { id: 'u1', role: 'user', content: 'Original prompt' } }),
+      lifecycleRow(2, 'running'),
+      logRow(3, {
+        type: 'message.appended',
+        message: { id: 'a1', role: 'assistant', content: 'Visible original answer' },
+      }),
+      logRow(4, { type: 'message.appended', message: { id: 'steer:1', role: 'user', content: 'Dropped steering' } }),
+      logRow(5, {
+        type: 'history.compacted',
+        evictedMessageIds: ['u1', 'a1'],
+        summary: { id: 'summary', role: 'user', content: 'Provider-only summary' },
+      }),
+      lifecycleRow(6, 'admitted', 'run_2'),
+      logRow(7, { runId: 'run_2', type: 'history.rewound', trigger: 'retry', retainedMessageIds: ['summary'] }),
+    ];
+    const transcript = await materializeTranscript(project(rows, 1));
+    expect(
+      transcript.flatMap((message) => message.parts.filter((part) => part.type === 'text').map((part) => part.text)),
+    ).toEqual(['Original prompt', 'Visible original answer']);
+  });
+
   it('should keep a turn a compaction evicted even when a rewind drops its summary', () => {
     const user = (id: string) => ({ id, role: 'user', content: 'x' });
     const assistant = (id: string) => ({ id, role: 'assistant', content: [{ type: 'text', text: id }] });
@@ -798,7 +1027,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       type: 'batch',
       answer: { status: 'refused', reason: 'identity-mismatch' },
     });
-    expect(refused.state).toBe(initialChatProjection);
+    expect(refused.state).toEqual({ ...initialChatProjection, resetVersion: state.resetVersion + 1 });
     expect(refused.emit).toEqual({ type: 'reread' });
     const unreadable = reduceChatProjection(state, {
       type: 'batch',
@@ -881,4 +1110,172 @@ it('should retain failed-run history and finalize its interrupted tool tail', as
       input: { file: 'main.ts' },
     }),
   );
+});
+
+describe('compact captured projection parity', () => {
+  const compactCases = [
+    ...logs.map((name) => ({ name, rows: readLog(name) })),
+    {
+      name: 'sealed correction, compaction and partial rewind',
+      rows: [
+        lifecycleRow(0, 'admitted'),
+        logRow(1, { type: 'message.appended', message: { id: 'u1', role: 'user', content: 'Original prompt' } }),
+        lifecycleRow(2, 'running'),
+        logRow(3, {
+          type: 'message.appended',
+          message: {
+            id: 'a1',
+            role: 'assistant',
+            content: [
+              { type: 'text', text: 'original' },
+              { type: 'text', text: 'remove' },
+            ],
+          },
+        }),
+        logRow(4, { type: 'message.appended', message: { id: 'a2', role: 'assistant', content: 'later answer' } }),
+        logRow(5, { type: 'message.appended', message: { id: 'steer:1', role: 'user', content: 'Steer' } }),
+        logRow(6, {
+          type: 'message.envelope-replaced',
+          messageId: 'a1',
+          replacement: { id: 'a1', role: 'assistant', content: 'corrected' },
+        }),
+        logRow(7, {
+          type: 'history.compacted',
+          evictedMessageIds: ['u1', 'a1'],
+          summary: { id: 'summary', role: 'user', content: 'summary' },
+        }),
+        logRow(8, { type: 'history.rewound', retainedMessageIds: ['summary'], trigger: 'regenerate' }),
+      ],
+    },
+    {
+      name: 'independent rewind and opaque history rows',
+      rows: [
+        lifecycleRow(0, 'admitted'),
+        logRow(1, { type: 'message.appended', message: { id: 'u1', role: 'user', content: 'Original prompt' } }),
+        logRow(2, { type: 'message.appended', message: { id: 'a1', role: 'assistant', content: 'Original answer' } }),
+        logRow(3, { type: 'run.lifecycle', state: 'admitted', admission: { rewind: { retainedMessageIds: ['u1'] } } }),
+        logRow(4, { type: 'future.presentation', content: 'opaque' }),
+        logRow(5, {
+          type: 'message.appended',
+          message: { id: 'future', role: 'future-role', content: 'opaque history' },
+        }),
+      ],
+    },
+    {
+      name: 'physical duplicate known and opaque rows',
+      rows: [
+        lifecycleRow(0, 'admitted'),
+        lifecycleRow(0, 'admitted'),
+        logRow(1, { type: 'future.presentation' }),
+        logRow(1, { type: 'future.presentation' }),
+        { ...lifecycleRow(2, 'running'), commandId: 'after-physical-duplicates' },
+      ],
+    },
+  ];
+  it.each(compactCases)(
+    'should preserve all visible and ledger facts from the actual host for $name',
+    async ({ rows }) => {
+      const root = await mkdtemp(join(tmpdir(), 'tau-render-compact-'));
+      const directory = join(root, '.tau/chats/parity');
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, 'events.jsonl'), rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+      const model = { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000, maxTokens: 4096 } as const;
+      const launcher = createAgentLauncher({
+        chats: createNodeChatStore({ workspaceRoot: root }),
+        model,
+        modelTransport: createTauCloudGatewayModelTransport({
+          baseUrl: 'https://gateway.example',
+          model,
+          auth: () => 'unused',
+          fetch: async () => {
+            throw new Error('Projection parity must not invoke a model.');
+          },
+        }),
+        credential: () => ({ mode: 'session' }),
+        systemPrompt: 'You are Tau.',
+        toolRegistry: { list: () => [], invoke: async () => ({ content: 'unused', isError: true }) },
+      });
+      const actor = createActor(chatProjectionLogic).start();
+      try {
+        let raw = project(rows, 7);
+        let validated = false;
+        for await (const frame of launcher.catchUp({ chatId: 'parity', limit: 1, maxBytes: 1024 * 1024 })) {
+          if (frame.type === 'page') {
+            const event = { type: 'facts', answer: frame.answer };
+            actor.send(event);
+          } else if (frame.type === 'validated') {
+            expect(frame.position.cursor).toBe(rows.length);
+            expect(frame.observedEndCursor).toBe(rows.length);
+            const last = rows.at(-1);
+            expect(frame.position.last).toEqual({ leaderEpoch: last?.leaderEpoch, sequence: last?.sequence });
+            const answer: Extract<ChatProjectionReadAnswer, { status: 'batch' }> = {
+              status: 'batch',
+              cursor: rows.length,
+              nextCursor: rows.length,
+              endCursor: rows.length,
+              events: [],
+              sourceGeneration: frame.position.sourceGeneration,
+              sourceHealth: frame.health,
+            };
+            actor.send({ type: 'batch', answer });
+            raw = reduceChatProjection(raw, { type: 'batch', answer }).state;
+            validated = true;
+          } else {
+            throw new Error(`Unexpected catch-up refusal: ${frame.answer.reason}`);
+          }
+        }
+        expect(validated).toBe(true);
+        const compact = actor.getSnapshot().context;
+        expect(compact.ledger.position.cursor).toBe(rows.length);
+        expect(compact.ledger).toEqual(raw.ledger);
+        expect(compact.openTools).toEqual(raw.openTools);
+        expect(compact.failure).toEqual(raw.failure);
+        expect(compact.attentionRow).toEqual(raw.attentionRow);
+        expect(await materializeTranscript(compact)).toEqual(await materializeTranscript(raw));
+      } finally {
+        actor.stop();
+        await launcher.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+it('should retain uncommitted live output when a different historical run is corrected', () => {
+  const message = (content: string) => ({
+    id: 'a1',
+    role: 'assistant',
+    content,
+    metadata: { tauInternal: { kind: 'stream', streamState: 'checkpoint' } },
+  });
+  const base = project(
+    [
+      lifecycleRow(0, 'admitted'),
+      logRow(1, { type: 'message.appended', message: message('old answer') }),
+      lifecycleRow(2, 'admitted', 'active-run'),
+      lifecycleRow(3, 'running', 'active-run'),
+    ],
+    1,
+  );
+  const live = reduceChatProjection(base, {
+    type: 'live',
+    event: {
+      type: 'text-delta',
+      chatId: 'chat_1',
+      runId: 'active-run',
+      messageId: 'new-message',
+      contentIndex: 0,
+      delta: 'Uncommitted',
+      offset: 0,
+    },
+  }).state;
+  const next = reduceChatProjection(live, {
+    type: 'batch',
+    answer: batch(
+      [logRow(4, { type: 'message.envelope-replaced', messageId: 'a1', replacement: message('corrected') })],
+      4,
+      5,
+    ),
+  }).state;
+  expect(next.live).toBe(live.live);
 });

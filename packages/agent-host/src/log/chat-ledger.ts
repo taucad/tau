@@ -8,6 +8,15 @@
  */
 import { canonicalJson } from '#log/canonical-json.js';
 import { classifyLogRow, historyRowTypes } from '#log/event-schema.js';
+import type { ClassifiedRow } from '#log/event-schema.js';
+import { projectionBatchSchema } from '#log/projection-facts.js';
+import type {
+  KnownProjectionEvent,
+  ProjectionBatch,
+  ProjectionFact,
+  ProjectionSourceHealth,
+} from '#log/projection-facts.js';
+import type { ReadRow } from '#log/serialization.js';
 import { isResumableRun } from '#log/resumable.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import operationTable from '#log/run-operation.legality.json' with { type: 'json' };
@@ -35,7 +44,7 @@ export type LogRowBody = AgentLogEvent extends infer Event
   : never;
 
 /** Where a reader is: rows folded and the last one's key; exactly what a read sends. @public */
-export type LedgerPosition = Readonly<{ cursor: number; last?: RowKey }>;
+export type LedgerPosition = Readonly<{ cursor: number; last?: RowKey; sourceGeneration?: string }>;
 
 /** A run's coded failure, as its terminal row states it. @internal */
 export type LedgerRunFailure = Readonly<RunFailureDetail & { code: string }>;
@@ -177,9 +186,12 @@ const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** The attempt the row states; absent on a legacy row, whose attempt its position implies. */
-const statedAttempt = (event: AgentLogEvent): number | undefined => event.attempt;
+const statedAttempt = (event: Pick<LogEventBase, 'attempt'>): number | undefined => event.attempt;
 
-const keyOf = (event: AgentLogEvent): RowKey => ({ leaderEpoch: event.leaderEpoch, sequence: event.sequence });
+const keyOf = (event: Pick<LogEventBase, 'leaderEpoch' | 'sequence'>): RowKey => ({
+  leaderEpoch: event.leaderEpoch,
+  sequence: event.sequence,
+});
 
 const internalKind = (message: ProviderMessage): string | undefined => {
   const kind = message.metadata?.tauInternal?.['kind'];
@@ -401,7 +413,7 @@ const createFold = (ledger: ChatLedger) => {
       invocation.runId === runId && invocation.purpose === purpose ? [attemptId] : [],
     );
 
-  const known = (event: AgentLogEvent, key: RowKey): void => {
+  const known = (event: AgentLogEvent | KnownProjectionEvent, key: RowKey): void => {
     switch (event.type) {
       case 'run.lifecycle': {
         lifecycle(event, key);
@@ -521,8 +533,16 @@ const createFold = (ledger: ChatLedger) => {
   };
 
   /** Fold one row; `false` when it was a redelivery and changed nothing. */
-  const step = (value: unknown): boolean => {
-    const classified = classifyLogRow(value);
+  const stepClassified = (
+    classified:
+      | ClassifiedRow
+      | Readonly<{ class: 'known'; event: KnownProjectionEvent }>
+      | Readonly<{
+          class: 'opaque';
+          event: Extract<ProjectionFact, { classification: 'opaque' }>['row'] & { type: string };
+          affectsHistory: boolean;
+        }>,
+  ): boolean => {
     if (classified.class === 'quarantined') {
       // A lost line may have been history; the chat still reads, but it no longer runs (CL-S2).
       draft.anomalies.push({ kind: 'quarantined' });
@@ -561,12 +581,12 @@ const createFold = (ledger: ChatLedger) => {
     if (classified.class === 'opaque') {
       entryOf(event.runId).opaque = true;
       draft.anomalies.push({ kind: 'opaque', row: key });
-      if (historyRowTypes.has(event.type)) {
+      if ('affectsHistory' in classified ? classified.affectsHistory : historyRowTypes.has(event.type)) {
         draft.historyIntact = false;
         draft.newerHistory = true;
       }
     } else {
-      known(event, key);
+      known(classified.event, key);
     }
     if (event.commandId !== undefined && draft.applied[event.commandId] === undefined) {
       const attempt = draft.runs[event.runId]?.attempt;
@@ -575,7 +595,13 @@ const createFold = (ledger: ChatLedger) => {
     return true;
   };
 
-  return { draft, step };
+  const stepPhysical = (classified: Parameters<typeof stepClassified>[0]): void => {
+    const { cursor, last } = draft.position;
+    stepClassified(classified);
+    const key = classified.class === 'quarantined' ? last : keyOf(classified.event);
+    draft.position = { cursor: cursor + 1, ...(key === undefined ? {} : { last: key }) };
+  };
+  return { draft, step: (value: unknown) => stepClassified(classifyLogRow(value)), stepClassified, stepPhysical };
 };
 
 /**
@@ -597,9 +623,89 @@ export const foldChatLedger = (ledger: ChatLedger, rows: readonly unknown[]): Ch
   return changed ? fold.draft : ledger;
 };
 
+/** Fold a physical log interval; duplicate deliveries occupy a cursor but apply no semantic effect. @internal */
+export const foldPhysicalChatLedger = (ledger: ChatLedger, rows: readonly unknown[]): ChatLedger => {
+  if (rows.length === 0) {
+    return ledger;
+  }
+  const fold = createFold(ledger);
+  for (const row of rows) {
+    fold.stepPhysical(classifyLogRow(row));
+  }
+  return fold.draft;
+};
+
+/** Fold privately owned parser witnesses without repeating their structural classification. @internal */
+export const foldClassifiedChatLedger = (ledger: ChatLedger, rows: readonly ReadRow[]): ChatLedger => {
+  const fold = createFold(ledger);
+  for (const row of rows) {
+    // Kept physical rows advance acquisition even when their semantic effect is a duplicate delivery.
+    fold.stepPhysical(row.opaque ? { class: 'opaque', event: row.event } : { class: 'known', event: row.event });
+  }
+  return rows.length > 0 ? fold.draft : ledger;
+};
+
+/** Position-qualified compact facts submitted to the shared ledger transitions. @public */
+export type FoldProjectionFactsInput = Readonly<{ ledger: ChatLedger; answer: ProjectionBatch }>;
+
+/**
+ * Fold a complete valid compact page through the canonical ledger transitions, without partial advancement.
+ * @param input - The current ledger and the compact page.
+ * @returns The same position/reset outcomes as a canonical read; malformed compact pages are stale.
+ * @public
+ */
+export const foldProjectionFacts = ({ ledger, answer }: FoldProjectionFactsInput): ReadFold => {
+  const parsed = projectionBatchSchema.safeParse(answer);
+  if (!parsed.success) {
+    return { kind: 'stale' };
+  }
+  const batch = parsed.data;
+  const mine = ledger.position.cursor;
+  if (batch.cursor !== mine) {
+    return batch.cursor < mine && batch.cursor === batch.endCursor && batch.facts.length === 0
+      ? { kind: 'reset', reason: 'clamped' }
+      : { kind: 'stale' };
+  }
+  if (ledger.position.sourceGeneration !== undefined && batch.sourceGeneration !== ledger.position.sourceGeneration) {
+    return { kind: 'reset', reason: 'identity-mismatch' };
+  }
+  const fold = createFold(ledger);
+  for (const fact of batch.facts) {
+    if (fact.classification === 'known') {
+      fold.stepPhysical({ class: 'known', event: { ...fact.row, ...fact.effect } });
+    } else {
+      fold.stepPhysical({
+        class: 'opaque',
+        event: { ...fact.row, type: fact.eventType },
+        affectsHistory: fact.affectsHistory,
+      });
+    }
+  }
+  const last = batch.facts.at(-1)?.row ?? ledger.position.last;
+  return {
+    kind: 'folded',
+    ledger: {
+      ...fold.draft,
+      position: {
+        cursor: batch.nextCursor,
+        sourceGeneration: batch.sourceGeneration,
+        ...(last === undefined ? {} : { last: keyOf(last) }),
+      },
+    },
+  };
+};
+
 /** The shape of one read's answer the fold needs; the seam contract's `ReadAnswer` is assignable to it. @internal */
 export type LedgerReadAnswer =
-  | Readonly<{ status: 'batch'; cursor: number; nextCursor: number; endCursor: number; events: readonly unknown[] }>
+  | Readonly<{
+      status: 'batch';
+      cursor: number;
+      nextCursor: number;
+      endCursor: number;
+      events: readonly unknown[];
+      sourceGeneration?: string;
+      sourceHealth?: ProjectionSourceHealth;
+    }>
   | Readonly<{ status: 'refused'; reason: 'cursor-ahead' | 'identity-mismatch' | 'owner-fenced' | 'unreadable' }>;
 
 /** What a reader does with one read's answer (CL-R13). @public */
@@ -637,10 +743,38 @@ export const foldReadAnswer = (ledger: ChatLedger, answer: LedgerReadAnswer): Re
   if (answer.nextCursor !== answer.cursor + answer.events.length || answer.endCursor < answer.nextCursor) {
     return { kind: 'stale' };
   }
-  if (answer.events.length === 0) {
-    return { kind: 'folded', ledger };
+  if (ledger.position.sourceGeneration !== undefined && answer.sourceGeneration !== ledger.position.sourceGeneration) {
+    return { kind: 'reset', reason: 'identity-mismatch' };
   }
-  const folded = foldChatLedger(ledger, answer.events);
+  if (answer.events.length === 0) {
+    const observed =
+      answer.sourceHealth === undefined
+        ? ledger
+        : {
+            ...ledger,
+            historyIntact: ledger.historyIntact && answer.sourceHealth.historyIntact,
+            newerHistory: ledger.newerHistory || answer.sourceHealth.newerHistory,
+          };
+    return {
+      kind: 'folded',
+      ledger:
+        answer.sourceGeneration === ledger.position.sourceGeneration
+          ? observed
+          : {
+              ...observed,
+              position: { ...ledger.position, sourceGeneration: answer.sourceGeneration },
+            },
+    };
+  }
+  const rawFolded = foldPhysicalChatLedger(ledger, answer.events);
+  const folded =
+    answer.sourceHealth === undefined
+      ? rawFolded
+      : {
+          ...rawFolded,
+          historyIntact: rawFolded.historyIntact && answer.sourceHealth.historyIntact,
+          newerHistory: rawFolded.newerHistory || answer.sourceHealth.newerHistory,
+        };
   const last = classifyLogRow(answer.events.at(-1));
   // The server's cursor is authoritative for an aligned batch, whatever the fold skipped.
   return {
@@ -649,6 +783,7 @@ export const foldReadAnswer = (ledger: ChatLedger, answer: LedgerReadAnswer): Re
       ...folded,
       position: {
         cursor: answer.nextCursor,
+        ...(answer.sourceGeneration === undefined ? {} : { sourceGeneration: answer.sourceGeneration }),
         ...(last.class === 'quarantined'
           ? folded.position.last
             ? { last: folded.position.last }

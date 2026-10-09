@@ -236,70 +236,75 @@ const runFailureDetailSchema = z
 /* Every variant below is loose for the reason `runFailureDetailSchema` states:
  * a field a newer writer adds is retained rather than rejected, so one
  * unreadable record never costs an older reader the whole chat (D14). */
-const knownLogEventSchema = z.union([
-  z.looseObject({ ...eventBase, type: z.literal('message.appended'), message: providerMessageSchema }),
-  z.looseObject({
-    ...eventBase,
+const lifecycleEventSchema = z.looseObject({
+  ...eventBase,
+  type: z.literal('run.lifecycle'),
+  state: z.enum(['admitted', 'running', 'paused', 'completed', 'failed', 'cancelled']),
+  placement: turnPlacementSchema.optional(),
+  storageDurability: z.enum(storageDurabilityClasses).optional(),
+  detail: runFailureDetailSchema.optional(),
+});
+const committedHistoryEventSchema = z.looseObject({
+  ...eventBase,
+  type: z.literal('turn.history-projection-committed'),
+  retainedMessageIds: z.array(nonEmptyString),
+  message: userProviderMessageSchema,
+  context: turnContextSchema,
+});
+const sharedEventShapes = {
+  messageAppended: { type: z.literal('message.appended'), message: providerMessageSchema },
+  messageEnvelopeReplaced: {
     type: z.literal('message.envelope-replaced'),
     messageId: nonEmptyString,
     replacement: providerMessageSchema,
     details: compactionTraceSchema.optional(),
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  historyCompacted: {
     type: z.literal('history.compacted'),
     evictedMessageIds: z.array(nonEmptyString).min(1),
     summary: providerMessageSchema,
     details: compactionTraceSchema.optional(),
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  historyRewound: {
     type: z.literal('history.rewound'),
     trigger: z.enum(['retry', 'edit', 'regenerate']),
     retainedMessageIds: z.array(nonEmptyString),
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  snapshotContextRefreshed: {
     type: z.literal('snapshot-context.refreshed'),
     messageId: nonEmptyString,
     content: jsonValueSchema,
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  safeguardRecordedNudge: {
     type: z.literal('safeguard.recorded'),
     safeguardId: nonEmptyString,
     action: z.literal('nudge'),
     reason: nonEmptyString,
     message: userProviderMessageSchema,
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  safeguardRecordedTerminate: {
     type: z.literal('safeguard.recorded'),
     safeguardId: nonEmptyString,
     action: z.literal('terminate'),
     reason: nonEmptyString,
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  interruptRecorded: {
     type: z.literal('interrupt.recorded'),
     interruptId: nonEmptyString,
     phase: z.enum(['requested', 'resolved']),
     reason: nonEmptyString,
     payload: jsonValueSchema.optional(),
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  turnChanged: {
     type: z.literal('turn.changed'),
     turnId: nonEmptyString,
     chatId: nonEmptyString,
     attempt: z.number().int().positive(),
     checkoutId: nonEmptyString,
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  turnFinalized: {
     type: z.literal('turn.finalized'),
     turnId: nonEmptyString,
-    runId: nonEmptyString,
     chatId: nonEmptyString,
     projectId: nonEmptyString,
     checkoutId: nonEmptyString.optional(),
@@ -309,70 +314,116 @@ const knownLogEventSchema = z.union([
     treeId: nonEmptyString.optional(),
     trigger: z.literal('turn'),
     runIds: z.array(nonEmptyString),
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  turnConflicted: {
     type: z.literal('turn.conflicted'),
     turnId: nonEmptyString,
-    runId: nonEmptyString,
     chatId: nonEmptyString,
     checkoutId: nonEmptyString.optional(),
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  turnFailed: {
     type: z.literal('turn.failed'),
     turnId: nonEmptyString,
-    runId: nonEmptyString,
     chatId: nonEmptyString,
     checkoutId: nonEmptyString.optional(),
     reason: z.string(),
     code: nonEmptyString.optional(),
-  }),
-  z.looseObject({
-    ...eventBase,
-    type: z.literal('run.lifecycle'),
-    state: z.enum(['admitted', 'running', 'paused', 'completed', 'failed', 'cancelled']),
-    placement: turnPlacementSchema.optional(),
-    storageDurability: z.enum(storageDurabilityClasses).optional(),
-    detail: runFailureDetailSchema.optional(),
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  modelInvocationPrepared: {
     type: z.literal('model.invocation-prepared'),
     attemptId: opaqueInvocationId,
     purpose: z.enum(['generation', 'compaction']),
     modelId: z.string().min(1).max(256),
     principal: z.string().min(1).max(256).optional(),
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  modelInvocationBound: {
     type: z.literal('model.invocation-bound'),
     attemptId: opaqueInvocationId,
     operationId: opaqueInvocationId,
     status: z.enum(['pending', 'terminal', 'unavailable']),
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  modelInvocationSettledCharged: {
     type: z.literal('model.invocation-settled'),
     attemptId: opaqueInvocationId,
     outcome: z.enum(['settled', 'released', 'absorbed']),
     operationId: opaqueInvocationId,
     chargedCreditAtoms: z.string().regex(/^\d+$/u),
-  }),
-  z.looseObject({
-    ...eventBase,
+  },
+  modelInvocationSettledVoided: {
     type: z.literal('model.invocation-settled'),
     attemptId: opaqueInvocationId,
     outcome: z.literal('voided'),
-  }),
-  z.looseObject({
-    ...eventBase,
-    type: z.literal('turn.history-projection-committed'),
-    retainedMessageIds: z.array(nonEmptyString),
-    message: userProviderMessageSchema,
-    context: turnContextSchema,
-  }),
-]);
+  },
+} as const;
+const sharedEventSchemas = [
+  z.looseObject({ ...eventBase, ...sharedEventShapes.messageAppended }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.messageEnvelopeReplaced }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.historyCompacted }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.historyRewound }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.snapshotContextRefreshed }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.safeguardRecordedNudge }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.safeguardRecordedTerminate }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.interruptRecorded }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.turnChanged }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.turnFinalized }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.turnConflicted }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.turnFailed }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.modelInvocationPrepared }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.modelInvocationBound }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.modelInvocationSettledCharged }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.modelInvocationSettledVoided }),
+] as const;
+const knownLogEventSchema = z.union([...sharedEventSchemas, lifecycleEventSchema, committedHistoryEventSchema]);
+
+/** The compact vocabulary shares the canonical field validators while omitting execution-only data. @internal */
+export const projectionEffectSchemas = [
+  z.object(sharedEventShapes.messageAppended),
+  z.object(sharedEventShapes.messageEnvelopeReplaced),
+  z.object(sharedEventShapes.historyCompacted),
+  z.object(sharedEventShapes.historyRewound),
+  z.object(sharedEventShapes.snapshotContextRefreshed).pick({ type: true }),
+  z.object(sharedEventShapes.safeguardRecordedNudge),
+  z.object(sharedEventShapes.safeguardRecordedTerminate),
+  z.object(sharedEventShapes.interruptRecorded),
+  z.object(sharedEventShapes.turnChanged),
+  z.object(sharedEventShapes.turnFinalized),
+  z.object(sharedEventShapes.turnConflicted),
+  z.object(sharedEventShapes.turnFailed),
+  z.object(sharedEventShapes.modelInvocationPrepared),
+  z.object(sharedEventShapes.modelInvocationBound),
+  z.object(sharedEventShapes.modelInvocationSettledCharged),
+  z.object(sharedEventShapes.modelInvocationSettledVoided),
+  lifecycleEventSchema
+    .omit({
+      version: true,
+      leaderEpoch: true,
+      sequence: true,
+      recordedAt: true,
+      runId: true,
+      epoch: true,
+      commandId: true,
+      attempt: true,
+    })
+    .strip()
+    .extend({
+      stopReason: z.string().optional(),
+      admission: z
+        .strictObject({
+          kind: z.enum(['tau', 'external']),
+          turnId: nonEmptyString,
+          message: userProviderMessageSchema,
+        })
+        .refine((admission) => admission.turnId === admission.message.id)
+        .optional(),
+      rewind: z.strictObject({ retainedMessageIds: z.array(z.string()) }).optional(),
+    }),
+  committedHistoryEventSchema.pick({ type: true, message: true }).strip(),
+] as const;
+
+/** Original physical row identity, shared by compact wire facts. @internal */
+export const projectionRowSchema = z.strictObject(eventBase);
+/** Future-version row identity, shared by opaque compact wire facts. @internal */
+export const opaqueProjectionRowSchema = z.strictObject({ ...eventBase, version: z.number().int().positive() });
 
 const knownEventTypes = new Set<string>(knownLogEventSchema.options.map((option) => option.shape.type.value));
 

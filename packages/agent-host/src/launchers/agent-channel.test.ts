@@ -19,6 +19,7 @@ import { createChannelClient, wrapMessagePort, wrapWebSocket } from '@taucad/rpc
 import type { Channel, MessagePortLike, MessagePortMainLike, WireProtocolSchemas } from '@taucad/rpc';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 
+import { parseLeadershipFrame } from '#launchers/leadership/frames.js';
 import { serveAgentChannel } from '#launchers/agent-channel.js';
 import type { AgentChannelEndpoint } from '#channel/endpoint.js';
 import type { AgentLauncher } from '#launchers/agent-launcher.js';
@@ -82,6 +83,51 @@ const cancel = { commandId: 'cmd-1', payload: { chatId: 'chat-1', runId: 'run-1'
 describe('serveAgentChannel', () => {
   it('should type the wire validators against the protocol', () => {
     expectTypeOf(agentWireProtocolSchemas).toExtend<WireProtocolSchemas<AgentWireProtocol>>();
+  });
+
+  it('preserves live writer generation in the actual leader decoder and refuses missing or foreign generations', () => {
+    const self = { chatId: 'chat-source', sender: 'reader', wire: 3, build: 'candidate' };
+    const event = {
+      type: 'text-delta',
+      chatId: self.chatId,
+      runId: 'run-source',
+      messageId: 'message-source',
+      contentIndex: 0,
+      delta: 'current',
+      sourceGeneration: 'writer-current',
+    };
+    const frame = {
+      chatId: self.chatId,
+      sender: 'writer',
+      wire: 3,
+      build: self.build,
+      kind: 'live',
+      epoch: 1,
+      body: { event },
+    };
+    expect(parseLeadershipFrame(frame, self)).toMatchObject({ kind: 'live', event });
+    const { sourceGeneration: _sourceGeneration, ...untagged } = event;
+    expect(parseLeadershipFrame({ ...frame, body: { event: untagged } }, self)).toBeUndefined();
+    expect(parseLeadershipFrame({ ...frame, wire: 2 }, self)).toBeUndefined();
+    expect(parseLeadershipFrame({ ...frame, wire: 4 }, self)).toBeUndefined();
+  });
+
+  it('refuses untagged live events on candidate wire 3', () => {
+    const schema = agentWireProtocolSchemas.listens.liveEvents.event;
+    const event = {
+      type: 'text-delta',
+      chatId: 'chat-source',
+      runId: 'run-source',
+      messageId: 'message-source',
+      contentIndex: 0,
+      delta: 'current',
+    } as const;
+    expect(schema.safeParse(event).success).toBe(false);
+    expect(schema.safeParse({ ...event, sourceGeneration: '' }).success).toBe(false);
+    expect(schema.parse({ ...event, sourceGeneration: 'writer-current' })).toEqual({
+      ...event,
+      sourceGeneration: 'writer-current',
+    });
   });
 
   it('should preserve live text offsets and reject invalid checkpoint coordinates', () => {
@@ -159,7 +205,7 @@ describe('serveAgentChannel', () => {
       });
     });
     const overSocket = await socketChannel.call('cancel', cancel);
-    expect(socketChannel.hello.payload).toEqual({ wire: 2, build });
+    expect(socketChannel.hello.payload).toEqual({ wire: 3, build });
 
     // Leg 2: a MessagePort, exactly as the Electron services utility is handed one.
     const channel = new MessageChannel();

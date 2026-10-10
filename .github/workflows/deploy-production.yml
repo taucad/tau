@@ -1,26 +1,28 @@
-# Deploy one application's release to production.
+# Roll back or redeploy one application's release in production.
 #
-# Production is never deployed by a merge. A person dispatches this workflow
-# from `main` with a release tag (`ui@x.y.z` or `api@x.y.z`, from GitHub's
-# Actions tab, `gh workflow run`, or the Command Center's deploy centre). A
-# release manager approves the run on the `production-promotion` environment,
-# and it deploys that one application at its tag
-# (docs/research/monorepo-app-release-practice.md, R3):
+# A release deploys itself: merging its release pull request creates the tag,
+# and `release-build.yml` builds it and deploys it to production in that same
+# run once a release manager approves the `production` environment. This
+# workflow is for everything after that, per application
+# (docs/research/monorepo-app-release-practice.md, R3): moving production back
+# to an earlier `ui@x.y.z` or `api@x.y.z` release, deploying a release again, or
+# deploying one whose release run was not approved.
 #
 #   - `api@x.y.z`: `deploy.yml` at the tag deploys the API to Fly (`tau-api`).
 #   - `ui@x.y.z`: `deploy-ui.yml` at the tag publishes tau.new to Netlify with
 #     the GeoSpec artifact of the tag commit's main CI run, and `deploy-docs.yml`
 #     at the tag publishes docs.tau.new.
 #
-# The other application stays where it is, so a UI release never moves the API
-# and a red desktop build never holds a web release. Each deploy runs in the
-# `production` environment at the tag ref, so the environment's deployments
-# record which tag each application runs.
+# A person dispatches it from `main` (GitHub's Actions tab, `gh workflow run`,
+# or the Command Center). It checks the release and dispatches the deploy at the
+# tag, whose run then waits for a release manager on the `production`
+# environment, exactly as a release's own deploy does. The other application
+# stays where it is.
 #
 # Before deploying, the release must be a published GitHub Release whose commit
-# is on `main`, and `release-build.yml` must have succeeded for that tag.
-# Deploying an older version than the application's last production deploy is a
-# rollback and needs `rollback: true`.
+# is on `main`, and its `release-build.yml` run must have verified it. Deploying
+# an older version than the application's last production deploy is a rollback
+# and needs `rollback: true`.
 #
 # The API image is built from the tag commit with the registry cache, and the UI
 # is built with the production site's variables: both bundles embed their
@@ -28,7 +30,9 @@
 # deployed bytes.
 #
 # Command Center contract: POST /repos/taucad/tau/actions/workflows/deploy-production.yml/dispatches
-# with {"ref": "main", "inputs": {"release": "<tag>", "rollback": "false"}}.
+# with {"ref": "main", "inputs": {"release": "<tag>", "rollback": "true"}}; the
+# approval then waits in the dispatched deploy runs (`deploy.yml`, or
+# `deploy-ui.yml` and `deploy-docs.yml`) on the `production` environment.
 name: Deploy release to production
 run-name: Deploy ${{ inputs.release }} to production
 
@@ -56,9 +60,6 @@ jobs:
     name: Promote ${{ inputs.release }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment:
-      name: production-promotion
-      deployment: false
     permissions:
       contents: read
       actions: write # dispatch the deploy workflows at the release tag
@@ -101,13 +102,29 @@ jobs:
           git merge-base --is-ancestor "$commit" origin/main \
             || { echo "::error::$RELEASE ($commit) is not on main"; exit 1; }
 
-          # This release must have built green. A release run's title is its
-          # release's name, which release.yml sets to the tag; the newest run decides.
-          conclusion=$(gh run list --workflow release-build.yml --commit "$commit" --limit 50 \
-            --json conclusion,displayTitle \
-            | jq -r --arg tag "$RELEASE" '[.[] | select(.displayTitle == $tag)][0].conclusion // empty')
-          test "$conclusion" = success \
-            || { echo "::error::release-build.yml has not succeeded for $RELEASE (${conclusion:-no run})"; exit 1; }
+          # This release must have been verified. A release run's title is its
+          # tag; its newest run decides. Only the verify job counts: the run's
+          # own production deploy may have been rejected or failed, which is
+          # what a redeploy is for.
+          run_id=$(gh run list --workflow release-build.yml --commit "$commit" --limit 50 \
+            --json databaseId,displayTitle \
+            | jq -r --arg tag "$RELEASE" '[.[] | select(.displayTitle == $tag)][0].databaseId // empty')
+          verified=""
+          if [ -n "$run_id" ]; then
+            verified=$(gh api "repos/$GH_REPO/actions/runs/$run_id/jobs?per_page=100" \
+              | jq -r --arg name "Verify $RELEASE" '[.jobs[] | select(.name == $name)][0].conclusion // empty')
+          fi
+          test "$verified" = success \
+            || { echo "::error::release-build.yml has not verified $RELEASE (${verified:-no verify job})"; exit 1; }
+
+          # The deploy waits for a release manager on the `production`
+          # environment; with no reviewer there it would not wait.
+          reviewers=$(gh api "repos/$GH_REPO/environments/production" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length')
+          if [ "${reviewers:-0}" -eq 0 ]; then
+            echo "::error::The production environment requires no reviewer; apply tau-cloud's stacks/repo/tau first."
+            exit 1
+          fi
 
           # The application's newest successful production deploy, recorded by
           # the `production` environment with the tag it ran at.
@@ -151,7 +168,7 @@ jobs:
           set -euo pipefail
           # A GITHUB_TOKEN may start workflow_dispatch runs. Each runs the tag's
           # own workflow file in the `production` environment, which admits only
-          # release tags of the deployed application (tau-cloud stacks/repo/tau).
+          # release tags and waits for a release manager (tau-cloud stacks/repo/tau).
           if [ "$APP" = api ]; then
             gh workflow run deploy.yml --ref "$RELEASE" -f environment=production -f app=api
           else
@@ -174,8 +191,8 @@ jobs:
             echo "- Action: $ACTION (production ran \`$PREVIOUS\`)"
             echo "- Commit: \`$COMMIT\`"
             if [ "$APP" = api ]; then
-              echo "- Started **Deploy to Fly.io** at \`$RELEASE\`; follow it under [Actions](https://github.com/$REPOSITORY/actions/workflows/deploy.yml)."
+              echo "- Started **Deploy to Fly.io** at \`$RELEASE\`; approve it on the \`production\` environment under [Actions](https://github.com/$REPOSITORY/actions/workflows/deploy.yml)."
             else
-              echo "- Started **Deploy UI to Netlify** and **Deploy docs to Netlify** at \`$RELEASE\`; follow them under [Actions](https://github.com/$REPOSITORY/actions/workflows/deploy-ui.yml)."
+              echo "- Started **Deploy UI to Netlify** and **Deploy docs to Netlify** at \`$RELEASE\`; approve both on the \`production\` environment under [Actions](https://github.com/$REPOSITORY/actions/workflows/deploy-ui.yml)."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

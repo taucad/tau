@@ -1,18 +1,24 @@
-# Build and verify what a GitHub Release ships.
+# Build, verify and deploy what a GitHub Release ships: one run per release.
 #
 # `release.yml` creates one GitHub Release per application version
-# (`<project>@<version>`) with the tau-release-bot token, which is what lets
-# its `published` event start this workflow. A release is therefore the trigger
-# for the full build of the application it names:
+# (`<project>@<version>`) with the tau-release-bot token when its release pull
+# request is merged, and that `published` event starts this workflow at the tag.
+# Merging the release pull request is therefore the whole release act: this run
+# builds it and takes it to production, pausing only for a release manager's
+# approval (docs/research/monorepo-app-release-practice.md):
 #
 #   - `ui@*` and `api@*`: lint, typecheck, test and build that application (and
-#     its dependency closure) at the tagged commit. A green run is what
-#     `deploy-production.yml` requires before it promotes the release.
+#     its dependency closure) at the tagged commit, then deploy it to
+#     production. The deploy jobs wait on the `production` environment, which a
+#     release manager approves in this run: `api@*` deploys the Fly API
+#     (`deploy.yml`), `ui@*` publishes tau.new and docs.tau.new (`deploy-ui.yml`
+#     and `deploy-docs.yml`). Staging needs nothing here: every push to `main`,
+#     the release merge included, already deployed it from `ci.yml`.
 #   - `desktop@*`: package the desktop app for macOS (Developer ID signed and
-#     notarized), Linux and Windows (unsigned), attach the archives to the
-#     release, mark the release "latest", then publish the update feeds to the
-#     fixed `desktop-feed` prerelease, so installed apps only see a release
-#     whose every asset is in place.
+#     notarized, after a release manager approves the `desktop` environment),
+#     Linux and Windows (unsigned), attach the archives to the release, mark the
+#     release "latest", then publish the update feeds to the fixed
+#     `desktop-feed` prerelease, which is the moment installed apps update.
 #   - `desktop-staging@<version>-staging.<n>`: the same desktop build, packaged
 #     for the staging channel (taucad.dev endpoints, no update checks) as a
 #     prerelease. `release-desktop-staging.yml` creates these. It signs from the
@@ -24,7 +30,18 @@
 #     because both ship OCCT compiled into the engine; so does a staging desktop
 #     prerelease.
 #
-# Nothing here publishes an npm package or deploys anything.
+# A dispatched rebuild, from `main` or at the tag, builds without deploying;
+# production deploys only from the `release` event's run at the tag. Rollbacks
+# and redeploys of an earlier release go through `deploy-production.yml`.
+#
+# Command Center contract: the release pull request's merge commit is the tag's
+# commit, so this workflow's run for that `head_sha` (event `release`, title the
+# tag) carries the release. Its production deploy jobs are `production-api`,
+# `production-ui` and `production-docs`; they wait as pending deployments of the
+# `production` environment (the desktop's macOS job waits on `desktop`), and
+# the environment's deployment status for the tag is the outcome.
+#
+# Nothing here publishes an npm package.
 #
 # The macOS job reads its signing material from the `desktop` environment,
 # which only `desktop@*` tags may use and a release manager approves per run,
@@ -592,3 +609,74 @@ jobs:
             exit 0
           fi
           gh release upload "$FEED_TAG" desktop-update-*.json --clobber
+
+  # Production waits for a release manager in this run. The `production`
+  # environment's required reviewers are that wait (tau-cloud
+  # `stacks/repo/tau`), so a release never deploys while the environment has
+  # none: this job fails instead and the deploys do not start.
+  production-gate:
+    needs: [resolve, verify-app]
+    if: >-
+      github.event_name == 'release' &&
+      (needs.resolve.outputs.project == 'ui' || needs.resolve.outputs.project == 'api') &&
+      github.ref == format('refs/tags/{0}', needs.resolve.outputs.tag)
+    name: Require approval for production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Require a reviewer on the production environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          reviewers=$(gh api "repos/$GH_REPO/environments/production" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length')
+          if [ "${reviewers:-0}" -eq 0 ]; then
+            echo "::error::The production environment requires no reviewer, so this release will not deploy itself. Apply tau-cloud's stacks/repo/tau, then deploy it with Deploy release to production."
+            exit 1
+          fi
+          echo "Production waits for one of $reviewers required reviewer(s)."
+
+  production-api:
+    needs: [resolve, production-gate]
+    if: needs.resolve.outputs.project == 'api'
+    name: Production API
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      app: api
+    secrets: inherit
+
+  production-ui:
+    needs: [resolve, production-gate]
+    if: needs.resolve.outputs.project == 'ui'
+    name: Production UI
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy-ui.yml
+    with:
+      environment: production
+      transport: main-run
+    secrets: inherit
+
+  # Waits on the same `production` environment as the UI, so one approval in
+  # this run releases both.
+  production-docs:
+    needs: [resolve, production-gate]
+    if: needs.resolve.outputs.project == 'ui'
+    name: Production docs
+    permissions:
+      contents: read
+    uses: ./.github/workflows/deploy-docs.yml
+    with:
+      environment: production
+      tag: ${{ needs.resolve.outputs.tag }}
+    secrets: inherit

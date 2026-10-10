@@ -4,8 +4,9 @@
 # builds them and a branch change there never leaves a site without a deploy.
 #
 #   - staging (docs.taucad.dev): after every green `CI` push run on `main`.
-#   - production (docs.tau.new): `deploy-production.yml` dispatches this
-#     workflow at the `ui@x.y.z` tag it deploys.
+#   - production (docs.tau.new): with the UI, in a `ui@x.y.z` release's
+#     `release-build.yml` run, or dispatched at the tag by
+#     `deploy-production.yml` for a rollback or redeploy.
 #
 # `netlify deploy` runs `apps/docs/netlify.toml`'s build command with the
 # site's variables, as the Netlify Git build did. Each run also asks Netlify to
@@ -14,7 +15,7 @@
 #
 # Manual redeploy: `gh workflow run deploy-docs.yml -f environment=staging`
 # from `main`; add `-f tag=<tag>` to deploy a specific commit. Production
-# redeploys go through `deploy-production.yml` with a `ui@` release tag.
+# rollbacks and redeploys go through `deploy-production.yml` with a `ui@` tag.
 
 name: Deploy docs to Netlify
 
@@ -67,17 +68,20 @@ jobs:
     env:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
     steps:
-      # Production deploys start only from deploy-production.yml, whose run a
-      # release manager approves; it dispatches this workflow at the release tag.
-      - name: Require a production deploy started by Deploy release to production
-        if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production'
+      # Production deploys run at a release tag: called by release-build.yml in
+      # the release's own run, or dispatched by deploy-production.yml for a
+      # rollback or redeploy. Either way the `production` environment waits for
+      # a release manager. A person dispatching this workflow directly is
+      # refused. (In a called workflow, `github.workflow_ref` names the caller.)
+      - name: Require a production deploy from a release
+        if: inputs.environment == 'production' && contains(github.workflow_ref, '/.github/workflows/deploy-docs.yml@')
         env:
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           if [ "$TRIGGERING_ACTOR" != 'github-actions[bot]' ] || ! [[ "$REF" =~ ^refs/tags/ui@[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Deploy to production with Deploy release to production (deploy-production.yml); it dispatches this workflow at the release tag."
+            echo "::error::Production deploys come from a release: merge its release pull request, or roll back with Deploy release to production (deploy-production.yml)."
             exit 1
           fi
 

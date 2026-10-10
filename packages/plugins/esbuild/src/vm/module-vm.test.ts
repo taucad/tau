@@ -95,6 +95,38 @@ describe('createEsbuildModuleVm', () => {
     }
   });
 
+  it('should bind a builtin global name only from its registry expression', async () => {
+    vi.stubGlobal('__moduleVmBuiltinScopeA', { token: 'A' });
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      'project/main.ts',
+      'export const result = { scoped: scopedBuiltin.token, unbound: typeof unboundBuiltin };',
+    );
+
+    const vm = await createEsbuildModuleVm({ filesystem });
+    activeVm = vm;
+    vm.registerModule('scoped-builtin', {
+      version: '1.0.0',
+      code: 'export default globalThis.__moduleVmBuiltinScopeA;',
+      globalName: 'scopedBuiltin',
+      registryExpression: 'globalThis.__moduleVmBuiltinScopeA',
+    });
+    vm.registerModule('unbound-builtin', {
+      version: '1.0.0',
+      code: 'export default {};',
+      globalName: 'unboundBuiltin',
+    });
+
+    const bundled = await vm.bundle('project/main.ts');
+    expect(bundled.success).toBe(true);
+    expect(bundled.code).toContain('const scopedBuiltin = globalThis.__moduleVmBuiltinScopeA;');
+    expect(bundled.code).not.toContain('unboundBuiltin =');
+    expect(bundled.code).not.toContain('__KERNEL_MODULES__');
+
+    const executed = await vm.execute<{ result: unknown }>(bundled.code);
+    expect(executed).toMatchObject({ success: true, value: { result: { scoped: 'A', unbound: 'undefined' } } });
+  });
+
   it('should return a structured bundle issue for unsupported private package imports', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText('project/model.ts', "import value from '#internal'; export const result = value;");

@@ -74,7 +74,14 @@ const repeated = (values: readonly string[]): string[] => {
   return [...new Set(values.filter((value) => seen.has(value) || !seen.add(value)))];
 };
 
-const duplicates = (groups: readonly RuleGroup[], where: string): string[] => [
+/** Repeated group names and uids, and intervals {@link seconds} cannot read (two unreadable ones would compare equal). */
+const groupProblems = (groups: readonly RuleGroup[], where: string): string[] => [
+  ...groups
+    .filter((group) => seconds(group.interval) === undefined)
+    .map(
+      (group) =>
+        `alert group "${group.name ?? group.title ?? ''}" has an unreadable interval ${JSON.stringify(group.interval)} in ${where}`,
+    ),
   ...repeated(groups.map((group) => group.name ?? group.title ?? '')).map(
     (name) => `alert group "${name}" appears more than once in ${where}`,
   ),
@@ -104,8 +111,8 @@ export const alertParityProblems = (provisioned: readonly RuleGroup[], cloud: re
   const localGroups = byName(provisioned);
   const remoteGroups = byName(cloud);
   return [
-    ...duplicates(cloud, 'infra/grafana/alerts'),
-    ...duplicates(provisioned, 'alerts.yaml'),
+    ...groupProblems(cloud, 'infra/grafana/alerts'),
+    ...groupProblems(provisioned, 'alerts.yaml'),
     ...[...remoteGroups.keys()]
       .filter((name) => !localGroups.has(name))
       .map((name) => `alert group "${name}" is missing locally`),

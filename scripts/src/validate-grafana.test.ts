@@ -78,5 +78,14 @@ describe('alert parity', () => {
       'alert group "tau-critical" appears more than once in infra/grafana/alerts',
       'alert rule "a" appears more than once in infra/grafana/alerts',
     ]);
+    expect(
+      alertParityProblems(
+        [{ name: 'tau-critical', interval: '5d', rules: [rule('a', 0)] }],
+        [{ title: 'tau-critical', interval: '1d', rules: [rule('a', 0)] }],
+      ),
+    ).toEqual([
+      'alert group "tau-critical" has an unreadable interval "1d" in infra/grafana/alerts',
+      'alert group "tau-critical" has an unreadable interval "5d" in alerts.yaml',
+    ]);
   });
 });

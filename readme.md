@@ -86,8 +86,6 @@ Tau is built on a foundation of excellent open-source projects:
 | **Database**         | [Drizzle ORM](https://orm.drizzle.team/)                                                                                                                                                       |
 | **Git Operations**   | [Isomorphic Git](https://isomorphic-git.org/)                                                                                                                                                  |
 | **Desktop**          | [Electron](https://www.electronjs.org/)                                                                                                                                                        |
-| **Documentation**    | [Fumadocs](https://fumadocs.dev/)                                                                                                                                                              |
-| **Build**            | [Nx](https://nx.dev/), [Vite](https://vite.dev/)                                                                                                                                               |
 
 Special thanks to [OpenSCAD Playground](https://github.com/openscad/openscad-playground) for inspiring the browser-based code-CAD architecture.
 

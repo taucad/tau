@@ -135,7 +135,7 @@ export function createDocumentWorkerDispatcher(
     try {
       const { memoryHandle } = args;
       worker.setDevtoolsTelemetryEnabled(memoryHandle?.devtoolsTelemetry === true);
-      worker.setCompiledWasmModules(memoryHandle?.compiledWasmModules ?? []);
+      worker.setCompiledWasmModules(options?.compiledWasmModules ?? memoryHandle?.compiledWasmModules ?? []);
       if (memoryHandle?.signalBuffer) {
         worker.setSignalBuffer(memoryHandle.signalBuffer);
       }
@@ -161,7 +161,7 @@ export function createDocumentWorkerDispatcher(
         worker.initialize({
           callbacks: { onLog },
           transferables: {
-            fileSystemPort: memoryHandle?.fileSystemPort,
+            fileSystemPort: options?.fileSystemPort ?? memoryHandle?.fileSystemPort,
             inlineFileSystem: options?.inlineFileSystem,
           },
           config: args.config,

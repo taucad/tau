@@ -13,22 +13,6 @@ import {
 } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-enable no-restricted-imports, import/extensions */
 
-type Deferred<Value> = {
-  readonly promise: Promise<Value>;
-  resolve(value: Value): void;
-  reject(error: unknown): void;
-};
-
-const deferred = <Value>(): Deferred<Value> => {
-  let resolve!: (value: Value) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, resolve, reject };
-};
-
 describe('createRealmResources', () => {
   it('should create one value for two holders and dispose it on the last release', async () => {
     const realm = createRealmResources();
@@ -81,7 +65,7 @@ describe('createRealmResources', () => {
 
   it('should share one pending creation between concurrent holders', async () => {
     const realm = createRealmResources();
-    const pending = deferred<{ heap: string }>();
+    const pending = Promise.withResolvers<{ heap: string }>();
     const create = vi.fn(async () => pending.promise);
 
     const holds = Promise.all([
@@ -111,7 +95,7 @@ describe('createRealmResources', () => {
 
   it('should reject every concurrent holder of a rejected creation', async () => {
     const realm = createRealmResources();
-    const pending = deferred<string>();
+    const pending = Promise.withResolvers<string>();
     const create = vi.fn(async () => pending.promise);
 
     const first = realm.hold({ group: 'occt', key: 'single', create });
@@ -184,7 +168,7 @@ afterEach(async () => {
 });
 
 /** A kernel that holds one realm resource from `initialize` and releases it in `onDispose`. */
-const createHoldingKernel = (create: () => Promise<object>): AnyKernelDefinitionV2 => ({
+const createHoldingKernel = (create: () => Promise<Record<string, unknown>>, key = 'v1'): AnyKernelDefinitionV2 => ({
   id: 'realm-kernel',
   extensions: ['realm'],
   name: 'Realm kernel',
@@ -192,7 +176,7 @@ const createHoldingKernel = (create: () => Promise<object>): AnyKernelDefinition
   views: { display: { title: 'Display', mimeType: 'model/gltf-binary' } },
   exports: {},
   initialize: async (_options, services) => {
-    const hold = await services.realm.hold({ group: 'realm-resources-test', key: 'v1', create });
+    const hold = await services.realm.hold({ group: 'realm-resources-test', key, create });
     return { hold };
   },
   onDispose: async (context) => {
@@ -200,20 +184,14 @@ const createHoldingKernel = (create: () => Promise<object>): AnyKernelDefinition
   },
   resolve: async ({ entryPath }) => ({ resolved: [entryPath], unresolved: [] }),
   describe: async () => ({ success: true, data: { parameters: emptyParameterDeclaration }, issues: [] }),
-  evaluate: async (_input, _services, context) => ({ handle: context }),
+  evaluate: async (_input, _services, context) => ({ handle: context as unknown }),
   render: async () => ({ content: new Uint8Array([1]) }),
   export: async () => {
     throw new Error('The realm kernel declares no exports.');
   },
 });
 
-const startWorker = async (kernel: AnyKernelDefinitionV2): Promise<KernelRuntimeWorker> => {
-  const runtime = defineRuntime({
-    kernels: [attachRuntimePluginDefinition({ id: kernel.id, extensions: ['realm'] }, () => kernel)],
-  });
-  const worker = new KernelRuntimeWorker({ runtime });
-  workers.push(worker);
-  await initializeWorkerForTesting(worker);
+const openDocument = async (worker: KernelRuntimeWorker): Promise<unknown> => {
   const evaluated = vi.fn();
   worker.onEvaluated = evaluated;
   worker.handleOpenDocument({
@@ -226,7 +204,16 @@ const startWorker = async (kernel: AnyKernelDefinitionV2): Promise<KernelRuntime
   await vi.waitFor(() => {
     expect(evaluated).toHaveBeenCalledOnce();
   });
-  expect(evaluated.mock.calls[0]![0]).toMatchObject({ success: true });
+  return evaluated.mock.calls[0]![0] as unknown;
+};
+
+const startWorker = async (kernel: AnyKernelDefinitionV2): Promise<KernelRuntimeWorker> => {
+  const runtime = defineRuntime({
+    kernels: [attachRuntimePluginDefinition({ id: 'realm-kernel', extensions: ['realm'] }, () => kernel)],
+  });
+  const worker = new KernelRuntimeWorker({ runtime });
+  workers.push(worker);
+  await initializeWorkerForTesting(worker);
   return worker;
 };
 
@@ -236,12 +223,37 @@ describe('services.realm', () => {
     const create = vi.fn(async () => ({ heap: 'shared' }));
 
     const first = await startWorker(createHoldingKernel(create));
+    await expect(openDocument(first)).resolves.toMatchObject({ success: true });
     const second = await startWorker(createHoldingKernel(create));
+    await expect(openDocument(second)).resolves.toMatchObject({ success: true });
     expect(create).toHaveBeenCalledOnce();
 
     await first.cleanup();
     await second.cleanup();
-    await startWorker(createHoldingKernel(create));
+    const third = await startWorker(createHoldingKernel(create));
+    await expect(openDocument(third)).resolves.toMatchObject({ success: true });
     expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it('should report a second build of a held group to the client as KERNEL_REALM_CONFLICT', async () => {
+    await seedTestFileSystem({ 'model.realm': 'realm' });
+    const create = vi.fn(async () => ({ heap: 'shared' }));
+
+    await expect(openDocument(await startWorker(createHoldingKernel(create, 'single')))).resolves.toMatchObject({
+      success: true,
+    });
+    const refused = await openDocument(await startWorker(createHoldingKernel(create, 'multi')));
+
+    expect(refused).toMatchObject({
+      success: false,
+      issues: [
+        {
+          code: 'KERNEL_REALM_CONFLICT',
+          details: { group: 'realm-resources-test', heldKey: 'single', requestedKey: 'multi' },
+        },
+      ],
+    });
+    expect((refused as { issues: KernelIssue[] }).issues[0]!.message).toContain('"single"');
+    expect(create).toHaveBeenCalledOnce();
   });
 });

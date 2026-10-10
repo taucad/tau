@@ -1373,6 +1373,10 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   }
 
   private createKernelBindingIssue(error: unknown): KernelIssue {
+    // A typed initialisation refusal (e.g. KERNEL_REALM_CONFLICT) keeps its own issue.
+    if (error instanceof Error && 'issues' in error && Array.isArray(error.issues) && error.issues.length > 0) {
+      return error.issues[0] as KernelIssue;
+    }
     let message: string;
     if (error instanceof Error) {
       message = error.message;

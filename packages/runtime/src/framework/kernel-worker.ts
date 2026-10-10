@@ -163,6 +163,7 @@ import { createNativeHandleIdentityKey, nativeBuildInputSymbol } from '#framewor
 import { finalizeExportArtifactSet } from '#framework/export-artifact-finalizer.js';
 import { isNotFoundError } from '#filesystem/filesystem-errors.js';
 import { loadWasmBinary } from '#framework/wasm-loader.js';
+import { realmResources } from '#framework/realm-resources.js';
 
 type FileSystemProxy = WorkerFileSystemProxy;
 
@@ -7135,6 +7136,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       tracer: this.tracer,
       compute: this.createComputeRuntime(signal),
       getCompiledWasmModule: (url) => this.getCompiledWasmModule(url),
+      realm: realmResources,
     };
   }
 

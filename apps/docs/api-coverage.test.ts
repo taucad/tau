@@ -130,6 +130,8 @@ const pendingApiReference: ReadonlySet<string> = new Set([
   'PluginFactory',
   'PluginInstance',
   'PluginMeta',
+  'RealmHold',
+  'RealmResources',
   'RenderContentFor',
   'RenderOptionsDependency',
   'RenderOptionsFor',

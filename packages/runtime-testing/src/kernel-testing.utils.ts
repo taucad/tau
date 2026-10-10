@@ -493,6 +493,22 @@ export const createMockKernelRuntime = (options?: {
     filesystem: createMockFileSystem(options?.filesystemOverrides),
     fileContentCache: new Map(),
     getCompiledWasmModule: () => undefined,
+    // ponytail: one unshared instance per hold; realm sharing is the runtime's, tested there.
+    realm: {
+      hold: async ({ create, dispose }) => {
+        const value = await create();
+        let released = false;
+        return {
+          value,
+          release: () => {
+            if (!released) {
+              released = true;
+              dispose?.(value);
+            }
+          },
+        };
+      },
+    },
     compute: createMockComputeRuntime(signal),
     bundler: {
       resolveDependencies: async () => ({ resolved: [], unresolved: [] }),

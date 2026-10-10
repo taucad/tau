@@ -37,6 +37,8 @@ export type {
 } from '#types/runtime-kernel-v2.types.js';
 export type {
   KernelFileSystem,
+  RealmHold,
+  RealmResources,
   RuntimeFileSystemBase,
   RuntimeLogger,
   RuntimeLogOptions,

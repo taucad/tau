@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Readable, Writable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
@@ -11,8 +13,14 @@ import type { ZodType } from 'zod';
 import { rpcName, toolName } from '@taucad/chat/constants';
 import { exportModelInputSchema, exportModelOutputSchema } from '@taucad/chat/schemas/tools/export-model';
 import { evaluateModelInputSchema, evaluateModelOutputSchema } from '@taucad/chat/schemas/tools/evaluate-model';
-import { screenshotInputSchema, screenshotMcpOutputSchema } from '@taucad/chat/schemas/tools/screenshot';
+import {
+  screenshotArtifactImageSchema,
+  screenshotInputSchema,
+  screenshotMcpOutputSchema,
+} from '@taucad/chat/schemas/tools/screenshot';
 import { testModelInputSchema, testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
+// oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load this package's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
+import packageJson from '../package.json' with { type: 'json' };
 
 const exposedRpcNames = [
   rpcName.evaluateModel,
@@ -61,6 +69,12 @@ export type TauMcpDispatchOptions = {
   toolCallId: string;
   /** Cancels the underlying browser or headless operation. */
   signal?: AbortSignal;
+  /**
+   * The client's request `_meta`, verbatim. Codex names the thread's project
+   * folder here (`codex/sandbox-state-meta`, sent to a server that declares that
+   * experimental capability), since it advertises no MCP roots.
+   */
+  meta?: Readonly<Record<string, unknown>> | undefined;
 };
 
 /** One validated call into Tau's canonical RPC dispatcher. @public */
@@ -128,6 +142,19 @@ export type TauMcpServerOptions = Readonly<{
   dispatch: TauMcpDispatch;
   /** Host tools registered beside the CAD four, dispatched by name. */
   hostTools?: readonly TauMcpHostTool[] | undefined;
+  /**
+   * How `screenshot` returns its images. `attachments` (the default) returns
+   * file paths and links in `structuredContent`. `inline` returns each image as
+   * an MCP image block the client shows its model, with the paths in text and
+   * no output schema; the dispatcher must then fill each image's `dataUrl`.
+   */
+  screenshotImages?: 'attachments' | 'inline' | undefined;
+}>;
+
+/** The streams {@link serveTauMcpStdio} speaks over, when not this process's own stdin and stdout. @public */
+export type TauMcpStdioStreams = Readonly<{
+  stdin?: Readable | undefined;
+  stdout?: Writable | undefined;
 }>;
 
 /** Options for one stateless Streamable HTTP MCP request. @public */
@@ -146,7 +173,7 @@ export type TauMcpHttpHandler = Readonly<{
   close(): Promise<void>;
 }>;
 
-/** Public metadata for one read-only Tau MCP tool. @public */
+/** Public metadata for one Tau MCP tool. @public */
 export type TauMcpToolDefinition = Readonly<{
   description: string;
   inputSchema: ZodType;
@@ -188,6 +215,7 @@ export type TauMcpCall = {
   arguments: unknown;
   toolCallId: string;
   signal?: AbortSignal;
+  meta?: Readonly<Record<string, unknown>> | undefined;
 };
 
 /** MCP adapter backed by a browser or headless Tau RPC authority. @public */
@@ -195,11 +223,32 @@ export type TauMcpAdapter = {
   call(input: TauMcpCall): Promise<CallToolResult>;
 };
 
-const rpcFailure = (result: TauMcpRpcFailure): CallToolResult => ({
-  isError: true,
-  content: [{ type: 'text', text: `${result.errorCode}: ${result.message}` }],
-  structuredContent: { ...result },
-});
+/** Longest detail line a failure carries: validation errors are short, a raw tool output can be megabytes of image data. */
+const failureDetailLimit = 2000;
+
+/**
+ * A failure as text alone: `CODE: message`, then one JSON line with any
+ * validation errors and raw output.
+ *
+ * Never `structuredContent`: a client validates it against the tool's output
+ * schema even on an error, which a failure never matches, so the client would
+ * replace the kernel's diagnostic with its own schema error.
+ *
+ * @param failure - The dispatcher's failure.
+ * @returns The error result the agent reads.
+ */
+const rpcFailure = ({ errorCode, message, validationErrors, rawOutput }: TauMcpRpcFailure): CallToolResult => {
+  const details =
+    validationErrors === undefined && rawOutput === undefined ? '' : JSON.stringify({ validationErrors, rawOutput });
+  // ponytail: a clipped detail line is no longer valid JSON; the code and message above it stay whole.
+  const clipped = details.length > failureDetailLimit ? `${details.slice(0, failureDetailLimit)}…` : details;
+  return {
+    isError: true,
+    content: [
+      { type: 'text', text: clipped === '' ? `${errorCode}: ${message}` : `${errorCode}: ${message}\n${clipped}` },
+    ],
+  };
+};
 
 const rpcSuccess = (result: Record<string, unknown>): CallToolResult => ({
   content: [{ type: 'text', text: JSON.stringify(result) }],
@@ -217,27 +266,80 @@ const testModelSuccess = (result: z.infer<typeof testModelOutputSchema>): CallTo
               .slice(0, 20)
               .map((failure) => failure.id)
               .join(', ')}${result.failures.length > 20 ? ` and ${String(result.failures.length - 20)} more` : ''}.`
-      }${result.fullResult ? ` Full report: ${result.fullResult.absolutePath}.` : ''}`,
+      }${result.fullResult ? ` Full report: ${result.fullResult.absolutePath ?? result.fullResult.path}.` : ''}`,
     },
   ],
   structuredContent: result,
 });
 
-const screenshotSuccess = (result: z.infer<typeof screenshotMcpOutputSchema>): CallToolResult => ({
+/**
+ * A screenshot result as a dispatcher returns it: the MCP result, plus each
+ * image's bytes for an `inline` server. The bytes never reach `structuredContent`.
+ */
+const screenshotDispatchSchema = screenshotMcpOutputSchema.extend({
+  images: z
+    .array(
+      screenshotArtifactImageSchema.extend({
+        dataUrl: z
+          .string()
+          .regex(/^data:image\/(?:png|webp);base64,/u)
+          .optional(),
+      }),
+    )
+    .min(1),
+});
+
+type ScreenshotDispatch = z.infer<typeof screenshotDispatchSchema>;
+
+const capturedViews = (result: ScreenshotDispatch): string =>
+  // The message says what the images leave out of the viewer, so a client that reads only text still learns it.
+  `Captured ${String(result.images.length)} CAD ${result.images.length === 1 ? 'view' : 'views'}.${result.message === undefined ? '' : ` ${result.message}`}`;
+
+const screenshotSuccess = (result: ScreenshotDispatch): CallToolResult => {
+  const images = result.images.map(({ dataUrl: _dataUrl, ...image }) => image);
+  return {
+    content: [
+      {
+        type: 'text',
+        text: `${capturedViews(result)} Open each local image with your image-viewing tool:\n${images.map(({ view, absolutePath }) => `${view}: ${absolutePath}`).join('\n')}`,
+      },
+      ...images.map(({ view, absolutePath, mimeType }): CallToolResult['content'][number] => ({
+        type: 'resource_link',
+        uri: pathToFileURL(absolutePath).href,
+        name: `${view} screenshot`,
+        mimeType,
+      })),
+    ],
+    structuredContent: { ...result, images },
+  };
+};
+
+/**
+ * A screenshot result as image blocks the client shows its model, in the
+ * order the text lists them, with no `structuredContent` (the tool declares no
+ * output schema in this mode). The provenance a structured result would carry
+ * rides the text instead.
+ *
+ * @param result - The dispatcher's result, with each image's bytes.
+ * @returns The text summary, then one image block per image that has bytes.
+ */
+const screenshotInline = (result: ScreenshotDispatch): CallToolResult => ({
   content: [
     {
       type: 'text',
-      // The message says what the images leave out of the viewer, so a client that reads only text still learns it.
-      text: `Captured ${String(result.images.length)} CAD ${result.images.length === 1 ? 'view' : 'views'}.${result.message === undefined ? '' : ` ${result.message}`} Open each local image with your image-viewing tool:\n${result.images.map(({ view, absolutePath }) => `${view}: ${absolutePath}`).join('\n')}`,
+      text: [
+        `${capturedViews(result)} The images follow in this order; each is also saved locally:`,
+        ...result.images.map(
+          ({ view, instance, angle, absolutePath, byteLength }) =>
+            `${[view, instance, angle].filter((part) => part !== undefined).join(' ')}: ${absolutePath} (${String(byteLength)} bytes)`,
+        ),
+        ...(result.sourceRevision === undefined ? [] : [`sourceRevision: ${JSON.stringify(result.sourceRevision)}`]),
+      ].join('\n'),
     },
-    ...result.images.map(({ view, absolutePath, mimeType }): CallToolResult['content'][number] => ({
-      type: 'resource_link',
-      uri: pathToFileURL(absolutePath).href,
-      name: `${view} screenshot`,
-      mimeType,
-    })),
+    ...result.images.flatMap(({ dataUrl, mimeType }): CallToolResult['content'] =>
+      dataUrl === undefined ? [] : [{ type: 'image', data: dataUrl.slice(dataUrl.indexOf(',') + 1), mimeType }],
+    ),
   ],
-  structuredContent: result,
 });
 
 const withoutSuccess = <Value extends { success: true }>(result: Value): Omit<Value, 'success'> => {
@@ -246,16 +348,18 @@ const withoutSuccess = <Value extends { success: true }>(result: Value): Omit<Va
 };
 
 /**
- * Create the read-only Tau MCP adapter.
+ * Validate MCP tool calls and map them onto canonical Tau RPC dispatch.
  *
- * @param options - Canonical RPC dispatch function for one authorized run.
+ * @param options - Canonical RPC dispatch function for one authorized run, and how screenshots return.
  * @returns An adapter that validates and maps MCP calls to Tau RPC calls.
  * @public
  */
-export const createTauMcpAdapter = (options: { dispatch: TauMcpDispatch }): TauMcpAdapter => ({
+export const createTauMcpAdapter = (
+  options: Pick<TauMcpServerOptions, 'dispatch' | 'screenshotImages'>,
+): TauMcpAdapter => ({
   async call(input) {
     input.signal?.throwIfAborted();
-    const dispatchOptions = { toolCallId: input.toolCallId, signal: input.signal };
+    const dispatchOptions = { toolCallId: input.toolCallId, signal: input.signal, meta: input.meta };
 
     switch (input.name) {
       case toolName.evaluateModel: {
@@ -280,7 +384,8 @@ export const createTauMcpAdapter = (options: { dispatch: TauMcpDispatch }): TauM
         if (result.success !== true) {
           return rpcFailure(result);
         }
-        return screenshotSuccess(screenshotMcpOutputSchema.parse(withoutSuccess(result)));
+        const capture = screenshotDispatchSchema.parse(withoutSuccess(result));
+        return options.screenshotImages === 'inline' ? screenshotInline(capture) : screenshotSuccess(capture);
       }
       case toolName.exportModel: {
         const args = exportModelInputSchema.parse(input.arguments);
@@ -313,6 +418,12 @@ const artifactWriteAnnotations = {
   openWorldHint: false,
 } as const;
 
+/**
+ * Asks Claude Code to list the tool upfront instead of deferring it behind
+ * tool search; other clients ignore unknown `_meta`.
+ */
+const alwaysLoad = { 'anthropic/alwaysLoad': true };
+
 /** A host tool beside the SDK schema converted from its JSON Schema. */
 type SdkHostTool = Readonly<{ tool: TauMcpHostTool; inputSchema: ZodType }>;
 
@@ -343,55 +454,72 @@ const toSdkHostTools = (tools: readonly TauMcpHostTool[] = []): readonly SdkHost
  * Register the CAD four and already converted host tools.
  *
  * @param server - MCP server that owns the transport lifecycle.
- * @param dispatch - Canonical RPC dispatch function for one authorized run.
+ * @param options - Canonical RPC dispatch function for one authorized run, and how screenshots return.
  * @param hostTools - Host tools with their SDK schemas.
  * @returns Nothing.
  */
-const registerTools = (server: McpServer, dispatch: TauMcpDispatch, hostTools: readonly SdkHostTool[]): void => {
-  const adapter = createTauMcpAdapter({ dispatch });
+const registerTools = (
+  server: McpServer,
+  options: Pick<TauMcpServerOptions, 'dispatch' | 'screenshotImages'>,
+  hostTools: readonly SdkHostTool[],
+): void => {
+  const { dispatch } = options;
+  const adapter = createTauMcpAdapter(options);
 
   server.registerTool(
     toolName.evaluateModel,
-    { ...canonicalToolDefinitions[toolName.evaluateModel], annotations: readOnlyAnnotations },
+    { ...canonicalToolDefinitions[toolName.evaluateModel], annotations: readOnlyAnnotations, _meta: alwaysLoad },
     async (args, extra) =>
       adapter.call({
         name: toolName.evaluateModel,
         arguments: args,
         toolCallId: randomUUID(),
         signal: extra.signal,
+        meta: extra._meta,
       }),
   );
   server.registerTool(
     toolName.testModel,
-    { ...canonicalToolDefinitions[toolName.testModel], annotations: readOnlyAnnotations },
+    { ...canonicalToolDefinitions[toolName.testModel], annotations: readOnlyAnnotations, _meta: alwaysLoad },
     async (args, extra) =>
       adapter.call({
         name: toolName.testModel,
         arguments: args,
         toolCallId: randomUUID(),
         signal: extra.signal,
+        meta: extra._meta,
       }),
   );
   server.registerTool(
     toolName.screenshot,
-    { ...canonicalToolDefinitions[toolName.screenshot], annotations: readOnlyAnnotations },
+    {
+      /* An inline result carries image blocks and no structured content, which
+       * a declared output schema would make the client reject. */
+      ...(options.screenshotImages === 'inline'
+        ? { description: descriptions.screenshot, inputSchema: screenshotInputSchema }
+        : canonicalToolDefinitions[toolName.screenshot]),
+      annotations: readOnlyAnnotations,
+      _meta: alwaysLoad,
+    },
     async (args, extra) =>
       adapter.call({
         name: toolName.screenshot,
         arguments: args,
         toolCallId: randomUUID(),
         signal: extra.signal,
+        meta: extra._meta,
       }),
   );
   server.registerTool(
     toolName.exportModel,
-    { ...canonicalToolDefinitions[toolName.exportModel], annotations: artifactWriteAnnotations },
+    { ...canonicalToolDefinitions[toolName.exportModel], annotations: artifactWriteAnnotations, _meta: alwaysLoad },
     async (args, extra) =>
       adapter.call({
         name: toolName.exportModel,
         arguments: args,
         toolCallId: randomUUID(),
         signal: extra.signal,
+        meta: extra._meta,
       }),
   );
   for (const { tool, inputSchema } of hostTools) {
@@ -401,13 +529,14 @@ const registerTools = (server: McpServer, dispatch: TauMcpDispatch, hostTools: r
         description: tool.description,
         inputSchema,
         ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
+        _meta: alwaysLoad,
       },
       async (args, extra) => {
         extra.signal.throwIfAborted();
         const result = await dispatch(
           /* The SDK validated `args` against the tool's own schema; this only recovers the object type (CL11). */
           { toolName: tool.name, args: hostToolArgumentsSchema.parse(args) },
-          { toolCallId: randomUUID(), signal: extra.signal },
+          { toolCallId: randomUUID(), signal: extra.signal, meta: extra._meta },
         );
         return result.success === true ? rpcSuccess(withoutSuccess(result)) : rpcFailure(result);
       },
@@ -425,19 +554,25 @@ const registerTools = (server: McpServer, dispatch: TauMcpDispatch, hostTools: r
  * @public
  */
 export const registerTauMcpTools = (server: McpServer, options: TauMcpServerOptions): void => {
-  registerTools(server, options.dispatch, toSdkHostTools(options.hostTools));
+  registerTools(server, options, toSdkHostTools(options.hostTools));
 };
 
 /**
  * Create an unconnected server over already converted host tools.
  *
- * @param dispatch - Canonical RPC dispatch function for one authorized run.
+ * @param options - Canonical RPC dispatch function for one authorized run, and how screenshots return.
  * @param hostTools - Host tools with their SDK schemas.
  * @returns A tool-only MCP server that has not yet been connected to a transport.
  */
-const createServer = (dispatch: TauMcpDispatch, hostTools: readonly SdkHostTool[]): McpServer => {
-  const server = new McpServer({ name: '@taucad/mcp', version: '0.0.1' }, { instructions: tauMcpInstructions });
-  registerTools(server, dispatch, hostTools);
+const createServer = (
+  options: Pick<TauMcpServerOptions, 'dispatch' | 'screenshotImages'>,
+  hostTools: readonly SdkHostTool[],
+): McpServer => {
+  const server = new McpServer(
+    { name: packageJson.name, version: packageJson.version },
+    { instructions: tauMcpInstructions },
+  );
+  registerTools(server, options, hostTools);
   return server;
 };
 
@@ -454,7 +589,35 @@ const createServer = (dispatch: TauMcpDispatch, hostTools: readonly SdkHostTool[
  * @public
  */
 export const createTauMcpServer = (options: TauMcpServerOptions): McpServer =>
-  createServer(options.dispatch, toSdkHostTools(options.hostTools));
+  createServer(options, toSdkHostTools(options.hostTools));
+
+/**
+ * Serve one Tau MCP server over stdio.
+ *
+ * For a local agent that launches Tau as its own stdio server (a Codex or
+ * Claude plugin). The protocol owns the output stream: nothing else may write
+ * to it, so a process whose other code may print passes a stream bound to its
+ * original stdout and points `process.stdout` elsewhere.
+ *
+ * It declares Codex's `codex/sandbox-state-meta` capability, without which Codex
+ * omits the thread's project folder from each call's `_meta`; the dispatcher
+ * receives that `_meta` as `meta`.
+ *
+ * @param options - Dispatch and host tools, as for {@link createTauMcpServer}.
+ * @param streams - Input and output streams; default this process's stdin and stdout.
+ * @returns The connected server; its `onclose` fires when the transport closes.
+ * @throws Error naming a host tool whose input schema cannot convert.
+ * @public
+ */
+export const serveTauMcpStdio = async (
+  options: TauMcpServerOptions,
+  streams: TauMcpStdioStreams = {},
+): Promise<McpServer> => {
+  const server = createTauMcpServer(options);
+  server.server.registerCapabilities({ experimental: { 'codex/sandbox-state-meta': {} } });
+  await server.connect(new StdioServerTransport(streams.stdin, streams.stdout));
+  return server;
+};
 
 /**
  * Create an MCP Streamable HTTP handler with standard session semantics.
@@ -522,13 +685,18 @@ export const createTauMcpHttpHandler = (
         sessions.delete(closedSessionId);
       },
     });
-    const server = createServer(async (call, dispatchOptions) => {
-      const dispatch = requestDispatch.getStore();
-      if (!dispatch) {
-        return { errorCode: 'MCP_RUN_INACTIVE', message: 'This MCP request has no active Tau authority.' };
-      }
-      return dispatch(call, dispatchOptions);
-    }, hostTools);
+    const server = createServer(
+      {
+        dispatch: async (call, dispatchOptions) => {
+          const dispatch = requestDispatch.getStore();
+          if (!dispatch) {
+            return { errorCode: 'MCP_RUN_INACTIVE', message: 'This MCP request has no active Tau authority.' };
+          }
+          return dispatch(call, dispatchOptions);
+        },
+      },
+      hostTools,
+    );
     const session: Session = { server, transport, authorityKey: options.authorityKey };
     // oxlint-disable-next-line unicorn/prefer-add-event-listener -- The SDK transport exposes an onclose callback, not EventTarget.
     transport.onclose = () => {

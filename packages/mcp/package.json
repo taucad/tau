@@ -1,7 +1,7 @@
 {
   "name": "@taucad/mcp",
   "version": "0.0.1",
-  "description": "Read-only Tau CAD MCP adapter over canonical chat RPC contracts",
+  "description": "Model Context Protocol server for Tau's CAD tools over canonical chat RPC contracts",
   "type": "module",
   "sideEffects": false,
   "private": false,

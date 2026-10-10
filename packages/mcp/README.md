@@ -12,3 +12,8 @@ authentication nor project selection. `createTauMcpHttpHandler()` exposes the
 tools over the official SDK's Streamable HTTP transport after the host has
 authenticated and bound every request. Session ids are additionally fenced by
 a non-secret authority key supplied by that host.
+
+`serveTauMcpStdio()` serves the same tools to a local agent that launched the
+process (a Codex or Claude Code plugin). With `screenshotImages: 'inline'`,
+`screenshot` returns MCP image blocks the client shows its model, with the
+saved file paths in text.

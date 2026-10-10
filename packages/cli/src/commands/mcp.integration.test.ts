@@ -101,6 +101,28 @@ const nativeEngineUnavailable = await (async (): Promise<string | undefined> => 
   }
 })();
 
+/**
+ * Why `screenshot` cannot render here, or `undefined` when it can.
+ *
+ * The renderer is WebGPU, loaded through the image plugin's own loader as the
+ * transcoder loads it; a runner with no GPU adapter and no software rasterizer
+ * (GitHub's Ubuntu runners) has nothing to render with, so it skips.
+ */
+const rendererUnavailable = await (async (): Promise<string | undefined> => {
+  try {
+    const backend = pathToFileURL(join(repoRoot, 'packages/plugins/image/src/image-backend.ts')).href;
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the loader's one export, typed without a dependency on the renderer.
+    const { loadImageBackend } = (await import(backend)) as {
+      loadImageBackend: () => Promise<{ describeAdapter: () => Promise<unknown> }>;
+    };
+    const renderer = await loadImageBackend();
+    const adapter = await renderer.describeAdapter();
+    return adapter === undefined ? 'the WebGPU renderer finds no adapter on this host' : undefined;
+  } catch (error) {
+    return `the WebGPU renderer does not load: ${error instanceof Error ? error.message : String(error)}`;
+  }
+})();
+
 const disposers: Array<() => Promise<void>> = [];
 
 afterAll(async () => {
@@ -315,7 +337,7 @@ describe('tau mcp over stdio', () => {
     async () => {
       const result = await call({ name: 'evaluate_model', arguments: { targetFile: 'main.ts' } });
 
-      expect(result.isError ?? false).toBe(false);
+      expect(result.isError ?? false, textOf(result)).toBe(false);
       expect(result.structuredContent).toMatchObject({ status: 'ready' });
       /* The first call loads the runtime, which proves the module log sees kernels at all. */
       expect(await served.kernelModules()).toContainEqual(expect.stringMatching(/\/replicad\.kernel\.ts$/u));
@@ -325,10 +347,11 @@ describe('tau mcp over stdio', () => {
 
   it(
     'should return a screenshot as an image block with its saved path and no structured content',
-    async () => {
+    async ({ skip }) => {
+      skip(rendererUnavailable !== undefined, rendererUnavailable);
       const result = await call({ name: 'screenshot', arguments: { targetFile: 'main.ts' } });
 
-      expect(result.isError ?? false).toBe(false);
+      expect(result.isError ?? false, textOf(result)).toBe(false);
       expect(result.structuredContent).toBeUndefined();
       const [summary, image] = result.content;
       expect(summary).toMatchObject({ type: 'text' });
@@ -368,7 +391,7 @@ describe('tau mcp over stdio', () => {
       skip(nativeEngineUnavailable !== undefined, nativeEngineUnavailable);
       const result = await call({ name: 'test_model', arguments: {} });
 
-      expect(result.isError ?? false).toBe(false);
+      expect(result.isError ?? false, textOf(result)).toBe(false);
       expect(result.structuredContent).toMatchObject({ passed: 1, total: 1 });
     },
     kernelCallLimit,
@@ -399,8 +422,10 @@ describe('tau mcp over stdio', () => {
     await annotate(`exited ${String(Math.round(elapsed))} ms after the client closed`);
 
     expect(code).toBe(0);
-    expect(screenshotPath).not.toBe('');
-    expect(await exists(screenshotPath)).toBe(false);
+    if (rendererUnavailable === undefined) {
+      expect(screenshotPath).not.toBe('');
+      expect(await exists(screenshotPath)).toBe(false);
+    }
     const lines = served
       .stdout()
       .split('\n')

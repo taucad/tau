@@ -223,14 +223,6 @@
       "lookups": 14
     },
     {
-      "id": "typescript:GeoSpecEngineHostBindings.loadModel",
-      "name": "loadModel",
-      "score": 14,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 14
-    },
-    {
       "id": "typescript:GeoSpecBoundingBoxExpectation.max",
       "name": "max",
       "score": 13,
@@ -253,14 +245,6 @@
       "workspace": 9,
       "examples": 4,
       "lookups": 0
-    },
-    {
-      "id": "typescript:GeoSpec",
-      "name": "GeoSpec",
-      "score": 12,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 12
     },
     {
       "id": "typescript:GeoSpecMatcher.toHaveNoDiagnostics",
@@ -343,22 +327,6 @@
       "lookups": 0
     },
     {
-      "id": "typescript:AnalyzeMeshOptions.parameters",
-      "name": "parameters",
-      "score": 9,
-      "workspace": 4,
-      "examples": 4,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:CreateStepLoaderOptions.parameters",
-      "name": "parameters",
-      "score": 9,
-      "workspace": 4,
-      "examples": 4,
-      "lookups": 1
-    },
-    {
       "id": "typescript:GeoSpecMatcher.toHaveMinimumWallThickness",
       "name": "toHaveMinimumWallThickness",
       "score": 9,
@@ -384,22 +352,6 @@
     },
     {
       "id": "typescript:GeometryProvenance.parameters",
-      "name": "parameters",
-      "score": 9,
-      "workspace": 4,
-      "examples": 4,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:LoadMeshOptions.parameters",
-      "name": "parameters",
-      "score": 9,
-      "workspace": 4,
-      "examples": 4,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:LoadStepOptions.parameters",
       "name": "parameters",
       "score": 9,
       "workspace": 4,
@@ -671,14 +623,6 @@
       "lookups": 4
     },
     {
-      "id": "typescript:AnalyzeMeshOptions.format",
-      "name": "format",
-      "score": 3,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 3
-    },
-    {
       "id": "typescript:CreateGeoSpecNativeModelLoaderOptions.format",
       "name": "format",
       "score": 3,
@@ -709,14 +653,6 @@
       "workspace": 2,
       "examples": 1,
       "lookups": 0
-    },
-    {
-      "id": "typescript:GeoSpecIngestSubjectRequest.format",
-      "name": "format",
-      "score": 3,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 3
     },
     {
       "id": "typescript:GeoSpecMinimumWallThicknessExpectation",
@@ -759,14 +695,6 @@
       "lookups": 3
     },
     {
-      "id": "typescript:GeometrySelector",
-      "name": "GeometrySelector",
-      "score": 3,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 3
-    },
-    {
       "id": "typescript:GeometrySource.format",
       "name": "format",
       "score": 3,
@@ -784,14 +712,6 @@
     },
     {
       "id": "typescript:GeometrySubjectMeshEvidence.format",
-      "name": "format",
-      "score": 3,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 3
-    },
-    {
-      "id": "typescript:LoadMeshOptions.format",
       "name": "format",
       "score": 3,
       "workspace": 0,
@@ -847,14 +767,6 @@
       "lookups": 3
     },
     {
-      "id": "typescript:SerializedRegExp.pattern",
-      "name": "pattern",
-      "score": 3,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 3
-    },
-    {
       "id": "typescript:Vec3",
       "name": "Vec3",
       "score": 3,
@@ -877,14 +789,6 @@
       "workspace": 2,
       "examples": 0,
       "lookups": 0
-    },
-    {
-      "id": "typescript:AnalyzeMeshResult",
-      "name": "AnalyzeMeshResult",
-      "score": 2,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 2
     },
     {
       "id": "typescript:BoundingBoxStats.primitives",
@@ -975,36 +879,12 @@
       "lookups": 2
     },
     {
-      "id": "typescript:GeoSpecEngineDescriptor.engine",
-      "name": "engine",
-      "score": 2,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:GeoSpecEngineImplementation.engine",
-      "name": "engine",
-      "score": 2,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
       "id": "typescript:GeoSpecFilletFeatureExpectation.selection",
       "name": "selection",
       "score": 2,
       "workspace": 0,
       "examples": 0,
       "lookups": 2
-    },
-    {
-      "id": "typescript:GeoSpecInitializeResult.engine",
-      "name": "engine",
-      "score": 2,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 1
     },
     {
       "id": "typescript:GeoSpecMatcher",
@@ -1017,14 +897,6 @@
     {
       "id": "typescript:GeoSpecModelFormat",
       "name": "GeoSpecModelFormat",
-      "score": 2,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 2
-    },
-    {
-      "id": "typescript:GeoSpecNativeCollector.expectGeo",
-      "name": "expectGeo",
       "score": 2,
       "workspace": 0,
       "examples": 0,
@@ -1111,22 +983,6 @@
       "lookups": 2
     },
     {
-      "id": "typescript:GeometryInspectionSelection.selector",
-      "name": "selector",
-      "score": 2,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 2
-    },
-    {
-      "id": "typescript:GeometrySelection.selector",
-      "name": "selector",
-      "score": 2,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 2
-    },
-    {
       "id": "typescript:LoadModelCodeOptions.code",
       "name": "code",
       "score": 2,
@@ -1141,30 +997,6 @@
       "workspace": 0,
       "examples": 0,
       "lookups": 2
-    },
-    {
-      "id": "typescript:RelationshipEndpointReport.selection",
-      "name": "selection",
-      "score": 2,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 2
-    },
-    {
-      "id": "typescript:SelectorDiagnosticOptions.selector",
-      "name": "selector",
-      "score": 2,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 2
-    },
-    {
-      "id": "typescript:StepLoadProgressEvent.phase",
-      "name": "phase",
-      "score": 2,
-      "workspace": 1,
-      "examples": 1,
-      "lookups": 0
     },
     {
       "id": "typescript:WatertightIrregularEdgeSample.color",
@@ -1191,78 +1023,6 @@
       "lookups": 1
     },
     {
-      "id": "typescript:AnalyzeBrepOptions.subject",
-      "name": "subject",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:AnalyzeBrepResult.diagnostics",
-      "name": "diagnostics",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:AnalyzeMeshOptions.subject",
-      "name": "subject",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:AnalyzeMeshOverlapOptions.subject",
-      "name": "subject",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:AnalyzeMeshOverlapResult.diagnostics",
-      "name": "diagnostics",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:AxisSelector.expect",
-      "name": "expect",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:AxisSelector.kind",
-      "name": "kind",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:BodySelector.expect",
-      "name": "expect",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:BodySelector.kind",
-      "name": "kind",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
       "id": "typescript:BoundingBoxAxisExtremum.aabb",
       "name": "aabb",
       "score": 1,
@@ -1281,14 +1041,6 @@
     {
       "id": "typescript:BrepEvidence.boundingBox",
       "name": "boundingBox",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:CandidateEntity.distance",
-      "name": "distance",
       "score": 1,
       "workspace": 0,
       "examples": 0,
@@ -1337,62 +1089,6 @@
     {
       "id": "typescript:CreateModelLoaderOptions.mesh",
       "name": "mesh",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:CreateStepLoaderOptions.mesh",
-      "name": "mesh",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:DatumSelector.expect",
-      "name": "expect",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:DatumSelector.kind",
-      "name": "kind",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:FaceQuery.offset",
-      "name": "offset",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:FaceSelector.expect",
-      "name": "expect",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:FaceSelector.kind",
-      "name": "kind",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:GeoSpec.analyzeMesh",
-      "name": "analyzeMesh",
       "score": 1,
       "workspace": 0,
       "examples": 0,
@@ -1471,14 +1167,6 @@
       "lookups": 0
     },
     {
-      "id": "typescript:GeoSpecClaimResult.diagnostics",
-      "name": "diagnostics",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
       "id": "typescript:GeoSpecComponentInterferenceAllowance.reason",
       "name": "reason",
       "score": 1,
@@ -1527,30 +1215,6 @@
       "lookups": 0
     },
     {
-      "id": "typescript:GeoSpecEngineHostBindings.analyzeMesh",
-      "name": "analyzeMesh",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:GeoSpecIngestSubjectRequest.frame",
-      "name": "frame",
-      "score": 1,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 0
-    },
-    {
-      "id": "typescript:GeoSpecIngestSubjectResult.subject",
-      "name": "subject",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
       "id": "typescript:GeoSpecModelLoadError.diagnostics",
       "name": "diagnostics",
       "score": 1,
@@ -1575,22 +1239,6 @@
       "lookups": 1
     },
     {
-      "id": "typescript:GeoSpecNodePoolRunnerOptions.cache",
-      "name": "cache",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:GeoSpecNodeRunnerOptions.cache",
-      "name": "cache",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
       "id": "typescript:GeoSpecPmiFaceAssociation.occurrence",
       "name": "occurrence",
       "score": 1,
@@ -1605,14 +1253,6 @@
       "workspace": 0,
       "examples": 1,
       "lookups": 0
-    },
-    {
-      "id": "typescript:GeoSpecProtocolProvenance.build",
-      "name": "build",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
     },
     {
       "id": "typescript:GeoSpecQueryOptions.subject",
@@ -1703,14 +1343,6 @@
       "lookups": 1
     },
     {
-      "id": "typescript:GeometrySelection.diagnostics",
-      "name": "diagnostics",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
       "id": "typescript:GeometryStats.boundingBox",
       "name": "boundingBox",
       "score": 1,
@@ -1729,70 +1361,6 @@
     {
       "id": "typescript:GeometrySubject.mesh",
       "name": "mesh",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:GroupSelector.expect",
-      "name": "expect",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:GroupSelector.kind",
-      "name": "kind",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:InspectGeometryOptions.subject",
-      "name": "subject",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:InspectGeometryResult.diagnostics",
-      "name": "diagnostics",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:InterfaceSelector.expect",
-      "name": "expect",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:InterfaceSelector.kind",
-      "name": "kind",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:LoadMeshFailure.diagnostics",
-      "name": "diagnostics",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:LoadMeshSuccess.subject",
-      "name": "subject",
       "score": 1,
       "workspace": 0,
       "examples": 0,
@@ -1833,22 +1401,6 @@
     {
       "id": "typescript:LoadModelSourceOptions.mesh",
       "name": "mesh",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:LoadStepOptions.mesh",
-      "name": "mesh",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:MeshComponentOverlap.intersectionVolume",
-      "name": "intersectionVolume",
       "score": 1,
       "workspace": 0,
       "examples": 0,
@@ -1911,56 +1463,8 @@
       "lookups": 1
     },
     {
-      "id": "typescript:OccurrenceSelector.expect",
-      "name": "expect",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:OccurrenceSelector.kind",
-      "name": "kind",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:PlaneQuery.offset",
-      "name": "offset",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:PlaneSelector.expect",
-      "name": "expect",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:PlaneSelector.kind",
-      "name": "kind",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
       "id": "typescript:PrimitiveRecord.aabb",
       "name": "aabb",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:RelationshipEvidence.diagnostics",
-      "name": "diagnostics",
       "score": 1,
       "workspace": 0,
       "examples": 0,
@@ -1976,22 +1480,6 @@
     },
     {
       "id": "typescript:RuntimeExportIntentFailure.diagnostics",
-      "name": "diagnostics",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:SelectorDiagnosticOptions.details",
-      "name": "details",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:SelectorIndex.diagnostics",
       "name": "diagnostics",
       "score": 1,
       "workspace": 0,
@@ -2055,44 +1543,12 @@
       "lookups": 1
     },
     {
-      "id": "typescript:analyzeMesh",
-      "name": "analyzeMesh",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
       "id": "typescript:defaultGeoSpecInclude",
       "name": "defaultGeoSpecInclude",
       "score": 1,
       "workspace": 0,
       "examples": 0,
       "lookups": 1
-    },
-    {
-      "id": "typescript:inspectGeometry",
-      "name": "inspectGeometry",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:loadMesh",
-      "name": "loadMesh",
-      "score": 1,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 0
-    },
-    {
-      "id": "typescript:loadStep",
-      "name": "loadStep",
-      "score": 1,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 0
     }
   ]
 }

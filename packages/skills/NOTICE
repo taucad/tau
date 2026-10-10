@@ -72,6 +72,32 @@ OpenRSCAD
   the upstream OpenSCAD language, and derives nothing from any GPL-licensed
   OpenSCAD source or builtin table.
 
+tscircuit (@tscircuit/core, @tscircuit/props, @tscircuit/footprinter)
+  Copyright (c) 2024 tscircuit Inc.
+  Licensed under the MIT License.
+  https://github.com/tscircuit/core
+  https://github.com/tscircuit/props
+  https://github.com/tscircuit/footprinter
+  Corpus source: the `@tscircuit/core` TypeScript declarations and their
+  documentation comments, resolved over `@tscircuit/props` and
+  `@tscircuit/footprinter`. The `package.json` files of `@tscircuit/props` and
+  `@tscircuit/footprinter` declare ISC; their LICENSE files grant the MIT
+  License, which this attribution follows.
+
+picovoxel
+  Copyright (c) 2025-2026 the picovoxel contributors
+  Licensed under the Apache License, Version 2.0.
+  https://github.com/taucad/picovoxel
+  Corpus source: the `picovoxel` TypeScript declarations and their
+  documentation comments. As picovoxel's own NOTICE records, its API is a
+  TypeScript port of LEAP 71's PicoGK, LEAP71_ShapeKernel and
+  LEAP71_LatticeLibrary, each Copyright (c) 2023-2026 LEAP 71 and licensed
+  under the Apache License, Version 2.0:
+  https://github.com/leap71/PicoGK
+  https://github.com/leap71/LEAP71_ShapeKernel
+  https://github.com/leap71/LEAP71_LatticeLibrary
+  picovoxel is not affiliated with, endorsed by, or supported by LEAP 71.
+
 KCL standard library (Zoo Modeling App)
   Copyright (c) 2023 The Zoo Authors
   Licensed under the MIT License.
@@ -93,5 +119,6 @@ libcascade / Open CASCADE Technology
   The redistributed corpus contains factual API names and signatures only.
   Documentation prose from Open CASCADE headers is excluded.
 
-GeoSpec (`geospec`) is first-party Tau code under the Apache-2.0 grant above
-and carries no separate upstream attribution.
+GeoSpec (`geospec`) and the `@taucad/picovoxel` adapter surface (the `tau-api-*`
+files beside the picovoxel corpus) are first-party Tau code under the
+Apache-2.0 grant above and carry no separate upstream attribution.

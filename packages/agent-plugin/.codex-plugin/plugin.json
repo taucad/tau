@@ -1,0 +1,33 @@
+{
+  "name": "tau",
+  "version": "0.1.0-beta.1",
+  "description": "Evaluate, test, screenshot and export code-CAD models with Tau.",
+  "author": {
+    "name": "Tau",
+    "url": "https://tau.new"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/agent-plugin#readme",
+  "repository": "https://github.com/taucad/tau",
+  "license": "Apache-2.0",
+  "keywords": ["cad", "3d", "replicad", "openscad", "geospec", "3d-printing"],
+  "skills": "./skills/",
+  "mcpServers": "./mcp/codex.json",
+  "interface": {
+    "displayName": "Tau",
+    "shortDescription": "Code-CAD with renders, GeoSpec tests and exports.",
+    "longDescription": "Author parametric CAD in replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel or tscircuit, then let Tau evaluate it, run its GeoSpec geometry tests, render screenshots and export STEP, STL, 3MF or glTF from your project folder.",
+    "developerName": "Tau",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://tau.new",
+    "defaultPrompt": [
+      "Model a parametric wall bracket in replicad and show me a screenshot.",
+      "Run the GeoSpec tests for this Tau project and fix what fails."
+    ]
+  },
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "tau"
+    }
+  }
+}

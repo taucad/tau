@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "tau": {
+      "command": "node",
+      "args": ["./dist/launch.mjs"],
+      "cwd": ".",
+      "env_vars": ["TAU_CLI"],
+      "startup_timeout_sec": 600,
+      "tool_timeout_sec": 900,
+      "omit_tools_from": ["deferred"],
+      "default_tools_approval_mode": "approve"
+    }
+  }
+}

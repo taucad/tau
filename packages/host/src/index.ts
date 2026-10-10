@@ -139,5 +139,12 @@ export {
   hostMcpLeaseCeiling,
   HostMcpCapabilityError,
   hostMcpCapabilityPrefix,
+  serveLocalHostMcp,
 } from '#mcp-server.js';
-export type { HostMcpCapabilityClaims, HostMcpEndpoint, HostMcpEndpointOptions } from '#mcp-server.js';
+export type {
+  HostMcpCapabilityClaims,
+  HostMcpEndpoint,
+  HostMcpEndpointOptions,
+  LocalHostMcp,
+  LocalHostMcpOptions,
+} from '#mcp-server.js';

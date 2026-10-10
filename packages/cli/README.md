@@ -108,6 +108,21 @@ Stdout carries result data only: tab-separated plain lines by default, one `{"v"
 
 `tau agent list` reads `<workspace>/.tau/chats`; the agent channel has no command that lists chats, so naming a host refuses with `HOST_CHAT_LIST_UNSUPPORTED` rather than guessing at ids.
 
+## Agent plugins
+
+`tau mcp` serves Tau's CAD tools — `evaluate_model`, `test_model`, `screenshot`, `export_model` and `arrange_workbench` — over stdio to the MCP client that launched it. Stdout carries the MCP protocol only. Each call works in the first of: `--project`; the folder Codex sends with the call; `CLAUDE_PROJECT_DIR`; the working directory. Screenshots come back inline; they and GeoSpec reports over 128 KiB are saved in a temporary folder that is removed when the server stops. `--plugin` and `--config` work as they do for `export`.
+
+```bash
+tau mcp --project ./bracket
+```
+
+For Codex and Claude Code, install [`@taucad/agent-plugin`](https://www.npmjs.com/package/@taucad/agent-plugin): it starts `tau mcp` for the agent and adds Tau's CAD skills.
+
+```bash
+claude plugin install tau --marketplace taucad/tau
+codex plugin marketplace add taucad/tau && codex plugin add tau@taucad
+```
+
 ## TUI
 
 `tau tui <chat>` is the same chat, the same channel and the same durable events as `tau agent tail`, with a keyboard attached. It follows the run, keeps at most 2,000 transcript rows resident, and offers exactly four things: type a prompt and press Enter (which starts a turn when the chat is idle and steers the running one when it is not), `y`/`n` to answer a pending approval with the option id the request itself offered, `c` to cancel, and `q` to detach. `q` leaves the run going — the daemon is what owns it.

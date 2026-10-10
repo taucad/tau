@@ -1,0 +1,13 @@
+{
+  "name": "taucad",
+  "interface": { "displayName": "Tau" },
+  "plugins": [
+    {
+      "name": "tau",
+      "source": { "source": "npm", "package": "@taucad/agent-plugin", "version": "beta" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity",
+      "description": "Evaluate, test, screenshot and export code-CAD models with Tau."
+    }
+  ]
+}

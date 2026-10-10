@@ -1,16 +1,19 @@
 {
-  "name": "@taucad/mcp",
-  "version": "0.0.1",
-  "description": "Model Context Protocol server for Tau's CAD tools over canonical chat RPC contracts",
+  "name": "@taucad/agent-plugin",
+  "version": "0.1.0-beta.1",
+  "description": "Tau CAD plugin for Codex and Claude Code: skills and the tau mcp launcher",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./src/launch.ts",
+    "./dist/launch.mjs"
+  ],
   "private": false,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
-    "directory": "packages/mcp"
+    "directory": "packages/agent-plugin"
   },
-  "homepage": "https://github.com/taucad/tau/tree/main/packages/mcp#readme",
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/agent-plugin#readme",
   "bugs": {
     "url": "https://github.com/taucad/tau/issues"
   },
@@ -18,14 +21,23 @@
   "types": "./dist/index.d.mts",
   "files": [
     "dist",
+    ".codex-plugin",
+    ".claude-plugin",
+    "mcp",
+    "skills",
+    "README.md",
+    "CHANGELOG.md",
     "LICENSE",
-    "README.md"
+    "NOTICE"
   ],
   "keywords": [
     "cad",
+    "codex",
+    "claude-code",
+    "plugin",
     "mcp",
-    "model-context-protocol",
-    "typescript"
+    "agent-skills",
+    "geospec"
   ],
   "author": "Richard Fontein",
   "license": "Apache-2.0",
@@ -51,15 +63,5 @@
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "catalog:"
-  },
-  "peerDependencies": {
-    "zod": "^4.0.0"
-  },
-  "devDependencies": {
-    "@taucad/chat": "workspace:*",
-    "zod": "catalog:"
   }
 }

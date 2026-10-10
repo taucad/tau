@@ -1,0 +1,33 @@
+{
+  "name": "agent-plugin",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/agent-plugin",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "release": {
+    "version": {
+      "versionActions": "packages/agent-plugin/scripts/version-actions.ts"
+    }
+  },
+  "targets": {
+    "build": {
+      "dependsOn": ["assemble"]
+    },
+    "assemble": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "commands": [
+          "node -e \"const { readdirSync, rmSync } = require('node:fs'); for (const entry of readdirSync('packages/agent-plugin/skills')) if (entry !== 'tau') rmSync('packages/agent-plugin/skills/' + entry, { recursive: true, force: true })\"",
+          "tsx packages/skills/src/cli.ts packages/agent-plugin/skills @taucad/jscad @taucad/manifold @taucad/openrscad @taucad/picovoxel @taucad/replicad @taucad/tscircuit @taucad/workbench geospec",
+          "node -e \"const { mkdirSync, writeFileSync } = require('node:fs'); const { resolve } = require('node:path'); mkdirSync('packages/agent-plugin/.dev', { recursive: true }); writeFileSync('packages/agent-plugin/.dev/cli.json', JSON.stringify({ argv: [resolve('node_modules/tsx/dist/cli.mjs'), resolve('packages/cli/src/bin.ts')] }, null, 2) + '\\n')\""
+        ],
+        "parallel": false
+      }
+    },
+    "test": {
+      "dependsOn": ["build"]
+    }
+  }
+}

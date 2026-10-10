@@ -100,7 +100,9 @@ describe('Vision presentation', () => {
     expect(screen.getByRole('button', { name: 'Play the story' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '06 Make' }));
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('The next step is physical');
-    expect(screen.getByText('Manufacturing workflow concept · No live machine connected')).toBeInTheDocument();
+    expect(
+      screen.getByText('Ring gear on a 256 mm build plate · Illustration, no print job is sent'),
+    ).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Take a closer look' })).toBeInTheDocument();
     expect(screen.getAllByRole('main')).toHaveLength(1);
   });
@@ -125,7 +127,7 @@ describe('Vision presentation', () => {
       );
     });
     expect(screen.getByRole('status')).toHaveTextContent('3D is unavailable');
-    expect(screen.getByAltText(/An exploded view of the planetary gearbox/)).toBeInTheDocument();
+    expect(screen.getByAltText(/The assembled planetary gearbox/)).toBeInTheDocument();
     expect(screen.queryByText(/Preparing 3D/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '10 Begin' }));
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('What will you make real?');

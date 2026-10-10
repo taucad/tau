@@ -26,8 +26,10 @@ import {
   visionFrame,
 } from '#routes/vision/vision-story.js';
 import { useVisionPlayback } from '#routes/vision/use-vision-playback.js';
-import posterUrl from '#routes/vision/vision-poster.png?url';
-import sourceUrl from '#components/geometry/splash/planetary/main.js?url';
+import posterUrl from '#routes/vision/vision-poster.webp?url';
+
+const sourceUrl =
+  'https://github.com/taucad/tau/tree/199c8079d5ee42f8c5771fc2cb02bf2791cc3bdf/libs/tau-examples/src/kernels/replicad/planetary-gear-system';
 
 const VisionScene = lazy(async () => {
   const module = await import('#routes/vision/vision-scene.js');
@@ -48,10 +50,10 @@ export const handle: Handle = { enablePageWrapper: false, enableOverflowY: true,
 const ModelPoster = (): React.JSX.Element => (
   <img
     src={posterUrl}
-    alt='An exploded view of the planetary gearbox, with its housing, gears, carrier, cover and bolts.'
+    alt='The assembled planetary gearbox: a fixed ring gear, three planets around the sun and a carrier with socket screws on top.'
     className='size-full object-contain p-8'
-    width={698}
-    height={366}
+    width={720}
+    height={720}
   />
 );
 
@@ -426,8 +428,8 @@ export default function VisionPage(): React.JSX.Element {
                   </a>
                 </Button>
                 <Button asChild variant='ghost'>
-                  <a href={sourceUrl} download='planetary-gearbox.js'>
-                    <Code2 /> Download model source
+                  <a href={sourceUrl} target='_blank' rel='noreferrer'>
+                    <Code2 /> Open the model source <ExternalLink />
                   </a>
                 </Button>
               </div>

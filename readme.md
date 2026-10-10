@@ -74,19 +74,20 @@ Please read our [Code of Conduct](code_of_conduct.md) before participating.
 
 Tau is built on a foundation of excellent open-source projects:
 
-| Category             | Technologies                                                                                                                                                              |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **State Management** | [XState v6](https://xstate.js.org/)                                                                                                                                       |
-| **Code Editor**      | [Monaco Editor](https://microsoft.github.io/monaco-editor/)                                                                                                               |
-| **3D Rendering**     | [Three.js](https://threejs.org/), [React Three Fiber](https://docs.pmnd.rs/react-three-fiber)                                                                             |
-| **UI Framework**     | [React 19](https://react.dev/), [Radix UI](https://www.radix-ui.com/), [shadcn/ui](https://ui.shadcn.com/)                                                                |
-| **File Tree**        | [Headless Tree](https://headless-tree.lukasbach.com/)                                                                                                                     |
-| **AI Orchestration** | [LangChain](https://js.langchain.com/)                                                                                                                                    |
-| **3D Processing**    | [glTF-Transform](https://gltf-transform.dev/), [Assimp](https://assimp.org/)                                                                                              |
-| **CAD Kernels**      | [OpenCascade.js](https://ocjs.org/), [Manifold](https://github.com/elalish/manifold), [JSCAD](https://openjscad.xyz/), [OpenRSCAD](https://github.com/matthova/openrscad) |
-| **Documentation**    | [Fumadocs](https://fumadocs.dev/)                                                                                                                                         |
-| **Database**         | [Drizzle ORM](https://orm.drizzle.team/)                                                                                                                                  |
-| **Git Operations**   | [Isomorphic Git](https://isomorphic-git.org/)                                                                                                                             |
+| Category             | Technologies                                                                                                                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **State Management** | [XState v6](https://stately.ai/docs)                                                                                                                                                           |
+| **UI Framework**     | [React 19](https://react.dev/), [React Router](https://reactrouter.com/), [Radix UI](https://www.radix-ui.com/), [shadcn/ui](https://ui.shadcn.com/), [Tailwind CSS](https://tailwindcss.com/) |
+| **Workspace Layout** | [Dockview](https://dockview.dev/)                                                                                                                                                              |
+| **Code Editor**      | [Monaco Editor](https://microsoft.github.io/monaco-editor/), [Shiki](https://shiki.style/)                                                                                                     |
+| **3D Rendering**     | [Three.js](https://threejs.org/), [React Three Fiber](https://r3f.docs.pmnd.rs/)                                                                                                               |
+| **AI Agents**        | [Pi](https://github.com/earendil-works/pi), [AI SDK](https://ai-sdk.dev/), [LangChain](https://js.langchain.com/)                                                                              |
+| **API**              | [NestJS](https://nestjs.com/), [Fastify](https://fastify.dev/), [Better Auth](https://www.better-auth.com/)                                                                                    |
+| **Database**         | [Drizzle ORM](https://orm.drizzle.team/)                                                                                                                                                       |
+| **Git Operations**   | [Isomorphic Git](https://isomorphic-git.org/)                                                                                                                                                  |
+| **Desktop**          | [Electron](https://www.electronjs.org/)                                                                                                                                                        |
+| **Documentation**    | [Fumadocs](https://fumadocs.dev/)                                                                                                                                                              |
+| **Build**            | [Nx](https://nx.dev/), [Vite](https://vite.dev/)                                                                                                                                               |
 
 Special thanks to [OpenSCAD Playground](https://github.com/openscad/openscad-playground) for inspiring the browser-based code-CAD architecture.
 

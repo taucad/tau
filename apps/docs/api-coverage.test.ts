@@ -225,7 +225,6 @@ const pendingApiReference: ReadonlySet<string> = new Set([
   'packageVersion',
   'parseStackTrace',
   'preserveExportNames',
-  'registerKernelModule',
   'resolveFileUrl',
   'resolveRootedPath',
   'resolveSourcePath',

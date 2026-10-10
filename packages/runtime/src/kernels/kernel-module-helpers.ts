@@ -74,6 +74,11 @@ export type RegisterKernelModuleOptions = {
   version: string;
   globalName?: string;
   exportPrefix?: string;
+  /**
+   * Expose one property of `exports` as the module instead of the whole object, for subpath
+   * modules such as `@jscad/modeling/booleans` (`exportPath: 'booleans'`).
+   */
+  exportPath?: string;
 };
 
 /** Builds an ESM shim that exposes a registry-backed built-in kernel module. @public */
@@ -99,23 +104,54 @@ export function createKernelModuleRegistryExpression(name: string): string {
   return `globalThis.${KERNEL_MODULES_KEY}.get(${JSON.stringify(name)})`;
 }
 
-/** Registers a registry-backed built-in module with the runtime bundler. @public */
+/**
+ * Registers a registry-backed built-in module with the runtime bundler.
+ *
+ * The entry is scoped to the bundler's kernel worker (`bundler.registryScope`), so two workers in
+ * one realm that register the same name each resolve their own exports.
+ * @public
+ */
 export function registerKernelModule(
   runtime: Pick<KernelServices, 'bundler'>,
   options: RegisterKernelModuleOptions,
 ): void {
+  const exports = options.exportPath === undefined ? options.exports : options.exports[options.exportPath];
+  if (!isRecordObject(exports)) {
+    throw new TypeError(`Kernel module "${options.name}" export path "${options.exportPath}" is not an object.`);
+  }
+  const { registryScope } = runtime.bundler;
+  const key = registryScope === undefined ? options.name : `${registryScope}:${options.name}`;
   const registry = getModuleRegistry();
-  registry.set(options.name, options.exports);
+  registry.set(key, exports);
+  // Transitional: unscoped readers (replicad's and jscad's `main` argument, jscad subpath shims)
+  // still read the realm-global name until WP-A3–A5 migrate them; delete with `getModuleRegistry`.
+  registry.set(options.name, exports);
 
+  const registryExpression = createKernelModuleRegistryExpression(key);
   runtime.bundler.registerModule(options.name, {
     code: createKernelModuleShim({
-      moduleExpression: createKernelModuleRegistryExpression(options.name),
-      exports: options.exports,
+      moduleExpression: registryExpression,
+      exports,
       exportPrefix: options.exportPrefix,
     }),
     version: options.version,
     globalName: options.globalName,
+    registryExpression,
   });
+}
+
+/**
+ * Drop every built-in module a kernel worker registered under `registryScope`.
+ * @param registryScope - The worker's scope, as carried by its bundler facade.
+ * @internal
+ */
+export function releaseKernelModuleScope(registryScope: string): void {
+  const registry = getModuleRegistry();
+  for (const key of registry.keys()) {
+    if (key.startsWith(`${registryScope}:`)) {
+      registry.delete(key);
+    }
+  }
 }
 
 function isValidJavaScriptIdentifier(value: string): boolean {

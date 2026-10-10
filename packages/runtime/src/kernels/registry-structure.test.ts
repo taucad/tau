@@ -30,15 +30,15 @@ const spelling = async (files: readonly string[], pattern: RegExp): Promise<stri
 };
 
 it('should keep the built-in module registry key inside the runtime helper', async () => {
-  const pluginDirectories = (await readdir(path.join(packagesRoot, 'plugins'), { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => `plugins/${entry.name}/src`);
-  const pluginSources = (
-    await Promise.all(pluginDirectories.map(async (directory) => sources(directory).catch((): string[] => [])))
-  ).flat();
-  const runtimeSources = (await sources('runtime/src')).filter(
-    (file) => file !== 'runtime/src/kernels/kernel-module-helpers.ts',
+  const pluginEntries = await readdir(path.join(packagesRoot, 'plugins'), { withFileTypes: true });
+  const pluginSourceLists = await Promise.all(
+    pluginEntries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => sources(`plugins/${entry.name}/src`).catch((): string[] => [])),
   );
+  const pluginSources = pluginSourceLists.flat();
+  const allRuntimeSources = await sources('runtime/src');
+  const runtimeSources = allRuntimeSources.filter((file) => file !== 'runtime/src/kernels/kernel-module-helpers.ts');
 
   const offenders = [
     ...(await spelling(

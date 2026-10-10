@@ -164,6 +164,7 @@ import { finalizeExportArtifactSet } from '#framework/export-artifact-finalizer.
 import { isNotFoundError } from '#filesystem/filesystem-errors.js';
 import { loadWasmBinary } from '#framework/wasm-loader.js';
 import { realmResources } from '#framework/realm-resources.js';
+import { releaseKernelModuleScope } from '#kernels/kernel-module-helpers.js';
 
 type FileSystemProxy = WorkerFileSystemProxy;
 
@@ -818,6 +819,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** Pending module registrations queued before the bundler is loaded */
   private readonly pendingModuleRegistrations = new Map<string, BuiltinModule>();
+  /** Scope of this worker's built-in modules in the realm's module registry. */
+  private readonly registryScope = randomUuid();
 
   /** In-flight bundler initializations to coalesce concurrent callers for the same extension */
   private readonly bundlerInitInProgress = new Map<string, Promise<{ definition: BundlerDefinition; ctx: unknown }>>();
@@ -2447,6 +2450,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.loadedTranscoders.clear();
 
     await this.onCleanup();
+    releaseKernelModuleScope(this.registryScope);
     this.fileSystem?.dispose();
     this.fileSystem = undefined;
   }
@@ -7047,6 +7051,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           unresolved: result.unresolvedPaths,
         };
       },
+      registryScope: this.registryScope,
       registerModule: (name: string, entry: BuiltinModule): void => {
         if (this.loadedBundlers.size > 0) {
           for (const bundler of new Set(this.loadedBundlers.values())) {

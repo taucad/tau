@@ -1,5 +1,4 @@
 // @vitest-environment node
-import { Buffer } from 'node:buffer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   KERNEL_MODULES_KEY,
@@ -244,10 +243,13 @@ describe('loadBinaryFile', () => {
 // =============================================================================
 
 /** A bundler double that records registrations and returns the registered shim as the bundle. */
-const createRecordingBundler = (): KernelBundler & { readonly modules: Map<string, BuiltinModule> } => {
+const createRecordingBundler = (
+  registryScope: string,
+): KernelBundler & { readonly modules: Map<string, BuiltinModule> } => {
   const modules = new Map<string, BuiltinModule>();
   return {
     modules,
+    registryScope,
     bundle: async () => ({ code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] }),
     resolveDependencies: async () => ({ resolved: [], unresolved: [] }),
     registerModule: (name, entry) => {
@@ -257,49 +259,50 @@ const createRecordingBundler = (): KernelBundler & { readonly modules: Map<strin
 };
 
 /** Evaluate a registry expression the way a bundle banner binds it. */
-const readRegistryExpression = (expression: string | undefined): unknown => {
+const readRegistryExpression = async (expression: string | undefined): Promise<unknown> => {
   expect(expression).toEqual(expect.any(String));
-  // oxlint-disable-next-line typescript/no-implied-eval -- the expression is runtime-generated module glue under test.
-  return new Function(`return ${expression};`)() as unknown;
+  const source = `export default ${expression};`;
+  const module = (await import(/* @vite-ignore */ `data:text/javascript,${encodeURIComponent(source)}`)) as {
+    default: unknown;
+  };
+  return module.default;
 };
 
 describe('registerKernelModule', () => {
-  it('should give each bundler its own registry entry for one module name', () => {
+  it('should give each bundler its own registry entry for one module name', async () => {
     const exportsA = { token: 'A' };
     const exportsB = { token: 'B' };
-    const bundlerA = createRecordingBundler();
-    const bundlerB = createRecordingBundler();
+    const bundlerA = createRecordingBundler('worker-a');
+    const bundlerB = createRecordingBundler('worker-b');
 
     registerKernelModule({ bundler: bundlerA }, { name: 'scoped-fake', exports: exportsA, version: '1.0.0' });
     registerKernelModule({ bundler: bundlerB }, { name: 'scoped-fake', exports: exportsB, version: '1.0.0' });
 
     const entryA = bundlerA.modules.get('scoped-fake');
     const entryB = bundlerB.modules.get('scoped-fake');
-    expect(readRegistryExpression(entryA?.registryExpression)).toBe(exportsA);
-    expect(readRegistryExpression(entryB?.registryExpression)).toBe(exportsB);
+    expect(await readRegistryExpression(entryA?.registryExpression)).toBe(exportsA);
+    expect(await readRegistryExpression(entryB?.registryExpression)).toBe(exportsB);
     expect(entryA?.code).toContain(`const __mod = ${entryA?.registryExpression};`);
     expect(entryA?.code).not.toBe(entryB?.code);
   });
 
   it('should forward the version and global name with the registry expression', () => {
-    const bundler = createRecordingBundler();
+    const bundler = createRecordingBundler('worker');
 
     registerKernelModule(
       { bundler },
       { name: 'global-fake', exports: { token: 'G' }, version: '2.0.0', globalName: 'globalFake' },
     );
 
-    expect(bundler.modules.get('global-fake')).toEqual({
-      code: expect.any(String),
-      version: '2.0.0',
-      globalName: 'globalFake',
-      registryExpression: expect.any(String),
-    });
+    const entry = bundler.modules.get('global-fake');
+    expect(Object.keys(entry ?? {}).toSorted()).toEqual(['code', 'globalName', 'registryExpression', 'version']);
+    expect(entry).toMatchObject({ version: '2.0.0', globalName: 'globalFake' });
+    expect(entry?.code).toContain(`const __mod = ${entry?.registryExpression};`);
   });
 
-  it('should expose one property of the exports as a subpath module', () => {
+  it('should expose one property of the exports as a subpath module', async () => {
     const booleans = { union: (): string => 'union', subtract: (): string => 'subtract' };
-    const bundler = createRecordingBundler();
+    const bundler = createRecordingBundler('worker');
 
     registerKernelModule(
       { bundler },
@@ -307,14 +310,14 @@ describe('registerKernelModule', () => {
     );
 
     const entry = bundler.modules.get('@fake/modeling/booleans');
-    expect(readRegistryExpression(entry?.registryExpression)).toBe(booleans);
+    expect(await readRegistryExpression(entry?.registryExpression)).toBe(booleans);
     expect(entry?.code).toContain('export { union };');
     expect(entry?.code).toContain('export { subtract };');
     expect(entry?.code).not.toContain('colors');
   });
 
   it('should reject an export path that does not name a module object', () => {
-    const bundler = createRecordingBundler();
+    const bundler = createRecordingBundler('worker');
 
     expect(() => {
       registerKernelModule(
@@ -411,7 +414,7 @@ const startRegistryWorker = async (
   const kernel = createRegistryKernel(exports, executed);
   const worker = new KernelRuntimeWorker({
     runtime: defineRuntime({
-      kernels: [attachRuntimePluginDefinition({ id: kernel.id, extensions: ['fake'] }, () => kernel)],
+      kernels: [attachRuntimePluginDefinition({ id: 'fake-kernel', extensions: ['fake'] }, () => kernel)],
       bundlers: [fakeBundler()],
     }),
   });
@@ -433,7 +436,7 @@ const evaluateDocument = async (worker: KernelRuntimeWorker, documentId: string)
   await vi.waitFor(() => {
     expect(evaluated).toHaveBeenCalledOnce();
   });
-  expect(evaluated.mock.calls[0]![0]).toMatchObject({ success: true });
+  expect(evaluated.mock.calls[0]![0] as unknown).toMatchObject({ success: true });
 };
 
 describe('worker-scoped kernel module registry', () => {

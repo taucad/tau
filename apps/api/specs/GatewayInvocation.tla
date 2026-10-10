@@ -10,10 +10,11 @@
 (* Processes: the host's attempt journal (prepare, send, bind, complete,   *)
 (* network drop, crash, resume with lookup); the API live path per attempt *)
 (* key (admit, abort check, dispatch intent, supplier call, eager          *)
-(* observation, client cancel, finish); the supplier; the recovery sweep   *)
-(* (claim, defer, resolve, transient failure) with Workers claimers; a     *)
-(* refund intent that also holds account atoms. The credit_operation row   *)
-(* per key is the durable state; each SQL statement is one atomic action.  *)
+(* observation, client cancel, service stop, finish); the supplier; the   *)
+(* recovery sweep (claim, defer, resolve, transient failure) with Workers  *)
+(* claimers; a refund intent that also holds account atoms. The            *)
+(* credit_operation row per key is the durable state; each SQL statement   *)
+(* is one atomic action.                                                   *)
 (*                                                                         *)
 (* Clocks: `now` is clock_timestamp(); a sweep transaction reads           *)
 (* transaction_timestamp(), modelled as t \in {now-1, now}.                *)
@@ -431,7 +432,27 @@ ApiClientCancel(k) ==
     /\ req' = [req EXCEPT ![k] = "done"]
     /\ UNCHANGED <<now, acctHeld, refundHeld, voided, conn, dispatches, claims, host, logVars>>
 
-\* finish(): terminalize under the admitting generation; absorbed_unknown returns without it.
+\* The API process stops (R10 of the graceful-shutdown blueprint): a step still streaming, or one its
+\* deadline cut, is terminalized at once as absorbed instead of left for recovery, and a client that
+\* left during the stop is counted the same way. finish() sees absorbed_unknown with the stop signal
+\* set and terminalizes under the admitting generation, so a sweep claim that won the race fences it
+\* out and recovery resolves the row as before. The signal is process-wide; one action per key
+\* over-approximates it.
+ApiServiceStop(k) ==
+    /\ \/ req[k] = "streaming"
+       \/ req[k] = "finishing" /\ fin[k] = "unknown"
+    /\ LET e == IF req[k] = "streaming" /\ conn[k] = "noticed" THEN "abort" ELSE "unknown" IN
+         /\ sup' = IF sup[k] = "generating" THEN [sup EXCEPT ![k] = "cut"] ELSE sup
+         /\ fin' = [fin EXCEPT ![k] = e]
+         /\ IF (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending"
+            THEN Terminal(k, "absorbed", 0, {e}, FALSE, 1)
+            ELSE /\ row' = [row EXCEPT ![k].ev = @ \cup {e}]   \* the evidence write is not fenced
+                 /\ UNCHANGED acctHeld
+    /\ req' = [req EXCEPT ![k] = "done"]
+    /\ UNCHANGED <<now, refundHeld, voided, conn, dispatches, claims, host, logVars>>
+
+\* finish(): terminalize under the admitting generation; absorbed_unknown returns without it, unless
+\* the process is stopping (ApiServiceStop).
 ApiFinish(k) ==
     /\ req[k] = "finishing"
     /\ IF fin[k] = "final" /\ (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending"
@@ -504,7 +525,7 @@ Host == \/ HostPrepare \/ HostSend \/ HostBind \/ HostComplete \/ HostSeesFailur
         \/ HostUserResume
 Api == \E k \in Keys : \/ ApiNotice(k) \/ ApiAbortBeforeAdmission(k) \/ ApiAdmit(k)
                        \/ ApiMarkIntent(k) \/ ApiDispatch(k) \/ SupplierEnd(k)
-                       \/ ApiObserve(k) \/ ApiClientCancel(k) \/ ApiFinish(k)
+                       \/ ApiObserve(k) \/ ApiClientCancel(k) \/ ApiServiceStop(k) \/ ApiFinish(k)
 Sweep == SweepClaim \/ SweepResolve \/ SweepFail \/ SweepCrash
 
 Next == Tick \/ RefundHold \/ RefundRelease \/ Host \/ Api \/ Sweep
@@ -604,6 +625,10 @@ ChargedReplyRecorded ==
 
 \* D-086: today's uncoded dead end is reachable; the target never reaches it
 NoUncodedDeadEnd == host.ph # "stuck"
+
+\* Vacuity for ApiServiceStop: only a stopping API absorbs under the admitting generation; every
+\* recovery absorb runs under a claimed one. Its witness must keep failing.
+NoLiveAbsorb == \A k \in Keys : row[k].cust = "absorbed" => row[k].tgen > 1
 
 -----------------------------------------------------------------------------
 (* GI-S7: the row's inductive invariant for Apalache (MC_GatewayInvocation). *)

@@ -55,12 +55,15 @@ class TsxWorker extends NodeWorker {
   }
 }
 
+/* A thread boots its own module graph under tsx, which takes seconds on a loaded machine. */
+const threadTimeout = 30_000;
+
 afterEach(async () => {
   await host?.close();
   host = undefined;
   await Promise.all(disposers.splice(0).map(async (dispose) => dispose()));
   await Promise.all(threads.splice(0).map(async (thread) => thread.worker.terminate()));
-});
+}, threadTimeout);
 
 const makeRoot = async (files: Readonly<Record<string, string>>): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-ws-thread-'));
@@ -133,9 +136,6 @@ const fileExists = async (path: string): Promise<boolean> => {
     return false;
   }
 };
-
-/* A thread boots its own module graph under tsx, which takes seconds on a loaded machine. */
-const threadTimeout = 30_000;
 
 describe.each(Object.keys(modes) as Mode[])(
   'webSocketHost client behaviour (%s)',

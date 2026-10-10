@@ -69,5 +69,14 @@ describe('alert parity', () => {
       'alert rule "a" appears more than once in infra/grafana/alerts',
       'alert group "tau-warning" is missing locally',
     ]);
+    expect(
+      alertParityProblems(
+        [{ name: 'tau-critical', interval: '1h1m', rules: [rule('a', 0)] }],
+        [...cloud(rule('a', 0)), { title: 'tau-critical', interval: 3660, rules: [rule('a', 0)] }],
+      ),
+    ).toEqual([
+      'alert group "tau-critical" appears more than once in infra/grafana/alerts',
+      'alert rule "a" appears more than once in infra/grafana/alerts',
+    ]);
   });
 });

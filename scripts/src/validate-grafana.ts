@@ -53,23 +53,35 @@ const comparable = (rule: unknown): unknown =>
     ),
   );
 
+const durationUnits: Readonly<Record<string, number>> = { h: 3600, m: 60, s: 1 };
+
+/** Seconds in a Grafana group interval (`60`, `"60s"`, `"1m30s"`, `"1h"`), or undefined when unreadable. */
 const seconds = (interval: RuleGroup['interval']): number | undefined => {
   if (typeof interval === 'number') {
     return interval;
   }
-  const match = /^(?<count>\d+)(?<unit>[sm])$/u.exec(interval ?? '');
-  return match?.groups ? Number(match.groups['count']) * (match.groups['unit'] === 'm' ? 60 : 1) : undefined;
+  if (!/^(?:\d+[hms])+$/u.test(interval ?? '')) {
+    return undefined;
+  }
+  return [...(interval ?? '').matchAll(/(?<count>\d+)(?<unit>[hms])/gu)].reduce(
+    (total, { groups }) => total + Number(groups?.['count']) * (durationUnits[groups?.['unit'] ?? ''] ?? 0),
+    0,
+  );
 };
 
-const duplicateUids = (groups: readonly RuleGroup[], where: string): string[] => {
+const repeated = (values: readonly string[]): string[] => {
   const seen = new Set<string>();
-  const repeated = new Set<string>();
-  for (const rule of groups.flatMap((group) => group.rules ?? [])) {
-    const uid = rule.uid ?? '';
-    (seen.has(uid) ? repeated : seen).add(uid);
-  }
-  return [...repeated].map((uid) => `alert rule "${uid}" appears more than once in ${where}`);
+  return [...new Set(values.filter((value) => seen.has(value) || !seen.add(value)))];
 };
+
+const duplicates = (groups: readonly RuleGroup[], where: string): string[] => [
+  ...repeated(groups.map((group) => group.name ?? group.title ?? '')).map(
+    (name) => `alert group "${name}" appears more than once in ${where}`,
+  ),
+  ...repeated(groups.flatMap((group) => group.rules ?? []).map((rule) => rule.uid ?? '')).map(
+    (uid) => `alert rule "${uid}" appears more than once in ${where}`,
+  ),
+];
 
 /**
  * The local provisioning copy must carry exactly the Grafana Cloud rule groups: the same groups with
@@ -92,8 +104,8 @@ export const alertParityProblems = (provisioned: readonly RuleGroup[], cloud: re
   const localGroups = byName(provisioned);
   const remoteGroups = byName(cloud);
   return [
-    ...duplicateUids(cloud, 'infra/grafana/alerts'),
-    ...duplicateUids(provisioned, 'alerts.yaml'),
+    ...duplicates(cloud, 'infra/grafana/alerts'),
+    ...duplicates(provisioned, 'alerts.yaml'),
     ...[...remoteGroups.keys()]
       .filter((name) => !localGroups.has(name))
       .map((name) => `alert group "${name}" is missing locally`),

@@ -5,12 +5,14 @@
  * in-realm `webSocketHost` worker factory.
  *
  * - `loop` spins forever, the hung model a terminable host must kill;
- * - `wait` writes `waiting.txt`, parks until the operation aborts, then writes `aborted.txt`;
+ * - `wait` writes `waiting.txt` and parks until the operation aborts, counting the abort;
  * - `compute` evaluates one value through the runtime's compute reuse service;
  * - anything else renders.
  *
- * Every rendering reports a token minted once per realm, the source it read and
- * the realm's `workerData`, so a test can tell which realm served it.
+ * Every rendering reports a token minted once per realm, the source it read,
+ * the realm's `workerData` and how many parked `wait` models it saw aborted, so
+ * a test can tell which realm served it. (The kernel filesystem refuses writes
+ * once an operation is aborted, so the abort is counted, not written.)
  *
  * @internal
  */
@@ -25,11 +27,15 @@ import { defineRuntime } from '#worker/runtime-definition.js';
 /** Minted once per realm. */
 const realmToken = randomUUID();
 
+/** Parked `wait` models this realm saw aborted. */
+let abortedWaits = 0;
+
 /** What one fixture rendering reports. @internal */
 export type ThreadFixtureReport = {
   readonly token: string;
   readonly source: string;
   readonly workerData: unknown;
+  readonly abortedWaits: number;
   readonly compute?: { readonly source: 'cache' | 'computed'; readonly publication?: string };
 };
 
@@ -95,7 +101,7 @@ const threadFixtureKernel = defineKernel({
   async evaluate({ entryPath }, services) {
     const source = String(await services.filesystem.readFile(entryPath, 'utf8')).trim();
     if (source === 'loop') {
-      // oxlint-disable-next-line no-constant-condition -- the hung model a terminable host must kill.
+      // oxlint-disable-next-line no-constant-condition, typescript/no-unnecessary-condition -- the hung model a terminable host must kill.
       while (true) {
         /* Never yields. */
       }
@@ -104,10 +110,10 @@ const threadFixtureKernel = defineKernel({
       await services.filesystem.writeFile('waiting.txt', 'waiting');
       await new Promise<void>((resolve) => {
         services.signal.addEventListener('abort', () => {
+          abortedWaits += 1;
           resolve();
         });
       });
-      await services.filesystem.writeFile('aborted.txt', 'aborted');
       services.signal.throwIfAborted();
     }
     const compute = source === 'compute' ? await evaluateCompute(services) : undefined;
@@ -118,6 +124,7 @@ const threadFixtureKernel = defineKernel({
       token: realmToken,
       source: handle.source,
       workerData: workerData ?? undefined,
+      abortedWaits,
       ...(handle.compute ? { compute: handle.compute } : {}),
     };
     return { content: new TextEncoder().encode(JSON.stringify(report)) };

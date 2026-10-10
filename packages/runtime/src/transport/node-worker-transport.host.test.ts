@@ -152,7 +152,9 @@ describe('nodeWorkerTransport — workerData', () => {
       if (outcome.superseded || !outcome.rendering.success) {
         throw new Error(`Expected one successful rendering: ${JSON.stringify(outcome)}`);
       }
-      const report = JSON.parse(new TextDecoder().decode(outcome.rendering.artifact.content as Uint8Array)) as {
+      const report = JSON.parse(
+        new TextDecoder().decode(outcome.rendering.artifact.content as Uint8Array<ArrayBuffer>),
+      ) as {
         workerData: unknown;
       };
       expect(report.workerData).toEqual({ projectRoot: '/projects/a', nested: { depth: 2 } });

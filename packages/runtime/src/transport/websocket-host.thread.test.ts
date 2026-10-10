@@ -45,13 +45,12 @@ const disposers: Array<() => Promise<void>> = [];
 class TsxWorker extends NodeWorker {
   public constructor(url: string | URL, options?: WorkerOptions) {
     super(url, { ...options, execArgv: ['--import', 'tsx'] });
-    const thread: SpawnedThread = {
-      worker: this,
-      exited: once(this, 'exit').then(([code]: unknown[]) => {
-        thread.exitedAt = performance.now();
-        return code as number;
-      }),
+    const waitForExit = async (): Promise<number> => {
+      const [code] = (await once(this, 'exit')) as [number];
+      thread.exitedAt = performance.now();
+      return code;
     };
+    const thread: SpawnedThread = { worker: this, exited: waitForExit() };
     threads.push(thread);
   }
 }
@@ -117,6 +116,15 @@ const renderReport = async (client: FixtureClient, path: string): Promise<Thread
   }
 };
 
+/** Await an operation the test abandons on purpose, ignoring how it ends. */
+const settle = async (operation: Promise<unknown>): Promise<void> => {
+  try {
+    await operation;
+  } catch {
+    /* Abandoned on purpose. */
+  }
+};
+
 const fileExists = async (path: string): Promise<boolean> => {
   try {
     await access(path);
@@ -126,84 +134,91 @@ const fileExists = async (path: string): Promise<boolean> => {
   }
 };
 
-describe.each(Object.keys(modes) as Mode[])('webSocketHost client behaviour (%s)', { concurrent: false }, (mode) => {
-  it('should serve one kernel worker per connection so two clients render concurrently', async () => {
-    const url = await startHost(mode, { fileSystem: fromNodeFs(await makeRoot({ 'main.fixture': 'box' })) });
-    const first = createClient(url);
-    const second = createClient(url);
+/* A thread boots its own module graph under tsx, which takes seconds on a loaded machine. */
+const threadTimeout = 30_000;
 
-    const reports = await Promise.all([renderReport(first, 'main.fixture'), renderReport(second, 'main.fixture')]);
+describe.each(Object.keys(modes) as Mode[])(
+  'webSocketHost client behaviour (%s)',
+  { concurrent: false, timeout: threadTimeout },
+  (mode) => {
+    it('should serve one kernel worker per connection so two clients render concurrently', async () => {
+      const url = await startHost(mode, { fileSystem: fromNodeFs(await makeRoot({ 'main.fixture': 'box' })) });
+      const first = createClient(url);
+      const second = createClient(url);
 
-    expect(reports.map((report) => report.source)).toEqual(['box', 'box']);
-    await Promise.all([first.shutdown(), second.shutdown()]);
-  });
+      const reports = await Promise.all([renderReport(first, 'main.fixture'), renderReport(second, 'main.fixture')]);
 
-  it('should render from the filesystem a client serves over the /fs socket', async () => {
-    const url = await startHost(mode);
-    const client = createClient(url, { fileSystem: fromMemoryFs({ 'main.fixture': 'from-client' }) });
-
-    await expect(renderReport(client, 'main.fixture')).resolves.toMatchObject({ source: 'from-client' });
-    await client.shutdown();
-  });
-
-  it('should close an unpaired /runtime socket with 1008 without starting a worker', async () => {
-    const url = await startHost(mode, { pairingTimeout: 300 });
-    const socket = new WebSocket(`${url}/runtime?session=never-paired`);
-    disposers.push(async () => {
-      socket.terminate();
+      expect(reports.map((report) => report.source)).toEqual(['box', 'box']);
+      await Promise.all([first.shutdown(), second.shutdown()]);
     });
 
-    const [code, reason] = (await once(socket, 'close')) as [number, Uint8Array<ArrayBuffer>];
+    it('should render from the filesystem a client serves over the /fs socket', async () => {
+      const url = await startHost(mode);
+      const client = createClient(url, { fileSystem: fromMemoryFs({ 'main.fixture': 'from-client' }) });
 
-    expect(code).toBe(1008);
-    expect(new TextDecoder().decode(reason)).toBe('no /fs socket paired for this session');
-    expect(threads).toHaveLength(0);
-  });
-
-  it('should settle every client with host-exit and resolve close() only after teardown', async () => {
-    const url = await startHost(mode, { fileSystem: fromNodeFs(await makeRoot({ 'main.fixture': 'box' })) });
-    const handle = host;
-    if (!handle) {
-      throw new Error('host was not started');
-    }
-    const first = webSocketTransport({ url }).materialize();
-    const second = webSocketTransport({ url }).materialize();
-    const [firstReady, secondReady] = await Promise.all([first.open(), second.open()]);
-    await Promise.all([firstReady.channel.ready, secondReady.channel.ready]);
-
-    host = undefined;
-    await handle.close();
-
-    expect(threads.every((thread) => thread.exitedAt !== undefined)).toBe(true);
-    await expect(first.closed).resolves.toEqual({ cause: 'host-exit', phase: 'session' });
-    await expect(second.closed).resolves.toEqual({ cause: 'host-exit', phase: 'session' });
-  });
-
-  it('should reuse a durable computation across connections through the paired /compute socket', async () => {
-    const url = await startHost(mode, {
-      fileSystem: fromNodeFs(await makeRoot({ 'main.fixture': 'compute' })),
-      allowPrivateComputePairing: true,
+      await expect(renderReport(client, 'main.fixture')).resolves.toMatchObject({ source: 'from-client' });
+      await client.shutdown();
     });
-    const engine = createSqliteComputeEngine({ directory: await makeRoot({}) });
-    disposers.push(async () => engine.dispose());
-    const compute: ComputeBinding = {
-      mode: 'durable',
-      store: fromSqlite({ store: engine, workspace: 'thread-fixture' }),
-    };
 
-    const first = createClient(url, { compute });
-    await expect(renderReport(first, 'main.fixture')).resolves.toMatchObject({
-      compute: { source: 'computed', publication: 'stored' },
+    it('should close an unpaired /runtime socket with 1008 without starting a worker', async () => {
+      const url = await startHost(mode, { pairingTimeout: 300 });
+      const socket = new WebSocket(`${url}/runtime?session=never-paired`);
+      disposers.push(async () => {
+        socket.terminate();
+      });
+
+      const [code, reason] = (await once(socket, 'close')) as [number, Uint8Array<ArrayBuffer>];
+
+      expect(code).toBe(1008);
+      expect(new TextDecoder().decode(reason)).toBe('no /fs socket paired for this session');
+      expect(threads).toHaveLength(0);
     });
-    await first.shutdown();
 
-    const second = createClient(url, { compute });
-    await expect(renderReport(second, 'main.fixture')).resolves.toMatchObject({ compute: { source: 'cache' } });
-    await second.shutdown();
-  });
-});
+    it('should settle every client with host-exit and resolve close() only after teardown', async () => {
+      const url = await startHost(mode, { fileSystem: fromNodeFs(await makeRoot({ 'main.fixture': 'box' })) });
+      const handle = host;
+      if (!handle) {
+        throw new Error('host was not started');
+      }
+      const first = webSocketTransport({ url }).materialize();
+      const second = webSocketTransport({ url }).materialize();
+      const [firstReady, secondReady] = await Promise.all([first.open(), second.open()]);
+      await Promise.all([firstReady.channel.ready, secondReady.channel.ready]);
 
-describe('webSocketHost thread per connection', { concurrent: false }, () => {
+      host = undefined;
+      await handle.close();
+
+      expect(threads.every((thread) => thread.exitedAt !== undefined)).toBe(true);
+      await expect(first.closed).resolves.toEqual({ cause: 'host-exit', phase: 'session' });
+      await expect(second.closed).resolves.toEqual({ cause: 'host-exit', phase: 'session' });
+    });
+
+    it('should reuse a durable computation across connections through the paired /compute socket', async () => {
+      const url = await startHost(mode, {
+        fileSystem: fromNodeFs(await makeRoot({ 'main.fixture': 'compute' })),
+        allowPrivateComputePairing: true,
+      });
+      const engine = createSqliteComputeEngine({ directory: await makeRoot({}) });
+      disposers.push(async () => engine.dispose());
+      const compute: ComputeBinding = {
+        mode: 'durable',
+        store: fromSqlite({ store: engine, workspace: 'thread-fixture' }),
+      };
+
+      const first = createClient(url, { compute });
+      await expect(renderReport(first, 'main.fixture')).resolves.toMatchObject({
+        compute: { source: 'computed', publication: 'stored' },
+      });
+      await first.shutdown();
+
+      const second = createClient(url, { compute });
+      await expect(renderReport(second, 'main.fixture')).resolves.toMatchObject({ compute: { source: 'cache' } });
+      await second.shutdown();
+    });
+  },
+);
+
+describe('webSocketHost thread per connection', { concurrent: false, timeout: threadTimeout }, () => {
   it('should give each connection its own realm and hand it the configured workerData', async () => {
     const url = await startHost('thread', { fileSystem: fromNodeFs(await makeRoot({ 'main.fixture': 'box' })) });
     const first = createClient(url);
@@ -244,7 +259,7 @@ describe('webSocketHost thread per connection', { concurrent: false }, () => {
     });
     const hung = createClient(url);
     const hungDocument = hung.open({ source: { path: 'loop.fixture' }, watch: false });
-    hungDocument.evaluation().catch(() => undefined);
+    void settle(hungDocument.evaluation());
     await vi.waitFor(
       () => {
         expect(threads).toHaveLength(1);
@@ -267,7 +282,7 @@ describe('webSocketHost thread per connection', { concurrent: false }, () => {
     expect((hungThread?.exitedAt ?? Number.POSITIVE_INFINITY) - closedAt).toBeLessThan(3000);
     await expect(renderReport(healthy, 'main.fixture')).resolves.toMatchObject({ source: 'box' });
     await healthy.shutdown();
-  }, 30_000);
+  });
 
   it('should cancel in-thread work when the client aborts over the wire', async () => {
     const root = await makeRoot({ 'main.fixture': 'box', 'wait.fixture': 'wait' });
@@ -275,7 +290,7 @@ describe('webSocketHost thread per connection', { concurrent: false }, () => {
     const client = createClient(url);
     const before = await renderReport(client, 'main.fixture');
     const waiting = client.open({ source: { path: 'wait.fixture' }, watch: false });
-    waiting.evaluation().catch(() => undefined);
+    void settle(waiting.evaluation());
     await vi.waitFor(
       async () => {
         expect(await fileExists(join(root, 'waiting.txt'))).toBe(true);
@@ -287,14 +302,13 @@ describe('webSocketHost thread per connection', { concurrent: false }, () => {
 
     await vi.waitFor(
       async () => {
-        expect(await fileExists(join(root, 'aborted.txt'))).toBe(true);
+        const after = await renderReport(client, 'main.fixture');
+        expect(after).toMatchObject({ token: before.token, abortedWaits: before.abortedWaits + 1 });
       },
       { timeout: 10_000 },
     );
-    const after = await renderReport(client, 'main.fixture');
-    expect(after.token).toBe(before.token);
     await client.shutdown();
-  }, 30_000);
+  });
 
   it('should close the runtime socket with 1011 when the connection thread exits', async () => {
     const url = await startHost('thread', { fileSystem: fromNodeFs(await makeRoot({ 'main.fixture': 'box' })) });

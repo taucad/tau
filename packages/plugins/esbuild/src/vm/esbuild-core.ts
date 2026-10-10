@@ -231,11 +231,9 @@ const createSourcePlugin = (session: BundlerSourceSession, detect: boolean): Plu
 });
 
 const commonJsBanner = (modules: ReadonlyMap<string, BuiltinModule>): string => {
-  const globals = [...modules.entries()]
-    .filter(([, module]) => module.globalName !== undefined)
-    .map(
-      ([name, module]) => `const ${module.globalName} = globalThis.__KERNEL_MODULES__?.get(${JSON.stringify(name)});`,
-    )
+  const globals = [...modules.values()]
+    .filter((module) => module.globalName !== undefined && module.registryExpression !== undefined)
+    .map((module) => `const ${module.globalName} = ${module.registryExpression};`)
     .join('\n');
   return `${globals}\nconst exports = {};\nconst module = { exports };\n`;
 };

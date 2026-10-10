@@ -115,6 +115,7 @@ export const esbuildBundler = defineBundler({
       code: builtinModule.code,
       version: builtinModule.version,
       globalName: builtinModule.globalName,
+      registryExpression: builtinModule.registryExpression,
     });
   },
 

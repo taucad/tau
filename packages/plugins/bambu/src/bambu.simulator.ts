@@ -1,3 +1,4 @@
+import { simulatedCameraJpeg } from '#bambu.simulator-image.js';
 import { bambuSettingsConfiguration } from '#bambu.settings.js';
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { defineMachine } from '@taucad/runtime/machine';
@@ -20,7 +21,13 @@ import { z } from 'zod';
 
 import { bambuAcceptedContainers, bambuSubmissionConfiguration } from '#bambu.machine.js';
 import { bambuX1cManifest } from '#bambu.manifest.js';
-import { bambuQuantity, bambuRemoteName, bambuStage, parseBambuStill } from '#bambu.protocol.js';
+import {
+  bambuQuantity,
+  bambuRemoteName,
+  bambuStage,
+  parseBambuStatusPayload,
+  parseBambuStill,
+} from '#bambu.protocol.js';
 
 /** Deterministic fault switches accepted by the simulator. @internal */
 export type BambuSimulatorFault =
@@ -30,6 +37,7 @@ export type BambuSimulatorFault =
   | 'partial-transfer'
   | 'protected-mode'
   | 'reply-lost-after-accept'
+  | 'storage-damaged'
   | 'storage-full'
   | 'timeout'
   | 'wrong-credential';
@@ -97,7 +105,8 @@ const nozzle = bambuQuantity({
 const celsius = (value: number): Quantity =>
   bambuQuantity({ value: Math.round(value * 10) / 10, unit: 'Cel', kind: quantityKinds.temperature, space: 'point' });
 
-const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]);
+/** Exercise the real diagnostic decoder; the simulator never invents a separate display message. */
+const storageFailure = parseBambuStatusPayload(new TextEncoder().encode('{"print":{"print_error":83902511}}')).alerts;
 const simulatedSerial = 'simulated-x1c';
 /** Degrees Celsius the enclosure settles to with its heaters off. */
 const ambient = 25;
@@ -465,6 +474,7 @@ export const createBambuSimulator = (
     return Object.freeze({
       connection: closed ? 'disconnected' : 'connected',
       readiness: run ? 'busy' : 'idle',
+      ...(faults.has('storage-damaged') ? { alerts: storageFailure } : {}),
       ...(run ? { activeRunId: run.id } : {}),
       observedAt,
       setup: Object.freeze({
@@ -722,7 +732,7 @@ export const createBambuSimulator = (
       : Object.freeze({
           type: 'supported',
           async capture() {
-            return parseBambuStill(jpeg, clock.now());
+            return parseBambuStill(simulatedCameraJpeg, clock.now());
           },
         }),
     async close() {
@@ -748,8 +758,16 @@ export const createBambuSimulator = (
 
 const simulatorBindingConfiguration = defineConfiguration({
   id: 'bambu.simulator.binding',
-  version: '1.1.0',
+  version: '1.2.0',
   schema: z.object({
+    faults: z
+      .array(z.enum(['storage-damaged', 'camera-unavailable']))
+      .max(2)
+      .default([])
+      .meta({
+        title: 'Simulated faults',
+        description: 'Reproduce storage or camera failures without connecting to a physical printer',
+      }),
     logicalId: z.string().min(1).max(64),
     speed: z.number().min(1).max(3600).default(1).meta({
       title: 'Demo speed',
@@ -794,6 +812,7 @@ const defineSimulator = (input: Readonly<{ simulator?: BambuSimulator }>) =>
         createBambuSimulator({
           clock: runtime.clock,
           speed: connectInput.configuration.speed,
+          faults: connectInput.configuration.faults,
           readArtifact: (read) => runtime.readArtifact(read),
         })
       ).session;

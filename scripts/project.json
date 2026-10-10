@@ -311,6 +311,26 @@
       "options": {
         "command": "node --test .agents/skills/codex-lanes/scripts/lanes.test.mjs"
       }
+    },
+    "native-renderer-test": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "vitest run --config scripts/native-renderer-spike/vitest.config.mts"
+      }
+    },
+    "native-renderer-build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/native-renderer-spike/build.mts"
+      }
+    },
+    "native-renderer-benchmark": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --import tsx scripts/native-renderer-spike/benchmark.mts"
+      }
     }
   }
 }

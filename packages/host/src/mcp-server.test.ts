@@ -36,7 +36,6 @@ import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { RpcGraphicsClient } from '@taucad/chat/rpc';
 import { exportModelOutputSchema } from '@taucad/chat/schemas/tools/export-model';
-import { parseToolErrorText } from '@taucad/chat/utils';
 import type { BambuStudioEngine, MachinePrintPlanner } from '@taucad/agent-tools/registry';
 import type { MachineArtifactReference, MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
 
@@ -398,8 +397,16 @@ describe('the mounted /mcp route', () => {
         headers: { authorization: `Bearer ${capability.token}` },
       });
       const result = await client.callTool('get_print_profiles', {});
-      expect(result.isError).toBe(true);
-      expect(parseToolErrorText(JSON.stringify(result.structuredContent))).toEqual(error);
+      expect(result).toMatchObject({
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: 'TOOL_INPUT_VALIDATION_FAILED: Invalid profile selection\n{"validationErrors":[{"path":"keys","message":"Too many keys"}]}',
+          },
+        ],
+      });
+      expect(result.structuredContent).toBeUndefined();
     } finally {
       await release();
     }
@@ -693,10 +700,8 @@ describe('the mounted /mcp route', () => {
     try {
       const capture = await client.callTool('screenshot', { targetFile: 'main.cs', mode: 'single' });
       expect(capture.isError).toBe(true);
-      expect(capture.structuredContent).toMatchObject({
-        errorCode: 'MCP_HOST_FAULT',
-        message: expect.stringContaining('retrying will not help') as string,
-      });
+      expect(capture.structuredContent).toBeUndefined();
+      expect(capture.content?.[0]?.text).toMatch(/^MCP_HOST_FAULT: .*retrying will not help\.$/u);
     } finally {
       await release();
     }

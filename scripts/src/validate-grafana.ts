@@ -41,6 +41,7 @@ type RuleGroup = {
   readonly name?: string;
   readonly title?: string;
   /** `"60s"` in provisioning, seconds in Cloud's JSON. */
+  // oxlint-disable-next-line tau-lint/no-bare-time-identifier -- Grafana's own rule-group key
   readonly interval?: string | number;
   readonly rules?: ReadonlyArray<{ readonly uid?: string }>;
 };
@@ -56,14 +57,14 @@ const comparable = (rule: unknown): unknown =>
 const durationUnits: Readonly<Record<string, number>> = { h: 3600, m: 60, s: 1 };
 
 /** Seconds in a Grafana group interval (`60`, `"60s"`, `"1m30s"`, `"1h"`), or undefined when unreadable. */
-const seconds = (interval: RuleGroup['interval']): number | undefined => {
-  if (typeof interval === 'number') {
-    return interval;
+const seconds = (groupInterval: RuleGroup['interval']): number | undefined => {
+  if (typeof groupInterval === 'number') {
+    return groupInterval;
   }
-  if (!/^(?:\d+[hms])+$/u.test(interval ?? '')) {
+  if (!/^(?:\d+[hms])+$/u.test(groupInterval ?? '')) {
     return undefined;
   }
-  return [...(interval ?? '').matchAll(/(?<count>\d+)(?<unit>[hms])/gu)].reduce(
+  return [...(groupInterval ?? '').matchAll(/(?<count>\d+)(?<unit>[hms])/gu)].reduce(
     (total, { groups }) => total + Number(groups?.['count']) * (durationUnits[groups?.['unit'] ?? ''] ?? 0),
     0,
   );
@@ -103,7 +104,10 @@ export const alertParityProblems = (provisioned: readonly RuleGroup[], cloud: re
     new Map(
       groups.map((group) => [
         group.name ?? group.title ?? '',
-        { interval: seconds(group.interval), uids: (group.rules ?? []).map((rule) => rule.uid).toSorted() },
+        {
+          interval: seconds(group.interval),
+          uids: (group.rules ?? []).map((rule) => rule.uid ?? '').toSorted((left, right) => left.localeCompare(right)),
+        },
       ]),
     );
   const local = byUid(provisioned);

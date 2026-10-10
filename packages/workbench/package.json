@@ -58,6 +58,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@gltf-transform/core": "catalog:",
     "@taucad/camera": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "zod": "catalog:"

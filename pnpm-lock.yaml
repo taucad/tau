@@ -4973,6 +4973,9 @@ importers:
 
   packages/workbench:
     devDependencies:
+      '@gltf-transform/core':
+        specifier: 'catalog:'
+        version: 4.4.0
       '@taucad/camera':
         specifier: workspace:*
         version: link:../camera

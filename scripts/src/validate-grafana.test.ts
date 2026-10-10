@@ -27,21 +27,47 @@ describe('alert parity', () => {
     data: [{ model: { expr } }, { model: { conditions: [{ evaluator: { params: [threshold] } }] } }],
     labels: { severity: 'critical' },
   });
+  const local = (...rules: ReadonlyArray<ReturnType<typeof rule>>) => [
+    { name: 'tau-critical', interval: '60s', rules },
+  ];
+  const cloud = (...rules: ReadonlyArray<ReturnType<typeof rule>>) => [{ title: 'tau-critical', interval: 60, rules }];
 
   it('treats YAML line folding as no difference', () => {
-    expect(alertParityProblems([{ rules: [rule('a', 0, 'up\n  == 0\n')] }], [{ rules: [rule('a', 0)] }])).toEqual([]);
+    expect(alertParityProblems(local(rule('a', 0, 'up\n  == 0\n')), cloud(rule('a', 0)))).toEqual([]);
+  });
+
+  it('keeps whitespace inside a line, where a label value can differ', () => {
+    expect(
+      alertParityProblems(
+        local(rule('a', 0, 'up{job="api  server"} == 0')),
+        cloud(rule('a', 0, 'up{job="api server"} == 0')),
+      ),
+    ).toEqual(['alert rule "a" differs between alerts.yaml and infra/grafana/alerts']);
   });
 
   it('reports missing rules on either side and any changed field, thresholds included', () => {
     expect(
       alertParityProblems(
-        [{ rules: [rule('same', 0), rule('threshold', 5), rule('local-only', 0)] }],
-        [{ rules: [rule('same', 0), rule('threshold', 0), rule('cloud-only', 0)] }],
+        local(rule('same', 0), rule('threshold', 5), rule('local-only', 0)),
+        cloud(rule('same', 0), rule('threshold', 0), rule('cloud-only', 0)),
       ),
     ).toEqual([
+      'alert group "tau-critical" has a different interval or rules between alerts.yaml and infra/grafana/alerts',
       'alert rule "cloud-only" is missing locally',
       'alert rule "local-only" is missing in Cloud',
       'alert rule "threshold" differs between alerts.yaml and infra/grafana/alerts',
+    ]);
+  });
+
+  it('compares groups by name and interval, and rejects a uid repeated across Cloud files', () => {
+    expect(
+      alertParityProblems(
+        [{ name: 'tau-critical', interval: '1m', rules: [rule('a', 0)] }],
+        [...cloud(rule('a', 0)), { title: 'tau-warning', interval: 60, rules: [rule('a', 0)] }],
+      ),
+    ).toEqual([
+      'alert rule "a" appears more than once in infra/grafana/alerts',
+      'alert group "tau-warning" is missing locally',
     ]);
   });
 });

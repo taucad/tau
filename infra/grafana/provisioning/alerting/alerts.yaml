@@ -329,13 +329,13 @@ groups:
             model:
               expr: |-
                 (
-                  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name="tau-api", gen_ai_token_type="cache_read"}[30m]))
-                  /
                   (
                     sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name="tau-api", gen_ai_token_type="cache_read"}[30m]))
-                    +
-                    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name="tau-api", gen_ai_token_type=~"input|cache_write"}[30m]))
+                    or
+                    0 * sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name="tau-api", gen_ai_token_type="input"}[30m]))
                   )
+                  /
+                  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name="tau-api", gen_ai_token_type=~"input|cache_read|cache_write"}[30m]))
                 ) < 0.4
                 and
                 sum by (gen_ai_request_model, gen_ai_provider_name) (increase(gen_ai_client_token_usage_sum{service_name="tau-api", gen_ai_token_type="input"}[30m])) >= 200000

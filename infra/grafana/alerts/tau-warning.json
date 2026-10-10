@@ -118,7 +118,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "(\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n  /\n  (\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n    +\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=~\"input|cache_write\"}[30m]))\n  )\n) < 0.4\nand\nsum by (gen_ai_request_model, gen_ai_provider_name) (increase(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m])) >= 200000",
+            "expr": "(\n  (\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n    or\n    0 * sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m]))\n  )\n  /\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=~\"input|cache_read|cache_write\"}[30m]))\n) < 0.4\nand\nsum by (gen_ai_request_model, gen_ai_provider_name) (increase(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m])) >= 200000",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "cache_hit_rate_low"

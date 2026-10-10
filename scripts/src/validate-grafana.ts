@@ -36,27 +36,76 @@ export const grafanaUidProblems = (sources: readonly UidSource[]): string[] => {
   return problems;
 };
 
-type RuleGroup = { readonly rules?: ReadonlyArray<{ readonly uid?: string }> };
+type RuleGroup = {
+  /** Provisioning files name a group; Cloud's rule-group JSON titles it. */
+  readonly name?: string;
+  readonly title?: string;
+  /** `"60s"` in provisioning, seconds in Cloud's JSON. */
+  readonly interval?: string | number;
+  readonly rules?: ReadonlyArray<{ readonly uid?: string }>;
+};
 
-/** A rule with every string's whitespace squashed, so YAML line folding is not a difference. */
+/** A rule with line breaks and their indentation folded to one space, so YAML line folding is not a difference. */
 const comparable = (rule: unknown): unknown =>
   JSON.parse(
     JSON.stringify(rule, (_key, value: unknown) =>
-      typeof value === 'string' ? value.replaceAll(/\s+/gu, ' ').trim() : value,
+      typeof value === 'string' ? value.replaceAll(/\s*\n\s*/gu, ' ').trim() : value,
     ),
   );
 
+const seconds = (interval: RuleGroup['interval']): number | undefined => {
+  if (typeof interval === 'number') {
+    return interval;
+  }
+  const match = /^(?<count>\d+)(?<unit>[sm])$/u.exec(interval ?? '');
+  return match?.groups ? Number(match.groups['count']) * (match.groups['unit'] === 'm' ? 60 : 1) : undefined;
+};
+
+const duplicateUids = (groups: readonly RuleGroup[], where: string): string[] => {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const rule of groups.flatMap((group) => group.rules ?? [])) {
+    const uid = rule.uid ?? '';
+    (seen.has(uid) ? repeated : seen).add(uid);
+  }
+  return [...repeated].map((uid) => `alert rule "${uid}" appears more than once in ${where}`);
+};
+
 /**
- * The local provisioning copy must carry exactly the Grafana Cloud rules, field for field: queries,
- * thresholds, waits, no-data handling, labels and annotations. A local stack otherwise cannot show a
- * page Cloud would send, or shows one it would not.
+ * The local provisioning copy must carry exactly the Grafana Cloud rule groups: the same groups with
+ * the same intervals and members, and each rule field for field (queries, thresholds, waits, no-data
+ * handling, labels and annotations). A local stack otherwise cannot show a page Cloud would send, or
+ * shows one it would not.
  */
 export const alertParityProblems = (provisioned: readonly RuleGroup[], cloud: readonly RuleGroup[]): string[] => {
   const byUid = (groups: readonly RuleGroup[]) =>
     new Map(groups.flatMap((group) => group.rules ?? []).map((rule) => [rule.uid ?? '', rule] as const));
+  const byName = (groups: readonly RuleGroup[]) =>
+    new Map(
+      groups.map((group) => [
+        group.name ?? group.title ?? '',
+        { interval: seconds(group.interval), uids: (group.rules ?? []).map((rule) => rule.uid).toSorted() },
+      ]),
+    );
   const local = byUid(provisioned);
   const remote = byUid(cloud);
+  const localGroups = byName(provisioned);
+  const remoteGroups = byName(cloud);
   return [
+    ...duplicateUids(cloud, 'infra/grafana/alerts'),
+    ...duplicateUids(provisioned, 'alerts.yaml'),
+    ...[...remoteGroups.keys()]
+      .filter((name) => !localGroups.has(name))
+      .map((name) => `alert group "${name}" is missing locally`),
+    ...[...localGroups.keys()]
+      .filter((name) => !remoteGroups.has(name))
+      .map((name) => `alert group "${name}" is missing in Cloud`),
+    ...[...remoteGroups]
+      .filter(([name, group]) => localGroups.has(name) && !isDeepStrictEqual(localGroups.get(name), group))
+      .map(
+        ([name]) =>
+          `alert group "${name}" has a different interval or rules between alerts.yaml and infra/grafana/alerts`,
+      ),
     ...[...remote.keys()].filter((uid) => !local.has(uid)).map((uid) => `alert rule "${uid}" is missing locally`),
     ...[...local.keys()].filter((uid) => !remote.has(uid)).map((uid) => `alert rule "${uid}" is missing in Cloud`),
     ...[...remote]

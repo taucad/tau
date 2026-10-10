@@ -772,6 +772,23 @@
       "owner": "machines"
     },
     {
+      "id": "M9",
+      "bound": "Keep-awake poll of the machines a streamed run is feeding (20 s, inside the shortest one-minute sleep timer); a slow answer skips the next tick",
+      "site": "packages/host/src/keep-awake.ts",
+      "token": "options.intervalMilliseconds ?? 20_000",
+      "class": "Liveness",
+      "owner": "machines"
+    },
+    {
+      "id": "M10",
+      "bound": "Desktop quit and keep-awake question to the services utility: which machines a streamed run is feeding (bound derived from machineStartWaitMilliseconds)",
+      "site": "apps/desktop/src/main/services-broker.ts",
+      "token": "The desktop machine host did not say whether a program is streaming.",
+      "class": "Peer",
+      "owner": "machines",
+      "fixedBy": "outside this charter: the machines owner (desktop streaming read answered by the utility)"
+    },
+    {
       "id": "N3",
       "bound": "Not a timer: the RevisionClock host-clock interface declares setTimeout without scheduling it",
       "site": "packages/revisions/src/revision-effects.types.ts",

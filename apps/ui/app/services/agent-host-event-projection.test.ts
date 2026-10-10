@@ -741,7 +741,7 @@ describe('projectAgentHostEvent', () => {
     ]);
   });
 
-  it('carries the ledger correlation a print request attaches, and nothing else from its context', () => {
+  it('carries the job a request attaches, and nothing else from its context', () => {
     const [part] = projectAgentHostEvent({
       ...base,
       type: 'interrupt.recorded',
@@ -758,10 +758,78 @@ describe('projectAgentHostEvent', () => {
       type: 'tool-input-available',
       input: {
         interruptId: 'approval-print',
-        context: { requestId: 'req-7f3a', machineId: 'bambu-simulator', fileName: 'pyramid.gcode.3mf' },
+        context: { jobId: 'req-7f3a', machineId: 'bambu-simulator', fileName: 'pyramid.gcode.3mf' },
       },
     });
-    expect(parseAgentHostApproval((part as { input: unknown }).input)?.context?.requestId).toBe('req-7f3a');
+    expect(parseAgentHostApproval((part as { input: unknown }).input)?.context?.jobId).toBe('req-7f3a');
+  });
+
+  it('carries the exact intent a machine action pauses on', () => {
+    const context = {
+      machineId: 'machine-1',
+      componentId: 'controller',
+      action: 'run.cancel',
+      operationId: 'operation-1',
+      label: 'Cancel print',
+    };
+    const [part] = projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'approval-action',
+      phase: 'requested',
+      reason: 'Cancel print on Workshop X1C',
+      payload: { kind: 'approval', prompt: 'Cancel print on Workshop X1C', context },
+    });
+    expect(parseAgentHostApproval((part as { input: unknown }).input)?.context).toStrictEqual(context);
+  });
+
+  it('keeps the parameters and version of the intent a machine action pauses on, so the person approves exactly it', () => {
+    const [part] = projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'approval-speed',
+      phase: 'requested',
+      reason: 'Set speed on Workshop X1C',
+      payload: {
+        kind: 'approval',
+        prompt: 'Set speed ({"ratio":1.5}) on Workshop X1C?',
+        context: {
+          machineId: 'machine-1',
+          componentId: 'speed',
+          action: 'level.set',
+          operationId: 'operation-2',
+          label: 'Set speed',
+          intent: { machineId: 'machine-1', version: 2, expectedRunId: 'run-7', parameters: { ratio: 1.5 } },
+        },
+      },
+    });
+    expect(parseAgentHostApproval((part as { input: unknown }).input)?.context).toMatchObject({
+      parameters: { ratio: 1.5 },
+      version: 2,
+      expectedRunId: 'run-7',
+    });
+  });
+
+  it('keeps an intent that saw no run as null, so the approval admits it only while no run is in progress', () => {
+    const [part] = projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'approval-light',
+      phase: 'requested',
+      reason: 'Chamber light on Workshop X1C',
+      payload: {
+        kind: 'approval',
+        prompt: 'Chamber light ({"on":true}) on Workshop X1C?',
+        context: {
+          machineId: 'machine-1',
+          componentId: 'chamber-light',
+          action: 'switch.set',
+          operationId: 'operation-3',
+          intent: { version: 1, expectedRunId: null, parameters: { on: true } },
+        },
+      },
+    });
+    expect(parseAgentHostApproval((part as { input: unknown }).input)?.context).toHaveProperty('expectedRunId', null);
   });
 
   it('projects a login an external agent is waiting on as facts, not a decision', () => {

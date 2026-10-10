@@ -238,7 +238,10 @@ describe('captureNetworkStill', () => {
   });
 
   it('should reject with a fixed code when ffmpeg is missing', async () => {
-    await expect(capture(pin, async () => undefined)).rejects.toThrow('MACHINE_STILL_FFMPEG_MISSING');
+    await expect(capture(pin, async () => undefined)).rejects.toMatchObject({
+      code: 'MACHINE_STILL_FFMPEG_MISSING',
+      message: 'MACHINE_STILL_FFMPEG_MISSING',
+    });
   });
 
   it('should reject with a fixed code when ffmpeg cannot start', async () => {
@@ -251,7 +254,7 @@ describe('captureNetworkStill', () => {
 describe('captureRtspsStill', () => {
   const options = (port: number): Parameters<typeof captureRtspsStill>[1] => ({
     ffmpeg,
-    accessCode: async () => accessCode,
+    password: async () => accessCode,
     openUpstream: async () => connectTcp(port),
   });
 

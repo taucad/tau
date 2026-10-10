@@ -16,7 +16,7 @@
  * @module
  */
 
-/** Tau's id for an X1C build plate, matching `bambuX1cManifest.bed.plates`. @public */
+/** Tau's id for a build plate, matching the FFF process's `bed.plates` in `bambuX1cManifest` and `bambuA1MiniManifest`. @public */
 export type BambuPlateId = 'cool' | 'engineering' | 'high-temperature' | 'textured-pei';
 
 /** Axis-aligned bounds in millimetres of the model's source frame. @public */
@@ -190,6 +190,8 @@ export const bambuX1cHotend: BambuHotendModel = {
  * Finds the plate a sliced file names.
  *
  * @param name - A `curr_bed_type` string, a `plate_N.json` `bed_type` value or a Tau plate id.
+ * @param printer - The printer family to look in; without it the X1C's plates are tried before the A1 mini's, so a
+ * name both share (`hot_plate`) resolves to the X1C's model.
  * @returns The plate, or `undefined` for a plate this package does not model.
  * @public
  *
@@ -200,9 +202,14 @@ export const bambuX1cHotend: BambuHotendModel = {
  * const plate = bambuPlateForBedType('hot_plate'); // the High Temp Plate
  * ```
  */
-export const bambuPlateForBedType = (name: string): BambuPlateModel | undefined => {
+export const bambuPlateForBedType = (
+  name: string,
+  printer?: BambuPlateModel['printer'],
+): BambuPlateModel | undefined => {
   const trimmed = name.trim().toLowerCase();
-  return [...bambuX1cPlates, ...bambuA1MiniPlates].find((plate) =>
-    plate.bedTypeNames.some((candidate) => candidate.toLowerCase() === trimmed),
+  return [...bambuX1cPlates, ...bambuA1MiniPlates].find(
+    (plate) =>
+      (printer === undefined || plate.printer === printer) &&
+      plate.bedTypeNames.some((candidate) => candidate.toLowerCase() === trimmed),
   );
 };

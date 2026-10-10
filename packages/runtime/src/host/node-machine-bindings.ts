@@ -17,19 +17,22 @@ import type {
   NodeMachineHostContext,
   RemoveNodeMachineBindingInput,
 } from '#host/node-machine-context.js';
-import { bindingBusyStates } from '#host/node-machine-print-requests.js';
+import { bindingBusyStates } from '#host/node-machine-jobs.js';
 import { machineDisplayName } from '#host/node-machine-store.js';
 import type { MachineBindingRecord } from '#host/node-machine-store.js';
 import type { NodeMachineSupervision } from '#host/node-machine-supervision.js';
 import type { MachineChannelHostOperations } from '#machines/machine-channel.js';
 import type { MachineBindingRemoval } from '#machines/machine-client.js';
 import { machineCredentialReference } from '#machines/machine-credential.js';
+import { machineCandidateEndpointSchema, machineEndpointSchema } from '#machines/machine.js';
 import type { MachineBindingOutcome, MachineCandidate } from '#machines/machine.js';
 
+/* A live discovery candidate: every provider names its endpoint's transport. Bindings stored before R17 are read by
+ * the store's own, lenient schema. */
 const candidateSchema = z.strictObject({
   id: identity,
   name: identity,
-  endpoint: z.strictObject({ address: identity, interface: identity }),
+  endpoint: machineCandidateEndpointSchema,
   claimedIdentity: z.strictObject({
     serial: identity.optional(),
     model: identity.optional(),
@@ -58,6 +61,8 @@ const discoveryLimits = {
   maximumNodes: 1024,
   maximumCharacters: 32_768,
 };
+/** The host alerts whose remedy is binding the machine again. */
+const rebindRemedies: ReadonlySet<string> = new Set(['tau.rebind-required', 'tau.reconnect-required']);
 const connectionContextSchema = z.strictObject({
   secretRef: identity,
   serviceTrust: z.record(identity, trustSchema).refine((value) => Object.keys(value).length <= 8),
@@ -92,13 +97,14 @@ export const createNodeMachineBindings = (
     definitionOf,
     directory,
     effectQueue,
-    effects,
+    jobs,
     machines,
     now,
+    operations,
     preparations,
     providerSources,
     report,
-    requests,
+    sessionLost,
     stillCaptureTimes,
     store,
     supervisors,
@@ -111,6 +117,13 @@ export const createNodeMachineBindings = (
   type PendingCeremony = DiscoveredCandidate & Readonly<{ name: string }>;
   const discovered = new Map<string, DiscoveredCandidate>();
   const ceremonies = new Map<string, PendingCeremony>();
+  // Whether the host lists an alert on this machine whose remedy is binding it again (its address answers as another
+  // machine or with another certificate, or reconnecting would reset its controller): a ceremony then confirms it.
+  const asksRebind = async (machineId: string): Promise<boolean> => {
+    const listed = await directory.snapshot();
+    const entry = listed.entries.find((candidate) => candidate.machineId === machineId);
+    return entry?.snapshot.alerts.some(({ code }) => rebindRemedies.has(code)) === true;
+  };
   // Mark a candidate whose claimed identity already has a saved credential; a failed lookup leaves it unmarked.
   const withCredentialFlag = async (providerId: string, candidate: MachineCandidate): Promise<MachineCandidate> => {
     const { serial } = candidate.claimedIdentity;
@@ -149,6 +162,7 @@ export const createNodeMachineBindings = (
         candidate: pending.candidate,
         configuration: pending.configuration,
         connection,
+        purpose: 'bind',
         signal: abort.signal,
       },
       context.runtime.connection(),
@@ -160,53 +174,117 @@ export const createNodeMachineBindings = (
       if (pending.candidate.claimedIdentity.serial && pending.candidate.claimedIdentity.serial !== descriptor.id) {
         throw new Error('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CHANGED');
       }
-      const snapshot = await session.getSnapshot({ signal: abort.signal });
       // `machine.json` is written before the session attaches: a crash after this leaves a whole binding that
       // reconnects at the next start, never a live session the store does not know.
-      bound = await effectQueue.queueFor('bindings', async () => {
+      // `created`: this ceremony made the binding, so a failed attach discards it; a confirmed existing one is kept.
+      const { record: boundRecord, created } = await effectQueue.queueFor('bindings', async () => {
         if (context.isClosed()) {
           throw new Error('MACHINE_BINDING_UNAVAILABLE');
         }
         // Identity is `{ providerId, physicalId }` in each `machine.json`, never a directory name.
-        if (
-          [...machines.values()].some(
-            ({ record }) => record.providerId === pending.providerId && record.physicalId === descriptor.id,
-          )
-        ) {
-          throw new Error('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CONFLICT');
+        const existing = [...machines.values()].find(
+          ({ record }) => record.providerId === pending.providerId && record.physicalId === descriptor.id,
+        );
+        if (existing) {
+          // A claimed identity is pinned to the endpoint it was bound at, and a machine the host stopped connecting
+          // to waits for a person: either way this ceremony is the person confirming the same machine, at its new
+          // endpoint or with its new certificate, so the binding keeps its id. Any other second binding is refused.
+          if (
+            providerSources.get(pending.providerId)?.manifest.connection.identity !== 'claimed' &&
+            !(await asksRebind(existing.record.id))
+          ) {
+            throw new Error('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CONFLICT');
+          }
+          return { record: existing.record, created: false };
         }
-        const created = await store.createMachine({
+        const made = await store.createMachine({
           name: pending.name,
           providerId: pending.providerId,
           physicalId: descriptor.id,
           candidate: pending.candidate,
           configuration: pending.configuration,
           connection,
+          // The first report writes the last-known identity, with the revision the host derives.
           boundAt: now(),
-          last: { descriptor, snapshot, observedAt: now() },
         });
-        machines.set(created.record.id, {
-          record: created.record,
-          operations: { status: 'open', log: created.log },
+        machines.set(made.record.id, {
+          record: made.record,
+          operations: { status: 'open', log: made.log },
         });
-        return created.record;
+        return { record: made.record, created: true };
       });
-      try {
-        await directory.attach({
-          machineId: bound.id,
-          name: bound.name,
-          providerId: bound.providerId,
+      bound = boundRecord;
+      const { id: machineId } = bound;
+      const attach = async (): Promise<void> =>
+        directory.attach({
+          machineId,
+          name: boundRecord.name,
+          providerId: boundRecord.providerId,
+          observations: providerSources.get(boundRecord.providerId)?.manifest.observations ?? [],
+          qualifications: providerSources.get(boundRecord.providerId)?.manifest.qualifications ?? [],
           session,
           onLost() {
+            sessionLost.emit(machineId);
             lost.resolve();
           },
         });
-      } catch (error) {
-        machines.delete(bound.id);
-        await store.discardMachine(bound.id).catch(report);
-        throw error;
+      if (created) {
+        try {
+          await attach();
+        } catch (error) {
+          machines.delete(machineId);
+          await store.discardMachine(machineId).catch(report);
+          throw error;
+        }
+      } else {
+        // As supervision swaps a session: on the machine's queue, so it never changes under an in-flight transfer,
+        // start or action. A job still waiting on the binding keeps it (its unproven transfer or start settles through
+        // the new session), but a streamed run the live session is feeding refuses: replacing it would cut the run.
+        // A live session it replaces is lost as any other is, so its holds end.
+        bound = await effectQueue.queueFor(`machine:${machineId}`, async () => {
+          const machine = machines.get(machineId);
+          if (!machine || context.isClosed()) {
+            throw new Error('MACHINE_BINDING_UNAVAILABLE');
+          }
+          const live = connectedSessions.get(machineId);
+          if (
+            live?.jobs.type === 'supported' &&
+            live.jobs.delivery === 'streamed' &&
+            [...jobs.values()].some((job) => job.machineId === machineId && job.run?.outcome === 'running')
+          ) {
+            throw new Error('MACHINE_BINDING_BUSY');
+          }
+          // The old reconnect loop ends once the new endpoint is durable, still on this queue, so an attempt it has in
+          // flight (at the old endpoint) never attaches after this one. A failed write leaves it watching the live
+          // session; once it has stopped, a failure hands the machine back to supervision on the backoff.
+          let stopped = false;
+          try {
+            machine.record = await store.writeMachine({
+              ...machine.record,
+              candidate: pending.candidate,
+              configuration: pending.configuration,
+              connection,
+            });
+            supervisors.get(machineId)?.stop.abort();
+            stopped = true;
+            if (live) {
+              connectedSessions.delete(machineId);
+              sessionLost.emit(machineId);
+            }
+            await attach();
+          } catch (error) {
+            if (stopped) {
+              supervise(machine.record, undefined);
+            }
+            throw error;
+          }
+          connectedSessions.set(machineId, session);
+          return machine.record;
+        });
       }
       connectedSessions.set(bound.id, session);
+      // Binding again is the person remedy for a moved or reset-prone machine: its host alerts end here.
+      await directory.update({ machineId, alerts: [] }).catch(report);
       supervise(bound, lost.promise);
       ceremonies.delete(ceremonyId);
       return Object.freeze({ status: 'bound', machineId: bound.id });
@@ -234,12 +312,10 @@ export const createNodeMachineBindings = (
       if (!machine) {
         throw new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
       }
-      // A machine whose log is unreadable can never settle its requests, so they do not hold it.
+      // A machine whose journal is unreadable can never settle its jobs, so they do not hold it.
       if (
         machine.operations.status === 'open' &&
-        [...requests.values()].some(
-          (request) => request.machineId === machineId && bindingBusyStates.has(request.state),
-        )
+        [...jobs.values()].some((job) => job.machineId === machineId && bindingBusyStates.has(job.state))
       ) {
         throw new Error('MACHINE_BINDING_BUSY');
       }
@@ -255,9 +331,9 @@ export const createNodeMachineBindings = (
       await store.removeMachine(machineId);
       machines.delete(machineId);
       stillCaptureTimes.delete(machineId);
-      for (const [operationId, state] of effects) {
-        if (state.intent.machineId === machineId) {
-          effects.delete(operationId);
+      for (const [operationId, operation] of operations) {
+        if (operation.planned.machineId === machineId) {
+          operations.delete(operationId);
         }
       }
       for (const [preparedId, preparation] of preparations) {
@@ -265,9 +341,9 @@ export const createNodeMachineBindings = (
           preparations.delete(preparedId);
         }
       }
-      for (const [requestId, request] of requests) {
-        if (request.machineId === machineId) {
-          requests.delete(requestId);
+      for (const [jobId, job] of jobs) {
+        if (job.machineId === machineId) {
+          jobs.delete(jobId);
         }
       }
       const { secretRef } = machine.record.connection;
@@ -288,8 +364,18 @@ export const createNodeMachineBindings = (
     operations: {
       async *discover(operationInput) {
         const source = providerSources.get(operationInput.providerId);
-        if (!source || !context.runtime) {
+        if (!source || !context.runtime || context.unavailableProviders.has(source.id)) {
           throw new Error('MACHINE_PROVIDER_UNAVAILABLE');
+        }
+        // Addressed discovery reaches the provider only in the transport it connects over.
+        const parsedEndpoint =
+          operationInput.endpoint === undefined ? undefined : machineEndpointSchema.safeParse(operationInput.endpoint);
+        const endpoint = parsedEndpoint?.data;
+        if (
+          parsedEndpoint !== undefined &&
+          (endpoint === undefined || endpoint.transport !== source.manifest.connection.transport)
+        ) {
+          throw new Error('MACHINE_DISCOVERY_ENDPOINT_INVALID');
         }
         const definition = await definitionOf(source.id);
         const result = await definition.bindingConfiguration.schema['~standard'].validate(operationInput.configuration);
@@ -303,7 +389,7 @@ export const createNodeMachineBindings = (
           maximumCharacters: 65_536,
         });
         for await (const raw of definition.discover(
-          { configuration, signal: operationInput.signal },
+          { configuration, ...(endpoint === undefined ? {} : { endpoint }), signal: operationInput.signal },
           context.runtime.discovery,
         )) {
           operationInput.signal.throwIfAborted();
@@ -357,7 +443,8 @@ export const createNodeMachineBindings = (
         const existing = [...machines.values()].find(
           ({ record }) => record.providerId === selected.providerId && record.candidate.id === selected.candidate.id,
         );
-        if (existing) {
+        // Bound already, unless the host asks a person to bind it again (same address, new certificate).
+        if (existing && !(await asksRebind(existing.record.id))) {
           return Object.freeze({
             status: 'bound',
             machineId: existing.record.id,

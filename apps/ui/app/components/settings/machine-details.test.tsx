@@ -6,6 +6,7 @@ import type { MachineProvider } from '@taucad/runtime/machine';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { MachineDetails } from '#components/settings/machine-details.js';
 import { simulatorProvider, x1cProvider } from '#components/settings/machine-details.fixture.js';
+import { providerFor, routerManifest } from '#components/print/testing/machines.fixture.js';
 
 const renderDetails = (provider: MachineProvider, firmware: string): void => {
   render(
@@ -32,26 +33,23 @@ const factsOf = (part: HTMLElement): string[] => {
 };
 
 describe('MachineDetails', () => {
-  it('should fold every standard part of the manifest behind a one-line summary', () => {
+  it('should fold every part of the manifest behind a one-line summary', () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
     const parts = screen.getAllByRole('button');
     expect(parts.map((part) => part.textContent)).toEqual([
       'Identity and firmware Firmware 01.08.02.00',
-      'Geometry 256 × 256 × 256 mm · CoreXY · Enclosed',
-      'Toolhead and nozzles 0.4 mm nozzle · 1.75 mm filament',
-      'Bed and plates 4 plates · up to 120 °C',
-      'Chamber and fans Enclosed · Not heated · 3 fans',
-      'Material system 1 unit × 4 slots · External spool',
-      'Camera Stills',
-      'Storage Removable',
-      'Network LAN mode',
-      'Speed profiles 4 profiles · 50–166%',
-      'Slicing profile 0.2 mm layers · Fast, Standard, Fine',
-      'Actions 6 qualified · 8 designed · 2 unsupported',
-      'Observation freshness 7 groups · 15 s to 2 min',
-      'Binding settings 3 fields · Read-only',
-      'Print options 10 fields · Set per print',
+      'Qualification profiles 1 profile',
+      'Connection Network · Authenticated',
+      'Axes X, Y, Z',
+      'Components 12 components',
+      'Processes FFF 256 × 256 × 256 mm · CoreXY',
+      'Jobs Stored · Started by Tau',
+      'Stop Motion halts at once, heaters turn off, the position is kept.',
+      'Controls 3 qualified · 14 designed',
+      'Observation freshness 4 groups · 15 s to 30 s',
+      'Binding settings 1 field · Read-only',
+      'Job options 10 fields · Set per job',
     ]);
     for (const part of parts) {
       expect(part).toHaveAttribute('aria-expanded', 'false');
@@ -59,10 +57,34 @@ describe('MachineDetails', () => {
     expect(screen.queryByRole('term')).not.toBeInTheDocument();
   });
 
-  it('should show the exact declared geometry, toolhead, bed and chamber values when opened', () => {
+  it('should show the connection, axes and every component with its nozzles and material units', () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
-    expect(factsOf(openPart('Geometry'))).toEqual([
+    expect(factsOf(openPart('Connection'))).toEqual([
+      'Transport: Network',
+      'One host at a time: No',
+      'Connecting: Changes nothing',
+      'Identity: Authenticated',
+    ]);
+    expect(factsOf(openPart('Axes'))).toEqual([
+      'X: Linear, 0 to 256 mm, moves the tool x',
+      'Y: Linear, 0 to 256 mm, moves the tool y',
+      'Z: Linear, 0 to 256 mm, moves the work z',
+    ]);
+    const components = factsOf(openPart('Components'));
+    expect(components).toContain('Toolhead: Toolhead, 1 nozzle tool-0');
+    expect(components).toContain('Nozzle 0.4 mm: Hardened steel, up to 300 °C nozzle-0');
+    expect(components).toContain('Bed: Heater bed');
+    expect(components).toContain('Filament: Material system, 2 units filament');
+    expect(components).toContain('AMS: Feeder, A1, A2, A3, A4 ams-a');
+    expect(components).toContain('External spool: External holder, Ext external');
+  });
+
+  it('should show the FFF process geometry, plates, speeds and slicing defaults', () => {
+    renderDetails(x1cProvider, '01.08.02.00');
+
+    const facts = factsOf(openPart('Processes'));
+    expect(facts.slice(0, 8)).toEqual([
       'Build volume: 256 × 256 × 256 mm',
       'Outer size: 389 × 389 × 457 mm',
       'Enclosure: Enclosed',
@@ -70,129 +92,143 @@ describe('MachineDetails', () => {
       'Kinematics: CoreXY',
       'Bed motion: Bed moves on Z',
       'Origin: Front-left corner',
-      'Toolhead home: X 1 · Y 1 · Z 256 mm',
+      'Toolhead home: X 128 · Y 256 · Z 256 mm',
     ]);
-    expect(factsOf(openPart('Toolhead and nozzles'))).toEqual([
-      'Filament diameter: 1.75 mm',
-      'Nozzle 0.4 mm: Hardened steel, up to 300 °C nozzle-0.4',
-    ]);
-    expect(factsOf(openPart('Bed and plates'))).toEqual([
-      'Maximum temperature: 120 °C',
-      'Cool plate: cool',
-      'Engineering plate: engineering',
-      'High temperature plate: high-temperature',
-      'Textured PEI plate: textured-pei',
-    ]);
-    expect(factsOf(openPart('Chamber and fans'))).toEqual([
-      'Enclosed: Yes',
-      'Heated: No',
-      'Light: Yes',
-      'Part cooling fan: part',
-      'Auxiliary fan: auxiliary',
-      'Chamber fan: chamber',
-    ]);
-    expect(factsOf(openPart('Material system'))).toEqual([
-      'Units: 1',
-      'Slots per unit: 4',
-      'External spool: Yes',
-      'Drying: Supported',
-      'Mount: On top',
-    ]);
+    expect(facts).toContain('Bed maximum temperature: 120 °C');
+    expect(facts).toContain('Textured PEI plate: textured-pei');
+    expect(facts).toContain('Ludicrous speed: 166% ludicrous');
+    expect(facts).toContain('Fine preset: 0.12 mm layers fine');
   });
 
-  it('should mark every action with its effect, qualification and reason', () => {
+  it('should show how jobs reach the machine and what Stop does before anything is pressed', () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
-    const list = within(openPart('Actions')).getByRole('list', { name: 'Actions' });
-    expect(
-      within(list)
-        .getAllByRole('listitem')
-        .map((action) => action.textContent),
-    ).toEqual([
-      'Start print Qualified print.start · Print effect · Needs Approved print request, Idle machine, Setup unchanged since preparation',
-      'Pause Qualified run.pause · Print effect · Needs Exact observed run',
-      'Resume Qualified run.resume · Print effect · Needs Exact observed run',
-      'Cancel Qualified run.cancel · Print effect · Needs Exact observed run',
-      'Urgent stop Qualified run.urgent-stop · Print effect · Priority stop of the current run; not a certified emergency stop.',
-      'Capture still Qualified camera.still · Observation · Needs Pinned camera trust',
-      'Chamber light Designed, not yet qualified light.set · No physical effect · Takes on',
-      'Speed profile Designed, not yet qualified speed.set · Motion effect · Takes profile',
-      'Fan target Designed, not yet qualified fan.set · Thermal effect · Takes fan, percent',
-      'Heater target Designed, not yet qualified temperature.set · Thermal effect · Takes heater, target',
-      'Home axes Designed, not yet qualified motion.home · Motion effect · Needs No active run, Doors closed',
-      'Jog axis Designed, not yet qualified motion.jog · Motion effect · Needs No active run, Homed axes · Takes axis, distance',
-      'Load filament Designed, not yet qualified material.load · Material effect · Needs Nozzle at material temperature · Takes slot',
-      'Unload filament Designed, not yet qualified material.unload · Material effect · Needs Nozzle at material temperature',
-      'Run calibration Unsupported calibration.run · Motion effect · Named qualified procedures need their own charter slice.',
-      'Format storage Unsupported storage.format · Storage effect · Destructive storage actions are outside this authority.',
+    expect(factsOf(openPart('Jobs'))).toEqual([
+      'Delivery: Stored on the machine',
+      'Start: Tau starts the run',
+      'Accepts: application/vnd.bambulab.gcode-3mf',
+      'Who may start: A person, or an agent a person approved',
+      'Vouched before a start: The build plate is clear',
     ]);
-    expect(within(list).getAllByText('Qualified')).toHaveLength(6);
-    expect(within(list).getAllByText('Designed, not yet qualified')).toHaveLength(8);
-    expect(within(list).getAllByText('Unsupported')).toHaveLength(2);
+    const stop = openPart('Stop');
+    expect(factsOf(stop)).toEqual([
+      'What Stop does: Motion halts at once, heaters turn off, the position is kept.',
+      'Recovery: None needed',
+    ]);
+    expect(stop).toHaveTextContent('not a safety-rated emergency stop');
+  });
+
+  it('should show a streamed, at-machine milling machine with its work area and its own job form', () => {
+    renderDetails(providerFor('grbl', routerManifest), '1.1h');
+
+    expect(screen.getByRole('button', { name: /^Processes / })).toHaveTextContent('Milling, 3-axis');
+    expect(factsOf(openPart('Processes'))).toEqual([
+      'Simultaneous axes: 3',
+      'Features: Arcs',
+      'Work offsets: G54, G55, G56, G57, G58, G59',
+      'Work area: 810 × 855 × 120 mm',
+    ]);
+    const jobs = factsOf(openPart('Jobs'));
+    expect(jobs).toContain('Delivery: Streamed by this computer, which must stay connected until the run ends');
+    expect(jobs).toContain('Start: A person presses start at the machine');
+    expect(jobs).toContain('Who may start: A person, or an agent a person approved, at the machine');
+    expect(factsOf(openPart('Stop'))[0]).toBe(
+      'What Stop does: Motion slows to a stop, the spindle stops, the position is kept.',
+    );
+    expect(screen.getByRole('button', { name: /^Job options / })).toHaveTextContent('1 field');
+  });
+
+  it('should mark every control with its qualification, its reason or evidence, and who may use it', () => {
+    renderDetails(x1cProvider, '01.08.02.00');
+
+    const controls = openPart('Controls');
+    expect(controls).toHaveTextContent('Designed controls can be tried by a person while Testing is on');
+    const rows = within(within(controls).getByRole('list', { name: 'Controls' }))
+      .getAllByRole('listitem')
+      .map((row) => row.textContent);
+    expect(rows).toContain(
+      'Pause Qualified run.pause on Printer · Run · Anyone, including an agent · Proven in x1c-hardware-2026-10',
+    );
+    expect(rows).toContain(
+      'Part fan Designed, not yet qualified level.set on Part fan · A person, or an agent a person approved · Takes ratio · Not yet qualified on this hardware.',
+    );
+    expect(rows).toContain(
+      'Answer the filament check Designed, not yet qualified interaction.respond on Filament · A person only · Takes activityId, answer, promptId · Not yet qualified on this hardware.',
+    );
+    expect(within(controls).getAllByText('Qualified')).toHaveLength(3);
+    expect(within(controls).getAllByText('Designed, not yet qualified')).toHaveLength(14);
   });
 
   it('should list each observation group with its staleness budget', () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
     expect(factsOf(openPart('Observation freshness'))).toEqual([
+      'State: Stale after 15 s',
       'Temperatures: Stale after 15 s',
-      'Run: Stale after 15 s',
-      'Material system: Stale after 1 min',
-      'Fans: Stale after 15 s',
-      'Chamber light: Stale after 1 min',
-      'Network: Stale after 1 min',
-      'Removable storage: Stale after 2 min',
+      'Material: Stale after 30 s',
+      'Accessories: Stale after 30 s',
     ]);
   });
 
-  it('should mark firmware the manifest qualifies', () => {
+  it('should mark firmware a qualification profile covers and list the profiles', () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
     const identity = factsOf(openPart('Identity and firmware'));
     expect(identity).toContain('Model: Bambu Lab X1 Carbon');
-    expect(identity).toContain('Firmware: 01.08.02.00 Qualified');
-    expect(identity).not.toContain('Hardware: Simulated, no printer attached');
+    expect(identity).toContain('Firmware: 01.08.02.00 Qualified in x1c-hardware-2026-10');
+    expect(identity).not.toContain('Hardware: Simulated, no machine attached');
+    expect(factsOf(openPart('Qualification profiles'))).toEqual([
+      'x1c-hardware-2026-10: Hardware · X1C · Firmware 01.08.02.00 · Operator runs on the workshop X1C, October 2026.',
+    ]);
   });
 
-  it('should qualify the reported firmware against the manifest and label the simulator', () => {
+  it('should say when no profile covers the reported firmware', () => {
+    renderDetails(x1cProvider, '01.09.00.00');
+
+    expect(factsOf(openPart('Identity and firmware'))).toContain(
+      'Firmware: 01.09.00.00 Not in a qualification profile',
+    );
+  });
+
+  it('should label the simulator and qualify its firmware only in simulation', () => {
     renderDetails(simulatorProvider, 'simulator-1');
 
     const identity = factsOf(openPart('Identity and firmware'));
     expect(identity).toContain('Model: Bambu Lab Simulated X1C');
-    expect(identity).toContain('Hardware: Simulated, no printer attached');
-    expect(identity).toContain('Firmware: simulator-1 Not in the qualified list');
-    expect(identity).toContain('Qualified firmware: 01.08.02.00');
+    expect(identity).toContain('Hardware: Simulated, no machine attached');
+    expect(identity).toContain('Firmware: simulator-1 Qualified in simulation');
     expect(identity).toContain('Provider: Simulated X1C bambu-simulator 1.0.0');
     expect(identity).toContain('Machine id: workshop-x1c');
+    expect(factsOf(openPart('Qualification profiles'))[0]).toMatch(/^simulation: Simulation · X1C/u);
   });
 
   it('should render the binding configuration read-only from its JSON Structure declaration', async () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
     const binding = openPart('Binding settings');
-    expect(binding).toHaveTextContent('Declared by bambu.machine.binding 1.0.0');
+    expect(binding).toHaveTextContent('Declared by bambu.machine.binding 2.1.0');
     expect(binding).not.toHaveTextContent('Only the simulator reads these');
-    const logicalId = await within(binding).findByRole('textbox', { name: 'Input for Logical Id' });
+    const serial = await within(binding).findByRole('textbox', { name: 'Input for Serial' });
     expect(
       within(binding)
         .getAllByRole('textbox')
         .map((input) => input.getAttribute('aria-label')),
-    ).toEqual(['Input for Address', 'Input for Logical Id', 'Input for Serial']);
+    ).toEqual(['Input for Serial']);
     for (const input of within(binding).getAllByRole('textbox')) {
       expect(input).toHaveAttribute('readonly');
     }
     expect(within(binding).queryByRole('button', { name: /^Reset/u })).not.toBeInTheDocument();
-    fireEvent.change(logicalId, { target: { value: 'renamed' } });
-    expect(logicalId).toHaveValue('');
+    fireEvent.change(serial, { target: { value: 'renamed' } });
+    expect(serial).toHaveValue('');
   });
 
   it("should show the simulator's binding fields as demo settings, read-only", async () => {
     renderDetails(simulatorProvider, 'simulator-1');
 
     const binding = openPart('Binding settings');
-    expect(binding).toHaveAccessibleName('Binding settings 2 fields · Read-only');
-    expect(binding).toHaveTextContent('Only the simulator reads these; they are not printer settings.');
-    expect(binding).toHaveTextContent('Declared by bambu.simulator.binding 1.1.0');
+    expect(binding).toHaveAccessibleName('Binding settings 1 field · Read-only');
+    expect(binding).toHaveTextContent('Only the simulator reads these; they are not machine settings.');
+    expect(binding).toHaveTextContent('Declared by bambu.simulator.binding 2.1.0');
     /* The declaration titles the field and starts it at real time. */
     const speed = await within(binding).findByRole('spinbutton', { name: 'Input for Demo Speed' });
     expect(within(binding).getByLabelText('Parameter: Demo Speed')).toHaveTextContent('Demo Speed');
@@ -201,13 +237,13 @@ describe('MachineDetails', () => {
     expect(
       within(binding).getByText('Simulated seconds per real second, so a long print can be watched in minutes'),
     ).toBeInTheDocument();
-    expect(within(binding).getByRole('textbox', { name: 'Input for Logical Id' })).toHaveAttribute('readonly');
   });
 
-  it('should render the print options with their declared defaults, locked and without growth', async () => {
+  it('should render the job options from the manifest with their declared defaults, locked and without growth', async () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
-    const options = openPart('Print options');
+    const options = openPart('Job options');
+    expect(options).toHaveTextContent('Declared by fixture.submission 1.3.0');
     const bedLeveling = await within(options).findByRole('switch', { name: 'Toggle for Bed Leveling' });
     expect(bedLeveling).toBeChecked();
     expect(bedLeveling).toBeDisabled();

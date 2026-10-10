@@ -216,6 +216,27 @@ describe('desktopBridge', () => {
     await expect(desktopBridge()?.machines.completeBinding({ ceremonyId: 'ceremony-2' })).rejects.toThrow();
   });
 
+  it("should reject a failed ceremony with the host's message and typed code", async () => {
+    const { completeMachineBinding } = installShellGlobal();
+    const { desktopBridge } = await loadBridge();
+    const message = 'The machine needs its access code.';
+
+    completeMachineBinding.mockResolvedValueOnce({ status: 'failed', code: 'MACHINE_CREDENTIAL_REQUIRED', message });
+    const coded = await desktopBridge()
+      ?.machines.completeBinding({ ceremonyId: 'ceremony-3' })
+      .catch((error: unknown) => error);
+    expect(coded).toBeInstanceOf(Error);
+    expect(coded).toMatchObject({ message, code: 'MACHINE_CREDENTIAL_REQUIRED' });
+
+    // With no code, the message alone.
+    completeMachineBinding.mockResolvedValueOnce({ status: 'failed', message });
+    const plain = await desktopBridge()
+      ?.machines.completeBinding({ ceremonyId: 'ceremony-4' })
+      .catch((error: unknown) => error);
+    expect(plain).toMatchObject({ message });
+    expect(plain).not.toHaveProperty('code');
+  });
+
   it('forwards project-session retain and release to the preload surface', async () => {
     const { retainAgentHost, releaseAgentHost } = installShellGlobal();
     const { desktopBridge } = await loadBridge();

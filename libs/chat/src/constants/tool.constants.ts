@@ -20,12 +20,13 @@ export const toolName = {
   revisions: 'revisions',
   updateTodos: 'update_todos',
   askQuestions: 'ask_questions',
+  listMachines: 'list_machines',
   getMachine: 'get_machine',
+  machineAction: 'machine_action',
+  stopMachine: 'stop_machine',
   getPrintProfiles: 'get_print_profiles',
-  requestPrint: 'request_print',
-  getPrintRequest: 'get_print_request',
-  listPrintRequests: 'list_print_requests',
-  cancelPrint: 'cancel_print',
+  requestJob: 'request_job',
+  checkJob: 'check_job',
 } as const satisfies Record<string, string>;
 
 /** @public */

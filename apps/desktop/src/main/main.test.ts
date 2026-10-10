@@ -6,6 +6,7 @@ import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
 
 import type * as Host from '@taucad/host';
+import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -58,11 +59,21 @@ const state = vi.hoisted(() => ({
     status: 'bound',
     machineId: 'workshop-x1c',
   })),
+  servicesStreaming: vi.fn(async (_boundMilliseconds: number): Promise<readonly string[]> => []),
+  servicesResumeStarts: vi.fn(),
   runtimePrewarm: vi.fn(),
   runtimeMaxUtilities: undefined as number | undefined,
   servicesQuiesce: vi.fn(
-    async (): Promise<
-      { status: 'quiesced' } | { status: 'failed'; message: string } | { status: 'timeout' } | { status: 'no-utility' }
+    async (
+      _boundMilliseconds: number,
+      _options?: Readonly<{ quitIfStreamingUnknown?: boolean }>,
+    ): Promise<
+      | { status: 'quiesced' }
+      | { status: 'failed'; message: string }
+      | { status: 'timeout' }
+      | { status: 'no-utility' }
+      | { status: 'streaming'; machines: readonly string[] }
+      | { status: 'streaming-unknown'; message: string }
     > => ({ status: 'quiesced' }),
   ),
   utilityEnvironmentAdditions: [] as NodeJS.ProcessEnv[],
@@ -180,6 +191,7 @@ vi.mock('electron', () => ({
   },
   MessageChannelMain: vi.fn(() => ({ port1: {}, port2: {} })),
   net: { fetch: vi.fn() },
+  powerSaveBlocker: { start: vi.fn(() => 1), stop: vi.fn() },
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
   safeStorage: { isEncryptionAvailable: vi.fn(() => false), encryptString: vi.fn(), decryptString: vi.fn() },
   screen: {
@@ -211,11 +223,13 @@ vi.mock('@taucad/runtime/electron/main', () => ({
 }));
 vi.mock('@taucad/host', async (importOriginal) => {
   /* The host's real bounds, so the quit waits main derives from them are the shipped ones (rule 9). */
-  const { projectCloseMilliseconds, projectReleaseMilliseconds } = await importOriginal<typeof Host>();
+  const { keepAwakeWhileStreaming, projectCloseMilliseconds, projectReleaseMilliseconds } =
+    await importOriginal<typeof Host>();
   return {
     defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
     discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
     externalAgentDescriptors: vi.fn(() => []),
+    keepAwakeWhileStreaming,
     projectCloseMilliseconds,
     projectReleaseMilliseconds,
   };
@@ -278,6 +292,9 @@ vi.mock('#main/services-broker.js', () => ({
       post: vi.fn(),
       connect: state.servicesConnect,
       completeMachineBinding: state.servicesCompleteBinding,
+      streamingMachines: state.servicesStreaming,
+      peekStreamingMachines: vi.fn(async () => []),
+      resumeMachineStarts: state.servicesResumeStarts,
       quiesce: state.servicesQuiesce,
       dispose: state.servicesDispose,
       computeProjectRoot: (root: string) =>
@@ -627,6 +644,90 @@ describe('desktop main compute owner', () => {
     bootMilliseconds,
   );
 
+  /* Q-streamed-host: quitting would stop a machine this app is feeding mid-run, so there is no way past it. */
+  it(
+    'should refuse to quit while a program streams, before anything is quiesced, with no Quit anyway',
+    async () => {
+      await bootstrap();
+      state.servicesStreaming.mockResolvedValueOnce(['LongMill']);
+
+      const quit = state.appListeners.get('before-quit')!.at(-1)!;
+      quit({ preventDefault: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(dialog.showMessageBox).toHaveBeenCalled();
+      });
+      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        buttons: ['Keep Tau open'],
+        message: 'A program is streaming to LongMill; stop it first.',
+      });
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      expect(state.servicesQuiesce).not.toHaveBeenCalled();
+      expect(state.servicesDispose).not.toHaveBeenCalled();
+      expect(app.quit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should ask before quitting when Tau cannot tell whether a program streams, and quit only on Quit anyway',
+    async () => {
+      await bootstrap();
+      state.servicesStreaming.mockRejectedValue(new Error('The desktop machine host did not answer.'));
+
+      const quit = state.appListeners.get('before-quit')!.at(-1)!;
+      quit({ preventDefault: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(dialog.showMessageBox).toHaveBeenCalled();
+      });
+      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        buttons: ['Keep Tau open', 'Quit anyway'],
+        defaultId: 0,
+        message: "Tau can't tell whether a program is streaming to a machine.",
+      });
+      expect(state.servicesQuiesce).not.toHaveBeenCalled();
+      expect(app.quit).not.toHaveBeenCalled();
+
+      dialog.showMessageBox.mockResolvedValue({ response: 1 });
+      quit({ preventDefault: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
+      expect(state.servicesQuiesce).toHaveBeenCalledWith(expect.any(Number), { quitIfStreamingUnknown: true });
+      dialog.showMessageBox.mockResolvedValue({ response: 0 });
+      state.servicesStreaming.mockResolvedValue([]);
+    },
+    bootMilliseconds,
+  );
+
+  /* The utility reads again before it closes anything when its store opened after main asked: a stream found then
+   * still holds the quit, and the machines start jobs again. */
+  it(
+    'should refuse to quit when the utility finds a stream that began after the first question',
+    async () => {
+      await bootstrap();
+      state.servicesQuiesce.mockResolvedValueOnce({ status: 'streaming', machines: ['LongMill'] });
+
+      const quit = state.appListeners.get('before-quit')!.at(-1)!;
+      quit({ preventDefault: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(dialog.showMessageBox).toHaveBeenCalled();
+      });
+      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        buttons: ['Keep Tau open'],
+        message: 'A program is streaming to LongMill; stop it first.',
+      });
+      expect(state.servicesQuiesce).toHaveBeenCalledWith(expect.any(Number), { quitIfStreamingUnknown: false });
+      expect(state.servicesResumeStarts).toHaveBeenCalledOnce();
+      expect(state.servicesDispose).not.toHaveBeenCalled();
+      expect(app.quit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
   /*
    * C69: a quit that cannot settle has to be *visible*.
    *
@@ -652,6 +753,11 @@ describe('desktop main compute owner', () => {
       });
       expect(app.quit).not.toHaveBeenCalled();
       expect(state.servicesDispose).not.toHaveBeenCalled();
+      /* B3H-3: the renderer let go and the person kept Tau open: the machines it asks about start jobs again. */
+      expect(state.sentToRenderer).toContain(quitChannels.ask);
+      await vi.waitFor(() => {
+        expect(state.servicesResumeStarts).toHaveBeenCalledOnce();
+      });
       /* The outcome itself is logged, not just its name, so what refused to
        * settle is recoverable from the log. */
       expect(state.log).toHaveBeenCalledWith('error', 'main.quiesce', {
@@ -822,7 +928,8 @@ describe('desktop quit bounds', () => {
 
     /* The utility's launchers drain their runs before they release. */
     expect(host.projectCloseMilliseconds).toBeGreaterThan(host.projectReleaseMilliseconds);
-    expect(quitQuiesceMilliseconds).toBeGreaterThan(host.projectCloseMilliseconds);
+    /* The utility's quiesce first waits for machine job starts in flight, then closes its projects. */
+    expect(quitQuiesceMilliseconds).toBeGreaterThan(host.projectCloseMilliseconds + machineStartWaitMilliseconds);
     /* The page cancels runs and flushes producers (10 s each) before the host's close. */
     expect(quitRendererMilliseconds).toBeGreaterThan(2 * 10_000 + host.projectReleaseMilliseconds);
   }, 60_000);
@@ -1110,6 +1217,24 @@ describe('desktop main machine binding channel', () => {
         { ceremonyId: 'ceremony-2', address: '10.0.0.5', accessCode: '12345678' },
       ]);
       expect(JSON.stringify(state.log.mock.calls)).not.toContain('12345678');
+
+      /* A refusal resolves as data, so the host's typed code crosses the context bridge, which keeps only an error's
+       * message. */
+      state.servicesCompleteBinding.mockRejectedValueOnce(
+        Object.assign(new Error('Enter the access code shown on the machine.'), {
+          code: 'MACHINE_CREDENTIAL_REQUIRED',
+        }),
+      );
+      await expect(complete({ senderFrame: {} }, { ceremonyId: 'ceremony-4' })).resolves.toEqual({
+        status: 'failed',
+        code: 'MACHINE_CREDENTIAL_REQUIRED',
+        message: 'Enter the access code shown on the machine.',
+      });
+      state.servicesCompleteBinding.mockRejectedValueOnce(new Error('The desktop machine binding timed out.'));
+      await expect(complete({ senderFrame: {} }, { ceremonyId: 'ceremony-5' })).resolves.toEqual({
+        status: 'failed',
+        message: 'The desktop machine binding timed out.',
+      });
     },
     bootMilliseconds,
   );

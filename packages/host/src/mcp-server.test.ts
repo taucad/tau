@@ -38,6 +38,12 @@ import type { RpcGraphicsClient } from '@taucad/chat/rpc';
 import { exportModelOutputSchema } from '@taucad/chat/schemas/tools/export-model';
 import { parseToolErrorText } from '@taucad/chat/utils';
 import type { BambuStudioEngine, MachinePrintPlanner } from '@taucad/agent-tools/registry';
+import {
+  defineMachineAction,
+  machineActionDescriptorOf,
+  standardMachineAction,
+  standardMachineActions,
+} from '@taucad/runtime/machine';
 import type { MachineArtifactReference, MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
 
 import { startAgentServer } from '#agent-server.js';
@@ -251,11 +257,13 @@ describe('createHostMcpEndpoint capability', () => {
       'screenshot',
       'export_model',
       'arrange_workbench',
+      'list_machines',
+      'get_machine',
+      'machine_action',
+      'stop_machine',
       'get_print_profiles',
-      'request_print',
-      'get_print_request',
-      'list_print_requests',
-      'cancel_print',
+      'request_job',
+      'check_job',
       'ask_questions',
     ]);
     expect(claims.allowedTools).not.toContain('start_machine_print');
@@ -705,33 +713,167 @@ describe('the mounted /mcp route', () => {
   /* The real machine registry's definitions and handler, never a hand-written
    * schema: a hand-written one is how a draft-07 `definitions` reference the
    * SDK could not read reached every external agent's `initialize` as HTTP 500. */
-  it('should initialize, list and call request_print from the real machine registry', async () => {
-    const timestamp = '2026-09-24T00:00:00.000Z';
-    const machine = {
+  it('should initialize, list and call the machine tools from the real machine registry', async () => {
+    const timestamp = '2026-10-05T00:00:00.000Z';
+    const qualified = { status: 'qualified', profileId: 'x1c-hardware-2026-10' } as const;
+    const actions = [
+      defineMachineAction(
+        {
+          componentId: 'chamber-light',
+          id: 'switch.set',
+          version: 1,
+          label: 'Chamber light',
+          effects: ['illumination'],
+          scope: 'any',
+          when: ['ready', 'active'],
+          safety: { authority: 'agent', attended: false, interlocks: [] },
+          requires: [],
+          confirms: 'acknowledgement',
+          qualification: qualified,
+        },
+        standardMachineActions['switch.set'].schema,
+      ),
+      standardMachineAction({
+        id: 'run.cancel',
+        componentId: 'controller',
+        label: 'Cancel the print',
+        when: ['active'],
+        qualification: qualified,
+      }),
+    ].map((definition) => machineActionDescriptorOf(definition));
+    const stop = { motion: 'halts', spindle: 'none', heaters: 'off', position: 'kept', recovery: [] } as const;
+    const machine: MachineDirectoryEntry = {
       machineId: 'machine-1',
+      name: 'Workshop X1C',
       providerId: 'bambu',
-      descriptor: { id: 'physical-machine-1', name: 'Workshop X1C', model: 'X1C' },
-      snapshot: { connection: 'connected', readiness: 'idle', observedAt: timestamp },
       freshness: 'current',
-    } as unknown as MachineDirectoryEntry;
-    const requestPrint = vi.fn<MachineClient['requestPrint']>(async (input) => ({
-      requestId: input.requestId,
+      descriptor: {
+        id: 'physical-machine-1',
+        name: 'X1C',
+        vendor: 'Bambu Lab',
+        model: 'X1C',
+        firmware: '01.08.00.00',
+        capabilities: {
+          connection: { transport: 'network', exclusive: false, opening: 'nothing', identity: 'authenticated' },
+          axes: [],
+          components: [
+            { id: 'controller', label: 'Printer', kind: 'controller' },
+            { id: 'chamber-light', label: 'Chamber light', kind: 'light' },
+          ],
+          /* A printer: slicing tools are offered only for an `fff` process. */
+          processes: [
+            {
+              type: 'fff',
+              version: 1,
+              geometry: {
+                unit: 'mm',
+                buildVolume: { x: 256, y: 256, z: 256 },
+                enclosure: { outer: { x: 389, y: 389, z: 457 }, enclosed: true, doors: [] },
+                kinematics: 'corexy',
+                bedMotion: 'z',
+                origin: 'front-left',
+                toolheadHome: { x: 1, y: 1, z: 256 },
+                materialSystemMount: 'none',
+              },
+              filamentDiameter: { value: 1.75, unit: 'mm' },
+              bed: {
+                maximumTemperature: { value: 110, unit: 'Cel' },
+                plates: [{ id: 'textured-pei', label: 'Textured PEI plate' }],
+              },
+              chamber: { enclosed: true, heated: false },
+              speedProfiles: [],
+              slicing: {
+                recommended: {
+                  layerHeight: { value: 0.2, unit: 'mm' },
+                  walls: 2,
+                  infillPercent: 15,
+                  nozzleTemperature: { value: 220, unit: 'Cel' },
+                  bedTemperature: { value: 55, unit: 'Cel' },
+                },
+                presets: [{ id: 'standard', label: 'Standard', layerHeight: { value: 0.2, unit: 'mm' } }],
+              },
+            },
+          ],
+          actions,
+          holds: [],
+          jobs: {
+            type: 'supported',
+            accepts: [],
+            delivery: 'stored',
+            start: 'remote',
+            submission: actions[0]!.configuration,
+            attestations: [{ id: 'work-area-clear', label: 'The build plate is clear' }],
+            safety: { attended: false, interlocks: [] },
+          },
+          stop,
+          revision: 'revision-1',
+          incarnation: 'incarnation-1',
+          qualifications: [],
+        },
+      },
+      snapshot: {
+        connection: 'connected',
+        observedAt: timestamp,
+        state: { status: 'active' },
+        run: {
+          runId: 'run-1',
+          origin: 'tau',
+          delivery: 'stored',
+          state: 'running',
+          progress: { basis: 'executed', counters: [] },
+        },
+        components: [],
+        activities: [],
+        checks: [],
+        availability: [],
+        alerts: [],
+        operations: [],
+      },
+    };
+    const requestJob = vi.fn<MachineClient['requestJob']>(async (input) => ({
+      version: 1,
+      jobId: input.jobId,
       machineId: input.machineId,
       artifact: input.artifact,
       configuration: input.configuration,
       requestedBy: input.requestedBy,
-      summary: input.summary ?? { fileName: 'main.gcode.3mf' },
       state: 'awaiting-approval',
       createdAt: timestamp,
       updatedAt: timestamp,
+      program: { name: 'main.gcode.3mf', facts: { process: 'fff', layers: 125 } },
+      checks: [],
     }));
-    /* Only what request_print reads; any other client call fails the test. */
+    const applyAction = vi.fn<MachineClient['applyAction']>(async (input) => ({
+      operationId: input.operationId,
+      machineId: input.machineId,
+      kind: 'action',
+      observedAt: timestamp,
+      status: 'accepted',
+    }));
+    const stopMachine = vi.fn<MachineClient['stop']>(async (input) => ({
+      operationId: input.operationId ?? 'stop',
+      machineId: input.machineId,
+      kind: 'stop',
+      observedAt: timestamp,
+      status: 'accepted',
+    }));
+    /* Only what the machine tools read; any other client call fails the test. */
     const client = {
       list: async () => ({
         cursor: { hostId: 'host-1', authorityId: 'authority-1', generation: 'generation-1', position: 1, revision: 1 },
         entries: [machine],
       }),
-      requestPrint,
+      /* The machine reads the program and completes nothing: it is ready as planned. */
+      checkJob: vi.fn<MachineClient['checkJob']>(async (input) => ({
+        status: 'ready',
+        program: { name: 'main.gcode.3mf', facts: { process: 'fff', layers: 125 } },
+        checks: [],
+        configuration: input.configuration,
+      })),
+      requestJob,
+      applyAction,
+      stop: stopMachine,
+      listJobs: async () => [],
       listProviders: async () => [
         { id: 'bambu', vendor: 'Bambu Lab', manifest: { identity: { typeId: 'bambu.x1c' } } },
       ],
@@ -742,7 +884,7 @@ describe('the mounted /mcp route', () => {
         digest: `sha256:${'d'.repeat(64)}`,
       } as unknown as MachineArtifactReference,
       configuration: { expectedBedType: 'textured-pei' },
-      summary: { layers: 125 },
+      program: { name: 'main.gcode.3mf', facts: { process: 'fff', layers: 125 } },
     }));
     /* A host without Bambu Studio: the profiles tool names the reference engine and why. */
     const machineRegistry = createMachineToolRegistry(client, {
@@ -824,11 +966,13 @@ describe('the mounted /mcp route', () => {
       'test_model',
       'screenshot',
       'export_model',
+      'list_machines',
+      'get_machine',
+      'machine_action',
+      'stop_machine',
       'get_print_profiles',
-      'request_print',
-      'get_print_request',
-      'list_print_requests',
-      'cancel_print',
+      'request_job',
+      'check_job',
       'arrange_workbench',
       'ask_questions',
     ]);
@@ -866,19 +1010,25 @@ describe('the mounted /mcp route', () => {
       idempotentHint: false,
       openWorldHint: false,
     });
-    expect(tools.find(({ name }) => name === 'request_print')?.annotations).toEqual({
+    expect(tools.find(({ name }) => name === 'request_job')?.annotations).toEqual({
       readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
+      idempotentHint: false,
       openWorldHint: true,
     });
-    expect(tools.find(({ name }) => name === 'cancel_print')?.annotations).toEqual({
+    expect(tools.find(({ name }) => name === 'machine_action')?.annotations).toEqual({
       readOnlyHint: false,
       destructiveHint: true,
       idempotentHint: false,
       openWorldHint: true,
     });
-    for (const name of ['get_print_profiles', 'get_print_request', 'list_print_requests']) {
+    expect(tools.find(({ name }) => name === 'stop_machine')?.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    });
+    for (const name of ['list_machines', 'get_machine', 'get_print_profiles', 'check_job']) {
       expect(tools.find((tool) => tool.name === name)?.annotations).toEqual({
         readOnlyHint: true,
         destructiveHint: false,
@@ -886,11 +1036,13 @@ describe('the mounted /mcp route', () => {
         openWorldHint: false,
       });
     }
-    expect(tools.find(({ name }) => name === 'request_print')?.inputSchema).toMatchObject({
+    /* A job names either a CAD source Tau slices or a finished program; neither is required alone. */
+    const requestJobSchema = tools.find(({ name }) => name === 'request_job')?.inputSchema;
+    expect(requestJobSchema).toMatchObject({
       type: 'object',
-      properties: { targetFile: { type: 'string' } },
-      required: ['targetFile'],
+      properties: { targetFile: { type: 'string' }, artifact: { type: 'string' } },
     });
+    expect(requestJobSchema?.['required'] ?? []).not.toEqual(expect.arrayContaining(['targetFile']));
 
     const call = async (name: string, args: Readonly<Record<string, unknown>>) => {
       const reply = await session.request('tools/call', { name, arguments: args });
@@ -910,42 +1062,59 @@ describe('the mounted /mcp route', () => {
     });
     invocations.length = 0;
     const options = { layerHeight: 0.2, supports: { enabled: true, angles: [45, 60] } };
-    const requested = await call('request_print', { targetFile: 'main.ts', options });
+    const requested = await call('request_job', { targetFile: 'main.ts', options });
 
     expect(requested.isError, JSON.stringify(requested)).not.toBe(true);
     expect(invocations).toHaveLength(1);
-    expect(invocations[0]).toMatchObject({ toolName: 'request_print', runId: 'run-1' });
+    expect(invocations[0]).toMatchObject({ toolName: 'request_job', runId: 'run-1' });
     /* An MCP caller has no interrupt port: the registry sees no `approve` and
-     * hands the request back awaiting approval instead of pausing anything. */
+     * hands the job back awaiting approval instead of pausing anything. */
     expect(invocations[0]?.approve).toBeUndefined();
     expect(planPrint.mock.calls[0]?.[0]).toMatchObject({ targetFile: 'main.ts', options });
-    const requestId = invocations[0]?.toolCallId;
+    const jobId = invocations[0]?.toolCallId;
+    expect(requestJob.mock.calls[0]?.[0].requestedBy).toEqual({
+      kind: 'agent',
+      id: 'external-agent',
+      label: 'External agent',
+    });
     expect(requested.structuredContent).toMatchObject({
-      request: {
-        requestId,
-        machineId: 'machine-1',
-        state: 'awaiting-approval',
-        requestedBy: { kind: 'agent', id: 'external-agent', label: 'External agent' },
-        summary: { fileName: 'main.gcode.3mf', layers: 125 },
-      },
+      job: { jobId, machineId: 'machine-1', state: 'awaiting-approval', program: { name: 'main.gcode.3mf' } },
       machineName: 'Workshop X1C',
     });
     expect(z.object({ nextStep: z.string() }).parse(requested.structuredContent).nextStep).toContain(
-      `Waiting for a person to accept print request ${String(requestId)}`,
+      `Waiting for a person to accept job ${String(jobId)} in Tau's Print pane`,
     );
 
     /* The SDK validates against the registry's published schema before the host sees the call... */
-    await expect(call('request_print', { targetFile: 'main.ts', preset: 'ultra' })).resolves.toMatchObject({
+    await expect(call('request_job', { targetFile: 'main.ts', preset: 'ultra' })).resolves.toMatchObject({
       isError: true,
     });
-    await expect(call('list_machines', {})).resolves.toMatchObject({ isError: true });
+    await expect(call('capture_machine_still', { machineId: 'machine-1' })).resolves.toMatchObject({ isError: true });
     expect(invocations).toHaveLength(1);
     /* ...and what the wire form leaves open (slicer options are any JSON on the
-     * wire) the registry refuses before anything reaches the ledger. */
-    await expect(call('request_print', { targetFile: 'main.ts', options: 'fine' })).resolves.toMatchObject({
+     * wire) the registry refuses before anything reaches the machine host. */
+    await expect(call('request_job', { targetFile: 'main.ts', options: 'fine' })).resolves.toMatchObject({
       isError: true,
     });
-    expect(requestPrint).toHaveBeenCalledTimes(1);
+    expect(requestJob).toHaveBeenCalledTimes(1);
+
+    /* An external agent reads the machine as text, applies the host's unattended actions only, and may stop. */
+    const read = await call('get_machine', {});
+    expect(JSON.stringify(read.structuredContent)).toContain('chamber-light switch.set {on: boolean}');
+    await expect(call('machine_action', { componentId: 'controller', action: 'run.cancel' })).resolves.toMatchObject({
+      structuredContent: {
+        status: 'needs-approval',
+        message: expect.stringContaining('Ask the person to do it in Tau.') as string,
+      },
+    });
+    expect(applyAction).not.toHaveBeenCalled();
+    await expect(
+      call('machine_action', { componentId: 'chamber-light', action: 'switch.set', parameters: { on: true } }),
+    ).resolves.toMatchObject({ structuredContent: { status: 'done' } });
+    expect(applyAction).toHaveBeenCalledOnce();
+    expect(applyAction.mock.calls[0]?.[0]).not.toHaveProperty('approval');
+    await expect(call('stop_machine', {})).resolves.toMatchObject({ structuredContent: { status: 'done' } });
+    expect(stopMachine).toHaveBeenCalledOnce();
 
     /* Codex reads the same slicing profiles a Tau turn does. */
     await expect(call('get_print_profiles', {})).resolves.toMatchObject({

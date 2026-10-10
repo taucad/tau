@@ -194,9 +194,9 @@ vi.mock('#routes/w.$workspace.$project/chat-message-tool-screenshot.js', () => (
 vi.mock('#routes/w.$workspace.$project/chat-message-tool-unknown.js', () => ({
   ChatMessagePartUnknown: () => <div data-testid='tool-unknown' />,
 }));
-vi.mock('#routes/w.$workspace.$project/chat-message-tool-request-print.js', () => ({
-  ChatMessageToolRequestPrint: ({ part }: { readonly part: { readonly state: string } }) => (
-    <div data-testid='tool-request-print' data-state={part.state} />
+vi.mock('#routes/w.$workspace.$project/chat-message-tool-request-job.js', () => ({
+  ChatMessageToolRequestJob: ({ part }: { readonly part: { readonly state: string } }) => (
+    <div data-testid='tool-request-job' data-state={part.state} />
   ),
 }));
 
@@ -1051,15 +1051,15 @@ describe('ChatMessage article wrapper — no sticky positioning (regression guar
   });
 });
 
-describe('ChatMessage print tools', () => {
-  it('should render request_print on its own card, never as an unknown part', () => {
+describe('ChatMessage machine tools', () => {
+  it('should render request_job on its own card, never as an unknown part', () => {
     const message: MyUIMessage = {
-      id: 'msg-request-print',
+      id: 'msg-request-job',
       role: 'assistant',
       parts: [
         {
-          type: 'tool-request_print',
-          toolCallId: 'call-print',
+          type: 'tool-request_job',
+          toolCallId: 'call-job',
           state: 'input-available',
           input: { targetFile: 'main.scad' },
         },
@@ -1069,28 +1069,29 @@ describe('ChatMessage print tools', () => {
 
     render(<ChatMessage messageId={message.id} />);
 
-    expect(screen.getByTestId('tool-request-print')).toHaveAttribute('data-state', 'input-available');
+    expect(screen.getByTestId('tool-request-job')).toHaveAttribute('data-state', 'input-available');
     expect(screen.queryByTestId('tool-unknown')).toBeNull();
   });
 
-  it('should render the other print tools on the generic card under their own names', () => {
+  it('should render the other machine tools on the generic card under their own names', () => {
     const message: MyUIMessage = {
-      id: 'msg-print-reads',
+      id: 'msg-machine-tools',
       role: 'assistant',
       parts: [
+        { type: 'tool-list_machines', toolCallId: 'call-list', state: 'input-available', input: {} },
         { type: 'tool-get_machine', toolCallId: 'call-machine', state: 'input-available', input: {} },
         {
-          type: 'tool-get_print_request',
-          toolCallId: 'call-read',
+          type: 'tool-machine_action',
+          toolCallId: 'call-action',
           state: 'input-available',
-          input: { requestId: 'call-print' },
+          input: { componentId: 'chamber-light', action: 'switch.set', parameters: { on: true } },
         },
-        { type: 'tool-list_print_requests', toolCallId: 'call-list', state: 'input-available', input: {} },
+        { type: 'tool-stop_machine', toolCallId: 'call-stop', state: 'input-available', input: {} },
         {
-          type: 'tool-cancel_print',
-          toolCallId: 'call-cancel',
+          type: 'tool-check_job',
+          toolCallId: 'call-check',
           state: 'input-available',
-          input: { requestId: 'call-print' },
+          input: { targetFile: 'main.scad' },
         },
       ],
     };
@@ -1098,21 +1099,21 @@ describe('ChatMessage print tools', () => {
 
     render(<ChatMessage messageId={message.id} />);
 
-    for (const name of ['get_machine', 'get_print_request', 'list_print_requests', 'cancel_print']) {
+    for (const name of ['list_machines', 'get_machine', 'machine_action', 'stop_machine', 'check_job']) {
       expect(screen.getByText(name)).toBeInTheDocument();
     }
     expect(screen.queryByTestId('tool-unknown')).toBeNull();
   });
 });
 
-it('shows generic diagnostics for an unsupported historical static tool', () => {
+it('shows a retired tool from an old chat on the generic card under its own name, never as an unknown part', () => {
   const message: MyUIMessage = {
     id: 'msg-unknown',
     role: 'assistant',
     parts: [
       {
-        type: 'tool-unregistered_operation',
-        toolCallId: 'unknown',
+        type: 'tool-request_print',
+        toolCallId: 'old-print',
         state: 'output-available',
         input: {},
         output: 'Old result',
@@ -1121,6 +1122,18 @@ it('shows generic diagnostics for an unsupported historical static tool', () => 
   };
   setMessages([message]);
   render(<ChatMessage messageId='msg-unknown' />);
+  expect(screen.getByText('request_print')).toBeInTheDocument();
+  expect(screen.queryByTestId('tool-unknown')).toBeNull();
+});
+
+it('shows generic diagnostics for a part that is not a tool part at all', () => {
+  const message: MyUIMessage = {
+    id: 'msg-unknown-data',
+    role: 'assistant',
+    parts: [{ type: 'data-retired', data: {} } as unknown as MyUIMessage['parts'][number]],
+  };
+  setMessages([message]);
+  render(<ChatMessage messageId='msg-unknown-data' />);
   expect(screen.getByTestId('tool-unknown')).toBeInTheDocument();
 });
 

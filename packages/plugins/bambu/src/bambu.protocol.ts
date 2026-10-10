@@ -1,6 +1,6 @@
 import { createQuantity, quantityKinds } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
-import type { MachineAlertSnapshot, MachineCandidate, MachineDatagram, MachineStill } from '@taucad/runtime/machine';
+import type { MachineAlert, MachineCandidate, MachineDatagram, MachineStill } from '@taucad/runtime/machine';
 
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 const maximumDiscoveryBytes = 8192;
@@ -10,6 +10,69 @@ const identifier = /^[A-Za-z0-9_-]{1,64}$/u;
 /** Models qualified for this LAN adapter. @internal */
 export type BambuModel = 'X1C' | 'A1 mini';
 
+/** What Tau knows of one model that the protocol, the session and the host read. @internal */
+export type BambuModelFacts = Readonly<{
+  /** The provider id, which also prefixes its candidates' ids. */
+  providerId: string;
+  /** The names the printer gives itself (`printer_type`, `project_name`, `devmodel`); the first is `printer_type`. */
+  reportedNames: readonly [string, ...string[]];
+  /** The product prefix of its serials. */
+  serialPrefix: string;
+  /** `printer_model` in a slice Bambu Studio made for it. */
+  sliceName: string;
+  /** Its build plates in `bambu.plate.ts`. */
+  plateFamily: 'x1c' | 'a1-mini';
+  /** Its camera: RTSPS through the host, or framed JPEG over TLS read by the provider. */
+  camera: 'rtsps' | 'jpeg-tls';
+  /** An enclosed chamber: a chamber sensor and light, and auxiliary and chamber fans. */
+  chamber: boolean;
+  /** The pressure-advance profiles it keeps per nozzle, when it caps them. */
+  calibrationCapacity?: number;
+  /** Measures flow ratio itself (the X1 series' lidar). */
+  flowRatioCalibration: boolean;
+  /** Its automatic calibration is reliable with a 0.2 mm nozzle. */
+  fineNozzleCalibration: boolean;
+  /** Takes `layer_inspect` (a first-layer scan) in a start. */
+  layerInspect: boolean;
+}>;
+
+/**
+ * Each model's facts, one row per model: a model added to `BambuModel` does not compile until its row states every
+ * one, so it never falls through to another model's values.
+ * @internal
+ */
+export const bambuModels: Readonly<Record<BambuModel, BambuModelFacts>> = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- keyed by the model name.
+  X1C: {
+    providerId: 'bambu',
+    reportedNames: ['BL-P001', 'X1 Carbon', 'Bambu Lab X1 Carbon'],
+    serialPrefix: '00M',
+    sliceName: 'Bambu Lab X1 Carbon',
+    plateFamily: 'x1c',
+    camera: 'rtsps',
+    chamber: true,
+    flowRatioCalibration: true,
+    fineNozzleCalibration: true,
+    layerInspect: true,
+  },
+  'A1 mini': {
+    providerId: 'bambu-a1-mini',
+    reportedNames: ['N1', 'A1 mini'],
+    serialPrefix: '030',
+    sliceName: 'Bambu Lab A1 mini',
+    plateFamily: 'a1-mini',
+    camera: 'jpeg-tls',
+    chamber: false,
+    calibrationCapacity: 16,
+    flowRatioCalibration: false,
+    fineNozzleCalibration: false,
+    layerInspect: false,
+  },
+};
+
+const isBambuModel = (value: string | undefined): value is BambuModel =>
+  value !== undefined && Object.hasOwn(bambuModels, value);
+
 /** Admit a serial only for its model's product prefix.
  * @param serial - Advertised or authenticated serial.
  * @param model - Qualified model.
@@ -17,14 +80,12 @@ export type BambuModel = 'X1C' | 'A1 mini';
  * @internal
  */
 export const isBambuSerial = (serial: string, model: BambuModel): boolean =>
-  identifier.test(serial) && serial.startsWith(model === 'X1C' ? '00M' : '030') && serial.length > 3;
+  identifier.test(serial) && serial.startsWith(bambuModels[model].serialPrefix) && serial.length > 3;
 
 const normalizeBambuModel = (value: string | undefined): string | undefined =>
-  value === 'BL-P001' || value === 'X1 Carbon' || value === 'Bambu Lab X1 Carbon'
-    ? 'X1C'
-    : value === 'N1' || value === 'A1 mini'
-      ? 'A1 mini'
-      : value;
+  value === undefined
+    ? undefined
+    : (Object.entries(bambuModels).find(([, facts]) => facts.reportedNames.includes(value))?.[0] ?? value);
 
 /** Normalized X1C run state; unknown provider values remain unknown. @internal */
 export type BambuRunState =
@@ -39,15 +100,30 @@ export type BambuRunState =
   | 'succeeded'
   | 'unknown';
 
-/** One tray's material, by the flat tray id Bambu reports. @internal */
+/** One tray's material, by the flat tray id Bambu reports (`ams_id * 4 + tray`, or 254 for the external spool). @internal */
 export type BambuMaterial = Readonly<{
   slot: number;
   state: 'empty' | 'loaded' | 'unknown';
+  /** `tray_type`: the material type, such as `PLA`. */
   materialId?: string;
+  /** `tray_info_idx`: the filament profile id, such as `GFL99`. */
   profileId?: string;
+  /** `setting_id`: the preset setting id. */
+  settingId?: string;
   brand?: string;
+  /** `#RRGGBBAA`, upper case. */
   color?: string;
+  /** Degrees Celsius. */
+  nozzleMinimum?: number;
+  /** Degrees Celsius. */
+  nozzleMaximum?: number;
   remainingPercent?: number;
+  /** A Bambu spool whose tag (`tag_uid`) identified it; its identity is read-only. */
+  tagged?: boolean;
+  /** `cali_idx`: the bound pressure-advance profile, −1 for the printer's default. */
+  calibrationIndex?: number;
+  /** `k`: the pressure advance the printer applies to this tray. */
+  pressureAdvance?: number;
 }>;
 
 /** Redacted status facts retained after one provider report is discarded. @internal */
@@ -66,8 +142,10 @@ export type BambuStatus = Readonly<{
   /** The external spool, kept apart from the AMS trays because reports carry them separately. */
   externalMaterial?: BambuMaterial;
   materialUnits?: ReadonlyArray<Readonly<{ unit: number; humidityIndex?: number; temperature?: Quantity }>>;
-  currentMaterialSlot?: number;
-  targetMaterialSlot?: number;
+  /** The loaded tray. Present but undefined when the printer reported none (255), so a merge clears the last one. */
+  currentMaterialSlot?: number | undefined;
+  /** The tray a filament change is heading to; present but undefined when the printer reported none. */
+  targetMaterialSlot?: number | undefined;
   providerRunId?: string;
   progress?: number;
   remainingSeconds?: number;
@@ -79,6 +157,20 @@ export type BambuStatus = Readonly<{
   /** The printer's current stage id (`stg_cur`); `bambuStage` reads it as a phrase. */
   stageId?: number;
   printType?: string;
+  /** `gcode_state` exactly as the printer words it, upper case. */
+  gcodeState?: string;
+  /** `gcode_start_time`: seconds since the epoch at which the current or last print started. */
+  startTime?: number;
+  /** `ams_status`: the filament system's main state (bits 8–15) and step (bits 0–7). */
+  amsStatus?: number;
+  /** `cali_version`: changes whenever anyone writes the pressure-advance table; absent where the firmware keeps none. */
+  calibrationVersion?: number;
+  /** `flag3`: bit 3 lets a slot be edited during a print. */
+  flag3?: number;
+  /** From `fun` bit 29 (clear means on), or from the printer refusing a command for want of it. */
+  developerMode?: 'on' | 'off';
+  /** `nozzle_type`, such as `hardened_steel`. */
+  nozzleType?: string;
   speedProfile?: 'silent' | 'standard' | 'sport' | 'ludicrous' | 'unknown';
   speedPercent?: number;
   partFanPercent?: number;
@@ -87,20 +179,33 @@ export type BambuStatus = Readonly<{
   wifiSignalDbm?: number;
   chamberLight?: 'off' | 'on' | 'unknown';
   removableStorage?: 'absent' | 'present';
-  alerts?: readonly MachineAlertSnapshot[];
+  alerts?: readonly MachineAlert[];
 }>;
 
 /** Identity-qualified printer firmware facts returned by `info.get_version`. @internal */
 export type BambuVersion = Readonly<{ serial: string; firmware: string; model?: string }>;
 
-/** Correlated command result that never treats transport delivery as acceptance. @internal */
-export type BambuCommandResult =
-  | Readonly<{ status: 'accepted'; providerRunId?: string }>
-  | Readonly<{ status: 'rejected'; reason: string }>
-  | Readonly<{ status: 'unrelated' }>;
+/**
+ * A refusal this package raises with a stable code, so a caller branches on `code` rather than reading the message.
+ * The message is the code unless a sentence for a person is given; nothing from the printer or the host is carried.
+ * @internal
+ */
+export class BambuProtocolError extends TypeError {
+  public readonly code: string;
+
+  /**
+   * @param code - Stable failure code callers branch on.
+   * @param message - Sentence a person reads; defaults to the code.
+   */
+  public constructor(code: string, message: string = code) {
+    super(message);
+    this.name = 'BambuProtocolError';
+    this.code = code;
+  }
+}
 
 const protocolError = (code: string): never => {
-  throw new TypeError(code);
+  throw new BambuProtocolError(code);
 };
 
 const decode = (bytes: Uint8Array<ArrayBuffer>, maximumBytes: number, code: string): string => {
@@ -184,7 +289,7 @@ const speedProfile = (value: unknown): BambuStatus['speedProfile'] => {
 const materialColor = (value: unknown): string | undefined => {
   const color = boundedString(value, 8);
   return color && /^(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/u.test(color)
-    ? `#${color.slice(0, 6).toUpperCase()}`
+    ? `#${color.toUpperCase()}${color.length === 6 ? 'FF' : ''}`
     : undefined;
 };
 
@@ -272,6 +377,24 @@ const hmsSeverities = [
 const hmsHelpPage = 'https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/';
 
 /**
+ * HMS `0500-0500-0001-0007`, "MQTT command verification failed": firmware from 01.08.03.00 beta / 01.08.05.00 drops
+ * every control command without Developer Mode while reads still answer (bambuddy `HMS_MQTT_VERIFY_FAILED`).
+ * @internal
+ */
+export const bambuCommandVerificationAlert = '0500-0500-0001-0007';
+
+/** What turns Developer Mode on. @internal */
+export const developerModeRemedy = Object.freeze({
+  type: 'person',
+  instruction: 'On the printer, turn on LAN Only mode and Developer Mode (Settings › General).',
+} as const);
+
+const printerScreenRemedy = Object.freeze({
+  type: 'person',
+  instruction: 'Read the message on the printer’s screen or its help page, and clear it at the printer.',
+} as const);
+
+/**
  * One sentence naming the module that raised a diagnostic.
  *
  * @param value - The diagnostic word whose top byte names the module.
@@ -304,7 +427,7 @@ const helpPageWords = (words: readonly [number, number, number, number]): readon
  * @param row - One untrusted `hms` entry.
  * @returns The alert, or `undefined` for a malformed row.
  */
-const hmsAlert = (row: unknown): MachineAlertSnapshot | undefined => {
+const hmsAlert = (row: unknown): MachineAlert | undefined => {
   if (row === null || typeof row !== 'object' || Array.isArray(row)) {
     return undefined;
   }
@@ -315,12 +438,26 @@ const hmsAlert = (row: unknown): MachineAlertSnapshot | undefined => {
     return undefined;
   }
   const words = [Math.floor(attribute / word), attribute % word, Math.floor(code / word), code % word] as const;
+  const displayed = displayCode(words, '-');
+  if (displayed === bambuCommandVerificationAlert) {
+    return Object.freeze({
+      code: displayed,
+      severity: 'serious',
+      message: 'The printer refused a command from Tau because Developer Mode is off.',
+      reference: `${hmsHelpPage}${displayCode(words, '_')}`,
+      blocks: 'everything',
+      remedies: [developerModeRemedy],
+    });
+  }
   const [severity, outcome = 'reported a problem'] = hmsSeverities[words[2] - 1] ?? [];
+  const blocks = severity === 'fatal' ? 'everything' : severity === 'serious' ? 'run' : 'nothing';
   return Object.freeze({
-    code: displayCode(words, '-'),
+    code: displayed,
     ...definedFields({ severity }),
     message: diagnosticMessage(attribute, outcome),
     reference: `${hmsHelpPage}${displayCode(helpPageWords(words), '_')}`,
+    blocks,
+    ...(blocks === 'nothing' ? {} : { remedies: [printerScreenRemedy] }),
   });
 };
 
@@ -331,13 +468,14 @@ const hmsAlert = (row: unknown): MachineAlertSnapshot | undefined => {
  * @param value - The untrusted `print_error` value.
  * @returns The alert, or `undefined` when there is no error.
  */
-const printErrorAlert = (value: unknown): MachineAlertSnapshot | undefined => {
+const printErrorAlert = (value: unknown): MachineAlert | undefined => {
   const printError = diagnosticWord(value);
   return printError === undefined
     ? undefined
     : Object.freeze({
         code: displayCode([Math.floor(printError / word), printError % word], '-'),
         message: diagnosticMessage(printError, 'reported a print error'),
+        blocks: 'nothing',
       });
 };
 
@@ -347,11 +485,11 @@ const printErrorAlert = (value: unknown): MachineAlertSnapshot | undefined => {
  * @param print - The report's `print` object.
  * @returns The alerts, or `undefined` when the report carries neither field.
  */
-const printerAlerts = (print: Readonly<Record<string, unknown>>): readonly MachineAlertSnapshot[] | undefined => {
+const printerAlerts = (print: Readonly<Record<string, unknown>>): readonly MachineAlert[] | undefined => {
   if (print['print_error'] === undefined && print['hms'] === undefined) {
     return undefined;
   }
-  const alerts = new Map<string, MachineAlertSnapshot>();
+  const alerts = new Map<string, MachineAlert>();
   for (const alert of [
     printErrorAlert(print['print_error']),
     ...boundedArray(print['hms'], 128).map((row) => hmsAlert(row)),
@@ -431,7 +569,7 @@ export const bambuQuantity = (
     semanticMode: 'declared-only',
   });
   if (result.status !== 'success' || typeof result.value.value !== 'number') {
-    throw new TypeError('BAMBU_INVALID_PHYSICAL_QUANTITY');
+    throw new BambuProtocolError('BAMBU_INVALID_PHYSICAL_QUANTITY');
   }
   const { assumptions, kind, numericProvenance, reference, representation, space, unit, value: _value } = result.value;
   return Object.freeze({
@@ -493,14 +631,14 @@ export const parseBambuDiscoveryDatagram = (
   const model = normalizeBambuModel(boundedString(headers.get('devmodel.bambu.com'), 64));
   const serial = boundedString(headers.get('usn') ?? headers.get('devid.bambu.com'), 64);
   const name = boundedString(headers.get('devname.bambu.com'), 128) ?? 'Bambu printer';
-  if ((model !== 'X1C' && model !== 'A1 mini') || (serial !== undefined && !isBambuSerial(serial, model))) {
+  if (!isBambuModel(model) || (serial !== undefined && !isBambuSerial(serial, model))) {
     return protocolError('BAMBU_DISCOVERY_INVALID');
   }
   const { address, interface: networkInterface } = input.datagram.peer;
   return Object.freeze({
-    id: `${model === 'X1C' ? 'bambu' : 'bambu-a1-mini'}:${serial ?? address}`,
+    id: `${bambuModels[model].providerId}:${serial ?? address}`,
     name,
-    endpoint: Object.freeze({ address, interface: networkInterface }),
+    endpoint: Object.freeze({ transport: 'network', address, interface: networkInterface }),
     claimedIdentity: Object.freeze({ model, ...(serial ? { serial } : {}) }),
     observedAt: input.observedAt,
     expiresAt: input.expiresAt,
@@ -514,7 +652,7 @@ const parseJson = (bytes: Uint8Array<ArrayBuffer>): Readonly<Record<string, unkn
       'BAMBU_STATUS_INVALID',
     );
   } catch (error) {
-    if (error instanceof TypeError && error.message === 'BAMBU_STATUS_INVALID') {
+    if (error instanceof BambuProtocolError) {
       throw error;
     }
     return protocolError('BAMBU_STATUS_INVALID');
@@ -550,34 +688,56 @@ const runState = (value: unknown): BambuRunState => {
 /** The flat tray id Bambu reports for the external spool (`vt_tray.id`, `tray_now`). @internal */
 export const bambuExternalSpoolSlot = 254;
 
+/** A `tag_uid` of zeros is a tray no tag identified. */
+const untagged = /^0+$/u;
+
 /**
  * One tray's material as a snapshot slot.
  *
  * @param row - The report's tray object.
  * @param slot - The tray's flat id.
- * @param missing - What a tray without a material type is.
+ * @param presence - What a tray without a material type is when the report says nothing of its presence
+ *   (`missing`), and whether the AMS reports filament in the tray (`present`, from `tray_exist_bits`).
  * @returns The slot's material.
  */
-const trayMaterial = (row: unknown, slot: number, missing: 'empty' | 'unknown'): BambuMaterial => {
+const trayMaterial = (
+  row: unknown,
+  slot: number,
+  { missing, present }: Readonly<{ missing: 'empty' | 'unknown'; present?: boolean }>,
+): BambuMaterial => {
+  const absent = present === undefined ? missing : present ? 'loaded' : 'empty';
   if (row === null || typeof row !== 'object' || Array.isArray(row)) {
-    return Object.freeze({ slot, state: missing });
+    return Object.freeze({ slot, state: absent });
   }
   const candidate = row as Readonly<Record<string, unknown>>;
+  const tagUid = boundedString(candidate['tag_uid'], 64);
+  const calibration = definedFields({
+    tagged: tagUid === undefined ? undefined : !untagged.test(tagUid),
+    calibrationIndex: finite({ value: candidate['cali_idx'], minimum: -1, maximum: 1_000_000 }),
+    pressureAdvance: finite({ value: candidate['k'], minimum: 0, maximum: 10 }),
+  });
   const materialId = boundedString(candidate['tray_type'], 128) ?? boundedString(candidate['material_id'], 128);
   if (materialId === undefined) {
     // An unset tray still reports a placeholder colour ("00000000"); it describes nothing.
-    return Object.freeze({ slot, state: missing });
+    return Object.freeze({ slot, state: absent, ...calibration });
   }
-  const profileId = boundedString(candidate['tray_info_idx'], 128);
-  const brand = boundedString(candidate['tray_sub_brands'], 128);
-  const color = materialColor(candidate['tray_color']);
   // The external holder has no filament reader, so its `remain` is never a measurement.
   const remainingPercent =
     slot === bambuExternalSpoolSlot ? undefined : finite({ value: candidate['remain'], minimum: 0, maximum: 100 });
   return Object.freeze({
     slot,
-    state: 'loaded',
-    ...definedFields({ materialId, profileId, brand, color, remainingPercent }),
+    state: present === false ? 'empty' : 'loaded',
+    ...definedFields({
+      materialId,
+      profileId: boundedString(candidate['tray_info_idx'], 128),
+      settingId: boundedString(candidate['setting_id'], 128),
+      brand: boundedString(candidate['tray_sub_brands'], 128),
+      color: materialColor(candidate['tray_color']),
+      nozzleMinimum: finite({ value: candidate['nozzle_temp_min'], minimum: 0, maximum: 500 }),
+      nozzleMaximum: finite({ value: candidate['nozzle_temp_max'], minimum: 0, maximum: 500 }),
+      remainingPercent,
+    }),
+    ...calibration,
   });
 };
 
@@ -593,63 +753,98 @@ const traySlot = (value: unknown): number | undefined => {
 };
 
 /**
+ * Whether one bit of a reported flag word is set; arithmetic, so it holds past 32 bits.
+ * @param value - The flag word.
+ * @param bit - The bit index, 0 for the lowest.
+ * @returns True when the bit is set.
+ * @internal
+ */
+export const bambuBit = (value: number | bigint, bit: number): boolean =>
+  typeof value === 'bigint' ? (value / 2n ** BigInt(bit)) % 2n === 1n : Math.floor(value / 2 ** bit) % 2 === 1;
+
+const recordOf = (value: unknown): Readonly<Record<string, unknown>> | undefined =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
+
+/**
  * The loaded materials and tray routing: AMS trays when the report has an AMS, else its flat `materials` list,
- * and the external spool from `vt_tray` (or the first `vir_slot` entry newer firmware sends instead).
+ * and the external spool from `vt_tray` (or the first `vir_slot` entry newer firmware sends instead). Units and
+ * trays are numbered by their own `id` fields, as Bambu Studio keys them, falling back to their position.
  *
  * @param print - The report's `print` object.
  * @returns The material fields the report carries.
  */
 const materialSetup = (print: Readonly<Record<string, unknown>>) => {
-  const { ams } = print;
-  const amsRecord =
-    ams !== null && typeof ams === 'object' && !Array.isArray(ams)
-      ? (ams as Readonly<Record<string, unknown>>)
-      : undefined;
+  const amsRecord = recordOf(print['ams']);
   const amsUnits = amsRecord?.['ams'];
+  const existBits = boundedString(amsRecord?.['tray_exist_bits'], 16);
+  const exist =
+    existBits !== undefined && /^[0-9A-Fa-f]{1,16}$/u.test(existBits) ? BigInt(`0x${existBits}`) : undefined;
+  const units = boundedArray(amsUnits, 4).flatMap((unit, position) => {
+    const candidate = recordOf(unit);
+    return candidate ? [{ id: integer(candidate['id'], 3) ?? position, candidate }] : [];
+  });
   const materialRows: ReadonlyArray<Readonly<{ row: unknown; slot: number }>> = Array.isArray(amsUnits)
-    ? boundedArray(amsUnits, 4).flatMap((unit, unitIndex) => {
-        if (unit === null || typeof unit !== 'object' || Array.isArray(unit)) {
-          return [];
+    ? units.flatMap(({ id, candidate }) => {
+        const trays = new Map<number, unknown>();
+        for (const [position, tray] of boundedArray(candidate['tray'], 4).entries()) {
+          trays.set(integer(recordOf(tray)?.['id'], 3) ?? position, tray);
         }
-        const trays = (unit as Readonly<Record<string, unknown>>)['tray'];
-        const rows = boundedArray(trays, 4);
-        return Array.from({ length: 4 }, (_, trayIndex) => ({
-          row: rows[trayIndex],
-          slot: unitIndex * 4 + trayIndex,
-        }));
+        return Array.from({ length: 4 }, (_, tray) => ({ row: trays.get(tray), slot: id * 4 + tray }));
       })
-    : boundedArray(print['materials'], 16).map((row, slot) => ({
-        row,
-        slot,
-      }));
-  const materials = materialRows.map(({ row, slot }) => trayMaterial(row, slot, amsRecord ? 'empty' : 'unknown'));
+    : boundedArray(print['materials'], 16).map((row, slot) => ({ row, slot }));
+  const materials = materialRows.map(({ row, slot }) =>
+    trayMaterial(row, slot, {
+      missing: amsRecord ? 'empty' : 'unknown',
+      ...(exist === undefined ? {} : { present: bambuBit(exist, slot) }),
+    }),
+  );
   // ponytail: one external holder (single nozzle); dual-nozzle printers report a second one, add it when supported.
   const externalRow = print['vt_tray'] ?? boundedArray(print['vir_slot'], 1)[0];
   const materialUnits = Array.isArray(amsUnits)
-    ? boundedArray(amsUnits, 4).flatMap((unit, index) => {
-        if (unit === null || typeof unit !== 'object' || Array.isArray(unit)) {
-          return [];
-        }
-        const candidate = unit as Readonly<Record<string, unknown>>;
-        return [
-          Object.freeze({
-            unit: index,
-            ...definedFields({
-              humidityIndex: integer(candidate['humidity'], 100),
-              temperature: temperature(candidate['temp'], 100),
-            }),
+    ? units.map(({ id, candidate }) =>
+        Object.freeze({
+          unit: id,
+          ...definedFields({
+            humidityIndex: integer(candidate['humidity'], 100),
+            temperature: temperature(candidate['temp'], 100),
           }),
-        ];
-      })
+        }),
+      )
     : undefined;
-  return definedFields({
+  const fields = definedFields({
     materials: amsRecord !== undefined || Array.isArray(print['materials']) ? Object.freeze(materials) : undefined,
     externalMaterial:
-      externalRow === undefined ? undefined : trayMaterial(externalRow, bambuExternalSpoolSlot, 'empty'),
+      externalRow === undefined ? undefined : trayMaterial(externalRow, bambuExternalSpoolSlot, { missing: 'unknown' }),
     materialUnits: materialUnits ? Object.freeze(materialUnits) : undefined,
-    currentMaterialSlot: traySlot(amsRecord?.['tray_now']),
-    targetMaterialSlot: traySlot(amsRecord?.['tray_tar']),
   });
+  // 255 means no tray: a reported field keeps its key even when undefined, so the merge clears the previous slot.
+  return {
+    ...fields,
+    ...(amsRecord !== undefined && 'tray_now' in amsRecord
+      ? { currentMaterialSlot: traySlot(amsRecord['tray_now']) }
+      : {}),
+    ...(amsRecord !== undefined && 'tray_tar' in amsRecord
+      ? { targetMaterialSlot: traySlot(amsRecord['tray_tar']) }
+      : {}),
+  };
+};
+
+/**
+ * Developer Mode from `fun`, a hex string (or a number): bit 29 clear means on. A1 and P1 printers send no `fun`.
+ *
+ * @param value - The untrusted `fun` field.
+ * @returns On, off, or nothing when the report does not say.
+ */
+const developerModeOf = (value: unknown): BambuStatus['developerMode'] => {
+  const bits =
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+      ? BigInt(value)
+      : typeof value === 'string' && /^[0-9A-Fa-f]{1,32}$/u.test(value)
+        ? BigInt(`0x${value}`)
+        : undefined;
+  return bits === undefined ? undefined : bambuBit(bits, 29) ? 'off' : 'on';
 };
 
 /** Normalize a bounded status report without retaining the provider payload.
@@ -657,43 +852,55 @@ const materialSetup = (print: Readonly<Record<string, unknown>>) => {
  * @returns Redacted normalized status.
  */
 export const parseBambuStatusPayload = (bytes: Uint8Array<ArrayBuffer>): BambuStatus => {
-  const print = record(parseJson(bytes)['print'], 'BAMBU_STATUS_INVALID');
+  const root = parseJson(bytes);
+  const print = record(root['print'], 'BAMBU_STATUS_INVALID');
   const nozzleDiameter = finite({ value: print['nozzle_diameter'], minimum: 0.1, maximum: 2 });
   const remainingMinutes = finite({ value: print['mc_remaining_time'], minimum: 0, maximum: 100_000 });
-  const parsed: BambuStatus = definedFields({
-    sequence: boundedString(print['sequence_id'], 128),
-    model: normalizeBambuModel(boundedString(print['printer_type'], 64)),
-    firmware: boundedString(print['firmware'], 64),
-    nozzleDiameter:
-      nozzleDiameter === undefined
-        ? undefined
-        : bambuQuantity({ value: nozzleDiameter, unit: 'mm', kind: quantityKinds.diameter, space: 'linear' }),
-    nozzleTemperature: temperature(print['nozzle_temper'], 500),
-    nozzleTargetTemperature: temperature(print['nozzle_target_temper'], 500),
-    bedTemperature: temperature(print['bed_temper'], 200),
-    bedTargetTemperature: temperature(print['bed_target_temper'], 200),
-    chamberTemperature: temperature(print['chamber_temper'], 150),
-    bedType: boundedString(print['plate_type'], 64),
+  const gcodeState = boundedString(print['gcode_state'], 32)?.toUpperCase();
+  const parsed: BambuStatus = Object.freeze({
+    ...definedFields({
+      sequence: boundedString(print['sequence_id'], 128),
+      model: normalizeBambuModel(boundedString(print['printer_type'], 64)),
+      firmware: boundedString(print['firmware'], 64),
+      nozzleDiameter:
+        nozzleDiameter === undefined
+          ? undefined
+          : bambuQuantity({ value: nozzleDiameter, unit: 'mm', kind: quantityKinds.diameter, space: 'linear' }),
+      nozzleType: boundedString(print['nozzle_type'], 64),
+      nozzleTemperature: temperature(print['nozzle_temper'], 500),
+      nozzleTargetTemperature: temperature(print['nozzle_target_temper'], 500),
+      bedTemperature: temperature(print['bed_temper'], 200),
+      bedTargetTemperature: temperature(print['bed_target_temper'], 200),
+      chamberTemperature: temperature(print['chamber_temper'], 150),
+      bedType: boundedString(print['plate_type'], 64),
+      providerRunId: boundedString(print['subtask_id'], 128),
+      progress: finite({ value: print['mc_percent'], minimum: 0, maximum: 100 }),
+      remainingSeconds: remainingMinutes === undefined ? undefined : remainingMinutes * 60,
+      runState: print['gcode_state'] === undefined ? undefined : runState(print['gcode_state']),
+      gcodeState,
+      startTime: integer(print['gcode_start_time'], 100_000_000_000),
+      runName: boundedString(print['subtask_name'], 256),
+      runFile: boundedString(print['gcode_file'], 256),
+      currentLayer: integer(print['layer_num'], 1_000_000),
+      totalLayers: integer(print['total_layer_num'], 1_000_000),
+      stageId: finite({ value: print['stg_cur'], minimum: -1, maximum: 65_535 }),
+      printType: boundedString(print['print_type'], 128),
+      speedProfile: speedProfile(print['spd_lvl']),
+      speedPercent: finite({ value: print['spd_mag'], minimum: 0, maximum: 1000 }),
+      partFanPercent: fanPercent(print['cooling_fan_speed']),
+      auxiliaryFanPercent: fanPercent(print['big_fan1_speed']),
+      chamberFanPercent: fanPercent(print['big_fan2_speed']),
+      wifiSignalDbm: wifiSignal(print['wifi_signal']),
+      chamberLight: lightState(print['lights_report']),
+      removableStorage: storagePresence(print['sdcard']),
+      amsStatus: integer(print['ams_status'], 65_535),
+      calibrationVersion: integer(print['cali_version'], 2 ** 31),
+      flag3: integer(print['flag3'], 2 ** 32),
+      developerMode: developerModeOf(root['fun'] ?? print['fun']),
+      alerts: printerAlerts(print),
+    }),
+    // After the defined fields: a tray reported as none keeps its undefined key (see `materialSetup`).
     ...materialSetup(print),
-    providerRunId: boundedString(print['subtask_id'], 128),
-    progress: finite({ value: print['mc_percent'], minimum: 0, maximum: 100 }),
-    remainingSeconds: remainingMinutes === undefined ? undefined : remainingMinutes * 60,
-    runState: print['gcode_state'] === undefined ? undefined : runState(print['gcode_state']),
-    runName: boundedString(print['subtask_name'], 256),
-    runFile: boundedString(print['gcode_file'], 256),
-    currentLayer: integer(print['layer_num'], 1_000_000),
-    totalLayers: integer(print['total_layer_num'], 1_000_000),
-    stageId: finite({ value: print['stg_cur'], minimum: -1, maximum: 65_535 }),
-    printType: boundedString(print['print_type'], 128),
-    speedProfile: speedProfile(print['spd_lvl']),
-    speedPercent: finite({ value: print['spd_mag'], minimum: 0, maximum: 1000 }),
-    partFanPercent: fanPercent(print['cooling_fan_speed']),
-    auxiliaryFanPercent: fanPercent(print['big_fan1_speed']),
-    chamberFanPercent: fanPercent(print['big_fan2_speed']),
-    wifiSignalDbm: wifiSignal(print['wifi_signal']),
-    chamberLight: lightState(print['lights_report']),
-    removableStorage: storagePresence(print['sdcard']),
-    alerts: printerAlerts(print),
   });
   if (Object.keys(parsed).every((key) => key === 'sequence')) {
     return protocolError('BAMBU_STATUS_INVALID');
@@ -717,7 +924,8 @@ export const parseBambuVersionPayload = (bytes: Uint8Array<ArrayBuffer>): BambuV
   const info = record(parseJson(bytes)['info'], 'BAMBU_VERSION_INVALID');
   if (
     info['command'] !== 'get_version' ||
-    info['sequence_id'] !== '0' ||
+    // Firmware may echo the sequence id as a number.
+    (typeof info['sequence_id'] === 'number' ? String(info['sequence_id']) : info['sequence_id']) !== '0' ||
     (typeof info['result'] === 'string' && info['result'].toLowerCase() !== 'success')
   ) {
     return protocolError('BAMBU_VERSION_INVALID');
@@ -740,38 +948,169 @@ export const parseBambuVersionPayload = (bytes: Uint8Array<ArrayBuffer>): BambuV
   return protocolError('BAMBU_VERSION_INVALID');
 };
 
-/** Interpret only an exactly correlated semantic command result.
- * @param input - Payload and exact requested command/sequence identity.
- * @returns Correlated semantic outcome or unrelated.
+/** One reply to a command, from any client: replies arrive on the shared report topic. @internal */
+export type BambuReply = Readonly<{
+  family: 'print' | 'system';
+  command: string;
+  sequence?: string;
+  /** `none` when the reply carries no verdict; older firmware answers some commands without one. */
+  result: 'success' | 'fail' | 'none';
+  reason?: string;
+  /** "mqtt message verify failed": the printer dropped the command because Developer Mode is off. */
+  unauthorized: boolean;
+  body: Readonly<Record<string, unknown>>;
+}>;
+
+/**
+ * Read one report payload as a command reply. A status push (`push_status`, or no command) is not a reply.
+ *
+ * @param bytes - Untrusted MQTT payload bytes.
+ * @returns The reply, or undefined for a status push or anything malformed.
+ * @internal
  */
-export const parseBambuCommandPayload = (
-  input: Readonly<{
-    bytes: Uint8Array<ArrayBuffer>;
-    command: string;
-    sequence: string;
-  }>,
-): BambuCommandResult => {
-  const print = record(parseJson(input.bytes)['print'], 'BAMBU_COMMAND_INVALID');
-  // Firmware may echo the sequence id as a number.
-  const sequence = print['sequence_id'];
-  if (
-    print['command'] !== input.command ||
-    (typeof sequence === 'number' ? String(sequence) : sequence) !== input.sequence
-  ) {
-    return Object.freeze({ status: 'unrelated' });
+export const parseBambuReply = (bytes: Uint8Array<ArrayBuffer>): BambuReply | undefined => {
+  let root: Readonly<Record<string, unknown>>;
+  try {
+    root = parseJson(bytes);
+  } catch {
+    return undefined;
   }
-  const result = boundedString(print['result'], 64)?.toLowerCase();
-  if (result === 'success') {
-    const providerRunId = boundedString(print['subtask_id'], 128);
+  for (const family of ['print', 'system'] as const) {
+    const body = recordOf(root[family]);
+    const command = boundedString(body?.['command'], 64);
+    if (body === undefined || command === undefined || command === 'push_status') {
+      continue;
+    }
+    const sequence = body['sequence_id'];
+    const verdict = boundedString(body['result'], 64)?.toLowerCase();
+    const reason = boundedString(body['reason'], 256);
     return Object.freeze({
-      status: 'accepted',
-      ...(providerRunId ? { providerRunId } : {}),
+      family,
+      command,
+      ...definedFields({
+        sequence: typeof sequence === 'number' ? String(sequence) : boundedString(sequence, 64),
+        reason,
+      }),
+      result: verdict === undefined ? 'none' : verdict === 'success' ? 'success' : 'fail',
+      unauthorized: verdict !== undefined && verdict !== 'success' && /verify failed/iu.test(reason ?? ''),
+      body,
     });
   }
-  return Object.freeze({
-    status: 'rejected',
-    reason: boundedString(print['reason'], 128) ?? 'provider-rejected',
-  });
+  return undefined;
+};
+
+/** One row of the printer's pressure-advance table, from `extrusion_cali_get`. @internal */
+export type BambuCalibrationRow = Readonly<{
+  index: number;
+  name: string;
+  filamentId: string;
+  settingId: string;
+  nozzleId?: string;
+  nozzleDiameter?: string;
+  pressureAdvance: number;
+}>;
+
+/**
+ * The rows of an `extrusion_cali_get` reply. Rows whose K lies outside 0–10 are dropped, as Bambu Studio drops them.
+ *
+ * @param reply - The reply.
+ * @returns The rows, or undefined when the reply is not a table or failed.
+ * @internal
+ */
+export const bambuCalibrationTable = (reply: BambuReply): readonly BambuCalibrationRow[] | undefined => {
+  if (reply.command !== 'extrusion_cali_get' || reply.result === 'fail') {
+    return undefined;
+  }
+  // An empty table comes back without `filaments` (the workshop X1C, 01.12); Bambu Studio reads that as no rows.
+  return Object.freeze(
+    boundedArray(reply.body['filaments'], 512).flatMap((value) => {
+      const row = recordOf(value);
+      const index = integer(row?.['cali_idx'], 1_000_000);
+      const pressureAdvance = finite({ value: row?.['k_value'], minimum: 0, maximum: 10 });
+      const filamentId = boundedString(row?.['filament_id'], 128);
+      if (row === undefined || index === undefined || pressureAdvance === undefined || filamentId === undefined) {
+        return [];
+      }
+      return [
+        Object.freeze({
+          index,
+          name: boundedString(row['name'], 64) ?? `Profile ${String(index)}`,
+          filamentId,
+          settingId: boundedString(row['setting_id'], 128) ?? '',
+          pressureAdvance,
+          ...definedFields({
+            nozzleId: boundedString(row['nozzle_id'], 32),
+            nozzleDiameter: boundedString(row['nozzle_diameter'], 8),
+          }),
+        }),
+      ];
+    }),
+  );
+};
+
+/** One measured result, from `extrusion_cali_get_result` or `flowrate_get_result`. @internal */
+export type BambuCalibrationResult = Readonly<{
+  /** Flat tray id. */
+  slot: number;
+  filamentId: string;
+  settingId: string;
+  confidence: 'good' | 'uncertain' | 'failed';
+  /** Pressure advance (K), for a pressure-advance result. */
+  pressureAdvance?: number;
+  /** `n_coef`, kept so a save sends back what the printer measured. */
+  coefficient?: string;
+  /** Flow ratio, for a flow-ratio result. */
+  flowRatio?: number;
+}>;
+
+const confidences = ['good', 'uncertain', 'failed'] as const;
+
+/**
+ * The results of an `extrusion_cali_get_result` or `flowrate_get_result` reply.
+ *
+ * @param reply - The reply.
+ * @returns The results, or undefined when the reply is neither or failed.
+ * @internal
+ */
+export const bambuCalibrationResults = (reply: BambuReply): readonly BambuCalibrationResult[] | undefined => {
+  if (
+    (reply.command !== 'extrusion_cali_get_result' && reply.command !== 'flowrate_get_result') ||
+    reply.result === 'fail' ||
+    !Array.isArray(reply.body['filaments'])
+  ) {
+    return undefined;
+  }
+  return Object.freeze(
+    boundedArray(reply.body['filaments'], 16).flatMap((value) => {
+      const row = recordOf(value);
+      const amsId = integer(row?.['ams_id'], 255);
+      const slotId = integer(row?.['slot_id'], 255);
+      const trayId = integer(row?.['tray_id'], 255);
+      const slot =
+        amsId !== undefined && amsId < 4 && slotId !== undefined && slotId < 4
+          ? amsId * 4 + slotId
+          : trayId !== undefined && trayId <= 15
+            ? trayId
+            : bambuExternalSpoolSlot;
+      const filamentId = boundedString(row?.['filament_id'], 128);
+      if (row === undefined || filamentId === undefined) {
+        return [];
+      }
+      return [
+        Object.freeze({
+          slot,
+          filamentId,
+          settingId: boundedString(row['setting_id'], 128) ?? '',
+          confidence: confidences[integer(row['confidence'], 2) ?? 2] ?? 'failed',
+          ...definedFields({
+            pressureAdvance: finite({ value: row['k_value'], minimum: 0, maximum: 10 }),
+            coefficient: boundedString(row['n_coef'], 16),
+            flowRatio: finite({ value: row['flow_ratio'], minimum: 0, maximum: 2 }),
+          }),
+        }),
+      ];
+    }),
+  );
 };
 
 /** Build one exact device topic after rejecting wildcard and separator injection.

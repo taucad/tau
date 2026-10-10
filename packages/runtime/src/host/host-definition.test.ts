@@ -5,7 +5,7 @@ import { definePlugin } from '@taucad/runtime/plugin';
 import { defineJobProvider } from '@taucad/runtime/job';
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { defineMachine } from '@taucad/runtime/machine';
-import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
+import { machineManifestDefinitionFixture } from '#machines/machine-manifest.fixture.js';
 
 const execute = vi.fn(async () => ({ value: 1 }));
 const configuration = () =>
@@ -44,19 +44,9 @@ describe('host runtime composition', () => {
           id: 'printer',
           name: 'Printer',
           version: '1',
-          protocolVersion: 1,
+          protocolVersion: 2,
           vendor: 'test',
-          technologies: ['additive.fff'],
-          accepts: [
-            {
-              contract: { id: 'test.gcode', version: 1 },
-              mediaType: 'text/x.gcode',
-              requiredMembers: [],
-              payloadSelection: 'single',
-              technology: 'additive.fff',
-            },
-          ],
-          manifest: machineManifestFixture,
+          manifest: machineManifestDefinitionFixture,
           bindingConfiguration: configuration(),
           submissionConfiguration: configuration(),
           discover,

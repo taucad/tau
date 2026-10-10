@@ -13,6 +13,16 @@ describe('WebSocket machines facet', () => {
       capturedAt: '2026-09-14T00:00:00.000Z',
       expiresAt: '2026-09-14T00:00:15.000Z',
     }));
+    const unused = async (): Promise<never> => {
+      throw new Error('Unused fixture operation');
+    };
+    const stop = vi.fn<MachineChannelClient['stop']>(async (input) => ({
+      operationId: input.operationId ?? 'stop-1',
+      machineId: input.machineId,
+      kind: 'stop',
+      status: 'accepted',
+      observedAt: '2026-09-14T00:00:00.000Z',
+    }));
     const channel: MachineChannelClient = {
       ready: Promise.resolve(),
       close,
@@ -23,39 +33,23 @@ describe('WebSocket machines facet', () => {
       async beginBinding() {
         return { status: 'operator-action-required', ceremonyId: 'fixture' };
       },
-      async removeBinding() {
-        throw new Error('Unused fixture operation');
-      },
-      async preparePrint() {
-        throw new Error('Unused fixture operation');
-      },
-      async uploadPrint() {
-        throw new Error('Unused fixture operation');
-      },
-      async requestPrint() {
-        throw new Error('Unused fixture operation');
-      },
-      async listPrintRequests() {
-        throw new Error('Unused fixture operation');
-      },
-      async *watchPrintRequests() {
+      removeBinding: unused,
+      checkJob: unused,
+      requestJob: unused,
+      listJobs: unused,
+      async *watchJobs() {
         yield* [];
       },
-      async resolvePrintRequest() {
-        throw new Error('Unused fixture operation');
-      },
-      async withdrawPrintRequest() {
-        throw new Error('Unused fixture operation');
-      },
-      async startPrint() {
-        throw new Error('Unused fixture operation');
-      },
-      async reconcileOperation() {
-        throw new Error('Unused fixture operation');
-      },
-      async controlRun() {
-        throw new Error('Unused fixture operation');
-      },
+      resolveJob: unused,
+      withdrawJob: unused,
+      applyAction: unused,
+      approveAction: unused,
+      stop,
+      beginHold: unused,
+      renewHold: unused,
+      endHold: unused,
+      reconcileOperation: unused,
+      setTesting: unused,
       captureStill,
       async list() {
         throw new Error('Unused fixture operation');
@@ -83,6 +77,11 @@ describe('WebSocket machines facet', () => {
       mediaType: 'image/jpeg',
     });
     expect(captureStill).toHaveBeenCalledWith({ machineId: 'machine-1' });
+    const requestedBy = { kind: 'user', id: 'operator', label: 'Operator' } as const;
+    await expect(
+      client.machines.stop({ machineId: 'machine-1', operationId: 'stop-1', requestedBy }),
+    ).resolves.toMatchObject({ kind: 'stop', status: 'accepted' });
+    expect(stop).toHaveBeenCalledWith({ machineId: 'machine-1', operationId: 'stop-1', requestedBy });
     await client.close();
     expect(close).toHaveBeenCalledOnce();
   });

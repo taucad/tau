@@ -2,13 +2,16 @@
  * Machine details for Settings › Compute › Machines, drawn from the provider's
  * manifest alone (blueprint D7, R3).
  *
- * Every standard part is a folded row whose one-line summary orients a
- * newcomer; opening it shows the exact declared values an engineer inspects.
- * The binding and print-submission configurations render through the shared
- * Parameters renderer from their native JSON Structure declarations, read-only:
- * the host offers no change to a binding once it exists, and each print chooses
- * its own submission values in the Print pane. Nothing here names a vendor or a
- * model, so a second provider's manifest renders the same way.
+ * Every part of the manifest is a folded row whose one-line summary orients a
+ * newcomer; opening it shows the exact declared values an engineer inspects:
+ * identity and qualification profiles, the connection, axes and components,
+ * each process, how jobs reach the machine, what Stop does, and every declared
+ * control with its qualification and who may use it. The binding and job
+ * submission configurations render through the shared Parameters renderer from
+ * their native JSON Structure declarations, read-only: the host offers no
+ * change to a binding once it exists, and each job chooses its own submission
+ * values in the Print pane. Nothing here names a vendor or a model, so a second
+ * provider's manifest renders the same way.
  *
  * @module
  */
@@ -21,7 +24,19 @@ import type { LucideIcon } from 'lucide-react';
 import { compileParameterManifest } from '@taucad/parameters';
 import type { ParameterManifest } from '@taucad/parameters';
 import type { ConfigurationManifestV1 } from '@taucad/runtime/configuration';
-import type { MachineActionDescriptor, MachineManifest, MachineProvider } from '@taucad/runtime/machine';
+import { fffProcessOf, isSimulatedMachine, millingProcessOf } from '@taucad/runtime/machine';
+import type {
+  MachineActionDescriptor,
+  MachineActionEffect,
+  MachineAuthority,
+  MachineAxis,
+  MachineComponent,
+  MachineFffProcess,
+  MachineManifest,
+  MachineMillingProcess,
+  MachineProvider,
+  MachineRemedy,
+} from '@taucad/runtime/machine';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@taucad/ui/components/accordion';
 import { cn } from '@taucad/ui/utils/cn';
 import { sha256StringSync } from '@taucad/utils/hash';
@@ -29,15 +44,12 @@ import { isRecord } from '@taucad/utils/schema';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
 import type { ParameterEdit, Units } from '#components/geometry/parameters/rjsf-context.js';
 import { rjsfDefaultFormStateBehavior } from '#components/geometry/parameters/rjsf-utils.js';
+import { describeOutcome, formatQuantity } from '#components/print/machine-facts.js';
 import { rjsfValidator } from '#lib/rjsf-validator.js';
-import { formatQuantity } from '#routes/w.$workspace.$project/chat-print-summary.js';
 
-type Geometry = MachineManifest['geometry'];
-type Qualification = MachineActionDescriptor['qualification'];
+type Geometry = MachineFffProcess['geometry'];
+type QualificationStatus = MachineActionDescriptor['qualification']['status'];
 
-const technologyLabels: Readonly<Record<MachineManifest['technology'], string>> = {
-  'additive.fff': 'Fused filament fabrication',
-};
 const kinematicsLabels: Readonly<Record<Geometry['kinematics'], string>> = {
   corexy: 'CoreXY',
   'cartesian-bedslinger': 'Cartesian, moving bed',
@@ -58,36 +70,74 @@ const doorLabels: Readonly<Record<Geometry['enclosure']['doors'][number], string
   top: 'Top',
   side: 'Side',
 };
-const mountLabels: Readonly<Record<Geometry['materialSystemMount'], string>> = {
-  top: 'On top',
-  side: 'On the side',
-  external: 'External',
-  none: 'None',
+const millingFeatureLabels: Readonly<Record<MachineMillingProcess['features'][number], string>> = {
+  'tool-centre-point': 'Tool centre point',
+  'tilted-plane': 'Tilted plane',
+  'cutter-compensation': 'Cutter compensation',
+  'canned-cycles': 'Canned cycles',
+  arcs: 'Arcs',
 };
-const nozzleMaterialLabels: Readonly<Record<MachineManifest['toolhead']['nozzles'][number]['material'], string>> = {
+const nozzleMaterialLabels: Readonly<
+  Record<Extract<MachineComponent, { kind: 'toolhead' }>['nozzles'][number]['material'], string>
+> = {
   hardened: 'Hardened steel',
   stainless: 'Stainless steel',
 };
-const effectLabels: Readonly<Record<MachineActionDescriptor['effect'], string>> = {
+const kindLabels: Readonly<Record<MachineComponent['kind'], string>> = {
+  controller: 'Controller',
+  light: 'Light',
+  fan: 'Fan',
+  heater: 'Heater',
+  coolant: 'Coolant',
+  air: 'Air blast',
+  vacuum: 'Vacuum',
+  extraction: 'Dust extraction',
+  override: 'Override',
+  'speed-profile': 'Speed profile',
+  camera: 'Camera',
+  storage: 'Storage',
+  enclosure: 'Enclosure',
+  laser: 'Laser',
+  motion: 'Motion',
+  spindle: 'Spindle',
+  tools: 'Tools',
+  probe: 'Probe',
+  toolhead: 'Toolhead',
+  'material-system': 'Material system',
+  interlock: 'Interlock',
+  vendor: 'Vendor part',
+};
+const effectLabels: Readonly<Record<MachineActionEffect, string>> = {
   none: 'No physical effect',
   observe: 'Observation',
-  thermal: 'Thermal effect',
-  motion: 'Motion effect',
-  material: 'Material effect',
-  print: 'Print effect',
-  storage: 'Storage effect',
+  illumination: 'Light',
+  configuration: 'Configuration',
+  coordinates: 'Coordinates',
+  motion: 'Motion',
+  thermal: 'Heat',
+  material: 'Material',
+  spindle: 'Spindle',
+  laser: 'Laser',
+  fluid: 'Fluid',
+  storage: 'Storage',
+  run: 'Run',
 };
-const qualificationLabels: Readonly<Record<Qualification, string>> = {
+const authorityLabels: Readonly<Record<MachineAuthority, string>> = {
+  agent: 'Anyone, including an agent',
+  'approved-agent': 'A person, or an agent a person approved',
+  person: 'A person only',
+};
+const qualificationLabels: Readonly<Record<QualificationStatus, string>> = {
   qualified: 'Qualified',
   designed: 'Designed, not yet qualified',
   unsupported: 'Unsupported',
 };
-const qualificationGlyphs: Readonly<Record<Qualification, LucideIcon>> = {
+const qualificationGlyphs: Readonly<Record<QualificationStatus, LucideIcon>> = {
   qualified: ShieldCheck,
   designed: Wrench,
   unsupported: Ban,
 };
-const qualificationOrder: readonly Qualification[] = ['qualified', 'designed', 'unsupported'];
+const qualificationOrder: readonly QualificationStatus[] = ['qualified', 'designed', 'unsupported'];
 
 /** Machines settings show native millimetres, as the manifests declare them. */
 const configurationUnits: Units = { length: { displaySymbol: 'mm' } };
@@ -97,37 +147,12 @@ const noFields: readonly string[] = [];
 /** A read-only form keeps nothing: the host offers no update for a configuration it shows. */
 const keepDeclaredValues = (): void => undefined;
 
-/**
- * Whether a provider is a labeled simulator rather than hardware (blueprint D10).
- *
- * ponytail: the provider contract has no simulated flag; the `<vendor>-simulator`
- * id convention is what the Print pane reads too. Add a manifest flag when a
- * second simulator needs a different id.
- *
- * @param providerId - The provider id.
- * @returns True for a simulator.
- */
-export const isSimulatedProvider = (providerId: string): boolean => providerId.includes('simulator');
-
 const yesNo = (value: boolean): string => (value ? 'Yes' : 'No');
 const counted = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? '' : 's'}`;
-const formatSize = ({ x, y, z }: Geometry['buildVolume'], unit: string): string => `${x} × ${y} × ${z} ${unit}`;
+const formatSize = ({ x, y, z }: Geometry['buildVolume'], unit = 'mm'): string => `${x} × ${y} × ${z} ${unit}`;
 const enclosureLabel = (enclosed: boolean): string => (enclosed ? 'Enclosed' : 'Open frame');
 const listed = (items: readonly string[], none: string, separator = ', '): string =>
   items.length > 0 ? items.join(separator) : none;
-
-const chamberSummary = ({ enclosed, heated, fans }: MachineManifest['chamber']): string =>
-  `${enclosed ? 'Enclosed' : 'Open'} · ${heated ? 'Heated' : 'Not heated'} · ${counted(fans.length, 'fan')}`;
-
-const heatedLabel = ({ heated, maximumTemperature }: MachineManifest['chamber']): string =>
-  heated && maximumTemperature ? `Yes, up to ${formatQuantity(maximumTemperature)}` : yesNo(heated);
-
-const materialSummary = ({ units, slotsPerUnit, externalSpool }: MachineManifest['materialSystem']): string => {
-  const slots = units === 0 ? 'None' : `${counted(units, 'unit')} × ${counted(slotsPerUnit, 'slot')}`;
-  return externalSpool ? `${slots} · External spool` : slots;
-};
-
-const cameraSummary = ({ stills }: MachineManifest['camera']): string => (stills ? 'Stills' : 'None');
 
 /**
  * An observation budget in the unit people read it in: "15 s", "2 min".
@@ -138,16 +163,81 @@ const cameraSummary = ({ stills }: MachineManifest['camera']): string => (stills
 const formatStaleAfter = (staleAfter: number): string =>
   staleAfter < 60_000 ? `${staleAfter / 1000} s` : `${staleAfter / 60_000} min`;
 
-const countFields = (configuration: ConfigurationManifestV1): number => {
+/**
+ * The fields a provider configuration declares, by key.
+ *
+ * @param configuration - The declared configuration.
+ * @returns Its top-level field keys; none when its schema cannot be read.
+ */
+export const fieldNames = (configuration: ConfigurationManifestV1): readonly string[] => {
   const projection = configuration.parameters.input;
   const properties = projection.status === 'usable' ? projection.declaration.schema['properties'] : undefined;
-  return typeof properties === 'object' && properties !== null ? Object.keys(properties).length : 0;
-};
-
-const parameterNames = (action: MachineActionDescriptor): readonly string[] => {
-  const properties = action.parameters?.['properties'];
   return typeof properties === 'object' && properties !== null ? Object.keys(properties) : [];
 };
+
+const countFields = (configuration: ConfigurationManifestV1): number => fieldNames(configuration).length;
+
+const axisSummary = ({ kind, unit, travel, carries }: MachineAxis): string =>
+  [
+    kind === 'linear' ? 'Linear' : 'Rotary',
+    travel === undefined ? undefined : `${travel.min} to ${travel.max} ${unit}`,
+    carries === 'tool' ? 'moves the tool' : 'moves the work',
+  ]
+    .filter((part) => part !== undefined)
+    .join(', ');
+
+/** What one component is, in a phrase: its kind and the facts its kind declares. */
+const describeComponent = (component: MachineComponent): string => {
+  switch (component.kind) {
+    case 'motion': {
+      return `Moves ${component.axes.map((axis) => axis.toUpperCase()).join(', ')}`;
+    }
+    case 'spindle': {
+      const speed = component.speed === undefined ? '' : `, ${component.speed.min}–${component.speed.max} rpm`;
+      return `Spindle, ${component.control === 'programmed' ? 'set by the program' : component.control === 'switched' ? 'switched on and off' : 'set by hand'}${speed}`;
+    }
+    case 'tools': {
+      return component.change === 'automatic'
+        ? `Automatic changer, ${counted(component.pockets, 'pocket')}`
+        : 'Changed by hand';
+    }
+    case 'probe': {
+      return component.finds === 'work' ? 'Probe, finds the work' : 'Probe, measures tool length';
+    }
+    case 'interlock': {
+      return `Interlock, ${component.guards === 'emergency-stop' ? 'emergency stop' : component.guards}`;
+    }
+    case 'vendor': {
+      return `Vendor part ${component.type}`;
+    }
+    case 'toolhead': {
+      return `Toolhead, ${counted(component.nozzles.length, 'nozzle')}`;
+    }
+    case 'material-system': {
+      return `Material system, ${counted(component.units.length, 'unit')}`;
+    }
+    default: {
+      return kindLabels[component.kind];
+    }
+  }
+};
+
+const describeRemedy = (remedy: MachineRemedy): string => {
+  switch (remedy.type) {
+    case 'person': {
+      return remedy.instruction;
+    }
+    case 'stop': {
+      return `Stop (${remedy.consequence})`;
+    }
+    case 'action': {
+      return `${remedy.action} on ${remedy.componentId}`;
+    }
+  }
+};
+
+const whoMayUse = (authority: MachineAuthority, attended: boolean): string =>
+  `${authorityLabels[authority]}${attended ? ', at the machine' : ''}`;
 
 /** Keywords whose values are instances rather than schemas. */
 const instanceKeywords = new Set(['const', 'default', 'enum', 'examples']);
@@ -301,37 +391,222 @@ function Part({
   );
 }
 
-function QualificationMark({ level }: { readonly level: Qualification }): React.JSX.Element {
-  const Glyph = qualificationGlyphs[level];
+function QualificationMark({ status }: { readonly status: QualificationStatus }): React.JSX.Element {
+  const Glyph = qualificationGlyphs[status];
   return (
     <span className='inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground'>
-      <Glyph aria-hidden className={cn('size-3.5 shrink-0', level === 'qualified' && 'text-success')} />
-      {qualificationLabels[level]}
+      <Glyph aria-hidden className={cn('size-3.5 shrink-0', status === 'qualified' && 'text-success')} />
+      {qualificationLabels[status]}
     </span>
   );
 }
 
-function ActionRow({ action }: { readonly action: MachineActionDescriptor }): React.JSX.Element {
-  const takes = parameterNames(action);
+function ActionRow({
+  action,
+  component,
+}: {
+  /** An action or a hold; both carry the same declared facts. */
+  readonly action: Omit<MachineActionDescriptor, 'scope'>;
+  readonly component: string;
+}): React.JSX.Element {
+  const takes = fieldNames(action.configuration);
+  const { qualification } = action;
   const notes = [
     action.description,
-    action.preconditions === undefined || action.preconditions.length === 0
-      ? undefined
-      : `Needs ${action.preconditions.join(', ')}`,
+    action.effects.map((effect) => effectLabels[effect]).join(', '),
+    whoMayUse(action.safety.authority, action.safety.attended),
     takes.length > 0 ? `Takes ${takes.join(', ')}` : undefined,
-  ].filter((note) => note !== undefined);
+    qualification.status === 'qualified' ? `Proven in ${qualification.profileId}` : qualification.reason,
+  ].filter((note) => note !== undefined && note !== '');
   return (
     <li className='flex flex-col gap-0.5 border-b border-border/70 py-2 last:border-b-0'>
       <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-1'>
-        <span>{action.label}</span> <QualificationMark level={action.qualification} />
+        <span>{action.label}</span> <QualificationMark status={qualification.status} />
       </div>{' '}
       <p className='text-xs text-muted-foreground'>
-        <Identifier>{action.id}</Identifier> · {effectLabels[action.effect]}
+        <Identifier>{action.id}</Identifier> on {component}
         {notes.map((note) => ` · ${note}`).join('')}
       </p>
     </li>
   );
 }
+
+/** One component's facts: its kind, and the nozzles or material units it declares. */
+function ComponentFacts({ component }: { readonly component: MachineComponent }): React.JSX.Element {
+  return (
+    <>
+      <Fact label={component.label}>
+        {describeComponent(component)} <Identifier>{component.id}</Identifier>
+      </Fact>
+      {component.kind === 'toolhead'
+        ? component.nozzles.map((nozzle) => (
+            <Fact key={nozzle.id} label={`Nozzle ${formatQuantity(nozzle.diameter)}`}>
+              {nozzleMaterialLabels[nozzle.material]}, up to {formatQuantity(nozzle.maximumTemperature)}{' '}
+              <Identifier>{nozzle.id}</Identifier>
+            </Fact>
+          ))
+        : null}
+      {component.kind === 'material-system'
+        ? component.units.map((unit) => (
+            <Fact key={unit.id} label={unit.label}>
+              {unit.kind === 'feeder' ? 'Feeder' : 'External holder'},{' '}
+              {listed(
+                unit.slots.map(({ label }) => label),
+                'no slots',
+              )}{' '}
+              <Identifier>{unit.id}</Identifier>
+            </Fact>
+          ))
+        : null}
+    </>
+  );
+}
+
+/** The FFF process: the printer's geometry, bed, chamber, speed profiles and slicing defaults. */
+function FffProcessFacts({ process }: { readonly process: MachineFffProcess }): React.JSX.Element {
+  const { geometry, bed, chamber, speedProfiles, slicing } = process;
+  return (
+    <dl>
+      <Fact label='Build volume'>{formatSize(geometry.buildVolume, geometry.unit)}</Fact>
+      <Fact label='Outer size'>{formatSize(geometry.enclosure.outer, geometry.unit)}</Fact>
+      <Fact label='Enclosure'>{enclosureLabel(geometry.enclosure.enclosed)}</Fact>
+      <Fact label='Doors'>
+        {listed(
+          geometry.enclosure.doors.map((door) => doorLabels[door]),
+          'None',
+        )}
+      </Fact>
+      <Fact label='Kinematics'>{kinematicsLabels[geometry.kinematics]}</Fact>
+      <Fact label='Bed motion'>{bedMotionLabels[geometry.bedMotion]}</Fact>
+      <Fact label='Origin'>{originLabels[geometry.origin]}</Fact>
+      <Fact label='Toolhead home'>
+        {`X ${geometry.toolheadHome.x} · Y ${geometry.toolheadHome.y} · Z ${geometry.toolheadHome.z} ${geometry.unit}`}
+      </Fact>
+      <Fact label='Filament diameter'>{formatQuantity(process.filamentDiameter)}</Fact>
+      <Fact label='Bed maximum temperature'>{formatQuantity(bed.maximumTemperature)}</Fact>
+      {bed.plates.map((plate) => (
+        <Fact key={plate.id} label={plate.label}>
+          <Identifier>{plate.id}</Identifier>
+        </Fact>
+      ))}
+      <Fact label='Chamber heated'>
+        {chamber.heated && chamber.maximumTemperature
+          ? `Yes, up to ${formatQuantity(chamber.maximumTemperature)}`
+          : yesNo(chamber.heated)}
+      </Fact>
+      {speedProfiles.map((profile) => (
+        <Fact key={profile.id} label={`${profile.label} speed`}>
+          {profile.percent}% <Identifier>{profile.id}</Identifier>
+        </Fact>
+      ))}
+      <Fact label='Layer height'>{formatQuantity(slicing.recommended.layerHeight)}</Fact>
+      <Fact label='Walls'>{slicing.recommended.walls}</Fact>
+      <Fact label='Infill'>{slicing.recommended.infillPercent}%</Fact>
+      <Fact label='Nozzle temperature'>{formatQuantity(slicing.recommended.nozzleTemperature)}</Fact>
+      <Fact label='Bed temperature'>{formatQuantity(slicing.recommended.bedTemperature)}</Fact>
+      {slicing.presets.map((preset) => (
+        <Fact key={preset.id} label={`${preset.label} preset`}>
+          {formatQuantity(preset.layerHeight)} layers <Identifier>{preset.id}</Identifier>
+        </Fact>
+      ))}
+    </dl>
+  );
+}
+
+/** The milling process: interpolation, controller features, work offsets and the work area. */
+function MillingProcessFacts({ process }: { readonly process: MachineMillingProcess }): React.JSX.Element {
+  return (
+    <dl>
+      <Fact label='Simultaneous axes'>{process.simultaneousAxes}</Fact>
+      <Fact label='Features'>
+        {listed(
+          process.features.map((feature) => millingFeatureLabels[feature]),
+          'None',
+        )}
+      </Fact>
+      <Fact label='Work offsets'>{process.workOffsets.join(', ')}</Fact>
+      {process.workArea === undefined ? null : <Fact label='Work area'>{formatSize(process.workArea)}</Fact>}
+      {process.kinematics === undefined ? null : (
+        <Fact label='Kinematics'>
+          <Identifier>{`${process.kinematics.id} ${process.kinematics.calibrationRevision}`}</Identifier>
+        </Fact>
+      )}
+    </dl>
+  );
+}
+
+/** What was proven on this model, where, and on which firmware. */
+function QualificationProfiles({
+  qualifications,
+}: {
+  readonly qualifications: MachineManifest['qualifications'];
+}): React.JSX.Element {
+  return qualifications.length === 0 ? (
+    <p className='text-xs text-muted-foreground'>
+      Nothing has been proven on this model yet, so every control is designed or unsupported.
+    </p>
+  ) : (
+    <dl>
+      {qualifications.map((profile) => (
+        <Fact key={profile.id} label={profile.id}>
+          {profile.environment === 'hardware' ? 'Hardware' : 'Simulation'} · {profile.model} · Firmware{' '}
+          {listed(profile.firmware, 'any')} · {profile.evidence}
+        </Fact>
+      ))}
+    </dl>
+  );
+}
+
+const transportLabel = ({ transport }: MachineManifest['connection']): string =>
+  transport === 'network' ? 'Network' : 'Serial cable';
+
+const jobsSummary = (jobs: MachineManifest['jobs']): string =>
+  jobs.type === 'unsupported'
+    ? 'Not supported'
+    : `${jobs.delivery === 'stored' ? 'Stored' : 'Streamed'} · ${jobs.start === 'remote' ? 'Started by Tau' : 'Started at the machine'}`;
+
+/** How programs reach the machine and start, and what a person vouches for first. */
+function JobFacts({ jobs }: { readonly jobs: MachineManifest['jobs'] }): React.JSX.Element {
+  if (jobs.type === 'unsupported') {
+    return <p className='text-xs text-muted-foreground'>Tau cannot send programs to this machine.</p>;
+  }
+  return (
+    <dl>
+      <Fact label='Delivery'>
+        {jobs.delivery === 'stored'
+          ? 'Stored on the machine'
+          : 'Streamed by this computer, which must stay connected until the run ends'}
+      </Fact>
+      <Fact label='Start'>
+        {jobs.start === 'remote' ? 'Tau starts the run' : 'A person presses start at the machine'}
+      </Fact>
+      <Fact label='Accepts'>{jobs.accepts.map(({ mediaType }) => mediaType).join(', ')}</Fact>
+      {/* A person approves every job; an agent may only ask for one. */}
+      <Fact label='Who may start'>{whoMayUse('approved-agent', jobs.safety.attended)}</Fact>
+      {jobs.attestations.map((attestation) => (
+        <Fact key={attestation.id} label='Vouched before a start'>
+          {attestation.label}
+        </Fact>
+      ))}
+    </dl>
+  );
+}
+
+const processSummary = (manifest: MachineManifest): string => {
+  const fff = fffProcessOf(manifest);
+  const milling = millingProcessOf(manifest);
+  return listed(
+    [
+      fff === undefined
+        ? undefined
+        : `FFF ${formatSize(fff.geometry.buildVolume, fff.geometry.unit)} · ${kinematicsLabels[fff.geometry.kinematics]}`,
+      milling === undefined ? undefined : `Milling, ${milling.simultaneousAxes}-axis`,
+      ...manifest.processes.filter(({ type }) => type !== 'fff' && type !== 'milling').map(({ type }) => type),
+    ].filter((part) => part !== undefined),
+    'None declared',
+    ' · ',
+  );
+};
 
 /**
  * A provider configuration's declared fields through the shared Parameters renderer. They only show
@@ -412,7 +687,7 @@ export function ConfigurationFields({
 }
 
 /**
- * Every standard part of one bound machine, from its provider's manifest.
+ * Every part of one bound machine, from its provider's manifest.
  *
  * @param properties - The provider that owns the manifest, the machine's logical id and the firmware it reports.
  * @returns The folded parts list.
@@ -427,19 +702,18 @@ export const MachineDetails = memo(function MachineDetails({
   readonly firmware: string;
 }): React.JSX.Element {
   const { manifest } = provider;
-  const { identity, geometry, toolhead, bed, chamber, materialSystem, camera, network } = manifest;
-  const { speedProfiles, slicing, actions, observations } = manifest;
-  const isQualifiedFirmware = identity.qualifiedFirmware.includes(firmware);
-  const FirmwareGlyph = isQualifiedFirmware ? ShieldCheck : ShieldQuestion;
-  const percents = speedProfiles.map(({ percent }) => percent);
+  const { identity, connection, axes, components, actions, holds, jobs, stop, observations, qualifications } = manifest;
+  const fff = fffProcessOf(manifest);
+  const milling = millingProcessOf(manifest);
+  const controls = [...actions, ...holds];
+  const covering = qualifications.find((profile) => profile.firmware.includes(firmware));
+  const FirmwareGlyph = covering === undefined ? ShieldQuestion : ShieldCheck;
   const budgets = observations.map(({ staleAfter }) => staleAfter);
-  const networkModes = [network.lanMode ? 'LAN mode' : undefined, network.cloud ? 'Vendor cloud' : undefined].filter(
-    (mode) => mode !== undefined,
-  );
-  const actionSummary = qualificationOrder
-    .map((level) => [level, actions.filter(({ qualification }) => qualification === level).length] as const)
+  const componentLabels = new Map(components.map(({ id, label }) => [id, label]));
+  const controlSummary = qualificationOrder
+    .map((status) => [status, controls.filter(({ qualification }) => qualification.status === status).length] as const)
     .filter(([, count]) => count > 0)
-    .map(([level, count]) => `${count} ${level}`)
+    .map(([status, count]) => `${count} ${status}`)
     .join(' · ');
   return (
     <Accordion type='multiple' className='text-sm'>
@@ -452,168 +726,103 @@ export const MachineDetails = memo(function MachineDetails({
           <Fact label='Model id'>
             <Identifier>{identity.model}</Identifier>
           </Fact>
-          {isSimulatedProvider(provider.id) ? <Fact label='Hardware'>Simulated, no printer attached</Fact> : null}
-          <Fact label='Technology'>{technologyLabels[manifest.technology]}</Fact>
+          {isSimulatedMachine(manifest) ? <Fact label='Hardware'>Simulated, no machine attached</Fact> : null}
           <Fact label='Firmware'>
             {firmware}{' '}
             <span className='inline-flex items-center gap-1.5 text-xs text-muted-foreground'>
-              <FirmwareGlyph aria-hidden className={cn('size-3.5 shrink-0', isQualifiedFirmware && 'text-success')} />
-              {isQualifiedFirmware ? 'Qualified' : 'Not in the qualified list'}
+              <FirmwareGlyph aria-hidden className={cn('size-3.5 shrink-0', covering && 'text-success')} />
+              {covering === undefined ? 'Not in a qualification profile' : `Qualified in ${covering.id}`}
             </span>
           </Fact>
-          <Fact label='Qualified firmware'>{listed(identity.qualifiedFirmware, 'None yet')}</Fact>
           <Fact label='Provider'>
             {provider.name} <Identifier>{`${provider.id} ${provider.version}`}</Identifier>
           </Fact>
           <Fact label='Machine id'>
             <Identifier>{machineId}</Identifier>
           </Fact>
-          <Fact label='Accepts'>{provider.accepts.map(({ mediaType }) => mediaType).join(', ')}</Fact>
         </dl>
       </Part>
       <Part
-        id='geometry'
-        title='Geometry'
-        summary={`${formatSize(geometry.buildVolume, geometry.unit)} · ${kinematicsLabels[geometry.kinematics]} · ${enclosureLabel(geometry.enclosure.enclosed)}`}
+        id='qualifications'
+        title='Qualification profiles'
+        summary={qualifications.length === 0 ? 'None yet' : counted(qualifications.length, 'profile')}
+      >
+        <QualificationProfiles qualifications={qualifications} />
+      </Part>
+      <Part
+        id='connection'
+        title='Connection'
+        summary={`${transportLabel(connection)} · ${connection.identity === 'authenticated' ? 'Authenticated' : 'Claimed identity'}`}
       >
         <dl>
-          <Fact label='Build volume'>{formatSize(geometry.buildVolume, geometry.unit)}</Fact>
-          <Fact label='Outer size'>{formatSize(geometry.enclosure.outer, geometry.unit)}</Fact>
-          <Fact label='Enclosure'>{enclosureLabel(geometry.enclosure.enclosed)}</Fact>
-          <Fact label='Doors'>
-            {listed(
-              geometry.enclosure.doors.map((door) => doorLabels[door]),
-              'None',
-            )}
+          <Fact label='Transport'>{transportLabel(connection)}</Fact>
+          <Fact label='One host at a time'>{yesNo(connection.exclusive)}</Fact>
+          <Fact label='Connecting'>
+            {connection.opening === 'resets-controller' ? 'Restarts the controller' : 'Changes nothing'}
           </Fact>
-          <Fact label='Kinematics'>{kinematicsLabels[geometry.kinematics]}</Fact>
-          <Fact label='Bed motion'>{bedMotionLabels[geometry.bedMotion]}</Fact>
-          <Fact label='Origin'>{originLabels[geometry.origin]}</Fact>
-          <Fact label='Toolhead home'>
-            {`X ${geometry.toolheadHome.x} · Y ${geometry.toolheadHome.y} · Z ${geometry.toolheadHome.z} ${geometry.unit}`}
+          <Fact label='Identity'>
+            {connection.identity === 'authenticated' ? 'Authenticated' : 'Claimed by the machine, not verified'}
           </Fact>
         </dl>
       </Part>
       <Part
-        id='toolhead'
-        title='Toolhead and nozzles'
-        summary={`${toolhead.nozzles.map(({ diameter }) => formatQuantity(diameter)).join(', ')} ${toolhead.nozzles.length === 1 ? 'nozzle' : 'nozzles'} · ${formatQuantity(toolhead.filamentDiameter)} filament`}
-      >
-        <dl>
-          <Fact label='Filament diameter'>{formatQuantity(toolhead.filamentDiameter)}</Fact>
-          {toolhead.nozzles.map((nozzle) => (
-            <Fact key={nozzle.id} label={`Nozzle ${formatQuantity(nozzle.diameter)}`}>
-              {nozzleMaterialLabels[nozzle.material]}, up to {formatQuantity(nozzle.maximumTemperature)}{' '}
-              <Identifier>{nozzle.id}</Identifier>
-            </Fact>
-          ))}
-        </dl>
-      </Part>
-      <Part
-        id='bed'
-        title='Bed and plates'
-        summary={`${counted(bed.plates.length, 'plate')} · up to ${formatQuantity(bed.maximumTemperature)}`}
-      >
-        <dl>
-          <Fact label='Maximum temperature'>{formatQuantity(bed.maximumTemperature)}</Fact>
-          {bed.plates.map((plate) => (
-            <Fact key={plate.id} label={plate.label}>
-              <Identifier>{plate.id}</Identifier>
-            </Fact>
-          ))}
-        </dl>
-      </Part>
-      <Part id='chamber' title='Chamber and fans' summary={chamberSummary(chamber)}>
-        <dl>
-          <Fact label='Enclosed'>{yesNo(chamber.enclosed)}</Fact>
-          <Fact label='Heated'>{heatedLabel(chamber)}</Fact>
-          <Fact label='Light'>{yesNo(chamber.light)}</Fact>
-          {chamber.fans.length > 0 ? (
-            chamber.fans.map((fan) => (
-              <Fact key={fan.id} label={fan.label}>
-                <Identifier>{fan.id}</Identifier>
-              </Fact>
-            ))
-          ) : (
-            <Fact label='Fans'>None</Fact>
-          )}
-        </dl>
-      </Part>
-      <Part id='material' title='Material system' summary={materialSummary(materialSystem)}>
-        <dl>
-          <Fact label='Units'>{materialSystem.units}</Fact>
-          <Fact label='Slots per unit'>{materialSystem.slotsPerUnit}</Fact>
-          <Fact label='External spool'>{yesNo(materialSystem.externalSpool)}</Fact>
-          <Fact label='Drying'>{materialSystem.drying ? 'Supported' : 'Not supported'}</Fact>
-          <Fact label='Mount'>{mountLabels[geometry.materialSystemMount]}</Fact>
-        </dl>
-      </Part>
-      <Part id='camera' title='Camera' summary={cameraSummary(camera)}>
-        <dl>
-          <Fact label='Still capture'>{yesNo(camera.stills)}</Fact>
-        </dl>
-      </Part>
-      <Part id='storage' title='Storage' summary={manifest.storage.removable ? 'Removable' : 'None'}>
-        <dl>
-          <Fact label='Removable storage'>{yesNo(manifest.storage.removable)}</Fact>
-        </dl>
-      </Part>
-      <Part id='network' title='Network' summary={listed(networkModes, 'None', ' · ')}>
-        <dl>
-          <Fact label='Local network (LAN mode)'>{yesNo(network.lanMode)}</Fact>
-          <Fact label='Vendor cloud'>{network.cloud ? 'Used' : 'Not used'}</Fact>
-        </dl>
-      </Part>
-      <Part
-        id='speed'
-        title='Speed profiles'
-        summary={
-          speedProfiles.length === 0
-            ? 'None declared'
-            : `${counted(speedProfiles.length, 'profile')} · ${Math.min(...percents)}–${Math.max(...percents)}%`
-        }
-      >
-        {speedProfiles.length === 0 ? (
-          <p className='text-xs text-muted-foreground'>This machine declares no speed profiles.</p>
-        ) : (
-          <dl>
-            {speedProfiles.map((profile) => (
-              <Fact key={profile.id} label={profile.label}>
-                {profile.percent}% <Identifier>{profile.id}</Identifier>
-              </Fact>
-            ))}
-          </dl>
+        id='axes'
+        title='Axes'
+        summary={listed(
+          axes.map(({ label }) => label),
+          'None declared',
         )}
-      </Part>
-      <Part
-        id='slicing'
-        title='Slicing profile'
-        summary={`${formatQuantity(slicing.recommended.layerHeight)} layers · ${slicing.presets.map(({ label }) => label).join(', ')}`}
       >
         <dl>
-          <Fact label='Layer height'>{formatQuantity(slicing.recommended.layerHeight)}</Fact>
-          <Fact label='Walls'>{slicing.recommended.walls}</Fact>
-          <Fact label='Infill'>{slicing.recommended.infillPercent}%</Fact>
-          <Fact label='Nozzle temperature'>{formatQuantity(slicing.recommended.nozzleTemperature)}</Fact>
-          <Fact label='Bed temperature'>{formatQuantity(slicing.recommended.bedTemperature)}</Fact>
-          {slicing.presets.map((preset) => (
-            <Fact key={preset.id} label={`${preset.label} preset`}>
-              {formatQuantity(preset.layerHeight)} layers <Identifier>{preset.id}</Identifier>
+          {axes.map((axis) => (
+            <Fact key={axis.id} label={axis.label}>
+              {axisSummary(axis)} <Identifier>{axis.id}</Identifier>
             </Fact>
           ))}
         </dl>
       </Part>
-      <Part id='actions' title='Actions' summary={actions.length === 0 ? 'None declared' : actionSummary}>
-        {actions.length === 0 ? (
-          <p className='text-xs text-muted-foreground'>This machine declares no actions.</p>
+      <Part id='components' title='Components' summary={counted(components.length, 'component')}>
+        <dl>
+          {components.map((component) => (
+            <ComponentFacts key={component.id} component={component} />
+          ))}
+        </dl>
+      </Part>
+      <Part id='processes' title='Processes' summary={processSummary(manifest)}>
+        {fff === undefined ? null : <FffProcessFacts process={fff} />}
+        {milling === undefined ? null : <MillingProcessFacts process={milling} />}
+        {fff === undefined && milling === undefined ? (
+          <p className='text-xs text-muted-foreground'>This machine declares no process Tau knows.</p>
+        ) : null}
+      </Part>
+      <Part id='jobs' title='Jobs' summary={jobsSummary(jobs)}>
+        <JobFacts jobs={jobs} />
+      </Part>
+      <Part id='stop' title='Stop' summary={describeOutcome(stop)}>
+        <dl>
+          <Fact label='What Stop does'>{describeOutcome(stop)}</Fact>
+          <Fact label='Recovery'>{listed(stop.recovery.map(describeRemedy), 'None needed', ', then ')}</Fact>
+        </dl>
+        <p className='pt-1 text-xs text-muted-foreground'>
+          Stop is sent over the connection; it is not a safety-rated emergency stop.
+        </p>
+      </Part>
+      <Part id='actions' title='Controls' summary={controls.length === 0 ? 'None declared' : controlSummary}>
+        {controls.length === 0 ? (
+          <p className='text-xs text-muted-foreground'>This machine declares no controls.</p>
         ) : (
           <>
             <p className='text-xs text-muted-foreground'>
-              Only qualified actions are offered; the rest stay disabled for the reason shown.
+              Only qualified controls are offered. Designed controls can be tried by a person while Testing is on;
+              unsupported ones stay off for the reason shown.
             </p>
-            <ul aria-label='Actions'>
-              {actions.map((action) => (
-                <ActionRow key={action.id} action={action} />
+            <ul aria-label='Controls'>
+              {controls.map((action) => (
+                <ActionRow
+                  key={`${action.componentId}:${action.id}`}
+                  action={action}
+                  component={componentLabels.get(action.componentId) ?? action.componentId}
+                />
               ))}
             </ul>
           </>
@@ -650,7 +859,7 @@ export const MachineDetails = memo(function MachineDetails({
       >
         <div className='flex flex-col gap-2'>
           <p className='text-xs text-muted-foreground'>
-            {isSimulatedProvider(provider.id) ? 'Only the simulator reads these; they are not printer settings. ' : ''}
+            {isSimulatedMachine(manifest) ? 'Only the simulator reads these; they are not machine settings. ' : ''}
             Chosen when this machine was bound; the host reports neither the chosen values nor a way to change them, so
             these are the declared fields. Declared by{' '}
             <Identifier>{`${provider.bindingConfiguration.source.id} ${provider.bindingConfiguration.source.version}`}</Identifier>
@@ -659,24 +868,21 @@ export const MachineDetails = memo(function MachineDetails({
           <ConfigurationFields providerId={provider.id} name='binding' configuration={provider.bindingConfiguration} />
         </div>
       </Part>
-      <Part
-        id='submission'
-        title='Print options'
-        summary={`${counted(countFields(provider.submissionConfiguration), 'field')} · Set per print`}
-      >
-        <div className='flex flex-col gap-2'>
-          <p className='text-xs text-muted-foreground'>
-            Each print chooses these in the Print pane; shown here with their declared defaults. Declared by{' '}
-            <Identifier>{`${provider.submissionConfiguration.source.id} ${provider.submissionConfiguration.source.version}`}</Identifier>
-            .
-          </p>
-          <ConfigurationFields
-            providerId={provider.id}
-            name='submission'
-            configuration={provider.submissionConfiguration}
-          />
-        </div>
-      </Part>
+      {jobs.type === 'unsupported' ? null : (
+        <Part
+          id='submission'
+          title='Job options'
+          summary={`${counted(countFields(jobs.submission), 'field')} · Set per job`}
+        >
+          <div className='flex flex-col gap-2'>
+            <p className='text-xs text-muted-foreground'>
+              Each job chooses these in the Print pane; shown here with their declared defaults. Declared by{' '}
+              <Identifier>{`${jobs.submission.source.id} ${jobs.submission.source.version}`}</Identifier>.
+            </p>
+            <ConfigurationFields providerId={provider.id} name='submission' configuration={jobs.submission} />
+          </div>
+        </Part>
+      )}
     </Accordion>
   );
 });

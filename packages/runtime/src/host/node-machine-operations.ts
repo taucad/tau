@@ -1,17 +1,33 @@
 /**
- * The write-ahead log of device effects each machine keeps in its `operations.jsonl`: an intent before anything is
- * sent, a sending mark as the send begins, and the result. Replay folds the log back into each effect's latest state,
- * and any record that breaks the replay rules makes the whole log untrustworthy.
+ * The operation journal each machine keeps in its `journal.jsonl`: one record before anything is sent (`planned`),
+ * one as the send begins (`sending`), then each result as it is learned: the reply, a confirmation from the machine's
+ * own reports, a reconciliation, or the 180-second escalation to `attention`. Replay folds the journal back into each
+ * operation's latest state, and any record that breaks the replay rules makes the whole journal untrustworthy. Every
+ * record carries `version: 1`; a record of another version, or of a type this host does not know, is refused, which
+ * marks the journal corrupt until a newer Tau reads it.
  *
  * @module
  */
 
+import { canonicalizeCacheValue, digestContent } from '@taucad/cache-core';
+import type { CacheValue, ContentDigest } from '@taucad/cache-core';
 import { z } from 'zod';
 
-import type { ContentDigest } from '@taucad/cache-core';
+import { cloneBoundedJson } from '@taucad/parameters/json';
 import type { MachineEventLog } from '#host/node-machine-event-log.js';
-import type { MachineOperationReceipt, MachineOperationSnapshot } from '#machines/machine-client.js';
-import type { MachineSubmissionReceipt, MachineTransferReceipt } from '#machines/machine.js';
+import type { HostActor } from '#host/host-admission.js';
+import { machineFailureCodes } from '#machines/machine-actions.js';
+import type { MachineFailure, MachineFailureCode } from '#machines/machine-actions.js';
+import { parseMachineOperationReceipt } from '#machines/machine-channel.js';
+import { machineRequesterSchema } from '#machines/machine-jobs.js';
+import type {
+  MachineOperation,
+  MachineOperationKind,
+  MachineOperationReceipt,
+  MachineReceipt,
+  MachineRequester,
+} from '#machines/machine-jobs.js';
+import type { MachineCommandReceipt } from '#machines/machine.js';
 
 /** A well-formed string of 1–256 characters: every id, name and code the host records. @internal */
 export const identity = z
@@ -32,208 +48,168 @@ export const receiptMessage = z
   .max(1024)
   .refine((value) => value.isWellFormed());
 
-const runEffectKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'urgent-stop']);
-const effectKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'upload', 'urgent-stop']);
-/** The record written before an effect is attempted. @internal */
-export const effectIntentSchema = z.strictObject({
-  type: z.literal('machine-effect-intent'),
+/**
+ * How long an operation may go unproven before a person is asked to look. Milliseconds. Long enough for a machine
+ * that proves a start only through its later status reports; a provider's own evidence for its machines lives with
+ * that provider.
+ * @internal
+ */
+export const confirmationWindow = 180_000;
+
+/** The journal record version this host writes and reads; a newer version's reader also accepts this one. @internal */
+export const journalVersion = 1;
+
+const timestamp = z.iso.datetime({ offset: true });
+const intentLimits = {
+  code: 'NODE_MACHINE_OPERATION_INPUT',
+  maximumDepth: 24,
+  maximumNodes: 4096,
+  maximumCharacters: 131_072,
+};
+const receiptSchema = z.unknown().transform((value) => parseMachineOperationReceipt(value));
+const plannedSchema = z.strictObject({
+  version: z.literal(journalVersion),
+  type: z.literal('machine-operation-planned'),
   machineId: identity,
   providerId: identity,
   physicalMachineId: identity,
   operationId: identity,
+  kind: z.enum(['action', 'stop', 'hold', 'transfer', 'start']),
   inputDigest: digest,
-  intent: z.discriminatedUnion('kind', [
-    z.strictObject({
-      kind: z.literal('upload'),
-      preparedId: identity,
-      preparedDigest: digest,
-    }),
-    z.strictObject({
-      kind: z.literal('start'),
-      preparedId: identity,
-      preparedDigest: digest,
-      transferId: identity,
-      expectedSetupDigest: digest,
-    }),
-    z.strictObject({
-      kind: z.enum(['cancel', 'pause', 'resume', 'urgent-stop']),
-      expectedProviderRunId: identity,
-    }),
-  ]),
-  plannedAt: z.iso.datetime({ offset: true }),
+  /** What was asked, as digested; what a confirmation or reconciliation needs to ask the provider again. */
+  intent: z.unknown().transform((value) => cloneBoundedJson(value, intentLimits)),
+  requestedBy: machineRequesterSchema.optional(),
+  /** The person whose approval admitted an agent's action. */
+  approvedBy: machineRequesterSchema.optional(),
+  attended: z.boolean().optional(),
+  action: z
+    .strictObject({
+      componentId: identity,
+      id: identity,
+      label: identity,
+      confirms: z.enum(['observation', 'acknowledgement', 'none']),
+    })
+    .optional(),
+  plannedAt: timestamp,
 });
-const effectSendingSchema = z.strictObject({
-  type: z.literal('machine-effect-sending'),
+const sendingSchema = z.strictObject({
+  version: z.literal(journalVersion),
+  type: z.literal('machine-operation-sending'),
   operationId: identity,
-  observedAt: z.iso.datetime({ offset: true }),
+  observedAt: timestamp,
 });
-const operationReceiptSchema = z.union([
-  z.strictObject({
-    operationId: identity,
-    machineId: identity,
-    kind: z.literal('upload'),
-    status: z.literal('accepted'),
-    evidence: z.strictObject({ transferId: identity }),
-    observedAt: z.iso.datetime({ offset: true }),
-  }),
-  z.strictObject({
-    operationId: identity,
-    machineId: identity,
-    kind: runEffectKindSchema,
-    status: z.literal('accepted'),
-    providerRunId: identity.optional(),
-    observedAt: z.iso.datetime({ offset: true }),
-  }),
-  z.strictObject({
-    operationId: identity,
-    machineId: identity,
-    kind: effectKindSchema,
-    status: z.literal('rejected'),
-    code: identity,
-    message: receiptMessage,
-    observedAt: z.iso.datetime({ offset: true }),
-  }),
-  z.strictObject({
-    operationId: identity,
-    machineId: identity,
-    kind: effectKindSchema,
-    status: z.literal('unknown'),
-    reason: identity,
-    providerRunId: identity.optional(),
-    observedAt: z.iso.datetime({ offset: true }),
-  }),
-]);
-/** The record of an effect's outcome, from its attempt, a reconciliation or a restart. @internal */
-export const effectResultSchema = z.strictObject({
-  type: z.literal('machine-effect-result'),
+const resultSchema = z.strictObject({
+  version: z.literal(journalVersion),
+  type: z.literal('machine-operation-result'),
   operationId: identity,
-  source: z.enum(['attempt', 'reconciliation', 'recovery']),
-  receipt: operationReceiptSchema,
+  source: z.enum(['attempt', 'confirmation', 'reconciliation', 'escalation', 'recovery']),
+  state: z.enum(['accepted', 'rejected', 'confirming', 'attention']),
+  receipt: receiptSchema,
+  observedAt: timestamp,
 });
-/** Everything a machine's `operations.jsonl` holds: the write-ahead records of its device effects. */
-const operationEventSchema = z.discriminatedUnion('type', [
-  effectIntentSchema,
-  effectSendingSchema,
-  effectResultSchema,
-]);
-const providerReceiptSchema = z.discriminatedUnion('status', [
-  z.strictObject({
-    status: z.literal('accepted'),
-    providerRunId: identity.optional(),
-    observedAt: z.iso.datetime({ offset: true }),
-  }),
-  z.strictObject({
-    status: z.literal('rejected'),
-    code: identity,
-    message: receiptMessage,
-    observedAt: z.iso.datetime({ offset: true }),
-  }),
-  z.strictObject({
-    status: z.literal('unknown'),
-    reason: identity,
-    providerRunId: identity.optional(),
-    observedAt: z.iso.datetime({ offset: true }),
-  }),
-]);
-const transferReceiptSchema = z.discriminatedUnion('status', [
-  z.strictObject({
-    status: z.literal('transferred'),
-    transferId: identity,
-    digest,
-    length: z.number().int().positive(),
-    observedAt: z.iso.datetime({ offset: true }),
-  }),
-  z.strictObject({
-    status: z.literal('rejected'),
-    code: identity,
-    message: receiptMessage,
-    observedAt: z.iso.datetime({ offset: true }),
-  }),
-  z.strictObject({
-    status: z.literal('unknown'),
-    reason: identity,
-    observedAt: z.iso.datetime({ offset: true }),
-  }),
-]);
+const journalEventSchema = z.discriminatedUnion('type', [plannedSchema, sendingSchema, resultSchema]);
 
-/** One effect's intent record. @internal */
-export type NodeMachineEffectIntentEvent = Readonly<z.infer<typeof effectIntentSchema>>;
-/** One effect's result record. @internal */
-export type NodeMachineEffectResultEvent = Readonly<z.infer<typeof effectResultSchema>>;
-/** Any record of a machine's operations log. @internal */
-export type NodeMachineEffectEvent = Readonly<z.infer<typeof operationEventSchema>>;
+/** One operation's first record. @internal */
+export type NodeMachineOperationPlanned = Readonly<z.output<typeof plannedSchema>>;
+/** One operation's result record. @internal */
+export type NodeMachineOperationResult = Readonly<z.output<typeof resultSchema>>;
+/** Any record of a machine's journal. @internal */
+export type NodeMachineJournalEvent = Readonly<z.output<typeof journalEventSchema>>;
 
-/** One recorded effect's latest state, as its log's records leave it. @internal */
-export type NodeMachineEffectState = {
-  intent: NodeMachineEffectIntentEvent;
-  status: MachineOperationSnapshot['status'];
+/** One recorded operation's latest state, as its journal leaves it. @internal */
+export type NodeMachineOperationState = {
+  planned: NodeMachineOperationPlanned;
+  state: MachineOperation['state'];
   updatedAt: string;
   receipt?: MachineOperationReceipt;
+  confirmingSince?: string;
+};
+
+const nextStates: Readonly<Record<MachineOperation['state'], ReadonlySet<string>>> = {
+  planned: new Set(),
+  sending: new Set(['accepted', 'rejected', 'confirming']),
+  confirming: new Set(['accepted', 'rejected', 'attention']),
+  attention: new Set(['accepted', 'rejected']),
+  accepted: new Set(),
+  rejected: new Set(),
 };
 
 /**
- * Parse one operations-log record.
+ * Parse one journal record.
  * @internal
  * @param candidate - An untrusted record.
  * @returns The frozen record.
  */
-export const parseOperationEvent = (candidate: unknown): NodeMachineEffectEvent =>
-  Object.freeze(operationEventSchema.parse(candidate));
+export const parseJournalEvent = (candidate: unknown): NodeMachineJournalEvent =>
+  Object.freeze(journalEventSchema.parse(candidate));
 
 /**
- * Fold one machine's operations log under the replay rules. Any violation makes the whole log unusable, since an
- * effect whose history cannot be trusted must never be sent again.
+ * Apply one result to an operation's state, under the same rules replay enforces.
  * @internal
- * @param machineId - The machine whose directory holds the log.
- * @param log - Its recovered operations log.
- * @returns Each recorded effect's latest state, by operation id.
+ * @param operation - The operation, changed in place.
+ * @param result - The result record.
  */
-export const replayOperations = async (
+export const applyOperationResult = (
+  operation: NodeMachineOperationState,
+  result: NodeMachineOperationResult,
+): void => {
+  const { receipt } = result;
+  if (
+    receipt.operationId !== operation.planned.operationId ||
+    receipt.machineId !== operation.planned.machineId ||
+    receipt.kind !== operation.planned.kind ||
+    !nextStates[operation.state].has(result.state)
+  ) {
+    throw new Error('NODE_MACHINE_OPERATION_INVALID_RESULT');
+  }
+  operation.state = result.state;
+  operation.updatedAt = result.observedAt;
+  operation.receipt = receipt;
+  if (result.state === 'confirming') {
+    operation.confirmingSince ??= result.observedAt;
+  }
+};
+
+/**
+ * Fold one machine's journal under the replay rules. Any violation makes the whole journal unusable, since an
+ * operation whose history cannot be trusted must never be sent again.
+ * @internal
+ * @param machineId - The machine whose directory holds the journal.
+ * @param log - Its recovered journal.
+ * @returns Each recorded operation's latest state, by operation id.
+ */
+export const replayJournal = async (
   machineId: string,
-  log: MachineEventLog<NodeMachineEffectEvent>,
-): Promise<Map<string, NodeMachineEffectState>> => {
-  const replayed = new Map<string, NodeMachineEffectState>();
+  log: MachineEventLog<NodeMachineJournalEvent>,
+): Promise<Map<string, NodeMachineOperationState>> => {
+  const replayed = new Map<string, NodeMachineOperationState>();
   for (let cursor = 0; ; ) {
-    // oxlint-disable-next-line eslint/no-await-in-loop -- the log folds in sequence.
+    // oxlint-disable-next-line eslint/no-await-in-loop -- the journal folds in sequence.
     const page = await log.replay({ cursor, limit: 128 });
     for (const { event } of page.records) {
-      if (event.type === 'machine-effect-intent') {
+      if (event.type === 'machine-operation-planned') {
         if (replayed.has(event.operationId)) {
-          throw new Error('NODE_MACHINE_EFFECT_DUPLICATE_INTENT');
+          throw new Error('NODE_MACHINE_OPERATION_DUPLICATE');
         }
         if (event.machineId !== machineId) {
-          throw new Error('NODE_MACHINE_EFFECT_MACHINE_MISMATCH');
+          throw new Error('NODE_MACHINE_OPERATION_MACHINE_MISMATCH');
         }
-        replayed.set(event.operationId, {
-          intent: event,
-          status: 'planned',
-          updatedAt: event.plannedAt,
-        });
+        replayed.set(event.operationId, { planned: event, state: 'planned', updatedAt: event.plannedAt });
         continue;
       }
-      const state = replayed.get(event.operationId);
-      if (!state) {
-        throw new Error('NODE_MACHINE_EFFECT_ORPHAN_TRANSITION');
+      const operation = replayed.get(event.operationId);
+      if (!operation) {
+        throw new Error('NODE_MACHINE_OPERATION_ORPHAN');
       }
-      if (event.type === 'machine-effect-sending') {
-        if (state.status !== 'planned') {
-          throw new Error('NODE_MACHINE_EFFECT_INVALID_SENDING');
+      if (event.type === 'machine-operation-sending') {
+        if (operation.state !== 'planned') {
+          throw new Error('NODE_MACHINE_OPERATION_INVALID_SENDING');
         }
-        state.status = 'sending';
-        state.updatedAt = event.observedAt;
+        operation.state = 'sending';
+        operation.updatedAt = event.observedAt;
         continue;
       }
-      if (
-        event.receipt.operationId !== state.intent.operationId ||
-        event.receipt.machineId !== state.intent.machineId ||
-        event.receipt.kind !== state.intent.intent.kind ||
-        (state.status !== 'sending' && state.status !== 'unknown')
-      ) {
-        throw new Error('NODE_MACHINE_EFFECT_INVALID_RESULT');
-      }
-      state.status = event.receipt.status;
-      state.updatedAt = event.receipt.observedAt;
-      state.receipt = event.receipt;
+      applyOperationResult(operation, event);
     }
     if (page.records.length === 0 || page.nextCursor >= page.endCursor) {
       return replayed;
@@ -242,61 +218,150 @@ export const replayOperations = async (
   }
 };
 
+const encoder = new TextEncoder();
+
 /**
- * The public receipt of one effect, from its provider's reply.
+ * Who asked, as the host records and tells the provider: the admitted session's actor id, `agent` when the session or
+ * the request says so, and the request's label to show. A request never names a person its session is not.
  * @internal
- * @param input - The effect's ids and intent, and the provider's reply.
- * @returns The validated receipt.
+ * @param actor - The admitted session's actor.
+ * @param claimed - What the request says, of which only the label is kept as given.
+ * @returns The requester to record.
  */
-export const publicOperationReceipt = (
-  input: Readonly<{
-    operationId: string;
-    machineId: string;
-    intent: NodeMachineEffectIntentEvent['intent'];
-    receipt: MachineSubmissionReceipt | MachineTransferReceipt;
-  }>,
-): MachineOperationReceipt => {
-  const { intent } = input;
-  const base = {
-    operationId: input.operationId,
-    machineId: input.machineId,
-    kind: intent.kind,
-  };
-  if (intent.kind !== 'upload') {
-    const receipt = providerReceiptSchema.parse(input.receipt);
-    // A control's preflight matched its run, so an accepted control names that run when the provider's reply does not.
-    const addressed =
-      'expectedProviderRunId' in intent && receipt.status === 'accepted' && receipt.providerRunId === undefined
-        ? { providerRunId: intent.expectedProviderRunId }
-        : {};
-    return operationReceiptSchema.parse({ ...base, ...receipt, ...addressed });
-  }
-  const transfer = transferReceiptSchema.parse(input.receipt);
-  return operationReceiptSchema.parse(
-    transfer.status === 'transferred'
-      ? {
-          ...base,
-          status: 'accepted',
-          evidence: { transferId: transfer.transferId },
-          observedAt: transfer.observedAt,
-        }
-      : { ...base, ...transfer },
-  );
+export const requesterOf = (actor: HostActor, claimed: MachineRequester): MachineRequester => ({
+  kind: actor.kind === 'agent' || claimed.kind === 'agent' ? 'agent' : 'user',
+  id: actor.id,
+  label: claimed.label,
+});
+
+/**
+ * The digest that makes an operation id idempotent: the same id with the same digest is the same operation.
+ * @internal
+ * @param input - The machine, the kind and the bounded intent.
+ * @returns The digest.
+ */
+export const operationInputDigest = async (
+  input: Readonly<{ machineId: string; kind: MachineOperationKind; intent: unknown }>,
+): Promise<ContentDigest> =>
+  digestContent({
+    bytes: encoder.encode(
+      canonicalizeCacheValue({ value: cloneBoundedJson({ ...input }, intentLimits) satisfies CacheValue }),
+    ),
+  });
+
+const failureCodes: ReadonlySet<string> = new Set(machineFailureCodes);
+
+/**
+ * A provider's refusal as a structured failure: its own code when it is one of the host's, otherwise
+ * `MACHINE_ACTION_PROVIDER_REJECTED` with the provider's code kept in the message.
+ * @internal
+ * @param refusal - The provider's code and message.
+ * @returns The failure.
+ */
+export const providerFailure = (refusal: Readonly<{ code: string; message: string }>): MachineFailure => {
+  const message = receiptMessage.safeParse(refusal.message).success ? refusal.message : 'The machine refused.';
+  return failureCodes.has(refusal.code)
+    ? { code: refusal.code as MachineFailureCode, message }
+    : { code: 'MACHINE_ACTION_PROVIDER_REJECTED', message: `${message} (${refusal.code.slice(0, 64)})`.slice(0, 1024) };
 };
 
 /**
- * The snapshot a client reads of one recorded effect.
+ * Whether a receipt is of one operation kind, narrowing it without an assertion.
  * @internal
- * @param state - The effect's latest state.
- * @returns The frozen snapshot.
+ * @param receipt - Any receipt.
+ * @param kind - The kind asked for.
+ * @returns Whether the receipt is of that kind.
  */
-export const effectSnapshot = (state: NodeMachineEffectState): MachineOperationSnapshot =>
-  Object.freeze({
-    operationId: state.intent.operationId,
-    machineId: state.intent.machineId,
-    kind: state.intent.intent.kind,
-    inputDigest: state.intent.inputDigest,
-    status: state.status,
-    updatedAt: state.updatedAt,
-    ...(state.receipt ? { receipt: state.receipt } : {}),
+export const isReceiptOf = <Kind extends MachineOperationKind>(
+  receipt: MachineOperationReceipt,
+  kind: Kind,
+): receipt is MachineReceipt<Kind> => receipt.kind === kind;
+
+/**
+ * The public receipt of one operation from its provider's reply.
+ * @internal
+ * @param planned - The operation.
+ * @param reply - The provider's reply.
+ * @returns The validated receipt.
+ */
+export const operationReceipt = (
+  planned: Pick<NodeMachineOperationPlanned, 'operationId' | 'machineId' | 'kind'>,
+  reply: MachineCommandReceipt,
+): MachineOperationReceipt => {
+  const base = { operationId: planned.operationId, machineId: planned.machineId, kind: planned.kind };
+  if (reply.status === 'rejected') {
+    return parseMachineOperationReceipt({
+      ...base,
+      status: 'rejected',
+      ...providerFailure(reply),
+      observedAt: reply.observedAt,
+    });
+  }
+  if (reply.status === 'unknown') {
+    return parseMachineOperationReceipt({
+      ...base,
+      status: 'unknown',
+      reason: reply.reason,
+      observedAt: reply.observedAt,
+    });
+  }
+  const evidence =
+    planned.kind === 'action'
+      ? reply.activityId === undefined
+        ? {}
+        : { activityId: reply.activityId }
+      : planned.kind === 'transfer'
+        ? { transferId: reply.transferId }
+        : planned.kind === 'start'
+          ? reply.runId === undefined
+            ? {}
+            : { runId: reply.runId }
+          : {};
+  return parseMachineOperationReceipt({ ...base, status: 'accepted', ...evidence, observedAt: reply.observedAt });
+};
+
+/**
+ * The record a client reads of one operation.
+ * @internal
+ * @param operation - The operation's latest state.
+ * @returns The frozen record.
+ */
+export const operationRecord = (operation: NodeMachineOperationState): MachineOperation => {
+  const { planned } = operation;
+  const activityId =
+    operation.receipt?.status === 'accepted' && operation.receipt.kind === 'action'
+      ? operation.receipt.activityId
+      : undefined;
+  return Object.freeze({
+    operationId: planned.operationId,
+    machineId: planned.machineId,
+    kind: planned.kind,
+    inputDigest: planned.inputDigest,
+    state: operation.state,
+    updatedAt: operation.updatedAt,
+    ...(operation.receipt ? { receipt: operation.receipt } : {}),
+    ...(operation.confirmingSince === undefined ? {} : { confirmingSince: operation.confirmingSince }),
+    ...(planned.requestedBy === undefined ? {} : { requestedBy: planned.requestedBy }),
+    ...(planned.approvedBy === undefined ? {} : { approvedBy: planned.approvedBy }),
+    ...(planned.attended === undefined ? {} : { attended: planned.attended }),
+    ...(planned.action === undefined
+      ? {}
+      : {
+          action: {
+            componentId: planned.action.componentId,
+            id: planned.action.id,
+            label: planned.action.label,
+            ...(activityId === undefined ? {} : { activityId }),
+          },
+        }),
   });
+};
+
+/**
+ * A refusal a client can act on: its message is the sentence to show, its `code` the structured failure code.
+ * @internal
+ * @param failure - The failure.
+ * @returns The error to throw.
+ */
+export const machineError = (failure: MachineFailure): Error =>
+  Object.assign(new Error(failure.message, { cause: failure }), { code: failure.code });

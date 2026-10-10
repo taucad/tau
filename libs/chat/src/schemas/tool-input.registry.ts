@@ -21,19 +21,21 @@ import { revisionsInputSchema, revisionsOutputSchema } from '#schemas/tools/revi
 import { updateTodosInputSchema, updateTodosOutputSchema } from '#schemas/tools/update-todos.tool.schema.js';
 import { askQuestionsInputSchema, askQuestionsOutputSchema } from '#schemas/tools/ask-questions.tool.schema.js';
 import {
-  cancelPrintInputSchema,
-  cancelPrintOutputSchema,
+  checkJobInputSchema,
+  checkJobOutputSchema,
   getMachineInputSchema,
   getMachineOutputSchema,
   getPrintProfilesInputSchema,
   getPrintProfilesOutputSchema,
-  getPrintRequestInputSchema,
-  getPrintRequestOutputSchema,
-  listPrintRequestsInputSchema,
-  listPrintRequestsOutputSchema,
-  requestPrintInputSchema,
-  requestPrintOutputSchema,
-} from '#schemas/tools/print.tool.schema.js';
+  listMachinesInputSchema,
+  listMachinesOutputSchema,
+  machineActionInputSchema,
+  machineActionOutputSchema,
+  requestJobInputSchema,
+  requestJobOutputSchema,
+  stopMachineInputSchema,
+  stopMachineOutputSchema,
+} from '#schemas/tools/machine.tool.schema.js';
 import {
   applyParameterOperationInputSchema,
   applyParameterOperationOutputSchema,
@@ -142,29 +144,33 @@ export const uiMessageTools = {
     inputSchema: askQuestionsInputSchema,
     outputSchema: askQuestionsOutputSchema,
   },
+  [toolName.listMachines]: {
+    inputSchema: listMachinesInputSchema,
+    outputSchema: listMachinesOutputSchema,
+  },
   [toolName.getMachine]: {
     inputSchema: getMachineInputSchema,
     outputSchema: getMachineOutputSchema,
+  },
+  [toolName.machineAction]: {
+    inputSchema: machineActionInputSchema,
+    outputSchema: machineActionOutputSchema,
+  },
+  [toolName.stopMachine]: {
+    inputSchema: stopMachineInputSchema,
+    outputSchema: stopMachineOutputSchema,
   },
   [toolName.getPrintProfiles]: {
     inputSchema: getPrintProfilesInputSchema,
     outputSchema: getPrintProfilesOutputSchema,
   },
-  [toolName.requestPrint]: {
-    inputSchema: requestPrintInputSchema,
-    outputSchema: requestPrintOutputSchema,
+  [toolName.requestJob]: {
+    inputSchema: requestJobInputSchema,
+    outputSchema: requestJobOutputSchema,
   },
-  [toolName.getPrintRequest]: {
-    inputSchema: getPrintRequestInputSchema,
-    outputSchema: getPrintRequestOutputSchema,
-  },
-  [toolName.listPrintRequests]: {
-    inputSchema: listPrintRequestsInputSchema,
-    outputSchema: listPrintRequestsOutputSchema,
-  },
-  [toolName.cancelPrint]: {
-    inputSchema: cancelPrintInputSchema,
-    outputSchema: cancelPrintOutputSchema,
+  [toolName.checkJob]: {
+    inputSchema: checkJobInputSchema,
+    outputSchema: checkJobOutputSchema,
   },
 } as const;
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseHostManifest } from '#host/host-manifest.js';
+import { machineChannelProtocolVersion } from '#machines/machine-channel.js';
 import { protocolVersion } from '#types/protocol-header.types.js';
 
 const manifest = (capabilities: unknown[]) => ({ v: 2, hostId: 'local-host', capabilities });
@@ -10,7 +11,12 @@ describe('host manifest v2', () => {
       manifest([
         { kind: 'cad', protocolVersion, endpoint: { type: 'route', path: '/runtime/cad' }, granted: true },
         { kind: 'jobs', protocolVersion: 1, endpoint: { type: 'route', path: '/runtime/jobs/v1' }, granted: false },
-        { kind: 'machines', protocolVersion: 1, endpoint: { type: 'port', name: 'machine-broker' }, granted: true },
+        {
+          kind: 'machines',
+          protocolVersion: machineChannelProtocolVersion,
+          endpoint: { type: 'port', name: 'machine-broker' },
+          granted: true,
+        },
         { kind: 'agent', protocolVersion: 1, endpoint: { type: 'port', name: 'agent' }, granted: false },
       ]),
     );
@@ -19,7 +25,7 @@ describe('host manifest v2', () => {
     expect(parsed.knownCapabilities.map((capability) => capability.protocolVersion)).toEqual([
       protocolVersion,
       1,
-      1,
+      machineChannelProtocolVersion,
       1,
     ]);
     expect(Object.isFrozen(parsed.manifest.capabilities)).toBe(true);
@@ -41,6 +47,18 @@ describe('host manifest v2', () => {
     expect(() =>
       parseHostManifest(manifest([{ kind, protocolVersion, endpoint: { type: 'port', name: kind }, granted: true }])),
     ).toThrow(`UNSUPPORTED_HOST_CAPABILITY_PROTOCOL:${kind}`);
+  });
+
+  it('should advertise the machines service at the version its channel says in the hello, refusing any other', () => {
+    for (const version of [1, 2, 4].filter((candidate) => candidate !== machineChannelProtocolVersion)) {
+      expect(() =>
+        parseHostManifest(
+          manifest([
+            { kind: 'machines', protocolVersion: version, endpoint: { type: 'port', name: 'm' }, granted: true },
+          ]),
+        ),
+      ).toThrow('UNSUPPORTED_HOST_CAPABILITY_PROTOCOL:machines');
+    }
   });
 
   it('should preserve unknown records inertly without treating them as known capabilities', () => {
@@ -88,7 +106,14 @@ describe('host manifest v2', () => {
     ],
     [
       'unnamed port',
-      manifest([{ kind: 'machines', protocolVersion: 1, endpoint: { type: 'port', name: '' }, granted: true }]),
+      manifest([
+        {
+          kind: 'machines',
+          protocolVersion: machineChannelProtocolVersion,
+          endpoint: { type: 'port', name: '' },
+          granted: true,
+        },
+      ]),
     ],
     [
       'unknown known-role key',

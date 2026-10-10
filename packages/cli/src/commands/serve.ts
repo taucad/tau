@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
-import { defaultConfigDirectory, startHostDaemon } from '@taucad/host';
+import { defaultConfigDirectory, defaultMachineProviders, startHostDaemon } from '@taucad/host';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import type { HostDaemonAgentOptions, HostDaemonEvent } from '@taucad/host';
@@ -37,18 +37,6 @@ const computeStoreWorkerModulePath = (): string =>
       import.meta.url,
     ),
   );
-
-/**
- * The machine providers `--machines` serves: the Bambu Lab X1C and its
- * socket-free simulator, the operator's dry-run device. Loaded on demand so a
- * daemon without the flag never touches the vendor package.
- *
- * @returns The daemon's machines option.
- */
-const machineProviders = async (): Promise<NonNullable<HostDaemonAgentOptions['machines']>> => {
-  const { bambuA1MiniMachine, bambuMachine, bambuSimulatorMachine } = await import('@taucad/bambu');
-  return { providers: [bambuMachine(), bambuA1MiniMachine(), bambuSimulatorMachine()] };
-};
 
 const childArguments = (options: { readonly plugin: unknown; readonly config?: string }): string[] => {
   const plugins = Array.isArray(options.plugin)
@@ -302,7 +290,7 @@ export const serveCommand = defineCommand({
     machines: {
       type: 'boolean',
       description:
-        'Serve the machines route beside the agent channel with the Bambu Lab X1C provider and its simulator (TAU_HOST_MACHINES=true)',
+        'Serve the machines route beside the agent channel with the Bambu Lab, Grbl and Carvera providers and their simulators (TAU_HOST_MACHINES=true)',
       default: process.env['TAU_HOST_MACHINES'] === 'true',
     },
   },
@@ -324,7 +312,7 @@ export const serveCommand = defineCommand({
     if (args.machines && !agent) {
       throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
     }
-    const machines = args.machines ? await machineProviders() : undefined;
+    const machines = args.machines ? { providers: await defaultMachineProviders() } : undefined;
     let computeWorker: Worker | undefined;
     let computeConnection: ReturnType<typeof connectSqliteComputeStoreWorker> | undefined;
     const computeWorkspaceRoot = agent?.workspaceRoot;

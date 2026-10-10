@@ -9,26 +9,37 @@ import type {
   ToolRegistry,
 } from '@taucad/agent-host';
 import type { KernelIssue } from '@taucad/runtime';
+import {
+  checkMachineAction,
+  fffProcessOf,
+  isSimulatedMachine,
+  machineActionIntent,
+  personOnlyJobApproval,
+} from '@taucad/runtime/machine';
 import type {
+  MachineActionDescriptor,
+  MachineApplyActionInput,
   MachineArtifactReference,
-  MachineBeginBindingInput,
   MachineClient,
-  MachineControlRunInput,
   MachineDirectoryEntry,
-  MachinePreparePrintInput,
-  PrintRequest,
-  PrintRequester,
-  PrintRequestSummary,
+  MachineFailureCode,
+  MachineJob,
+  MachineJobCheck,
+  MachineProgramSummary,
   MachineProvider,
+  MachineReceipt,
+  MachineRequestJobInput,
+  MachineRequester,
 } from '@taucad/runtime/machine';
 import {
-  cancelPrintInputSchema,
+  checkJobInputSchema,
   getMachineInputSchema,
   getPrintProfilesInputSchema,
-  getPrintRequestInputSchema,
-  listPrintRequestsInputSchema,
-  requestPrintInputSchema,
-  requestPrintOptionKeys,
+  listMachinesInputSchema,
+  machineActionInputSchema,
+  printOptionKeys,
+  requestJobInputSchema,
+  stopMachineInputSchema,
 } from '@taucad/chat';
 import { toolDescriptions, toolName } from '@taucad/chat/constants';
 import type { ToolInputValidationError } from '@taucad/chat';
@@ -39,134 +50,68 @@ import { z } from 'zod';
 
 import { captureFilesToDataUrls } from '#capture/capture-data-urls.js';
 import {
+  checkText,
+  describeMachineText,
+  formatDuration,
+  listMachinesText,
+  noMachineText,
+  outcomeText,
+  remedyText,
+  sentence,
+} from '#registry/machine-text.js';
+import {
   defaultBambuStudioEngine,
   describePrintProfiles,
   readProjectMachinePreferences,
 } from '#registry/print-profiles.js';
 import type { BambuStudioEngine, ResolvedMachinePreferences } from '#registry/print-profiles.js';
 
-const identity = z.string().min(1).max(256);
-const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
-const timestamp = z.iso.datetime({ offset: true });
-const candidate = z.strictObject({
-  id: identity,
-  name: identity,
-  endpoint: z.strictObject({ address: identity, interface: identity }),
-  claimedIdentity: z.strictObject({
-    serial: identity.optional(),
-    model: identity.optional(),
-  }),
-  observedAt: timestamp,
-  expiresAt: timestamp,
-  /* The host marks a discovered printer whose access code it already keeps; echoing it back is harmless. */
-  credential: z.enum(['saved']).optional(),
-});
-/* The runtime's `MachineArtifactReference`. The host names the project, so a
- * model may copy a reference whole from a print request, but its `projectId`
- * is replaced rather than trusted. */
-const artifact = z.strictObject({
-  projectId: identity.optional().describe('Always this project; any value given is replaced.'),
-  path: z.string().min(1).max(512),
-  digest,
-  length: z
-    .number()
-    .int()
-    .positive()
-    .max(512 * 1024 * 1024),
-  mediaType: identity,
-  contract: z.strictObject({
-    id: identity,
-    version: z.number().int().positive(),
-  }),
-  selectedMember: z.string().min(1).max(512),
-});
-/* A typeless input side keeps the recursive JSON check off the wire, where it
- * would serialize as the `definitions` ref loops providers refuse. */
-const configuration = z.any().describe('Provider configuration: any JSON value.').pipe(z.json());
-
 /*
- * The slicer keys an agent may set. `request_print` slices before anyone
- * approves, so any other key (the engine, its service endpoint and token, the
+ * The slicer keys an agent may set. A job is sliced before anyone approves it,
+ * so any other key (the engine, its service endpoint and token, the
  * machine-bound keys) refuses at this boundary, for Tau turns and MCP callers
  * alike. Typed against the slicer's own options so the list names real ones.
  */
-const printOptionKeys: ReadonlySet<string> = new Set<keyof SlicerOptionsInput>(requestPrintOptionKeys);
+const allowedOptionKeys: ReadonlySet<string> = new Set<keyof SlicerOptionsInput>(printOptionKeys);
 
-/*
- * The print tools a CAD agent is offered take their inputs and descriptions
- * from `@taucad/chat`, the provider-facing contract; the rest are host tools.
- */
-const inputs = {
-  discover_machines: z.strictObject({ providerId: identity, configuration }),
-  begin_machine_binding: z.strictObject({ candidate, name: identity }),
-  list_machines: z.strictObject({}),
-  [toolName.getMachine]: getMachineInputSchema,
-  [toolName.getPrintProfiles]: getPrintProfilesInputSchema,
-  [toolName.requestPrint]: requestPrintInputSchema.superRefine(({ options = {} }, context) => {
-    const refused = Object.keys(options).filter((key) => !printOptionKeys.has(key));
+const withOptionKeys = <Schema extends typeof requestJobInputSchema>(schema: Schema, tool: string): Schema =>
+  schema.superRefine(({ options = {} }, context) => {
+    const refused = Object.keys(options).filter((key) => !allowedOptionKeys.has(key));
     if (refused.length > 0) {
       context.addIssue({
         code: 'custom',
         path: ['options'],
-        message: `request_print options cannot include ${refused.map((key) => `"${key}"`).join(', ')}; they accept only ${requestPrintOptionKeys.join(', ')}.`,
+        message: `${tool} options cannot include ${refused.map((key) => `"${key}"`).join(', ')}; they accept only ${printOptionKeys.join(', ')}.`,
       });
     }
-  }),
-  [toolName.getPrintRequest]: getPrintRequestInputSchema,
-  [toolName.listPrintRequests]: listPrintRequestsInputSchema,
-  [toolName.cancelPrint]: cancelPrintInputSchema.refine(
-    (value) =>
-      value.requestId === undefined
-        ? value.machineId !== undefined && value.expectedProviderRunId !== undefined
-        : value.machineId === undefined && value.expectedProviderRunId === undefined,
-    { message: 'Give requestId alone, or machineId together with expectedProviderRunId.' },
-  ),
-  prepare_machine_print: z.strictObject({
-    machineId: identity,
-    artifact,
-    configuration,
-  }),
-  upload_machine_print: z.strictObject({
-    machineId: identity,
-    preparedId: identity,
-    preparedDigest: digest,
-    operationId: identity,
-  }),
-  reconcile_machine_operation: z.strictObject({
-    machineId: identity,
-    operationId: identity,
-  }),
-  control_machine_run: z.strictObject({
-    machineId: identity,
-    operationId: identity,
-    command: z.enum(['cancel', 'pause', 'resume', 'urgent-stop']),
-    expectedProviderRunId: identity,
-  }),
-  capture_machine_still: z.strictObject({ machineId: identity }),
+  });
+
+/*
+ * The machine tools a CAD agent is offered take their inputs and descriptions
+ * from `@taucad/chat`, the provider-facing contract; the rest are host tools.
+ * Discovery and binding are a person's, in Tau: an agent session holds no grant for them, so no tool offers them.
+ */
+const inputs = {
+  [toolName.listMachines]: listMachinesInputSchema,
+  [toolName.getMachine]: getMachineInputSchema,
+  [toolName.machineAction]: machineActionInputSchema,
+  [toolName.stopMachine]: stopMachineInputSchema,
+  [toolName.getPrintProfiles]: getPrintProfilesInputSchema,
+  [toolName.requestJob]: withOptionKeys(requestJobInputSchema, toolName.requestJob),
+  [toolName.checkJob]: withOptionKeys(checkJobInputSchema, toolName.checkJob),
+  capture_machine_still: z.strictObject({ machineId: z.string().min(1).max(256) }),
 } as const;
 
 type MachineToolName = keyof typeof inputs;
 
 const descriptions: Readonly<Record<MachineToolName, string>> = {
-  discover_machines:
-    'Run one bounded machine-provider discovery using non-secret provider configuration. Never provide credentials or certificate decisions.',
-  begin_machine_binding:
-    'Begin the trusted host-local binding ceremony for one discovered candidate. Credentials remain outside this tool.',
-  list_machines: "List this computer's machine directory, including freshness and observed run state.",
+  [toolName.listMachines]: toolDescriptions[toolName.listMachines],
   [toolName.getMachine]: toolDescriptions[toolName.getMachine],
+  [toolName.machineAction]: toolDescriptions[toolName.machineAction],
+  [toolName.stopMachine]: toolDescriptions[toolName.stopMachine],
   [toolName.getPrintProfiles]: toolDescriptions[toolName.getPrintProfiles],
-  [toolName.requestPrint]: toolDescriptions[toolName.requestPrint],
-  [toolName.getPrintRequest]: toolDescriptions[toolName.getPrintRequest],
-  [toolName.listPrintRequests]: toolDescriptions[toolName.listPrintRequests],
-  [toolName.cancelPrint]: toolDescriptions[toolName.cancelPrint],
-  prepare_machine_print:
-    'Preflight one project artifact, named by its path and digest, against a machine: archive, digest, setup and materials are checked and nothing is transferred or started. Host paths and raw G-code are not accepted.',
-  upload_machine_print:
-    'Transfer one preflighted artifact to the machine storage with a new caller-retained operation ID. Nothing starts; a start only happens through an accepted print request.',
-  reconcile_machine_operation:
-    'Read the durable state of one exact machine operation without repeating its physical effect.',
-  control_machine_run:
-    'Pause, resume, cancel, or urgently stop the exact currently observed provider run using a new operation ID.',
+  [toolName.requestJob]: toolDescriptions[toolName.requestJob],
+  [toolName.checkJob]: toolDescriptions[toolName.checkJob],
   capture_machine_still:
     'Capture one authenticated, rate-limited, short-lived bounded still without changing machine or run state.',
 };
@@ -178,68 +123,81 @@ const asJson = (value: unknown): JsonValue => {
 };
 
 /**
- * What `request_print` needs from its host beyond the machine client.
+ * What `request_job` and `check_job` need from their host beyond the machine client.
  *
- * Slices the named source through the runtime export route to `gcode.3mf` —
- * the same route `export_model` takes, so the artifact is recorded in the
- * project and named by the project, its path and its digest — composes the
- * provider's submission configuration for the resolved machine (expected setup
- * from what the machine observes, since an agent cannot know a provider's
- * schema), and summarizes the toolpath (`@taucad/slicer/toolpath`) for the
- * approval prompt.
+ * For a `targetFile`, slices it through the runtime export route into a container the machine accepts — the same
+ * route `export_model` takes, so the artifact is recorded in the project and named by the project, its path and its
+ * digest; a host without that route refuses a `targetFile`. For an
+ * `artifact`, reads the finished program and names it the same way, in the container the machine accepts. Either
+ * way it returns only what the call chose of the provider's start form; the provider completes the rest from what
+ * the machine reports (`checkJob`), and summarizes the program for the approval prompt.
  *
  * @public
  */
 export type MachinePrintPlanner = (
-  input: Readonly<{
-    /** The tool call, for a deterministic artifact directory across retries. */
-    toolCallId: string;
-    /** Project-relative CAD source the agent named. */
-    targetFile: string;
-    /** The machine the print is for, as the directory currently observes it. */
-    machine: MachineDirectoryEntry;
-    preset?: 'fast' | 'standard' | 'fine' | undefined;
-    /** The plate the agent was told is installed; the machine's own report wins. */
-    plate?: string | undefined;
-    /** Slicer options, keys from `requestPrintOptionKeys` only; the slicer's own schema validates the values. */
-    options?: JsonObject | undefined;
-    /** Bambu Studio presets the agent chose; the machine's defaults fill the rest. */
-    profiles?: z.infer<typeof requestPrintInputSchema>['profiles'];
-    /** Bambu Studio setting keys and values applied over the presets. */
-    settings?: z.infer<typeof requestPrintInputSchema>['settings'];
-    /**
-     * The project's print intent file as this call read it, or undefined when
-     * the project has none. The planner applies it under the call's own
-     * choices when it names this machine's model.
-     */
-    preferences?: ResolvedMachinePreferences | undefined;
-    signal: AbortSignal;
-  }>,
+  input: Readonly<
+    {
+      /** The tool call, for a deterministic artifact directory across retries. */
+      toolCallId: string;
+      /** The machine the job is for, as the directory currently observes it. */
+      machine: MachineDirectoryEntry;
+      preset?: 'fast' | 'standard' | 'fine' | undefined;
+      /** The plate the agent was told is installed; the machine's own report wins. */
+      plate?: string | undefined;
+      /** Slicer options, keys from `printOptionKeys` only; the slicer's own schema validates the values. */
+      options?: JsonObject | undefined;
+      /** Bambu Studio presets the agent chose; the machine's defaults fill the rest. */
+      profiles?: BambuStudioInput['profiles'];
+      /** Bambu Studio setting keys and values applied over the presets. */
+      settings?: BambuStudioInput['settings'];
+      /**
+       * The project's print intent file as this call read it, or undefined when
+       * the project has none. The planner applies it under the call's own
+       * choices when it names this machine's model.
+       */
+      preferences?: ResolvedMachinePreferences | undefined;
+      signal: AbortSignal;
+    } & (
+      | {
+          /** Project-relative CAD source the agent named, to slice. */
+          targetFile: string;
+          artifact?: undefined;
+        }
+      | {
+          /** Project-relative finished program the agent named, run as is. */
+          artifact: string;
+          targetFile?: undefined;
+        }
+    )
+  >,
 ) => Promise<
   Readonly<{
     artifact: MachineArtifactReference;
-    /** The provider's submission configuration for this machine. */
-    configuration: PrintRequest['configuration'];
-    summary?: Omit<PrintRequestSummary, 'fileName'> | undefined;
+    /** What this call chose of the provider's start form; `checkJob` completes it. */
+    configuration: MachineRequestJobInput['configuration'];
+    /** What the program is, as Tau read it; the host's own parse wins. */
+    program: Partial<MachineProgramSummary> & Readonly<{ name: string }>;
+    /**
+     * The plate id the job is for when the machine does not report one: stated by the call or by the project's saved
+     * settings. The approval prompt names it, since the person approves a print made for it.
+     */
+    statedPlate?: string | undefined;
     /** What the project's print intent contributed, or why it was ignored, for the tool result. */
     machinePreferences?: JsonObject | undefined;
-    /** What the slice could not honour although it was made (the export's warning issues); the agent tells the person. */
+    /** What the slice could not honour although it was made, or what Tau could not read; the agent tells the person. */
     warnings?: readonly KernelIssue[] | undefined;
   }>
 >;
 
+/** Engine-specific slicing fields of `request_job`. */
+type BambuStudioInput = NonNullable<z.infer<typeof requestJobInputSchema>['bambuStudio']>;
+
 /** Options for {@link createMachineToolRegistry}. @public */
 export type MachineToolRegistryOptions = {
-  /** Backs `request_print`; without it the tool is not offered rather than offered-and-failing. */
+  /** Backs `request_job` and `check_job`; without it neither is offered rather than offered-and-failing. */
   readonly planPrint?: MachinePrintPlanner | undefined;
   /**
-   * The `tau.json` id of the project the agent works in. `prepare_machine_print`
-   * names its artifact by this project whatever the model passed, and is not
-   * offered without one.
-   */
-  readonly projectId?: string | undefined;
-  /**
-   * The agent's project filesystem for one invocation. `request_print` and
+   * The agent's project filesystem for one invocation. The job tools and
    * `get_print_profiles` read the project's print intent,
    * `.tau/machines/settings/<typeId>.json`, through it as their defaults; without it no
    * file applies.
@@ -247,6 +205,13 @@ export type MachineToolRegistryOptions = {
   readonly machineSettings?: Pick<MachineSettingsService, 'readMachineSettings'> | undefined;
   /** Backs `get_print_profiles`; defaults to this host's `@taucad/slicer/bambu-studio`. */
   readonly bambuStudio?: BambuStudioEngine | undefined;
+  /**
+   * How long `machine_action` watches for the machine to show an action it reports. Milliseconds; defaults to
+   * a reading every 500 for 3000.
+   */
+  readonly confirmation?: Readonly<{ pollInterval: number; pollTimeout: number }> | undefined;
+  /** Host-adjusted wall clock, milliseconds. Defaults to `Date.now`. */
+  readonly now?: (() => number) | undefined;
 };
 
 /**
@@ -255,7 +220,7 @@ export type MachineToolRegistryOptions = {
  * @param options - The registry options; their filesystem is the agent's view of the project.
  * @param provider - Selected provider and stable type.
  * @param selection - Cancellation and optional read-only profile override.
- * @returns The file as read, or undefined when the project has none or no filesystem is wired.
+ * @returns The file as read, or undefined when the project has none.
  */
 const readPreferences = async (
   options: MachineToolRegistryOptions,
@@ -268,15 +233,18 @@ const readPreferences = async (
   return readProjectMachinePreferences(options.machineSettings, provider, selection);
 };
 
-/** Request states in which there is nothing left to stop. */
-const settledStates = new Set<PrintRequest['state']>(['denied', 'withdrawn', 'rejected', 'failed']);
-
-/** Who settled a paused request, as the ledger records it, per answer. */
+/** Who settled a paused request, as the record keeps it, per answer. */
 const resolutionLabels = {
   approved: 'Accepted in chat',
   denied: 'Declined in chat',
   cancelled: 'Stopped with the chat turn',
 } as const satisfies Record<InterruptResolution['outcome'], string>;
+
+const chatPerson = (outcome: InterruptResolution['outcome']): MachineRequester => ({
+  kind: 'user',
+  id: 'chat',
+  label: resolutionLabels[outcome],
+});
 
 const definitionFor = (name: MachineToolName) => ({
   name,
@@ -286,15 +254,15 @@ const definitionFor = (name: MachineToolName) => ({
 });
 
 const describeMachines = (entries: readonly MachineDirectoryEntry[]): string =>
-  entries.map((entry) => `${entry.machineId} (${entry.descriptor.name})`).join(', ');
+  entries.map((entry) => `${entry.machineId} (${entry.name})`).join(', ');
 
 /**
- * The machine a print is for: the one named, or the only one bound.
+ * The machine a call is for: the one named, or the only one bound.
  *
  * @param client - The negotiated machines facet.
  * @param machineId - The agent's choice, when it made one.
  * @param signal - Cancels the directory read.
- * @returns The directory entry the request targets.
+ * @returns The directory entry.
  * @throws When the choice is unknown or ambiguous; the message lists what is bound.
  */
 const resolveMachine = async (
@@ -312,176 +280,15 @@ const resolveMachine = async (
     }
     throw new Error(`No machine ${wanted} is bound. Bound machines: ${describeMachines(entries) || 'none'}.`);
   }
-  if (entries.length === 1) {
-    return entries[0]!;
+  const [only] = entries;
+  if (entries.length === 1 && only !== undefined) {
+    return only;
   }
   throw new Error(
     entries.length === 0
-      ? 'No machine is bound on this computer; the person binds one in the Print pane.'
+      ? noMachineText
       : `Several machines are bound; pass machineId. Bound machines: ${describeMachines(entries)}.`,
   );
-};
-
-const formatDuration = (seconds: number): string => {
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 1) {
-    return 'under a minute';
-  }
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return `about ${hours === 0 ? `${String(rest)} min` : `${String(hours)} h ${String(rest)} min`}`;
-};
-
-/**
- * The one line the person decides on.
- *
- * @param request - The request as the ledger recorded it.
- * @param machine - The machine it targets.
- * @returns "Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min."
- */
-const approvalPrompt = (request: PrintRequest, machine: MachineDirectoryEntry): string => {
-  const facts = [
-    ...(request.summary.layers === undefined ? [] : [`${String(request.summary.layers)} layers`]),
-    ...(request.summary.estimatedDuration === undefined ? [] : [formatDuration(request.summary.estimatedDuration)]),
-  ];
-  return `Print ${request.summary.fileName} on ${machine.descriptor.name}?${facts.length === 0 ? '' : ` ${facts.join(', ')}.`}`;
-};
-
-/** What became of a started request's run, as the printer has reported it since the start. */
-type StartedRun = 'running' | 'ended' | 'not-yet-reported';
-
-/**
- * Whether a started request's run is still the printer's run. `started` records that the printer took the start, not
- * that it still prints: only a report newer than the start can say the run ended (blueprint x1c-start-confirmation F9).
- *
- * @param request - Any request.
- * @param machine - Its machine as the directory lists it, if bound.
- * @returns The run's fate for a started request, or `undefined` for any other.
- */
-const startedRunOf = (request: PrintRequest, machine: MachineDirectoryEntry | undefined): StartedRun | undefined => {
-  const { receipt } = request;
-  if (request.state !== 'started' || receipt?.status !== 'accepted') {
-    return undefined;
-  }
-  if (machine?.freshness !== 'current') {
-    return 'not-yet-reported';
-  }
-  const runId = 'providerRunId' in receipt ? receipt.providerRunId : undefined;
-  if (runId !== undefined && machine.snapshot.activeRunId === runId) {
-    return 'running';
-  }
-  return Date.parse(machine.snapshot.observedAt) > Date.parse(receipt.observedAt) ? 'ended' : 'not-yet-reported';
-};
-
-/**
- * The next step for a started request, from what the printer has reported since the start.
- *
- * @param request - The started request.
- * @param machine - The request's machine, as the directory lists it.
- * @returns The started run and its next step.
- */
-const startedNextStep = (
-  request: PrintRequest,
-  machine?: MachineDirectoryEntry,
-): Readonly<{ run: StartedRun; nextStep: string }> => {
-  const { fileName } = request.summary;
-  const run = startedRunOf(request, machine) ?? 'not-yet-reported';
-  const machineName = machine?.descriptor.name ?? request.machineId;
-  switch (run) {
-    case 'running': {
-      return {
-        run,
-        nextStep: `The print of ${fileName} is running on ${machineName}. Observe it with get_machine; this request needs nothing more.`,
-      };
-    }
-    case 'ended': {
-      const reported = machine?.snapshot.run?.state ?? machine?.snapshot.readiness ?? 'unknown';
-      return {
-        run,
-        nextStep: `The print of ${fileName} has ended; ${machineName} now reports its run as ${reported}. This request is finished and does not keep the machine busy: read get_machine for whether it is ready.`,
-      };
-    }
-    case 'not-yet-reported': {
-      return {
-        run,
-        nextStep: `The printer took the start of ${fileName} and has not reported the run since. Observe it with get_machine; don't start another print on this machine until it does.`,
-      };
-    }
-  }
-};
-
-/**
- * What the agent tells the person and does next, for a request awaiting the person or settled:
- * the start outcome in words, so an unconfirmed start is never reported as submitted or started.
- *
- * @param request - The request as the ledger recorded it.
- * @returns `{ nextStep }`, or nothing while the host is still preparing, uploading or starting.
- */
-const nextStepOf = (
-  request: PrintRequest,
-  machine?: MachineDirectoryEntry,
-): Readonly<{ run?: StartedRun; nextStep?: string }> => {
-  const { requestId } = request;
-  const { fileName } = request.summary;
-  switch (request.state) {
-    case 'awaiting-approval': {
-      return {
-        nextStep: `Waiting for a person to accept print request ${requestId} in Tau's Print pane; accepting uploads the file and starts the print. Do not retry; call get_print_request to observe it.`,
-      };
-    }
-    case 'started': {
-      return startedNextStep(request, machine);
-    }
-    case 'confirming': {
-      return {
-        nextStep: `Tau sent the start of ${fileName} and is waiting for the printer to confirm it; the printer's own status usually does within a minute. Call get_print_request again shortly. Do not retry or start another print.`,
-      };
-    }
-    case 'unknown': {
-      return {
-        nextStep: `The printer has not confirmed the start of ${fileName} for several minutes, so whether it is printing is unknown. Tell the person to check the printer's screen; Tau keeps watching and updates the request if the printer reports the run. Do not retry or start another print.`,
-      };
-    }
-    case 'rejected':
-    case 'failed': {
-      const failure = request.failure ?? (request.receipt?.status === 'rejected' ? request.receipt : undefined);
-      const outcome =
-        request.state === 'rejected'
-          ? `The printer rejected the start of ${fileName}`
-          : `Print request ${requestId} for ${fileName} failed`;
-      return {
-        nextStep:
-          failure === undefined
-            ? `${outcome}. Tell the person it failed.`
-            : `${outcome}. Tell the person it failed and why, with any fix its message names: "${failure.message}"`,
-      };
-    }
-    case 'denied': {
-      return {
-        nextStep: `The person declined print request ${requestId}; that is their decision. Do not retry it unless they ask.`,
-      };
-    }
-    case 'withdrawn': {
-      return {
-        nextStep: `Print request ${requestId} was withdrawn before it started. Do not retry it unless the person asks.`,
-      };
-    }
-    case 'preparing':
-    case 'approved':
-    case 'uploading':
-    case 'starting': {
-      return {};
-    }
-  }
-};
-
-const findRequest = async (client: MachineClient, requestId: string, signal: AbortSignal): Promise<PrintRequest> => {
-  const requests = await client.listPrintRequests({ signal });
-  const found = requests.find((request) => request.requestId === requestId);
-  if (!found) {
-    throw new Error(`No print request ${requestId}.`);
-  }
-  return found;
 };
 
 /**
@@ -492,200 +299,728 @@ const findRequest = async (client: MachineClient, requestId: string, signal: Abo
  * other caller (MCP, API-coordinated). Put an agent id on the invocation when a
  * surface needs to name the vendor agent.
  */
-const requesterOf = (invocation: HostToolInvocation): PrintRequester =>
+const requesterOf = (invocation: HostToolInvocation): MachineRequester =>
   invocation.approve === undefined
     ? { kind: 'agent', id: 'external-agent', label: 'External agent' }
     : { kind: 'agent', id: 'tau', label: 'Tau agent' };
 
+// ───────────────────────────── Actions ─────────────────────────────
+
+type ActionStatus = 'done' | 'confirming' | 'refused' | 'needs-approval' | 'denied' | 'rejected' | 'unknown';
+type ActionReport = Readonly<{ status: ActionStatus; message: string; operationId?: string; code?: string }>;
+
+const delay = async (milliseconds: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, milliseconds);
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(new DOMException('The operation was aborted.', 'AbortError'));
+      },
+      { once: true },
+    );
+  });
+
 /**
- * Settle a print request by the person's answer in chat.
+ * The parameters' problems against the action's own schema, before a person is asked to approve them. The host
+ * validates again with the trusted schema.
  *
- * @param client - The negotiated machines facet.
- * @param answered - The request the person answered, their answer, and the call's cancellation (only an approval
- *   takes it).
- * @returns The settled request.
+ * @param descriptor - The installed action.
+ * @param parameters - What the agent sent.
+ * @returns The problems in words, or undefined when they fit (or the schema cannot be read here).
  */
-const settleApproval = async (
+const parameterProblems = (descriptor: MachineActionDescriptor, parameters: JsonObject): string | undefined => {
+  try {
+    const schema = z.fromJSONSchema(
+      descriptor.configuration.legacyProjection.inputSchema as Parameters<typeof z.fromJSONSchema>[0],
+    );
+    const result = schema.safeParse(parameters);
+    return result.success ? undefined : z.prettifyError(result.error);
+  } catch {
+    // ponytail: a schema the converter cannot read is left to the host's own validation.
+    return undefined;
+  }
+};
+
+/** What `machine_action` sends, as asked before an approval and kept with it. */
+type ActionIntent = Omit<MachineApplyActionInput, 'attended' | 'signal'> &
+  Readonly<{ label: string; confirms: MachineActionDescriptor['confirms'] }>;
+
+/** An intent this registry wrote to the session log, read back: a payload of any other shape is never sent. */
+const recalledIntentSchema = z.object({
+  machineId: z.string(),
+  componentId: z.string(),
+  capabilityRevision: z.string(),
+  operationId: z.string(),
+  action: z.string(),
+  version: z.number().int(),
+  expectedRunId: z.string().nullable(),
+  parameters: z.unknown(),
+  label: z.string(),
+  confirms: z.enum(['observation', 'acknowledgement', 'none']),
+}) satisfies z.ZodType<Omit<ActionIntent, 'requestedBy'>>;
+
+/**
+ * Send one action and say what became of it: the receipt, and for an action the machine reports, whether it
+ * showed the change within a few seconds. An approval is never claimed here: the person's Approve recorded it on the
+ * host under this operation id (R15), and the host matches it to this exact request.
+ */
+const applyIntent = async (
   client: MachineClient,
-  answered: Readonly<{ requestId: string; resolution: InterruptResolution; signal: AbortSignal }>,
-): Promise<PrintRequest> => {
-  const { requestId, resolution, signal } = answered;
-  const resolvedBy: PrintRequester = { kind: 'user', id: 'chat', label: resolutionLabels[resolution.outcome] };
-  /* A denial is the person's decision and ends the request `denied`; only a run
-   * that was aborted or closed withdraws it. Both are safety answers that must
-   * land even while the run is being cancelled, so neither takes the signal. */
-  return resolution.outcome === 'approved'
-    ? client.resolvePrintRequest({ requestId, decision: 'approve', resolvedBy, signal })
-    : resolution.outcome === 'denied'
-      ? client.resolvePrintRequest({ requestId, decision: 'deny', resolvedBy })
-      : client.withdrawPrintRequest({ requestId, resolvedBy });
+  invocation: HostToolInvocation,
+  context: Readonly<{
+    entry: MachineDirectoryEntry;
+    intent: ActionIntent;
+    confirmation: MachineToolRegistryOptions['confirmation'];
+  }>,
+): Promise<ActionReport> => {
+  const { entry, intent } = context;
+  const { signal } = invocation;
+  const { label, confirms, ...request } = intent;
+  const receipt = await client.applyAction({
+    ...request,
+    requestedBy: requesterOf(invocation),
+    signal,
+  });
+  const { operationId } = intent;
+  const named = `${label} on ${entry.name}`;
+  /* The host found no approval the person recorded for this exact request. */
+  if (receipt.status === 'rejected' && receipt.code === 'MACHINE_ACTION_APPROVAL_REQUIRED') {
+    return {
+      status: 'needs-approval',
+      operationId,
+      code: receipt.code,
+      message: `${named} needs a person's approval, which Tau has not recorded. Ask the person to approve it in Tau.`,
+    };
+  }
+  if (receipt.status === 'rejected') {
+    return {
+      status: 'rejected',
+      operationId,
+      code: receipt.code,
+      message: `${entry.name} refused ${label}: ${receipt.message}`,
+    };
+  }
+  if (receipt.status === 'unknown') {
+    return {
+      status: 'unknown',
+      operationId,
+      message: `Whether ${named} happened is unknown (${receipt.reason}). Do not resend it; get_machine shows what the machine reports.`,
+    };
+  }
+  if (confirms === 'none') {
+    return { status: 'done', operationId, message: `Sent ${named}; this machine does not report whether it happened.` };
+  }
+  if (confirms === 'acknowledgement') {
+    return { status: 'done', operationId, message: `${entry.name} took ${label}.` };
+  }
+  const { pollInterval, pollTimeout } = context.confirmation ?? { pollInterval: 500, pollTimeout: 3000 };
+  const deadline = Date.now() + pollTimeout;
+  /* Reads the journal only; nothing is resent. */
+  const watch = async (): Promise<ActionReport> => {
+    const operation = await client.reconcileOperation({ machineId: entry.machineId, operationId, signal });
+    if (operation.state === 'accepted') {
+      return { status: 'done', operationId, message: `${entry.name} shows ${label} done.` };
+    }
+    if (operation.state === 'rejected') {
+      const rejected = operation.receipt?.status === 'rejected' ? operation.receipt : undefined;
+      return {
+        status: 'rejected',
+        operationId,
+        ...(rejected === undefined ? {} : { code: rejected.code }),
+        message: `${entry.name} did not do ${label}${rejected === undefined ? '' : `: ${rejected.message}`}.`,
+      };
+    }
+    if (Date.now() >= deadline) {
+      return {
+        status: 'confirming',
+        operationId,
+        message: `${entry.name} took ${label} and has not shown the change yet. Do not resend it; get_machine shows it when it does.`,
+      };
+    }
+    await delay(pollInterval, signal);
+    return watch();
+  };
+  return watch();
 };
 
 /**
- * `request_print`: resolve the machine, plan with the project's print intent,
- * open the request, and gate it.
+ * What the agent reads when a person did not approve an action: declined, or the turn stopped before they answered.
+ * @param outcome - How the approval ended.
+ * @param named - "Cancel the print on Workshop X1C".
+ * @returns The report; nothing was sent.
+ */
+const unapprovedReport = (outcome: InterruptResolution['outcome'], named: string): ActionReport =>
+  outcome === 'cancelled'
+    ? {
+        status: 'refused',
+        message: `Nothing was sent: the chat turn stopped before the person answered whether to do ${named}. Ask again only if they still want it.`,
+      }
+    : { status: 'denied', message: `The person declined ${named}. Do not retry it unless they ask.` };
+
+/** The approval prompt for one action: what, where, and what it does. */
+const actionPrompt = (entry: MachineDirectoryEntry, descriptor: MachineActionDescriptor, parameters: JsonObject) => {
+  const shown = Object.keys(parameters).length === 0 ? '' : ` (${JSON.stringify(parameters)})`;
+  const what = descriptor.consequence ?? descriptor.description;
+  const outcome = descriptor.outcome === undefined ? '' : ` ${outcomeText(entry, descriptor.outcome)}`;
+  return `${descriptor.label}${shown} on ${entry.name}?${what === undefined ? '' : ` ${what}`}${outcome}`;
+};
+
+/**
+ * A refusal in words, with what clears it.
+ * @param entry - The machine.
+ * @param check - Why the action is unavailable.
+ * @returns The report; nothing was sent.
+ */
+const refusedReport = (
+  entry: MachineDirectoryEntry,
+  check: Readonly<{ code: MachineFailureCode; message: string; remedy?: Parameters<typeof remedyText>[1] }>,
+): ActionReport => {
+  const remedy = check.remedy === undefined ? '' : ` It clears with ${sentence(remedyText(entry, check.remedy))}`;
+  return {
+    status: 'refused',
+    code: check.code,
+    message:
+      check.code === 'MACHINE_ACTION_PERSON_REQUIRED'
+        ? `${check.message} Ask the person to do it at the machine.${remedy}`
+        : `Nothing was sent: ${check.message}${remedy}`,
+  };
+};
+
+/**
+ * `machine_action`: check the action as the agent, then apply it, ask the person first, or say why not.
  *
  * @param client - The negotiated machines facet.
- * @param options - The planner that slices for it and the project filesystem.
- * @param invocation - The tool call, with its run approval when the host has one.
- * @returns The ledger's record, plus how the person answered when this call
- *   waited, the next step in words, what the project's print intent contributed,
- *   and what the slice could not honour.
+ * @param options - The confirmation watch and the clock.
+ * @param invocation - The tool call; its id is the operation id, and its approval asks the person.
+ * @returns What became of the action.
  */
-const requestPrint = async (
+const machineAction = async (
+  client: MachineClient,
+  options: MachineToolRegistryOptions,
+  invocation: HostToolInvocation,
+): Promise<ActionReport> => {
+  const { componentId, action, machineId, ...rest } = inputs.machine_action.parse(invocation.input);
+  // SAFETY: a zod record of JSON values is a JSON object.
+  const parameters = (rest.parameters ?? {}) as JsonObject;
+  const entry = await resolveMachine(client, machineId, invocation.signal);
+  /* The key names the exact intent, so an approval is spent only on the request the person saw. */
+  const key = `action:${entry.machineId}:${componentId}:${action}:${JSON.stringify(parameters)}`;
+  const prior = await invocation.approve?.recall?.(key);
+  if (prior !== undefined) {
+    if (prior.resolution.outcome !== 'approved') {
+      return unapprovedReport(prior.resolution.outcome, `${action} on ${entry.name}`);
+    }
+    const recalled = recalledIntentSchema.safeParse(prior.payload['intent']);
+    if (!recalled.success) {
+      return {
+        status: 'refused',
+        code: 'MACHINE_ACTION_APPROVAL_REQUIRED',
+        message: `The approved request for ${action} on ${entry.name} could not be read back, so nothing was sent. Ask the person to approve it again.`,
+      };
+    }
+    /* Who asks is the caller now, not what the log says. */
+    const intent = { ...recalled.data, requestedBy: requesterOf(invocation) };
+    return applyIntent(client, invocation, { entry, intent, confirmation: options.confirmation });
+  }
+  const check = checkMachineAction({
+    entry,
+    componentId,
+    action,
+    caller: 'agent',
+    attended: false,
+    now: (options.now ?? Date.now)(),
+  });
+  if (check.status === 'unavailable') {
+    return refusedReport(entry, check);
+  }
+  const { descriptor } = check;
+  /* The check looked among actions, not holds. */
+  if (!('scope' in descriptor)) {
+    throw new Error(`${componentId} ${action} is a hold, which only a person at the machine uses.`);
+  }
+  const problems = parameterProblems(descriptor, parameters);
+  if (problems !== undefined) {
+    return {
+      status: 'refused',
+      code: 'MACHINE_ACTION_PARAMETERS_INVALID',
+      message: `Nothing was sent: the parameters do not fit ${descriptor.label}.\n${problems}`,
+    };
+  }
+  /* The run, revision and version the agent saw: an approval for this run never reaches the next one. */
+  const intent: ActionIntent = {
+    ...machineActionIntent(entry, descriptor, {
+      operationId: invocation.toolCallId,
+      parameters,
+      requestedBy: requesterOf(invocation),
+    }),
+    label: descriptor.label,
+    confirms: descriptor.confirms,
+  };
+  if (check.status === 'available') {
+    const sent = await applyIntent(client, invocation, { entry, intent, confirmation: options.confirmation });
+    /* The host admits under a standard family's floor, which a provider's descriptor may sit below: then ask the
+     * person for this same request. A refusal at admission journals nothing, so the operation id is still unused. */
+    if (sent.status !== 'needs-approval' || invocation.approve === undefined) {
+      return sent;
+    }
+  }
+  if (invocation.approve === undefined) {
+    return {
+      status: 'needs-approval',
+      message: `${descriptor.label} on ${entry.name} needs a person's approval, which only Tau can ask for. Ask the person to do it in Tau.`,
+    };
+  }
+  const prompt = `${isSimulatedMachine(entry.descriptor.capabilities) ? 'Simulated: ' : ''}${actionPrompt(entry, descriptor, parameters)}`;
+  const resolution = await invocation.approve({
+    key,
+    prompt,
+    /* The Print pane shows the parameters and the prompt beside Approve: the person approves exactly this. */
+    payload: {
+      kind: 'machine-action',
+      machineId: entry.machineId,
+      componentId,
+      action,
+      operationId: intent.operationId,
+      label: descriptor.label,
+      parameters,
+      prompt,
+      // SAFETY: every field of the intent is JSON.
+      intent: intent as unknown as JsonObject,
+    },
+  });
+  if (resolution.outcome !== 'approved') {
+    return unapprovedReport(resolution.outcome, `${descriptor.label} on ${entry.name}`);
+  }
+  /* The person's Approve recorded the approval on the host before it answered this interrupt. */
+  return applyIntent(client, invocation, { entry, intent, confirmation: options.confirmation });
+};
+
+/**
+ * `stop_machine`: the machine's fastest halt, open to the agent with no approval.
+ */
+const stopMachine = async (client: MachineClient, invocation: HostToolInvocation): Promise<ActionReport> => {
+  const { machineId } = inputs.stop_machine.parse(invocation.input);
+  const entry = await resolveMachine(client, machineId, invocation.signal);
+  const operationId = invocation.toolCallId;
+  const receipt: MachineReceipt<'stop'> = await client.stop({
+    machineId: entry.machineId,
+    operationId,
+    requestedBy: requesterOf(invocation),
+    signal: invocation.signal,
+  });
+  const outcome = outcomeText(entry, entry.descriptor.capabilities.stop);
+  switch (receipt.status) {
+    case 'accepted': {
+      return { status: 'done', operationId, message: `${entry.name} took the stop. ${outcome}` };
+    }
+    case 'rejected': {
+      return {
+        status: 'rejected',
+        operationId,
+        code: receipt.code,
+        message: `${entry.name} refused the stop: ${receipt.message} Tell the person to stop it at the machine now.`,
+      };
+    }
+    case 'unknown': {
+      return {
+        status: 'unknown',
+        operationId,
+        message: `Whether ${entry.name} stopped is unknown (${receipt.reason}). Tell the person to check the machine now.`,
+      };
+    }
+  }
+};
+
+// ───────────────────────────── Jobs ─────────────────────────────
+
+/** What the person must confirm or state that only Tau's Print pane can take from them. */
+const personOnlyApproval = (entry: MachineDirectoryEntry): readonly string[] | undefined => {
+  const approval = personOnlyJobApproval(entry.descriptor.capabilities);
+  return approval === undefined
+    ? undefined
+    : [...approval.attestations.map(({ label }) => label), ...(approval.attended ? ['They are at the machine'] : [])];
+};
+
+const paneStep = (entry: MachineDirectoryEntry | undefined): string => {
+  const confirmations = entry === undefined ? undefined : personOnlyApproval(entry);
+  return confirmations === undefined ? '' : `, where they confirm: ${confirmations.join('; ')}`;
+};
+
+/**
+ * The job fields the agent reads: checks that have not passed, with their remedies in words.
+ */
+const jobOutput = (job: MachineJob, entry: MachineDirectoryEntry | undefined): JsonObject => {
+  const checks = job.checks
+    .filter(({ state }) => state !== 'passed')
+    .map((check) => ({
+      id: check.id,
+      label: check.label,
+      state: check.state,
+      ...(check.detail === undefined ? {} : { detail: check.detail }),
+      ...(check.remedy === undefined || entry === undefined ? {} : { remedy: remedyText(entry, check.remedy) }),
+    }));
+  return asJson({
+    jobId: job.jobId,
+    machineId: job.machineId,
+    state: job.state,
+    program: job.program,
+    ...(checks.length === 0 ? {} : { checks }),
+    ...(job.failure === undefined ? {} : { failure: job.failure }),
+    ...(job.run === undefined ? {} : { run: { outcome: job.run.outcome } }),
+  }) as JsonObject;
+};
+
+/**
+ * What the agent tells the person and does next, for a job awaiting the person or settled: the start outcome in
+ * words, so an unconfirmed start is never reported as started.
+ *
+ * @param job - The job as the host recorded it.
+ * @param entry - Its machine, as the directory lists it.
+ * @returns The next step, or undefined while the host is still working on the job.
+ */
+const nextStepOf = (job: MachineJob, entry: MachineDirectoryEntry | undefined): string | undefined => {
+  const { jobId } = job;
+  const { name } = job.program;
+  const machineName = entry?.name ?? job.machineId;
+  switch (job.state) {
+    case 'awaiting-approval': {
+      const blocked =
+        entry === undefined
+          ? []
+          : job.checks.filter(({ state }) => state === 'blocked').map((check) => checkText(entry, check));
+      const blocking = blocked.length === 0 ? '' : ` ${sentence(`It cannot start until: ${blocked.join('; ')}`)}`;
+      return `Waiting for a person to accept job ${jobId} in Tau's Print pane${paneStep(entry)}; accepting starts ${name}.${blocking} Do not retry; get_machine shows the job.`;
+    }
+    case 'awaiting-start': {
+      return `${name} is loaded on ${machineName}; a person starts it with the machine's own start. get_machine shows the run once it does.`;
+    }
+    case 'confirming': {
+      return `Tau sent the start of ${name} and is waiting for ${machineName} to confirm it. Call get_machine shortly. Do not retry or start another job.`;
+    }
+    case 'started': {
+      const outcome = job.run?.outcome;
+      if (outcome === 'running') {
+        return `${name} is running on ${machineName}. Observe it with get_machine; this job needs nothing more.`;
+      }
+      if (outcome === undefined || outcome === 'unknown') {
+        return `${machineName} took the start of ${name} and has not reported the run since. Observe it with get_machine; do not start another job on it until it does.`;
+      }
+      return `The run of ${name} has ended: ${outcome}. This job needs nothing more; get_machine says whether ${machineName} is ready.`;
+    }
+    case 'unknown': {
+      return `${machineName} has not confirmed the start of ${name} for several minutes, so whether it runs is unknown. Tell the person to check the machine; Tau keeps watching. Do not retry or start another job.`;
+    }
+    case 'rejected':
+    case 'failed': {
+      const failure = job.failure ?? (job.receipt?.status === 'rejected' ? job.receipt : undefined);
+      const outcome =
+        job.state === 'rejected' ? `${machineName} rejected the start of ${name}` : `Job ${jobId} for ${name} failed`;
+      return failure === undefined
+        ? `${outcome}. Tell the person it failed.`
+        : `${outcome}. Tell the person it failed and why, with any fix its message names: "${failure.message}"`;
+    }
+    case 'denied': {
+      return `The person declined job ${jobId}; that is their decision. Do not retry it unless they ask.`;
+    }
+    case 'withdrawn': {
+      return `Job ${jobId} was withdrawn before it started. Do not retry it unless the person asks.`;
+    }
+    case 'preparing':
+    case 'approved':
+    case 'transferring':
+    case 'starting': {
+      return undefined;
+    }
+  }
+};
+
+const findJob = async (
+  client: MachineClient,
+  input: Readonly<{ jobId: string; machineId?: string }>,
+  signal: AbortSignal,
+): Promise<MachineJob> => {
+  const jobs = await client.listJobs({
+    ...(input.machineId === undefined ? {} : { machineId: input.machineId }),
+    signal,
+  });
+  const found = jobs.find((job) => job.jobId === input.jobId);
+  if (!found) {
+    throw new Error(`No job ${input.jobId}.`);
+  }
+  return found;
+};
+
+/**
+ * Settle a job by the person's answer in chat. The person's own session resolves the job before answering (R16): the
+ * agent's session can never approve one, so an answer here only reads what the person's surface recorded. A run
+ * stopped with the chat, or a denial no surface recorded, withdraws the request; an approval the chat could not take
+ * (attestations, presence) leaves the job waiting for the Print pane.
+ *
+ * @param client - The negotiated machines facet.
+ * @param answered - The job's ids, the answer, and the call's cancellation.
+ * @returns The job as it stands.
+ */
+const settleApproval = async (
+  client: MachineClient,
+  answered: Readonly<{ jobId: string; machineId?: string; resolution: InterruptResolution; signal: AbortSignal }>,
+): Promise<MachineJob> => {
+  const { jobId, machineId, resolution, signal } = answered;
+  const job = await findJob(client, { jobId, ...(machineId === undefined ? {} : { machineId }) }, signal);
+  if (job.state !== 'awaiting-approval' || resolution.outcome === 'approved') {
+    return job;
+  }
+  /* A safety answer that must land even while the run is being cancelled, so it does not take the signal. */
+  return client.withdrawJob({ jobId, resolvedBy: chatPerson(resolution.outcome) });
+};
+
+/** What starting a program does, by process: a printer prints, a mill cuts, anything else runs it. */
+const processVerbs: Readonly<Record<string, string>> = { fff: 'Print', milling: 'Cut' };
+
+/**
+ * The one line the person decides on: "Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min.", with
+ * "Simulated: " before it for a simulator and the plate a person stated when the machine reports none.
+ *
+ * @param job - The job awaiting approval.
+ * @param entry - Its machine.
+ * @param statedPlate - The plate id the plan is for when the machine does not report its own (the call's or the
+ *   project's saved one).
+ * @returns The prompt.
+ */
+const approvalPrompt = (job: MachineJob, entry: MachineDirectoryEntry, statedPlate: string | undefined): string => {
+  const { program } = job;
+  /* A program the host has not read yet is `other`; the machine's own process names it then. */
+  const process =
+    program.facts.process === 'other'
+      ? entry.descriptor.capabilities.processes.find(({ type }) => type in processVerbs)?.type
+      : program.facts.process;
+  const verb = (process === undefined ? undefined : processVerbs[process]) ?? 'Run';
+  const facts = [
+    ...(program.facts.process === 'fff' && program.facts.layers !== undefined
+      ? [`${String(program.facts.layers)} layers`]
+      : []),
+    ...(program.estimatedDuration === undefined ? [] : [formatDuration(program.estimatedDuration)]),
+  ];
+  const plate =
+    statedPlate === undefined
+      ? undefined
+      : fffProcessOf(entry.descriptor.capabilities)?.bed.plates.find(({ id }) => id === statedPlate);
+  const confirmations = personOnlyApproval(entry);
+  const simulated = isSimulatedMachine(entry.descriptor.capabilities) ? 'Simulated: ' : '';
+  return `${simulated}${verb} ${program.name} on ${entry.name}?${facts.length === 0 ? '' : ` ${facts.join(', ')}.`}${plate === undefined ? '' : ` On the ${plate.label}, as stated; ${entry.name} does not report its plate.`}${confirmations === undefined ? '' : ` Accept it in the Print pane, confirming: ${confirmations.join('; ')}.`}`;
+};
+
+const jobReport = (job: MachineJob, entry: MachineDirectoryEntry | undefined, extra: JsonObject = {}): JsonValue => {
+  const nextStep = nextStepOf(job, entry);
+  return {
+    job: jobOutput(job, entry),
+    ...(entry === undefined
+      ? {}
+      : { machineName: entry.name, simulated: isSimulatedMachine(entry.descriptor.capabilities) }),
+    ...extra,
+    ...(nextStep === undefined ? {} : { nextStep }),
+  };
+};
+
+/**
+ * Prepare the program for one machine and ask the machine about it: slice a `targetFile` with the project's print
+ * intent, or read a finished `artifact`, then `checkJob` with what the call chose, which the provider completes from
+ * what the machine reports. What both job tools start from; it records nothing.
+ *
+ * @param client - The negotiated machines facet.
+ * @param options - The planner and the project filesystem.
+ * @param call - The tool call, its parsed input and its machine.
+ * @returns The plan, the machine's check with the completed configuration, and what the call reports either way.
+ */
+const planJob = async (
+  client: MachineClient,
+  options: MachineToolRegistryOptions,
+  call: Readonly<{
+    invocation: HostToolInvocation;
+    parsed: z.infer<typeof requestJobInputSchema>;
+    entry: MachineDirectoryEntry;
+  }>,
+): Promise<
+  Readonly<{
+    plan: Awaited<ReturnType<MachinePrintPlanner>>;
+    check: MachineJobCheck;
+    reported: JsonObject;
+  }>
+> => {
+  const { invocation, parsed, entry } = call;
+  const { planPrint } = options;
+  if (!planPrint) {
+    throw new Error('This host cannot prepare jobs.');
+  }
+  const { signal } = invocation;
+  const providers = await client.listProviders({ signal });
+  const provider = providers.find(({ id }) => id === entry.providerId);
+  if (!provider) {
+    throw new Error(`Provider ${entry.providerId} is unavailable.`);
+  }
+  const common = {
+    toolCallId: invocation.toolCallId,
+    machine: entry,
+    plate: parsed.plate,
+    signal,
+  };
+  const plan =
+    parsed.artifact === undefined
+      ? await planPrint({
+          ...common,
+          targetFile: sourceOf(parsed),
+          preset: parsed.preset,
+          // SAFETY: a zod record of JSON values is a JSON object.
+          options: parsed.options as JsonObject | undefined,
+          profiles: parsed.bambuStudio?.profiles,
+          settings: parsed.bambuStudio?.settings,
+          preferences: await readPreferences(options, provider, { signal, profileId: parsed.profileId }),
+        })
+      : await planPrint({ ...common, artifact: parsed.artifact });
+  signal.throwIfAborted();
+  const check = await client.checkJob({
+    machineId: entry.machineId,
+    artifact: plan.artifact,
+    configuration: plan.configuration,
+    signal,
+  });
+  const reported = asJson({
+    ...(plan.machinePreferences === undefined ? {} : { machinePreferences: plan.machinePreferences }),
+    ...(plan.warnings === undefined ? {} : { warnings: plan.warnings }),
+  }) as JsonObject;
+  return { plan, check, reported };
+};
+
+/** What a job call names: its CAD source or its finished program; the input schema requires exactly one. */
+const sourceOf = (parsed: Readonly<{ targetFile?: string | undefined; artifact?: string | undefined }>): string => {
+  const source = parsed.targetFile ?? parsed.artifact;
+  if (source === undefined) {
+    throw new Error('Pass exactly one of targetFile or artifact.');
+  }
+  return source;
+};
+
+/** A refused program in words: nothing was recorded or sent. */
+const refusedText = (entry: MachineDirectoryEntry, check: Extract<MachineJobCheck, { status: 'refused' }>) =>
+  `${entry.name} refused the program, so nothing was recorded or sent: ${sentence(check.message)} (${check.code})`;
+
+/**
+ * `request_job`: resolve the machine, prepare the program, check it, request the job, and gate it.
+ *
+ * @param client - The negotiated machines facet.
+ * @param options - The planner that prepares it and the project filesystem.
+ * @param invocation - The tool call, with its run approval when the host has one.
+ * @returns The job, how the person answered when this call waited, the next step, what the project's print intent
+ *   contributed, and what the slice could not honour.
+ * @throws When the machine refuses the program; no job is recorded then.
+ */
+const requestJob = async (
   client: MachineClient,
   options: MachineToolRegistryOptions,
   invocation: HostToolInvocation,
 ): Promise<JsonValue> => {
-  const parsed = inputs.request_print.parse(invocation.input);
-  const { planPrint } = options;
-  if (!planPrint) {
-    throw new Error('This host cannot slice for printing.');
-  }
+  const parsed = inputs.request_job.parse(invocation.input);
   const { signal } = invocation;
-  const machine = await resolveMachine(client, parsed.machineId, signal);
-  const machineName = machine.descriptor.name;
-  /* D5 under a Tau host: asking paused the run, and this is its next attempt. The person answered the request they
-   * saw, so that request is settled, not a new plan. */
-  const approvalKey = `print:${machine.machineId}:${parsed.targetFile}`;
+  const entry = await resolveMachine(client, parsed.machineId, signal);
+  /* Under a Tau host asking paused the run, and this is its next attempt. The person answered the job they saw, so
+   * that job is settled, not a new plan. */
+  const approvalKey = `job:${entry.machineId}:${sourceOf(parsed)}`;
   const prior = await invocation.approve?.recall?.(approvalKey);
-  const priorRequestId = prior?.payload['requestId'];
-  if (prior !== undefined && typeof priorRequestId === 'string') {
-    const request = await findRequest(client, priorRequestId, signal);
-    if (request.state !== 'awaiting-approval') {
-      /* Settled already, by the hand-over or by the Print pane: the ledger's answer is the effective one. */
+  const priorJobId = prior?.payload['jobId'];
+  if (prior !== undefined && typeof priorJobId === 'string') {
+    const job = await findJob(client, { jobId: priorJobId, machineId: entry.machineId }, signal);
+    if (job.state !== 'awaiting-approval') {
+      /* Settled already, by the hand-over or by the Print pane: the job's answer is the effective one. */
       const approval =
-        request.state === 'denied' ? 'denied' : request.state === 'withdrawn' ? 'cancelled' : prior.resolution.outcome;
-      return asJson({ request, machineName, approval, ...nextStepOf(request, machine) });
+        job.state === 'denied' ? 'denied' : job.state === 'withdrawn' ? 'cancelled' : prior.resolution.outcome;
+      return jobReport(job, entry, { approval });
     }
-    const settled = await settleApproval(client, { requestId: priorRequestId, resolution: prior.resolution, signal });
-    return asJson({
-      request: settled,
-      machineName,
-      approval: prior.resolution.outcome,
-      ...nextStepOf(settled, machine),
+    const settled = await settleApproval(client, {
+      jobId: priorJobId,
+      machineId: entry.machineId,
+      resolution: prior.resolution,
+      signal,
     });
+    return jobReport(settled, entry, { approval: prior.resolution.outcome });
   }
-  const providers = await client.listProviders({ signal });
-  const provider = providers.find(({ id }) => id === machine.providerId);
-  if (!provider) {
-    throw new Error(`Provider ${machine.providerId} is unavailable.`);
+  const { plan, check, reported } = await planJob(client, options, { invocation, parsed, entry });
+  if (check.status === 'refused') {
+    throw new Error(refusedText(entry, check));
   }
-  const plan = await planPrint({
-    toolCallId: invocation.toolCallId,
-    targetFile: parsed.targetFile,
-    machine,
-    preset: parsed.preset,
-    plate: parsed.plate,
-    // SAFETY: a zod record of JSON values is a JSON object.
-    options: parsed.options as JsonObject | undefined,
-    profiles: parsed.profiles,
-    settings: parsed.settings,
-    preferences: await readPreferences(options, provider, { signal, profileId: parsed.profileId }),
-    signal,
-  });
-  signal.throwIfAborted();
-  const reported = {
-    ...(plan.machinePreferences === undefined ? {} : { machinePreferences: plan.machinePreferences }),
-    ...(plan.warnings === undefined ? {} : { warnings: plan.warnings }),
-  };
-  /* Idempotent by the tool call: a retried call finds its own request rather
-   * than opening a second one for the same intent. */
-  const requestId = invocation.toolCallId;
-  const request = await client.requestPrint({
-    machineId: machine.machineId,
+  /* Idempotent by the tool call: a retried call finds its own job rather than requesting a second one. */
+  const jobId = invocation.toolCallId;
+  const job = await client.requestJob({
+    machineId: entry.machineId,
     artifact: plan.artifact,
-    configuration: plan.configuration,
+    /* The provider's completion of what the call chose: what the person approves is what starts. */
+    configuration: check.configuration,
     requestedBy: requesterOf(invocation),
-    summary: { fileName: plan.artifact.path.split('/').at(-1) ?? plan.artifact.path, ...plan.summary },
-    requestId,
+    /* Tau's read of the program, or the machine's facts where Tau could not read it (`other`, or none). */
+    program:
+      plan.program.facts === undefined || plan.program.facts.process === 'other'
+        ? { ...plan.program, facts: check.program.facts }
+        : plan.program,
+    jobId,
     signal,
   });
-  if (request.state !== 'awaiting-approval' || invocation.approve === undefined) {
-    /* Preflight refused, the retry found a request already past its approval,
-     * or no person can answer here: the record and its next step say which. */
-    return asJson({ request, machineName, ...nextStepOf(request, machine), ...reported });
+  if (job.state !== 'awaiting-approval' || invocation.approve === undefined) {
+    /* Preflight refused, the retry found a job already past its approval, or no person can answer here. */
+    return jobReport(job, entry, reported);
   }
   const resolution = await invocation.approve({
     key: approvalKey,
-    prompt: approvalPrompt(request, machine),
+    prompt: approvalPrompt(job, entry, plan.statedPlate),
     payload: {
-      kind: 'print-request',
-      requestId,
-      machineId: machine.machineId,
-      fileName: request.summary.fileName,
+      kind: 'job',
+      jobId,
+      machineId: entry.machineId,
+      fileName: job.program.name,
       artifactDigest: plan.artifact.digest,
     },
   });
-  const settled = await settleApproval(client, { requestId, resolution, signal });
+  const settled = await settleApproval(client, { jobId, machineId: entry.machineId, resolution, signal });
+  return jobReport(settled, entry, { approval: resolution.outcome, ...reported });
+};
+
+/** `check_job`: prepare as `request_job` would and ask the machine, recording nothing. */
+const checkJob = async (
+  client: MachineClient,
+  options: MachineToolRegistryOptions,
+  invocation: HostToolInvocation,
+): Promise<JsonValue> => {
+  const parsed = inputs.check_job.parse(invocation.input);
+  const { signal } = invocation;
+  const entry = await resolveMachine(client, parsed.machineId, signal);
+  const { check, reported } = await planJob(client, options, { invocation, parsed, entry });
+  if (check.status === 'refused') {
+    return {
+      status: 'refused',
+      simulated: isSimulatedMachine(entry.descriptor.capabilities),
+      message: refusedText(entry, check),
+      ...reported,
+    };
+  }
+  const checks = check.checks
+    .filter(({ state }) => state !== 'passed')
+    .map((value) => ({
+      id: value.id,
+      label: value.label,
+      state: value.state,
+      ...(value.detail === undefined ? {} : { detail: value.detail }),
+      ...(value.remedy === undefined ? {} : { remedy: remedyText(entry, value.remedy) }),
+    }));
   return asJson({
-    request: settled,
-    machineName,
-    approval: resolution.outcome,
-    ...nextStepOf(settled, machine),
+    status: check.status,
+    simulated: isSimulatedMachine(entry.descriptor.capabilities),
+    program: check.program,
+    ...(checks.length === 0 ? {} : { checks }),
     ...reported,
   });
 };
 
 /**
- * `cancel_print`: withdraw what has not started, cancel what has.
- *
- * @param client - The negotiated machines facet.
- * @param invocation - The tool call; its id names the cancel operation.
- * @param parsed - Validated tool input.
- * @returns The request and, for a started one, the cancel receipt.
- */
-const cancelPrint = async (
-  client: MachineClient,
-  invocation: HostToolInvocation,
-  parsed: z.infer<typeof inputs.cancel_print>,
-): Promise<JsonValue> => {
-  const { signal } = invocation;
-  const operationId = `${invocation.toolCallId}:cancel`;
-  if (parsed.requestId === undefined) {
-    return asJson(
-      await client.controlRun({
-        machineId: parsed.machineId!,
-        operationId,
-        command: 'cancel',
-        expectedProviderRunId: parsed.expectedProviderRunId!,
-        signal,
-      }),
-    );
-  }
-  const request = await findRequest(client, parsed.requestId, signal);
-  if (request.state === 'started') {
-    const { receipt } = request;
-    const expectedProviderRunId =
-      receipt?.status === 'accepted' && receipt.kind !== 'upload' ? receipt.providerRunId : undefined;
-    if (expectedProviderRunId === undefined) {
-      throw new Error(`Print request ${request.requestId} started without a provider run id; reconcile it first.`);
-    }
-    const cancelled = await client.controlRun({
-      machineId: request.machineId,
-      operationId,
-      command: 'cancel',
-      expectedProviderRunId,
-      signal,
-    });
-    return asJson({ request, receipt: cancelled });
-  }
-  if (settledStates.has(request.state)) {
-    return asJson({ request });
-  }
-  return asJson({
-    request: await client.withdrawPrintRequest({ requestId: request.requestId, resolvedBy: requesterOf(invocation) }),
-  });
-};
-
-/**
- * `get_print_profiles`: resolve the machine and its provider, then describe
- * what Bambu Studio would slice with.
- *
- * @param client - The negotiated machines facet.
- * @param options - Where Bambu Studio comes from.
- * @param invocation - The tool call.
- * @returns The profiles, or the reference engine and why.
+ * `get_print_profiles`: resolve the machine and its provider, then describe what Bambu Studio would slice with.
  */
 const getPrintProfiles = async (
   client: MachineClient,
@@ -695,10 +1030,15 @@ const getPrintProfiles = async (
   const { signal } = invocation;
   const { machineId, ...rest } = inputs.get_print_profiles.parse(invocation.input);
   const entry = await resolveMachine(client, machineId, signal);
+  if (fffProcessOf(entry.descriptor.capabilities) === undefined) {
+    throw new Error(
+      `${entry.name} has no fff process, so nothing is sliced for it; request_job runs a finished program named by artifact.`,
+    );
+  }
   const providers = await client.listProviders({ signal });
   const provider = providers.find(({ id }) => id === entry.providerId);
   if (provider === undefined) {
-    throw new Error(`No provider ${entry.providerId} backs ${entry.descriptor.name}.`);
+    throw new Error(`No provider ${entry.providerId} backs ${entry.name}.`);
   }
   return describePrintProfiles(options.bambuStudio ?? defaultBambuStudioEngine, {
     provider,
@@ -715,116 +1055,41 @@ const invokeMachine = async (
 ): Promise<JsonValue> => {
   const { input, signal, toolName: name } = invocation;
   switch (name) {
-    case 'discover_machines': {
-      const parsed = inputs.discover_machines.parse(input);
-      const events = [];
-      for await (const event of client.discover({ ...parsed, signal })) {
-        if (events.length === 256) {
-          throw new Error('Machine discovery exceeded the tool result limit.');
-        }
-        events.push(event);
-      }
-      return asJson({ events });
-    }
-    case 'begin_machine_binding': {
-      const parsed = inputs.begin_machine_binding.parse(input);
-      // SAFETY: the strict schema above is the JSON projection of MachineCandidate.
-      return asJson(
-        await client.beginBinding({
-          ...parsed,
-          candidate: parsed.candidate as MachineBeginBindingInput['candidate'],
-          signal,
-        }),
-      );
-    }
     case 'list_machines': {
       inputs.list_machines.parse(input);
-      return asJson(await client.list({ signal }));
+      const { entries } = await client.list({ signal });
+      return listMachinesText(entries);
     }
     case 'get_machine': {
       const { machineId } = inputs.get_machine.parse(input);
-      return asJson(await resolveMachine(client, machineId, signal));
+      const entry = await resolveMachine(client, machineId, signal);
+      const listed =
+        entry.descriptor.capabilities.jobs.type === 'supported'
+          ? await client.listJobs({ machineId: entry.machineId, signal })
+          : [];
+      const jobs = listed.slice(0, 3);
+      return describeMachineText(entry, {
+        jobs: jobs.map((job) => {
+          const nextStep = nextStepOf(job, entry);
+          return nextStep === undefined ? { job } : { job, nextStep };
+        }),
+        now: (options.now ?? Date.now)(),
+      });
+    }
+    case 'machine_action': {
+      return machineAction(client, options, invocation);
+    }
+    case 'stop_machine': {
+      return stopMachine(client, invocation);
     }
     case 'get_print_profiles': {
       return getPrintProfiles(client, options, invocation);
     }
-    case 'request_print': {
-      return requestPrint(client, options, invocation);
+    case 'request_job': {
+      return requestJob(client, options, invocation);
     }
-    case 'get_print_request': {
-      const { requestId } = inputs.get_print_request.parse(input);
-      const request = await findRequest(client, requestId, signal);
-      const { entries } = await client.list({ signal });
-      return asJson({
-        request,
-        ...nextStepOf(
-          request,
-          entries.find(({ machineId }) => machineId === request.machineId),
-        ),
-      });
-    }
-    case 'list_print_requests': {
-      const parsed = inputs.list_print_requests.parse(input);
-      const [requests, { entries }] = await Promise.all([
-        client.listPrintRequests({ ...parsed, signal }),
-        client.list({ signal }),
-      ]);
-      /* A started request names its run's fate, so a finished print is never read as a busy machine. */
-      const listed = requests.slice(0, 64).map((request) => {
-        const run = startedRunOf(
-          request,
-          entries.find(({ machineId }) => machineId === request.machineId),
-        );
-        return run === undefined ? request : { ...request, run };
-      });
-      return asJson({ requests: listed, total: requests.length });
-    }
-    case 'cancel_print': {
-      return cancelPrint(client, invocation, inputs.cancel_print.parse(input));
-    }
-    case 'prepare_machine_print': {
-      const parsed = inputs.prepare_machine_print.parse(input);
-      if (options.projectId === undefined) {
-        throw new Error('This host cannot name the project a print artifact belongs to, so it prepares no prints.');
-      }
-      /* The host names the project; the machine channel checks the reference's grammar. */
-      const artifact = { ...parsed.artifact, projectId: options.projectId };
-      // SAFETY: the strict artifact schema validates the reference's wire shape and its canonical sha256 digest.
-      return asJson(
-        await client.preparePrint({
-          ...parsed,
-          artifact: artifact as MachineArtifactReference,
-          configuration: parsed.configuration as MachinePreparePrintInput['configuration'],
-          signal,
-        }),
-      );
-    }
-    case 'upload_machine_print': {
-      const parsed = inputs.upload_machine_print.parse(input);
-      // SAFETY: digest fields are checked against the canonical sha256 wire form above.
-      return asJson(
-        await client.uploadPrint({
-          ...(parsed as Omit<Parameters<MachineClient['uploadPrint']>[0], 'signal'>),
-          signal,
-        }),
-      );
-    }
-    case 'reconcile_machine_operation': {
-      return asJson(
-        await client.reconcileOperation({
-          ...inputs.reconcile_machine_operation.parse(input),
-          signal,
-        }),
-      );
-    }
-    case 'control_machine_run': {
-      const parsed = inputs.control_machine_run.parse(input);
-      return asJson(
-        await client.controlRun({
-          ...(parsed as Omit<MachineControlRunInput, 'signal'>),
-          signal,
-        }),
-      );
+    case 'check_job': {
+      return checkJob(client, options, invocation);
     }
     case 'capture_machine_still': {
       const { machineId } = inputs.capture_machine_still.parse(input);
@@ -847,8 +1112,8 @@ const invokeMachine = async (
 /**
  * Build the explicit machine tools over one already negotiated and granted client.
  *
- * No tool here starts a print: a start happens only inside the host's print
- * request ledger after a person accepts the request (blueprint D4, D12).
+ * The agent causes an effect only through a declared action (`machine_action`, under the host's authority and a
+ * person's approval where the action needs one), `stop_machine`, or a job a person accepts (`request_job`).
  *
  * @param client - The negotiated machines facet.
  * @param options - Host capabilities beyond the client.
@@ -861,13 +1126,9 @@ export const createMachineToolRegistry = (
 ): ToolRegistry => ({
   list: () =>
     (Object.keys(inputs) as MachineToolName[])
-      .filter(
-        (name) =>
-          (name !== 'request_print' || options.planPrint !== undefined) &&
-          (name !== 'prepare_machine_print' || options.projectId !== undefined),
-      )
+      .filter((name) => (name !== 'request_job' && name !== 'check_job') || options.planPrint !== undefined)
       .map((name) => definitionFor(name)),
-  answerApproval: async (answer) => answerPrintApproval(client, answer),
+  answerApproval: async (answer) => answerJobApproval(client, answer),
   async invoke(invocation): Promise<HostToolResult> {
     if (!toolNames.has(invocation.toolName)) {
       return {
@@ -881,10 +1142,12 @@ export const createMachineToolRegistry = (
     try {
       invocation.signal.throwIfAborted();
       return {
-        content: await invokeMachine(client, options, {
-          ...invocation,
-          toolName: invocation.toolName as MachineToolName,
-        }),
+        content: asJson(
+          await invokeMachine(client, options, {
+            ...invocation,
+            toolName: invocation.toolName as MachineToolName,
+          }),
+        ),
         isError: false,
       };
     } catch (error) {
@@ -917,27 +1180,27 @@ export const createMachineToolRegistry = (
 });
 
 /**
- * Settle the print request a person answered in chat (D5, GM.r1 H2): the host hands every answer to the approval
- * `request_print` asked for here, whether or not the run continues.
- *
- * A request no longer awaiting approval was already settled (by the call's own recall, the Print pane, or a replayed
- * answer) and is left alone, so a second hand-over settles nothing twice.
+ * Settle the job a person answered in chat: the host hands every answer to the approval `request_job` asked for
+ * here, whether or not the run continues. A job no longer awaiting approval was already settled and is left alone.
+ * Action approvals are not handed over: an action applies only in the attempt that recalls its approval.
  *
  * @param client - The negotiated machines facet.
- * @param answer - The tool, its request's payload and the person's answer.
+ * @param answer - The tool, its job's payload and the person's answer.
  */
-const answerPrintApproval = async (client: MachineClient, answer: HostToolApprovalAnswer): Promise<void> => {
-  const { toolName, payload, resolution } = answer;
-  const { requestId } = payload;
-  if (toolName !== 'request_print' || payload['kind'] !== 'print-request' || typeof requestId !== 'string') {
+const answerJobApproval = async (client: MachineClient, answer: HostToolApprovalAnswer): Promise<void> => {
+  const { toolName: name, payload, resolution } = answer;
+  const { jobId, machineId } = payload;
+  if (name !== toolName.requestJob || payload['kind'] !== 'job' || typeof jobId !== 'string') {
     return;
   }
-  /* Nobody waits on the hand-over, and an approval's upload answers to the host rather than to a caller. */
+  /* Nobody waits on the hand-over. */
   const { signal } = new AbortController();
-  const request = await findRequest(client, requestId, signal);
-  if (request.state === 'awaiting-approval') {
-    await settleApproval(client, { requestId, resolution, signal });
-  }
+  await settleApproval(client, {
+    jobId,
+    ...(typeof machineId === 'string' ? { machineId } : {}),
+    resolution,
+    signal,
+  });
 };
 
 /** Whether a name belongs to the bounded machine registry. @internal */

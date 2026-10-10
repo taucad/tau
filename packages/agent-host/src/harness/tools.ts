@@ -18,7 +18,8 @@ const pathFields = new Map<string, string>([
   ['evaluate_model', 'targetFile'],
   ['export_model', 'targetFile'],
   ['screenshot', 'targetFile'],
-  ['request_print', 'targetFile'],
+  ['request_job', 'targetFile'],
+  ['check_job', 'targetFile'],
   ['list_directory', 'path'],
   ['grep', 'path'],
   ['glob_search', 'path'],
@@ -60,12 +61,13 @@ export const tauToolKinds = new Map<string, string>([
   ['use_skill', 'other'],
   ['update_todos', 'edit'],
   ['ask_questions', 'other'],
+  ['list_machines', 'read'],
   ['get_machine', 'read'],
-  ['request_print', 'other'],
-  ['get_print_request', 'read'],
+  ['machine_action', 'other'],
+  ['stop_machine', 'other'],
   ['get_print_profiles', 'read'],
-  ['list_print_requests', 'read'],
-  ['cancel_print', 'other'],
+  ['request_job', 'other'],
+  ['check_job', 'read'],
 ]);
 
 const normalizeBracketArrays = (input: Record<string, unknown>): Record<string, unknown> => {

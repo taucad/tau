@@ -1828,6 +1828,9 @@ importers:
       '@taucad/build123d':
         specifier: workspace:*
         version: link:../../packages/plugins/build123d
+      '@taucad/carvera':
+        specifier: workspace:*
+        version: link:../../packages/plugins/carvera
       '@taucad/converter':
         specifier: workspace:*
         version: link:../libs/converter
@@ -1849,6 +1852,9 @@ importers:
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../packages/plugins/gltf
+      '@taucad/grbl':
+        specifier: workspace:*
+        version: link:../../packages/plugins/grbl
       '@taucad/host':
         specifier: workspace:*
         version: link:../../packages/host
@@ -3298,9 +3304,6 @@ importers:
       '@taucad/assimp':
         specifier: workspace:*
         version: link:../plugins/assimp
-      '@taucad/bambu':
-        specifier: workspace:*
-        version: link:../plugins/bambu
       '@taucad/brep':
         specifier: workspace:*
         version: link:../plugins/brep
@@ -3652,9 +3655,15 @@ importers:
       '@taucad/bambu':
         specifier: workspace:*
         version: link:../plugins/bambu
+      '@taucad/carvera':
+        specifier: workspace:*
+        version: link:../plugins/carvera
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../filesystem
+      '@taucad/grbl':
+        specifier: workspace:*
+        version: link:../plugins/grbl
       '@taucad/jobs':
         specifier: workspace:*
         version: link:../jobs
@@ -3858,6 +3867,9 @@ importers:
 
   packages/plugins/bambu:
     dependencies:
+      '@standard-schema/spec':
+        specifier: 'catalog:'
+        version: 1.1.0
       '@taucad/units':
         specifier: workspace:*
         version: link:../../units
@@ -3937,6 +3949,19 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
+  packages/plugins/carvera:
+    dependencies:
+      '@taucad/units':
+        specifier: workspace:*
+        version: link:../../units
+    devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
   packages/plugins/esbuild:
     dependencies:
       '@taucad/bundler-core':
@@ -3983,6 +4008,15 @@ importers:
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../../runtime-testing
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
+  packages/plugins/grbl:
+    devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)

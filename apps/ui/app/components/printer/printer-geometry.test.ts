@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { parseGcode } from '@taucad/slicer/toolpath';
-import { bambuA1MiniManifest } from '@taucad/bambu';
 import {
   derivePrinterGeometry,
   framedPartBox,
@@ -15,8 +14,15 @@ import {
 } from '#components/printer/printer-geometry.js';
 import type { PrinterBounds, PrinterCameraPose, PrinterGeometry } from '#components/printer/printer-geometry.js';
 import { fixtureProgram } from '#components/printer/testing/toolpath-fixture.js';
-import { resolvePrinterManifest, x1cReferenceGeometry } from '#components/printer/printer-manifest.fixture.js';
+import {
+  printerManifestOf,
+  resolvePrinterManifest,
+  x1cReferenceGeometry,
+} from '#components/printer/printer-manifest.fixture.js';
 import type { PrinterManifest } from '#components/printer/printer-manifest.fixture.js';
+import { a1MiniManifest, routerManifest, x1cManifest } from '#components/print/testing/machines.fixture.js';
+
+const a1MiniScene = resolvePrinterManifest(a1MiniManifest);
 
 const bedSlinger: PrinterManifest = {
   identity: { displayName: 'Open bed slinger' },
@@ -55,7 +61,7 @@ describe('derivePrinterGeometry', () => {
   });
 
   it('should use Mini dimensions and moving-bed geometry without X1C-specific model assets', () => {
-    const mini = derivePrinterGeometry(bambuA1MiniManifest);
+    const mini = derivePrinterGeometry(a1MiniScene);
     expect(mini.model).toBe('a1-mini');
     expect(mini.buildVolume).toEqual([180, 180, 180]);
     expect(mini.motion).toBe('head-rises');
@@ -117,7 +123,7 @@ describe('derivePrinterGeometry', () => {
   });
 
   it('should move Mini’s bed oppositely to toolpath Y while the head stays centred', () => {
-    const mini = derivePrinterGeometry(bambuA1MiniManifest);
+    const mini = derivePrinterGeometry(a1MiniScene);
     for (const y of [0, 90, 180]) {
       expect(plateOffsetForY(mini, y)).toBe(90 - y);
       expect(y + plateOffsetForY(mini, y)).toBe(90);
@@ -134,7 +140,37 @@ describe('derivePrinterGeometry', () => {
 
   it('should resolve the X1C reference until a manifest arrives', () => {
     expect(resolvePrinterManifest(undefined)).toBe(x1cReferenceGeometry);
-    expect(resolvePrinterManifest(bedSlinger)).toBe(bedSlinger);
+    expect(resolvePrinterManifest(x1cManifest).identity).toEqual({ displayName: 'X1 Carbon', model: 'x1c' });
+  });
+
+  it('should read the scene facts from the FFF process and the light, fan and material-system components', () => {
+    expect(printerManifestOf(x1cManifest)).toMatchObject({
+      geometry: x1cReferenceGeometry.geometry,
+      chamber: {
+        enclosed: true,
+        light: true,
+        fans: [
+          { id: 'part-fan', label: 'Part fan' },
+          { id: 'aux-fan', label: 'Auxiliary fan' },
+          { id: 'chamber-fan', label: 'Chamber fan' },
+        ],
+      },
+      materialSystem: { units: 1, slotsPerUnit: 4, externalSpool: true },
+    });
+    expect(printerManifestOf(a1MiniManifest)?.chamber).toEqual({
+      enclosed: false,
+      light: false,
+      fans: [{ id: 'part-fan', label: 'Part fan' }],
+    });
+  });
+
+  it('should draw a milling machine as its open work area, with no material unit or light', () => {
+    const router = derivePrinterGeometry(resolvePrinterManifest(routerManifest));
+    expect(router.model).toBe('longmill-mk2-30');
+    expect(router.buildVolume).toEqual([810, 855, 120]);
+    expect(router.panels).toHaveLength(0);
+    expect(router.materialUnit).toBeUndefined();
+    expect(router.light).toBeUndefined();
   });
 });
 

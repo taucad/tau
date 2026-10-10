@@ -71,7 +71,6 @@
     "@parcel/watcher": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/assimp": "workspace:*",
-    "@taucad/bambu": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/gltf": "workspace:*",

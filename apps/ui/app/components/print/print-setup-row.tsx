@@ -5,6 +5,7 @@ import { cn } from '@taucad/ui/utils/cn';
 /** Match the Parameters label, control and reset columns in the Print pane. */
 export function PrintSetupRow({
   label,
+  reading,
   description,
   swatch,
   isModified = false,
@@ -13,6 +14,8 @@ export function PrintSetupRow({
   children,
 }: {
   readonly label: string;
+  /** What the machine reports now, shown after the label. */
+  readonly reading?: string;
   readonly description?: string;
   readonly swatch?: string;
   readonly isModified?: boolean;
@@ -34,6 +37,9 @@ export function PrintSetupRow({
               <MaterialSwatch materials={[{ color: swatch, roughness: 0.35, metalness: 0 }]} />
             )}
             <span className='truncate'>{label}</span>
+            {reading === undefined ? null : (
+              <span className='shrink-0 text-xs text-muted-foreground/70 tabular-nums'>{reading}</span>
+            )}
           </span>
           {isModified && onReset ? <ModifiedIndicator onReset={onReset} tooltip={`Reset ${label}`} /> : null}
         </div>

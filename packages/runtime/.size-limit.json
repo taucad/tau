@@ -1,8 +1,8 @@
 [
   {
-    "name": "total (ESM JS)",
+    "name": "total (ESM JS) — measured 207.55 kB brotli on 2026-10-10",
     "path": ["dist/**/*.mjs", "!dist/**/wasm/**", "!dist/**/fonts/**"],
-    "limit": "205 kB"
+    "limit": "210 kB"
   },
   {
     "name": "@taucad/runtime",

@@ -20,8 +20,8 @@ export const slicingPreferencesSchema = z.strictObject({
     .optional(),
   settings: bambuStudio.settings,
   /**
-   * Reference-slicer options, limited to the print-quality keys `request_print` accepts
-   * (`requestPrintOptionKeys` in the chat tool schemas, which this package cannot import).
+   * Reference-slicer options, limited to the print-quality keys `request_job` accepts
+   * (`printOptionKeys` in the chat tool schemas, which this package cannot import).
    */
   options: z
     .strictObject({

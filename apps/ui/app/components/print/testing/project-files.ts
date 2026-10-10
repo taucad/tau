@@ -8,12 +8,12 @@
 
 import { MachineSettingsOwner } from '@taucad/runtime/host';
 import { machineSettingsPath } from '@taucad/runtime/machine/settings';
-import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
+import { providerSettingsDefinitions } from '#machines/machine-settings-definitions.js';
 import { slicingPreferences } from '@taucad/slicer/preferences';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
 import { Topic } from '@taucad/events';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
-import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
+import type { CheckedFileWrite, CheckedFileWriteResult, FileStatEntry, FileWritePrecondition } from '@taucad/types';
 
 type CheckedWrite = Omit<CheckedFileWrite, 'signal'>;
 
@@ -28,6 +28,11 @@ export type ProjectFiles = Readonly<{
       subscribe: () => Readonly<{ unsubscribe: () => void }>;
     }>;
     contentService: Readonly<Pick<FileContentService, 'subscribe' | 'watchReady'>>;
+    /** The project's file index: a case-insensitive path search, and a notice on every change. */
+    treeService: Readonly<{
+      searchFiles: (query: string) => Promise<FileStatEntry[]>;
+      subscribeTree: (listener: () => void) => () => void;
+    }>;
     parameterFiles: Readonly<{
       exists: (path: string) => Promise<boolean>;
       readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
@@ -109,6 +114,25 @@ export const createProjectFiles = (root = '/projects/project-1'): ProjectFiles =
       subscribe: (path, listener) =>
         changes.subscribe({ handler: listener, interestedIn: (changed) => changed === path }),
     },
+    treeService: {
+      searchFiles: async (query) =>
+        [...files].flatMap(([path, bytes]): FileStatEntry[] =>
+          path.toLowerCase().includes(query.toLowerCase())
+            ? [
+                {
+                  path,
+                  name: path.split('/').at(-1) ?? path,
+                  type: 'file',
+                  size: bytes.byteLength,
+                  mtimeMs: 0,
+                  contentKind: 'text',
+                  lineCount: decoder.decode(bytes).split('\n').length,
+                },
+              ]
+            : [],
+        ),
+      subscribeTree: (listener) => changes.subscribe({ handler: listener }),
+    },
     parameterFiles: {
       exists: async (path) => files.has(relative(path)),
       readFile: async (path) => {
@@ -138,7 +162,7 @@ export const createProjectFiles = (root = '/projects/project-1'): ProjectFiles =
   };
   const createSettings = (): { owner: MachineSettingsOwner; settings: MachineSettingsStore } => {
     const owner = new MachineSettingsOwner({
-      definitions: [slicingPreferences, bambuSettingsConfiguration],
+      definitions: [slicingPreferences, ...providerSettingsDefinitions],
       filesystem: {
         readFileStream: (path) =>
           new ReadableStream({

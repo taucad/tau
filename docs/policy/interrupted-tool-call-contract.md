@@ -80,7 +80,7 @@ A Tau host's tool that asks for approval pauses the run on a native `interrupt.r
 - The continued attempt receives an approval-answer reminder (`tauInternal.kind: 'approval-answer'`). It names each answer given since the attempt last ran, with its prompt, the asking call ID and the tool.
 - A denial or a Stop ends the run with no attempt left to tell. The chat's next run receives the same reminder for the ended run's untold answers, before the person's new message, and says that its calls ask again. An answer is therefore never conveyed only through the aborted call's error text.
 - The host hands each answer to the tool registry's idempotent `answerApproval`, so what the tool guards follows the answer whether or not the run continues. An answer or a Stop hands over only the requests its own command resolved. An applied resume reconciles every answer of its run.
-- Recall is at-least-once for a generic tool. A call that recalled an answer and then threw releases it, and a crash before the output row lets the next call recall it again. A tool that guards a side effect keys that effect idempotently, as `request_print` keys its ledger request by the asking call.
+- Recall is at-least-once for a generic tool. A call that recalled an answer and then threw releases it, and a crash before the output row lets the next call recall it again. A tool that guards a side effect keys that effect idempotently, as `request_job` keys its job by the asking call.
 
 ## Ownership
 

@@ -1,6 +1,6 @@
 import { toolName } from '#constants/tool.constants.js';
 import { arrangeWorkbenchDescription } from '#schemas/tools/arrange-workbench.tool.schema.js';
-import { requestPrintOptionKeys } from '#schemas/tools/print.tool.schema.js';
+import { printOptionKeys } from '#schemas/tools/machine.tool.schema.js';
 
 const parameterUnitRule =
   'When current.entry.groups[g].units[pointer] exists, it is the unit of the stored number and of native-value writes; use unit-value with inputUnit to be explicit.';
@@ -152,18 +152,24 @@ Ask only what the person alone can decide and what changes the work: what to bui
 Ask early, before investing in a direction. Put your recommendation first: it is adopted if nobody answers within waitSeconds. The person can always answer in their own words. Use waitSeconds 0 when you can start on the recommendation now.
 
 Returns each answer and who settled it. Unless status is "answered", proceed with the recommended option and say once which you assumed; a later answer arrives as a message. Never repeat a question or write a multiple-choice question as prose.`,
-  [toolName.getMachine]:
-    'Read one bound machine: its readiness, loaded setup and printable envelope. Omit machineId when exactly one machine is bound; otherwise the error names every bound machine.',
-  [toolName.requestPrint]: `The only way to print. Slices one CAD source file to a .gcode.3mf in the project and opens a print request on a bound machine; nothing is uploaded or started until a person accepts, which starts the print. A Tau-hosted turn waits for the answer and the start; elsewhere it returns the request awaiting-approval for the Print pane. Report the outcome as nextStep states it; an unconfirmed start is unknown, never "submitted" or "started". Never retry or work around a request with other machine tools. First run test_model, check the part fits get_machine's printable envelope, and call get_print_profiles. When get_machine shows no bedType, ask which plate is installed and pass it as plate. Under engine "bambu-studio" presets follow what the printer reports; change them with profiles and settings as get_print_profiles names them. Under the reference engine, options accept only ${requestPrintOptionKeys.join(', ')}.`,
-  [toolName.getPrintProfiles]: `List the slicing presets and settings request_print can use for a bound machine. Read-only.
+  [toolName.listMachines]:
+    'List every machine bound on this computer, one line each: id, name, model, connection, state and any run. Read-only.',
+  [toolName.getMachine]: `Read one bound machine as it last reported: state, run and progress, components, activities and the questions they ask, alerts and checks with remedies, recent jobs and operations, what stop does, and every declared action with its parameters, what it does, who may use it and whether you may use it now. Read-only.
 
-For a Bambu printer with Bambu Studio available it returns engine "bambu-studio": defaults (the presets chosen from the printer's model, nozzle, loaded filament and reported plate), the compatible printers, processes and filaments (source "user" marks the person's own), plates, and every setting's current value by group with enum choices. Pass profiles to read another selection, and keys for full descriptors (units, ranges, descriptions). Otherwise it returns engine "reference" and why. The project’s .tau/machines/settings/<typeId>.json retains named profiles shared by machines of that type. savedProfiles lists stable IDs and the active selection. Pass profileId to inspect or prepare a different saved profile without changing that selection. machinePreferences reports the exact profile and source versions used; request_print arguments override its sparse values. Edit the versioned record to change saved preferences.`,
-  [toolName.getPrintRequest]:
-    'Read one print request by its exact request ID: state, summary, receipts, any failure, and a nextStep saying what to tell the person and do next. A started request also says whether its run is still running or has ended; only get_machine says whether the machine is ready.',
-  [toolName.listPrintRequests]:
-    "List print requests, newest first, optionally for one machine. A started request's run says whether it is still running or has ended, so a finished print is not read as a busy machine.",
-  [toolName.cancelPrint]:
-    'Stop a print. Withdraws a request that has not started, or cancels the exact observed provider run of a started one, which stops the printer. Give requestId alone, or machineId with expectedProviderRunId.',
+Read it before machine_action, and to follow an action or a job. Omit machineId when exactly one machine is bound.`,
+  [toolName.machineAction]: `Apply one declared action that get_machine lists, by componentId, action and parameters.
+
+An action you may use now runs at once; one that needs approval pauses for the person to approve exactly this request in a Tau chat, and elsewhere returns needs-approval for the person to do it in Tau; one only a person at the machine may use is refused with what the person must do. Report the message as it states it. Never resend an action that is confirming or unknown, and never work around a refusal with other tools. To halt the machine, use stop_machine.`,
+  [toolName.stopMachine]:
+    'Stop the machine now: its fastest halt, open to you at any time without approval, and not an emergency stop. Returns what the machine is left doing and how a person recovers it. To pause a run that can continue, use machine_action with run.pause.',
+  [toolName.requestJob]: `The only way to start a program on a machine. Name targetFile, a CAD source Tau slices (3D printers only), or artifact, a finished program in the project run as is (get_machine lists what the machine accepts). Nothing starts until a person accepts. A Tau-hosted turn waits for the answer; otherwise, or when only the person can confirm something, the job awaits approval in Tau's Print pane. Report the outcome as nextStep states it; an unconfirmed start is unknown, never "started". Request a job once; after an approval reminder, repeat the same call to read the answer.
+
+For targetFile, first run test_model, fit get_machine's build volume and read get_print_profiles. When get_machine reports no plate, ask which is installed and pass plate. Under engine "bambu-studio" use bambuStudio.profiles and .settings as get_print_profiles names them; under the reference engine options accept only ${printOptionKeys.join(', ')}.`,
+  [toolName.checkJob]:
+    'Prepare exactly as request_job would (slice targetFile, or read artifact) and ask the machine whether it is ready for the program: ready, blocked (with the checks that fail and their remedies) or refused. Records no job and sends nothing to the machine.',
+  [toolName.getPrintProfiles]: `List the slicing presets and settings request_job can use for a bound machine with an fff process (a 3D printer); other machines take a finished program and have none. Read-only.
+
+For a Bambu printer with Bambu Studio available it returns engine "bambu-studio": defaults (the presets chosen from the printer's model, nozzle, loaded filament and reported plate), the compatible printers, processes and filaments (source "user" marks the person's own), plates, and every setting's current value by group with enum choices. Pass profiles to read another selection, and keys for full descriptors. Otherwise it returns engine "reference" and why. The project's .tau/machines/settings/<typeId>.json keeps named profiles shared by machines of that type; savedProfiles lists their ids and the active one. Pass profileId to read another without changing the selection. machinePreferences reports the profile and source versions used; request_job arguments override its sparse values.`,
   [toolName.revisions]: `Read this project's saved revisions. Read-only.
 
 Actions:

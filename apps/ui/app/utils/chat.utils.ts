@@ -27,6 +27,9 @@ const maxSnippetLength = 200;
 
 const joinLines = (...lines: Array<string | undefined | false>): string => lines.filter(Boolean).join('\n');
 
+/* A job on a simulator reads as one in Copy and export, as the job card says it. */
+const simulatedMark = (simulated: boolean | undefined): string => (simulated === true ? ' (simulated)' : '');
+
 type SerializableFileMetadata =
   | {
       readonly size: number;
@@ -84,6 +87,10 @@ type ToolSerializer<T extends keyof MyTools> = {
 };
 
 type ToolPartFor<Name extends keyof MyTools> = ToolUIPart<Pick<MyTools, Name>>;
+
+/** The machine tools answer in text; an old chat's object answer is kept readable rather than `[object Object]`. */
+const machineTextOf = (output: unknown): string =>
+  typeof output === 'string' ? output : JSON.stringify(output, undefined, 2);
 
 const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
   [toolName.getParameters]: {
@@ -288,39 +295,56 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     input: (input) => `arrange_workbench(${Object.keys(input).join(', ')})`,
     output: (output) => `-> ${output.revisions.map((revision) => revision.path).join(', ')}`,
   },
+  [toolName.listMachines]: {
+    input: () => '',
+    output: (output: unknown) => machineTextOf(output),
+  },
   [toolName.getMachine]: {
     input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
-    output: (output) => JSON.stringify(output, null, 2),
+    output: (output: unknown) => machineTextOf(output),
+  },
+  [toolName.machineAction]: {
+    input: (input) =>
+      joinLines(
+        input.machineId === undefined ? undefined : `machineId: ${input.machineId}`,
+        `${input.componentId}: ${input.action}`,
+        input.parameters === undefined ? undefined : JSON.stringify(input.parameters),
+      ),
+    output: (output) => `${output.status}: ${output.message}`,
+  },
+  [toolName.stopMachine]: {
+    input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
+    output: (output) => `${output.status}: ${output.message}`,
   },
   [toolName.getPrintProfiles]: {
     input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
     output: (output) => JSON.stringify(output, null, 2),
   },
-  [toolName.requestPrint]: {
+  [toolName.requestJob]: {
     input: (input) =>
       joinLines(
-        `targetFile: ${input.targetFile}`,
+        input.artifact === undefined ? `targetFile: ${input.targetFile}` : `artifact: ${input.artifact}`,
         input.machineId === undefined ? undefined : `machineId: ${input.machineId}`,
         input.preset === undefined ? undefined : `preset: ${input.preset}`,
       ),
     output: (output) =>
       joinLines(
-        `${output.request.summary.fileName} on ${output.machineName ?? output.request.machineId}: ${output.request.state}`,
-        output.request.failure?.message,
+        `${output.job.program.name} on ${output.machineName ?? output.job.machineId}${simulatedMark(output.simulated)}: ${output.job.state}`,
+        output.job.failure?.message,
         output.nextStep,
       ),
   },
-  [toolName.getPrintRequest]: {
-    input: (input) => `requestId: ${input.requestId}`,
-    output: (output) => `${output.request.summary.fileName}: ${output.request.state}`,
-  },
-  [toolName.listPrintRequests]: {
-    input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
-    output: (output) => `${String(output.total)} print request(s)`,
-  },
-  [toolName.cancelPrint]: {
-    input: (input) => JSON.stringify(input),
-    output: (output) => JSON.stringify(output, null, 2),
+  [toolName.checkJob]: {
+    input: (input) =>
+      joinLines(
+        input.artifact === undefined ? `targetFile: ${input.targetFile}` : `artifact: ${input.artifact}`,
+        input.machineId === undefined ? undefined : `machineId: ${input.machineId}`,
+      ),
+    output: (output) =>
+      joinLines(
+        `${output.status}${simulatedMark(output.simulated)}${output.program ? `: ${output.program.name}` : ''}`,
+        output.message,
+      ),
   },
   [toolName.revisions]: {
     input: (input) => `action: ${input.action}`,

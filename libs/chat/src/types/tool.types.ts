@@ -21,19 +21,21 @@ import type { RevisionsInput, RevisionsOutput } from '#schemas/tools/revisions.t
 import type { UpdateTodosInput, UpdateTodosOutput } from '#schemas/tools/update-todos.tool.schema.js';
 import type { AskQuestionsInput, AskQuestionsOutput } from '#schemas/tools/ask-questions.tool.schema.js';
 import type {
-  CancelPrintInput,
-  CancelPrintOutput,
+  CheckJobInput,
+  CheckJobOutput,
   GetMachineInput,
   GetMachineOutput,
   GetPrintProfilesInput,
   GetPrintProfilesOutput,
-  GetPrintRequestInput,
-  GetPrintRequestOutput,
-  ListPrintRequestsInput,
-  ListPrintRequestsOutput,
-  RequestPrintInput,
-  RequestPrintOutput,
-} from '#schemas/tools/print.tool.schema.js';
+  ListMachinesInput,
+  ListMachinesOutput,
+  MachineActionInput,
+  MachineActionOutput,
+  RequestJobInput,
+  RequestJobOutput,
+  StopMachineInput,
+  StopMachineOutput,
+} from '#schemas/tools/machine.tool.schema.js';
 import type {
   ApplyParameterOperationInput,
   ApplyParameterOperationOutput,
@@ -171,12 +173,13 @@ export type MyTools = InferUITools<{
   [toolName.applyParameterOperation]: AiTool<ApplyParameterOperationInput, ApplyParameterOperationOutput>;
   [toolName.updateTodos]: AiTool<UpdateTodosInput, UpdateTodosOutput>;
   [toolName.askQuestions]: AiTool<AskQuestionsInput, AskQuestionsOutput>;
+  [toolName.listMachines]: AiTool<ListMachinesInput, ListMachinesOutput>;
   [toolName.getMachine]: AiTool<GetMachineInput, GetMachineOutput>;
+  [toolName.machineAction]: AiTool<MachineActionInput, MachineActionOutput>;
+  [toolName.stopMachine]: AiTool<StopMachineInput, StopMachineOutput>;
   [toolName.getPrintProfiles]: AiTool<GetPrintProfilesInput, GetPrintProfilesOutput>;
-  [toolName.requestPrint]: AiTool<RequestPrintInput, RequestPrintOutput>;
-  [toolName.getPrintRequest]: AiTool<GetPrintRequestInput, GetPrintRequestOutput>;
-  [toolName.listPrintRequests]: AiTool<ListPrintRequestsInput, ListPrintRequestsOutput>;
-  [toolName.cancelPrint]: AiTool<CancelPrintInput, CancelPrintOutput>;
+  [toolName.requestJob]: AiTool<RequestJobInput, RequestJobOutput>;
+  [toolName.checkJob]: AiTool<CheckJobInput, CheckJobOutput>;
 }>;
 
 /**

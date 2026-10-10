@@ -3,10 +3,11 @@
  * `tau serve --machines` daemon: the network, secret and artifact runtime a
  * `createNodeMachineHost` needs, and its durable identity.
  *
- * Ported from the qualification script's runtime
- * (`packages/plugins/bambu/scripts/qualify-x1c.mts`) so both launchers run one
- * implementation. Every network operation is bounded by the provider's own
- * limits and pinned to the trust the binding ceremony recorded.
+ * Both launchers run this one implementation. The standard protocols it offers
+ * providers (TCP and TLS streams, UDP discovery, implicit-FTPS upload, RTSPS
+ * stills) take every endpoint, account and limit from the provider's call,
+ * and every TLS connection is pinned to the trust the binding ceremony
+ * recorded; nothing here knows a vendor.
  *
  * @public
  */
@@ -25,7 +26,7 @@ import type { PeerCertificate, TLSSocket } from 'node:tls';
 import { MessageChannel } from 'node:worker_threads';
 import type { MessagePort } from 'node:worker_threads';
 
-import { connectMachineChannel } from '@taucad/runtime/machine';
+import { connectMachineChannel, withMachineCode } from '@taucad/runtime/machine';
 import type {
   MachineArtifactReference,
   MachineClient,
@@ -40,7 +41,12 @@ import type {
   MachineTransportTrust,
 } from '@taucad/runtime/machine';
 import type { HostRouteGrant } from '@taucad/runtime/host';
-import type { NodeMachineRuntime } from '@taucad/runtime/host/node';
+import { createNodeMachineSerial } from '@taucad/runtime/host/node';
+import type {
+  CreateNodeMachineHostInput,
+  NodeMachineRuntime,
+  NodeMachineSerialDriver,
+} from '@taucad/runtime/host/node';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { projectManifestMaxBytes } from '@taucad/types';
 import { z } from 'zod';
@@ -56,6 +62,9 @@ import type { SecretVault, SecretVaultFacts, SecretVaultWriteOptions } from '#se
  *
  * A serve that fails closes both ends, so every call rejects with the channel
  * instead of hanging; closing the facet retires the served session with it.
+ * A handshake that fails, or a facet closed before its handshake, closes both
+ * ends too: `ready` still rejects for a caller that awaits it, and one that
+ * never does leaves no unhandled rejection behind.
  *
  * @param serve - Attach the host's end of the channel, e.g. `host.serve({ port, session })`.
  * @returns The available facet and its close.
@@ -75,11 +84,21 @@ export const localMachineFacet = (
     }
   };
   void attach();
+  const observeReadiness = async (): Promise<void> => {
+    try {
+      await client.ready;
+    } catch {
+      client.close();
+      port2.close();
+    }
+  };
+  // async-iife: readiness stays caller-visible while this observer owns failed-handshake cleanup.
+  void observeReadiness();
   return { available: true, ...client };
 };
 
 /**
- * Every operation the machines route answers; a served session is granted all
+ * Every operation the machines route answers; a person's session is granted all
  * of them, because the route's operator is the same person who bound the
  * machine. Kept beside the runtime so the desktop utility and the daemon
  * issue identical sessions.
@@ -93,20 +112,71 @@ export const machineRouteGrants: readonly HostRouteGrant[] = (
     'machines.list',
     'machines.get',
     'machines.watch',
-    'machines.preparePrint',
-    'machines.uploadPrint',
-    'machines.startPrint',
     'machines.reconcileOperation',
-    'machines.controlRun',
     'machines.captureStill',
-    'machines.requestPrint',
-    'machines.listPrintRequests',
-    'machines.watchPrintRequests',
-    'machines.resolvePrintRequest',
-    'machines.withdrawPrintRequest',
+    'machines.checkJob',
+    'machines.requestJob',
+    'machines.listJobs',
+    'machines.watchJobs',
+    'machines.resolveJob',
+    'machines.withdrawJob',
+    'machines.applyAction',
+    'machines.approveAction',
+    'machines.stop',
+    'machines.beginHold',
+    'machines.renewHold',
+    'machines.endHold',
+    'machines.setTesting',
     'machines.removeBinding',
   ] as const
 ).map((operation) => ({ route: 'machines', operation }));
+
+/* A person's own acts: finding and binding a machine, approving an action or deciding a job (R16), Testing mode,
+ * and the held controls a person presses. */
+const personOperations: ReadonlySet<string> = new Set([
+  'machines.approveAction',
+  'machines.resolveJob',
+  'machines.discover',
+  'machines.beginBinding',
+  'machines.removeBinding',
+  'machines.setTesting',
+  'machines.beginHold',
+]);
+
+/**
+ * What an agent's machines session is granted: {@link machineRouteGrants} without a person's own acts (discovery,
+ * binding, approving an action, deciding a job, Testing mode, holds). The session's actor is `{ kind: 'agent' }`, set by the host that issues it, so the
+ * host applies the agent rules whatever a call's payload says.
+ * @public
+ */
+export const machineAgentGrants: readonly HostRouteGrant[] = machineRouteGrants.filter(
+  ({ operation }) => !personOperations.has(operation),
+);
+
+/**
+ * The machine providers every Tau host serves: each first-party provider beside its socket-free simulator. The
+ * provider packages load on the first call, so a host that serves no machines never touches them.
+ *
+ * @returns One fresh registration per provider, for `createNodeMachineHost`.
+ * @public
+ */
+export const defaultMachineProviders = async (): Promise<CreateNodeMachineHostInput['providers']> => {
+  const [bambu, grbl, carvera] = await Promise.all([
+    import('@taucad/bambu'),
+    import('@taucad/grbl'),
+    import('@taucad/carvera'),
+  ]);
+  return [
+    bambu.bambuMachine(),
+    bambu.bambuA1MiniMachine(),
+    bambu.bambuSimulatorMachine(),
+    bambu.bambuA1MiniSimulatorMachine(),
+    grbl.grblMachine(),
+    grbl.grblSimulatorMachine(),
+    carvera.carveraMachine(),
+    carvera.carveraSimulatorMachine(),
+  ];
+};
 
 const digestOf = (bytes: Uint8Array<ArrayBuffer>): string =>
   `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
@@ -155,7 +225,7 @@ export const openMachineHostIdentity = async (directory: string): Promise<Machin
 
 /**
  * The `tau.json` id of the project a directory holds, read the way a machine
- * host names a print request's project: a bounded read of that one field, so
+ * host names a job's project: a bounded read of that one field, so
  * a manifest another rule would refuse still names its project.
  *
  * @param project - The project directory's files, e.g. a `NodeFsProviderClient` rooted at it.
@@ -225,7 +295,7 @@ export type MachineSecretStore = Readonly<{
  *
  * const directory = '/var/lib/tau/machines';
  * const secrets = createMachineSecretStore({ vault: openSecretVault({ directory }), legacyDirectory: directory });
- * const release = secrets.stage('vault:machine/bambu/00M00A391800004', '12345678');
+ * const release = secrets.stage('vault:machine/acme/SN-0001', '12345678');
  * release();
  * ```
  */
@@ -498,7 +568,7 @@ const listenDatagrams = async function* (input: MachineDatagramListenInput): Asy
 /**
  * The artifact as 64 KiB views, without copying. basic-ftp's transfer watchdog reads progress from the data
  * socket's `bytesWritten`, which counts a chunk the moment it is queued: a whole-file chunk looks stalled for as
- * long as the printer takes to drain it, so a healthy upload that outlasts the timeout is aborted.
+ * long as the server takes to drain it, so a healthy upload that outlasts the timeout is aborted.
  * @param bytes - The artifact.
  * @yields Consecutive views of at most 64 KiB.
  */
@@ -576,6 +646,11 @@ const uploadFile = async (
 /** Options for {@link createNodeMachineRuntime}. @public */
 export type CreateNodeMachineRuntimeOptions = Readonly<{
   secrets: MachineSecretStore;
+  /**
+   * The native serial driver for controllers on a USB or serial port. Absent, providers see no serial access and
+   * serial machines cannot be found or connected.
+   */
+  serial?: NodeMachineSerialDriver;
   /** Told every entry a provider logs. */
   log?: (entry: MachineLogEntry) => void;
   /**
@@ -597,26 +672,30 @@ export type CreateNodeMachineRuntimeOptions = Readonly<{
 /**
  * The host-owned runtime a machine host discovers, binds and prints with.
  *
- * Its `captureNetworkStill` decodes one JPEG from a pinned RTSPS camera with
- * the system `ffmpeg`, which plays a loopback proxy that answers the camera's
- * authentication itself, so the access code never reaches ffmpeg. Without an
- * ffmpeg, every capture rejects `MACHINE_STILL_FFMPEG_MISSING` rather than the
- * camera reporting stills unsupported.
+ * Its `uploadFile` stores one file over implicit FTPS (see `MachineFileUploadInput`). Its `captureNetworkStill`
+ * decodes one JPEG from a pinned RTSPS camera with the system `ffmpeg`, which plays a loopback proxy that answers the
+ * camera's authentication itself, so the credential never reaches ffmpeg. Without an ffmpeg, every capture rejects
+ * `MACHINE_STILL_FFMPEG_MISSING` rather than the camera reporting stills unsupported.
  *
  * @param options - Secret custody, artifact reader, log sink and `ffmpeg` lookup.
  * @returns The runtime for `createNodeMachineHost`, whose `credentials` answer
- * whether a printer's code is saved and forget a removed binding's code.
+ * whether a machine's credential is saved and forget a removed binding's credential.
  * @public
  */
 export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOptions): NodeMachineRuntime => {
   const clock = Object.freeze({ now: () => new Date().toISOString() });
   const { secrets } = options;
+  const serial = options.serial === undefined ? undefined : createNodeMachineSerial(options.serial);
   return Object.freeze({
     credentials: Object.freeze({
       has: async (reference: string) => secrets.has(reference),
       forget: async (reference: string) => secrets.forget(reference),
     }),
-    discovery: Object.freeze({ clock, listenDatagrams }),
+    discovery: Object.freeze({
+      clock,
+      listenDatagrams,
+      ...(serial === undefined ? {} : { listSerialPorts: serial.listSerialPorts }),
+    }),
     connection: (): MachineConnectionRuntime =>
       Object.freeze({
         clock,
@@ -624,6 +703,7 @@ export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOption
           options.log?.(entry);
         },
         connectStream,
+        ...(serial === undefined ? {} : { openSerial: serial.openSerial }),
         async *readArtifact(input) {
           if (input.artifact.length > input.maximumBytes) {
             throw new Error('MACHINE_ARTIFACT_TOO_LARGE');
@@ -640,19 +720,25 @@ export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOption
           return options.secrets.resolve(input.reference);
         },
         uploadFile: async (input) => uploadFile(input, options.secrets),
-        captureNetworkStill: async (input) =>
-          captureRtspsStill(input, {
-            ffmpeg: await (options.findFfmpeg ?? findFfmpeg)(),
-            accessCode: async () => secrets.resolve(input.secretRef),
-            openUpstream: async () =>
-              openSocket({
-                endpoint: input.endpoint,
-                transport: 'tls',
-                trust: input.trust,
-                connectTimeout: input.connectTimeout,
-                signal: input.signal,
-              }),
-          }),
+        captureNetworkStill: async (input) => {
+          try {
+            return await captureRtspsStill(input, {
+              ffmpeg: await (options.findFfmpeg ?? findFfmpeg)(),
+              password: async () => secrets.resolve(input.secretRef),
+              openUpstream: async () =>
+                openSocket({
+                  endpoint: input.endpoint,
+                  transport: 'tls',
+                  trust: input.trust,
+                  connectTimeout: input.connectTimeout,
+                  signal: input.signal,
+                }),
+            });
+          } catch (error) {
+            /* Capture refuses as `new Error('MACHINE_STILL_*')`; the provider gets the typed code to keep or map. */
+            throw withMachineCode(error);
+          }
+        },
       }),
   });
 };

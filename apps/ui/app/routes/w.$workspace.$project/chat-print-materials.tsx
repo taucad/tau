@@ -1,165 +1,98 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowUpFromLine, ChevronLeft, ChevronRight, LoaderCircle, Palette } from 'lucide-react';
-import { z } from 'zod';
-import type { MachineDirectoryEntry, MachineManifest } from '@taucad/runtime/machine';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowDownToLine, ArrowUpFromLine, ChevronLeft, ChevronRight, Layers, LoaderCircle } from 'lucide-react';
+import type {
+  CalibrationProfile,
+  MachineDirectoryEntry,
+  MaterialSlotAddress,
+  MaterialSlotSnapshot,
+  SlotMaterial,
+} from '@taucad/runtime/machine';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
+import { Input } from '@taucad/ui/components/input';
 import { cn } from '@taucad/ui/utils/cn';
 import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
+import {
+  declaredSlots,
+  formatQuantity,
+  isExternalSlot,
+  materialSystemOf,
+  materialSystemValue,
+  sameSlot,
+  slotLabel,
+  toolheadOf,
+} from '#components/print/machine-facts.js';
+import type { MaterialSystemComponent } from '#components/print/machine-facts.js';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import { StringColorPicker } from '#components/ui/string-color-picker.js';
+import type { MachineControl } from '#hooks/use-machine-control.js';
 import {
-  actionAvailability,
-  describeWaits,
-  useMachineAction,
+  ActionButton,
+  Blocked,
+  Consequences,
+  declaredAction,
 } from '#routes/w.$workspace.$project/chat-print-controls.js';
-import type { ActionAvailability, ApplyMachineAction } from '#routes/w.$workspace.$project/chat-print-controls.js';
-import {
-  PrintNotice,
-  PrintRow,
-  PrintSteps,
-  StaleBadge,
-  useNow,
-} from '#routes/w.$workspace.$project/chat-print-section.js';
-import type { PrintStep } from '#routes/w.$workspace.$project/chat-print-section.js';
-import { formatQuantity, materialSlotLabel, readableStage } from '#routes/w.$workspace.$project/chat-print-summary.js';
-
-type Material = MachineDirectoryEntry['snapshot']['setup']['materials'][number];
-
-/** The slot a material system reports while nothing is in the toolhead (Bambu's 255). */
-const noSlot = 255;
-
-/** How long an accepted action waits for the printer to report it before the pane says it has not. */
-const reportWithin = 15_000;
-
-// ---------------------------------------------------------------------------
-// ponytail: snapshot fields the machine-actions guide proposes (its revision 2 settles their names), read only when an
-// observation carries them, as the polish canvas's simulated printer does. The runtime's strict snapshot carries none
-// yet, so the product derives what it can from `targetSlot` and the run's stage. Replace with the runtime's types once
-// they land.
-
-/** The proposed `materialSystem.change`: the printer's own steps for one change, and the prompt it waits on. */
-const observedChangeSchema = z.object({
-  changeId: z.string(),
-  kind: z.enum(['load', 'unload']),
-  slot: z.number().int(),
-  steps: z.array(z.object({ id: z.string(), label: z.string(), actor: z.enum(['machine', 'person']) })).min(1),
-  step: z.string(),
-  /** An answer names the prompt, so a late answer never answers a later one. */
-  awaiting: z.object({ kind: z.enum(['feed', 'confirmation']), promptId: z.string() }).optional(),
-});
-
-/** The proposed slot facts: how its material was identified and the nozzle range it prints at. */
-const observedSlotSchema = z.object({
-  identifiedBy: z.enum(['tag', 'person']).optional(),
-  nozzleTemperature: z.object({ min: z.number(), max: z.number() }).optional(),
-});
-
-/** The presets `material.set` declares in its parameters: `profile.oneOf` of `{ const, title }`. */
-const materialPresetsSchema = z.object({
-  properties: z.object({
-    profile: z.object({ oneOf: z.array(z.object({ const: z.string(), title: z.string() })).min(1) }),
-  }),
-});
-
-const observedChange = (entry: MachineDirectoryEntry): z.infer<typeof observedChangeSchema> | undefined => {
-  const system = entry.snapshot.materialSystem;
-  return system !== undefined && 'change' in system ? observedChangeSchema.safeParse(system.change).data : undefined;
-};
-
-const observedSlot = (material: Material): z.infer<typeof observedSlotSchema> =>
-  observedSlotSchema.safeParse(material).data ?? {};
-
-/** A preset a person can set a slot to: the vendor's profile id and its name. */
-type MaterialPreset = Readonly<{ const: string; title: string }>;
-
-const materialPresets = (manifest: MachineManifest | undefined): readonly MaterialPreset[] =>
-  materialPresetsSchema.safeParse(manifest?.actions.find((action) => action.id === 'material.set')?.parameters).data
-    ?.properties.profile.oneOf ?? [];
-
-// ---------------------------------------------------------------------------
-
-/** A filament change the printer is in the middle of. @public */
-export type MaterialChange = Readonly<{
-  kind: 'load' | 'unload';
-  slot: number;
-  /** What the printer reports doing now, in its words. */
-  step?: string;
-  /** The change as the printer reports it, when it does: its steps and the prompt it waits on. */
-  reported?: Readonly<{
-    steps: readonly PrintStep[];
-    awaiting?: Readonly<{ kind: 'feed' | 'confirmation'; promptId: string }>;
-  }>;
-}>;
+import { PrintRow, PrintStage, StaleBadge } from '#routes/w.$workspace.$project/chat-print-section.js';
 
 /**
- * The filament change in progress. A printer that reports the change names its steps; otherwise it shows as a target
- * slot other than the one in the toolhead, with the run's stage phrase as its step.
+ * What a slot holds, in a few words: the material, or why there is none.
  *
- * @param entry - The machine as observed.
- * @returns The change, or nothing.
+ * @param slot - The slot as observed.
+ * @param isExternal - Whether it is an external holder, which cannot tell empty from unset.
+ * @returns "PLA", "Empty", "Not set" or "Unknown".
  * @public
  */
-export const materialChange = (entry: MachineDirectoryEntry): MaterialChange | undefined => {
-  const observed = observedChange(entry);
-  if (observed !== undefined) {
-    const at = observed.steps.findIndex((step) => step.id === observed.step);
-    const current = observed.steps[at];
-    return {
-      kind: observed.kind,
-      slot: observed.slot,
-      ...(current === undefined ? {} : { step: current.label }),
-      reported: {
-        steps: observed.steps.map((step, index) => ({
-          label: step.label,
-          actor: step.actor,
-          state: index < at ? 'done' : index === at ? 'active' : 'todo',
-        })),
-        ...(observed.awaiting === undefined ? {} : { awaiting: observed.awaiting }),
-      },
-    };
-  }
-  const { materialSystem, run } = entry.snapshot;
-  const target = materialSystem?.targetSlot;
-  if (target === undefined || target === materialSystem?.currentSlot) {
-    return undefined;
-  }
-  const step = readableStage(run?.stage);
-  const facts = step === undefined ? {} : { step };
-  return target === noSlot
-    ? { kind: 'unload', slot: materialSystem?.currentSlot ?? noSlot, ...facts }
-    : { kind: 'load', slot: target, ...facts };
-};
-
-/** The external holder has no reader: a material it does not report is one nobody has set, not an empty holder. */
-const materialName = (material: Material, manifest: MachineManifest | undefined): string =>
-  material.state === 'loaded'
-    ? (material.materialId ?? 'Loaded')
-    : material.slot === manifest?.materialSystem.externalSpoolSlot
-      ? 'Not set'
-      : material.state === 'empty'
-        ? 'Empty'
-        : 'Unknown';
+export const slotName = (slot: MaterialSlotSnapshot, isExternal: boolean): string =>
+  slot.material === undefined
+    ? slot.state === 'empty'
+      ? 'Empty'
+      : isExternal || slot.identifiedBy === 'unset'
+        ? 'Not set'
+        : 'Unknown'
+    : [slot.material.brand, slot.material.materialType].filter(Boolean).join(' ');
 
 /**
- * The slot in the toolhead, as a closed Monitor's summary says it: "A1 PETG".
+ * The slot in the toolhead, as a closed Monitor's summary says it: "A1 PLA".
  *
  * @param entry - The machine as observed.
- * @param manifest - Its manifest, for slot names.
  * @returns The phrase, or nothing while no slot is in use.
  * @public
  */
-export const materialInUse = (
-  entry: MachineDirectoryEntry,
-  manifest: MachineManifest | undefined,
-): string | undefined => {
-  const current = entry.snapshot.materialSystem?.currentSlot;
-  const material = entry.snapshot.setup.materials.find((candidate) => candidate.slot === current);
-  return material === undefined
+export const materialInUse = (entry: MachineDirectoryEntry): string | undefined => {
+  const system = materialSystemOf(entry.descriptor.capabilities);
+  const value = materialSystemValue(entry);
+  const current = value?.routes.find((route) => route.current !== null)?.current;
+  const slot =
+    current === null || current === undefined
+      ? undefined
+      : value?.slots.find((candidate) => sameSlot(candidate.slot, current));
+  return slot === undefined
     ? undefined
-    : `${materialSlotLabel(material.slot, manifest)} ${materialName(material, manifest)}`;
+    : `${slotLabel(system, slot.slot)} ${slotName(slot, isExternalSlot(system, slot.slot))}`;
 };
+
+function SlotSwatch({
+  material,
+  isLarge = false,
+}: {
+  readonly material: SlotMaterial | undefined;
+  readonly isLarge?: boolean;
+}): React.JSX.Element {
+  return material === undefined ? (
+    <span
+      aria-hidden
+      className={cn(
+        'shrink-0 rounded-full border border-dashed border-muted-foreground/60',
+        isLarge ? 'size-8' : 'size-4',
+      )}
+    />
+  ) : (
+    <span className={cn('flex shrink-0', isLarge && '[&>[data-slot=material-swatch]]:size-8')}>
+      <MaterialSwatch materials={[{ color: material.color.slice(0, 7), roughness: 0.35, metalness: 0 }]} />
+    </span>
+  );
+}
 
 function Remaining({ percent }: { readonly percent: number | undefined }): React.JSX.Element | undefined {
   if (percent === undefined) {
@@ -175,284 +108,132 @@ function Remaining({ percent }: { readonly percent: number | undefined }): React
   );
 }
 
-function SlotSwatch({
-  material,
-  size = 'sm',
-}: {
-  readonly material: Material;
-  readonly size?: 'sm' | 'lg';
-}): React.JSX.Element {
-  return material.color === undefined ? (
-    <span
-      aria-hidden
-      className={cn(
-        'shrink-0 rounded-full border border-dashed border-muted-foreground/60',
-        size === 'sm' ? 'size-4' : 'size-8',
-      )}
-    />
-  ) : (
-    <span className={cn('flex shrink-0', size === 'lg' && '[&>[data-slot=material-swatch]]:size-8')}>
-      <MaterialSwatch materials={[{ color: material.color, roughness: 0.35, metalness: 0 }]} />
-    </span>
-  );
-}
-
-/** What one slot offers now: its names, the verb, the question it asks and why each action waits. */
-type SlotPlan = Readonly<{
-  label: string;
-  name: string;
-  isExternal: boolean;
-  isCurrent: boolean;
-  /** Whether the material system read the spool's tag, which sets its material. */
-  isTagged: boolean;
-  verb: 'load' | 'unload';
-  buttonLabel: string;
-  confirmLabel: string;
-  question: string;
-  /** Why loading or unloading waits; nothing when it can be taken. */
-  wait: string | undefined;
-  /** Why setting the material waits; nothing when it can be set. */
-  setWait: string | undefined;
-}>;
-
-/**
- * The plan for one slot from the observation: load what is not in the toolhead, unload what is, and set the material
- * of a spool its tag does not identify.
- *
- * @param input - The machine, its manifest, the slot and the declared actions' availability.
- * @returns The plan.
- */
-const slotPlan = ({
-  entry,
-  manifest,
-  material,
-  availability,
-  setAvailability,
-}: {
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
-  readonly material: Material;
-  readonly availability: ActionAvailability | undefined;
-  readonly setAvailability: ActionAvailability | undefined;
-}): SlotPlan => {
-  const label = materialSlotLabel(material.slot, manifest);
-  const name = materialName(material, manifest);
-  const isExternal = material.slot === manifest?.materialSystem.externalSpoolSlot;
-  const isTagged = observedSlot(material).identifiedBy === 'tag';
-  const currentSlot = entry.snapshot.materialSystem?.currentSlot;
-  const isCurrent = currentSlot === material.slot;
-  const current = entry.snapshot.setup.materials.find((candidate) => candidate.slot === currentSlot);
-  const goesBack = current === undefined ? '' : ` and ${materialSlotLabel(current.slot, manifest)} goes back first`;
-  const change = materialChange(entry);
-  const canSet = setAvailability !== undefined;
-  const emptyWait = isExternal
-    ? `Set the material of the spool on the holder${canSet ? '' : ' on the printer'} first, so the nozzle heats for it.`
-    : `Put a spool in ${label}; the AMS reads a Bambu spool's tag${canSet ? ', and you set any other spool here' : ''}.`;
-  const busyWait = (own: ActionAvailability | undefined): string | undefined =>
-    entry.snapshot.activeRunId === undefined
-      ? change === undefined
-        ? describeWaits([own])[0]
-        : 'Wait for the filament change to finish.'
-      : 'Filament changes wait until the run ends.';
-  const setWait = isTagged ? `The AMS read this spool's tag, which sets its material.` : busyWait(setAvailability);
-  if (isCurrent) {
-    return {
-      label,
-      name,
-      isExternal,
-      isCurrent,
-      isTagged,
-      verb: 'unload',
-      buttonLabel: 'Unload',
-      confirmLabel: `Unload ${label}`,
-      question: `Unload ${label} (${name})? The nozzle heats so the filament can retract${isExternal ? '; pull it out of the toolhead once it stops.' : ` into ${label}.`}`,
-      wait: busyWait(availability),
-      setWait,
-    };
-  }
-  return {
-    label,
-    name,
-    isExternal,
-    isCurrent,
-    isTagged,
-    verb: 'load',
-    buttonLabel: isExternal ? 'Feed into toolhead' : 'Load into toolhead',
-    confirmLabel: `${isExternal ? 'Feed' : 'Load'} ${label}`,
-    question: isExternal
-      ? `Feed the external ${name}? The nozzle heats for ${name}${goesBack}; then push the filament into the toolhead when asked.`
-      : `Load ${label} (${name}) into the toolhead? The nozzle heats for ${name}${goesBack}.`,
-    wait: material.state === 'loaded' ? busyWait(availability) : emptyWait,
-    setWait,
-  };
-};
-
-/** A profile id by the preset name the printer declares for it; a bare vendor id ("GFG99") means nothing to a person. */
-const profileName = (profileId: string | undefined, manifest: MachineManifest | undefined): string | undefined =>
-  materialPresets(manifest).find((preset) => preset.const === profileId)?.title;
-
-/**
- * What the slot holds and where: the swatch, the material, the place, then its remaining, colour, profile, nozzle
- * range and the AMS unit's humidity and temperature.
- *
- * @param properties - The machine, its manifest, the slot and its plan.
- * @returns The facts.
- */
-function SlotFacts({
-  entry,
-  manifest,
-  material,
-  plan,
-}: {
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
-  readonly material: Material;
-  readonly plan: SlotPlan;
-}): React.JSX.Element {
-  const slotsPerUnit = manifest?.materialSystem.slotsPerUnit ?? 0;
-  const unit =
-    plan.isExternal || slotsPerUnit <= 0
-      ? undefined
-      : entry.snapshot.materialSystem?.units.find(
-          (candidate) => candidate.unit === Math.floor(material.slot / slotsPerUnit),
-        );
-  const unitLine = [
-    unit?.humidityIndex === undefined ? undefined : `humidity ${String(unit.humidityIndex)}`,
-    unit?.temperature === undefined ? undefined : formatQuantity(unit.temperature),
-  ]
-    .filter((part) => part !== undefined)
-    .join(' · ');
-  const { nozzleTemperature } = observedSlot(material);
-  const profile = profileName(material.profileId, manifest);
-  const place = plan.isCurrent ? 'In the toolhead' : plan.isExternal ? 'On the external holder' : 'In the AMS';
-  return (
-    <>
-      <div className='flex min-w-0 items-center gap-2.5'>
-        <SlotSwatch material={material} size='lg' />
-        <div className='flex min-w-0 flex-1 flex-col'>
-          <p className='truncate text-sm font-medium'>
-            <span className='font-mono'>{plan.label}</span> · {plan.name}
-          </p>
-          <p className='truncate text-xs text-muted-foreground'>
-            {plan.isTagged ? `${place} · read from its tag` : place}
-          </p>
-        </div>
-      </div>
-      <dl className='flex flex-col gap-0.5'>
-        {material.remainingPercent === undefined ? null : (
-          <PrintRow label='Remaining'>{material.remainingPercent} %</PrintRow>
-        )}
-        {material.color === undefined ? null : <PrintRow label='Colour'>{material.color.slice(0, 7)}</PrintRow>}
-        {profile === undefined ? null : <PrintRow label='Profile'>{profile}</PrintRow>}
-        {nozzleTemperature === undefined ? null : (
-          <PrintRow label='Nozzle'>
-            {nozzleTemperature.min}–{nozzleTemperature.max} °C
-          </PrintRow>
-        )}
-        {unit === undefined ? null : <PrintRow label='AMS'>{unitLine || 'Not reported'}</PrintRow>}
-      </dl>
-    </>
-  );
-}
-
-/**
- * The one question a slot action asks before the nozzle heats.
- *
- * @param properties - The slot's plan, whether the action is in flight, and the two answers.
- * @returns The confirmation.
- */
-function SlotConfirmation({
-  plan,
-  isBusy,
-  onConfirm,
-  onKeep,
-}: {
-  readonly plan: SlotPlan;
-  readonly isBusy: boolean;
-  readonly onConfirm: () => void;
-  readonly onKeep: () => void;
-}): React.JSX.Element {
-  return (
-    <div
-      role='alertdialog'
-      aria-label={`Confirm ${plan.buttonLabel.toLowerCase()}`}
-      className='rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs'
-    >
-      <p>{plan.question}</p>
-      <div className='mt-2 flex flex-wrap gap-2'>
-        <Button type='button' size='sm' autoFocus disabled={isBusy} onClick={onConfirm}>
-          {isBusy ? <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' /> : null}
-          {plan.confirmLabel}
-        </Button>
-        <Button type='button' size='sm' variant='outline' disabled={isBusy} onClick={onKeep}>
-          Keep as is
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 // oxlint-disable-next-line tau-lint/no-hardcoded-color -- data: the colour a spool without one starts from
 const unsetSpoolColor = '#FFFFFF';
 const hexColor = /^#[\da-f]{6}$/iu;
+const materialTypes = ['PLA', 'PETG', 'ABS', 'ASA', 'TPU', 'PA', 'PC', 'PVA', 'HIPS'] as const;
 
 /**
- * Set the material of a spool its tag does not identify: one of the presets the printer declares, and its colour. The
- * printer heats the nozzle for the preset's range, so the form asks for nothing else.
+ * Set a slot's material: type, colour, the vendor preset it prints with and its nozzle range. The colour is sent as
+ * `#RRGGBBAA`, opaque.
  *
- * @param properties - The slot, its plan, the presets and the two answers.
+ * @param properties - The control, the material system, the slot and the way back.
  * @returns The form.
  */
 function MaterialForm({
-  material,
-  plan,
-  presets,
-  isBusy,
-  onSave,
-  onCancel,
+  control,
+  systemId,
+  slot,
+  label,
+  onClose,
 }: {
-  readonly material: Material;
-  readonly plan: SlotPlan;
-  readonly presets: readonly MaterialPreset[];
-  readonly isBusy: boolean;
-  readonly onSave: (choice: Readonly<{ profile: string; color: string }>) => void;
-  readonly onCancel: () => void;
+  readonly control: MachineControl;
+  readonly systemId: string;
+  readonly slot: MaterialSlotSnapshot;
+  readonly label: string;
+  readonly onClose: () => void;
 }): React.JSX.Element {
-  const [profile, setProfile] = useState(
-    () => presets.find((preset) => preset.const === material.profileId)?.const ?? presets[0]?.const ?? '',
+  const current = slot.material;
+  const [materialType, setMaterialType] = useState(current?.materialType ?? 'PLA');
+  const [color, setColor] = useState(current?.color.slice(0, 7) ?? unsetSpoolColor);
+  const [profileId, setProfileId] = useState(current?.preset.profileId ?? '');
+  const [settingId, setSettingId] = useState(current?.preset.settingId ?? '');
+  const [minimum, setMinimum] = useState(String(current?.nozzleTemperature?.min.value ?? 190));
+  const [maximum, setMaximum] = useState(String(current?.nozzleTemperature?.max.value ?? 230));
+  const range = { min: Number(minimum), max: Number(maximum) };
+  const isValid =
+    hexColor.test(color) &&
+    profileId.trim() !== '' &&
+    Number.isFinite(range.min) &&
+    Number.isFinite(range.max) &&
+    range.min > 0 &&
+    range.min <= range.max &&
+    range.max <= 500;
+  const field = ({
+    name,
+    value,
+    set,
+    type = 'text',
+  }: Readonly<{
+    name: string;
+    value: string;
+    set: (value: string) => void;
+    type?: 'text' | 'number';
+  }>): React.JSX.Element => (
+    <Input
+      aria-label={name}
+      type={type}
+      className='h-6 text-xs'
+      value={value}
+      onChange={(event) => {
+        set(event.target.value);
+      }}
+    />
   );
-  const [color, setColor] = useState(material.color?.slice(0, 7) ?? unsetSpoolColor);
-  const isColorValid = hexColor.test(color);
   return (
     <form
-      aria-label={`Set the material in ${plan.label}`}
+      aria-label={`Set the material in ${label}`}
       className='flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 p-2'
       onSubmit={(event) => {
         event.preventDefault();
-        onSave({ profile, color: color.toUpperCase() });
+        const send = async (): Promise<void> => {
+          const isAccepted = await control.apply(systemId, 'material.set', {
+            slot: slot.slot,
+            material: {
+              materialType,
+              color: `${color.toUpperCase()}FF`,
+              preset: { profileId: profileId.trim(), settingId: settingId.trim() },
+              nozzleTemperature: range,
+            },
+          });
+          if (isAccepted) {
+            onClose();
+          }
+        };
+        void send();
       }}
     >
       <div className='-my-1.5 flex min-w-0 flex-col'>
         <PrintSetupRow label='Material'>
           <ParameterSelect
             label='Material'
-            value={profile}
+            value={materialType}
             shouldAutoFocus
-            groups={[{ options: presets.map((preset) => ({ value: preset.const, label: preset.title })) }]}
-            onChange={setProfile}
+            groups={[
+              { options: [...new Set([...materialTypes, materialType])].map((type) => ({ value: type, label: type })) },
+            ]}
+            onChange={setMaterialType}
           />
         </PrintSetupRow>
         <PrintSetupRow label='Colour'>
           <StringColorPicker aria-label='Colour' value={color} onChange={setColor} />
         </PrintSetupRow>
+        <PrintSetupRow label='Filament profile' description='The vendor preset id, such as GFA01.'>
+          {field({ name: 'Filament profile', value: profileId, set: setProfileId })}
+        </PrintSetupRow>
+        <PrintSetupRow label='Preset setting'>
+          {field({ name: 'Preset setting', value: settingId, set: setSettingId })}
+        </PrintSetupRow>
+        <PrintSetupRow label='Nozzle from (°C)'>
+          {field({ name: 'Minimum nozzle temperature', value: minimum, set: setMinimum, type: 'number' })}
+        </PrintSetupRow>
+        <PrintSetupRow label='Nozzle to (°C)'>
+          {field({ name: 'Maximum nozzle temperature', value: maximum, set: setMaximum, type: 'number' })}
+        </PrintSetupRow>
       </div>
-      {isColorValid ? null : <p className='text-xs text-muted-foreground'>Choose a colour as #RRGGBB.</p>}
+      {isValid ? null : (
+        <p className='text-xs text-muted-foreground'>
+          Choose a #RRGGBB colour, a profile and a nozzle range up to 500 °C.
+        </p>
+      )}
       <div className='flex flex-wrap gap-2'>
-        <Button type='submit' size='sm' disabled={isBusy || !isColorValid || profile === ''}>
-          {isBusy ? <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' /> : null}
+        <Button type='submit' size='sm' disabled={!isValid || control.pending !== undefined}>
+          {control.pending === `${systemId}:material.set` ? (
+            <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
+          ) : null}
           Save
         </Button>
-        <Button type='button' size='sm' variant='outline' disabled={isBusy} onClick={onCancel}>
+        <Button type='button' size='sm' variant='outline' onClick={onClose}>
           Cancel
         </Button>
       </div>
@@ -460,256 +241,71 @@ function MaterialForm({
   );
 }
 
-/** What a sent action is, in the words that wait for it: "Waiting for Workshop X1C to confirm the load…". */
-const sentNoun = { load: 'load', unload: 'unload', set: 'material' } as const;
-
-/** An accepted action until the printer reports it. */
-type Sent = Readonly<{
-  verb: keyof typeof sentNoun;
-  at: number;
-  /** The slot in the toolhead when a load or unload was sent. */
-  currentSlot?: number;
-  /** The preset and colour a material setting sent. */
-  material?: Readonly<{ profile: string; color: string }>;
-}>;
+/** Operation states that still wait for the machine. */
+const unsettled: ReadonlySet<string> = new Set(['sending', 'confirming', 'attention']);
 
 /**
- * The slot's actions and their moments: offered, confirming or editing, sent, and in progress as the printer reports
- * it. An action the printer has not reported in time says so, as an unconfirmed print start does; nothing is resent.
+ * One slot opened from the list: what is in it and what can be done with it. A load or unload asks once before the
+ * nozzle heats; a material is set in a short form in place.
  *
- * @param properties - The machine, its manifest, the slot, its plan and the action seam.
- * @returns The actions.
- */
-function SlotActions({
-  entry,
-  manifest,
-  material,
-  plan,
-  availability,
-  setAvailability,
-  apply,
-}: {
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
-  readonly material: Material;
-  readonly plan: SlotPlan;
-  readonly availability: ActionAvailability | undefined;
-  readonly setAvailability: ActionAvailability | undefined;
-  readonly apply: ApplyMachineAction | undefined;
-}): React.JSX.Element {
-  const [moment, setMoment] = useState<'offered' | 'confirming' | 'editing'>('offered');
-  const [sent, setSent] = useState<Sent>();
-  const now = useNow();
-  const action = useMachineAction(entry, apply);
-  const currentSlot = entry.snapshot.materialSystem?.currentSlot;
-  const change = materialChange(entry);
-  const presets = materialPresets(manifest);
-  /* A sent action the printer has not reported yet: a load or unload shows as a change, a material as the slot's. */
-  const pending =
-    sent === undefined ||
-    (sent.material === undefined
-      ? change !== undefined || sent.currentSlot !== currentSlot
-      : material.profileId === sent.material.profile &&
-        (material.color ?? '').slice(0, 7).toUpperCase() === sent.material.color)
-      ? undefined
-      : sent;
-  const confirm = async (): Promise<void> => {
-    const sending: Sent = { verb: plan.verb, at: Date.now(), ...(currentSlot === undefined ? {} : { currentSlot }) };
-    // Unload names the slot it shows, so the host can hold it to the printer's report (machine-actions guide).
-    const isAccepted = await action.run(`material.${plan.verb}`, { slot: material.slot });
-    setMoment('offered');
-    setSent(isAccepted ? sending : undefined);
-  };
-  const save = async (choice: Readonly<{ profile: string; color: string }>): Promise<void> => {
-    const isAccepted = await action.run('material.set', { slot: material.slot, ...choice });
-    if (isAccepted) {
-      setMoment('offered');
-      setSent({ verb: 'set', at: Date.now(), material: choice });
-    }
-  };
-  const error = action.error ? <PrintNotice tone='error'>{action.error}</PrintNotice> : null;
-
-  if (pending !== undefined && now - pending.at < reportWithin) {
-    return (
-      <p role='status' className='flex min-w-0 items-center gap-2 text-xs text-muted-foreground'>
-        <LoaderCircle aria-hidden className='size-3.5 shrink-0 animate-spin motion-reduce:animate-none' />
-        Waiting for {entry.name} to confirm the {sentNoun[pending.verb]}…
-      </p>
-    );
-  }
-  if (moment === 'confirming') {
-    return (
-      <SlotConfirmation
-        plan={plan}
-        isBusy={action.pending !== undefined}
-        onConfirm={() => {
-          void confirm();
-        }}
-        onKeep={() => {
-          setMoment('offered');
-        }}
-      />
-    );
-  }
-  if (moment === 'editing') {
-    return (
-      <>
-        <MaterialForm
-          material={material}
-          plan={plan}
-          presets={presets}
-          isBusy={action.pending !== undefined}
-          onSave={(choice) => {
-            void save(choice);
-          }}
-          onCancel={() => {
-            setMoment('offered');
-          }}
-        />
-        {error}
-      </>
-    );
-  }
-  return (
-    <>
-      <OfferedActions
-        material={material}
-        plan={plan}
-        availability={availability}
-        setAvailability={setAvailability}
-        hasPresets={presets.length > 0}
-        isChanging={change !== undefined}
-        onAct={() => {
-          setMoment('confirming');
-        }}
-        onSetMaterial={() => {
-          setMoment('editing');
-        }}
-      />
-      {pending === undefined ? null : (
-        <p role='status' className='text-xs text-muted-foreground'>
-          {entry.name} has not confirmed the {sentNoun[pending.verb]} yet. Check its screen before trying again; Tau did
-          not resend it.
-        </p>
-      )}
-      {error}
-    </>
-  );
-}
-
-/**
- * What a slot offers at rest: loading, feeding or unloading it, and setting its material, each disabled with its
- * reason while it waits. A spool nobody has set has nothing to load yet, so setting its material leads.
- *
- * @param properties - The slot, its plan, the declared actions' availability and the two openings.
- * @returns The buttons and their reasons.
- */
-function OfferedActions({
-  material,
-  plan,
-  availability,
-  setAvailability,
-  hasPresets,
-  isChanging,
-  onAct,
-  onSetMaterial,
-}: {
-  readonly material: Material;
-  readonly plan: SlotPlan;
-  readonly availability: ActionAvailability | undefined;
-  readonly setAvailability: ActionAvailability | undefined;
-  /** Whether the printer declares presets to set a material from. */
-  readonly hasPresets: boolean;
-  /** Whether a filament change is in progress on another slot. */
-  readonly isChanging: boolean;
-  readonly onAct: () => void;
-  readonly onSetMaterial: () => void;
-}): React.JSX.Element {
-  const waitId = useId();
-  const setWaitId = useId();
-  const showsAct = material.state === 'loaded' && availability !== undefined;
-  const showsSet = setAvailability !== undefined && hasPresets;
-  const canAct = plan.wait === undefined && availability?.isAvailable === true && !isChanging;
-  const canSet = plan.setWait === undefined && setAvailability?.isAvailable === true && !isChanging;
-  /* Both buttons may wait for the same reason; it shows once and describes both. */
-  const idFor = (wait: string): string => (wait === plan.wait ? waitId : setWaitId);
-  const waits = [...new Set([plan.wait, showsSet ? plan.setWait : undefined])].filter((wait) => wait !== undefined);
-  return (
-    <>
-      <div className='flex flex-wrap gap-2'>
-        {showsAct ? (
-          <Button
-            type='button'
-            size='sm'
-            variant={plan.isCurrent ? 'outline' : 'default'}
-            disabled={!canAct}
-            aria-describedby={plan.wait === undefined ? undefined : idFor(plan.wait)}
-            onClick={onAct}
-          >
-            {plan.isCurrent ? <ArrowUpFromLine aria-hidden /> : <ArrowDownToLine aria-hidden />}
-            {plan.buttonLabel}
-          </Button>
-        ) : null}
-        {showsSet ? (
-          <Button
-            type='button'
-            size='sm'
-            variant={material.state === 'loaded' ? 'outline' : 'default'}
-            disabled={!canSet}
-            aria-describedby={plan.setWait === undefined ? undefined : idFor(plan.setWait)}
-            onClick={onSetMaterial}
-          >
-            <Palette aria-hidden />
-            Set material
-          </Button>
-        ) : null}
-      </div>
-      {waits.map((wait) => (
-        <p key={wait} id={idFor(wait)} className='text-xs text-muted-foreground'>
-          {wait}
-        </p>
-      ))}
-    </>
-  );
-}
-
-/**
- * One slot opened from the list: what is in it, where it is, and what can be done with it. Loading and unloading ask
- * once, then follow the printer's report; setting a spool's material opens a short form in place.
- *
- * @param properties - The machine, its manifest, the slot, the action seam and the way back.
+ * @param properties - The control, the material system, the slot and the way back.
  * @returns The slot's detail.
  */
 function SlotDetail({
-  entry,
-  manifest,
-  material,
-  apply,
+  control,
+  system,
+  slot,
   onBack,
 }: {
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
-  readonly material: Material;
-  readonly apply: ApplyMachineAction | undefined;
+  readonly control: MachineControl;
+  readonly system: MaterialSystemComponent;
+  readonly slot: MaterialSlotSnapshot;
   readonly onBack: () => void;
 }): React.JSX.Element {
+  const { entry } = control;
   const backRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     backRef.current?.focus();
   }, []);
-  const isCurrent = entry.snapshot.materialSystem?.currentSlot === material.slot;
-  const availability = actionAvailability({
-    entry,
-    manifest,
-    action: isCurrent ? 'material.unload' : 'material.load',
-    apply,
-  });
-  const setAvailability = actionAvailability({ entry, manifest, action: 'material.set', apply });
-  const plan = slotPlan({ entry, manifest, material, availability, setAvailability });
+  const [moment, setMoment] = useState<'offered' | 'confirming' | 'editing'>('offered');
+  const confirmRef = useRef<HTMLDivElement>(null);
+  /* The button that opened the confirmation is gone, so the confirmation takes focus on its first choice. */
+  useEffect(() => {
+    if (moment === 'confirming') {
+      confirmRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    }
+  }, [moment]);
+  const value = materialSystemValue(entry);
+  const label = slotLabel(system, slot.slot);
+  const isExternal = isExternalSlot(system, slot.slot);
+  const route = value?.routes.find((candidate) =>
+    system.routes.some(
+      (declared) => declared.unitId === slot.slot.unitId && declared.toolheadIds.includes(candidate.toolheadId),
+    ),
+  );
+  const toolheadId =
+    route?.toolheadId ??
+    system.routes.find((declared) => declared.unitId === slot.slot.unitId)?.toolheadIds[0] ??
+    toolheadOf(entry.descriptor.capabilities)?.id ??
+    '';
+  const isCurrent = sameSlot(slot.slot, route?.current);
+  const verb = isCurrent ? 'material.unload' : 'material.load';
+  const unit = value?.units?.find((candidate) => candidate.unitId === slot.slot.unitId);
+  const profiles = value?.calibrations?.rows ?? [];
+  const calibration = slot.material?.calibration;
+  const nozzleId = toolheadOf(entry.descriptor.capabilities)?.nozzles[0]?.id ?? '';
+  const waiting = entry.snapshot.operations.find(
+    (operation) => operation.action?.componentId === system.id && unsettled.has(operation.state),
+  );
+  const place = isCurrent
+    ? 'In the toolhead'
+    : isExternal
+      ? 'On the external holder'
+      : `In the ${system.units.find((candidate) => candidate.id === slot.slot.unitId)?.label ?? 'feeder'}`;
   return (
     <div
       role='group'
-      aria-label={`Slot ${plan.label}`}
+      aria-label={`Slot ${label}`}
       className='flex min-w-0 flex-col gap-2 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2'
     >
       <button
@@ -721,262 +317,245 @@ function SlotDetail({
         <ChevronLeft aria-hidden className='size-3.5' />
         All slots
       </button>
-      <SlotFacts entry={entry} manifest={manifest} material={material} plan={plan} />
-      <SlotActions
-        entry={entry}
-        manifest={manifest}
-        material={material}
-        plan={plan}
-        availability={availability}
-        setAvailability={setAvailability}
-        apply={apply}
-      />
-    </div>
-  );
-}
-
-/** What the printer waits on, as the change's status announces it. */
-const awaitingSentence = {
-  feed: 'waits for you to push the filament in.',
-  confirmation: 'asks whether the filament comes out of the nozzle.',
-} as const;
-
-/**
- * The change's slot as its card names it: "Feeding Ext", "PETG".
- *
- * @param entry - The machine as observed.
- * @param manifest - Its manifest, for slot names.
- * @param change - The change in progress.
- * @returns The title, the material's name and whether the slot is the external spool.
- */
-const changeNames = (
-  entry: MachineDirectoryEntry,
-  manifest: MachineManifest | undefined,
-  change: MaterialChange,
-): Readonly<{ title: string; name: string; isExternal: boolean }> => {
-  const material = entry.snapshot.setup.materials.find((candidate) => candidate.slot === change.slot);
-  const label = materialSlotLabel(change.slot, manifest);
-  const isExternal = change.slot === manifest?.materialSystem.externalSpoolSlot;
-  const verb = change.kind === 'unload' ? 'Unloading' : isExternal ? 'Feeding' : 'Loading';
-  return {
-    title: `${verb} ${label}`,
-    name: material === undefined ? label : materialName(material, manifest),
-    isExternal,
-  };
-};
-
-/** The change the card shows: during a run, the run line names an AMS change the printer does not report. */
-const shownChange = (entry: MachineDirectoryEntry): MaterialChange | undefined => {
-  const change = materialChange(entry);
-  return change?.reported === undefined && entry.snapshot.activeRunId !== undefined ? undefined : change;
-};
-
-/**
- * The printer's extrusion check: Done when the filament comes out of the nozzle, Retry to extrude again. One per
- * prompt, so an answered prompt waits for the printer and the next prompt asks again.
- *
- * @param properties - The material's name, the printer's, whether the pane can answer, and the answer.
- * @returns The check.
- */
-function ExtrusionCheck({
-  name,
-  printer,
-  isAvailable,
-  isBusy,
-  onAnswer,
-}: {
-  readonly name: string;
-  readonly printer: string;
-  readonly isAvailable: boolean;
-  readonly isBusy: boolean;
-  readonly onAnswer: (answer: 'extruded' | 'retry') => Promise<boolean>;
-}): React.JSX.Element {
-  const [isAnswered, setIsAnswered] = useState(false);
-  const answer = async (value: 'extruded' | 'retry'): Promise<void> => {
-    setIsAnswered(await onAnswer(value));
-  };
-  return (
-    <div role='group' aria-label='Check the extrusion' className='flex min-w-0 flex-col gap-2 text-xs'>
-      <p>
-        Is {name} coming out of the nozzle?{' '}
-        {isAvailable ? 'Done when it is; Retry extrudes again.' : "Answer on the printer's screen."}
-      </p>
-      {isAvailable && isAnswered ? (
-        <p role='status' className='flex items-center gap-2 text-muted-foreground'>
-          <LoaderCircle aria-hidden className='size-3.5 shrink-0 animate-spin motion-reduce:animate-none' />
-          Waiting for {printer} to continue…
-        </p>
-      ) : null}
-      {isAvailable && !isAnswered ? (
-        <div className='flex flex-wrap gap-2'>
-          <Button
-            type='button'
-            size='sm'
-            disabled={isBusy}
-            onClick={() => {
-              void answer('extruded');
-            }}
-          >
-            Done
-          </Button>
-          <Button
-            type='button'
-            size='sm'
-            variant='outline'
-            disabled={isBusy}
-            onClick={() => {
-              void answer('retry');
-            }}
-          >
-            Retry
-          </Button>
+      <div className='flex min-w-0 items-center gap-2.5'>
+        <SlotSwatch material={slot.material} isLarge />
+        <div className='flex min-w-0 flex-1 flex-col'>
+          <p className='truncate text-sm font-medium'>
+            <span className='font-mono'>{label}</span> · {slotName(slot, isExternal)}
+          </p>
+          <p className='truncate text-xs text-muted-foreground'>
+            {slot.identifiedBy === 'tag'
+              ? `${place} · read from its tag`
+              : slot.identifiedBy === 'person'
+                ? `${place} · set by a person`
+                : place}
+          </p>
         </div>
-      ) : null}
+      </div>
+      <dl className='flex flex-col gap-0.5'>
+        {slot.remainingPercent === undefined ? null : <PrintRow label='Remaining'>{slot.remainingPercent} %</PrintRow>}
+        {slot.material === undefined ? null : (
+          <>
+            <PrintRow label='Colour'>{slot.material.color.slice(0, 7)}</PrintRow>
+            <PrintRow label='Profile'>
+              {slot.material.preset.profileId}
+              {slot.material.preset.settingId === '' ? '' : ` · ${slot.material.preset.settingId}`}
+            </PrintRow>
+            {slot.material.nozzleTemperature === undefined ? null : (
+              <PrintRow label='Nozzle'>
+                {formatQuantity(slot.material.nozzleTemperature.min)}–
+                {formatQuantity(slot.material.nozzleTemperature.max)}
+              </PrintRow>
+            )}
+            <PrintRow label='Pressure advance'>
+              {calibration?.type === 'profile'
+                ? (profiles.find((profile) => profile.profileId === calibration.profileId)?.name ??
+                  calibration.profileId)
+                : 'Default'}
+            </PrintRow>
+          </>
+        )}
+        {unit === undefined ? null : (
+          <PrintRow label='Unit'>
+            {[
+              unit.humidityIndex === undefined ? undefined : `humidity ${String(unit.humidityIndex)}`,
+              unit.temperature === undefined ? undefined : formatQuantity(unit.temperature),
+            ]
+              .filter(Boolean)
+              .join(' · ') || 'Not reported'}
+          </PrintRow>
+        )}
+      </dl>
+      {waiting === undefined ? null : (
+        <p role='status' className='flex min-w-0 items-center gap-2 text-xs text-muted-foreground'>
+          <LoaderCircle aria-hidden className='size-3.5 shrink-0 animate-spin motion-reduce:animate-none' />
+          {waiting.state === 'attention'
+            ? `${entry.name} has not confirmed “${waiting.action?.label ?? 'the change'}”. Check its screen; nothing was resent.`
+            : `Waiting for ${entry.name} to confirm “${waiting.action?.label ?? 'the change'}”…`}
+        </p>
+      )}
+      {moment === 'editing' ? (
+        <MaterialForm
+          control={control}
+          systemId={system.id}
+          slot={slot}
+          label={label}
+          onClose={() => {
+            setMoment('offered');
+          }}
+        />
+      ) : moment === 'confirming' ? (
+        <div
+          ref={confirmRef}
+          role='alertdialog'
+          aria-label={`Confirm ${isCurrent ? 'unload' : 'load'}`}
+          className='rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs'
+        >
+          <p>
+            {isCurrent ? `Unload ${label}?` : `Load ${label} (${slotName(slot, isExternal)}) into the toolhead?`}{' '}
+            {declaredAction(entry, system.id, verb)?.consequence ?? 'The nozzle heats so the filament can move.'}
+          </p>
+          <div className='mt-2 flex flex-wrap gap-2'>
+            <ActionButton
+              control={control}
+              componentId={system.id}
+              action={verb}
+              parameters={{ slot: slot.slot, toolheadId }}
+              label={isCurrent ? `Unload ${label}` : `Load ${label}`}
+              variant='default'
+              onDone={() => {
+                setMoment('offered');
+              }}
+            />
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              onClick={() => {
+                setMoment('offered');
+              }}
+            >
+              Keep as is
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <Blocked control={control} componentId={system.id} action={verb} />
+          <div className='flex flex-wrap gap-2'>
+            {slot.state === 'loaded' && declaredAction(entry, system.id, verb) !== undefined ? (
+              <Button
+                type='button'
+                size='sm'
+                variant={isCurrent ? 'outline' : 'default'}
+                disabled={control.check(system.id, verb).status !== 'available'}
+                onClick={() => {
+                  setMoment('confirming');
+                }}
+              >
+                {isCurrent ? <ArrowUpFromLine aria-hidden /> : <ArrowDownToLine aria-hidden />}
+                {isCurrent ? 'Unload' : isExternal ? 'Feed into toolhead' : 'Load into toolhead'}
+              </Button>
+            ) : null}
+            {declaredAction(entry, system.id, 'material.set') !== undefined && slot.editing.allowed ? (
+              <Button
+                type='button'
+                size='sm'
+                variant={slot.state === 'loaded' ? 'outline' : 'default'}
+                disabled={control.check(system.id, 'material.set').status !== 'available'}
+                onClick={() => {
+                  setMoment('editing');
+                }}
+              >
+                Set material
+              </Button>
+            ) : null}
+            {slot.identifiedBy === 'person' && slot.editing.allowed ? (
+              <ActionButton
+                control={control}
+                componentId={system.id}
+                action='material.clear'
+                parameters={{ slot: slot.slot }}
+                variant='ghost'
+              />
+            ) : null}
+            {slot.material === undefined ? null : (
+              <ActionButton
+                control={control}
+                componentId={system.id}
+                action='material.calibration.run'
+                parameters={{ method: 'pressure-advance', slots: [slot.slot], nozzleId }}
+                label='Calibrate'
+                variant='ghost'
+              />
+            )}
+          </div>
+          {slot.editing.allowed || slot.editing.reason === undefined ? null : (
+            <p className='text-xs text-muted-foreground'>{slot.editing.reason}</p>
+          )}
+          {slot.material === undefined ||
+          declaredAction(entry, system.id, 'material.calibration.select') === undefined ? null : (
+            <div className='-my-1.5 flex min-w-0 flex-col'>
+              <PrintSetupRow label='Pressure advance'>
+                <ParameterSelect
+                  label='Pressure-advance profile'
+                  value={calibration?.type === 'profile' ? calibration.profileId : 'default'}
+                  isDisabled={control.check(system.id, 'material.calibration.select').status !== 'available'}
+                  groups={[
+                    {
+                      options: [
+                        { value: 'default', label: 'Default' },
+                        ...profiles.map((profile) => ({
+                          value: profile.profileId,
+                          label: profile.name,
+                          secondary: `K ${profile.pressureAdvance.toFixed(3)}`,
+                        })),
+                      ],
+                    },
+                  ]}
+                  onChange={(profileId) => {
+                    void control.apply(system.id, 'material.calibration.select', { slot: slot.slot, profileId });
+                  }}
+                />
+              </PrintSetupRow>
+            </div>
+          )}
+          <Consequences descriptors={[declaredAction(entry, system.id, 'material.calibration.run')]} />
+        </>
+      )}
     </div>
   );
 }
 
 /**
- * A filament change in progress, beside a print start in progress and outside the stages, because it may need the
- * person: its steps when the printer names them, with the prompt it waits on. Feeding the external spool needs the
- * person twice: they push the filament in, then say whether it came out of the nozzle. Done and Retry show only while
- * the printer asks, and each answer names that prompt.
+ * The material slots, one per row, each opening its own detail in place: the list slides away and the slot slides
+ * in, and All slots brings the list back with focus on the row it left.
  *
- * @param properties - The machine, its manifest and the action seam.
- * @returns The card, or nothing without a change to show.
- * @public
- */
-export function MaterialChangeCard({
-  entry,
-  manifest,
-  apply,
-}: {
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
-  readonly apply: ApplyMachineAction | undefined;
-}): React.JSX.Element | undefined {
-  const action = useMachineAction(entry, apply);
-  const cardRef = useRef<HTMLElement>(null);
-  const change = shownChange(entry);
-  /* The change and each prompt come into view wherever the person scrolled, as the slot that started it may have. */
-  const moment =
-    change === undefined ? '' : `${change.kind}:${String(change.slot)}:${change.reported?.awaiting?.promptId ?? ''}`;
-  useEffect(() => {
-    if (moment !== '') {
-      cardRef.current?.scrollIntoView({ block: 'nearest' });
-    }
-  }, [moment]);
-  if (change === undefined) {
-    return undefined;
-  }
-  const { title, name, isExternal } = changeNames(entry, manifest, change);
-  const { reported } = change;
-  const awaiting = reported?.awaiting;
-  return (
-    <section
-      ref={cardRef}
-      aria-label='Filament change'
-      className='flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-card p-3'
-    >
-      <p role='status' className='flex min-w-0 items-center gap-2 text-sm'>
-        <LoaderCircle aria-hidden className='size-4 shrink-0 animate-spin motion-reduce:animate-none' />
-        <span className='min-w-0 truncate'>
-          {title} · {name}…
-        </span>
-        {/* The status persists, so the moment the printer asks is announced. */}
-        <span className='sr-only'>
-          {awaiting === undefined ? '' : ` ${entry.name} ${awaitingSentence[awaiting.kind]}`}
-        </span>
-      </p>
-      {reported === undefined ? (
-        change.step === undefined ? null : (
-          <p className='text-xs text-muted-foreground'>{change.step}</p>
-        )
-      ) : (
-        <PrintSteps steps={reported.steps} layout='list' />
-      )}
-      {awaiting?.kind === 'feed' ? (
-        <p className='text-xs'>
-          Push the {name} into the toolhead until the extruder grips it; {entry.name} carries on by itself.
-        </p>
-      ) : null}
-      {awaiting?.kind === 'confirmation' ? (
-        <ExtrusionCheck
-          key={awaiting.promptId}
-          name={name}
-          printer={entry.name}
-          isAvailable={
-            actionAvailability({ entry, manifest, action: 'material.continue', apply })?.isAvailable === true
-          }
-          isBusy={action.pending !== undefined}
-          onAnswer={async (answer) => action.run('material.continue', { promptId: awaiting.promptId, answer })}
-        />
-      ) : null}
-      {reported === undefined && change.kind === 'load' && isExternal ? (
-        /* Without the printer's steps the pane cannot tell when it asks, so the answer stays on its screen. */
-        <p className='text-xs'>
-          Once the nozzle is hot, push the {name} into the toolhead until the extruder grips it, then confirm on the
-          printer&apos;s screen.
-        </p>
-      ) : null}
-      {action.error ? <PrintNotice tone='error'>{action.error}</PrintNotice> : null}
-    </section>
-  );
-}
-
-/**
- * The material slots, one per row, each opening its own detail in place: the list slides away and the
- * slot slides in, and All slots brings the list back with focus on the row it left.
- *
- * @param properties - The machine, its manifest, the action seam and whether the observation is stale.
- * @returns The slots.
+ * @param properties - The control and whether the observation is stale.
+ * @returns The slots, or nothing on a machine without a material system.
  * @public
  */
 export function MaterialSlots({
-  entry,
-  manifest,
-  apply,
+  control,
   isStale,
 }: {
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
-  readonly apply: ApplyMachineAction | undefined;
+  readonly control: MachineControl;
   readonly isStale: boolean;
-}): React.JSX.Element {
-  const [opened, setOpened] = useState<number>();
-  /* A new object per return, so returning to the same row twice still moves focus. */
-  const [returnedFrom, setReturnedFrom] = useState<Readonly<{ slot: number }>>();
-  const rows = useRef(new Map<number, HTMLButtonElement>());
+}): React.JSX.Element | undefined {
+  const { entry } = control;
+  const [opened, setOpened] = useState<MaterialSlotAddress>();
+  const [returnedFrom, setReturnedFrom] = useState<Readonly<{ key: string }>>();
+  const rows = useRef(new Map<string, HTMLButtonElement>());
   useEffect(() => {
     if (returnedFrom !== undefined) {
-      rows.current.get(returnedFrom.slot)?.focus();
+      rows.current.get(returnedFrom.key)?.focus();
     }
   }, [returnedFrom]);
-  const { materials } = entry.snapshot.setup;
-  const { materialSystem } = entry.snapshot;
-  const change = materialChange(entry);
-  const material = materials.find((candidate) => candidate.slot === opened);
-
+  const system = materialSystemOf(entry.descriptor.capabilities);
+  if (system === undefined) {
+    return undefined;
+  }
+  const value = materialSystemValue(entry);
+  const slots = declaredSlots(system, value);
+  const keyOf = (address: MaterialSlotAddress): string => `${address.unitId}/${address.slotId}`;
+  const slot = opened === undefined ? undefined : slots.find((candidate) => sameSlot(candidate.slot, opened));
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <div className='flex min-w-0 items-center gap-2'>
-        <h4 className='min-w-0 flex-1 truncate text-xs font-medium'>Material</h4>
+        <h4 className='min-w-0 flex-1 truncate text-xs font-medium'>{system.label}</h4>
         {isStale ? <StaleBadge /> : null}
       </div>
-      {material ? (
+      {slot ? (
         <SlotDetail
-          key={material.slot}
-          entry={entry}
-          manifest={manifest}
-          material={material}
-          apply={apply}
+          key={keyOf(slot.slot)}
+          control={control}
+          system={system}
+          slot={slot}
           onBack={() => {
-            setReturnedFrom({ slot: material.slot });
+            setReturnedFrom({ key: keyOf(slot.slot) });
             setOpened(undefined);
           }}
         />
-      ) : materials.length === 0 ? (
-        <p className='text-xs text-muted-foreground'>No material slots observed.</p>
       ) : (
         <ul
           aria-label='Material slots'
@@ -986,34 +565,41 @@ export function MaterialSlots({
               'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2',
           )}
         >
-          {materials.map((slot) => {
-            const label = materialSlotLabel(slot.slot, manifest);
-            const isCurrent = materialSystem?.currentSlot === slot.slot;
-            const isChanging = change?.slot === slot.slot;
+          {slots.map((candidate) => {
+            const key = keyOf(candidate.slot);
+            const isCurrent = value?.routes.some((route) => sameSlot(candidate.slot, route.current)) === true;
+            const isChanging =
+              value?.routes.some(
+                (route) => sameSlot(candidate.slot, route.target) && !sameSlot(candidate.slot, route.current),
+              ) === true;
             return (
-              <li key={slot.slot}>
+              <li key={key}>
                 <button
                   ref={(element) => {
                     if (element) {
-                      rows.current.set(slot.slot, element);
+                      rows.current.set(key, element);
                     } else {
-                      rows.current.delete(slot.slot);
+                      rows.current.delete(key);
                     }
                   }}
                   type='button'
                   className='-mx-1 flex min-h-8 w-[calc(100%+0.5rem)] min-w-0 cursor-action items-center gap-2 rounded-md px-1 text-left text-xs transition-colors hover:bg-accent/50 focus-visible:focus-outline motion-reduce:transition-none'
                   onClick={() => {
-                    setOpened(slot.slot);
+                    setOpened(candidate.slot);
                   }}
                 >
-                  <span className='w-7 shrink-0 font-mono text-muted-foreground'>{label}</span>
-                  <SlotSwatch material={slot} />
-                  <span className={cn('min-w-0 flex-1 truncate', slot.state !== 'loaded' && 'text-muted-foreground')}>
-                    {materialName(slot, manifest)}
+                  <span className='max-w-28 min-w-7 shrink-0 truncate font-mono text-muted-foreground'>
+                    {slotLabel(system, candidate.slot)}
+                  </span>
+                  <SlotSwatch material={candidate.material} />
+                  <span
+                    className={cn('min-w-0 flex-1 truncate', candidate.state !== 'loaded' && 'text-muted-foreground')}
+                  >
+                    {slotName(candidate, isExternalSlot(system, candidate.slot))}
                   </span>
                   {isChanging ? (
                     <LoaderCircle
-                      aria-label={change.kind === 'unload' ? 'Unloading' : 'Loading'}
+                      aria-label='Changing'
                       className='size-3.5 shrink-0 animate-spin text-information motion-reduce:animate-none'
                     />
                   ) : isCurrent ? (
@@ -1021,7 +607,7 @@ export function MaterialSlots({
                       In use
                     </Badge>
                   ) : null}
-                  <Remaining percent={slot.remainingPercent} />
+                  <Remaining percent={candidate.remainingPercent} />
                   <ChevronRight aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
                 </button>
               </li>
@@ -1030,5 +616,147 @@ export function MaterialSlots({
         </ul>
       )}
     </div>
+  );
+}
+
+/**
+ * Save a pressure-advance value typed by hand, for a preset and a nozzle.
+ *
+ * @param properties - The control, the material system and the nozzles.
+ * @returns The form.
+ */
+function ManualProfileForm({
+  control,
+  systemId,
+  nozzles,
+}: {
+  readonly control: MachineControl;
+  readonly systemId: string;
+  readonly nozzles: readonly string[];
+}): React.JSX.Element {
+  const [name, setName] = useState('');
+  const [profileId, setProfileId] = useState('');
+  const [settingId, setSettingId] = useState('');
+  const [nozzleId, setNozzleId] = useState(nozzles[0] ?? '');
+  const [k, setK] = useState('0.02');
+  const pressureAdvance = Number(k);
+  const isValid =
+    name.trim() !== '' && profileId.trim() !== '' && nozzleId !== '' && pressureAdvance > 0 && pressureAdvance < 2;
+  return (
+    <form
+      aria-label='Save a pressure-advance profile'
+      className='flex min-w-0 flex-col gap-2'
+      onSubmit={(event) => {
+        event.preventDefault();
+        void control.apply(systemId, 'material.calibration.save', {
+          source: 'manual',
+          name: name.trim(),
+          preset: { profileId: profileId.trim(), settingId: settingId.trim() },
+          nozzleId,
+          pressureAdvance,
+        });
+      }}
+    >
+      <div className='-my-1.5 flex min-w-0 flex-col'>
+        {(
+          [
+            ['Name', name, setName],
+            ['Filament profile', profileId, setProfileId],
+            ['Preset setting', settingId, setSettingId],
+            ['Pressure advance (K)', k, setK],
+          ] as const
+        ).map(([label, value, set]) => (
+          <PrintSetupRow key={label} label={label}>
+            <Input
+              aria-label={label}
+              className='h-6 text-xs'
+              value={value}
+              maxLength={label === 'Name' ? 40 : undefined}
+              inputMode={label === 'Pressure advance (K)' ? 'decimal' : undefined}
+              onChange={(event) => {
+                set(event.target.value);
+              }}
+            />
+          </PrintSetupRow>
+        ))}
+        {nozzles.length > 1 ? (
+          <PrintSetupRow label='Nozzle'>
+            <ParameterSelect
+              label='Nozzle'
+              value={nozzleId}
+              groups={[{ options: nozzles.map((id) => ({ value: id, label: id })) }]}
+              onChange={setNozzleId}
+            />
+          </PrintSetupRow>
+        ) : null}
+      </div>
+      <div>
+        <Button
+          type='submit'
+          size='sm'
+          variant='outline'
+          disabled={!isValid || control.check(systemId, 'material.calibration.save').status !== 'available'}
+        >
+          Save profile
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Pressure advance: the machine-held profile table, each row deletable, and a value saved by hand. Shown only on a
+ * machine that keeps such a table.
+ *
+ * @param properties - The control.
+ * @returns The stage, or nothing.
+ * @public
+ */
+export function PressureAdvanceStage({ control }: { readonly control: MachineControl }): React.JSX.Element | undefined {
+  const { entry } = control;
+  const system = materialSystemOf(entry.descriptor.capabilities);
+  const table = materialSystemValue(entry)?.calibrations;
+  if (system === undefined || table === undefined) {
+    return undefined;
+  }
+  const nozzles = toolheadOf(entry.descriptor.capabilities)?.nozzles.map((nozzle) => nozzle.id) ?? [];
+  const row = (profile: CalibrationProfile): React.JSX.Element => (
+    <PrintRow
+      key={profile.profileId}
+      label={profile.name}
+      badge={
+        <ActionButton
+          control={control}
+          componentId={system.id}
+          action='material.calibration.delete'
+          parameters={{ profileId: profile.profileId }}
+          label='Delete'
+          variant='ghost'
+          ariaLabel={`Delete ${profile.name}`}
+        />
+      }
+    >
+      K {profile.pressureAdvance.toFixed(3)} · {profile.preset.profileId} · {profile.nozzleId}
+    </PrintRow>
+  );
+  return (
+    <PrintStage
+      icon={Layers}
+      title='Pressure advance'
+      summary={`${String(table.rows.length)} ${table.rows.length === 1 ? 'profile' : 'profiles'}`}
+    >
+      {table.rows.length === 0 ? (
+        <p className='text-xs text-muted-foreground'>No saved profiles; every slot uses the default.</p>
+      ) : (
+        <dl className='flex flex-col gap-1'>{table.rows.map(row)}</dl>
+      )}
+      {declaredAction(entry, system.id, 'material.calibration.save') === undefined ? null : (
+        <ManualProfileForm control={control} systemId={system.id} nozzles={nozzles} />
+      )}
+      <p className='text-xs text-muted-foreground'>
+        {entry.name} keeps these per nozzle{table.capacity === undefined ? '' : `, up to ${String(table.capacity)}`}; a
+        change from another app updates this list.
+      </p>
+    </PrintStage>
   );
 }

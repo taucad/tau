@@ -1,13 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, Circle, CircleAlert, Hand, LoaderCircle } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { PrintRequester } from '@taucad/runtime/machine';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
 import { disclosureMotion } from '#components/revisions/revision-actions.js';
-
-/** Who the pane acts as when it creates or resolves a request. @public */
-export const operator: PrintRequester = { kind: 'user', id: 'operator', label: 'You' };
 
 /**
  * A clock that ticks once a second while mounted, for ages and staleness.
@@ -47,7 +43,7 @@ export function PrintStages({ children }: { readonly children: React.ReactNode }
   return (
     <div
       data-slot='print-stages'
-      className='flex min-w-0 flex-col divide-y divide-border/70 overflow-hidden rounded-lg border border-border/70 bg-background'
+      className='flex min-w-0 shrink-0 flex-col divide-y divide-border/70 overflow-hidden rounded-lg border border-border/70 bg-background'
       onKeyDown={(event) => {
         const move = stageKeys[event.key];
         if (move === undefined || !(event.target instanceof HTMLElement) || !event.target.dataset['printStage']) {
@@ -250,12 +246,12 @@ export function StaleBadge(): React.JSX.Element {
 /** One step of a send or a filament change, as `PrintSteps` lists it. @public */
 export type PrintStep = Readonly<{
   label: string;
-  state: 'done' | 'active' | 'todo';
+  state: 'done' | 'active' | 'todo' | 'skipped';
   /** Who takes the step: while it is active, a step for the person shows a hand instead of a spinner. */
   actor?: 'machine' | 'person';
 }>;
 
-const stepStateWords = { done: 'done', active: 'in progress', todo: 'to do' } as const;
+const stepStateWords = { done: 'done', active: 'in progress', todo: 'to do', skipped: 'skipped' } as const;
 
 /**
  * Something in progress as its steps, in order: what is done, the step in progress and what follows. Sends and
@@ -288,7 +284,8 @@ export function PrintSteps({
             aria-current={step.state === 'active' ? 'step' : undefined}
             className={cn(
               'flex min-w-0 items-center gap-1',
-              step.state !== 'todo' && 'text-foreground',
+              step.state !== 'todo' && step.state !== 'skipped' && 'text-foreground',
+              step.state === 'skipped' && 'line-through',
               needsPerson && 'font-medium',
             )}
           >

@@ -22,6 +22,8 @@ import type { RuntimeClient } from '@taucad/runtime/client';
 import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
 import type { FileSystemBridgeConnection } from '@taucad/runtime/filesystem';
 import type * as runtimeFilesystem from '@taucad/runtime/filesystem';
+import type * as runtimeHost from '@taucad/runtime/host';
+import type * as runtimeHostNode from '@taucad/runtime/host/node';
 import { z } from 'zod';
 
 import { startHostDaemon } from '#host-daemon.js';
@@ -36,6 +38,52 @@ import type { HostJobWorkerFactory } from '#job-worker.js';
 
 /* Observe the filesystem the daemon binds to its runtime child, without changing
  * it: the captured thunk is the connection that child's bridge opens. */
+/* Every session the daemon's machine admission revokes, so a case sees a closed channel give its session back. */
+const revokedSessions = vi.hoisted(() => [] as unknown[]);
+vi.mock('@taucad/runtime/host', async (importOriginal) => {
+  const original = await importOriginal<typeof runtimeHost>();
+  return {
+    ...original,
+    createHostAdmissionAuthority: (input: Parameters<typeof original.createHostAdmissionAuthority>[0]) => {
+      const admission = original.createHostAdmissionAuthority(input);
+      return {
+        ...admission,
+        revoke: (session: Parameters<typeof admission.revoke>[0]) => {
+          revokedSessions.push(session);
+          return admission.revoke(session);
+        },
+      };
+    },
+  };
+});
+/* A machine host whose quiesce a case times out with a start still in flight, counting the resumes it hands out. */
+const machineQuiesce = vi.hoisted(() => ({ isStartInFlight: false, resumes: 0 }));
+/* What the machine host answers when asked which machines a streamed run feeds, in place of its own answer (the host
+ * owns that read and its tests). */
+const machineStreaming = vi.hoisted(() => ({
+  machines: undefined as undefined | ReadonlyArray<Readonly<{ machineId: string; name: string }>>,
+}));
+vi.mock('@taucad/runtime/host/node', async (importOriginal) => {
+  const original = await importOriginal<typeof runtimeHostNode>();
+  return {
+    ...original,
+    createNodeMachineHost: async (input: Parameters<typeof original.createNodeMachineHost>[0]) => {
+      const host = await original.createNodeMachineHost(input);
+      return {
+        ...host,
+        quiesce: async (options?: Parameters<typeof host.quiesce>[0]) => {
+          if (machineQuiesce.isStartInFlight) {
+            throw new original.MachineHostStartInFlightError(() => {
+              machineQuiesce.resumes += 1;
+            });
+          }
+          return host.quiesce(options);
+        },
+        streamingMachines: async () => machineStreaming.machines ?? host.streamingMachines(),
+      };
+    },
+  };
+});
 const runtimeFileSystemOpens = vi.hoisted(() => [] as Array<() => FileSystemBridgeConnection>);
 vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
   const original = await importOriginal<typeof runtimeFilesystem>();
@@ -88,76 +136,63 @@ const fixtureConfiguration = defineConfiguration({
 });
 
 /* The daemon only lists what `--machines` admitted; the host names no real provider. */
-const fixtureMachine = defineMachine({
+const fixtureMachineDefinition = {
   id: 'fixture-printer',
   name: 'Fixture printer',
   version: '1',
-  protocolVersion: 1,
+  protocolVersion: 2,
   vendor: 'fixture',
-  technologies: ['additive.fff'],
-  accepts: [
-    {
-      contract: { id: 'fixture.gcode', version: 1 },
-      mediaType: 'text/x.gcode',
-      requiredMembers: [],
-      payloadSelection: 'single',
-      technology: 'additive.fff',
-    },
-  ],
   manifest: {
-    version: 2,
+    version: 3,
     identity: {
       typeId: 'fixture.printer',
       vendor: 'fixture',
       model: 'fixture-printer',
       displayName: 'Fixture printer',
-      qualifiedFirmware: [],
     },
-    technology: 'additive.fff',
-    geometry: {
-      unit: 'mm',
-      buildVolume: { x: 200, y: 200, z: 200 },
-      enclosure: { outer: { x: 300, y: 300, z: 400 }, enclosed: false, doors: [] },
-      kinematics: 'cartesian-bedslinger',
-      bedMotion: 'y',
-      origin: 'front-left',
-      toolheadHome: { x: 1, y: 1, z: 200 },
-      materialSystemMount: 'none',
-    },
-    toolhead: {
-      filamentDiameter: { value: 1.75, unit: 'mm' },
-      nozzles: [
-        {
-          id: 'nozzle-0.4',
-          diameter: { value: 0.4, unit: 'mm' },
-          maximumTemperature: { value: 260, unit: 'Cel' },
-          material: 'stainless',
+    connection: { transport: 'network', exclusive: false, opening: 'nothing', identity: 'authenticated' },
+    axes: [],
+    components: [{ id: 'controller', label: 'Controller', kind: 'controller' }],
+    processes: [
+      {
+        type: 'fff',
+        version: 1,
+        geometry: {
+          unit: 'mm',
+          buildVolume: { x: 200, y: 200, z: 200 },
+          enclosure: { outer: { x: 300, y: 300, z: 400 }, enclosed: false, doors: [] },
+          kinematics: 'cartesian-bedslinger',
+          bedMotion: 'y',
+          origin: 'front-left',
+          toolheadHome: { x: 1, y: 1, z: 200 },
+          materialSystemMount: 'none',
         },
-      ],
-    },
-    bed: { maximumTemperature: { value: 100, unit: 'Cel' }, plates: [{ id: 'smooth', label: 'Smooth plate' }] },
-    chamber: { enclosed: false, heated: false, light: false, fans: [] },
-    materialSystem: { units: 0, slotsPerUnit: 0, externalSpool: true, drying: false },
-    camera: { stills: false },
-    storage: { removable: false },
-    network: { lanMode: true, cloud: false },
-    speedProfiles: [],
-    actions: [],
-    observations: [],
-    slicing: {
-      recommended: {
-        layerHeight: { value: 0.2, unit: 'mm' },
-        walls: 2,
-        infillPercent: 15,
-        nozzleTemperature: { value: 210, unit: 'Cel' },
-        bedTemperature: { value: 60, unit: 'Cel' },
+        filamentDiameter: { value: 1.75, unit: 'mm' },
+        bed: { maximumTemperature: { value: 100, unit: 'Cel' }, plates: [{ id: 'smooth', label: 'Smooth plate' }] },
+        chamber: { enclosed: false, heated: false },
+        speedProfiles: [],
+        slicing: {
+          recommended: {
+            layerHeight: { value: 0.2, unit: 'mm' },
+            walls: 2,
+            infillPercent: 15,
+            nozzleTemperature: { value: 210, unit: 'Cel' },
+            bedTemperature: { value: 60, unit: 'Cel' },
+          },
+          presets: [
+            { id: 'fast', label: 'Fast', layerHeight: { value: 0.28, unit: 'mm' } },
+            { id: 'standard', label: 'Standard', layerHeight: { value: 0.2, unit: 'mm' } },
+            { id: 'fine', label: 'Fine', layerHeight: { value: 0.12, unit: 'mm' } },
+          ],
+        },
       },
-      presets: [
-        { id: 'fast', label: 'Fast', layerHeight: { value: 0.28, unit: 'mm' } },
-        { id: 'standard', label: 'Standard', layerHeight: { value: 0.2, unit: 'mm' } },
-        { id: 'fine', label: 'Fine', layerHeight: { value: 0.12, unit: 'mm' } },
-      ],
-    },
+    ],
+    actions: [],
+    holds: [],
+    jobs: { type: 'unsupported' },
+    stop: { motion: 'halts', spindle: 'none', heaters: 'off', position: 'may-be-lost', recovery: [] },
+    observations: [],
+    qualifications: [],
   },
   bindingConfiguration: fixtureConfiguration,
   submissionConfiguration: fixtureConfiguration,
@@ -166,6 +201,16 @@ const fixtureMachine = defineMachine({
   },
   async connect() {
     throw new Error('The fixture printer does not connect.');
+  },
+} satisfies Parameters<typeof defineMachine>[0];
+const fixtureMachine = defineMachine(fixtureMachineDefinition);
+/* The same machine on a serial port, which a daemon without serial access lists unavailable. */
+const fixtureSerialMachine = defineMachine({
+  ...fixtureMachineDefinition,
+  id: 'fixture-router',
+  manifest: {
+    ...fixtureMachineDefinition.manifest,
+    connection: { ...fixtureMachineDefinition.manifest.connection, transport: 'serial' },
   },
 });
 
@@ -774,7 +819,7 @@ describe('startHostDaemon', () => {
     const daemon = startHostDaemon({
       relayUrl: new URL('http://127.0.0.1:1'),
       runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
-      agent: { ...agentOptions, machines: { providers: [fixtureMachine()] } },
+      agent: { ...agentOptions, machines: { providers: [fixtureMachine(), fixtureSerialMachine()] } },
       onEvent: (event) => events.push(event),
     });
     await daemon.ready;
@@ -789,7 +834,7 @@ describe('startHostDaemon', () => {
 
     /* `tau serve --machines`: the probe answers, the socket upgrades, the host
      * lists what the flag admitted — and the tool registry was offered the
-     * same facet, with the served project's id for `request_print`. */
+     * same facet, with the served project's id for `request_job`. */
     const probe = await fetch(new URL('/machines', origin), { headers: { authorization: `Bearer ${agentToken}` } });
     expect(probe.status).toBe(204);
     const socket = new WebSocket(new URL('/machines', origin).href.replace('http:', 'ws:'), {
@@ -801,12 +846,54 @@ describe('startHostDaemon', () => {
     const client = connectMachineChannel(socket);
     try {
       const providers = await client.listProviders({});
-      expect(providers.map((provider) => provider.id)).toEqual(['fixture-printer']);
+      /* The daemon has no serial driver, so it says why it cannot serve a serial machine. */
+      expect(providers.map(({ id, unavailable }) => ({ id, unavailable }))).toEqual([
+        { id: 'fixture-printer', unavailable: undefined },
+        { id: 'fixture-router', unavailable: { reason: expect.stringContaining('serial ports') as string } },
+      ]);
       await expect(client.list({})).resolves.toMatchObject({ entries: [] });
     } finally {
       client.close();
     }
     expect(registrySpy.mock.calls.at(-1)?.[0]).toMatchObject({ projectId, machines: { available: true } });
+    /* The tools' facet rides an agent session of its own: it reads machines, but a person's own acts are not its to
+     * call, whatever the payload claims. */
+    const agentFacet = registrySpy.mock.calls.at(-1)?.[0].machines;
+    if (agentFacet?.available !== true) {
+      throw new Error('The daemon offered its tools no machines facet.');
+    }
+    await expect(agentFacet.list({})).resolves.toMatchObject({ entries: [] });
+    const person = { kind: 'user', id: 'person', label: 'Person' } as const;
+    await expect(agentFacet.setTesting({ machineId: 'any', enabled: true, requestedBy: person })).rejects.toThrow(
+      'ROUTE_DENIED',
+    );
+    /* An agent never approves its own action: approving is a person's act on the person's session. */
+    await expect(
+      agentFacet.approveAction({
+        machineId: 'any',
+        operationId: 'op-1',
+        intent: {
+          componentId: 'controller',
+          action: 'controller.wake',
+          version: 1,
+          expectedRunId: null,
+          parameters: {},
+        },
+        decision: 'approve',
+        approvedBy: person,
+      }),
+    ).rejects.toThrow('ROUTE_DENIED');
+    /* The agent's session lives only as long as its channel. */
+    const revokedBefore = revokedSessions.length;
+    const closable = (facet: typeof agentFacet): facet is typeof agentFacet & Readonly<{ close(): void }> =>
+      'close' in facet && typeof facet.close === 'function';
+    if (!closable(agentFacet)) {
+      throw new Error('The daemon offered its tools a machines facet it cannot close.');
+    }
+    agentFacet.close();
+    await vi.waitFor(() => {
+      expect(revokedSessions.length).toBe(revokedBefore + 1);
+    });
 
     const readArtifact = machineRuntimeSpy.mock.calls.at(-1)?.[0].readArtifact;
     if (readArtifact === undefined) {
@@ -859,6 +946,91 @@ describe('startHostDaemon', () => {
 
     await daemon.close();
     expect(await daemon.closed).toEqual({ cause: 'requested' });
+  }, 20_000);
+
+  it('should stop, saying so, when a machine job is still starting as the machine host closes', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-machines-starting-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.env['TAU_SECRET_VAULT'] = 'memory';
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const events: HostDaemonEvent[] = [];
+    machineQuiesce.resumes = 0;
+    machineQuiesce.isStartInFlight = true;
+    try {
+      const daemon = startHostDaemon({
+        relayUrl: new URL('http://127.0.0.1:1'),
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
+        agent: { ...(await agentOptionsIn(temporaryDirectory)), machines: { providers: [fixtureMachine()] } },
+        onEvent: (event) => events.push(event),
+      });
+      await daemon.ready;
+      await daemon.close();
+      expect(await daemon.closed).toEqual({ cause: 'requested' });
+      /* The gate stays up through the close: nothing admits starts again on the way out. */
+      expect(machineQuiesce.resumes).toBe(0);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'warning',
+          code: 'MACHINE_HOST',
+          message: 'A machine job was still starting when Tau Host stopped; check the machine.',
+        }),
+      );
+    } finally {
+      machineQuiesce.isStartInFlight = false;
+    }
+  }, 20_000);
+
+  it('should keep the computer awake while a streamed run feeds a machine, and let go when it ends or Tau Host stops', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-machines-awake-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.env['TAU_SECRET_VAULT'] = 'memory';
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    /* A stub, so no test holds the real computer awake. */
+    const release = vi.fn();
+    const keepAwake = { hold: vi.fn(() => release) };
+    const router = [{ machineId: 'router', name: 'Router' }];
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const daemon = startHostDaemon({
+        relayUrl: new URL('http://127.0.0.1:1'),
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
+        agent: {
+          ...(await agentOptionsIn(temporaryDirectory)),
+          machines: { providers: [fixtureMachine()], keepAwake },
+        },
+      });
+      await daemon.ready;
+      /* The host's own answer: nothing streams. */
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(keepAwake.hold).not.toHaveBeenCalled();
+
+      machineStreaming.machines = router;
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(keepAwake.hold).toHaveBeenCalledOnce();
+      machineStreaming.machines = [];
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(release).toHaveBeenCalledOnce();
+
+      machineStreaming.machines = router;
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(keepAwake.hold).toHaveBeenCalledTimes(2);
+      await daemon.close();
+      expect(release).toHaveBeenCalledTimes(2);
+      expect(await daemon.closed).toEqual({ cause: 'requested' });
+    } finally {
+      vi.useRealTimers();
+      machineStreaming.machines = undefined;
+    }
   }, 20_000);
 
   it('should warn and keep serving without machines while another Tau app owns the machine store', async () => {

@@ -1,237 +1,1420 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera, LoaderCircle, RefreshCw, SlidersHorizontal } from 'lucide-react';
-import type { MachineClient, MachineDirectoryEntry, MachineManifest } from '@taucad/runtime/machine';
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Camera,
+  Check,
+  ChevronsDown,
+  ChevronsUp,
+  CircleAlert,
+  Crosshair,
+  Hand,
+  House,
+  LoaderCircle,
+  Move,
+  OctagonX,
+  RefreshCw,
+  Wrench,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { componentValue, fffProcessOf, machineActionOf } from '@taucad/runtime/machine';
+import type {
+  MachineActionDescriptor,
+  MachineActivity,
+  MachineAxis,
+  MachineClient,
+  MachineComponent,
+  MachineDirectoryEntry,
+  MachineHoldDescriptor,
+  MachineRemedy,
+} from '@taucad/runtime/machine';
+import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
-import { randomUuid } from '@taucad/utils/id';
+import { Input } from '@taucad/ui/components/input';
+import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
+import { cn } from '@taucad/ui/utils/cn';
 import { isRecord } from '@taucad/utils/schema';
 import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
+import { describeOutcome, failureCodeOf } from '#components/print/machine-facts.js';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
-import { PrintNotice, PrintRow, PrintStage, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
+import type { MachineControl } from '#hooks/use-machine-control.js';
+import {
+  PrintNotice,
+  PrintRow,
+  PrintStage,
+  PrintSteps,
+  useNow,
+} from '#routes/w.$workspace.$project/chat-print-section.js';
 import { formatAge } from '#routes/w.$workspace.$project/chat-print-summary.js';
 
-/**
- * One declared machine action to apply, as the machine-actions blueprint proposes `MachineClient.applyAction`.
- * @public
- */
-export type MachineActionInput = Readonly<{
-  machineId: string;
-  /** Idempotency key: the same id with the same input never applies twice. */
-  operationId: string;
-  /** A manifest action id, such as `light.set`. */
-  action: string;
-  /** Validated against the action's declared parameter schema. */
-  parameters: Readonly<Record<string, unknown>>;
-  /** For an action on the run: the exact run the person saw. */
-  expectedProviderRunId?: string;
-}>;
+/** Statuses in which a run owns the machine: motion, tools and the spindle stay with it. */
+const runOwnedStates: ReadonlySet<string> = new Set(['starting', 'running', 'paused', 'finishing']);
 
 /**
- * Applies one action; it resolves once the host accepted it, and the printer's next observation shows the effect.
+ * Whether a run owns the machine now.
  *
- * ponytail: an optional pane seam until the machine-actions API guide is approved; the product passes none, so
- * every action control says why it waits. Replace it with `MachineClient.applyAction` when that lands.
+ * @param entry - The machine as observed.
+ * @returns True while a run is starting, running, paused or finishing.
  * @public
  */
-export type ApplyMachineAction = (input: MachineActionInput) => Promise<void>;
+export const isRunOwned = (entry: MachineDirectoryEntry): boolean =>
+  runOwnedStates.has(entry.snapshot.run?.state ?? '');
 
 /**
- * Whether a declared action can be offered now. `reason` completes a sentence about the action ("… is
- * designed but not yet qualified on this printer"); a reason the pane says elsewhere is omitted.
+ * The installed descriptor of an action, when the machine declares it.
+ *
+ * @param entry - The machine as observed.
+ * @param componentId - The component.
+ * @param action - The action id.
+ * @returns The descriptor, or nothing.
  * @public
  */
-export type ActionAvailability = Readonly<{ isAvailable: boolean; label: string; reason?: string }>;
+export const declaredAction = (
+  entry: MachineDirectoryEntry,
+  componentId: string,
+  action: string,
+): MachineActionDescriptor | undefined => {
+  const descriptor = machineActionOf(entry, { componentId, action });
+  return descriptor !== undefined && 'scope' in descriptor ? descriptor : undefined;
+};
 
-const qualificationWait: Readonly<Record<'designed' | 'unsupported', string>> = {
-  designed: 'designed but not yet qualified on this printer',
-  unsupported: 'not supported on this printer',
+/** A schema keyword's list, or none. */
+const listOf = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
+
+/**
+ * The JSON Schema of one parameter in a control's form; for a form of alternatives (`spindle.set`), the first branch
+ * that declares it.
+ *
+ * @param descriptor - The action or hold.
+ * @param name - The parameter.
+ * @returns The parameter's schema, or nothing when the form does not name it.
+ * @public
+ */
+export const formParameter = (
+  descriptor: MachineActionDescriptor | MachineHoldDescriptor | undefined,
+  name: string,
+): Record<string, unknown> | undefined => {
+  const schema: unknown = descriptor?.configuration.legacyProjection.inputSchema;
+  if (!isRecord(schema)) {
+    return undefined;
+  }
+  const branches = [schema, ...listOf(schema['oneOf']), ...listOf(schema['anyOf'])];
+  for (const branch of branches) {
+    const property = isRecord(branch) && isRecord(branch['properties']) ? branch['properties'][name] : undefined;
+    if (isRecord(property)) {
+      return property;
+    }
+  }
+  return undefined;
 };
 
 /**
- * The sentences that say why actions wait, one per reason: "Chamber light and print speed are designed but
- * not yet qualified on this printer."
+ * A number for one parameter from the control's form: its default, else the pane's choice kept inside the form's
+ * bounds.
  *
- * @param availabilities - The actions shown, any of them available.
- * @returns One sentence per distinct reason.
+ * @param descriptor - The action or hold.
+ * @param name - The parameter.
+ * @param preferred - What the pane sends when the form declares no default.
+ * @returns The value to send.
  * @public
  */
-export const describeWaits = (availabilities: ReadonlyArray<ActionAvailability | undefined>): readonly string[] => {
-  const byReason = Map.groupBy(
-    availabilities.filter((availability) => availability?.reason !== undefined),
-    (availability) => availability?.reason ?? '',
-  );
-  return [...byReason].map(([reason, waiting]) => {
-    const labels = waiting.map((availability, index) =>
-      index === 0 ? (availability?.label ?? '') : (availability?.label.toLowerCase() ?? ''),
+export const formNumber = (
+  descriptor: MachineActionDescriptor | MachineHoldDescriptor | undefined,
+  name: string,
+  preferred: number,
+): number => {
+  const property = formParameter(descriptor, name);
+  if (typeof property?.['default'] === 'number') {
+    return property['default'];
+  }
+  const maximum = typeof property?.['maximum'] === 'number' ? property['maximum'] : Number.POSITIVE_INFINITY;
+  const minimum = typeof property?.['minimum'] === 'number' ? property['minimum'] : Number.NEGATIVE_INFINITY;
+  return Math.min(maximum, Math.max(minimum, preferred));
+};
+
+/**
+ * The choices one parameter's form offers: `oneOf` constants with their titles, or an `enum`.
+ *
+ * @param descriptor - The action.
+ * @param name - The parameter.
+ * @returns Value and label pairs; none when the form offers no fixed choices.
+ * @public
+ */
+export const formChoices = (
+  descriptor: MachineActionDescriptor | undefined,
+  name: string,
+): ReadonlyArray<Readonly<{ value: string; label: string }>> => {
+  const property = formParameter(descriptor, name);
+  if (Array.isArray(property?.['oneOf'])) {
+    return property['oneOf'].flatMap((choice) =>
+      isRecord(choice) && typeof choice['const'] === 'string'
+        ? [{ value: choice['const'], label: typeof choice['title'] === 'string' ? choice['title'] : choice['const'] }]
+        : [],
     );
-    return `${new Intl.ListFormat('en', { type: 'conjunction' }).format(labels)} ${labels.length > 1 ? 'are' : 'is'} ${reason}.`;
-  });
+  }
+  return Array.isArray(property?.['enum'])
+    ? property['enum'].filter((value) => typeof value === 'string').map((value) => ({ value, label: value }))
+    : [];
 };
 
 /**
- * Whether the pane may offer a declared action now. A stale or disconnected printer blocks every action
- * without a reason of its own: the pane's observation notice already says what waits.
+ * The marks a control wears: "Unqualified" while it is designed but tried under testing.
  *
- * @param input - The machine, its manifest, the action id and the seam that applies it.
- * @returns The availability, or nothing when the manifest does not declare the action.
+ * @param properties - The descriptor.
+ * @returns The badge, or nothing for a qualified control.
  * @public
  */
-export const actionAvailability = ({
-  entry,
-  manifest,
-  action,
-  apply,
+export function QualificationBadge({
+  descriptor,
 }: {
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
+  readonly descriptor: MachineActionDescriptor | MachineHoldDescriptor | undefined;
+}): React.JSX.Element | undefined {
+  return descriptor?.qualification.status === 'designed' ? (
+    <Badge
+      variant='outline'
+      className='ml-0.5 px-1 py-0 text-[0.625rem]'
+      title='Not yet qualified on this machine; usable because testing is on.'
+    >
+      Unqualified
+    </Badge>
+  ) : undefined;
+}
+
+/**
+ * A button for one declared action: absent when the machine does not declare it, disabled with the check's reason
+ * while it cannot be used, and sent through the control's one path when pressed.
+ *
+ * @param properties - The control, the action, its parameters and how it looks.
+ * @returns The button, or nothing.
+ * @public
+ */
+export function ActionButton({
+  control,
+  componentId,
+  action,
+  parameters = {},
+  label,
+  icon: Icon,
+  variant = 'outline',
+  ariaLabel,
+  onDone,
+}: {
+  readonly control: MachineControl;
+  readonly componentId: string;
   readonly action: string;
-  readonly apply: ApplyMachineAction | undefined;
-}): ActionAvailability | undefined => {
-  const descriptor = manifest?.actions.find((candidate) => candidate.id === action);
+  readonly parameters?: unknown;
+  readonly label?: string;
+  readonly icon?: LucideIcon;
+  readonly variant?: 'default' | 'outline' | 'ghost' | 'destructive' | 'secondary';
+  readonly ariaLabel?: string;
+  /** Called with whether the machine accepted it. */
+  readonly onDone?: (isAccepted: boolean) => void;
+}): React.JSX.Element | undefined {
+  const descriptor = declaredAction(control.entry, componentId, action);
   if (descriptor === undefined) {
     return undefined;
   }
-  const { label, qualification } = descriptor;
-  if (qualification !== 'qualified') {
-    return { isAvailable: false, label, reason: qualificationWait[qualification] };
-  }
-  if (apply === undefined) {
-    return { isAvailable: false, label, reason: 'not available from Tau yet' };
-  }
-  if (entry.freshness !== 'current' || entry.snapshot.connection !== 'connected') {
-    return { isAvailable: false, label };
-  }
-  return { isAvailable: true, label };
-};
-
-/** What a person reads when the host refuses an action, by the code the machine-actions guide proposes. */
-const actionFailures: ReadonlyMap<string, string> = new Map([
-  ['MACHINE_ACTION_UNDECLARED', 'This printer does not declare that action, so nothing was sent.'],
-  ['MACHINE_ACTION_UNQUALIFIED', 'That action is not qualified on this printer yet, so nothing was sent.'],
-  ['MACHINE_ACTION_UNSUPPORTED', "The printer's firmware does not support that action, so nothing was sent."],
-  ['MACHINE_ACTION_PARAMETERS_INVALID', 'The printer refused the values Tau sent; report this as a bug.'],
-  ['MACHINE_ACTION_RUN_ACTIVE', 'The printer is running a print, so nothing was sent; try again once it finishes.'],
-  ['MACHINE_CONTROL_STALE_RUN', 'The run changed before the action arrived, so nothing was sent.'],
-  [
-    'MACHINE_ACTION_UNAVAILABLE',
-    'Tau is not connected to this printer right now, so nothing was sent; try again once it reconnects.',
-  ],
-  [
-    'MACHINE_ACTION_PRECONDITION_FAILED',
-    'The printer is not ready for that yet, so nothing was sent; check it and try again.',
-  ],
-]);
+  const check = control.check(componentId, action);
+  const isPending = control.pending === `${componentId}:${action}`;
+  return (
+    <Button
+      type='button'
+      size='sm'
+      variant={variant}
+      aria-label={ariaLabel}
+      disabled={check.status !== 'available' || control.pending !== undefined}
+      title={check.status === 'unavailable' ? check.message : descriptor.consequence}
+      onClick={() => {
+        const send = async (): Promise<void> => {
+          const isAccepted = await control.apply(componentId, action, parameters);
+          onDone?.(isAccepted);
+        };
+        // async-iife: press -- the control reports its own refusal.
+        void send();
+      }}
+    >
+      {isPending ? (
+        <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
+      ) : Icon === undefined ? null : (
+        <Icon aria-hidden />
+      )}
+      {label ?? descriptor.label}
+      <QualificationBadge descriptor={descriptor} />
+    </Button>
+  );
+}
 
 /**
- * A refused or failed action in the person's words, by the first known code in the error.
+ * The id of a machine's Stop control in the pane's header, so a `stop` remedy can lead to it.
  *
- * @param error - What the seam rejected with.
- * @returns One sentence.
+ * @param machineId - The machine.
+ * @returns The element id.
  * @public
  */
-export const describeActionFailure = (error: unknown): string => {
-  const message = error instanceof Error ? error.message : String(error);
-  const code = /\b[A-Z][\dA-Z]*(?:_[\dA-Z]+)+\b/u.exec(message)?.[0];
-  return (
-    (code === undefined ? undefined : actionFailures.get(code)) ?? `The printer did not take the change (${message}).`
-  );
-};
+export const stopControlId = (machineId: string): string => `machine-stop-${machineId}`;
 
 /**
- * Applies actions for one printer: what is in flight, the last failure, and the call itself.
+ * What clears a refusal: an action remedy is its own button, a person's remedy is an instruction, and a `stop`
+ * remedy says what Stop costs with a link to the pane's one Stop control, never a second Stop.
+ *
+ * @param properties - The control and the remedy.
+ * @returns The remedy.
+ * @public
+ */
+export function RemedyButton({
+  control,
+  remedy,
+  componentLabel,
+}: {
+  readonly control: MachineControl;
+  readonly remedy: MachineRemedy;
+  /** Names the component an action remedy acts on, where that is not the group it is shown in. */
+  readonly componentLabel?: string;
+}): React.JSX.Element | undefined {
+  if (remedy.type === 'person') {
+    return (
+      <p className='flex items-start gap-1.5 text-xs'>
+        <Hand aria-hidden className='mt-0.5 size-3 shrink-0 text-information' />
+        <span>At the machine: {remedy.instruction}</span>
+      </p>
+    );
+  }
+  if (remedy.type === 'stop') {
+    return (
+      <p className='flex flex-wrap items-baseline gap-x-1.5 text-xs'>
+        <OctagonX aria-hidden className='size-3 shrink-0 self-center text-destructive' />
+        {/* ponytail: Stop is in the header whenever something can be stopped, which a stop remedy implies. */}
+        <Button
+          type='button'
+          variant='link'
+          size='xs'
+          className='h-auto p-0'
+          onClick={() => {
+            /* An attribute selector, as a machine id may hold characters an `#id` selector reads as syntax. */
+            document
+              .querySelector<HTMLElement>(`[id=${JSON.stringify(stopControlId(control.entry.machineId))}]`)
+              ?.focus();
+          }}
+        >
+          Go to Stop
+        </Button>
+        <span>{remedy.consequence}</span>
+      </p>
+    );
+  }
+  const label = declaredAction(control.entry, remedy.componentId, remedy.action)?.label ?? remedy.action;
+  return (
+    <ActionButton
+      control={control}
+      componentId={remedy.componentId}
+      action={remedy.action}
+      label={componentLabel === undefined ? undefined : `${componentLabel}: ${label}`}
+    />
+  );
+}
+
+/**
+ * Whether the pane asks "I am at the machine" once, above everything: only where starting a job needs someone there.
+ * Elsewhere a control that needs someone watching asks beside itself, when it is used.
  *
  * @param entry - The machine as observed.
- * @param apply - The seam, when the pane has one.
- * @returns The action in flight, the last failure and `run`, which resolves true once the host accepted.
+ * @returns True when the machine's job start is attended.
  * @public
  */
-export const useMachineAction = (
-  entry: MachineDirectoryEntry,
-  apply: ApplyMachineAction | undefined,
-): Readonly<{
-  pending: string | undefined;
-  error: string | undefined;
-  run: (action: string, parameters: Record<string, unknown>, expectedProviderRunId?: string) => Promise<boolean>;
-}> => {
-  const [pending, setPending] = useState<string>();
-  const [error, setError] = useState<string>();
-  const run = async (
-    action: string,
-    parameters: Record<string, unknown>,
-    expectedProviderRunId?: string,
-  ): Promise<boolean> => {
-    if (apply === undefined) {
-      return false;
-    }
-    setPending(action);
-    setError(undefined);
-    try {
-      await apply({
-        machineId: entry.machineId,
-        operationId: randomUuid(),
-        action,
-        parameters,
-        ...(expectedProviderRunId === undefined ? {} : { expectedProviderRunId }),
-      });
-      return true;
-    } catch (error) {
-      setError(describeActionFailure(error));
-      return false;
-    } finally {
-      setPending(undefined);
-    }
-  };
-  return { pending, error, run };
+export const asksPresenceAtPane = (entry: MachineDirectoryEntry): boolean => {
+  const { jobs } = entry.descriptor.capabilities;
+  return jobs.type === 'supported' && jobs.safety.attended;
 };
-
-/** How long a requested change shows before the pane stops claiming it: the printer reports within seconds. */
-const reportWithin = 15_000;
 
 /**
- * A value the person asked for, shown in place of the observed one until the printer reports it. When the
- * printer has not reported it within 15 s, the observed value speaks again and `isUnconfirmed` says so.
+ * "I am at the machine" beside the controls that need it, on a machine whose pane does not ask above. It sets the
+ * same presence the pane would, so the request carries it the same way.
  *
- * @param observed - The value as last observed.
- * @returns The value to show, whether a change is on its way, and `request`, which shows the value while
- * `send` runs and drops it when the host refuses.
+ * @param properties - The control.
+ * @returns The switch.
  */
-const useRequested = <T,>(
-  observed: T | undefined,
-): Readonly<{
-  shown: T | undefined;
-  isPending: boolean;
-  isUnconfirmed: boolean;
-  request: (value: T, send: () => Promise<boolean>) => Promise<void>;
-}> => {
-  const [requested, setRequested] = useState<Readonly<{ value: T; at: number }>>();
-  const [isUnconfirmed, setIsUnconfirmed] = useState(false);
-  const now = useNow();
-  const isReported = requested !== undefined && Object.is(requested.value, observed);
-  const isLate = requested !== undefined && !isReported && now - requested.at > reportWithin;
-  /* Settled while rendering, as React adjusts state from props: the printer reported it, or never did. */
-  if (isReported || isLate) {
-    setRequested(undefined);
-    setIsUnconfirmed(isLate);
+function InlinePresence({ control }: { readonly control: MachineControl }): React.JSX.Element {
+  return (
+    <div className='-my-1.5 flex min-w-0 flex-col'>
+      <PrintSetupRow
+        label='I am at the machine'
+        description={
+          control.attended
+            ? 'Tau asks again after 10 minutes without a control being used.'
+            : 'These controls need someone who can see the machine.'
+        }
+      >
+        <ParametersBoolean aria-label='I am at the machine' value={control.attended} onChange={control.setAttended} />
+      </PrintSetupRow>
+    </div>
+  );
+}
+
+/**
+ * Why a group of controls cannot act now, with the way out, said once above the group. Where the group's action
+ * needs someone watching and the pane does not ask, "I am at the machine" is asked here instead of the refusal.
+ *
+ * @param properties - The control, the action that speaks for the group, and whether to show its remedy.
+ * @returns The line, or nothing while the action is available or undeclared.
+ * @public
+ */
+export function Blocked({
+  control,
+  componentId,
+  action,
+  kind = 'action',
+  hasRemedy = true,
+}: {
+  readonly control: MachineControl;
+  readonly componentId: string;
+  readonly action: string;
+  readonly kind?: 'action' | 'hold';
+  /** Off where the group already shows the remedy's own button; a remedy for another motion group still shows. */
+  readonly hasRemedy?: boolean;
+}): React.JSX.Element | undefined {
+  const check = control.check(componentId, action, kind);
+  const asksHere =
+    machineActionOf(control.entry, { componentId, action, kind })?.safety.attended === true &&
+    !asksPresenceAtPane(control.entry);
+  const isReasonShown =
+    check.status === 'unavailable' &&
+    check.code !== 'MACHINE_ACTION_UNDECLARED' &&
+    !(asksHere && check.code === 'MACHINE_ACTION_ATTENDANCE_REQUIRED');
+  /* On a machine with several motion groups, a remedy that homes another group names it: this group's own Home would
+   * move the wrong axes and leave the block in place. */
+  const remedy = check.status === 'unavailable' ? check.remedy : undefined;
+  const motions = control.entry.descriptor.capabilities.components.filter((component) => component.kind === 'motion');
+  const otherGroup =
+    motions.length > 1 && remedy?.type === 'action' && remedy.componentId !== componentId
+      ? motions.find((motion) => motion.id === remedy.componentId)
+      : undefined;
+  return (
+    <>
+      {isReasonShown ? (
+        <div className='flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground'>
+          <CircleAlert aria-hidden className='size-3.5 shrink-0 text-warning' />
+          <span className='min-w-0 flex-1'>
+            {otherGroup === undefined ? check.message : `${otherGroup.label}: ${check.message}`}
+          </span>
+          {remedy === undefined || (!hasRemedy && otherGroup === undefined) ? null : (
+            <RemedyButton control={control} remedy={remedy} componentLabel={otherGroup?.label} />
+          )}
+        </div>
+      ) : null}
+      {asksHere ? <InlinePresence control={control} /> : null}
+    </>
+  );
+}
+
+/**
+ * What each declared control in a group does on this machine, said before it is pressed.
+ *
+ * @param properties - The descriptors the group offers.
+ * @returns The lines, or nothing when none declares a consequence.
+ * @public
+ */
+export function Consequences({
+  descriptors,
+}: {
+  readonly descriptors: ReadonlyArray<MachineActionDescriptor | undefined>;
+}): React.JSX.Element | undefined {
+  const lines = descriptors.flatMap((descriptor) =>
+    descriptor?.consequence === undefined && descriptor?.outcome === undefined
+      ? []
+      : [
+          {
+            key: `${descriptor.componentId}:${descriptor.id}`,
+            text: [
+              descriptor.consequence,
+              descriptor.outcome === undefined ? undefined : describeOutcome(descriptor.outcome),
+            ]
+              .filter((part) => part !== undefined)
+              .join(' '),
+            label: descriptor.label,
+          },
+        ],
+  );
+  if (lines.length === 0) {
+    return undefined;
   }
-  return {
-    shown: requested === undefined ? observed : requested.value,
-    isPending: requested !== undefined,
-    isUnconfirmed,
-    request: async (value, send) => {
-      setIsUnconfirmed(false);
-      setRequested({ value, at: Date.now() });
-      if (!(await send())) {
-        setRequested(undefined);
-      }
-    },
+  return (
+    <ul className='flex flex-col gap-0.5 text-xs text-muted-foreground'>
+      {lines.map((line) => (
+        <li key={line.key}>
+          <span className='font-medium text-foreground'>{line.label}:</span> {line.text}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const group = (title: string, children: React.ReactNode): React.JSX.Element => (
+  <div role='group' aria-label={title} className='flex min-w-0 flex-col gap-2'>
+    <h4 className='text-xs font-medium text-muted-foreground'>{title}</h4>
+    {children}
+  </div>
+);
+
+type MotionComponent = Extract<MachineComponent, { kind: 'motion' }>;
+
+const jogSteps = ['0.1', '1', '10', 'hold'] as const;
+type JogStep = (typeof jogSteps)[number];
+/** Millimetres per minute a jog from the pane asks for when the form declares no default. */
+const preferredJogFeed = 1000;
+
+/**
+ * The pad, in the direction each arrow shows. Z's arrows show what moves vertically: on a machine whose bed rides Z
+ * (the X1C), the up arrow raises the bed, which is Z− in machine coordinates, as in Bambu Studio.
+ */
+const jogButtons = [
+  { axis: 'y', direction: 1, icon: ArrowUp, area: 'col-start-2 row-start-1', isBeforeHome: true },
+  { axis: 'x', direction: -1, icon: ArrowLeft, area: 'col-start-1 row-start-2', isBeforeHome: true },
+  { axis: 'x', direction: 1, icon: ArrowRight, area: 'col-start-3 row-start-2', isBeforeHome: false },
+  { axis: 'y', direction: -1, icon: ArrowDown, area: 'col-start-2 row-start-3', isBeforeHome: false },
+  { axis: 'z', direction: 1, icon: ChevronsUp, area: 'row-start-1', isBeforeHome: true },
+  { axis: 'z', direction: -1, icon: ChevronsDown, area: 'row-start-3', isBeforeHome: false },
+] as const;
+
+/** One square cell of the pad: an icon over its axis label. */
+const jogCell = 'size-11 flex-col gap-0 font-mono text-[0.625rem]';
+
+/**
+ * The jog pad as studios lay it out (Bambu Studio, OctoPrint, Mainsail): an XY cross with Home in its centre, Z in its
+ * own column beside it, and the step as a segmented control. One step per press, or press and hold, which moves only
+ * while held and renews its lease every half lease until released.
+ *
+ * @param properties - The control, the motion component and its axes.
+ * @returns The pad.
+ */
+function JogPad({
+  control,
+  motion,
+  axes,
+}: {
+  readonly control: MachineControl;
+  readonly motion: MotionComponent;
+  readonly axes: readonly MachineAxis[];
+}): React.JSX.Element {
+  const declaredHold = machineActionOf(control.entry, { componentId: motion.id, action: 'motion.jog', kind: 'hold' });
+  const holdDescriptor = declaredHold !== undefined && 'lease' in declaredHold ? declaredHold : undefined;
+  const stepDescriptor = declaredAction(control.entry, motion.id, 'motion.jog');
+  const steps = jogSteps.filter((step) => step !== 'hold' || holdDescriptor !== undefined);
+  const [step, setStep] = useState<JogStep>('1');
+  const isHold = step === 'hold';
+  const check = control.check(motion.id, 'motion.jog', isHold ? 'hold' : 'action');
+  const isEnabled = check.status === 'available';
+  const jogFeed = formNumber(isHold ? holdDescriptor : stepDescriptor, 'feed', preferredJogFeed);
+  const present = new Set(axes.map((axis) => axis.id));
+  const isBedOnZ = axes.find((axis) => axis.id === 'z')?.carries === 'work';
+  const home = declaredAction(control.entry, motion.id, 'motion.home');
+  const homeCheck = control.check(motion.id, 'motion.home');
+  const end = (): void => {
+    if (isHold) {
+      control.endHold();
+    }
   };
+  const button = ({ axis, direction: shown, icon: Icon, area }: (typeof jogButtons)[number]): React.JSX.Element => {
+    const isBed = axis === 'z' && isBedOnZ;
+    const direction = isBed ? (shown === 1 ? -1 : 1) : shown;
+    const label = `${axis.toUpperCase()}${direction > 0 ? '+' : '−'}`;
+    const begin = (): void => {
+      if (isEnabled && isHold) {
+        control.beginHold(motion.id, { axis, direction, feed: jogFeed });
+      }
+    };
+    return (
+      <Button
+        key={label}
+        type='button'
+        size='icon-lg'
+        variant='outline'
+        aria-label={isBed ? `Jog ${label}, bed ${shown > 0 ? 'up' : 'down'}` : `Jog ${label}`}
+        aria-pressed={
+          isHold
+            ? control.hold?.componentId === motion.id &&
+              control.hold.parameters.axis === axis &&
+              control.hold.parameters.direction === direction
+            : undefined
+        }
+        /* The button whose hold is in force stays live: a disabled button may never see its own release. */
+        disabled={!isEnabled && control.hold === undefined}
+        className={cn(jogCell, area)}
+        onPointerDown={begin}
+        onPointerUp={end}
+        onPointerLeave={end}
+        onPointerCancel={end}
+        onBlur={end}
+        onKeyDown={(event) => {
+          if ((event.key === ' ' || event.key === 'Enter') && isHold) {
+            event.preventDefault();
+            if (!event.repeat) {
+              begin();
+            }
+          }
+        }}
+        onKeyUp={(event) => {
+          if (event.key === ' ' || event.key === 'Enter') {
+            end();
+          }
+        }}
+        onClick={() => {
+          if (!isHold) {
+            void control.apply(motion.id, 'motion.jog', {
+              axis,
+              distance: Number(step) * direction,
+              feed: jogFeed,
+            });
+          }
+        }}
+      >
+        <Icon aria-hidden />
+        {label}
+      </Button>
+    );
+  };
+  const planar = jogButtons.filter((jog) => jog.axis !== 'z' && present.has(jog.axis));
+  const vertical = jogButtons.filter((jog) => jog.axis === 'z' && present.has(jog.axis));
+  return (
+    <div className='flex min-w-0 flex-col gap-3'>
+      <PrintSetupRow label='Jog' reading='mm'>
+        <QualificationBadge descriptor={isHold ? holdDescriptor : stepDescriptor} />
+        <ToggleGroup
+          type='single'
+          variant='outline'
+          size='sm'
+          aria-label='Jog step'
+          value={step}
+          onValueChange={(value) => {
+            const chosen = jogSteps.find((candidate) => candidate === value);
+            if (chosen !== undefined) {
+              setStep(chosen);
+            }
+          }}
+        >
+          {steps.map((key) => (
+            <ToggleGroupItem
+              key={key}
+              value={key}
+              aria-label={key === 'hold' ? 'Hold to jog' : `${key} mm`}
+              className='px-2.5 font-mono text-xs'
+            >
+              {key === 'hold' ? 'Hold' : key}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      </PrintSetupRow>
+      <div className='flex items-start justify-center gap-6'>
+        {planar.length > 0 || home !== undefined ? (
+          <div className='grid grid-cols-3 grid-rows-3 gap-1.5' role='group' aria-label='Jog X and Y'>
+            {/* Reading order follows the cross: Y+, X−, Home, X+, Y−. */}
+            {planar.filter((jog) => jog.isBeforeHome).map((jog) => button(jog))}
+            {home === undefined ? null : (
+              <Button
+                type='button'
+                size='icon-lg'
+                variant='secondary'
+                aria-label={home.label}
+                title={homeCheck.status === 'unavailable' ? homeCheck.message : home.consequence}
+                disabled={homeCheck.status !== 'available' || control.pending !== undefined}
+                className={cn(jogCell, 'col-start-2 row-start-2 font-sans')}
+                onClick={() => {
+                  void control.apply(motion.id, 'motion.home', {});
+                }}
+              >
+                {control.pending === `${motion.id}:motion.home` ? (
+                  <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
+                ) : (
+                  <House aria-hidden />
+                )}
+                Home
+              </Button>
+            )}
+            {planar.filter((jog) => !jog.isBeforeHome).map((jog) => button(jog))}
+          </div>
+        ) : null}
+        {vertical.length > 0 ? (
+          <div className='grid grid-rows-3 gap-1.5' role='group' aria-label={isBedOnZ ? 'Move the bed' : 'Jog Z'}>
+            {vertical.map((jog) => button(jog))}
+            <span className='row-start-2 flex items-center justify-center text-xs text-muted-foreground'>
+              {isBedOnZ ? 'Bed' : 'Z'}
+            </span>
+          </div>
+        ) : null}
+      </div>
+      {isHold && holdDescriptor !== undefined ? (
+        <p className='text-xs text-muted-foreground'>
+          Moves only while pressed. If this window stops renewing the hold, the machine stops by itself within{' '}
+          {holdDescriptor.bound} ms.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Motion: unlock, wake, home, go to work zero, the jog pad and zeroing the work offset at the current position.
+ *
+ * @param properties - The control and the motion component.
+ * @returns The group, or nothing when the machine declares no motion control.
+ */
+function MotionGroup({
+  control,
+  motion,
+  title,
+  hasController,
+}: {
+  readonly control: MachineControl;
+  readonly motion: MotionComponent;
+  readonly title: string;
+  /** Whether this group carries the controller's Unlock and Wake: only the first of several motion groups does. */
+  readonly hasController: boolean;
+}): React.JSX.Element | undefined {
+  const { entry } = control;
+  const has = (componentId: string, action: string): boolean =>
+    declaredAction(entry, componentId, action) !== undefined;
+  const controllerId =
+    entry.descriptor.capabilities.components.find((component) => component.kind === 'controller')?.id ?? 'controller';
+  /* The pad, work zero and zeroing are X/Y/Z linear: a group without such an axis (a rotary unit) offers none of them,
+   * rather than an empty move or a pad with no buttons. ponytail: rotary jog is a follow-up. */
+  const axes = entry.descriptor.capabilities.axes.filter(
+    (axis) => motion.axes.includes(axis.id) && axis.kind === 'linear',
+  );
+  const workZero = Object.fromEntries(axes.filter((axis) => axis.id !== 'z').map((axis) => [axis.id, 0]));
+  const hasJog =
+    axes.some((axis) => jogButtons.some((jog) => jog.axis === axis.id)) &&
+    (has(motion.id, 'motion.jog') ||
+      machineActionOf(entry, { componentId: motion.id, action: 'motion.jog', kind: 'hold' }) !== undefined);
+  const hasWorkZero = has(motion.id, 'motion.move') && Object.keys(workZero).length > 0;
+  const offset = componentValue(entry.snapshot.components, motion.id, 'motion')?.workOffset.id;
+  const hasZeroing = has(motion.id, 'work-offset.set') && offset !== undefined && axes.length > 0;
+  const offered = [
+    hasController && has(controllerId, 'controller.unlock'),
+    hasController && has(controllerId, 'controller.wake'),
+    has(motion.id, 'motion.home'),
+    hasWorkZero,
+    hasJog,
+    hasZeroing,
+  ];
+  if (!offered.some(Boolean)) {
+    return undefined;
+  }
+  return group(
+    title,
+    <>
+      {hasJog ? <Blocked control={control} componentId={motion.id} action='motion.jog' hasRemedy={false} /> : null}
+      <div className='flex flex-wrap gap-2'>
+        {hasController ? (
+          <>
+            <ActionButton control={control} componentId={controllerId} action='controller.unlock' />
+            <ActionButton control={control} componentId={controllerId} action='controller.wake' />
+          </>
+        ) : null}
+        {hasJog ? null : <ActionButton control={control} componentId={motion.id} action='motion.home' />}
+        {hasWorkZero ? (
+          <ActionButton
+            control={control}
+            componentId={motion.id}
+            action='motion.move'
+            label='Go to work zero'
+            parameters={{ frame: 'work', position: workZero }}
+          />
+        ) : null}
+      </div>
+      {hasJog ? <JogPad control={control} motion={motion} axes={axes} /> : null}
+      {hasZeroing ? (
+        <div className='flex flex-wrap items-center gap-2'>
+          <span className='text-xs text-muted-foreground'>Zero {offset} here:</span>
+          {axes.map((axis) => (
+            <ActionButton
+              key={axis.id}
+              control={control}
+              componentId={motion.id}
+              action='work-offset.set'
+              parameters={{ offset, position: { [axis.id]: 0 } }}
+              label={axis.label}
+              ariaLabel={`Zero ${axis.label} here`}
+            />
+          ))}
+        </div>
+      ) : null}
+      <Consequences
+        descriptors={[
+          hasController ? declaredAction(entry, controllerId, 'controller.unlock') : undefined,
+          hasController ? declaredAction(entry, controllerId, 'controller.wake') : undefined,
+          declaredAction(entry, motion.id, 'motion.home'),
+        ]}
+      />
+    </>,
+  );
+}
+
+/**
+ * One probe's cycles as its form names them: a button for a single cycle, a choice and a button for several. A form
+ * that names no cycles offers none, since the pane cannot know what the probe runs.
+ *
+ * @param properties - The control and the probe.
+ * @returns The control, or nothing.
+ */
+function ProbeCycle({
+  control,
+  probe,
+}: {
+  readonly control: MachineControl;
+  readonly probe: MachineComponent;
+}): React.JSX.Element | undefined {
+  const cycles = formChoices(declaredAction(control.entry, probe.id, 'probe.run'), 'cycle');
+  const [cycle, setCycle] = useState(cycles[0]?.value);
+  if (cycle === undefined) {
+    return undefined;
+  }
+  const button = (
+    <ActionButton control={control} componentId={probe.id} action='probe.run' parameters={{ cycle }} icon={Crosshair} />
+  );
+  return cycles.length === 1 ? (
+    button
+  ) : (
+    <PrintSetupRow label='Cycle'>
+      <ParameterSelect
+        label={`${probe.label} cycle`}
+        value={cycle}
+        groups={[{ options: cycles }]}
+        onChange={setCycle}
+      />
+      {button}
+    </PrintSetupRow>
+  );
+}
+
+/**
+ * Tools and probing: probe cycles, a tool change to a chosen tool and measuring the tool.
+ *
+ * @param properties - The control.
+ * @returns The group, or nothing without probes or tools.
+ */
+function ToolsGroup({ control }: { readonly control: MachineControl }): React.JSX.Element | undefined {
+  const { entry } = control;
+  const { components } = entry.descriptor.capabilities;
+  const probes = components.filter((component) => component.kind === 'probe');
+  const tools = components.find(
+    (component): component is Extract<MachineComponent, { kind: 'tools' }> => component.kind === 'tools',
+  );
+  const table = tools === undefined ? undefined : componentValue(entry.snapshot.components, tools.id, 'tools');
+  const numbers = table?.table.rows.map((row) => row.number) ?? [];
+  const choices =
+    numbers.length > 0 ? numbers : Array.from({ length: Math.max(tools?.pockets ?? 0, 1) }, (_, index) => index + 1);
+  const [tool, setTool] = useState(() =>
+    String(choices.find((number) => number !== table?.current) ?? choices[0] ?? 1),
+  );
+  const descriptors = [
+    ...probes.flatMap((probe) => [
+      declaredAction(entry, probe.id, 'probe.run'),
+      declaredAction(entry, probe.id, 'tool.measure'),
+    ]),
+    tools === undefined ? undefined : declaredAction(entry, tools.id, 'tool.change'),
+  ].filter((descriptor) => descriptor !== undefined);
+  const [first] = descriptors;
+  if (first === undefined) {
+    return undefined;
+  }
+  return group(
+    'Tools and probing',
+    <>
+      <Blocked control={control} componentId={first.componentId} action={first.id} />
+      <div className='flex flex-wrap gap-2'>
+        {probes.map((probe) => (
+          <ProbeCycle key={probe.id} control={control} probe={probe} />
+        ))}
+        {probes.map((probe) => (
+          <ActionButton key={`${probe.id}-measure`} control={control} componentId={probe.id} action='tool.measure' />
+        ))}
+      </div>
+      {tools !== undefined && declaredAction(entry, tools.id, 'tool.change') !== undefined ? (
+        <PrintSetupRow
+          label='Tool'
+          description={table?.current === undefined ? undefined : `T${String(table.current)} is in the spindle.`}
+        >
+          <ParameterSelect
+            label='Tool to change to'
+            value={tool}
+            groups={[
+              {
+                options: choices.map((number) => ({
+                  value: String(number),
+                  label: `T${String(number)}`,
+                  secondary: table?.table.rows.find((row) => row.number === number)?.description,
+                })),
+              },
+            ]}
+            onChange={setTool}
+          />
+          <ActionButton
+            control={control}
+            componentId={tools.id}
+            action='tool.change'
+            parameters={{ tool: Number(tool) }}
+            label='Change'
+            icon={Wrench}
+          />
+        </PrintSetupRow>
+      ) : null}
+      <Consequences descriptors={descriptors} />
+    </>,
+  );
+}
+
+type SpindleComponent = Extract<MachineComponent, { kind: 'spindle' }>;
+
+/** How long a spindle switched on from the pane turns, when its form declares no default. Seconds. */
+const preferredSpindleSeconds = 10;
+/** The speed a programmed spindle runs at from the pane, when its form declares no default. Revolutions per minute. */
+const preferredSpindleSpeed = 10_000;
+
+/**
+ * The spindle: on for a bounded time, or off.
+ *
+ * @param properties - The control and the spindle.
+ * @returns The group, or nothing when the machine declares no spindle control.
+ */
+function SpindleGroup({
+  control,
+  spindle,
+}: {
+  readonly control: MachineControl;
+  readonly spindle: SpindleComponent;
+}): React.JSX.Element | undefined {
+  const descriptor = declaredAction(control.entry, spindle.id, 'spindle.set');
+  if (descriptor === undefined) {
+    return undefined;
+  }
+  const value = componentValue(control.entry.snapshot.components, spindle.id, 'spindle');
+  const check = control.check(spindle.id, 'spindle.set');
+  const direction = spindle.directions[0] ?? 'clockwise';
+  const spindleSeconds = formNumber(descriptor, 'duration', preferredSpindleSeconds);
+  const speed =
+    spindle.control === 'programmed' && formParameter(descriptor, 'speed') !== undefined
+      ? Math.min(formNumber(descriptor, 'speed', preferredSpindleSpeed), spindle.speed?.max ?? Number.POSITIVE_INFINITY)
+      : undefined;
+  const description =
+    check.status === 'unavailable'
+      ? check.message
+      : spindle.control === 'switched'
+        ? `${descriptor.consequence ?? 'Tau switches it; the speed is set on its own dial.'} It stops by itself after ${String(spindleSeconds)} s.`
+        : `Runs at ${speed === undefined ? 'its set speed' : `${speed.toLocaleString()} rpm`} for ${String(spindleSeconds)} s, then stops by itself.`;
+  return group(
+    spindle.label,
+    <PrintSetupRow label={spindle.label} description={description}>
+      <QualificationBadge descriptor={descriptor} />
+      <ParametersBoolean
+        aria-label={spindle.label}
+        value={value !== undefined && value.mode !== 'off'}
+        disabled={check.status !== 'available' || control.pending !== undefined}
+        onChange={(isOn) => {
+          void control.apply(
+            spindle.id,
+            'spindle.set',
+            isOn
+              ? { mode: direction, ...(speed === undefined ? {} : { speed }), duration: spindleSeconds }
+              : { mode: 'off' },
+          );
+        }}
+      />
+    </PrintSetupRow>,
+  );
+}
+
+const fanLevels = [0, 0.25, 0.5, 0.75, 1] as const;
+const overrideLevels = [0.5, 0.75, 1, 1.25, 1.5] as const;
+
+/**
+ * The choices an `option.set` declares in its form, else a printer's speed profiles.
+ *
+ * @param entry - The machine.
+ * @param descriptor - The action.
+ * @returns Value and label pairs.
+ */
+const optionChoices = (
+  entry: MachineDirectoryEntry,
+  descriptor: MachineActionDescriptor,
+): ReadonlyArray<Readonly<{ value: string; label: string }>> => {
+  const declared = formChoices(descriptor, 'option');
+  if (declared.length > 0) {
+    return declared;
+  }
+  const kind = entry.descriptor.capabilities.components.find(
+    (component) => component.id === descriptor.componentId,
+  )?.kind;
+  return kind === 'speed-profile'
+    ? (fffProcessOf(entry.descriptor.capabilities)?.speedProfiles.map((profile) => ({
+        value: profile.id,
+        label: `${profile.label} · ${String(profile.percent)} %`,
+      })) ?? [])
+    : [];
 };
 
-const rebind = 'bind it again in Settings under Printers with the access code shown on its screen';
+/**
+ * One switch, level or option row, from the action the machine declares on the component.
+ *
+ * @param properties - The control and the descriptor.
+ * @returns The row.
+ */
+function AccessoryRow({
+  control,
+  descriptor,
+}: {
+  readonly control: MachineControl;
+  readonly descriptor: MachineActionDescriptor;
+}): React.JSX.Element {
+  const { entry } = control;
+  const { componentId, id, label } = descriptor;
+  /* The level last chosen here, until the machine reports a different one: the machine reports only the speed it
+   * runs at, and a program that changes it wins. */
+  const [target, setTarget] = useState<Readonly<{ level: number; reported: number | undefined }>>();
+  const check = control.check(componentId, id);
+  const isDisabled = check.status !== 'available' || control.pending !== undefined;
+  const description = check.status === 'unavailable' ? check.message : descriptor.consequence;
+  const { components } = entry.snapshot;
+  if (id === 'switch.set') {
+    return (
+      <PrintSetupRow label={label} description={description}>
+        <QualificationBadge descriptor={descriptor} />
+        <ParametersBoolean
+          aria-label={label}
+          value={componentValue(components, componentId, 'switch')?.on === true}
+          disabled={isDisabled}
+          onChange={(on) => {
+            void control.apply(componentId, id, { on });
+          }}
+        />
+      </PrintSetupRow>
+    );
+  }
+  if (id === 'level.set') {
+    const kind = entry.descriptor.capabilities.components.find((component) => component.id === componentId)?.kind;
+    const ratio = componentValue(components, componentId, 'level')?.ratio;
+    const levels: readonly number[] = kind === 'override' ? overrideLevels : fanLevels;
+    const percent = (level: number): string => `${String(Math.round(level * 100))} %`;
+    const chosen =
+      target !== undefined && target.reported === ratio
+        ? target.level
+        : ratio !== undefined && levels.includes(ratio)
+          ? ratio
+          : undefined;
+    return (
+      <PrintSetupRow label={label} reading={ratio === undefined ? undefined : percent(ratio)} description={description}>
+        <QualificationBadge descriptor={descriptor} />
+        <ParameterSelect
+          label={label}
+          value={chosen === undefined ? '' : String(chosen)}
+          placeholder='Set speed'
+          isDisabled={isDisabled}
+          groups={[{ options: levels.map((level) => ({ value: String(level), label: percent(level) })) }]}
+          onChange={(value) => {
+            setTarget({ level: Number(value), reported: ratio });
+            void control.apply(componentId, id, { ratio: Number(value) });
+          }}
+        />
+      </PrintSetupRow>
+    );
+  }
+  const choices = optionChoices(entry, descriptor);
+  return (
+    <PrintSetupRow label={label} description={description}>
+      <QualificationBadge descriptor={descriptor} />
+      <ParameterSelect
+        label={label}
+        value={componentValue(components, componentId, 'option')?.option ?? ''}
+        placeholder='Not reported'
+        isDisabled={isDisabled || choices.length === 0}
+        groups={[{ options: choices }]}
+        onChange={(option) => {
+          void control.apply(componentId, id, { option });
+        }}
+      />
+    </PrintSetupRow>
+  );
+}
+
+const accessoryFamilies: ReadonlySet<string> = new Set(['switch.set', 'level.set', 'option.set']);
+
+/**
+ * The Control stage's summary while it is closed: each switch the machine reports.
+ *
+ * @param entry - The machine as observed.
+ * @returns A few words, or nothing.
+ * @public
+ */
+export const controlSummary = (entry: MachineDirectoryEntry): string | undefined =>
+  entry.descriptor.capabilities.actions
+    .filter((descriptor) => descriptor.id === 'switch.set')
+    .flatMap((descriptor) => {
+      const value = componentValue(entry.snapshot.components, descriptor.componentId, 'switch');
+      return value === undefined ? [] : [`${descriptor.label} ${value.on ? 'on' : 'off'}`];
+    })
+    .join(' · ') || undefined;
+
+/**
+ * Control: the camera, then motion, tools and probing, the spindle, and every switch, level and option the machine
+ * declares. A run owns motion, tools and the spindle, so those leave the stage while it lasts.
+ *
+ * @param properties - The client (for stills) and the control.
+ * @returns The stage.
+ * @public
+ */
+export function ControlStage({
+  client,
+  control,
+}: {
+  readonly client: MachineClient;
+  readonly control: MachineControl;
+}): React.JSX.Element {
+  const { entry } = control;
+  const { components, actions } = entry.descriptor.capabilities;
+  /* Every motion group: a rotary unit or a second head homes and jogs on its own, so none stands for the others. */
+  const motions = components.filter((component): component is MotionComponent => component.kind === 'motion');
+  const spindle = components.find((component): component is SpindleComponent => component.kind === 'spindle');
+  const camera = components.find((component) => component.kind === 'camera');
+  const accessories = actions.filter((descriptor) => accessoryFamilies.has(descriptor.id));
+  const isOwned = isRunOwned(entry);
+  return (
+    <PrintStage icon={Move} title='Control' summary={controlSummary(entry)} isDefaultOpen={isOwned}>
+      {camera === undefined ? null : <CameraView client={client} entry={entry} />}
+      {isOwned && motions.some((motion) => declaredAction(entry, motion.id, 'motion.jog') !== undefined) ? (
+        <p className='text-xs text-muted-foreground'>
+          Motion, tools and the spindle stay with the job until it ends or is stopped.
+        </p>
+      ) : null}
+      {isOwned
+        ? null
+        : motions.map((motion, index) => (
+            <MotionGroup
+              key={motion.id}
+              control={control}
+              motion={motion}
+              title={motions.length > 1 ? motion.label : 'Motion'}
+              hasController={index === 0}
+            />
+          ))}
+      {isOwned ? null : <ToolsGroup control={control} />}
+      {spindle === undefined || isOwned ? null : <SpindleGroup control={control} spindle={spindle} />}
+      {accessories.length === 0
+        ? null
+        : group(
+            'Accessories and overrides',
+            <div className='-my-1.5 flex min-w-0 flex-col'>
+              {accessories.map((descriptor) => (
+                <AccessoryRow
+                  key={`${descriptor.componentId}:${descriptor.id}`}
+                  control={control}
+                  descriptor={descriptor}
+                />
+              ))}
+            </div>,
+          )}
+    </PrintStage>
+  );
+}
+
+const resultWords: Readonly<Record<'good' | 'uncertain' | 'failed', string>> = {
+  good: 'Good fit',
+  uncertain: 'Uncertain',
+  failed: 'Failed',
+};
+
+/**
+ * The pressure advance a measured value carries: the only result Tau can keep, as a machine profile. A flow ratio
+ * belongs in the slicer's filament preset, which Tau does not write yet.
+ *
+ * @param value - The result's value.
+ * @returns The K value, or `undefined` for any other result.
+ */
+const pressureAdvanceOf = (value: unknown): number | undefined =>
+  typeof value === 'number'
+    ? value
+    : isRecord(value) && typeof value['pressureAdvance'] === 'number'
+      ? value['pressureAdvance']
+      : undefined;
+
+/**
+ * A measured value as the person reads it: a pressure advance as "K 0.020", a flow ratio as "Flow ratio 0.980",
+ * anything else as text.
+ *
+ * @param value - The result's value.
+ * @returns The words.
+ */
+const describeResult = (value: unknown): string => {
+  const pressureAdvance = pressureAdvanceOf(value);
+  if (pressureAdvance !== undefined) {
+    return `K ${pressureAdvance.toFixed(3)}`;
+  }
+  return isRecord(value) && typeof value['flowRatio'] === 'number'
+    ? `Flow ratio ${value['flowRatio'].toFixed(3)}`
+    : JSON.stringify(value);
+};
+
+/**
+ * Whether an activity still belongs in front of the person.
+ *
+ * @param activity - Any activity.
+ * @returns True while it runs, needs the person, or has results or a failure to read.
+ */
+const isShownActivity = (activity: MachineActivity): boolean =>
+  activity.state !== 'succeeded' || (activity.results?.length ?? 0) > 0;
+
+/**
+ * Keep a measured calibration result: a name and Save, or Discard. A result Tau cannot keep (a flow ratio) is shown
+ * read-only with Discard.
+ *
+ * @param properties - The control, the activity and the dismissal.
+ * @returns The form.
+ */
+function CalibrationResults({
+  control,
+  activity,
+  onDiscard,
+}: {
+  readonly control: MachineControl;
+  readonly activity: MachineActivity;
+  readonly onDiscard: () => void;
+}): React.JSX.Element {
+  const results = activity.results ?? [];
+  const usable = results.filter(
+    (result) => result.confidence !== 'failed' && pressureAdvanceOf(result.value) !== undefined,
+  );
+  const [resultId, setResultId] = useState(usable[0]?.id ?? '');
+  const [name, setName] = useState(`${activity.label} (measured)`.slice(0, 40));
+  return (
+    <div role='group' aria-label='Calibration result' className='flex min-w-0 flex-col gap-2 text-xs'>
+      <dl className='flex flex-col gap-1'>
+        {results.map((result) => (
+          <PrintRow
+            key={result.id}
+            label={result.label}
+            badge={
+              <Badge
+                variant={result.confidence === 'good' ? 'secondary' : 'outline'}
+                className={result.confidence === 'good' ? undefined : 'border-transparent bg-feature/10 text-feature'}
+              >
+                {resultWords[result.confidence]}
+              </Badge>
+            }
+          >
+            {describeResult(result.value)}
+          </PrintRow>
+        ))}
+      </dl>
+      {usable.length === 0 ? null : (
+        <div className='-my-1.5 flex min-w-0 flex-col'>
+          {usable.length > 1 ? (
+            <PrintSetupRow label='Keep'>
+              <ParameterSelect
+                label='Result to keep'
+                value={resultId}
+                groups={[{ options: usable.map((result) => ({ value: result.id, label: result.label })) }]}
+                onChange={setResultId}
+              />
+            </PrintSetupRow>
+          ) : null}
+          <PrintSetupRow label='Name'>
+            <Input
+              aria-label='Profile name'
+              className='h-6 text-xs'
+              maxLength={40}
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value);
+              }}
+            />
+          </PrintSetupRow>
+        </div>
+      )}
+      <div className='flex flex-wrap gap-2'>
+        {usable.length === 0 ? null : (
+          <ActionButton
+            control={control}
+            componentId={activity.componentId}
+            action='material.calibration.save'
+            parameters={{ source: 'measured', activityId: activity.activityId, resultId, name: name.trim() }}
+            label='Save as a profile'
+            variant='default'
+            onDone={(isAccepted) => {
+              if (isAccepted) {
+                onDiscard();
+              }
+            }}
+          />
+        )}
+        <Button type='button' size='sm' variant='outline' onClick={onDiscard}>
+          Discard
+        </Button>
+      </div>
+      <p className='text-muted-foreground'>
+        {usable.length > 0
+          ? 'Nothing changes on the machine until you save a result.'
+          : results.some((result) => result.confidence !== 'failed')
+            ? 'Tau can’t keep this result yet. Enter it in your slicer’s filament settings.'
+            : 'No result is good enough to keep.'}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The component that answers a prompt: the activity's own, else any component declaring `interaction.respond`.
+ *
+ * @param entry - The machine.
+ * @param activity - The activity asking.
+ * @returns The component id, or nothing when the machine takes answers only at its screen.
+ */
+const respondingComponent = (entry: MachineDirectoryEntry, activity: MachineActivity): string | undefined =>
+  declaredAction(entry, activity.componentId, 'interaction.respond') === undefined
+    ? entry.descriptor.capabilities.actions.find((descriptor) => descriptor.id === 'interaction.respond')?.componentId
+    : activity.componentId;
+
+/**
+ * One activity at the machine: its steps, the instruction or the question that needs the person, its cancel, and
+ * what a measuring activity found.
+ *
+ * @param properties - The control, the activity and its dismissal.
+ * @returns The card.
+ */
+function ActivityCard({
+  control,
+  activity,
+  onDiscard,
+}: {
+  readonly control: MachineControl;
+  readonly activity: MachineActivity;
+  readonly onDiscard: () => void;
+}): React.JSX.Element {
+  const { entry } = control;
+  const cardRef = useRef<HTMLElement>(null);
+  const { awaiting, results } = activity;
+  const prompt = awaiting?.kind === 'confirmation' ? awaiting : undefined;
+  const respondOn = respondingComponent(entry, activity);
+  const [answered, setAnswered] = useState<string>();
+  const moment = `${activity.activityId}:${prompt?.promptId ?? awaiting?.kind ?? ''}`;
+  /* Each new question comes into view wherever the person scrolled; a moment awaiting nothing ends in ':'. */
+  useEffect(() => {
+    if (!moment.endsWith(':')) {
+      cardRef.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [moment]);
+  const isWaiting = awaiting !== undefined;
+  const isFinished = activity.state === 'succeeded' || activity.state === 'failed';
+  return (
+    <section
+      ref={cardRef}
+      aria-label={activity.label}
+      className='flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-card p-3'
+    >
+      <p role='status' className='flex min-w-0 items-center gap-2 text-sm'>
+        {isWaiting ? (
+          <Hand aria-hidden className='size-4 shrink-0 text-information' />
+        ) : activity.state === 'failed' ? (
+          <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
+        ) : isFinished ? (
+          <Check aria-hidden className='size-4 shrink-0 text-success' />
+        ) : (
+          <LoaderCircle aria-hidden className='size-4 shrink-0 animate-spin motion-reduce:animate-none' />
+        )}
+        <span className='min-w-0 truncate'>{activity.label}</span>
+        <span className='sr-only'>{isWaiting ? ` ${entry.name} waits for you: ${awaiting.label}` : ''}</span>
+      </p>
+      {activity.steps.length === 0 ? null : <PrintSteps steps={activity.steps} layout='list' />}
+      {activity.message === undefined ? null : <p className='text-xs text-muted-foreground'>{activity.message}</p>}
+      {awaiting?.kind === 'instruction' ? <p className='text-xs'>{awaiting.label}</p> : null}
+      {prompt === undefined ? null : (
+        <div role='group' aria-label={prompt.label} className='flex min-w-0 flex-col gap-2 text-xs'>
+          {activity.steps.some((step) => step.state === 'active' && step.label === prompt.label) ? null : (
+            <p>{prompt.label}</p>
+          )}
+          {respondOn === undefined ? (
+            <p className='text-muted-foreground'>Answer on the machine&apos;s screen.</p>
+          ) : answered === prompt.promptId ? (
+            <p role='status' className='flex items-center gap-2 text-muted-foreground'>
+              <LoaderCircle aria-hidden className='size-3.5 shrink-0 animate-spin motion-reduce:animate-none' />
+              Waiting for {entry.name} to continue…
+            </p>
+          ) : (
+            <div className='flex flex-wrap gap-2'>
+              {prompt.answers.map((answer) => (
+                <ActionButton
+                  key={answer.id}
+                  control={control}
+                  componentId={respondOn}
+                  action='interaction.respond'
+                  parameters={{ activityId: activity.activityId, promptId: prompt.promptId, answer: answer.id }}
+                  label={answer.label}
+                  variant={answer.role === 'confirm' ? 'default' : 'outline'}
+                  onDone={(isAccepted) => {
+                    if (isAccepted) {
+                      setAnswered(prompt.promptId);
+                    }
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {results === undefined || results.length === 0 ? null : (
+        <CalibrationResults control={control} activity={activity} onDiscard={onDiscard} />
+      )}
+      {activity.cancel === undefined || isFinished ? null : (
+        <div>
+          <ActionButton
+            control={control}
+            componentId={activity.cancel.componentId}
+            action={activity.cancel.action}
+            label='Cancel'
+            variant='ghost'
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Everything in progress at the machine that is not the run itself, outside the stages: a question is never folded
+ * away.
+ *
+ * @param properties - The control.
+ * @returns The cards, or nothing.
+ * @public
+ */
+export function Activities({ control }: { readonly control: MachineControl }): React.JSX.Element | undefined {
+  const [discarded, setDiscarded] = useState<ReadonlySet<string>>(new Set());
+  const shown = control.entry.snapshot.activities.filter(
+    (activity) => isShownActivity(activity) && !discarded.has(activity.activityId),
+  );
+  if (shown.length === 0) {
+    return undefined;
+  }
+  return (
+    <>
+      {shown.map((activity) => (
+        <ActivityCard
+          key={activity.activityId}
+          control={control}
+          activity={activity}
+          onDiscard={() => {
+            setDiscarded((current) => new Set(current).add(activity.activityId));
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+const rebind = 'bind the machine again in Settings under Machines';
 
 /**
  * What a person reads when a still capture fails, by the fixed code it rejects with: the camera
- * leg (`@taucad/host`), its pinned connection and saved access code, and the host's own checks.
+ * leg (`@taucad/host`), its pinned connection and saved credentials, and the host's own checks.
  */
 const stillFailures: ReadonlyMap<string, string> = new Map([
   [
@@ -242,23 +1425,23 @@ const stillFailures: ReadonlyMap<string, string> = new Map([
     'MACHINE_STILL_FFMPEG_FAILED',
     'Tau could not start ffmpeg; reinstall it (with Homebrew on macOS: brew reinstall ffmpeg), then capture again.',
   ],
-  ['MACHINE_STILL_AUTH_REJECTED', `The camera refused the printer's saved access code; ${rebind}.`],
-  ['MACHINE_SECRET_UNKNOWN', `Tau no longer has this printer's access code; ${rebind}.`],
+  ['MACHINE_STILL_AUTH_REJECTED', `The camera refused the machine's saved credentials; ${rebind}.`],
+  ['MACHINE_SECRET_UNKNOWN', `Tau no longer has this machine's credentials; ${rebind}.`],
   [
     'MACHINE_TLS_PIN_MISMATCH',
-    'The camera presented a different certificate from the one saved when the printer was bound, so Tau did not connect; if the printer was reset or replaced, bind it again in Settings under Printers.',
+    `The camera presented a different certificate from the one saved when the machine was bound, so Tau did not connect; if the machine was reset or replaced, ${rebind}.`,
   ],
   [
     'MACHINE_CONNECT_FAILED',
-    'Tau could not connect to the camera; check that the printer is on and on this network, then capture again.',
+    'Tau could not connect to the camera; check that the machine is on and on this network, then capture again.',
   ],
   [
     'MACHINE_CONNECT_TIMEOUT',
-    'The camera did not answer in time; check that the printer is on and on this network, then capture again.',
+    'The camera did not answer in time; check that the machine is on and on this network, then capture again.',
   ],
   [
     'MACHINE_STILL_TIMEOUT',
-    'The camera sent no picture in time; check that the printer is on and connected, then capture again.',
+    'The camera sent no picture in time; check that the machine is on and connected, then capture again.',
   ],
   [
     'MACHINE_STILL_STREAM_FAILED',
@@ -276,35 +1459,30 @@ const stillFailures: ReadonlyMap<string, string> = new Map([
   ],
   [
     'MACHINE_STILL_REQUEST_INVALID',
-    "Tau built an invalid request for this printer's camera, so nothing was sent; report this as a bug.",
+    'Tau built an invalid request for this camera, so nothing was sent; report this as a bug.',
   ],
-  ['MACHINE_STILL_UNAVAILABLE', 'Tau is not connected to this printer right now; capture again once it reconnects.'],
+  ['MACHINE_STILL_UNAVAILABLE', 'Tau is not connected to this machine right now; capture again once it reconnects.'],
   ['MACHINE_STILL_RATE_LIMITED', 'Stills are limited to one every 5 seconds; wait a moment, then capture again.'],
 ]);
 
 const unknownStillFailure = 'The camera could not capture a still; capture again in a moment.';
 
 /**
- * A failed still capture in the person's words. The machine channel carries the code as the
- * message and a desktop shell may wrap it in its own words, so the code is looked for anywhere in
- * the message, after the error's own `code`. A failure that names no known code keeps a generic
- * sentence plus the code, or the message when it names none.
+ * A failed still capture in the person's words, by the error's typed `code` (the machine channel carries it; a
+ * message is never searched). A failure without a known code keeps a generic sentence plus its code, or its message
+ * when it has none.
  *
  * @param error - What `captureStill` rejected with.
  * @returns One sentence saying what happened and what to do.
  * @public
  */
 export const describeStillFailure = (error: unknown): string => {
-  const message = error instanceof Error ? error.message : String(error);
-  const codes = [
-    ...(isRecord(error) && typeof error['code'] === 'string' ? [error['code']] : []),
-    ...(message.match(/\b[A-Z][\dA-Z]*(?:_[\dA-Z]+)+\b/gu) ?? []),
-  ];
-  const sentence = codes.map((code) => stillFailures.get(code)).find((candidate) => candidate !== undefined);
+  const code = failureCodeOf(error);
+  const sentence = code === undefined ? undefined : stillFailures.get(code);
   if (sentence !== undefined) {
     return sentence;
   }
-  const detail = codes[0] ?? message.trim();
+  const detail = code ?? (error instanceof Error ? error.message : String(error)).trim();
   return detail === '' ? unknownStillFailure : `${unknownStillFailure} (${detail})`;
 };
 
@@ -327,7 +1505,6 @@ function CameraView({
   const [still, setStill] = useState<Readonly<{ url: string; capturedAt: string; expiresAt: string }>>();
   const captureAbort = useRef<AbortController | undefined>(undefined);
   const now = useNow();
-  const isSupported = entry.descriptor.operations.includes('still');
 
   useEffect(
     () => () => {
@@ -389,14 +1566,10 @@ function CameraView({
         ) : (
           <div className='flex min-h-24 flex-col items-center justify-center gap-2 p-3 text-center text-xs text-muted-foreground'>
             <Camera aria-hidden className='size-5' />
-            {isSupported ? (
-              <Button type='button' size='xs' variant='outline' disabled={isBusy} onClick={capture}>
-                {isBusy ? busyGlyph : null}
-                Capture still
-              </Button>
-            ) : (
-              <span>Still capture is unavailable for this printer.</span>
-            )}
+            <Button type='button' size='xs' variant='outline' disabled={isBusy} onClick={capture}>
+              {isBusy ? busyGlyph : null}
+              Capture still
+            </Button>
           </div>
         )}
         {still ? (
@@ -413,258 +1586,5 @@ function CameraView({
       </figure>
       {error ? <PrintNotice tone='error'>{error}</PrintNotice> : null}
     </div>
-  );
-}
-
-/** Run states with a run whose speed can change. */
-const runningStates: ReadonlySet<string> = new Set(['printing', 'paused']);
-
-/**
- * The Control center's summary while it is closed: the light and the run's speed.
- *
- * @param entry - The machine as observed.
- * @param manifest - Its manifest, for the speed label.
- * @returns A few words, or nothing when neither is reported.
- * @public
- */
-export const controlCenterSummary = (
-  entry: MachineDirectoryEntry,
-  manifest: MachineManifest | undefined,
-): string | undefined => {
-  const { lights, run } = entry.snapshot;
-  const speed =
-    run && runningStates.has(run.state)
-      ? manifest?.speedProfiles.find((profile) => profile.id === run.speedProfile)?.label
-      : undefined;
-  return (
-    [
-      lights?.chamber === 'on' ? 'Light on' : lights?.chamber === 'off' ? 'Light off' : undefined,
-      speed === undefined ? undefined : `${speed} speed`,
-    ]
-      .filter((part) => part !== undefined)
-      .join(' · ') || undefined
-  );
-};
-
-const storageLabel = { present: 'Card inserted', absent: 'No card' } as const;
-
-type Requested<T> = ReturnType<typeof useRequested<T>>;
-
-/**
- * The chamber light's switch: the person's choice shows at once and holds until the printer reports it.
- *
- * @param properties - The machine, whether the light can be set now, the request and the action runner.
- * @returns The row.
- */
-function LightRow({
-  entry,
-  availability,
-  light,
-  action,
-}: {
-  readonly entry: MachineDirectoryEntry;
-  readonly availability: ActionAvailability;
-  readonly light: Requested<'on' | 'off'>;
-  readonly action: ReturnType<typeof useMachineAction>;
-}): React.JSX.Element {
-  return (
-    <PrintSetupRow
-      label='Chamber light'
-      description={light.isUnconfirmed ? `${entry.name} has not reported the light change yet.` : undefined}
-    >
-      {light.isPending ? (
-        <LoaderCircle aria-hidden className='size-3.5 animate-spin text-muted-foreground motion-reduce:animate-none' />
-      ) : null}
-      <ParametersBoolean
-        aria-label='Chamber light'
-        value={light.shown === 'on'}
-        disabled={!availability.isAvailable || action.pending === 'light.set'}
-        onChange={(isOn) => {
-          void light.request(isOn ? 'on' : 'off', async () => action.run('light.set', { on: isOn }));
-        }}
-      />
-    </PrintSetupRow>
-  );
-}
-
-type SpeedProfile = Exclude<
-  NonNullable<MachineDirectoryEntry['snapshot']['run']>['speedProfile'],
-  'unknown' | undefined
->;
-
-/**
- * The run's speed profile, from the manifest's profiles, for the exact run the person sees.
- *
- * @param properties - The machine, its manifest, whether speed can be set now, the request and the action runner.
- * @returns The row.
- */
-function SpeedRow({
-  entry,
-  manifest,
-  availability,
-  speed,
-  action,
-}: {
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest;
-  readonly availability: ActionAvailability;
-  readonly speed: Requested<SpeedProfile>;
-  readonly action: ReturnType<typeof useMachineAction>;
-}): React.JSX.Element {
-  return (
-    <PrintSetupRow
-      label='Print speed'
-      description={speed.isUnconfirmed ? `${entry.name} has not reported the speed change yet.` : undefined}
-    >
-      <ParameterSelect
-        label='Print speed'
-        value={speed.shown ?? ''}
-        placeholder='Not reported'
-        isDisabled={!availability.isAvailable || action.pending === 'speed.set'}
-        groups={[
-          {
-            options: manifest.speedProfiles.map((profile) => ({
-              value: profile.id,
-              label: profile.label,
-              secondary: `${String(profile.percent)} %`,
-            })),
-          },
-        ]}
-        onChange={(profile) => {
-          // SAFETY: the options are the manifest's speed profiles.
-          void speed.request(profile as SpeedProfile, async () =>
-            action.run('speed.set', { profile }, entry.snapshot.activeRunId),
-          );
-        }}
-      />
-    </PrintSetupRow>
-  );
-}
-
-/**
- * Fans, Wi-Fi, storage and, when the printer cannot have it set, the run's speed: read, not set.
- *
- * @param properties - The machine, its manifest and whether to show the speed.
- * @returns The rows.
- */
-function EnvironmentRows({
-  entry,
-  manifest,
-  isSpeedShown,
-}: {
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
-  readonly isSpeedShown: boolean;
-}): React.JSX.Element {
-  const { fans, network, removableStorage, run } = entry.snapshot;
-  const fanLine = (manifest?.chamber.fans ?? [{ id: 'part', label: 'Part fan' }])
-    .map(
-      (fan) => `${fan.label.replace(/ fan$/u, '')} ${fans?.[fan.id] === undefined ? '–' : `${String(fans[fan.id])} %`}`,
-    )
-    .join(' · ');
-  const speed = [run?.speedProfile, run?.speedPercent === undefined ? undefined : `${String(run.speedPercent)} %`]
-    .filter((part) => part !== undefined)
-    .join(' · ');
-  return (
-    <dl className='flex flex-col gap-0.5'>
-      {isSpeedShown && speed !== '' ? <PrintRow label='Speed'>{speed}</PrintRow> : null}
-      <PrintRow label='Fans'>{fanLine}</PrintRow>
-      <PrintRow label='Wi-Fi'>
-        {network?.wifiSignalDbm === undefined ? 'Not reported' : `${String(network.wifiSignalDbm)} dBm`}
-      </PrintRow>
-      {removableStorage === undefined ? null : <PrintRow label='Storage'>{storageLabel[removableStorage]}</PrintRow>}
-    </dl>
-  );
-}
-
-/**
- * Which Control center actions the printer declares and can take now, and the distinct reasons the others wait.
- *
- * @param entry - The machine as observed.
- * @param manifest - Its manifest.
- * @param apply - The action seam.
- * @returns The light's and the speed's availability, whether a run is in progress, and the reasons.
- */
-const controlAvailability = (
-  entry: MachineDirectoryEntry,
-  manifest: MachineManifest | undefined,
-  apply: ApplyMachineAction | undefined,
-): Readonly<{
-  light: ActionAvailability | undefined;
-  speed: ActionAvailability | undefined;
-  isRunning: boolean;
-  reasons: readonly string[];
-}> => {
-  const { run, activeRunId } = entry.snapshot;
-  const light =
-    manifest?.chamber.light === false ? undefined : actionAvailability({ entry, manifest, action: 'light.set', apply });
-  const isRunning = run !== undefined && runningStates.has(run.state) && activeRunId !== undefined;
-  const speed = isRunning ? actionAvailability({ entry, manifest, action: 'speed.set', apply }) : undefined;
-  return { light, speed, isRunning, reasons: describeWaits([light, speed]) };
-};
-
-/**
- * The Control center for the selected printer: the camera first, then the chamber light and, during a
- * run, its speed, then the fans, Wi-Fi and storage the printer reports. Controls the pane cannot offer
- * stay visible, disabled, with one line saying why. It opens by default while a run is in progress.
- *
- * @param properties - The client, machine, manifest and the action seam.
- * @returns The stage.
- * @public
- */
-export function ControlCenterStage({
-  client,
-  entry,
-  manifest,
-  apply,
-}: {
-  readonly client: MachineClient;
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
-  readonly apply: ApplyMachineAction | undefined;
-}): React.JSX.Element {
-  const { lights, run } = entry.snapshot;
-  const action = useMachineAction(entry, apply);
-  const light = useRequested(lights?.chamber === 'unknown' ? undefined : lights?.chamber);
-  const speed = useRequested(run?.speedProfile === 'unknown' ? undefined : run?.speedProfile);
-  const {
-    light: lightAvailability,
-    speed: speedAvailability,
-    isRunning,
-    reasons,
-  } = controlAvailability(entry, manifest, apply);
-
-  return (
-    <PrintStage
-      icon={SlidersHorizontal}
-      title='Control center'
-      summary={controlCenterSummary(entry, manifest)}
-      isDefaultOpen={isRunning}
-    >
-      {manifest?.camera.stills === false ? null : <CameraView client={client} entry={entry} />}
-      {lightAvailability === undefined && speedAvailability === undefined ? null : (
-        <div className='-my-1.5 flex min-w-0 flex-col'>
-          {lightAvailability === undefined ? null : (
-            <LightRow entry={entry} availability={lightAvailability} light={light} action={action} />
-          )}
-          {speedAvailability === undefined || manifest === undefined ? null : (
-            <SpeedRow
-              entry={entry}
-              manifest={manifest}
-              availability={speedAvailability}
-              speed={speed}
-              action={action}
-            />
-          )}
-        </div>
-      )}
-      <EnvironmentRows entry={entry} manifest={manifest} isSpeedShown={isRunning && speedAvailability === undefined} />
-      {reasons.map((reason) => (
-        <p key={reason} className='text-xs text-muted-foreground'>
-          {reason}
-        </p>
-      ))}
-      {action.error ? <PrintNotice tone='error'>{action.error}</PrintNotice> : null}
-    </PrintStage>
   );
 }

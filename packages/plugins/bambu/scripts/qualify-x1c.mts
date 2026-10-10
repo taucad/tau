@@ -63,6 +63,8 @@ import type {
   MachineNetworkStillInput,
   MachineNetworkStream,
   MachineOperationReceipt,
+  MachineReport,
+  MaterialSlotSnapshot,
   MachineSession,
   MachineStill,
   MachineTransportTrust,
@@ -72,15 +74,22 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { Client as FtpClient } from 'basic-ftp';
 import { z } from 'zod';
 
+import { bambuCandidateAddress } from '#bambu.host.js';
 import { bambuMachine } from '#bambu.machine.js';
+import { bambuFtpsPort, bambuServicePort, bambuX1cManifest } from '#bambu.manifest.js';
 import { parseBambuDiscoveryDatagram } from '#bambu.protocol.js';
 
+// oxlint-disable-next-line no-restricted-imports -- The operator script's own sibling module; scripts have no `#` alias.
+import { printCubeOutcome } from './print-cube-outcome.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The operator script's own sibling module; scripts have no `#` alias.
 import { tapProjectFileReplies } from './project-file-reply.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The same sibling module's reply type.
 import type { ProjectFileReply } from './project-file-reply.mjs';
 
 const execFileAsync = promisify(execFile);
+// The X1C's ports, read from its manifest as the provider reads them.
+const mqttPort = bambuServicePort(bambuX1cManifest, 'mqtt');
+const cameraPort = bambuServicePort(bambuX1cManifest, 'camera');
 const cameraReconnectDelay = 5000;
 /** The live view's pause between captures; each capture is its own camera session. Milliseconds. */
 const cameraCaptureInterval = 1000;
@@ -248,7 +257,7 @@ const runPassiveDiscovery = async (): Promise<void> => {
             identitySha256: digest(Uint8Array.from(Buffer.from(candidate.claimedIdentity.serial))),
           }
         : {}),
-      endpointSha256: digest(Uint8Array.from(Buffer.from(candidate.endpoint.address))),
+      endpointSha256: digest(Uint8Array.from(Buffer.from(bambuCandidateAddress(candidate)))),
       observedAt: candidate.observedAt,
       expiresAt: candidate.expiresAt,
     })}\n`,
@@ -309,7 +318,7 @@ const resolveCurrentConfiguration = async (
   if (!configuration.trust) {
     throw new QualificationError('X1C_APPROVED_TRUST_PINS_REQUIRED');
   }
-  const configuredAddressMatches = await readCertificate(configuration.address, 8883, 1500).then(
+  const configuredAddressMatches = await readCertificate(configuration.address, mqttPort, 1500).then(
     (certificate) => matchesPin(certificate, configuration.trust?.mqtt ?? ''),
     () => false,
   );
@@ -318,7 +327,7 @@ const resolveCurrentConfiguration = async (
   }
   const candidate = await discoverPassiveX1c();
   return relocateConfiguration(configuration, {
-    address: candidate.endpoint.address,
+    address: bambuCandidateAddress(candidate),
     model: candidate.claimedIdentity.model,
     serial: candidate.claimedIdentity.serial,
   });
@@ -344,14 +353,14 @@ const prepareReadOnlyConfiguration = async (): Promise<void> => {
     throw new QualificationError('X1C_DISCOVERY_SERIAL_MISSING');
   }
   const [observedMqtt, observedCamera] = await Promise.all([
-    probeCertificate(candidate.endpoint.address, 8883),
-    probeCertificate(candidate.endpoint.address, 322),
+    probeCertificate(bambuCandidateAddress(candidate), mqttPort),
+    probeCertificate(bambuCandidateAddress(candidate), cameraPort),
   ]);
   if (observedMqtt !== mqtt || observedCamera !== camera) {
     throw new QualificationError('X1C_APPROVED_TRUST_PIN_MISMATCH');
   }
   const configuration = configurationSchema.parse({
-    address: candidate.endpoint.address,
+    address: bambuCandidateAddress(candidate),
     serial,
     logicalId: 'workshop-x1c',
     mode: 'developer-lan',
@@ -376,7 +385,7 @@ const prepareReadOnlyConfiguration = async (): Promise<void> => {
       stage: 'prepare-read-only',
       prepared: true,
       identitySha256: digest(Uint8Array.from(Buffer.from(serial))),
-      endpointSha256: digest(Uint8Array.from(Buffer.from(candidate.endpoint.address))),
+      endpointSha256: digest(Uint8Array.from(Buffer.from(bambuCandidateAddress(candidate)))),
       trustMatched: { mqtt: true, camera: true },
     })}\n`,
   );
@@ -413,7 +422,7 @@ const certificatePem = (bytes: Uint8Array<ArrayBuffer>): string => {
 };
 
 const resolveFtpTrust = async (configuration: QualificationConfiguration): Promise<PinnedTrust> => {
-  const certificate = await readCertificate(configuration.address, 990);
+  const certificate = await readCertificate(configuration.address, bambuFtpsPort);
   const approved = [configuration.trust?.mqtt, configuration.trust?.camera].find(
     (candidate) => candidate && matchesPin(certificate, candidate),
   );
@@ -433,7 +442,7 @@ const uploadBambuFile = async (
   }
   if (
     input.endpoint.address !== configuration.address ||
-    input.endpoint.port !== 990 ||
+    input.endpoint.port !== bambuFtpsPort ||
     input.username !== 'bblp' ||
     input.secretRef !== 'keychain:x1c-qualification' ||
     !/^tau-[A-Za-z0-9_-]{1,64}\.gcode\.3mf$/u.test(input.remoteName) ||
@@ -443,7 +452,7 @@ const uploadBambuFile = async (
     throw new QualificationError('X1C_FTPS_UPLOAD_REQUEST_INVALID');
   }
   input.signal.throwIfAborted();
-  const certificate = await readCertificate(configuration.address, 990);
+  const certificate = await readCertificate(configuration.address, bambuFtpsPort);
   if (!matchesPin(certificate, trust.digest)) {
     throw new QualificationError('X1C_TLS_PIN_MISMATCH');
   }
@@ -455,7 +464,7 @@ const uploadBambuFile = async (
   try {
     await client.access({
       host: configuration.address,
-      port: 990,
+      port: bambuFtpsPort,
       user: input.username,
       password: await readAccessCode(configuration),
       secure: 'implicit',
@@ -500,7 +509,7 @@ const uploadBambuFile = async (
 const validateRtspsStillInput = (input: MachineNetworkStillInput, configuration: QualificationConfiguration): void => {
   if (
     input.endpoint.address !== configuration.address ||
-    input.endpoint.port !== 322 ||
+    input.endpoint.port !== cameraPort ||
     input.path !== '/streaming/live/1' ||
     input.username !== 'bblp' ||
     input.secretRef !== 'keychain:x1c-qualification' ||
@@ -611,7 +620,7 @@ const configuredX1cStillInput = (
     throw new QualificationError('X1C_APPROVED_TRUST_PINS_REQUIRED');
   }
   return {
-    endpoint: { address: configuration.address, port: 322 },
+    endpoint: { address: configuration.address, port: cameraPort },
     trust: pinned(configuration.trust.camera),
     secretRef: 'keychain:x1c-qualification',
     username: 'bblp',
@@ -827,7 +836,7 @@ const openSession = async (
   const observedAt = new Date().toISOString();
   const event = await definition
     .discover(
-      { configuration, signal },
+      { configuration, endpoint: { transport: 'network', address: configuration.address }, signal },
       {
         clock: { now: () => new Date().toISOString() },
         async *listenDatagrams() {
@@ -852,6 +861,7 @@ const openSession = async (
           camera: pinned(configuration.trust.camera),
         },
       },
+      purpose: 'bind',
       signal,
     },
     runtime,
@@ -1096,14 +1106,7 @@ const runLiveReadOnly = async (configuration: QualificationConfiguration): Promi
                 vendor: descriptor.vendor,
                 model: descriptor.model,
                 firmware: descriptor.firmware,
-                technology: descriptor.technology,
-                accepts: descriptor.accepts,
-                operations: descriptor.operations,
-                ratedEnvelope: descriptor.ratedEnvelope,
-                printableEnvelope: descriptor.printableEnvelope,
-                tools: descriptor.tools,
-                materialSystem: descriptor.materialSystem,
-                bedTypes: descriptor.bedTypes,
+                capabilities: descriptor.capabilities,
               },
               snapshot,
               camera: camera.status(),
@@ -1218,36 +1221,31 @@ const runReadOnly = async (configuration: QualificationConfiguration): Promise<v
           vendor: first.descriptor.vendor,
           model: first.descriptor.model,
           firmware: first.descriptor.firmware,
-          technology: first.descriptor.technology,
-          accepts: first.descriptor.accepts,
-          operations: first.descriptor.operations,
-          ratedEnvelope: first.descriptor.ratedEnvelope,
-          printableEnvelope: first.descriptor.printableEnvelope,
-          tools: first.descriptor.tools,
-          materialSystem: first.descriptor.materialSystem,
-          bedTypes: first.descriptor.bedTypes,
+          components: first.descriptor.capabilities.components,
+          actions: first.descriptor.capabilities.actions.map(({ componentId, id }) => `${componentId}:${id}`),
         },
         snapshot: {
           connection: first.snapshot.connection,
-          readiness: first.snapshot.readiness,
-          ...(first.snapshot.activeRunId
+          state: first.snapshot.state,
+          ...(first.snapshot.run
             ? {
-                activeRunIdentitySha256: digest(Uint8Array.from(Buffer.from(first.snapshot.activeRunId))),
+                run: {
+                  ...first.snapshot.run,
+                  runId: digest(Uint8Array.from(Buffer.from(first.snapshot.run.runId))),
+                },
               }
             : {}),
           observedAt: first.snapshot.observedAt,
-          setup: first.snapshot.setup,
-          run: first.snapshot.run,
-          temperatures: first.snapshot.temperatures,
+          components: first.snapshot.components,
+          availability: first.snapshot.availability,
+          alerts: first.snapshot.alerts,
         },
         still,
         reconnect: {
           connection: reconnected.snapshot.connection,
           firmware: reconnected.descriptor.firmware,
-          readiness: reconnected.snapshot.readiness,
-          setup: reconnected.snapshot.setup,
-          run: reconnected.snapshot.run,
-          temperatures: reconnected.snapshot.temperatures,
+          state: reconnected.snapshot.state,
+          components: reconnected.snapshot.components,
           observedAt: reconnected.snapshot.observedAt,
         },
       })}\n`,
@@ -1257,6 +1255,12 @@ const runReadOnly = async (configuration: QualificationConfiguration): Promise<v
     await closeSession(session);
   }
 };
+
+/** Every material slot the report knows, across its material systems. */
+const materialSlotsOf = (report: MachineReport): readonly MaterialSlotSnapshot[] =>
+  report.components.flatMap((component) =>
+    component.knowledge === 'known' && component.value.kind === 'material-system' ? component.value.slots : [],
+  );
 
 const waitForCurrentMachine = async (
   client: ReturnType<typeof connectMachineChannel>,
@@ -1342,9 +1346,8 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
       { route: 'machines', operation: 'machines.beginBinding' },
       { route: 'machines', operation: 'machines.list' },
       { route: 'machines', operation: 'machines.get' },
-      { route: 'machines', operation: 'machines.preparePrint' },
-      { route: 'machines', operation: 'machines.uploadPrint' },
-      { route: 'machines', operation: 'machines.startPrint' },
+      { route: 'machines', operation: 'machines.requestJob' },
+      { route: 'machines', operation: 'machines.resolveJob' },
       { route: 'machines', operation: 'machines.reconcileOperation' },
     ],
   });
@@ -1368,11 +1371,8 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
       let candidate: MachineCandidate | undefined;
       for await (const event of client.discover({
         providerId: 'bambu',
-        configuration: {
-          logicalId: activeConfiguration.logicalId,
-          address: activeConfiguration.address,
-          serial: activeConfiguration.serial,
-        },
+        configuration: { serial: activeConfiguration.serial },
+        endpoint: { transport: 'network', address: activeConfiguration.address },
         signal: cancellation.signal,
       })) {
         if (event.type !== 'lost' && event.candidate.claimedIdentity.serial === activeConfiguration.serial) {
@@ -1408,23 +1408,27 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
     }
     phase = 'SETUP';
     const entry = await waitForCurrentMachine(client, machineId, cancellation.signal);
-    const nozzle = entry.descriptor.tools[0]?.nozzleDiameter;
-    const material = entry.snapshot.setup.materials.find((row) => row.slot === 0);
+    const toolhead = entry.descriptor.capabilities.components.find((component) => component.kind === 'toolhead');
+    const nozzle = toolhead?.kind === 'toolhead' ? toolhead.nozzles[0]?.diameter : undefined;
+    const material = materialSlotsOf(entry.snapshot).find(
+      ({ slot }) => slot.unitId === 'ams-a' && slot.slotId === 'a1',
+    );
     if (
       entry.descriptor.model !== 'X1C' ||
       entry.descriptor.firmware !== '01.12.00.00' ||
-      entry.snapshot.readiness !== 'idle' ||
-      entry.snapshot.activeRunId !== undefined ||
+      entry.snapshot.state.status !== 'ready' ||
+      entry.snapshot.run !== undefined ||
       nozzle?.value !== 0.4 ||
-      nozzle.unit.code !== 'mm' ||
       material?.state !== 'loaded' ||
-      material.materialId?.toLowerCase() !== 'petg'
+      material.material?.materialType.toLowerCase() !== 'petg'
     ) {
       throw new QualificationError('X1C_PRINT_SETUP_UNQUALIFIED');
     }
     phase = 'UPLOAD';
-    const prepared = await client.preparePrint({
+    const operator = { kind: 'user', id: 'operator', label: 'Operator' } as const;
+    const requested = await client.requestJob({
       machineId,
+      jobId: `${printOperationId}-job`,
       artifact: artifact.artifact,
       configuration: {
         amsMapping: [0],
@@ -1438,32 +1442,29 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
         flowCalibration: true,
         timelapse: false,
       },
+      requestedBy: operator,
       signal: cancellation.signal,
     });
-    const uploaded = await client.uploadPrint({
-      machineId,
-      preparedId: prepared.preparedId,
-      preparedDigest: prepared.preparedDigest,
-      operationId: `${printOperationId}-upload`,
-      signal: cancellation.signal,
-    });
-    if (uploaded.status !== 'accepted' || uploaded.kind !== 'upload') {
-      throw new QualificationError('X1C_UPLOAD_NOT_ACCEPTED');
+    if (requested.state !== 'awaiting-approval') {
+      throw new QualificationError(`X1C_JOB_${requested.state.toUpperCase().replaceAll('-', '_')}`);
     }
-    process.stdout.write(
-      `${JSON.stringify({ stage: 'print-cube', status: 'uploaded', artifactSha256: cubeArtifactDigest.slice(7), amsSlot: 0, bedType: 'hot_plate', nozzleDiameterMm: 0.4 })}\n`,
-    );
     phase = 'START';
-    let receipt: MachineOperationReceipt = await client.startPrint({
-      machineId,
-      preparedId: prepared.preparedId,
-      preparedDigest: prepared.preparedDigest,
-      transferId: uploaded.evidence.transferId,
-      expectedSetupDigest: prepared.setupDigest,
-      operationId: printOperationId,
+    // The operator stands at the printer for this stage: the consent variable is their attestation the plate is clear.
+    const job = await client.resolveJob({
+      jobId: requested.jobId,
+      decision: 'approve',
+      resolvedBy: operator,
+      attestations: ['work-area-clear'],
+      attended: true,
+      transferOperationId: `${printOperationId}-upload`,
+      startOperationId: printOperationId,
       signal: cancellation.signal,
     });
-    for (let attempt = 0; receipt.status === 'unknown' && attempt < 15; attempt += 1) {
+    process.stdout.write(
+      `${JSON.stringify({ stage: 'print-cube', status: job.state, artifactSha256: cubeArtifactDigest.slice(7), amsSlot: 0, bedType: 'hot_plate', nozzleDiameterMm: 0.4 })}\n`,
+    );
+    let receipt: MachineOperationReceipt | undefined = job.receipt;
+    for (let attempt = 0; (receipt === undefined || receipt.status === 'unknown') && attempt < 15; attempt += 1) {
       // oxlint-disable-next-line no-await-in-loop -- reconciliation observes one possible send and never retransmits it.
       await delay(1000, undefined, { signal: cancellation.signal });
       // oxlint-disable-next-line no-await-in-loop -- exact operation reconciliation is the only safe unknown-result path.
@@ -1473,17 +1474,22 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
         signal: cancellation.signal,
       });
       if (reconciled.receipt) {
-        receipt = reconciled.receipt;
+        ({ receipt } = reconciled);
       }
     }
+    if (receipt === undefined || job.state === 'rejected') {
+      throw new QualificationError(`X1C_JOB_${(job.failure?.code ?? job.state).toUpperCase().replaceAll('-', '_')}`);
+    }
     if (receipt.status === 'rejected') {
-      if (receipt.message.toLowerCase().includes('verify failed')) {
+      if (receipt.message.toLowerCase().includes('verify failed') || receipt.code === 'MACHINE_ACTION_UNSUPPORTED') {
         throw new QualificationError('X1C_DEVELOPER_MODE_REQUIRED');
       }
       throw new QualificationError('X1C_START_REJECTED');
     }
     let observedActive = false;
     let lastProgress = -1;
+    // The run this stage started: the receipt's, else the first live run after the start (the printer was idle).
+    let runId = receipt.status === 'accepted' && receipt.kind === 'start' ? receipt.runId : undefined;
     const deadline = Date.now() + 90 * 60_000;
     while (Date.now() < deadline) {
       // oxlint-disable-next-line no-await-in-loop -- supervised monitoring reads one durable machine projection serially.
@@ -1492,27 +1498,38 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
         signal: cancellation.signal,
       });
       const { run } = current.snapshot;
-      const active = ['preparing', 'printing', 'paused', 'finishing'].includes(run?.state ?? '');
-      if (active) {
+      if (runId === undefined && (run?.state === 'starting' || run?.state === 'running' || run?.state === 'paused')) {
+        ({ runId } = run);
+      }
+      const outcome = printCubeOutcome(run, runId);
+      if (outcome !== 'waiting') {
         observedActive = true;
       }
       if (receipt.status === 'unknown' && !observedActive) {
         throw new QualificationError('X1C_START_UNCONFIRMED');
       }
-      if (observedActive && run?.state === 'succeeded') {
+      if (outcome === 'completed') {
         process.stdout.write(
-          `${JSON.stringify({ stage: 'print-cube', status: 'completed', progress: run.progress ?? 100, completedAt: new Date().toISOString() })}\n`,
+          `${JSON.stringify({ stage: 'print-cube', status: 'completed', completedAt: new Date().toISOString() })}\n`,
         );
         return;
       }
-      if (observedActive && run?.state === 'failed') {
+      if (outcome === 'cancelled') {
+        throw new QualificationError('X1C_PRINT_CANCELLED');
+      }
+      if (outcome === 'failed' || (observedActive && current.snapshot.state.status === 'alarm')) {
         throw new QualificationError('X1C_PRINT_FAILED');
       }
-      const progress = Math.floor(run?.progress ?? 0);
+      // The printer reports its last run until the next one, so losing this one means another run replaced it.
+      if (observedActive && outcome === 'waiting') {
+        throw new QualificationError('X1C_PRINT_RUN_LOST');
+      }
+      const progress = Math.floor((run?.progress.fraction ?? 0) * 100);
       if (observedActive && progress !== lastProgress) {
         lastProgress = progress;
+        const layer = run?.progress.counters.find(({ id }) => id === 'layer');
         process.stdout.write(
-          `${JSON.stringify({ stage: 'print-cube', status: run?.state, progress, currentLayer: run?.currentLayer, totalLayers: run?.totalLayers, remainingSeconds: run?.remainingSeconds })}\n`,
+          `${JSON.stringify({ stage: 'print-cube', status: run?.state, progress, currentLayer: layer?.current, totalLayers: layer?.total, remainingSeconds: run?.progress.remaining === undefined ? undefined : Math.round(run.progress.remaining / 1000) })}\n`,
         );
       }
       // oxlint-disable-next-line no-await-in-loop -- five-second reads are bounded by the ninety-minute supervised run.
@@ -1652,9 +1669,9 @@ const main = async (): Promise<void> => {
           identitySha256: candidate.claimedIdentity.serial
             ? digest(Uint8Array.from(Buffer.from(candidate.claimedIdentity.serial)))
             : undefined,
-          endpointSha256: digest(Uint8Array.from(Buffer.from(candidate.endpoint.address))),
-          mqtt: await probeCertificate(candidate.endpoint.address, 8883),
-          camera: await probeCertificate(candidate.endpoint.address, 322),
+          endpointSha256: digest(Uint8Array.from(Buffer.from(bambuCandidateAddress(candidate)))),
+          mqtt: await probeCertificate(bambuCandidateAddress(candidate), mqttPort),
+          camera: await probeCertificate(bambuCandidateAddress(candidate), cameraPort),
         })}\n`,
       );
       return;
@@ -1667,8 +1684,8 @@ const main = async (): Promise<void> => {
     if (stage === 'probe-read-only') {
       process.stdout.write(
         `${JSON.stringify({
-          mqtt: await probeCertificate(configuration.address, 8883),
-          camera: await probeCertificate(configuration.address, 322),
+          mqtt: await probeCertificate(configuration.address, mqttPort),
+          camera: await probeCertificate(configuration.address, cameraPort),
         })}\n`,
       );
       return;

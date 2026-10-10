@@ -26,9 +26,11 @@ describe('writeBambuContainer', () => {
     const bytes = writeBambuContainer({ gcode, modelName: 'cube', plate: 'textured-pei' });
     const members = unzipSync(bytes);
     expect(Object.keys(members)).toEqual([...bambuContainerMembers]);
-    expect(new TextDecoder().decode(members[bambuPlateMember])).toBe(gcode);
+    // A Bambu plate is also recorded under Bambu Studio's own name for it.
+    const plate = `; CONFIG_BLOCK_START\n; curr_bed_type = Textured PEI Plate\n; CONFIG_BLOCK_END\n${gcode}`;
+    expect(new TextDecoder().decode(members[bambuPlateMember])).toBe(plate);
     expect(new TextDecoder().decode(members['Metadata/plate_1.gcode.md5'])).toBe(
-      createHash('md5').update(gcode).digest('hex'),
+      createHash('md5').update(plate).digest('hex'),
     );
     expect(new TextDecoder().decode(members['[Content_Types].xml'])).toContain(
       'Extension="gcode" ContentType="text/x.gcode"',
@@ -40,6 +42,48 @@ describe('writeBambuContainer', () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu plate_1.json field names are fixed.
       bed_type: 'textured-pei',
     });
+  });
+
+  it('should record what the plate was sliced for where Bambu Studio records it', () => {
+    const members = unzipSync(
+      writeBambuContainer({
+        gcode,
+        modelName: 'cube',
+        plate: 'cool',
+        printerModel: 'Bambu Lab X1 Carbon',
+        nozzleDiameter: 0.4,
+        filamentTypes: ['PLA', 'PETG'],
+        filamentColors: ['#ff0000', '#0000FF'],
+        filamentDiameters: [1.75, 1.75],
+      }),
+    );
+    expect(new TextDecoder().decode(members[bambuPlateMember])).toBe(
+      '; CONFIG_BLOCK_START\n' +
+        '; curr_bed_type = Cool Plate\n' +
+        '; filament_colour = #FF0000;#0000FF\n' +
+        '; filament_diameter = 1.75,1.75\n' +
+        '; filament_type = PLA;PETG\n' +
+        '; nozzle_diameter = 0.4\n' +
+        '; printer_model = Bambu Lab X1 Carbon\n' +
+        `; CONFIG_BLOCK_END\n${gcode}`,
+    );
+    expect(new TextDecoder().decode(members['Metadata/slice_info.config'])).toContain(
+      '  <metadata key="nozzle_diameters" value="0.4"/>\n' +
+        '  <object identify_id="1" name="cube" skipped="false"/>\n' +
+        '  <filament id="1" type="PLA" color="#FF0000"/>\n' +
+        '  <filament id="2" type="PETG" color="#0000FF"/>\n',
+    );
+  });
+
+  it.each([
+    ['a printer model that ends the comment line', { printerModel: 'X1\nM104 S300' }],
+    ['a material that splits the list', { filamentTypes: ['PLA;PETG'] }],
+    ['a zero diameter', { filamentDiameters: [0] }],
+    ['an unbounded nozzle', { nozzleDiameter: Number.POSITIVE_INFINITY }],
+  ])('should refuse %s, which would land in a G-code comment', (_name, facts) => {
+    expect(() => writeBambuContainer({ gcode, modelName: 'cube', ...facts })).toThrow(
+      new TypeError('SLICER_CONTAINER_SETTING_INVALID'),
+    );
   });
 
   it('should be byte-deterministic and escape the model name', () => {

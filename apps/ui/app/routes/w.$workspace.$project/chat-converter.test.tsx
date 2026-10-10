@@ -1008,8 +1008,12 @@ describe('ChatConverter', () => {
     ['X1C', bambuMachine],
     ['A1 mini', bambuA1MiniMachine],
   ])('compiles the %s submission form, external spool slot included', async (_name, machine) => {
+    const { jobs } = machine().manifest;
+    if (jobs.type !== 'supported') {
+      throw new Error('A Bambu printer takes jobs.');
+    }
     const { manifest } = await compileExportConfigurationManifest('bambu', 'machine.submission', {
-      schema: machine().submissionConfiguration.legacyProjection.inputSchema as JSONSchema7,
+      schema: jobs.submission.legacyProjection.inputSchema as JSONSchema7,
       defaults: {},
     });
 

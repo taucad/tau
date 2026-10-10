@@ -82,8 +82,6 @@ describe('createCliRuntime', () => {
         name.startsWith('@taucad/') &&
         ![
           '@taucad/agent-host',
-          // Machine providers, loaded by `tau serve --machines`, not runtime plugins.
-          '@taucad/bambu',
           '@taucad/host',
           '@taucad/jobs-solvers',
           '@taucad/parameters',

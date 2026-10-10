@@ -354,6 +354,23 @@ describe('serializeMessage', () => {
     });
   });
 
+  describe('machine tool parts', () => {
+    it("keeps an old chat's object answer from get_machine readable", () => {
+      const message = baseMessage([
+        {
+          type: 'tool-get_machine',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { machineId: 'workshop-x1c' },
+          // An answer recorded before get_machine answered in text.
+          output: { name: 'Workshop X1C' } as unknown as string,
+        },
+      ]);
+      expect(serializeMessage(message)).toContain('"name": "Workshop X1C"');
+      expect(serializeMessage(message)).not.toContain('[object Object]');
+    });
+  });
+
   describe('dynamic-tool parts', () => {
     it('serializes input-streaming state', () => {
       const message = baseMessage([
@@ -503,6 +520,51 @@ describe('serializeMessage', () => {
       expect(serializeMessage(message)).toBe(
         '<tool_call name="read_file">\ntargetFile: readme.md\n</tool_call>\n<tool_result>\nL1-L1\n```\nHello\n```\n</tool_result>',
       );
+    });
+
+    it('serializes a request_job for a finished program by its artifact', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-request_job',
+          toolCallId: 'c1',
+          state: 'output-error',
+          input: { artifact: 'out/bracket.gcode', machineId: 'router' },
+          errorText: 'No machine',
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="request_job">\nartifact: out/bracket.gcode\nmachineId: router\n</tool_call>\n<tool_result>\n[Error: No machine]\n</tool_result>',
+      );
+    });
+
+    it.each([
+      { simulated: true, mark: ' (simulated)' },
+      { simulated: false, mark: '' },
+    ])('marks a request_job and check_job on a simulator: simulated $simulated', ({ simulated, mark }) => {
+      const program = { name: 'part' };
+      const message = baseMessage([
+        {
+          type: 'tool-request_job',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { artifact: 'out/part.gcode.3mf' },
+          output: {
+            job: { jobId: 'job-1', machineId: 'x1c', state: 'started', program },
+            machineName: 'Workshop X1C',
+            simulated,
+          },
+        },
+        {
+          type: 'tool-check_job',
+          toolCallId: 'c2',
+          state: 'output-available',
+          input: { artifact: 'out/part.gcode.3mf' },
+          output: { status: 'ready', simulated, program },
+        },
+      ]);
+      const text = serializeMessage(message);
+      expect(text).toContain(`<tool_result>\npart on Workshop X1C${mark}: started\n</tool_result>`);
+      expect(text).toContain(`<tool_result>\nready${mark}: part\n</tool_result>`);
     });
 
     it('serializes tool with output-error state', () => {

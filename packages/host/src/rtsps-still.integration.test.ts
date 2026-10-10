@@ -75,7 +75,7 @@ describe.skipIf(ffmpeg === undefined)('captureRtspsStill through a fake RTSP cam
             maximumBytes: 1024 * 1024,
             signal: AbortSignal.timeout(30_000),
           },
-          { ffmpeg: wrapper, accessCode: async () => accessCode, openUpstream: async () => connectTcp(camera.port) },
+          { ffmpeg: wrapper, password: async () => accessCode, openUpstream: async () => connectTcp(camera.port) },
         );
 
         expect(still.mediaType).toBe('image/jpeg');

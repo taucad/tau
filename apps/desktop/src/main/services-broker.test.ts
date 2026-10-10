@@ -327,6 +327,78 @@ describe('createServicesBroker', () => {
       message: 'MACHINE_BINDING_UNKNOWN',
     });
     await expect(failed).rejects.toThrow('MACHINE_BINDING_UNKNOWN');
+
+    /* The host's typed code survives the relay beside its message. */
+    const refused = broker.completeMachineBinding({ ceremonyId: 'ceremony-3' }, 1000);
+    spawns[0]?.message({
+      type: 'machine-binding-complete-failed',
+      requestId: bindingFrames()[2]?.['requestId'],
+      message: 'Enter the access code shown on the machine.',
+      code: 'MACHINE_CREDENTIAL_REQUIRED',
+    });
+    await expect(refused).rejects.toMatchObject({
+      message: 'Enter the access code shown on the machine.',
+      code: 'MACHINE_CREDENTIAL_REQUIRED',
+    });
+  });
+
+  it('should ask a running utility which machines a program streams to, and answer none without one', async () => {
+    const { broker, spawns } = brokerHarness();
+    /* Asking never spawns a utility: one that is not running feeds nothing. */
+    await expect(broker.streamingMachines(1000)).resolves.toEqual([]);
+    expect(spawns).toHaveLength(0);
+
+    broker.connect('nodeFs');
+    const asked = broker.streamingMachines(1000);
+    const question = (spawns[0]?.posted ?? []).find(
+      (message): message is Record<string, unknown> =>
+        typeof message === 'object' &&
+        message !== null &&
+        'type' in message &&
+        message['type'] === 'machines-streaming',
+    );
+    spawns[0]?.message({
+      type: 'machines-streaming-answered',
+      requestId: question?.['requestId'],
+      machines: ['LongMill'],
+    });
+    await expect(asked).resolves.toEqual(['LongMill']);
+
+    /* Main calls the quit off: the running utility hears it once. */
+    broker.resumeMachineStarts();
+    const resumes = (spawns[0]?.posted ?? []).filter(
+      (message) =>
+        typeof message === 'object' && message !== null && 'type' in message && message.type === 'machines-resume',
+    );
+    expect(resumes).toEqual([{ type: 'machines-resume' }]);
+  });
+
+  it('should peek at the streaming machines for keep-awake with a read-only question, never forking a utility', async () => {
+    const { broker, spawns } = brokerHarness();
+    await expect(broker.peekStreamingMachines(1000)).resolves.toEqual([]);
+    expect(spawns).toHaveLength(0);
+
+    broker.connect('nodeFs');
+    const peeked = broker.peekStreamingMachines(1000);
+    const types = (spawns[0]?.posted ?? []).map((message) =>
+      typeof message === 'object' && message !== null && 'type' in message ? message.type : undefined,
+    );
+    /* Never quit's question, which would hold the utility's starts. */
+    expect(types).toContain('machines-streaming-peek');
+    expect(types).not.toContain('machines-streaming');
+    const question = (spawns[0]?.posted ?? []).find(
+      (message): message is Record<string, unknown> =>
+        typeof message === 'object' &&
+        message !== null &&
+        'type' in message &&
+        message.type === 'machines-streaming-peek',
+    );
+    spawns[0]?.message({
+      type: 'machines-streaming-answered',
+      requestId: question?.['requestId'],
+      machines: ['Router'],
+    });
+    await expect(peeked).resolves.toEqual(['Router']);
   });
 
   it('should never replay or log an access code, and complete without one when none was typed', async () => {
@@ -852,13 +924,34 @@ describe('createServicesBroker — the quit hold (W19, D31)', () => {
 
     const quiescing = broker.quiesce(5000);
     expect(broker.quiesce(5000)).toBe(quiescing);
-    expect(utility.postMessage).toHaveBeenCalledWith({ type: 'quiesce' });
+    expect(utility.postMessage).toHaveBeenCalledWith({ type: 'quiesce', quitIfStreamingUnknown: false });
     expect(utility.kill).not.toHaveBeenCalled();
 
     utility.message({ type: 'quiesced' });
 
     await expect(quiescing).resolves.toEqual({ status: 'quiesced' });
     expect(utility.kill).not.toHaveBeenCalled();
+  });
+
+  it('reports a refusal over a streamed run, serves again, and asks again on the next quit', async () => {
+    const { broker, spawns } = brokerHarness();
+    broker.connect('nodeFs');
+    const utility = spawns[0]!;
+
+    const refused = broker.quiesce(5000);
+    utility.message({ type: 'quiesce-refused', reason: 'streaming', machines: ['LongMill'] });
+    await expect(refused).resolves.toEqual({ status: 'streaming', machines: ['LongMill'] });
+    expect(() => broker.connect('nodeFs')).not.toThrow();
+
+    const unknown = broker.quiesce(5000);
+    expect(unknown).not.toBe(refused);
+    utility.message({ type: 'quiesce-refused', reason: 'streaming-unknown', message: 'The store is busy.' });
+    await expect(unknown).resolves.toEqual({ status: 'streaming-unknown', message: 'The store is busy.' });
+
+    const anyway = broker.quiesce(5000, { quitIfStreamingUnknown: true });
+    expect(utility.postMessage).toHaveBeenLastCalledWith({ type: 'quiesce', quitIfStreamingUnknown: true });
+    utility.message({ type: 'quiesced' });
+    await expect(anyway).resolves.toEqual({ status: 'quiesced' });
   });
 
   it('cuts at the bound when the utility never answers, so quit is never held open', async () => {

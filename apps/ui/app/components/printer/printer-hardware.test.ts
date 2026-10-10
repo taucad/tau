@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { bambuA1MiniManifest } from '@taucad/bambu';
 import { createPrinterHardware, toolheadOpacity } from '#components/printer/printer-hardware.js';
 import { derivePrinterGeometry } from '#components/printer/printer-geometry.js';
-import { x1cReferenceGeometry } from '#components/printer/printer-manifest.fixture.js';
+import { resolvePrinterManifest, x1cReferenceGeometry } from '#components/printer/printer-manifest.fixture.js';
+import { a1MiniManifest } from '#components/print/testing/machines.fixture.js';
 import { applyPlateGrain, plateStandInOutline } from '#components/printer/printer-plate-surface.js';
 
 describe('physical printer assemblies', () => {
   it('keeps the bed and gantry independently movable, with Mini’s column right of the print', () => {
-    for (const manifest of [x1cReferenceGeometry, bambuA1MiniManifest]) {
+    for (const manifest of [x1cReferenceGeometry, resolvePrinterManifest(a1MiniManifest)]) {
       const geometry = derivePrinterGeometry(manifest);
       const hardware = createPrinterHardware(geometry);
       const resources = new Set<THREE.BufferGeometry | THREE.Material>();

@@ -140,12 +140,13 @@ export const tauToolNames = [
   'use_skill',
   'update_todos',
   'ask_questions',
+  'list_machines',
   'get_machine',
-  'request_print',
-  'get_print_request',
+  'machine_action',
+  'stop_machine',
   'get_print_profiles',
-  'list_print_requests',
-  'cancel_print',
+  'request_job',
+  'check_job',
 ] as const;
 
 /**

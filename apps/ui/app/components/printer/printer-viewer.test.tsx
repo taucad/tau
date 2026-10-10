@@ -85,7 +85,7 @@ const loadedSpoolColor = '#3366FF';
 const liveState = (overrides: Partial<PrinterLiveState> = {}): PrinterLiveState => ({
   machineId: 'machine-1',
   machineName: 'X1C simulator',
-  runState: 'printing',
+  runState: 'running',
   isActive: true,
   printsThisFile: true,
   position: { currentLayer: 2, totalLayers: 3, progress: 40 },
@@ -257,7 +257,7 @@ describe('PrinterViewer', () => {
     expect(props.chamberLight).toBe('on');
     expect(props.liveNozzleTarget).toBe(250);
     const hud = screen.getByRole('region', { name: 'Print HUD' });
-    expect(within(hud).getByText('Machine').nextElementSibling).toHaveTextContent('X1C simulator · printing');
+    expect(within(hud).getByText('Machine').nextElementSibling).toHaveTextContent('X1C simulator · running');
     expect(within(hud).getByText('Nozzle').nextElementSibling).toHaveTextContent('250 °C');
     expect(controls).not.toHaveTextContent('No active run to follow');
 
@@ -281,7 +281,7 @@ describe('PrinterViewer', () => {
     expect(props.store.getTime()).toBe(liveTime(props.program, mocks.live.position));
     expect(layerAtTime(props.program, props.store.getTime())).toBe(2);
 
-    mocks.live = liveState({ runState: 'succeeded', isActive: false, printsThisFile: false });
+    mocks.live = liveState({ runState: 'completed', isActive: false, printsThisFile: false });
     view.rerender(viewer());
     expect(within(controls).getByRole('switch', { name: 'Live' })).not.toBeChecked();
     expect(within(controls).getByRole('switch', { name: 'Live' })).toBeDisabled();
@@ -356,7 +356,7 @@ describe('PrinterViewer', () => {
   });
 
   it("should tint the toolpath with the file's own filament colour ahead of the loaded spool", async () => {
-    mocks.live = liveState({ isActive: false, printsThisFile: false, runState: 'idle' });
+    mocks.live = liveState({ isActive: false, printsThisFile: false, runState: undefined });
     const coloured = writeBambuContainer({
       // oxlint-disable-next-line tau-lint/no-hardcoded-color -- the colour Bambu Studio records for the model
       gcode: `; CONFIG_BLOCK_START\n; filament_colour = #F5A623\n; CONFIG_BLOCK_END\n${fixtureGcode({ layers: 3 })}`,
@@ -379,7 +379,7 @@ describe('PrinterViewer', () => {
   });
 
   it('should colour each tool by its own filament and list the filaments a multi-colour file prints with', async () => {
-    mocks.live = liveState({ isActive: false, printsThisFile: false, runState: 'idle' });
+    mocks.live = liveState({ isActive: false, printsThisFile: false, runState: undefined });
     const threeFilaments = writeBambuContainer({
       gcode: fixtureGcode({ layers: 3, tools: [0, 1, 2] }),
       modelName: 'fixture',

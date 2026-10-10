@@ -26,6 +26,12 @@ const edges = [{ from: 'glb', to: 'gcode.3mf', fidelity: 'mesh', optionsSchema: 
 // bound printer's tray count through `bambuStudio.hints` when such a printer is qualified.
 const maximumFilaments = 4;
 
+// Bambu Studio's `printer_model` for each machine profile the reference engine slices for.
+const printerModels = { 'bambu-x1c': 'Bambu Lab X1 Carbon' } as const satisfies Record<
+  ResolvedSlicerOptions['machineProfile'],
+  string
+>;
+
 const issue = (message: string, code: KernelIssue['code'], details?: KernelIssue['details']): KernelIssue => ({
   message,
   code,
@@ -190,6 +196,16 @@ export const slicerTranscoder = defineTranscoder({
         modelName: modelNameOf(file.name),
         plate: options.plate,
         ...(model.color === undefined ? {} : { filamentColors: [model.color] }),
+        // What the reference engine sliced for, where Bambu Studio records it, so a printer's job checks can read it.
+        // ponytail: the service is sent only placement, so its slice states none of these.
+        ...(options.engine === 'reference'
+          ? {
+              printerModel: printerModels[options.machineProfile],
+              nozzleDiameter: options.nozzleDiameter,
+              filamentDiameters: [options.filamentDiameter],
+              ...(options.filamentType === undefined ? {} : { filamentTypes: [options.filamentType] }),
+            }
+          : {}),
       });
       const reason =
         options.engine === 'service'

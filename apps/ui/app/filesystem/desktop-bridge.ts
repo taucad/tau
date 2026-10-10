@@ -145,10 +145,16 @@ const bambuStudioValue = <Value>(answer: unknown): Value => {
   throw Object.assign(new Error(message), { name: 'BambuStudioError', code: result?.error?.code });
 };
 
-/* Parsed, not trusted: main answers with whatever the utility said. */
-const bindingOutcomeSchema = z.discriminatedUnion('status', [
+/* Parsed, not trusted: main answers with whatever the utility said. A failure resolves as data, since an error
+ * crossing the context bridge keeps only its message. */
+const bindingAnswerSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('bound'), machineId: z.string().min(1).max(256) }),
   z.object({ status: z.literal('operator-action-required'), ceremonyId: z.string().min(1).max(256) }),
+  z.object({
+    status: z.literal('failed'),
+    code: z.string().min(1).max(128).optional(),
+    message: z.string().max(4096),
+  }),
 ]);
 
 /** Keep the native app icon aligned with Tau's resolved local theme. */
@@ -247,8 +253,8 @@ export type DesktopBridge = {
      *
      * A typed access code goes straight to the host, which keeps it in the OS
      * keychain once the printer accepts it, and is never kept in page state;
-     * the outcome is the host's own. A refusal reaches the page as a message
-     * that carries the host's code.
+     * the outcome is the host's own. A refusal rejects with the host's
+     * message and, when it has one, its typed `code` on the error.
      */
     completeBinding(input: DesktopMachineBindingCompletion): Promise<MachineBindingOutcome>;
   };
@@ -389,7 +395,11 @@ export const desktopBridge = (): DesktopBridge | undefined => {
         if (!shell.machines) {
           throw new Error('This desktop build has no machine binding ceremony.');
         }
-        return bindingOutcomeSchema.parse(await shell.machines.completeBinding(input));
+        const answer = bindingAnswerSchema.parse(await shell.machines.completeBinding(input));
+        if (answer.status === 'failed') {
+          throw Object.assign(new Error(answer.message), answer.code === undefined ? {} : { code: answer.code });
+        }
+        return answer;
       },
     },
     compute: shell.compute ?? {

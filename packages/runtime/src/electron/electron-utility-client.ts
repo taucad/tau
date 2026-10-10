@@ -20,7 +20,7 @@ import type {
 } from '#transport/index.js';
 
 import type { ElectronUtilityTransportOptions } from '#electron/electron-utility-transport.schemas.js';
-import { createLazyMachineFacet } from '#electron/_internal/machine-facet.js';
+import { createLazyMachineFacet } from '#transport/_internal/machine-facet.js';
 import { takeElectronRuntimeHostExit, takeElectronRuntimeHostRelease } from '#electron/_internal/runtime-host-lease.js';
 import type { ElectronRuntimeHostExitDetail } from '#electron/_internal/runtime-host-lease.js';
 
@@ -99,7 +99,7 @@ const createElectronUtilityClient = (
   debugLog(origin, 'port-wrapped');
   /* Carried beside the CAD channel, never over it: the shell brokers the
    * machines port separately, and the facet dials it on first use. */
-  const machines = createLazyMachineFacet(hooks.machines);
+  const machines = createLazyMachineFacet(hooks.machines, 'electronUtilityTransport');
 
   let openPromise: Promise<TransportClientReady> | undefined;
   let closePromise: Promise<void> | undefined;

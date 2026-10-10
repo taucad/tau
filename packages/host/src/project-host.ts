@@ -368,7 +368,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     parameterActor: async (root: string, entry: string) => parameters.get(parameterKey(root, entry)),
     ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
     ...(options.geospecRunner === undefined ? {} : { geospecRunner: options.geospecRunner }),
-    /* The machine tools, over a facet this host already serves; a print request names the project by its id. */
+    /* The machine tools, over a facet this host already serves; a job names the project by its id. */
     ...(options.machines === undefined ? {} : { machines: options.machines }),
     ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
   };

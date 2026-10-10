@@ -930,18 +930,33 @@ export type AgentHostApproval = {
   /**
    * The durable record this interrupt gates, when the tool named one.
    *
-   * `request_print` writes `{ requestId, machineId, fileName }` so the Print
-   * pane can resolve the same ledger record the banner shows; other tools may
-   * write nothing.
+   * A job request writes `{ jobId, machineId, fileName }` and a machine action
+   * `{ machineId, componentId, action, operationId, label, intent }`, so the Print pane
+   * can answer the same interrupt the banner shows; other tools may write nothing.
    */
   readonly context?: AgentHostApprovalContext | undefined;
 };
 
 /** Ledger correlation a tool attaches to the interrupt it raises. @public */
 export type AgentHostApprovalContext = {
-  readonly requestId?: string | undefined;
+  readonly jobId?: string | undefined;
   readonly machineId?: string | undefined;
   readonly fileName?: string | undefined;
+  /** For a machine action: the component, the action id, the operation it will send and its label. */
+  readonly componentId?: string | undefined;
+  readonly action?: string | undefined;
+  readonly operationId?: string | undefined;
+  readonly label?: string | undefined;
+  /** For a machine action: the parameters of the exact intent the person approves, from the tool's `intent`. */
+  readonly parameters?: Readonly<Record<string, unknown>> | undefined;
+  /** For a machine action: the action version of that intent, which the host's approval record names (R15). */
+  readonly version?: number | undefined;
+  /**
+   * For a machine action: the run the agent saw when it asked, `null` for none. The person approves the action for
+   * this run only (R16).
+   */
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the agent's statement that it saw no run.
+  readonly expectedRunId?: string | null | undefined;
 };
 
 /** One sign-in method an external agent offered. @public */
@@ -985,16 +1000,35 @@ const interruptRequestSchema = z.looseObject({
       toolCall: z.looseObject({ title: z.string().optional() }).optional(),
       options: z.array(approvalOptionSchema).optional(),
       requestId: z.string().min(1).optional(),
+      jobId: z.string().min(1).optional(),
       machineId: z.string().min(1).optional(),
       fileName: z.string().min(1).optional(),
+      componentId: z.string().min(1).optional(),
+      action: z.string().min(1).optional(),
+      operationId: z.string().min(1).optional(),
+      label: z.string().min(1).optional(),
+      intent: z
+        .looseObject({
+          parameters: z.record(z.string(), z.unknown()).optional(),
+          version: z.number().int().optional(),
+          expectedRunId: z.string().min(1).nullable().optional(),
+        })
+        .optional(),
     })
     .optional(),
 });
 
 const agentHostApprovalContextSchema = z.object({
-  requestId: z.string().min(1).optional(),
+  jobId: z.string().min(1).optional(),
   machineId: z.string().min(1).optional(),
   fileName: z.string().min(1).optional(),
+  componentId: z.string().min(1).optional(),
+  action: z.string().min(1).optional(),
+  operationId: z.string().min(1).optional(),
+  label: z.string().min(1).optional(),
+  parameters: z.record(z.string(), z.unknown()).optional(),
+  version: z.number().int().optional(),
+  expectedRunId: z.string().min(1).nullable().optional(),
 });
 
 /**
@@ -1004,16 +1038,39 @@ const agentHostApprovalContextSchema = z.object({
  * @returns Only the correlation keys present, or `undefined` when none are.
  */
 const approvalContextOf = (
-  context: { requestId?: string; machineId?: string; fileName?: string } | undefined,
+  context:
+    | (AgentHostApprovalContext & {
+        readonly requestId?: string | undefined;
+        readonly intent?:
+          | {
+              readonly parameters?: Readonly<Record<string, unknown>> | undefined;
+              readonly version?: number | undefined;
+              // oxlint-disable-next-line typescript/no-restricted-types -- null is the agent's statement that it saw no run.
+              readonly expectedRunId?: string | null | undefined;
+            }
+          | undefined;
+      })
+    | undefined,
 ): AgentHostApprovalContext | undefined => {
   if (!context) {
     return undefined;
   }
-  const picked: AgentHostApprovalContext = {
-    ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
-    ...(context.machineId === undefined ? {} : { machineId: context.machineId }),
-    ...(context.fileName === undefined ? {} : { fileName: context.fileName }),
-  };
+  // ponytail: a host from before jobs names the job `requestId`; drop the alias once every host writes `jobId`.
+  const jobId = context.jobId ?? context.requestId;
+  const picked: AgentHostApprovalContext = Object.fromEntries(
+    Object.entries({
+      jobId,
+      machineId: context.machineId,
+      fileName: context.fileName,
+      componentId: context.componentId,
+      action: context.action,
+      operationId: context.operationId,
+      label: context.label,
+      parameters: context.intent?.parameters,
+      version: context.intent?.version,
+      expectedRunId: context.intent?.expectedRunId,
+    }).filter(([, value]) => value !== undefined),
+  );
   return Object.keys(picked).length === 0 ? undefined : picked;
 };
 

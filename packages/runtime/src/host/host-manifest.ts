@@ -1,4 +1,5 @@
 import { cloneBoundedJson } from '@taucad/parameters/json';
+import { machineChannelProtocolVersion } from '#machines/machine-channel.js';
 import { protocolVersion } from '#types/protocol-header.types.js';
 
 const manifestLimits = {
@@ -18,14 +19,20 @@ export type HostCapabilityEndpoint =
   | Readonly<{ type: 'route'; path: string }>
   | Readonly<{ type: 'port'; name: string }>;
 
-/** Versioned service advertisement. `granted` is descriptive, never authorization. @public */
+/**
+ * Versioned service advertisement. `granted` is descriptive, never authorization. A service whose channel says its
+ * version in a hello advertises that same number (`cad`: the runtime protocol; `machines`: the machines channel), so
+ * the advertisement and the hello cannot drift.
+ * @public
+ */
 export type HostCapabilityDescriptor = Readonly<{
   endpoint: HostCapabilityEndpoint;
   granted: boolean;
 }> &
   (
     | Readonly<{ kind: 'cad'; protocolVersion: typeof protocolVersion }>
-    | Readonly<{ kind: Exclude<HostCapabilityRole, 'cad'>; protocolVersion: 1 }>
+    | Readonly<{ kind: 'machines'; protocolVersion: typeof machineChannelProtocolVersion }>
+    | Readonly<{ kind: Exclude<HostCapabilityRole, 'cad' | 'machines'>; protocolVersion: 1 }>
   );
 
 /** Bounded, re-serializable manifest-v2 wire value. @public */
@@ -136,7 +143,12 @@ export const parseHostManifest = (input: unknown): AdmittedHostManifestV2 => {
     if (observedRoles.has(kind)) {
       throw new TypeError(`DUPLICATE_HOST_CAPABILITY_ROLE:${kind}`);
     }
-    const protocol = kind === 'cad' ? ({ kind, protocolVersion } as const) : ({ kind, protocolVersion: 1 } as const);
+    const protocol =
+      kind === 'cad'
+        ? ({ kind, protocolVersion } as const)
+        : kind === 'machines'
+          ? ({ kind, protocolVersion: machineChannelProtocolVersion } as const)
+          : ({ kind, protocolVersion: 1 } as const);
     if (candidate['protocolVersion'] !== protocol.protocolVersion) {
       throw new TypeError(`UNSUPPORTED_HOST_CAPABILITY_PROTOCOL:${kind}`);
     }

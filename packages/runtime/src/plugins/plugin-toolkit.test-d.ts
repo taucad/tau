@@ -76,14 +76,11 @@ const machine = () =>
       id: 'machine-provider',
       name: 'Machine',
       version: '1.0.0',
-      protocolVersion: 1,
+      protocolVersion: 2,
       vendor: 'test',
-      technologies: ['additive.fff'],
-      accepts: [],
       manifest: machineManifestFixture,
       bindingConfiguration: jobRegistration.configuration,
       submissionConfiguration: jobRegistration.configuration,
-      queries: {},
     } as const,
     () => ({
       async *discover() {},
@@ -135,7 +132,7 @@ describe('plugin toolkit types', () => {
     >();
     expectTypeOf(selected.capabilities.kernels[0].id).toEqualTypeOf<'step'>();
     expectTypeOf(selected.capabilities.jobs[0].kind).toEqualTypeOf<'simulation.fake'>();
-    expectTypeOf(selected.capabilities.machines[0].protocolVersion).toEqualTypeOf<1>();
+    expectTypeOf(selected.capabilities.machines[0].protocolVersion).toEqualTypeOf<2>();
   });
   it('projects selected plugin tuples before direct buckets', () => {
     const runtime = defineRuntime({

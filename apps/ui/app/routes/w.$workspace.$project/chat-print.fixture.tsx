@@ -8,26 +8,23 @@
 
 import { vi } from 'vitest';
 import type { Mock } from 'vitest';
-import { z } from 'zod';
 import { Topic } from '@taucad/events';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { CapabilitiesManifest, ExportResult } from '@taucad/runtime';
 import { createMockRuntimeDocument } from '@taucad/runtime-testing';
-import { defineConfiguration } from '@taucad/runtime/configuration';
-import { quantity } from '@taucad/runtime/configuration/zod';
-import { parseMachineManifest } from '@taucad/runtime/machine';
 import type {
+  ComponentObservation,
+  MachineCheckJobInput,
   MachineClient,
   MachineDirectoryEntry,
   MachineDirectoryFrame,
   MachineDirectorySnapshot,
-  MachineOperationReceipt,
+  MachineJob,
   MachineProvider,
-  PrintRequest,
+  MachineRun,
+  MaterialSlotSnapshot,
 } from '@taucad/runtime/machine';
 import type { BambuPresetSummary, BambuStudioSelection, BambuStudioSettings } from '@taucad/slicer/bambu-studio';
-import { quantityKinds } from '@taucad/units/quantity';
-import type { Quantity } from '@taucad/units/quantity';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { ParameterManifest } from '@taucad/parameters';
 import type * as ParametersModule from '#components/geometry/parameters/parameters.js';
@@ -37,7 +34,21 @@ import { projectFiles } from '#components/print/testing/project-files.js';
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import type { PendingAgentHostApproval } from '#components/chat/chat-approval-banner.js';
 import type { DesktopBambuStudio } from '#filesystem/desktop-bridge.js';
-import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
+import type { PendingMachineAction } from '#components/print/machine-action-approval.js';
+import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
+import { fffProcessOf } from '@taucad/runtime/machine';
+import { bambuSettingsConfiguration, bambuSlotOf } from '@taucad/bambu/settings';
+import { observedSlots, toolheadOf } from '#components/print/machine-facts.js';
+import {
+  bambuContainer,
+  fffComponents,
+  known,
+  machineEntry,
+  machineSnapshot,
+  providerFor,
+  temperature,
+  x1cManifest,
+} from '#components/print/testing/machines.fixture.js';
 import type { SlicedArtifact } from '#routes/w.$workspace.$project/chat-print-prepare.js';
 import type { SliceSummary } from '#components/printer/printer-summary.js';
 
@@ -270,13 +281,6 @@ export const bambuStudioSliceSummary: SliceSummary = {
   producer: { name: 'Bambu Studio', version: '02.08.02.61' },
 };
 
-/** A quantity as the machine reports it; the pane reads only the value and the unit code. */
-const observed = (value: number, code: string): Quantity => {
-  const quantity: unknown = { value, unit: { code } };
-  // SAFETY: fixtures never convert; only `value` and `unit.code` are read.
-  return quantity as Quantity;
-};
-
 /**
  * A stand-in for the shared Parameters renderer: shows the draft, offers a
  * slicer option, a machine option and one field reset, and shows each boolean
@@ -364,192 +368,222 @@ export const parametersMock = (actual: typeof ParametersModule): typeof Paramete
   },
 });
 
-const millimetres = (value: number) => ({ value, unit: 'mm' });
-const celsius = (value: number) => ({ value, unit: 'Cel' });
-export const manifest = parseMachineManifest({
-  version: 2,
-  identity: {
-    typeId: 'bambu.x1c',
-    vendor: 'Bambu Lab',
-    model: 'x1c',
-    displayName: 'X1 Carbon',
-    qualifiedFirmware: ['01.08.02.00'],
-  },
-  technology: 'additive.fff',
-  geometry: {
-    unit: 'mm',
-    buildVolume: { x: 256, y: 256, z: 256 },
-    enclosure: { outer: { x: 389, y: 389, z: 457 }, enclosed: true, doors: ['front'] },
-    kinematics: 'corexy',
-    bedMotion: 'z',
-    origin: 'front-left',
-    toolheadHome: { x: 1, y: 1, z: 256 },
-    materialSystemMount: 'top',
-  },
-  toolhead: {
-    filamentDiameter: millimetres(1.75),
-    nozzles: [{ id: 'nozzle-0.4', diameter: millimetres(0.4), maximumTemperature: celsius(300), material: 'hardened' }],
-  },
-  bed: {
-    maximumTemperature: celsius(120),
-    plates: [
-      { id: 'cool', label: 'Cool plate' },
-      { id: 'textured-pei', label: 'Textured PEI plate' },
-    ],
-  },
-  chamber: { enclosed: true, heated: false, light: true, fans: [{ id: 'part', label: 'Part cooling fan' }] },
-  materialSystem: { units: 1, slotsPerUnit: 4, externalSpool: true, externalSpoolSlot: 254, drying: true },
-  camera: { stills: true },
-  storage: { removable: true },
-  network: { lanMode: true, cloud: false },
-  speedProfiles: [],
-  actions: [
-    { id: 'print.start', label: 'Start print', effect: 'print', qualification: 'qualified' },
-    { id: 'run.pause', label: 'Pause', effect: 'print', qualification: 'qualified' },
-    { id: 'run.urgent-stop', label: 'Urgent stop', effect: 'print', qualification: 'qualified' },
-    { id: 'light.set', label: 'Chamber light', effect: 'none', qualification: 'designed' },
-    { id: 'storage.format', label: 'Format storage', effect: 'storage', qualification: 'unsupported' },
-  ],
-  observations: [
-    { group: 'run', label: 'Run', staleAfter: 15_000 },
-    { group: 'thermal', label: 'Temperatures', staleAfter: 15_000 },
-  ],
-  slicing: {
-    recommended: {
-      layerHeight: millimetres(0.2),
-      walls: 2,
-      infillPercent: 15,
-      nozzleTemperature: celsius(250),
-      bedTemperature: celsius(70),
-    },
-    presets: [
-      { id: 'fast', label: 'Fast', layerHeight: millimetres(0.28) },
-      { id: 'standard', label: 'Standard', layerHeight: millimetres(0.2) },
-      { id: 'fine', label: 'Fine', layerHeight: millimetres(0.12) },
-    ],
-  },
-});
-
-const bindingConfiguration = defineConfiguration({
-  id: 'fixture.binding',
-  version: '1',
-  schema: z.object({ logicalId: z.string().min(1).max(64) }),
-  ui: { version: 1, rjsf: {} },
-});
-const submissionConfiguration = defineConfiguration({
-  id: 'fixture.submission',
-  version: '1',
-  schema: z.object({
-    amsMapping: z.array(z.number().int()).default([]),
-    // Mirrors `bambu.machine.submission` (packages/plugins/bambu/src/bambu.machine.ts): both flags default on,
-    // and only the schema says so; apps/ui does not depend on @taucad/bambu.
-    bedLeveling: z.boolean().default(true),
-    flowCalibration: z.boolean().default(true),
-    expectedBedType: z.string().min(1),
-    expectedMaterials: z.array(z.object({ slot: z.number().int(), materialId: z.string() })).default([]),
-    expectedFilamentDiameter: quantity({
-      unit: 'mm',
-      quantityKind: quantityKinds.diameter,
-      space: 'linear',
-    }).positive(),
-    expectedNozzleDiameter: quantity({ unit: 'mm', quantityKind: quantityKinds.diameter, space: 'linear' }).positive(),
-    expectedModel: z.literal('X1C'),
-    timelapse: z.boolean().default(false),
-  }),
-  ui: { version: 1, rjsf: {} },
-});
-export const accepted = {
-  contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
-  mediaType: 'application/vnd.bambulab.gcode-3mf',
-  requiredMembers: ['Metadata/plate_1.gcode'],
-  payloadSelection: 'plate',
-  technology: 'additive.fff',
-} as const;
 export const provider: MachineProvider = {
-  id: 'bambu',
+  ...providerFor('bambu', x1cManifest),
   name: 'Bambu LAN',
-  version: '1',
-  protocolVersion: 1,
-  vendor: 'Bambu Lab',
-  technologies: ['additive.fff'],
-  accepts: [accepted],
-  manifest,
-  bindingConfiguration: bindingConfiguration.manifest,
-  submissionConfiguration: submissionConfiguration.manifest,
-  queries: {},
+  /* As the Bambu provider declares it: the project's Bambu preferences live under this form's source id. */
+  settingsConfiguration: bambuSettingsConfiguration.manifest,
 };
 
-/** The simulator: the same printer shape, and it accepts files from any slicer (blueprint P3). */
-export const simulatorProvider: MachineProvider = { ...provider, id: 'bambu-simulator', name: 'Bambu simulator' };
+/** The simulator: the same printer shape on a simulated transport, and it accepts files from any slicer (P3). */
+export const simulatorProvider: MachineProvider = {
+  ...provider,
+  id: 'bambu-simulator',
+  name: 'Bambu simulator',
+  manifest: {
+    ...x1cManifest,
+    qualifications: x1cManifest.qualifications.map((profile) => ({ ...profile, environment: 'simulation' })),
+  },
+};
+
+type Fields = Readonly<Record<string, MachineCheckJobInput['configuration']>>;
+
+const isFields = (value: MachineCheckJobInput['configuration']): value is Fields =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * The start form completed as the Bambu provider completes it (R5 amended): what the program was sliced for comes
+ * from the program, never from the caller (the fixture's slices are made for this machine's model, nozzle, filament
+ * and the Textured PEI Plate), the material in each mapped slot from what the machine holds, and Bambu Studio's start
+ * defaults; the caller's choices (mapping, stated plate, start flags) win.
+ *
+ * @param machine - The machine as the directory reports it.
+ * @param configuration - The partial form the pane sent.
+ * @returns The completed form.
+ */
+const completeConfiguration = (
+  machine: MachineDirectoryEntry | undefined,
+  configuration: MachineCheckJobInput['configuration'],
+): Fields => {
+  const given = isFields(configuration) ? configuration : {};
+  const mapping = Array.isArray(given['amsMapping'])
+    ? given['amsMapping'].filter((slot): slot is number => typeof slot === 'number')
+    : [];
+  const slots = machine === undefined ? [] : observedSlots(machine);
+  const nozzle = machine === undefined ? undefined : toolheadOf(machine.descriptor.capabilities)?.nozzles[0];
+  const filament = machine === undefined ? undefined : fffProcessOf(machine.descriptor.capabilities)?.filamentDiameter;
+  return {
+    bedLeveling: true,
+    flowCalibration: true,
+    timelapse: false,
+    ...given,
+    ...(machine === undefined ? {} : { expectedModel: machine.descriptor.model }),
+    ...(nozzle === undefined ? {} : { expectedNozzleDiameter: nozzle.diameter.value }),
+    ...(filament === undefined ? {} : { expectedFilamentDiameter: filament.value }),
+    expectedBedType: 'textured-pei',
+    expectedMaterials: mapping.flatMap((slot) => {
+      const materialId = slots.find(({ address }) => bambuSlotOf(address) === slot)?.materialId;
+      return materialId === undefined ? [] : [{ slot, materialId }];
+    }),
+  };
+};
+
+/** What the idle X1C reports: the shared FFF readings, with the textured PEI plate observed on the bed. */
+const idleComponents = (): readonly ComponentObservation[] =>
+  fffComponents().map((observation) =>
+    observation.componentId === 'bed' && observation.knowledge === 'known' && observation.value.kind === 'readings'
+      ? {
+          ...observation,
+          value: {
+            ...observation.value,
+            values: [...observation.value.values, { id: 'plate', label: 'Plate', value: 'textured-pei' }],
+          },
+        }
+      : observation,
+  );
 
 /**
  * A machine as the directory reports it. The simulator by default, so the reference-engine
- * flow can send; the real printer (`providerId: 'bambu'`) takes only Bambu Studio archives.
+ * flow can send; a test of the real printer's refusal answers `checkJob` with its blocked producer check.
  */
-export const entry = (overrides: Partial<MachineDirectoryEntry> = {}): MachineDirectoryEntry => ({
-  machineId: 'machine-1',
-  /* The name the person gave it, which every surface shows (blueprint D3); the device reports its own. */
-  name: 'Workshop X1C',
-  providerId: 'bambu-simulator',
-  descriptor: {
-    id: 'physical-1',
-    name: 'X1C-00M09A350100123',
-    vendor: 'Bambu Lab',
-    model: 'X1C',
-    technology: 'additive.fff',
-    firmware: '01.08.02.00',
-    accepts: [accepted],
-    operations: ['start', 'pause', 'resume', 'cancel', 'urgent-stop', 'still'],
-    ratedEnvelope: { width: 0.256, depth: 0.256, height: 0.256, unit: 'm' },
-    printableEnvelope: { width: 0.256, depth: 0.256, height: 0.256, unit: 'm' },
-    tools: [],
-    materialSystem: { kind: 'ams', slotCount: 4 },
-    bedTypes: ['textured-pei'],
-  },
-  snapshot: {
-    connection: 'connected',
-    readiness: 'idle',
-    observedAt: timestamp,
-    setup: {
-      toolId: '0.4mm',
-      bedType: 'textured-pei',
-      materials: [
-        { slot: 0, state: 'loaded', materialId: 'pla-black', profileId: 'GFA01', color: 'black' },
-        { slot: 1, state: 'empty' },
-      ],
+export const entry = (overrides: Partial<MachineDirectoryEntry> = {}): MachineDirectoryEntry => {
+  const base = machineEntry({ manifest: x1cManifest, snapshot: machineSnapshot(idleComponents()) });
+  /* The host stamps the provider manifest's qualifications on the descriptor, so the simulator's entry reads simulated. */
+  const providerId = overrides.providerId ?? base.providerId;
+  const { qualifications } = [provider, simulatorProvider].find(({ id }) => id === providerId)?.manifest ?? x1cManifest;
+  return {
+    ...base,
+    /* The device reports its own name and model; every surface shows the name the person gave it (blueprint D3). */
+    descriptor: {
+      ...base.descriptor,
+      name: 'X1C-00M09A350100123',
+      model: 'X1C',
+      capabilities: { ...base.descriptor.capabilities, qualifications },
     },
-    run: { state: 'idle' },
-    temperatures: { nozzle: observed(28, 'Cel') },
-  },
-  freshness: 'current',
-  ...overrides,
-});
+    ...overrides,
+  };
+};
 
-export const printing = (): MachineDirectoryEntry =>
-  entry({
+/**
+ * One component's observation replaced, the rest as observed.
+ *
+ * @param components - What the machine reports.
+ * @param next - The replacement, matched by component id.
+ * @returns The components.
+ */
+export const withComponent = (
+  components: readonly ComponentObservation[],
+  next: ComponentObservation,
+): readonly ComponentObservation[] => [
+  ...components.filter((observation) => observation.componentId !== next.componentId),
+  next,
+];
+
+/**
+ * The material slots replaced on an entry's material system, everything else as observed.
+ *
+ * @param current - The entry.
+ * @param slots - The slots it now reports.
+ * @returns The entry.
+ */
+export const withSlots = (
+  current: MachineDirectoryEntry,
+  slots: readonly MaterialSlotSnapshot[],
+  inUse?: MaterialSlotSnapshot['slot'],
+): MachineDirectoryEntry => {
+  const system = current.snapshot.components.find((observation) => observation.componentId === 'filament');
+  if (system?.knowledge !== 'known' || system.value.kind !== 'material-system') {
+    return current;
+  }
+  const routes = inUse === undefined ? system.value.routes : [{ toolheadId: 'tool-0', current: inUse, target: null }];
+  return {
+    ...current,
     snapshot: {
-      ...entry().snapshot,
-      readiness: 'busy',
-      activeRunId: 'provider-run-1',
-      run: {
-        state: 'printing',
-        progress: 42,
-        remainingSeconds: 540,
-        currentLayer: 42,
-        totalLayers: 125,
-        file: 'pyramid.gcode.3mf',
-      },
-      temperatures: {
-        nozzle: observed(219.5, 'Cel'),
-        nozzleTarget: observed(220, 'Cel'),
-        bed: observed(55, 'Cel'),
-        bedTarget: observed(55, 'Cel'),
-      },
-      fans: { part: 100 },
-      lights: { chamber: 'on' },
-      network: { wifiSignalDbm: -52 },
+      ...current.snapshot,
+      components: withComponent(current.snapshot.components, { ...system, value: { ...system.value, slots, routes } }),
     },
+  };
+};
+
+/**
+ * A slot a person set: loaded with a material, editable.
+ *
+ * @param address - `unitId/slotId`, such as `ams-a/a2` or `external/spool`.
+ * @param materialType - The material, such as `PETG`.
+ * @param material - The colour and preset; black Bambu PLA by default.
+ * @returns The slot.
+ */
+export const loadedSlot = (
+  address: string,
+  materialType: string,
+  { color = '#000000FF', profileId = 'GFA01' }: Readonly<{ color?: string; profileId?: string }> = {},
+): MaterialSlotSnapshot => {
+  const [unitId = '', slotId = ''] = address.split('/');
+  return {
+    slot: { unitId, slotId },
+    state: 'loaded',
+    identifiedBy: 'person',
+    material: {
+      materialType,
+      color,
+      preset: { profileId, settingId: `${profileId}S` },
+      calibration: { type: 'default' },
+    },
+    editing: { allowed: true, duringRun: false },
+  };
+};
+
+/**
+ * A slot with nothing in it.
+ *
+ * @param address - `unitId/slotId`.
+ * @returns The slot.
+ */
+export const emptySlot = (address: string): MaterialSlotSnapshot => {
+  const [unitId = '', slotId = ''] = address.split('/');
+  return {
+    slot: { unitId, slotId },
+    state: 'empty',
+    identifiedBy: 'unset',
+    editing: { allowed: true, duringRun: false },
+  };
+};
+
+/** A Tau run 42 layers into 125, nine minutes left, its heaters at their targets. */
+export const printingRun = {
+  runId: 'provider-run-1',
+  origin: 'tau',
+  delivery: 'stored',
+  state: 'running',
+  program: { name: 'pyramid.gcode.3mf' },
+  progress: {
+    basis: 'executed',
+    fraction: 0.42,
+    remaining: 540_000,
+    counters: [{ id: 'layer', label: 'Layer', current: 42, total: 125 }],
+  },
+} as const satisfies MachineRun;
+
+export const printing = (): MachineDirectoryEntry => {
+  const idle = entry();
+  let { components } = idle.snapshot;
+  components = withComponent(
+    components,
+    known('tool-0', 'temperature', { kind: 'readings', values: [temperature('nozzle', 219.5, 220)] }),
+  );
+  components = withComponent(
+    components,
+    known('bed', 'temperature', {
+      kind: 'readings',
+      values: [temperature('bed', 55, 55), { id: 'plate', label: 'Plate', value: 'textured-pei' }],
+    }),
+  );
+  components = withComponent(components, known('part-fan', 'accessories', { kind: 'level', ratio: 1 }));
+  components = withComponent(components, known('chamber-light', 'accessories', { kind: 'switch', on: true }));
+  return entry({
+    snapshot: { ...idle.snapshot, state: { status: 'active' }, run: printingRun, components },
   });
+};
 
 const cursor = {
   hostId: 'host-1',
@@ -560,31 +594,40 @@ const cursor = {
 };
 
 /** A well-formed branded digest for fixtures: `sha256:` plus 64 hex characters of one fill. */
-const digestOf = (fill: string): PrintRequest['artifact']['digest'] =>
+const digestOf = (fill: string): MachineJob['artifact']['digest'] =>
   // SAFETY: the brand names exactly this shape; fixtures never verify bytes.
-  `sha256:${fill.repeat(64)}` as PrintRequest['artifact']['digest'];
+  `sha256:${fill.repeat(64)}` as MachineJob['artifact']['digest'];
 
-export const artifact: PrintRequest['artifact'] = {
+export const artifact: MachineJob['artifact'] = {
   projectId,
   path: `.tau/artifacts/${'b'.repeat(64)}/pyramid.gcode.3mf`,
   digest: digestOf('b'),
   length: 4,
-  mediaType: accepted.mediaType,
-  contract: accepted.contract,
+  mediaType: bambuContainer.mediaType,
+  contract: bambuContainer.contract,
   selectedMember: 'Metadata/plate_1.gcode',
 };
 
-export const agentRequest = (overrides: Partial<PrintRequest> = {}): PrintRequest => ({
-  requestId: 'request-agent-1',
+/** The agent's requester. */
+export const agent = { kind: 'agent', id: 'agent-1', label: 'Tau agent' } as const;
+
+export const agentJob = (overrides: Partial<MachineJob> = {}): MachineJob => ({
+  version: 1,
+  jobId: 'job-agent-1',
   machineId: 'machine-1',
   artifact,
   configuration: {
     expectedBedType: 'textured-pei',
-    expectedMaterials: [{ slot: 0, materialId: 'pla-black' }],
+    expectedMaterials: [{ slot: 0, materialId: 'PLA' }],
     expectedNozzleDiameter: 0.4,
   },
-  requestedBy: { kind: 'agent', id: 'agent-1', label: 'Tau agent' },
-  summary: { fileName: 'pyramid.gcode.3mf', layers: 125, estimatedDuration: 2520, filamentLength: 3200 },
+  requestedBy: agent,
+  program: {
+    name: 'pyramid.gcode.3mf',
+    estimatedDuration: 2_520_000,
+    facts: { process: 'fff', layers: 125, filamentLength: 3200 },
+  },
+  checks: [],
   state: 'awaiting-approval',
   createdAt: timestamp,
   updatedAt: timestamp,
@@ -643,112 +686,138 @@ const channel = <T,>() => {
 /** The push-driven client and the spies the tests read. */
 export type PrintClientFixture = Readonly<{
   client: MachineClient;
-  controlRun: Mock<MachineClient['controlRun']>;
+  applyAction: Mock<MachineClient['applyAction']>;
+  approveAction: Mock<MachineClient['approveAction']>;
+  beginHold: Mock<MachineClient['beginHold']>;
+  checkJob: Mock<MachineClient['checkJob']>;
+  endHold: Mock<MachineClient['endHold']>;
   goStale: () => void;
-  journal: (record: PrintRequest) => void;
+  journal: (record: MachineJob) => void;
   observe: (next: MachineDirectoryEntry) => void;
   reconcileOperation: Mock<MachineClient['reconcileOperation']>;
-  requestPrint: Mock<MachineClient['requestPrint']>;
-  resolvePrintRequest: Mock<MachineClient['resolvePrintRequest']>;
-  startPrint: Mock<MachineClient['startPrint']>;
-  uploadPrint: Mock<MachineClient['uploadPrint']>;
-  withdrawPrintRequest: Mock<MachineClient['withdrawPrintRequest']>;
+  renewHold: Mock<MachineClient['renewHold']>;
+  requestJob: Mock<MachineClient['requestJob']>;
+  resolveJob: Mock<MachineClient['resolveJob']>;
+  stop: Mock<MachineClient['stop']>;
+  withdrawJob: Mock<MachineClient['withdrawJob']>;
 }>;
 
 /**
- * A `MachineClient` over one in-memory journal. Approving a request journals it
- * straight to `started`; the pane never uploads or starts anything itself.
+ * A `MachineClient` over one in-memory jobs journal. Approving a job journals it straight to `started`; the pane
+ * never transfers or starts anything itself.
  *
- * @param input - The initial directory entries and print requests.
+ * @param input - The initial directory entries and jobs.
  * @returns The client, its spies and the telemetry pushers.
  */
 export const createFixture = ({
   entries = [entry()],
-  requests = [],
+  jobs = [],
 }: {
   readonly entries?: readonly MachineDirectoryEntry[];
-  readonly requests?: readonly PrintRequest[];
+  readonly jobs?: readonly MachineJob[];
 } = {}): PrintClientFixture => {
   const directory = channel<MachineDirectoryFrame>();
-  const requestFrames = channel<PrintRequest>();
-  const records = new Map(requests.map((request) => [request.requestId, request]));
+  const jobFrames = channel<MachineJob>();
+  const records = new Map(jobs.map((job) => [job.jobId, job]));
   let snapshot: MachineDirectorySnapshot = { cursor, entries };
+  const settle = (job: MachineJob): MachineJob => {
+    records.set(job.jobId, job);
+    jobFrames.push(job);
+    return job;
+  };
+  const known = (jobId: string): MachineJob => {
+    const current = records.get(jobId);
+    if (!current) {
+      throw new Error('MACHINE_JOB_UNKNOWN');
+    }
+    return current;
+  };
 
-  const uploadPrint = vi.fn<MachineClient['uploadPrint']>(async () => {
-    throw new Error('the pane never uploads');
-  });
-  const startPrint = vi.fn<MachineClient['startPrint']>(async () => {
-    throw new Error('the pane never starts');
-  });
-  const requestPrint = vi.fn<MachineClient['requestPrint']>(async (input) => {
-    const record: PrintRequest = {
-      requestId: input.requestId,
+  /* The host records the person's decision as given. */
+  const approveAction = vi.fn<MachineClient['approveAction']>(async ({ decision, operationId }) =>
+    decision === 'approve' ? { status: 'approved', operationId, expiresAt: later } : { status: 'denied', operationId },
+  );
+  /* Ready, with the form completed from what the machine reports, as the provider answers a job check. */
+  const checkJob = vi.fn<MachineClient['checkJob']>(async (input) => ({
+    status: 'ready',
+    program: { name: input.artifact.path, facts: { process: 'other' } },
+    checks: [],
+    configuration: completeConfiguration(
+      snapshot.entries.find((candidate) => candidate.machineId === input.machineId),
+      input.configuration,
+    ),
+  }));
+  const requestJob = vi.fn<MachineClient['requestJob']>(async (input) =>
+    settle({
+      version: 1,
+      jobId: input.jobId,
       machineId: input.machineId,
       artifact: input.artifact,
       configuration: input.configuration,
       requestedBy: input.requestedBy,
-      summary: input.summary ?? { fileName: input.artifact.path },
+      program: { name: input.artifact.path, facts: { process: 'other' }, ...input.program },
+      checks: [],
       state: 'awaiting-approval',
       createdAt: timestamp,
       updatedAt: timestamp,
-    };
-    records.set(record.requestId, record);
-    requestFrames.push(record);
-    return record;
-  });
-  const resolvePrintRequest = vi.fn<MachineClient['resolvePrintRequest']>(async (input) => {
-    const current = records.get(input.requestId);
-    if (!current) {
-      throw new Error('MACHINE_PRINT_REQUEST_UNKNOWN');
-    }
-    const record: PrintRequest = {
-      ...current,
+    }),
+  );
+  const resolveJob = vi.fn<MachineClient['resolveJob']>(async (input) =>
+    settle({
+      ...known(input.jobId),
       state: input.decision === 'approve' ? 'started' : 'denied',
       resolvedBy: input.resolvedBy,
-      ...(input.uploadOperationId === undefined ? {} : { uploadOperationId: input.uploadOperationId }),
+      ...(input.transferOperationId === undefined ? {} : { transferOperationId: input.transferOperationId }),
       ...(input.startOperationId === undefined ? {} : { startOperationId: input.startOperationId }),
+      ...(input.attended === undefined ? {} : { attended: input.attended }),
+      ...(input.attestations === undefined
+        ? {}
+        : { attestations: input.attestations.map((id) => ({ id, by: input.resolvedBy, at: later })) }),
       updatedAt: later,
-    };
-    records.set(record.requestId, record);
-    requestFrames.push(record);
-    return record;
-  });
-  const withdrawPrintRequest = vi.fn<MachineClient['withdrawPrintRequest']>(async (input) => {
-    const current = records.get(input.requestId);
-    if (!current) {
-      throw new Error('MACHINE_PRINT_REQUEST_UNKNOWN');
-    }
-    const record: PrintRequest = { ...current, state: 'withdrawn', resolvedBy: input.resolvedBy, updatedAt: later };
-    records.set(record.requestId, record);
-    requestFrames.push(record);
-    return record;
-  });
+    }),
+  );
+  const withdrawJob = vi.fn<MachineClient['withdrawJob']>(async (input) =>
+    settle({ ...known(input.jobId), state: 'withdrawn', resolvedBy: input.resolvedBy, updatedAt: later }),
+  );
   const reconcileOperation = vi.fn<MachineClient['reconcileOperation']>(async (input) => ({
     operationId: input.operationId,
     machineId: input.machineId,
     kind: 'start',
     inputDigest: digestOf('c'),
-    status: 'accepted',
+    state: 'accepted',
     updatedAt: later,
     receipt: {
       operationId: input.operationId,
       machineId: input.machineId,
       kind: 'start',
       status: 'accepted',
-      providerRunId: 'provider-run-9',
+      runId: 'provider-run-9',
       observedAt: later,
     },
   }));
-  const controlRun = vi.fn<MachineClient['controlRun']>(
-    async (input): Promise<MachineOperationReceipt> => ({
-      operationId: input.operationId,
-      machineId: input.machineId,
-      kind: input.command,
-      status: 'accepted',
-      providerRunId: input.expectedProviderRunId,
-      observedAt: later,
-    }),
-  );
+  const applyAction = vi.fn<MachineClient['applyAction']>(async (input) => ({
+    operationId: input.operationId,
+    machineId: input.machineId,
+    kind: 'action',
+    status: 'accepted',
+    observedAt: later,
+  }));
+  const stop = vi.fn<MachineClient['stop']>(async (input) => ({
+    operationId: input.operationId ?? 'stop-1',
+    machineId: input.machineId,
+    kind: 'stop',
+    status: 'accepted',
+    observedAt: later,
+  }));
+  const beginHold = vi.fn<MachineClient['beginHold']>(async () => ({ status: 'held', holdId: 'hold-1', lease: 100 }));
+  const renewHold = vi.fn<MachineClient['renewHold']>(async () => ({ status: 'held' }));
+  const endHold = vi.fn<MachineClient['endHold']>(async (input) => ({
+    operationId: input.holdId,
+    machineId: 'machine-1',
+    kind: 'hold',
+    status: 'accepted',
+    observedAt: later,
+  }));
 
   const client: MachineClient = {
     listProviders: async () => [provider, simulatorProvider],
@@ -759,13 +828,6 @@ export const createFixture = ({
     removeBinding: async () => {
       throw new Error('not used');
     },
-    preparePrint: async () => {
-      throw new Error('not used');
-    },
-    uploadPrint,
-    startPrint,
-    reconcileOperation,
-    controlRun,
     captureStill: async () => {
       throw new Error('not used');
     },
@@ -778,23 +840,34 @@ export const createFixture = ({
       return found;
     },
     watch: ({ signal }) => directory.iterate(signal),
-    requestPrint,
-    /* Filtered as the host filters: by machine, and by the project the artifact names. */
-    listPrintRequests: async ({ machineId, projectId: project }) =>
+    approveAction,
+    checkJob,
+    requestJob,
+    /* Filtered as the host filters: by machine, and by the project the artifact names when one is given. */
+    listJobs: async ({ machineId, projectId: project }) =>
       [...records.values()].filter(
         (record) =>
           (machineId === undefined || record.machineId === machineId) &&
           (project === undefined || record.artifact.projectId === project),
       ),
-    async *watchPrintRequests({ projectId: project, signal }) {
-      for await (const record of requestFrames.iterate(signal)) {
+    async *watchJobs({ projectId: project, signal }) {
+      for await (const record of jobFrames.iterate(signal)) {
         if (project === undefined || record.artifact.projectId === project) {
           yield record;
         }
       }
     },
-    resolvePrintRequest,
-    withdrawPrintRequest,
+    resolveJob,
+    withdrawJob,
+    applyAction,
+    stop,
+    beginHold,
+    renewHold,
+    endHold,
+    reconcileOperation,
+    setTesting: async () => {
+      throw new Error('not used');
+    },
   };
 
   const observe = (next: MachineDirectoryEntry): void => {
@@ -820,43 +893,45 @@ export const createFixture = ({
       });
     }
   };
-  const journal = (record: PrintRequest): void => {
-    records.set(record.requestId, record);
-    requestFrames.push(record);
-  };
 
   return {
     client,
-    controlRun,
+    applyAction,
+    approveAction,
+    beginHold,
+    checkJob,
+    endHold,
     goStale,
-    journal,
+    journal: settle,
     observe,
     reconcileOperation,
-    requestPrint,
-    resolvePrintRequest,
-    startPrint,
-    uploadPrint,
-    withdrawPrintRequest,
+    renewHold,
+    requestJob,
+    resolveJob,
+    stop,
+    withdrawJob,
   };
 };
 
 /**
- * A chat bridge that either has one interrupt pending or none.
+ * A chat bridge with at most one job interrupt and any number of action interrupts pending.
  *
- * @param pending - The interrupt a paused run is waiting on, if any.
+ * @param pending - The interrupt a paused job request waits on, if any.
+ * @param actions - The machine actions paused agent calls wait on.
  * @returns The bridge and its spies.
  */
 export const createBridge = (
   pending?: PendingAgentHostApproval,
+  actions: readonly PendingMachineAction[] = [],
 ): Readonly<{
-  bridge: PrintApprovalBridge;
-  pendingFor: Mock<PrintApprovalBridge['pendingFor']>;
-  respond: Mock<PrintApprovalBridge['respond']>;
+  bridge: MachineApprovalBridge;
+  pendingForJob: Mock<MachineApprovalBridge['pendingForJob']>;
+  respond: Mock<MachineApprovalBridge['respond']>;
 }> => {
-  const pendingFor = vi.fn<PrintApprovalBridge['pendingFor']>(() => pending);
-  const respond = vi.fn<PrintApprovalBridge['respond']>(async () => undefined);
-  const bridge: PrintApprovalBridge = { pendingFor, respond };
-  return { bridge, pendingFor, respond };
+  const pendingForJob = vi.fn<MachineApprovalBridge['pendingForJob']>(() => pending);
+  const respond = vi.fn<MachineApprovalBridge['respond']>(async () => undefined);
+  const bridge: MachineApprovalBridge = { pendingForJob, pendingActions: () => actions, respond };
+  return { bridge, pendingForJob, respond };
 };
 
 /** A slice already written for `main.ts`, for orientation tests that need one without exporting. */
@@ -865,7 +940,7 @@ export const sliceFixture: SlicedArtifact = {
   fileName: 'main.gcode.3mf',
   digest: digestOf('d'),
   length: 4,
-  mimeType: accepted.mediaType,
+  mimeType: bambuContainer.mediaType,
   optionsKey: '{}',
   rendering: undefined,
   materialConfiguration: {},

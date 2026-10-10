@@ -1,12 +1,14 @@
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { defineMachine } from '@taucad/runtime/machine';
-import type { MachineManifest } from '@taucad/runtime/machine';
+import type { MachineManifestDefinition } from '@taucad/runtime/machine';
 import { z } from 'zod';
 
+// Only what this provider needs to talk to the machine. Where it is (address or serial path) arrives as the discovery
+// endpoint, and its name comes from the person at bind.
 const bindingConfiguration = defineConfiguration({
   id: '<%= name %>.machine.binding',
   version: '1.0.0',
-  schema: z.object({ logicalId: z.string() }),
+  schema: z.object({}),
   ui: { version: 1, rjsf: {} },
 });
 
@@ -17,60 +19,20 @@ const submissionConfiguration = defineConfiguration({
   ui: { version: 1, rjsf: {} },
 });
 
-const manifest: MachineManifest = {
-  version: 2,
-  identity: {
-    typeId: '<%= name %>.generic',
-    vendor: '<%= name %>',
-    model: '<%= name %>',
-    displayName: '<%= alias %>Machine',
-    qualifiedFirmware: [],
-  },
-  technology: 'additive.fff',
-  geometry: {
-    unit: 'mm',
-    buildVolume: { x: 200, y: 200, z: 200 },
-    enclosure: { outer: { x: 300, y: 300, z: 400 }, enclosed: false, doors: [] },
-    kinematics: 'cartesian-bedslinger',
-    bedMotion: 'y',
-    origin: 'front-left',
-    toolheadHome: { x: 1, y: 1, z: 200 },
-    materialSystemMount: 'none',
-  },
-  toolhead: {
-    filamentDiameter: { value: 1.75, unit: 'mm' },
-    nozzles: [
-      {
-        id: 'nozzle-0.4',
-        diameter: { value: 0.4, unit: 'mm' },
-        maximumTemperature: { value: 260, unit: 'Cel' },
-        material: 'stainless',
-      },
-    ],
-  },
-  bed: { maximumTemperature: { value: 100, unit: 'Cel' }, plates: [{ id: 'smooth', label: 'Smooth plate' }] },
-  chamber: { enclosed: false, heated: false, light: false, fans: [] },
-  materialSystem: { units: 0, slotsPerUnit: 0, externalSpool: true, drying: false },
-  camera: { stills: false },
-  storage: { removable: false },
-  network: { lanMode: true, cloud: false },
-  speedProfiles: [],
+const manifest: MachineManifestDefinition = {
+  version: 3,
+  identity: { typeId: '<%= name %>.machine', vendor: '<%= name %>', model: '<%= name %>', displayName: '<%= alias %>Machine' },
+  connection: { transport: 'network', exclusive: true, opening: 'nothing', identity: 'claimed' },
+  axes: [],
+  components: [{ id: 'controller', kind: 'controller', label: 'Controller' }],
+  processes: [],
+  // Declare actions with `standardMachineAction` or `defineMachineAction`; each starts `designed` until qualified.
   actions: [],
+  holds: [],
+  jobs: { type: 'unsupported' },
+  stop: { motion: 'halts', spindle: 'none', heaters: 'none', position: 'kept', recovery: [] },
   observations: [],
-  slicing: {
-    recommended: {
-      layerHeight: { value: 0.2, unit: 'mm' },
-      walls: 2,
-      infillPercent: 15,
-      nozzleTemperature: { value: 210, unit: 'Cel' },
-      bedTemperature: { value: 60, unit: 'Cel' },
-    },
-    presets: [
-      { id: 'fast', label: 'Fast', layerHeight: { value: 0.28, unit: 'mm' } },
-      { id: 'standard', label: 'Standard', layerHeight: { value: 0.2, unit: 'mm' } },
-      { id: 'fine', label: 'Fine', layerHeight: { value: 0.12, unit: 'mm' } },
-    ],
-  },
+  qualifications: [],
 };
 
 /** `<%= name %>` physical-machine capability. @public */
@@ -78,27 +40,17 @@ export const <%= alias %>Machine = defineMachine({
   id: '<%= name %>',
   name: '<%= alias %>Machine',
   version: '1.0.0',
-  protocolVersion: 1,
+  protocolVersion: 2,
   vendor: '<%= name %>',
-  technologies: ['custom'],
-  accepts: [
-    {
-      contract: { id: 'manufacturing.toolpath.custom', version: 1 },
-      mediaType: 'application/octet-stream',
-      requiredMembers: [],
-      payloadSelection: 'single',
-      technology: 'custom',
-    },
-  ],
   manifest,
   bindingConfiguration,
   submissionConfiguration,
   async *discover(input) {
-    void input.configuration.logicalId;
+    void input.endpoint;
     yield* [];
   },
   async connect(input) {
-    void input.configuration.logicalId;
+    void input.candidate.endpoint;
     throw new Error('TODO: implement <%= name %> machine connection');
   },
 });

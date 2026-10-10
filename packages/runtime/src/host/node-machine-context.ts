@@ -1,7 +1,7 @@
 /**
  * What the parts of one Node machine host share: the id and digest schemas its records use, and the state
  * `createNodeMachineHost` builds once its store is open and its directory recovered. Discovery and binding, reconnect
- * supervision and the print-request ledger read and write these same maps; none of them keeps a copy.
+ * supervision, the operation journal and the jobs ledger read and write these same maps; none of them keeps a copy.
  *
  * @module
  */
@@ -16,14 +16,15 @@ import {
   identity as operationIdentity,
   receiptMessage as operationReceiptMessage,
 } from '#host/node-machine-operations.js';
-import type { NodeMachineEffectEvent, NodeMachineEffectState } from '#host/node-machine-operations.js';
+import type { NodeMachineJournalEvent, NodeMachineOperationState } from '#host/node-machine-operations.js';
 import type {
   MachineBindingRecord,
   MachineOperationsState,
   MachinePreparationRecord,
   NodeMachineStore,
 } from '#host/node-machine-store.js';
-import type { MachineDirectory } from '#machines/machine-directory.js';
+import type { MachineDirectory, MachineDirectoryEntry } from '#machines/machine-directory.js';
+import type { MachineJob } from '#machines/machine-jobs.js';
 import type {
   MachineConnectInput,
   MachineConnectionContext,
@@ -31,10 +32,10 @@ import type {
   MachineDiscoveryEvent,
   MachineDiscoveryInput,
   MachineDiscoveryRuntime,
+  MachineManifestDefinition,
   MachineProvider,
   MachineSession,
 } from '#machines/machine.js';
-import type { PrintRequest } from '#machines/print-request.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 
 /** A well-formed string of 1–256 characters: every id, name and code the host records. @internal */
@@ -70,8 +71,10 @@ export type RemoveNodeMachineBindingInput = Readonly<{
   machineId: string;
 }>;
 
-/** The executable half of a provider: its configuration schemas, discovery and connection. @internal */
+/** The executable half of a provider: its trusted schemas, discovery and connection. @internal */
 export type ExecutableMachineDefinition = Readonly<{
+  /** The authored manifest, whose actions and holds carry the schemas the host validates parameters with. */
+  manifest: MachineManifestDefinition;
   bindingConfiguration: Readonly<{ schema: StandardSchemaV1 }>;
   submissionConfiguration: Readonly<{ schema: StandardSchemaV1 }>;
   settingsConfiguration?: Readonly<{ schema: StandardSchemaV1 }>;
@@ -82,10 +85,10 @@ export type ExecutableMachineDefinition = Readonly<{
   connect(input: MachineConnectInput<unknown>, runtime: MachineConnectionRuntime): Promise<MachineSession>;
 }>;
 
-/** One bound machine: its latest `machine.json` and its operations log, which may have been found unreadable. @internal */
+/** One bound machine: its latest `machine.json` and its journal, which may have been found unreadable. @internal */
 export type BoundMachine = {
   record: MachineBindingRecord;
-  operations: MachineOperationsState<NodeMachineEffectEvent>;
+  operations: MachineOperationsState<NodeMachineJournalEvent>;
 };
 
 /** One supervised machine's reconnect loop: aborting `stop` ends it, and `done` settles once it has. @internal */
@@ -100,40 +103,52 @@ export type NodeMachineHostContext = Readonly<{
   runtime: NodeMachineRuntime | undefined;
   /** Each provider the host serves, by id, carrying its executable definition. */
   providerSources: ReadonlyMap<string, MachineProvider & RuntimePluginDefinitionCarrier<unknown>>;
-  store: NodeMachineStore<NodeMachineEffectEvent>;
+  /** The served providers this host cannot reach machines for (`MachineProvider.unavailable`), by id. */
+  unavailableProviders: ReadonlySet<string>;
+  store: NodeMachineStore<NodeMachineJournalEvent>;
   directory: MachineDirectory;
-  /** Serializes the host's work by key: `machine:<id>`, `effect:<id>`, `request:<id>` and `bindings`. */
+  /** Serializes the host's work by key: `machine:<id>`, `operation:<id>`, `job:<id>` and `bindings`. */
   effectQueue: ResourceQueue;
   /** Every bound machine, by machine id. */
   machines: Map<string, BoundMachine>;
   /** Every unexpired preparation, by prepared id. */
   preparations: Map<string, MachinePreparationRecord>;
-  /** Every recorded effect of a machine with a readable log, by operation id. */
-  effects: Map<string, NodeMachineEffectState>;
-  /** Every print request of a bound machine, by request id. */
-  requests: Map<string, PrintRequest>;
-  /** Emits each request as it is committed. */
-  requestCommits: Topic<PrintRequest>;
+  /** Every recorded operation of a machine with a readable journal, by operation id. */
+  operations: Map<string, NodeMachineOperationState>;
+  /** Every job of a bound machine, by job id. */
+  jobs: Map<string, MachineJob>;
+  /** Emits each job as it is committed. */
+  jobCommits: Topic<MachineJob>;
+  /** Emits after every directory change, including every observation. */
+  commits: Topic<void>;
+  /** Emits a machine id each time its live session stops being live, before any reconnect; holds and streamed runs end on it. */
+  sessionLost: Topic<string>;
   /** When each machine's last still was requested, in epoch milliseconds. */
   stillCaptureTimes: Map<string, number>;
   /** The live session of each connected machine, by machine id. */
   connectedSessions: Map<string, MachineSession>;
   /** One reconnect loop per supervised machine, by machine id. */
   supervisors: Map<string, NodeMachineSupervisor>;
+  /** Every job start between its quiescing check and its settled receipt; quiescing waits for these. */
+  startsInFlight: Set<Promise<unknown>>;
   /** Whether the host has begun closing; a call, since it changes after the context is built. */
   isClosed(): boolean;
+  /** Whether the host is quiescing or closing: no job start or streamed run may begin (`MACHINE_HOST_CLOSING`). */
+  isQuiescing(): boolean;
   now(): string;
   report(error: unknown): void;
   /** Resolve a provider's executable definition once, and the same promise after that. */
   definitionOf(providerId: string): Promise<ExecutableMachineDefinition>;
-  /** The machine an effect is recorded against, refusing an unbound machine with `missing` and an unreadable log. */
+  /** The machine an operation is recorded against, refusing an unbound machine with `missing` and an unreadable log. */
   usableMachine(
     machineId: string,
     missing: string,
   ): Readonly<{
     record: MachineBindingRecord;
-    log: MachineEventLog<NodeMachineEffectEvent>;
+    log: MachineEventLog<NodeMachineJournalEvent>;
   }>;
-  /** Write one whole request, then publish it. */
-  commitRequest(record: PrintRequest): Promise<PrintRequest>;
+  /** The machine's current entry, when its session is connected and has reported in this incarnation. */
+  currentEntry(machineId: string): Promise<MachineDirectoryEntry | undefined>;
+  /** Write one whole job, then publish it. */
+  commitJob(job: MachineJob): Promise<MachineJob>;
 }>;

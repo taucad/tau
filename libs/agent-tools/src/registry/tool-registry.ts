@@ -293,11 +293,11 @@ export type ChatToolRegistryOptions = {
   /**
    * The host's part of printing: the `tau.json` id of the project the agent
    * works in, which names every print artifact, and a binary read of the
-   * recorded slice. The registry slices through its own `export_model`
-   * route, so `request_print` is offered only with these, a `graphics` client
-   * and an available `machines` facet. A host that cannot name its project
-   * omits this, and neither `request_print` nor `prepare_machine_print` is
-   * offered.
+   * recorded slice. `request_job` and `check_job` are offered with these and
+   * an available `machines` facet; they slice a `targetFile` through the
+   * registry's own `export_model` route, so without a `graphics` client they
+   * run finished programs (`artifact`) only. A host that cannot name its
+   * project omits this, and neither is offered.
    */
   readonly print?: Pick<MachinePrintPlannerDependencies, 'projectId' | 'readArtifact'> | undefined;
   readonly machineSettings?: Pick<MachineSettingsService, 'readMachineSettings'> | undefined;
@@ -596,27 +596,29 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
   const { machines, print } = options;
   const machineRegistry = machines?.available
     ? createMachineToolRegistry(machines, {
-        projectId: print?.projectId,
         /* The agent's own view, the one its edits to the print intent go through. */
         machineSettings: options.machineSettings,
+        /* Finished programs need only the project; slicing needs the export route too. */
         planPrint:
-          print === undefined || !servable(rpcForTool[toolName.exportModel])
+          print === undefined
             ? undefined
             : createMachinePrintPlanner({
                 ...print,
                 machines,
                 /* This registry's own route, so the slice is validated and recorded exactly as an export is. */
-                exportModel: async (input) =>
-                  invokeRpcTool({
-                    toolCallId: input.toolCallId,
-                    toolName: toolName.exportModel,
-                    input: {
-                      targetFile: input.targetFile,
-                      to: input.to,
-                      ...(input.options === undefined ? {} : { options: input.options }),
-                    },
-                    signal: input.signal,
-                  }),
+                exportModel: servable(rpcForTool[toolName.exportModel])
+                  ? async (input) =>
+                      invokeRpcTool({
+                        toolCallId: input.toolCallId,
+                        toolName: toolName.exportModel,
+                        input: {
+                          targetFile: input.targetFile,
+                          to: input.to,
+                          ...(input.options === undefined ? {} : { options: input.options }),
+                        },
+                        signal: input.signal,
+                      })
+                  : undefined,
               }),
       })
     : undefined;

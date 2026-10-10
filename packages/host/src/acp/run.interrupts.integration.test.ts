@@ -299,10 +299,18 @@ describe('an approval nobody answers', () => {
       launcher.execute({ type: 'resume', commandId: 'cmd-resume', payload: { chatId, runId } }),
     ).resolves.toMatchObject({ status: 'applied' });
     /* The vendor session is reattached and told to continue; the agent's next step is the gated write it was
-     * waiting on, so it asks again. */
+     * waiting on, so it asks again. The ask lands as `[requested, paused]`, one durable append per row (W1), so wait
+     * for a lifecycle row after the second request: a read between the two sees the request under a run still
+     * `running`. Any lifecycle row settles the wait, so a resume that fails still reaches the assertion below. */
     await until(
-      async () =>
-        interruptsOf(await readLog(workspaceRoot, chatId)).filter((event) => event.phase === 'requested').length === 2,
+      async () => {
+        const log = await readLog(workspaceRoot, chatId);
+        const asked = log.findLastIndex((event) => event.type === 'interrupt.recorded' && event.phase === 'requested');
+        return (
+          interruptsOf(log).filter((event) => event.phase === 'requested').length === 2 &&
+          log.slice(asked + 1).some((event) => event.type === 'run.lifecycle')
+        );
+      },
       'the approval asked again',
       async () => readLog(workspaceRoot, chatId),
     );

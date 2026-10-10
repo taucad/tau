@@ -1,3 +1,4 @@
+import { once } from 'node:events';
 import { writeFile } from 'node:fs/promises';
 
 /** Run one permission probe. */
@@ -48,12 +49,20 @@ const handleStart = async (message) => {
         childProcess.execFileSync(process.execPath, ['--version']);
       })(),
     ),
-    worker: await denied(
-      (async () => {
-        const worker = new workerThreads.Worker('0', { eval: true });
+    /* The child runs each runtime connection in a worker thread, which keeps the child's grants. */
+    workerFilesystem: await (async () => {
+      try {
+        const worker = new workerThreads.Worker(
+          "const { parentPort } = require('node:worker_threads'); try { require('node:fs').readFileSync('/etc/hosts'); parentPort.postMessage(false); } catch (error) { parentPort.postMessage(error.code === 'ERR_ACCESS_DENIED'); }",
+          { eval: true },
+        );
+        const [workerDenied] = await once(worker, 'message');
         await worker.terminate();
-      })(),
-    ),
+        return workerDenied === true;
+      } catch {
+        return false;
+      }
+    })(),
     addon: await denied(
       (async () => {
         process.dlopen({ exports: {} }, new URL('missing.node', import.meta.url).pathname);

@@ -117,7 +117,7 @@ await test('publication rejects unreviewed prose, unsafe slugs, invalid dates an
   assert.throws(() => validateArticles([article, article], now));
 });
 
-await test('a reviewed article builds an escaped detail page and journal entry without publishing fixtures', async () => {
+await test('a reviewed article builds an escaped detail page and blog entry without publishing fixtures', async () => {
   const { mkdtemp, cp, mkdir, writeFile, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const scratch = await mkdtemp(join(tmpdir(), 'tau-www-editorial-test-'));

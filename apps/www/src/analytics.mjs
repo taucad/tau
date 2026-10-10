@@ -14,7 +14,7 @@ export const allowedPages = new Set([
   '/use-cases/engineering/',
   '/use-cases/learning/',
 ]);
-export const campaignCodes = new Set(['launch', 'journal', 'github', 'docs']);
+export const campaignCodes = new Set(['launch', 'blog', 'github', 'docs']);
 /**
  * @typedef {{name: unknown, page: unknown, placement?: unknown, campaign?: unknown, returning?: unknown, eventId: unknown}} EventInput
  */

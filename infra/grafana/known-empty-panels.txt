@@ -1,20 +1,13 @@
-# Panels api:grafana:check may find empty locally, one `Dashboard › Panel` per line. Each depends only
-# on series the exercise harness cannot produce: Fly's own metrics and the
-# gen_ai_* token, spend and terminal-evidence series, which need a funded call that succeeds (a local
-# call without a supplier key or a funded account answers 503). Agent panels fill from the harness's synthetic
+# Panels api:grafana:check may find empty locally, one `Dashboard › Panel` per line. Fly's own metrics
+# have no local producer. The other two are event panels that stay empty while nothing goes wrong: a
+# funded call refused at admission, and an agent, ACP, LLM or gateway warning or error in the API's
+# logs. The harness's funded Haiku calls fill the gen_ai_* panels, given a supplier key in apps/api/.env
+# (without one those calls answer 503 and the check fails on them). Agent panels fill from its synthetic
 # agent ingest, which validates the ingest path, not agent execution. Delete a line when it fills; the
 # checker reports lines that have data again.
 
-Agents & Codex Usage › User-Charged LLM Spend by Surface (USD/h)
-Agents & Codex Usage › Tokens by Model and Type
-AI Agent › Token Usage (Input / Output / Cache Read)
-AI Agent › Prompt cache hit rate
-AI Agent › User-Charged LLM Spend (USD/h)
-AI Agent › Model Usage Distribution
-AI Agent › TTFT (p50 / p95)
-Billing & Credit Ledger › User-Charged LLM Spend by Model (USD/h)
-Billing & Credit Ledger › Daily User-Charged LLM Spend by Activity (USD)
-Billing & Credit Ledger › Funded LLM Terminal Evidence (1h)
+Agents & Codex Usage › Agent & LLM Warnings and Errors
+Billing & Credit Ledger › Funded LLM Admission Denials (1h)
 Infrastructure › CPU Usage (Fly.io)
 Infrastructure › Memory Usage (Fly.io)
 Infrastructure › Network I/O (Fly.io)
@@ -26,5 +19,3 @@ Runtime & Machines (Fly-equivalent) › Fly Edge Responses by Status
 Runtime & Machines (Fly-equivalent) › Fly Edge Response Time p95
 Runtime & Machines (Fly-equivalent) › Fly Concurrency by Machine
 Runtime & Machines (Fly-equivalent) › Fly Volume Used
-SLO / Executive › User-Charged LLM Spend (24h)
-System Overview › LLM Token Throughput

@@ -42,7 +42,7 @@ Bounds and physical properties are insufficient. Cover major components, named f
 
 - `toHaveBoundingBox`: size/position.
 - `toHaveConnectedComponents`: qualified material connectivity; visual touching cannot justify tolerance changes.
-- `toBeWatertight`: closed edge incidence, not manifold validity, fusion or material connectivity. Bounds prove none of these. Missing evidence is unsupported.
+- `toBeWatertight`: closed edge incidence, not manifold validity, fusion or material connectivity. Bounds prove none of these. Missing evidence is unsupported. Neither needs `.asOriginal()` on Manifold output.
 - `toHaveSurfaceArea`, `toHaveVolume`, `toHaveCenterOfMass`, `toHaveMass`: physical measurements.
 - `toHaveNoComponentInterference`: overlap; allow deliberate press fits.
 - `loadModel({ file, format: 'step' })`: use BRep evidence for supported topology and feature assertions. Missing occurrence, interference, clearance, containment, lumen, wall, section or motion evidence is unsupported, not a pass or an envelope substitute.

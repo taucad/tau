@@ -3,7 +3,7 @@ title: 'GeoSpec Policy'
 description: 'Rules for GeoSpec matcher API design, evidence naming, diagnostics, failure messages, compiled native/WASM implementation, and high-assurance geometry test authoring.'
 status: active
 created: '2026-06-23'
-updated: '2026-09-05'
+updated: '2026-10-09'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/testing-policy.md
@@ -418,6 +418,8 @@ GeoSpec tests multiple geometry kernels, and the evidence substrate follows each
 | Exact-BRep (replicad/OpenCascade, …) | AP242 STEP BRep   | Exact-geometry proofs run on geometry round-tripped through **AP242 STEP** — the interchange is part of what is certified. Mesh evidence is also available for mesh-grade checks. |
 
 For an exact-BRep kernel, never substitute a kernel-native serialization — OCCT `.brep`, a kernel's internal solid format, or a pre-STEP tessellation — to make the load cheaper: it certifies the kernel, not the AP242 exchange the shop floor receives. Reduce total evidence-production wall by reusing canonical AP242 evidence. A subset artifact is justified only when its producer avoids whole-model construction and a benchmark proves a total-wall win; filtering after whole-model construction is not optimization. Mesh (GLB) evidence — whether primary for mesh-only kernels, derived from AP242 when substituting for BRep, or explicitly asserted as a rendered export (§19) — is first-class for mesh-grade integrity, spatial localization, and topology/CSG compute, but it does not substitute for the AP242 exact-BRep substrate where exactness is asserted (§10).
+
+All TRIANGLES primitives of a glTF mesh carrying `EXT_mesh_manifold` over its declared POSITION accessor form one material partition; separate meshes, instancing nodes and undeclared primitives remain separate operands.
 
 **Why**: GeoSpec must certify what each kernel actually delivers — a mesh from a mesh-only kernel, the AP242 interchange from a BRep kernel; bypassing AP242 for a faster kernel-native format would certify geometry no downstream consumer receives.
 

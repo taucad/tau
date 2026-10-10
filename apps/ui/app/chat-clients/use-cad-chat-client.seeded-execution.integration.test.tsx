@@ -212,7 +212,15 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution | undefined
         // A seed waits for a fresh, caught-up read of its own empty host log.
         subscribe: (...args: Parameters<AgentHostClient['subscribe']>) => {
           queueMicrotask(() =>
-            args[3]?.({ status: 'batch', chatId, cursor: 0, nextCursor: 0, endCursor: 0, events: [] }),
+            args[3]?.({
+              status: 'batch',
+              sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+              chatId,
+              cursor: 0,
+              nextCursor: 0,
+              endCursor: 0,
+              events: [],
+            }),
           );
           return () => undefined;
         },

@@ -9,7 +9,7 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
-import { readRecordIssues } from '#workbench-records/record-issues.js';
+import { readRecordIssues, subscribeRecordIssues } from '#workbench-records/record-issues.js';
 import { EntriesSyncHost, EntryOwner } from '#routes/w.$workspace.$project/entries-sync-host.js';
 
 vi.mock('@xstate/react', () => ({
@@ -156,7 +156,8 @@ describe('entry owner reconciliation', () => {
       });
       expect(watchClosures).toHaveLength(2);
       expect(setEntriesRecord).not.toHaveBeenCalled();
-      expect(readRecordIssues('p')[0]?.state).toBe('reading');
+      // Re-registering is not a problem: the issue clears instead of flashing a reading state.
+      expect(readRecordIssues('p')).toEqual([]);
       await act(async () => {
         ready.resolve();
       });
@@ -171,6 +172,9 @@ describe('entry owner reconciliation', () => {
         expect(readRecordIssues('p')).toEqual([]);
       });
       hostFiles.set(bytes(60_000));
+      // A routine re-read of a fine record never publishes an issue (the header trigger would flash).
+      const published = vi.fn();
+      const stop = subscribeRecordIssues('p', published);
       await act(async () => {
         liveWatchEntries?.();
       });
@@ -181,6 +185,8 @@ describe('entry owner reconciliation', () => {
           }),
         );
       });
+      stop();
+      expect(published).not.toHaveBeenCalled();
       expect(hostFiles.writeFileChecked).not.toHaveBeenCalled();
     } finally {
       view.unmount();
@@ -395,11 +401,8 @@ describe('entry owner reconciliation', () => {
     expect(acknowledged.has('a.ts')).toBe(false);
     // The failure reaches the settings trigger as a record issue, never as loose page text.
     expect(screen.queryByRole('alert')).toBeNull();
-    await waitFor(() => {
-      expect(readRecordIssues('p')).toMatchObject([
-        { kind: 'entries', path: '.tau/workbench/entries.json', state: 'reading', message: 'offline' },
-      ]);
-    });
+    // A bounded retry is not a problem yet: nothing reaches the trigger.
+    expect(readRecordIssues('p')).toEqual([]);
     geometryUnits.set('b.ts', cad);
     view.rerender(<EntriesSyncHost />);
     await act(async () => undefined);

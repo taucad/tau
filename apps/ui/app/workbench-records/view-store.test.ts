@@ -2,10 +2,10 @@
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 /* oxlint-disable eslint/no-await-in-loop -- Interleaving cases intentionally run in sequence. */
 import { describe, expect, it, vi } from 'vitest';
-import { workbenchRecords } from '@taucad/workbench';
+import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
-import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
+import { createWorkbenchViewStore, fenceClosedView, finishClosedView } from '#workbench-records/view-store.js';
 import type { ViewRecordPatch, ViewRecordState } from '#workbench-records/view-store.js';
 
 const encoder = new TextEncoder();
@@ -73,6 +73,192 @@ const makeStore = (data: ReturnType<typeof memory>) =>
   });
 
 describe('workbench view checked store', () => {
+  it('cleans abandoned constructor tokens without letting a stale finalizer retire a replacement', async () => {
+    const callbacks: Array<(held: unknown) => void> = [];
+    const registrations: Array<{ held: unknown; target: WeakRef<object> }> = [];
+    const nativeRegistry = globalThis.FinalizationRegistry;
+    class ControlledRegistry extends nativeRegistry<unknown> {
+      public constructor(callback: (held: unknown) => void) {
+        super(callback);
+        callbacks.push(callback);
+      }
+
+      public override register(target: object, held: unknown, unregisterToken?: object): void {
+        registrations.push({ held, target: new WeakRef(target) });
+        super.register(target, held, unregisterToken);
+      }
+    }
+    vi.stubGlobal('FinalizationRegistry', ControlledRegistry);
+    vi.resetModules();
+    const isolated = await import('#workbench-records/view-store.js');
+    const data = memory();
+    const input = {
+      root: '/abandoned-view-lifetime',
+      viewId: 'v-c1e20003',
+      files: data.files,
+      onChange: vi.fn(),
+      onError: vi.fn(),
+    };
+    const path = `${input.root}/${workbenchPaths.view(input.viewId)}`;
+    const captured = new Set<Map<unknown, unknown>>();
+    const originalSet = Map.prototype.set;
+    const set = vi.spyOn(Map.prototype, 'set').mockImplementation(function (this: Map<unknown, unknown>, key, value) {
+      if (key === path) {
+        captured.add(this);
+      }
+      return originalSet.call(this, key, value);
+    });
+    let prior: ReturnType<typeof isolated.createWorkbenchViewStore> | undefined =
+      isolated.createWorkbenchViewStore(input);
+    let replacement: ReturnType<typeof isolated.createWorkbenchViewStore> | undefined;
+    try {
+      expect(registrations).toHaveLength(1);
+      const stale = registrations[0]!;
+      // The harness invokes cleanup deterministically; it never depends on an actual GC run.
+      prior = undefined;
+      callbacks[0]!(stale.held);
+      expect([...captured][0]?.has(path)).toBe(false);
+      replacement = isolated.createWorkbenchViewStore(input);
+      callbacks[0]!(stale.held);
+      expect([...captured][0]?.has(path)).toBe(true);
+      expect(await replacement.read()).toBe(true);
+      expect(await replacement.edit({ ...seed(), name: 'Replacement survives stale cleanup' })).toBe(true);
+      expect(registrations).toHaveLength(2);
+    } finally {
+      prior?.dispose();
+      replacement?.dispose();
+      set.mockRestore();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
+  it('keeps retained operational methods usable after the store wrapper is dropped', async () => {
+    const data = memory();
+    let store: ReturnType<typeof createWorkbenchViewStore> | undefined = makeStore(data);
+    const { read, edit, flush, dispose } = store;
+    store = undefined;
+    try {
+      expect(await read()).toBe(true);
+      expect(await edit({ ...seed(), name: 'Retained operation' })).toBe(true);
+      expect(await flush()).toBe(true);
+      expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+        status: 'current',
+        record: { name: 'Retained operation' },
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('retires lifetime entries after the last owner disposes without requiring a first read', () => {
+    const data = memory();
+    const root = '/bounded-view-lifetimes';
+    const captured = new Set<Map<unknown, unknown>>();
+    const originalSet = Map.prototype.set;
+    const set = vi.spyOn(Map.prototype, 'set').mockImplementation(function (this: Map<unknown, unknown>, key, value) {
+      if (typeof key === 'string' && key.startsWith(`${root}/`)) {
+        captured.add(this);
+      }
+      return originalSet.call(this, key, value);
+    });
+    const owners: Array<ReturnType<typeof createWorkbenchViewStore>> = [];
+    try {
+      for (let index = 0; index < 64; index++) {
+        owners.push(
+          createWorkbenchViewStore({
+            root,
+            viewId: `v-retained${index}`,
+            files: data.files,
+            onChange: vi.fn(),
+            onError: vi.fn(),
+          }),
+        );
+      }
+      expect(captured.size).toBe(1);
+      const lifetimes = [...captured][0]!;
+      expect([...lifetimes.keys()].filter((key) => typeof key === 'string' && key.startsWith(`${root}/`))).toHaveLength(
+        64,
+      );
+      for (const owner of owners) {
+        owner.dispose();
+        owner.dispose();
+      }
+      expect([...lifetimes.keys()].filter((key) => typeof key === 'string' && key.startsWith(`${root}/`))).toHaveLength(
+        0,
+      );
+    } finally {
+      for (const owner of owners) {
+        owner.dispose();
+      }
+      set.mockRestore();
+    }
+  });
+
+  it('keeps an ordinary replacement readable and writable before its first acknowledged read', async () => {
+    const data = memory();
+    const input = {
+      root: '/replacement-lifetime',
+      viewId: 'v-c1e20001',
+      files: data.files,
+      onChange: vi.fn(),
+      onError: vi.fn(),
+    };
+    const prior = createWorkbenchViewStore(input);
+    await prior.read();
+    const replacement = createWorkbenchViewStore(input);
+    prior.dispose();
+    try {
+      expect(await replacement.read()).toBe(true);
+      expect(await replacement.retryRead()).toBe(true);
+      expect(await replacement.edit({ ...seed(), name: 'Replacement person edit' })).toBe(true);
+      expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+        status: 'current',
+        record: { name: 'Replacement person edit' },
+      });
+      expect(data.writes).toHaveBeenCalledOnce();
+    } finally {
+      prior.dispose();
+      replacement.dispose();
+    }
+  });
+
+  it('keeps explicit close fencing earlier owners while a reopened view obtains a fresh lifetime', async () => {
+    const data = memory();
+    const input = {
+      root: '/closed-lifetime',
+      viewId: 'v-c1e20002',
+      files: data.files,
+      onChange: vi.fn(),
+      onError: vi.fn(),
+    };
+    const prior = createWorkbenchViewStore(input);
+    await prior.read();
+    const waiting = createWorkbenchViewStore(input);
+    const path = `${input.root}/${workbenchPaths.view(input.viewId)}`;
+    await fenceClosedView(path);
+    finishClosedView(path);
+    const reopened = createWorkbenchViewStore(input);
+    try {
+      expect(await prior.edit({ ...seed(), name: 'Retired edit' })).toBe(false);
+      expect(await waiting.read()).toBe(false);
+      expect(await waiting.retryRead()).toBe(false);
+      expect(await reopened.read()).toBe(true);
+      prior.dispose();
+      waiting.dispose();
+      expect(await reopened.edit({ ...seed(), name: 'Reopened person edit' })).toBe(true);
+      expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+        status: 'current',
+        record: { name: 'Reopened person edit' },
+      });
+      expect(data.writes).toHaveBeenCalledOnce();
+    } finally {
+      prior.dispose();
+      waiting.dispose();
+      reopened.dispose();
+    }
+  });
+
   it('fences internal publication immediately when its source invalidates during a read', async () => {
     const data = memory();
     const entered = Promise.withResolvers<void>();

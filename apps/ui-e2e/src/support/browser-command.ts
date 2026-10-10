@@ -2,11 +2,11 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import { release } from 'node:os';
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import type { BrowserCommand, BrowserCommandContext } from 'vitest/node';
@@ -15,6 +15,7 @@ import type { CapturedChatLog } from '@taucad/formal/capture';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
 import type {
   AgentHostGatewayFixtureOptions,
+  ProjectionImportWork,
   TargetClickOptions,
   TargetCookie,
   TargetDiagnostics,
@@ -28,11 +29,18 @@ import type {
   TargetWebGpuProfile,
   TargetWebGpuQualificationReport,
   TargetWorker,
+  TargetWorkerFlowEvidence,
 } from './external-target.ts';
 import { testBaseURL } from './base-url.ts';
 import { classifyWebGpuAdapter, webGpuLaunchArguments } from './webgpu-profile.ts';
 import { listTauServeChats, readTauServeFile, startTauServeFixture } from './tau-serve-fixture.ts';
 import type { TauServeFixture, TauServeFixtureOptions } from './tau-serve-fixture.ts';
+import {
+  validateProjectionFixtureBytes,
+  generateProjectionDirectory,
+  validateProjectionDirectory,
+} from './projection-fixture-validation.ts';
+import type { ProjectionFixtureProof, ProjectionDirectoryReceipt } from './projection-fixture-validation.ts';
 import { browserHostScript, createGatewayScriptWalk } from './agent-host-gateway-script.ts';
 import type { GatewayScriptTurn, GatewayScriptWalk, GatewayTurnCount } from './agent-host-gateway-script.ts';
 
@@ -70,6 +78,14 @@ type ParkedGate = AgentHostGatewayGate & { readonly release: () => void };
 
 /** What the fixture is holding and what it has been asked, right now. */
 export type AgentHostGatewayState = {
+  /** Bounded actual SSE writes, for correlating held provider output with channel delivery. */
+  readonly emitted: ReadonlyArray<{
+    readonly request: number;
+    readonly turn: string;
+    readonly event: string;
+    readonly at: number;
+    readonly text?: string;
+  }>;
   /** Every request parked at a gate, oldest first. Its length is the pending count. */
   readonly parked: readonly AgentHostGatewayGate[];
   /** Per-turn provider-call counts, in the order the turns were first asked. */
@@ -87,7 +103,15 @@ type Session = {
   }>;
   readonly context: ProviderContext;
   /** The DevTools session of each page whose CPU profile `uiCpuProfile` is recording. */
-  readonly cpuProfiles: Map<TargetSurface, CdpSession>;
+  readonly cpuProfiles: Map<
+    TargetSurface,
+    {
+      readonly cdp: CdpSession;
+      readonly navigationStartSeconds: number;
+      readonly stopWorkers?: (path: string) => Promise<void>;
+      readonly snapshotWorkers?: (path: string) => Promise<void>;
+    }
+  >;
   readonly pageErrors: string[];
   readonly posthogEvents: Array<{ readonly event: string; readonly decoded: string }>;
   readonly posthogRequests: string[];
@@ -95,6 +119,7 @@ type Session = {
   readonly workerIds: WeakMap<object, string>;
   nextWorkerId: number;
   readonly agentHostGatewayGates: ParkedGate[];
+  readonly agentHostGatewayEmitted: Array<AgentHostGatewayState['emitted'][number]>;
   agentHostGatewayFailure?: AgentHostGatewayFailure | undefined;
   /** Armed by `uiHoldNextAgentHostGatewayRequest`; consumed by the next request. */
   agentHostGatewayRequestHold?: boolean;
@@ -106,6 +131,11 @@ type Session = {
 };
 
 const sessions = new Map<string, Session>();
+const observedDownloads = new WeakMap<
+  TargetPage,
+  Array<Promise<{ readonly base64: string; readonly suggestedFilename: string } | Error>>
+>();
+
 const hostFixtureProcesses = new Map<string, ChildProcess>();
 const outputRoot = resolve(
   import.meta.dirname,
@@ -356,6 +386,7 @@ export const uiOpenTarget: BrowserCommand<[options?: { deviceScaleFactor?: numbe
   const session: Session = {
     agentHostApiRequests: [],
     agentHostGatewayGates: [],
+    agentHostGatewayEmitted: [],
     agentHostGatewayRequests: [],
     consoleMessages: [],
     context,
@@ -369,8 +400,10 @@ export const uiOpenTarget: BrowserCommand<[options?: { deviceScaleFactor?: numbe
     tracing: false,
   };
   observePage(session, primary);
-  await context.tracing.start({ screenshots: true, snapshots: true });
-  session.tracing = true;
+  if (process.env['TAU_E2E_TRACE'] !== 'false') {
+    await context.tracing.start({ screenshots: true, snapshots: true });
+    session.tracing = true;
+  }
   sessions.set(commandContext.sessionId, session);
 };
 
@@ -711,6 +744,7 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
   session.agentHostGatewayFailure = undefined;
   const walk = createGatewayScriptWalk(script);
   session.agentHostGatewayWalk = walk;
+  session.agentHostGatewayEmitted.length = 0;
   let requestIndex = 0;
   const headers = {
     'access-control-allow-credentials': 'true',
@@ -789,6 +823,21 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
         const currentRequest = requestIndex++;
         const writeEvent = (event: string, data: unknown): void => {
           response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+          const delta = typeof data === 'object' && data !== null && 'delta' in data ? data.delta : undefined;
+          const text =
+            typeof delta === 'object' && delta !== null && 'text' in delta && typeof delta.text === 'string'
+              ? delta.text
+              : undefined;
+          if (session.agentHostGatewayEmitted.length === 16) {
+            session.agentHostGatewayEmitted.shift();
+          }
+          session.agentHostGatewayEmitted.push({
+            request: currentRequest,
+            turn: (step?.turn ?? '').slice(0, 256),
+            event,
+            at: Date.now(),
+            ...(text === undefined ? {} : { text: text.slice(0, 256) }),
+          });
         };
         response.writeHead(200, {
           ...headers,
@@ -1016,6 +1065,7 @@ export const uiReadAgentHostGatewayState: BrowserCommand<[], AgentHostGatewaySta
   return {
     parked: session.agentHostGatewayGates.map(({ kind, turn }) => ({ kind, turn })),
     turns: session.agentHostGatewayWalk?.counts() ?? [],
+    emitted: [...session.agentHostGatewayEmitted],
   };
 };
 
@@ -1790,6 +1840,459 @@ export const uiSampleCameraDuringClick: BrowserCommand<[selector: string, frameC
   return samples;
 };
 
+// Installed only in an explicitly opted-in diagnostic worker before application startup.
+const installProjectionAcquisitionProbe = (): {
+  installed: boolean;
+  constructors: { fileHandle: boolean; directoryHandle: boolean; blob: boolean };
+} => {
+  type Receipt = {
+    path: string;
+    identity: 'observed-path' | 'unqualified-basename' | 'unknown';
+    getFileCalls: number;
+    /** Milliseconds. */
+    getFileDuration: number;
+    arrayBufferCalls: number;
+    /** Milliseconds. */
+    arrayBufferDuration: number;
+    bytes: number;
+    pending: number;
+  };
+  type Sample = {
+    operation: 'getFile' | 'arrayBuffer';
+    path: string;
+    identity: Receipt['identity'];
+    stack: string | undefined;
+    startedAt: number;
+    completedAt?: number;
+    bytes?: number;
+    size?: number;
+    error?: string;
+  };
+  const paths = new WeakMap<object, string>();
+  const receipts = new Map<string, Receipt>();
+  const samples: Sample[] = [];
+  let unretainedReceiptCalls = 0;
+  let targetSamples = 0;
+  let unknownSamples = 0;
+  let droppedTargetSamples = 0;
+  let droppedUnknownSamples = 0;
+  const constructors = {
+    fileHandle: typeof FileSystemFileHandle !== 'undefined',
+    directoryHandle: typeof FileSystemDirectoryHandle !== 'undefined',
+    blob: typeof Blob !== 'undefined',
+  };
+  if (!constructors.blob) {
+    return { installed: false, constructors };
+  }
+  const receiptOf = (path: string, identity: Receipt['identity']): Receipt | undefined => {
+    let receipt = receipts.get(path);
+    if (receipt === undefined && receipts.size < 16) {
+      receipt = {
+        path,
+        identity,
+        getFileCalls: 0,
+        getFileDuration: 0,
+        arrayBufferCalls: 0,
+        arrayBufferDuration: 0,
+        bytes: 0,
+        pending: 0,
+      };
+      receipts.set(path, receipt);
+    }
+    if (receipt === undefined) {
+      unretainedReceiptCalls++;
+    }
+    return receipt;
+  };
+  const sampleOf = (
+    operation: Sample['operation'],
+    path: string,
+    identity: Receipt['identity'],
+  ): Sample | undefined => {
+    if (identity === 'unknown') {
+      if (unknownSamples >= 4) {
+        droppedUnknownSamples++;
+        return undefined;
+      }
+      unknownSamples++;
+    } else {
+      if (targetSamples >= 16) {
+        droppedTargetSamples++;
+        return undefined;
+      }
+      targetSamples++;
+    }
+    const sample: Sample = {
+      operation,
+      path,
+      identity,
+      stack: new Error('Acquisition caller').stack?.slice(0, 4096),
+      startedAt: performance.timeOrigin + performance.now(),
+    };
+    samples.push(sample);
+    return sample;
+  };
+  const directory = constructors.directoryHandle ? FileSystemDirectoryHandle.prototype.getDirectoryHandle : undefined;
+  const handle = constructors.directoryHandle ? FileSystemDirectoryHandle.prototype.getFileHandle : undefined;
+  const getFile = constructors.fileHandle ? FileSystemFileHandle.prototype.getFile : undefined;
+  const { arrayBuffer } = Blob.prototype;
+  if (directory !== undefined && handle !== undefined) {
+    FileSystemDirectoryHandle.prototype.getDirectoryHandle = async function (...args) {
+      const result = await directory.apply(this, args);
+      paths.set(result, `${paths.get(this) ?? this.name}/${args[0]}`);
+      return result;
+    };
+    FileSystemDirectoryHandle.prototype.getFileHandle = async function (...args) {
+      const result = await handle.apply(this, args);
+      paths.set(result, `${paths.get(this) ?? this.name}/${args[0]}`);
+      return result;
+    };
+  }
+  if (getFile !== undefined) {
+    FileSystemFileHandle.prototype.getFile = async function () {
+      const observedPath = paths.get(this);
+      const path = observedPath ?? this.name;
+      if (!path.endsWith('/events.jsonl') && !(observedPath === undefined && path === 'events.jsonl')) {
+        return getFile.call(this);
+      }
+      const identity = observedPath === undefined ? 'unqualified-basename' : 'observed-path';
+      const receipt = receiptOf(path, identity);
+      const sample = sampleOf('getFile', path, identity);
+      const start = performance.now();
+      if (receipt !== undefined) {
+        receipt.getFileCalls++;
+        receipt.pending++;
+      }
+      try {
+        const file = await getFile.call(this);
+        paths.set(file, path);
+        return file;
+      } catch (error) {
+        if (sample !== undefined) {
+          sample.error = String(error).slice(0, 4096);
+        }
+        throw error;
+      } finally {
+        if (sample !== undefined) {
+          sample.completedAt = performance.timeOrigin + performance.now();
+        }
+        if (receipt !== undefined) {
+          receipt.getFileDuration += performance.now() - start;
+          receipt.pending--;
+        }
+      }
+    };
+  }
+  Blob.prototype.arrayBuffer = async function () {
+    const observedPath = paths.get(this);
+    const name = 'name' in this && typeof this.name === 'string' ? this.name : undefined;
+    if (observedPath === undefined && name !== undefined && name !== 'events.jsonl') {
+      return arrayBuffer.call(this);
+    }
+    const path = observedPath ?? name ?? '<unknown-blob>';
+    let identity: Receipt['identity'] = 'observed-path';
+    if (observedPath === undefined) {
+      identity = name === undefined ? 'unknown' : 'unqualified-basename';
+    } else if (path === 'events.jsonl') {
+      identity = 'unqualified-basename';
+    }
+    const receipt = receiptOf(path, identity);
+    const sample = sampleOf('arrayBuffer', path, identity);
+    if (sample !== undefined) {
+      sample.size = this.size;
+    }
+    const start = performance.now();
+    if (receipt !== undefined) {
+      receipt.arrayBufferCalls++;
+      receipt.pending++;
+    }
+    try {
+      const bytes = await arrayBuffer.call(this);
+      if (sample !== undefined) {
+        sample.bytes = bytes.byteLength;
+      }
+      if (receipt !== undefined) {
+        receipt.bytes += bytes.byteLength;
+      }
+      return bytes;
+    } catch (error) {
+      if (sample !== undefined) {
+        sample.error = String(error).slice(0, 4096);
+      }
+      throw error;
+    } finally {
+      if (sample !== undefined) {
+        sample.completedAt = performance.timeOrigin + performance.now();
+      }
+      if (receipt !== undefined) {
+        receipt.arrayBufferDuration += performance.now() - start;
+        receipt.pending--;
+      }
+    }
+  };
+  Object.assign(globalThis, {
+    __tauProjectionAcquisition: {
+      read: () => ({
+        kind: 'native-file-handle-getFile-and-Blob-arrayBuffer',
+        constructors,
+        unretainedReceiptCalls,
+        droppedTargetSamples,
+        droppedUnknownSamples,
+        receipts: [...receipts.values()].map((entry) => ({ ...entry })),
+        samples: samples.map((sample) => ({ ...sample })),
+      }),
+      restore: () => {
+        if (directory !== undefined && handle !== undefined) {
+          FileSystemDirectoryHandle.prototype.getDirectoryHandle = directory;
+          FileSystemDirectoryHandle.prototype.getFileHandle = handle;
+        }
+        if (getFile !== undefined) {
+          FileSystemFileHandle.prototype.getFile = getFile;
+        }
+        Blob.prototype.arrayBuffer = arrayBuffer;
+      },
+    },
+  });
+  return { installed: true, constructors };
+};
+
+const startWorkerCpuProfiles = async (
+  cdp: CdpSession,
+): Promise<{
+  stop(path: string): Promise<void>;
+  snapshot(path: string): Promise<void>;
+}> => {
+  type WorkerProfile = {
+    readonly sessionId: string;
+    readonly targetId: string;
+    readonly url: string;
+    readonly attachedAt: number;
+    startedAt?: number;
+    resumedAt?: number;
+    acquisitionInstallation?: unknown;
+    error?: string;
+    ready: Promise<void>;
+  };
+  const workers: WorkerProfile[] = [];
+  const requests = new Map<
+    number,
+    {
+      readonly sessionId: string;
+      readonly resolve: (value: unknown) => void;
+      readonly reject: (error: Error) => void;
+    }
+  >();
+  const heapChunks = new Map<string, (chunk: string) => void>();
+  let nextRequest = 0;
+  let stopping = false;
+  const command = async (sessionId: string, method: string, params: object = {}): Promise<unknown> => {
+    const id = ++nextRequest;
+    const response = Promise.withResolvers<unknown>();
+    requests.set(id, { sessionId, resolve: response.resolve, reject: response.reject });
+    // This bounds only diagnostic protocol replies, never a product or acceptance wait.
+    const replyTimer = setTimeout(
+      () => {
+        response.reject(new Error(`Worker profiler ${method} did not reply.`));
+      },
+      method === 'HeapProfiler.takeHeapSnapshot' ? 120_000 : 5000,
+    );
+    try {
+      const [, result] = await Promise.all([
+        cdp.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) }),
+        response.promise,
+      ]);
+      return result;
+    } finally {
+      clearTimeout(replyTimer);
+      requests.delete(id);
+    }
+  };
+  cdp.on('Target.receivedMessageFromTarget', ({ sessionId, message }) => {
+    const response = JSON.parse(message) as {
+      id?: number;
+      result?: unknown;
+      error?: { message: string };
+      method?: string;
+      params?: { chunk?: string };
+    };
+    if (response.method === 'HeapProfiler.addHeapSnapshotChunk' && response.params?.chunk !== undefined) {
+      heapChunks.get(sessionId)?.(response.params.chunk);
+      return;
+    }
+    const request = response.id === undefined ? undefined : requests.get(response.id);
+    if (request?.sessionId !== sessionId) {
+      return;
+    }
+    if (response.error) {
+      request.reject(new Error(response.error.message));
+    } else {
+      request.resolve(response.result);
+    }
+  });
+  cdp.on('Target.detachedFromTarget', ({ sessionId }) => {
+    for (const request of requests.values()) {
+      if (request.sessionId === sessionId) {
+        request.reject(new Error('Worker profiler target detached.'));
+      }
+    }
+  });
+  cdp.on('Target.attachedToTarget', ({ sessionId, targetInfo }) => {
+    const worker: WorkerProfile = {
+      sessionId,
+      targetId: targetInfo.targetId,
+      url: targetInfo.url,
+      attachedAt: Date.now(),
+      ready: Promise.resolve(),
+    };
+    workers.push(worker);
+    worker.ready = (async () => {
+      try {
+        if (!stopping) {
+          if (process.env['VITE_TAU_E2E_PROJECTION_MULTICHAT'] === 'true') {
+            worker.acquisitionInstallation = await command(sessionId, 'Runtime.evaluate', {
+              expression: `(${installProjectionAcquisitionProbe.toString()})()`,
+              returnByValue: true,
+            });
+          }
+          await command(sessionId, 'Profiler.enable');
+          await command(sessionId, 'Profiler.setSamplingInterval', { interval: 100 });
+          await command(sessionId, 'Profiler.start');
+          worker.startedAt = Date.now();
+        }
+      } catch (error) {
+        worker.error = String(error);
+      } finally {
+        try {
+          await command(sessionId, 'Runtime.runIfWaitingForDebugger');
+          worker.resumedAt = Date.now();
+        } catch (error) {
+          worker.error = `${worker.error ?? ''} Resume: ${String(error)}`;
+        }
+      }
+    })();
+  });
+  await cdp.send('Target.setAutoAttach', {
+    autoAttach: true,
+    waitForDebuggerOnStart: true,
+    flatten: false,
+    filter: [{ type: 'worker' }, { exclude: true }],
+  });
+  const stop = async (path: string): Promise<void> => {
+    stopping = true;
+    const receipts = await Promise.all(
+      workers.map(async (worker, index) => {
+        await worker.ready;
+        let profilePath: string | undefined;
+        let acquisition: unknown;
+        let acquisitionError: string | undefined;
+        if (process.env['VITE_TAU_E2E_PROJECTION_MULTICHAT'] === 'true') {
+          try {
+            acquisition = await command(worker.sessionId, 'Runtime.evaluate', {
+              expression:
+                '(() => { const probe = globalThis.__tauProjectionAcquisition; if (!probe) return { available: false }; try { return { available: true, ...probe.read() }; } finally { probe.restore(); } })()',
+              returnByValue: true,
+            });
+          } catch (error) {
+            acquisitionError = String(error);
+          }
+        }
+        try {
+          if (worker.startedAt !== undefined) {
+            const result = await command(worker.sessionId, 'Profiler.stop');
+            if (typeof result !== 'object' || result === null || !('profile' in result)) {
+              throw new Error('Worker profiler returned no profile.');
+            }
+            profilePath = `${path}.worker-${String(index)}.cpuprofile`;
+            await writeFile(profilePath, JSON.stringify(result.profile));
+          }
+        } catch (error) {
+          worker.error = `${worker.error ?? ''} Stop: ${String(error)}`;
+        }
+        return { ...worker, ready: undefined, profilePath, acquisition, acquisitionError, stoppedAt: Date.now() };
+      }),
+    );
+    await cdp.send('Target.setAutoAttach', { autoAttach: false, waitForDebuggerOnStart: false, flatten: false });
+    await writeFile(
+      `${path}.workers.json`,
+      JSON.stringify(
+        {
+          diagnosticOnly: true,
+          workerStartupPausedForProfiler: true,
+          scope:
+            'Direct dedicated workers; nested workers are not covered. Attachment-to-resume delay is reported per target.',
+          available: receipts.some((receipt) => receipt.profilePath !== undefined),
+          workers: receipts,
+        },
+        null,
+        2,
+      ),
+    );
+  };
+  return {
+    stop,
+    snapshot: async (path) => {
+      const receipts = [];
+      for (const [index, worker] of workers.entries()) {
+        await worker.ready;
+        const heapPath = `${path}.worker-${String(index)}.heapsnapshot`;
+        const file = await open(heapPath, 'w');
+        let writing = Promise.resolve();
+        let snapshotError: string | undefined;
+        let acquisition: unknown;
+        let usage: unknown;
+        heapChunks.set(worker.sessionId, (chunk) => {
+          const previous = writing;
+          const writeChunk = async (): Promise<void> => {
+            await previous;
+            await file.write(chunk);
+          };
+          writing = writeChunk();
+        });
+        try {
+          acquisition = await command(worker.sessionId, 'Runtime.evaluate', {
+            expression: 'globalThis.__tauProjectionAcquisition?.read()',
+            returnByValue: true,
+          });
+          usage = await command(worker.sessionId, 'Runtime.getHeapUsage');
+          await command(worker.sessionId, 'HeapProfiler.enable');
+          await command(worker.sessionId, 'HeapProfiler.takeHeapSnapshot', { reportProgress: false });
+        } catch (error) {
+          snapshotError = String(error);
+        } finally {
+          heapChunks.delete(worker.sessionId);
+          try {
+            await writing;
+          } finally {
+            await file.close();
+          }
+        }
+        receipts.push({
+          targetId: worker.targetId,
+          url: worker.url,
+          heapPath,
+          acquisition,
+          usage,
+          error: snapshotError,
+        });
+      }
+      await writeFile(
+        `${path}.workers.json`,
+        JSON.stringify(
+          {
+            diagnosticOnly: true,
+            at: Date.now(),
+            workers: receipts,
+            scope:
+              'Direct workers only; snapshots are intrusive retained-heap observations, not peak memory or clean latency.',
+          },
+          null,
+          2,
+        ),
+      );
+    },
+  };
+};
+
 /**
  * Records a CPU profile of one target page through the DevTools protocol.
  *
@@ -1804,7 +2307,7 @@ export const uiSampleCameraDuringClick: BrowserCommand<[selector: string, frameC
  * @returns The profile's absolute path after `stop`; nothing after `start`.
  */
 export const uiCpuProfile: BrowserCommand<
-  [action: 'start' | 'stop', artifactName?: string, surface?: TargetSurface],
+  [action: 'start' | 'stop' | 'snapshot', artifactName?: string, surface?: TargetSurface],
   string | undefined
 > = async (commandContext, action, artifactName, surface = 'primary') => {
   const session = sessionFor(commandContext);
@@ -1813,22 +2316,82 @@ export const uiCpuProfile: BrowserCommand<
       throw new Error(`A CPU profile of the ${surface} page is already recording.`);
     }
     const cdp = await session.context.newCDPSession(pageFor(session, surface));
-    await cdp.send('Profiler.enable');
-    await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
-    await cdp.send('Profiler.start');
-    session.cpuProfiles.set(surface, cdp);
+    try {
+      await cdp.send('Performance.enable');
+      const { metrics } = await cdp.send('Performance.getMetrics');
+      const navigationStartSeconds = metrics.find((metric) => metric.name === 'NavigationStart')?.value;
+      if (navigationStartSeconds === undefined) {
+        throw new Error('CPU profiling needs the page navigation clock to align gesture marks.');
+      }
+      await cdp.send('Profiler.enable');
+      await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
+      await cdp.send('Profiler.start');
+      const workerProfiles =
+        process.env['VITE_TAU_E2E_PROJECTION_DIAGNOSTICS'] === 'true' ? await startWorkerCpuProfiles(cdp) : undefined;
+      session.cpuProfiles.set(surface, {
+        cdp,
+        navigationStartSeconds,
+        ...(workerProfiles ? { stopWorkers: workerProfiles.stop, snapshotWorkers: workerProfiles.snapshot } : {}),
+      });
+    } catch (error) {
+      await cdp.detach();
+      throw error;
+    }
     return undefined;
   }
-  const cdp = session.cpuProfiles.get(surface);
-  if (!cdp || !artifactName) {
+  const recording = session.cpuProfiles.get(surface);
+  if (!recording || !artifactName) {
     throw new Error(`Stopping a CPU profile needs a recording of the ${surface} page and an artifact name.`);
   }
+  if (action === 'snapshot') {
+    if (process.env['VITE_TAU_E2E_PROJECTION_MULTICHAT'] !== 'true') {
+      throw new Error('Heap snapshots require the explicit multi-chat diagnostic flag.');
+    }
+    const path = resolve(outputRoot, commandContext.sessionId, artifactName.replaceAll(/[^a-zA-Z0-9._-]+/gu, '-'));
+    await mkdir(resolve(path, '..'), { recursive: true });
+    const file = await open(`${path}.renderer.heapsnapshot`, 'w');
+    let writing = Promise.resolve();
+    const chunk = (event: { chunk: string }): void => {
+      const previous = writing;
+      const writeChunk = async (): Promise<void> => {
+        await previous;
+        await file.write(event.chunk);
+      };
+      writing = writeChunk();
+    };
+    recording.cdp.on('HeapProfiler.addHeapSnapshotChunk', chunk);
+    try {
+      await recording.cdp.send('HeapProfiler.enable');
+      await recording.cdp.send('HeapProfiler.takeHeapSnapshot', { reportProgress: false });
+    } finally {
+      recording.cdp.off('HeapProfiler.addHeapSnapshotChunk', chunk);
+      try {
+        await writing;
+      } finally {
+        await file.close();
+      }
+    }
+    await recording.snapshotWorkers?.(path);
+    return path;
+  }
   session.cpuProfiles.delete(surface);
-  const { profile } = await cdp.send('Profiler.stop');
-  await cdp.detach();
+  const { cdp, navigationStartSeconds, stopWorkers } = recording;
   const path = resolve(outputRoot, commandContext.sessionId, artifactName.replaceAll(/[^a-zA-Z0-9._-]+/gu, '-'));
   await mkdir(resolve(path, '..'), { recursive: true });
-  await writeFile(path, JSON.stringify(profile));
+  try {
+    const { profile } = await cdp.send('Profiler.stop');
+    await writeFile(path, JSON.stringify(profile));
+    const marks = await pageFor(session, surface).evaluate(() =>
+      performance
+        .getEntriesByType('mark')
+        .filter((entry) => entry.name.startsWith('projection:'))
+        .map((entry) => ({ name: entry.name, startTime: entry.startTime })),
+    );
+    await writeFile(`${path}.clock.json`, JSON.stringify({ navigationStartSeconds, marks }));
+    await stopWorkers?.(path);
+  } finally {
+    await cdp.detach();
+  }
   return path;
 };
 
@@ -1880,6 +2443,278 @@ export const uiTargetWorkers: BrowserCommand<
     })
     .filter(({ url }) => urlSubstring === undefined || url.includes(urlSubstring))
     .toSorted((left, right) => left.identity.localeCompare(right.identity));
+};
+
+/** Count physical operations without substituting bytes or handles in the import control. */
+const projectionImportWork = (install: boolean): ProjectionImportWork => {
+  type SyncHandle = { write(data: AllowSharedBufferSource, options?: { at?: number }): number };
+  const scope = globalThis as typeof globalThis & {
+    FileSystemSyncAccessHandle?: { prototype: SyncHandle };
+    __tauProjectionImportWork?: { counts: ProjectionImportWork; restore(): void };
+  };
+  if (!install) {
+    const probe = scope.__tauProjectionImportWork;
+    if (!probe) {
+      throw new Error('Projection import work probe was not installed.');
+    }
+    probe.restore();
+    delete scope.__tauProjectionImportWork;
+    return probe.counts;
+  }
+  if (scope.__tauProjectionImportWork) {
+    throw new Error('Projection import work probe is already active.');
+  }
+  const counts: ProjectionImportWork = {
+    syncAccessCalls: 0,
+    syncWriteCalls: 0,
+    syncWriteBytes: 0,
+    writableCalls: 0,
+    getFileCalls: 0,
+    snapshotBytes: 0,
+    arrayBufferCalls: 0,
+    arrayBufferBytes: 0,
+    streamCalls: 0,
+    streamRequestedBytes: 0,
+  };
+  const selected = new WeakSet<object>();
+  const filePrototype = FileSystemFileHandle.prototype as FileSystemFileHandle & {
+    createSyncAccessHandle?: () => Promise<SyncHandle>;
+  };
+  const { getFile, createWritable, createSyncAccessHandle } = filePrototype;
+  const { slice, arrayBuffer, stream } = Blob.prototype;
+  const syncPrototype = scope.FileSystemSyncAccessHandle?.prototype;
+  const write = syncPrototype?.write;
+  const matches = (handle: FileSystemFileHandle) => handle.name === 'projection-import-work.bin';
+  filePrototype.getFile = async function () {
+    const file = await getFile.call(this);
+    if (matches(this)) {
+      selected.add(file);
+      counts.getFileCalls++;
+      counts.snapshotBytes += file.size;
+    }
+    return file;
+  };
+  filePrototype.createWritable = async function (...args) {
+    if (matches(this)) {
+      counts.writableCalls++;
+    }
+    return createWritable.apply(this, args);
+  };
+  if (createSyncAccessHandle) {
+    filePrototype.createSyncAccessHandle = async function () {
+      const handle = await createSyncAccessHandle.call(this);
+      if (matches(this)) {
+        counts.syncAccessCalls++;
+        selected.add(handle);
+      }
+      return handle;
+    };
+  }
+  if (syncPrototype && write) {
+    syncPrototype.write = function (...args) {
+      const written = write.apply(this, args);
+      if (selected.has(this)) {
+        counts.syncWriteCalls++;
+        counts.syncWriteBytes += written;
+      }
+      return written;
+    };
+  }
+  Blob.prototype.slice = function (...args) {
+    const result = slice.apply(this, args);
+    if (selected.has(this)) {
+      selected.add(result);
+    }
+    return result;
+  };
+  Blob.prototype.arrayBuffer = async function () {
+    const bytes = await arrayBuffer.call(this);
+    if (selected.has(this)) {
+      counts.arrayBufferCalls++;
+      counts.arrayBufferBytes += bytes.byteLength;
+    }
+    return bytes;
+  };
+  Blob.prototype.stream = function () {
+    if (selected.has(this)) {
+      counts.streamCalls++;
+      counts.streamRequestedBytes += this.size;
+    }
+    return stream.call(this);
+  };
+  scope.__tauProjectionImportWork = {
+    counts,
+    restore() {
+      filePrototype.getFile = getFile;
+      filePrototype.createWritable = createWritable;
+      if (createSyncAccessHandle) {
+        filePrototype.createSyncAccessHandle = createSyncAccessHandle;
+      }
+      if (syncPrototype && write) {
+        syncPrototype.write = write;
+      }
+      Blob.prototype.slice = slice;
+      Blob.prototype.arrayBuffer = arrayBuffer;
+      Blob.prototype.stream = stream;
+    },
+  };
+  return counts;
+};
+
+/** Read only the explicitly named independent import worker and its physical verification reader. */
+export const uiProjectionImportWork: BrowserCommand<
+  [install: boolean, workerUrl: string],
+  { worker: ProjectionImportWork; reader: ProjectionImportWork }
+> = async (commandContext, install, workerUrl) => {
+  const page = pageFor(sessionFor(commandContext));
+  const worker = page.workers().find((candidate) => candidate.url() === workerUrl);
+  if (!worker) {
+    throw new Error('The selected projection import worker is not running.');
+  }
+  const [workerWork, reader] = await Promise.all([
+    worker.evaluate(projectionImportWork, install),
+    page.evaluate(projectionImportWork, install),
+  ]);
+  return { worker: workerWork, reader };
+};
+
+/** Install/read a fixture-only probe on new catch-up ports in resident page-visible agent-host workers. */
+export const uiWorkerCatchUpFlow: BrowserCommand<
+  [install: boolean, surface?: TargetSurface],
+  readonly TargetWorkerFlowEvidence[]
+> = async (commandContext, install, surface) => {
+  const page = pageFor(sessionFor(commandContext), surface);
+  const workers = page.workers().filter((worker) => worker.url().includes('agent-host.worker'));
+  if (workers.length === 0) {
+    return [{ url: '', available: false, streams: [] }];
+  }
+  return Promise.all(
+    workers.map(async (worker) => ({
+      url: worker.url(),
+      available: true,
+      streams: await worker.evaluate((shouldInstall) => {
+        type Stream = TargetWorkerFlowEvidence['streams'][number];
+        type Probe = { streams: Map<string, Stream> };
+        type Frame = {
+          k?: string;
+          i?: string;
+          n?: string;
+          s?: number;
+          a?: { chatId?: string };
+          d?: { answer?: { nextCursor?: number }; position?: { cursor?: number } };
+        };
+        const scope = globalThis as typeof globalThis & { __tauFixtureWorkerCatchUp?: Probe };
+        if (shouldInstall && scope.__tauFixtureWorkerCatchUp === undefined) {
+          const probe: Probe = { streams: new Map() };
+          scope.__tauFixtureWorkerCatchUp = probe;
+          const calls = new WeakMap<MessagePort, Map<string, Stream>>();
+          const wrappers = new WeakMap<EventListenerOrEventListenerObject, EventListener>();
+          const seen = new WeakSet<Event>();
+          const post = MessagePort.prototype.postMessage;
+          const add = MessagePort.prototype.addEventListener;
+          const remove = MessagePort.prototype.removeEventListener;
+          let portSequence = 0;
+          MessagePort.prototype.addEventListener = function (
+            this: MessagePort,
+            ...[type, listener, options]: Parameters<EventTarget['addEventListener']>
+          ): void {
+            if (listener === null) {
+              return;
+            }
+            if (type !== 'message') {
+              add.call(this, type, listener, options);
+              return;
+            }
+            const wrapped: EventListener = (event) => {
+              const frame = (event as MessageEvent<Frame>).data;
+              if (!seen.has(event)) {
+                seen.add(event);
+                if (frame.k === 'ss' && frame.n === 'catchUp' && frame.i && frame.a?.chatId) {
+                  let requests = calls.get(this);
+                  if (requests === undefined) {
+                    requests = new Map();
+                    calls.set(this, requests);
+                    portSequence += 1;
+                  }
+                  const stream: Stream = {
+                    id: frame.i,
+                    chatId: frame.a.chatId,
+                    fa: 0,
+                    fw: 0,
+                    su: 0,
+                    lb: 0,
+                    credits: 0,
+                    sn: 0,
+                    sc: 0,
+                    se: 0,
+                    lastIncomingAt: Date.now(),
+                  };
+                  if (probe.streams.size === 16) {
+                    const oldest = probe.streams.keys().next().value;
+                    if (oldest !== undefined) {
+                      probe.streams.delete(oldest);
+                    }
+                  }
+                  if (requests.size === 16) {
+                    const oldest = requests.keys().next().value;
+                    if (oldest !== undefined) {
+                      requests.delete(oldest);
+                    }
+                  }
+                  requests.set(frame.i, stream);
+                  probe.streams.set(`${portSequence}:${frame.i}`, stream);
+                } else if (frame.i && (frame.k === 'fa' || frame.k === 'fw' || frame.k === 'su' || frame.k === 'lb')) {
+                  const stream = calls.get(this)?.get(frame.i);
+                  if (stream !== undefined) {
+                    stream[frame.k] += 1;
+                    stream.lastIncomingAt = Date.now();
+                    if (frame.k === 'fw' && typeof frame.s === 'number') {
+                      stream.credits += frame.s;
+                    }
+                  }
+                }
+              }
+              if (typeof listener === 'function') {
+                listener.call(this, event);
+              } else {
+                listener.handleEvent(event);
+              }
+            };
+            wrappers.set(listener, wrapped);
+            add.call(this, type, wrapped, options);
+          };
+          MessagePort.prototype.removeEventListener = function (
+            this: MessagePort,
+            ...[type, listener, options]: Parameters<EventTarget['removeEventListener']>
+          ): void {
+            if (listener === null) {
+              return;
+            }
+            remove.call(this, type, wrappers.get(listener) ?? listener, options);
+          };
+          MessagePort.prototype.postMessage = function (
+            message: unknown,
+            options?: Transferable[] | StructuredSerializeOptions,
+          ): void {
+            const frame = message as Frame | undefined;
+            if (frame?.i && (frame.k === 'sn' || frame.k === 'sc' || frame.k === 'se')) {
+              const stream = calls.get(this)?.get(frame.i);
+              if (stream !== undefined) {
+                stream[frame.k] += 1;
+                stream.lastOutgoingAt = Date.now();
+                const cursor = frame.d?.answer?.nextCursor ?? frame.d?.position?.cursor;
+                if (typeof cursor === 'number') {
+                  stream.lastCursor = cursor;
+                }
+              }
+            }
+            post.call(this, message, Array.isArray(options) ? { transfer: options } : options);
+          };
+        }
+        return [...(scope.__tauFixtureWorkerCatchUp?.streams.values() ?? [])].map((stream) => ({ ...stream }));
+      }, install),
+    })),
+  );
 };
 
 export const uiCookies: BrowserCommand<[], TargetCookie[]> = async (commandContext) =>
@@ -1938,6 +2773,155 @@ export const uiDownloadTarget: BrowserCommand<
   };
 };
 
+/** Write bounded binary artifact chunks; final SHA proves exact UTF8 bytes survived transport. */
+export const uiWriteArtifactChunk: BrowserCommand<
+  [name: string, base64: string, offset: number, finalSha256?: string],
+  void
+> = async (_context, name, base64, offset, finalSha256) => {
+  const destination = resolve(outputRoot, name);
+  if (!destination.startsWith(`${outputRoot}/`) || !Number.isSafeInteger(offset) || offset < 0) {
+    throw new Error('Invalid fixture artifact destination/offset.');
+  }
+  const bytes = Buffer.from(base64, 'base64');
+  if (bytes.length > 65_536) {
+    throw new Error('Fixture artifact chunk exceeds bound.');
+  }
+  await mkdir(outputRoot, { recursive: true });
+  const file = await open(destination, offset === 0 ? 'w' : 'r+');
+  try {
+    const stat = await file.stat();
+    if (stat.size !== offset) {
+      throw new Error('Fixture artifact chunks arrived out of order.');
+    }
+    let written = 0;
+    while (written < bytes.length) {
+      const result = await file.write(bytes, written, bytes.length - written, offset + written);
+      if (result.bytesWritten === 0) {
+        throw new Error('Fixture artifact write made no progress.');
+      }
+      written += result.bytesWritten;
+    }
+  } finally {
+    await file.close();
+  }
+  if (
+    finalSha256 !== undefined &&
+    createHash('sha256')
+      .update(await readFile(destination))
+      .digest('hex') !== finalSha256
+  ) {
+    throw new Error('Fixture artifact final byte proof failed.');
+  }
+};
+
+/** Validate the immutable benchmark in Node and return only exact small manifest proof. */
+export const uiValidateProjectionFixture: BrowserCommand<
+  [path: string, expected?: { fixtureSha256: string; historySha256: string; turns: number }],
+  ProjectionFixtureProof
+> = async (_context, path, expected) => {
+  const bytes = await readFile(isAbsolute(path) ? path : resolve(outputRoot, path));
+  if (!(bytes.buffer instanceof ArrayBuffer)) {
+    throw new Error('Node fixture bytes must have an owned ArrayBuffer.');
+  }
+  return validateProjectionFixtureBytes(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), expected);
+};
+
+/** Generate exact raw fixture files in the existing artifact root, returning only their small proof. */
+export const uiGenerateProjectionDirectory: BrowserCommand<
+  [seedPath: string, seedSha256: string, turns: number, name: string],
+  {
+    receipt: ProjectionDirectoryReceipt;
+    proof: ProjectionFixtureProof;
+    expected: { fixtureSha256: string; historySha256: string; turns: number };
+  }
+> = async (_context, seedPath, seedSha256, turns, name) => {
+  if (!/^[a-z0-9-]+$/u.test(name)) {
+    throw new Error('Invalid projection directory artifact name.');
+  }
+  const directory = resolve(outputRoot, name);
+  await mkdir(outputRoot, { recursive: true });
+  const receipt = await generateProjectionDirectory({ seedPath, seedSha256, turns, destination: directory });
+  const expected = {
+    fixtureSha256: createHash('sha256')
+      .update(await readFile(resolve(directory, 'receipt.json')))
+      .digest('hex'),
+    historySha256: receipt.files.find((file) => file.path === `.tau/chats/${receipt.chatId}/events.jsonl`)!.sha256,
+    turns,
+  };
+  const proof = await validateProjectionDirectory(directory, expected);
+  return { receipt, proof, expected };
+};
+
+/** Qualify a raw fixture directory before any browser import or native discovery. */
+export const uiValidateProjectionDirectory: BrowserCommand<
+  [path: string, expected: { fixtureSha256: string; historySha256: string; turns: number }],
+  ProjectionFixtureProof
+> = async (_context, path, expected) =>
+  validateProjectionDirectory(isAbsolute(path) ? path : resolve(outputRoot, path), expected);
+
+/** Read immutable fixture input in bounded binary chunks, without WebSocket-sized whole-file replies. */
+export const uiReadFixtureChunk: BrowserCommand<
+  [path: string, offset: number],
+  { readonly base64: string; readonly eof: boolean }
+> = async (_context, path, offset) => {
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw new Error('Invalid fixture read offset.');
+  }
+  const file = await open(isAbsolute(path) ? path : resolve(outputRoot, path), 'r');
+  try {
+    const bytes = Buffer.alloc(65_536);
+    const result = await file.read(bytes, 0, bytes.length, offset);
+    const stat = await file.stat();
+    return {
+      base64: bytes.subarray(0, result.bytesRead).toString('base64'),
+      eof: offset + result.bytesRead >= stat.size,
+    };
+  } finally {
+    await file.close();
+  }
+};
+
+/** Observe actual operator-triggered downloads without invoking product gestures. */
+export const uiStartObservedDownloads: BrowserCommand<[], void> = async (commandContext) => {
+  const page = sessionFor(commandContext).primary;
+  if (observedDownloads.has(page)) {
+    return;
+  }
+  const pending: Array<Promise<{ readonly base64: string; readonly suggestedFilename: string } | Error>> = [];
+  observedDownloads.set(page, pending);
+  page.on('download', (download) => {
+    pending.push(
+      (async () => {
+        try {
+          const path = await download.path();
+          if (!path) {
+            throw new Error('Observed operator download has no readable physical artifact.');
+          }
+          const bytes = await readFile(path);
+          return { base64: bytes.toString('base64'), suggestedFilename: download.suggestedFilename() };
+        } catch (error) {
+          return error instanceof Error ? error : new Error(String(error));
+        }
+      })(),
+    );
+  });
+};
+
+/** Drain completed actual download bytes; errors remain evidence rather than fabricated output. */
+export const uiReadObservedDownloads: BrowserCommand<
+  [],
+  ReadonlyArray<{ readonly base64: string; readonly suggestedFilename: string }>
+> = async (commandContext) => {
+  const pending = observedDownloads.get(sessionFor(commandContext).primary);
+  const results = await Promise.all(pending?.splice(0) ?? []);
+  return results.map((result) => {
+    if (result instanceof Error) {
+      throw result;
+    }
+    return result;
+  });
+};
+
 export const uiReadTargetEvents: BrowserCommand<
   [],
   {
@@ -1973,6 +2957,13 @@ export const uiBrowserCommands = {
   uiCpuProfile,
   uiDragTarget,
   uiDownloadTarget,
+  uiWriteArtifactChunk,
+  uiReadFixtureChunk,
+  uiValidateProjectionFixture,
+  uiGenerateProjectionDirectory,
+  uiValidateProjectionDirectory,
+  uiStartObservedDownloads,
+  uiReadObservedDownloads,
   uiEmulateColorScheme,
   uiEmulateContrast,
   uiEmulateForcedColors,
@@ -2016,6 +3007,8 @@ export const uiBrowserCommands = {
   uiStartHostFixture,
   uiStartTauServeFixture,
   uiTargetWorkers,
+  uiProjectionImportWork,
+  uiWorkerCatchUpFlow,
   uiStopTauServeFixture,
   uiReleaseTauServeGateway,
   uiIsTauServeGatewayHeld,

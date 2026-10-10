@@ -439,7 +439,7 @@ describe('createBillableModelEvidenceCollector', () => {
   });
   /* A supplier that answered with a status ran nothing: the refusal keeps its own kind and settles
    * released at zero, instead of waiting on supplier evidence that can never come and pausing the
-   * route a day later (the staging Haiku 4.5 pause of 2026-10-08). */
+   * route a day later (the staging Haiku 5.5 pause of 2026-10-08). */
   it('should settle a provider refusal as rejected rather than absorbing it', () => {
     const collector = createBillableModelEvidenceCollector(
       'anthropic',

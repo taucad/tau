@@ -504,3 +504,15 @@ export const readProjectCheckoutTree = async (
   }
   throw new Error('Webaccess checkout evidence requires the directory-picker fixture handle.');
 };
+
+/** Inspect the existing physical provider namespace without creating another authority. */
+export const readPhysicalDatabasePrefix = async (required: boolean): Promise<string> =>
+  target.evaluate(async (required) => {
+    const databases = await indexedDB.databases();
+    const suffix = '-fs-direct';
+    const name = databases.find((database) => database.name?.endsWith(suffix))?.name;
+    if (required && name === undefined) {
+      throw new Error('The selected IndexedDB physical authority is absent.');
+    }
+    return name?.slice(0, -suffix.length) ?? 'tau-';
+  }, required);

@@ -4,7 +4,7 @@
  *
  * Covers auth, REST, client telemetry ingest (CAD kernel, editor, WASM, IndexedDB, and synthetic agent
  * turns with their usage context, and client sync attempts, that validate the ingest path, not agent
- * execution), Tau Sync (git smart HTTP + LFS into MinIO), publications, Claude Haiku 4.5 through the LLM
+ * execution), Tau Sync (git smart HTTP + LFS into MinIO), publications, Claude Haiku 5.5 through the LLM
  * gateway, billing attempt lookups, and the hosts/kernels WebSockets. Codex/ACP and the billing workers run
  * beside it (see the observability handbook); this script does not start them.
  *
@@ -530,7 +530,7 @@ await run('ai', async () => {
         'x-tau-project-id': projectId,
       },
       body: {
-        model: 'anthropic-claude-haiku-4.5',
+        model: 'anthropic-claude-haiku-5.5',
         max_tokens: 200,
         stream: true,
         ...(withTool
@@ -552,7 +552,7 @@ await run('ai', async () => {
   const late = await call('POST', '/v1/llm/anthropic/v1/messages', {
     headers: { 'anthropic-version': '2023-06-01', 'x-tau-attempt-id': voided },
     body: {
-      model: 'anthropic-claude-haiku-4.5',
+      model: 'anthropic-claude-haiku-5.5',
       max_tokens: 10,
       stream: true,
       messages: [{ role: 'user', content: 'hi' }],

@@ -12,6 +12,7 @@ import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
 import { slicingPreferences } from '@taucad/slicer/preferences';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
 import { Topic } from '@taucad/events';
+import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 
 type CheckedWrite = Omit<CheckedFileWrite, 'signal'>;
@@ -26,7 +27,7 @@ export type ProjectFiles = Readonly<{
       getSnapshot: () => Readonly<{ context: Readonly<{ rootDirectory: string }> }>;
       subscribe: () => Readonly<{ unsubscribe: () => void }>;
     }>;
-    contentService: Readonly<{ subscribe: (path: string, listener: () => void) => () => void }>;
+    contentService: Readonly<Pick<FileContentService, 'subscribe' | 'watchReady'>>;
     parameterFiles: Readonly<{
       exists: (path: string) => Promise<boolean>;
       readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
@@ -88,6 +89,23 @@ export const createProjectFiles = (root = '/projects/project-1'): ProjectFiles =
       }),
     },
     contentService: {
+      watchReady: (request, listener) => {
+        const closed = Promise.withResolvers<void>();
+        const off = changes.subscribe({
+          handler: (path) => {
+            listener({ type: 'change', path });
+          },
+          interestedIn: (changed) => request.paths.some((path) => changed === path),
+        });
+        return {
+          ready: Promise.resolve(),
+          closed: closed.promise,
+          dispose: () => {
+            off();
+            closed.resolve();
+          },
+        };
+      },
       subscribe: (path, listener) =>
         changes.subscribe({ handler: listener, interestedIn: (changed) => changed === path }),
     },
@@ -155,7 +173,8 @@ export const createProjectFiles = (root = '/projects/project-1'): ProjectFiles =
         editMachineSettings: async (input) => captured.edit(input),
         machineSettingsSettlement: async (id) => captured.settlement(id),
       }),
-      (typeId, listener) => fileManager.contentService.subscribe(machineSettingsPath({ typeId }), listener),
+      (typeId, listener) =>
+        fileManager.contentService.watchReady({ paths: [machineSettingsPath({ typeId })] }, listener),
       () => undefined,
     );
     return { owner, settings };

@@ -537,3 +537,6 @@ export type TurnPlacementPort = Readonly<{
     input: TurnAttemptInput,
   ) => Promise<TurnPlacementAnswer<NoResult, 'LEASE_HELD_ELSEWHERE' | 'REVISIONS_BUSY' | 'SESSION_FENCED'>>;
 }>;
+
+/** A launcher live delta qualified by its emitting writer incarnation. @public */
+export type SourceLiveEvent = AgentLiveEvent & { readonly sourceGeneration: string };

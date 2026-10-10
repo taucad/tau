@@ -16,6 +16,7 @@ export {
   gatewayProviderKinds,
 } from '#wire/admission.schema.js';
 export type { AgentChannelAdmissionConfig, AgentChannelModel } from '#wire/admission.schema.js';
+export { agentWireLimits } from '#wire/limits.js';
 export { chatIdSchema, commandAnswerSchema, commandPayloads } from '#wire/commands.schema.js';
 export type {
   CommandAnswer,
@@ -43,10 +44,13 @@ export type {
 export {
   agentChannelRevisionEventSchema,
   agentLiveEventSchema,
+  sourceLiveEventSchema,
   agentWireHelloSchema,
-  agentWireLimits,
   agentWireProtocolSchemas,
   agentWireVersion,
+  catchUpRequestSchema,
+  catchUpPositionSchema,
+  catchUpFrameSchema,
   readAnswerSchema,
   readRequestSchema,
   rowKeySchema,
@@ -55,6 +59,9 @@ export type {
   AgentChannelRevisionEvent,
   AgentWireHello,
   AgentWireProtocol,
+  CatchUpRequest,
+  CatchUpInput,
+  CatchUpFrame,
   ReadAnswer,
   ReadInput,
   ReadRequest,

@@ -52,9 +52,9 @@ describe('useProjectThumbnail', () => {
     const first = renderHook(() => useProjectThumbnail('p'));
     const second = renderHook(() => useProjectThumbnail('p'));
     await waitFor(() => {
-      expect(first.result.current).toBe('blob:mock-1');
+      expect(first.result.current.url).toBe('blob:mock-1');
     });
-    expect(second.result.current).toBe('blob:mock-1');
+    expect(second.result.current.url).toBe('blob:mock-1');
     expect(readFile).toHaveBeenCalledExactlyOnceWith('/projects/p/thumbnail.webp');
     first.unmount();
     expect(URL.revokeObjectURL).not.toHaveBeenCalled();
@@ -89,7 +89,7 @@ describe('useProjectThumbnail', () => {
     vi.mocked(useFileManager).mockReturnValue(fixture.manager);
     const view = renderHook(() => useProjectThumbnail('p'));
     await waitFor(() => {
-      expect(view.result.current).toBe('blob:mock-1');
+      expect(view.result.current.url).toBe('blob:mock-1');
     });
     act(() => {
       fixture.change();
@@ -104,7 +104,7 @@ describe('useProjectThumbnail', () => {
       gate.resolve(new Uint8Array([2]));
     });
     await waitFor(() => {
-      expect(view.result.current).toBeUndefined();
+      expect(view.result.current.url).toBeUndefined();
     });
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-1');
@@ -116,12 +116,12 @@ describe('useProjectThumbnail', () => {
     vi.mocked(useFileManager).mockReturnValue(first.manager);
     const view = renderHook(() => useProjectThumbnail('p'));
     await waitFor(() => {
-      expect(view.result.current).toBe('blob:mock-1');
+      expect(view.result.current.url).toBe('blob:mock-1');
     });
     vi.mocked(useFileManager).mockReturnValue(second.manager);
     view.rerender();
     await waitFor(() => {
-      expect(view.result.current).toBe('blob:mock-2');
+      expect(view.result.current.url).toBe('blob:mock-2');
     });
     expect(first.dispose).toHaveBeenCalledOnce();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-1');
@@ -132,7 +132,7 @@ describe('useProjectThumbnail', () => {
     vi.mocked(useFileManager).mockReturnValue(fixture.manager);
     const view = renderHook(() => useProjectThumbnail('p'));
     await waitFor(() => {
-      expect(view.result.current).toBe('blob:mock-1');
+      expect(view.result.current.url).toBe('blob:mock-1');
     });
     act(() => {
       fixture.change({ type: 'reset' });
@@ -140,6 +140,6 @@ describe('useProjectThumbnail', () => {
     await waitFor(() => {
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-2');
     });
-    expect(view.result.current).toBe('blob:mock-1');
+    expect(view.result.current.url).toBe('blob:mock-1');
   });
 });

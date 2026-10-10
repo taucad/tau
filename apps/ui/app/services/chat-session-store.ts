@@ -195,6 +195,8 @@ export type ChatSession = {
    * and mode. A surface mounts `useComposerRecordToasts` on it.
    */
   readonly composerRecordRef: ComposerRecordRef;
+  /** Coherent visible transcript; the SDK array may be reconstructing a cumulative stream. */
+  readonly messages: readonly MyUIMessage[];
   /**
    * This chat's state in the agent-state vocabulary (D32, S45).
    *
@@ -227,7 +229,7 @@ type CachedMessagePresentation = MessagePresentation & {
   readonly firstMessage: MyUIMessage | undefined;
 };
 
-/** SDK snapshots clone the active message; retain equal JSON-safe part values for memoized renderers. */
+/** Compare mutable SDK values against retained snapshots without changing equal renderer parts. */
 const equalPartValue = (left: unknown, right: unknown): boolean => {
   if (Object.is(left, right)) {
     return true;
@@ -254,17 +256,17 @@ const equalPartValue = (left: unknown, right: unknown): boolean => {
 
 const shareMessageParts = (previous: MyUIMessage | undefined, current: MyUIMessage): MyUIMessage => {
   if (previous?.id !== current.id || previous.role !== current.role) {
-    return current;
+    return structuredClone(current);
   }
   const parts = current.parts.map((part, index) =>
-    equalPartValue(previous.parts[index], part) ? previous.parts[index]! : part,
+    equalPartValue(previous.parts[index], part) ? previous.parts[index]! : structuredClone(part),
   );
   const unchanged =
     parts.length === previous.parts.length && parts.every((part, index) => part === previous.parts[index]);
   if (unchanged && equalPartValue(previous.metadata, current.metadata)) {
     return previous;
   }
-  return { ...current, parts: unchanged ? previous.parts : parts };
+  return { ...current, metadata: structuredClone(current.metadata), parts: unchanged ? previous.parts : parts };
 };
 
 export type ChatHistoricalUsage = Readonly<{
@@ -285,6 +287,41 @@ const emptyHistoricalUsage: ChatHistoricalUsage = {
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
   parts: 0,
+};
+
+const inactiveProjectionLimit = 4;
+const inactiveProjectionWeightLimit = 16 * 1024 * 1024;
+
+/** Approximate retained representation weight, bounded at retirement rather than during streaming. */
+const projectionWeight = (projection: ChatProjection): number => {
+  const pending: unknown[] = [projection];
+  const seen = new Set<unknown>();
+  let weight = 0;
+  while (pending.length > 0 && weight <= inactiveProjectionWeightLimit) {
+    const value = pending.pop();
+    if (typeof value === 'string') {
+      weight += value.length * 2;
+    } else if (typeof value === 'object' && value !== null) {
+      if (seen.has(value)) {
+        continue;
+      }
+      seen.add(value);
+      weight += 32;
+      const record = value as Record<string, unknown>;
+      for (const key in record) {
+        if (Object.hasOwn(record, key)) {
+          weight += key.length * 2 + 8;
+          if (weight > inactiveProjectionWeightLimit) {
+            break;
+          }
+          pending.push(record[key]);
+        }
+      }
+    } else {
+      weight += 8;
+    }
+  }
+  return weight;
 };
 
 const usageOf = (messages: readonly MyUIMessage[]): ChatHistoricalUsage => {
@@ -323,6 +360,35 @@ const usageOf = (messages: readonly MyUIMessage[]): ChatHistoricalUsage => {
     parts,
   };
 };
+
+/** Compare a reconstructing SDK prefix without requiring its transient part state to have settled. */
+const includesPresentedPrefix = (
+  messages: readonly MyUIMessage[],
+  prefix: readonly MyUIMessage[],
+  offset: number,
+): boolean =>
+  prefix.every((message, index) => {
+    const next = messages[offset + index];
+    if (next === message) {
+      return true;
+    }
+    return (
+      next?.id === message.id &&
+      message.parts.every((part, partIndex) => {
+        const candidate = next.parts[partIndex];
+        if (candidate?.type !== part.type) {
+          return false;
+        }
+        if (
+          (part.type === 'text' || part.type === 'reasoning') &&
+          (candidate.type === 'text' || candidate.type === 'reasoning')
+        ) {
+          return candidate.text.startsWith(part.text);
+        }
+        return equalPartValue(candidate, part);
+      })
+    );
+  });
 
 const emptyMessagePresentation: MessagePresentation = {
   messagesById: new Map(),
@@ -385,8 +451,8 @@ type InternalSession = ChatSession & {
   /** A fresh check found no local log bytes, whose empty host read otherwise parks. */
   seedLocalLogEmpty: boolean;
   seedLocalLogCheck: Promise<Uint8Array<ArrayBuffer>> | undefined;
-  /** A seeded chat observes its own log even before the sidebar lists it. */
-  seedObservationRelease: (() => void) | undefined;
+  /** The retained session owns one lease on the shared local/foreign log observation. */
+  observationRelease: (() => void) | undefined;
   /** Durable seed waiting for the focused admission and project connector to publish. */
   pendingSeedGesture: ChatTurnGesture | undefined;
   /** The one command being dispatched, and the SDK watch following its projected run. */
@@ -396,6 +462,18 @@ type InternalSession = ChatSession & {
   watchedRunId: string | undefined;
   watchedSegmentId: string | undefined;
   watchedStreamVersion: number | undefined;
+  /** Bounded derived presentation retained only while the same source replays its cumulative prefix. */
+  presentationHold:
+    | Readonly<{
+        messages: readonly MyUIMessage[];
+        prefixOffset: number;
+        prefix: readonly MyUIMessage[];
+        runId: string;
+        segmentId: string | undefined;
+        streamVersion: number;
+        sourceGeneration: string | undefined;
+      }>
+    | undefined;
   materializeVersion: number;
   transcriptMaterialization: Promise<void> | undefined;
   recoveredRunId: string | undefined;
@@ -408,6 +486,8 @@ type InternalSession = ChatSession & {
   stopRequested: boolean;
   /** What asked for the pending stop; logged with the cancel it sends. */
   stopOrigin: StopOrigin | undefined;
+  /** A storage invalidation waits for host settlement, independently of SDK reattachment readiness. */
+  refreshDeferred: boolean;
   restoredStoppedRunId: string | undefined;
   status: ChatStatus;
   /** The project this chat belongs to, from its caller (PV-S4, L3 D9); never from focus. */
@@ -476,6 +556,7 @@ const endsHere = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>, runI
 
 /** The two phases that OPEN a run and keep its project busy (I24); every other phase settles one. */
 const opensRun = (phase: ProjectedRunPhase): boolean => phase === 'admitted' || phase === 'running';
+const retainsLiveRun = (phase: ProjectedRunPhase): boolean => opensRun(phase) || phase === 'paused';
 
 /* The `revision` region's three facts, as the project's route last reported them. */
 const sendRevisionFacts = (ref: ChatSessionActorRef, facts: ChatRevisionFacts): void => {
@@ -526,7 +607,9 @@ export type ProjectClosePlan = Readonly<{
 }>;
 
 type ProjectHostConnector = Readonly<{
-  connect: (chatId: string) => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'hostCommand' | 'close'>>;
+  connect: (
+    chatId: string,
+  ) => Promise<Pick<AgentHostClient, 'read' | 'catchUp' | 'subscribe' | 'hostCommand' | 'close'>>;
   stoppability?: (chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
 }>;
 
@@ -536,6 +619,7 @@ export class ChatSessionStore {
   readonly #projectHostConnectors = new Map<string, ProjectHostConnector>();
   readonly #remoteReadVersions = new Map<string, number>();
   readonly #remoteReadCompletedVersions = new Map<string, number>();
+  readonly #remoteHistoryPresence = new WeakMap<NonNullable<ChatProjection['remote']>['views'], boolean>();
   readonly #remoteObservations = new Map<string, ObservationService<void>>();
   readonly #projectRunKeys = new Map<string, string>();
   readonly #projectRunVersions = new Map<string, number>();
@@ -560,13 +644,25 @@ export class ChatSessionStore {
    * overwritten.
    */
   readonly #composerDrains = new Map<string, Promise<void>>();
-  /**
-   * Each chat's projection of its log (PV-S7), fed from every stream that reads it. Kept for the store's life, not a
-   * view's: a run outlives the view that started it (V5), and its rows keep arriving.
-   */
+  /** Live owners pin projections; a bounded inactive cache preserves recent warm navigation. */
   readonly #projections = new Map<string, Actor<typeof chatProjectionLogic>>();
+  readonly #inactiveProjections = new Map<
+    string,
+    { projectId: string; actor: Actor<typeof chatProjectionLogic>; weight: number }
+  >();
+  readonly #deletedProjections = new WeakSet<Actor<typeof chatProjectionLogic>>();
   /** A read answer, not the projection's initially empty cursor, proves this chat's log was checked. */
   readonly #answeredLogReads = new Set<string>();
+  /** Display eligibility for the existing validated projection; never command or read authority. */
+  readonly #validatedDisplays = new WeakMap<
+    Actor<typeof chatProjectionLogic>,
+    Readonly<{
+      views: ChatProjection['views'];
+      remote: ChatProjection['remote'];
+      resetVersion: number;
+      sourceGeneration: string | undefined;
+    }>
+  >();
   /** The chat the person has in front of them (R3); only it counts as attended. */
   #focusedChatId: string | undefined;
   readonly #membershipTopic = new Topic<void>({ name: 'ChatSessionStore.membership' });
@@ -697,6 +793,7 @@ export class ChatSessionStore {
 
   /** Observe a listed chat's log without acquiring its SDK transcript or composer. @public */
   public observe(chatId: string, projectId: string): () => void {
+    this.#inactiveProjections.delete(chatId);
     const existing = this.#observed.get(chatId);
     if (existing !== undefined && existing.projectId !== projectId) {
       throw new Error(`Chat ${chatId} is already observed in project ${existing.projectId}.`);
@@ -723,6 +820,7 @@ export class ChatSessionStore {
       if (!this.#sessions.has(chatId)) {
         this.#historicalUsage.delete(chatId);
       }
+      this.#retireProjection(chatId, projectId);
       this.#notifyMembership();
       this.#refreshProjectRuns(projectId);
     };
@@ -999,15 +1097,33 @@ export class ChatSessionStore {
   /** Refresh an idle live transcript from the host projection, never from chat-record metadata. */
   public async refreshFromStorage(chatId: string): Promise<void> {
     const session = this.#sessions.get(chatId);
-    if (session?.status !== 'ready') {
+    if (session === undefined) {
       return;
     }
+    const source = this.#projectionContext(chatId);
+    if (
+      session.status !== 'ready' ||
+      session.commandInFlight ||
+      (source !== undefined && retainsLiveRun(selectRunPhase(source)))
+    ) {
+      session.refreshDeferred = true;
+      return;
+    }
+    session.refreshDeferred = false;
     await this.#refreshRemoteSegmentsSafely(chatId, session.projectId);
     if (this.#sessions.get(chatId) !== session) {
       return;
     }
     const projection = this.#projectionContext(chatId);
-    if (projection !== undefined && selectCaughtUp(projection)) {
+    if (
+      projection !== undefined &&
+      selectCaughtUp(projection) &&
+      !retainsLiveRun(selectRunPhase(projection)) &&
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- SDK callbacks can mutate status while the storage await is pending.
+      session.status === 'ready' &&
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Admission can begin while the storage await is pending.
+      !session.commandInFlight
+    ) {
       session.transcriptMaterialization = this.#applyProjectedTranscript(
         session,
         projection,
@@ -1030,15 +1146,25 @@ export class ChatSessionStore {
    * @returns The retained chat session.
    */
   public acquire(chatId: string, projectId: string): ChatSession {
+    this.#inactiveProjections.delete(chatId);
+    const observed = this.#observed.get(chatId);
+    if (observed !== undefined && observed.projectId !== projectId) {
+      throw new Error(`Chat ${chatId} is already observed in project ${observed.projectId}.`);
+    }
     const existing = this.#sessions.get(chatId);
     if (existing) {
+      if (existing.projectId !== projectId) {
+        throw new Error(`Chat ${chatId} is already acquired in project ${existing.projectId}.`);
+      }
       existing.viewRefcount += 1;
       return existing;
     }
 
     const session = this.#createSession(chatId, projectId);
     this.#sessions.set(chatId, session);
-    this.#startRemoteObservation(chatId, projectId);
+    session.observationRelease = this.observe(chatId, projectId);
+    // A retained sidebar observation may already be caught up and emit no new answer.
+    this.#syncProjection(chatId, 'open');
     this.#refreshSnapshot();
     this.#notifyMembership();
     return session;
@@ -1096,13 +1222,14 @@ export class ChatSessionStore {
     if (session === undefined) {
       return;
     }
+    session.presentationHold = undefined;
     this.#messagePresentations.delete(chatId);
     session.chat.messages = messages;
   }
 
   /** Stable structural and command selections; streaming text only inspects the current tail. */
   public getMessagePresentation(chatId: string): MessagePresentation {
-    const messages = this.#sessions.get(chatId)?.chat.messages;
+    const messages = this.#sessions.get(chatId)?.messages;
     if (messages === undefined) {
       return emptyMessagePresentation;
     }
@@ -1114,9 +1241,6 @@ export class ChatSessionStore {
       cached.lastRole === last?.role &&
       (messages.length === 1 || cached.firstMessage === messages[0])
     ) {
-      if (cached.lastRawMessage === last) {
-        return cached;
-      }
       const selected = last === undefined ? undefined : shareMessageParts(cached.lastMessage, last);
       if (last !== undefined) {
         // The map is an index over the authoritative SDK array, not another transcript.
@@ -1142,8 +1266,18 @@ export class ChatSessionStore {
     const agentInvocations = [
       ...new Set([...prefixInvocations, ...invocationsOf(last === undefined ? [] : [last])]),
     ].join('\n');
+    const selected = last === undefined ? undefined : shareMessageParts(undefined, last);
     const next: CachedMessagePresentation = {
-      messagesById: new Map(messages.map((message) => [message.id, message])),
+      messagesById: new Map(
+        messages.map((message) => [
+          message.id,
+          message === last
+            ? selected!
+            : message === cached?.lastRawMessage
+              ? shareMessageParts(cached.lastMessage, message)
+              : message,
+        ]),
+      ),
       order: messages.map((message) => message.id),
       groups: buildTurnGroups(messages),
       agentInvocations,
@@ -1151,8 +1285,8 @@ export class ChatSessionStore {
       lastId: last?.id,
       lastRole: last?.role,
       prefixInvocations,
-      lastParts: last?.parts,
-      lastMessage: last,
+      lastParts: selected?.parts,
+      lastMessage: selected,
       lastRawMessage: last,
       firstMessage: messages[0],
     };
@@ -1185,6 +1319,10 @@ export class ChatSessionStore {
 
   /** Derive exact usage from the merged host log, cached per projected snapshot. */
   public async getHistoricalUsage(chatId: string): Promise<ChatHistoricalUsage> {
+    const actor = this.#projections.get(chatId);
+    if (actor !== undefined && this.#deletedProjections.has(actor)) {
+      throw new Error('Chat usage projection superseded.');
+    }
     const projection = this.#projectionContext(chatId);
     if (projection === undefined || !selectCaughtUp(projection)) {
       return usageOf(this.#sessions.get(chatId)?.chat.messages ?? []);
@@ -1211,6 +1349,9 @@ export class ChatSessionStore {
         const target = entry.projection;
         // oxlint-disable-next-line eslint/no-await-in-loop -- One chat's projections serialize; a later snapshot replaces the target after this read.
         const result = usageOf(await materializeTranscript(target));
+        if (this.#projections.get(chatId) !== actor || this.#historicalUsage.get(chatId) !== entry) {
+          throw new Error('Chat usage projection superseded.');
+        }
         const latest = this.#projectionContext(chatId);
         if (latest !== undefined && selectCaughtUp(latest) && !sameSource(target, latest)) {
           entry.projection = latest;
@@ -1236,9 +1377,12 @@ export class ChatSessionStore {
 
   /** Fold one host read answer; the attachment and deterministic test readers share this projection ingress. @internal */
   public receiveHostReadAnswer(chatId: string, answer: ChatProjectionReadAnswer): void {
+    const currentActor = this.#projections.get(chatId);
+    const deleted = currentActor !== undefined && this.#deletedProjections.has(currentActor);
     const cursor = this.#projectionContext(chatId)?.ledger.position.cursor ?? 0;
     if (
       answer.status === 'batch' &&
+      !deleted &&
       answer.cursor === cursor &&
       answer.nextCursor === cursor + answer.events.length &&
       answer.endCursor >= answer.nextCursor
@@ -1249,6 +1393,10 @@ export class ChatSessionStore {
         observed.status = 'attached';
       }
     } else if (answer.status === 'refused') {
+      const actor = this.#projections.get(chatId);
+      if (actor !== undefined) {
+        this.#validatedDisplays.delete(actor);
+      }
       this.#answeredLogReads.delete(chatId);
       const session = this.#sessions.get(chatId);
       if (session !== undefined) {
@@ -1261,6 +1409,11 @@ export class ChatSessionStore {
       }
     }
     this.#projectionOf(chatId).send({ type: 'batch', answer });
+    // A verified empty batch can leave the reducer unchanged while establishing read authority.
+    if (answer.status === 'batch' && answer.events.length === 0) {
+      this.#syncProjection(chatId, 'none');
+      this.#unreadTopic.emit();
+    }
     this.startPendingSeed(chatId);
   }
 
@@ -1548,7 +1701,7 @@ export class ChatSessionStore {
       return false;
     }
     const projection = this.#projectionContext(chatId);
-    if (projection === undefined || !selectCaughtUp(projection)) {
+    if (projection === undefined || !selectCaughtUp(projection) || !this.#hasTranscriptAuthority(chatId, projection)) {
       return record.legacy.has(chatId);
     }
     const attention = selectAttentionRow(projection);
@@ -1581,6 +1734,7 @@ export class ChatSessionStore {
    * @public
    */
   public async removeChat(chatId: string): Promise<void> {
+    this.#invalidateDeletedProjection(chatId);
     // A released chat's record may still be landing its last write; removing under it would bring the file back.
     await this.#composerDrains.get(chatId);
     const session = this.#sessions.get(chatId);
@@ -1638,6 +1792,14 @@ export class ChatSessionStore {
    * @public
    */
   public async removeProject(projectId: string): Promise<void> {
+    const chatIds = new Set([
+      ...[...this.#inactiveProjections].filter(([, entry]) => entry.projectId === projectId).map(([id]) => id),
+      ...[...this.#observed].filter(([, entry]) => entry.projectId === projectId).map(([id]) => id),
+      ...[...this.#sessions].filter(([, entry]) => entry.projectId === projectId).map(([id]) => id),
+    ]);
+    for (const chatId of chatIds) {
+      this.#invalidateDeletedProjection(chatId);
+    }
     // Ponytail: waits on every released chat's drain, not only this project's; drains are one write long.
     await Promise.all(this.#composerDrains.values());
     const sessions = [...this.#sessions.values()].filter((session) => session.projectId === projectId);
@@ -1732,11 +1894,19 @@ export class ChatSessionStore {
     const directory = `/projects/${projectId}/${chatRecordsPath(chatId)}/events`;
     const observation = new ObservationService<void>({
       resource: directory,
-      watch: (invalidate, reset) =>
-        watch(
+      watch: (invalidate, reset) => {
+        let active = true;
+        const registration = watch(
           directory,
           (event) => {
+            if (!active) {
+              return;
+            }
             if (event.type === 'reset') {
+              const projection = this.#projections.get(chatId);
+              if (projection !== undefined) {
+                this.#validatedDisplays.delete(projection);
+              }
               reset();
               return;
             }
@@ -1748,7 +1918,16 @@ export class ChatSessionStore {
             }
           },
           { recursive: true },
-        ),
+        );
+        return {
+          ready: registration.ready,
+          closed: registration.closed,
+          dispose() {
+            active = false;
+            registration.dispose();
+          },
+        };
+      },
       invalidate: () => {
         this.#invalidateRemoteRead(chatId);
       },
@@ -1883,8 +2062,12 @@ export class ChatSessionStore {
           },
         },
         onStatus: (event) => {
-          if (observed.attachment !== attachment) {
+          if (observed.attachment !== attachment || this.#deletedProjections.has(this.#projectionOf(chatId))) {
             return;
+          }
+          if (observed.retry !== undefined) {
+            clearTimeout(observed.retry);
+            observed.retry = undefined;
           }
           observed.status =
             event.type === 'attachment.attached'
@@ -1922,14 +2105,27 @@ export class ChatSessionStore {
             if (observed.attachment !== attachment) {
               return;
             }
-            attachment.stop();
-            observed.attachment = undefined;
-            observed.retry = setTimeout(() => {
+            const readerOnly = event.reason === 'owner-fenced';
+            if (!readerOnly) {
+              attachment.stop();
+              observed.attachment = undefined;
+            }
+            const retry = setTimeout(() => {
+              if (observed.retry !== retry) {
+                return;
+              }
               observed.retry = undefined;
               if (this.#observed.get(chatId) === observed) {
-                this.#startObservedAttachment(chatId, observed);
+                if (readerOnly) {
+                  if (observed.attachment === attachment) {
+                    attachment.send({ type: 'retry-read' });
+                  }
+                } else if (observed.attachment === undefined) {
+                  this.#startObservedAttachment(chatId, observed);
+                }
               }
             }, retryDelayMilliseconds);
+            observed.retry = retry;
           });
         },
       },
@@ -2315,6 +2511,19 @@ export class ChatSessionStore {
       if (published === context) {
         return;
       }
+      if (published !== undefined && published.resetVersion !== context.resetVersion) {
+        this.#answeredLogReads.delete(chatId);
+        this.#validatedDisplays.delete(projection);
+        const session = this.#sessions.get(chatId);
+        if (session !== undefined) {
+          session.seedLocalLogEmpty = false;
+          session.seedLocalLogCheck = undefined;
+        }
+        const observed = this.#observed.get(chatId);
+        if (observed?.status === 'attached') {
+          observed.status = 'lost';
+        }
+      }
       published = context;
       const nextAttention = selectCaughtUp(context) ? selectAttentionRow(context) : attention;
       if (nextAttention !== attention) {
@@ -2348,14 +2557,49 @@ export class ChatSessionStore {
     const session = this.#sessions.get(chatId);
     const projection = this.#projectionContext(chatId);
     const projectId = session?.projectId ?? this.#observed.get(chatId)?.projectId;
+    const actor = this.#projections.get(chatId);
+    if (actor !== undefined && projection !== undefined) {
+      const retained = this.#validatedDisplays.get(actor);
+      if (
+        retained !== undefined &&
+        (retained.views !== projection.views ||
+          retained.remote?.views !== projection.remote?.views ||
+          retained.resetVersion !== projection.resetVersion ||
+          retained.sourceGeneration !== projection.ledger.position.sourceGeneration)
+      ) {
+        this.#validatedDisplays.delete(actor);
+      }
+      if (
+        selectCaughtUp(projection) &&
+        this.#hasTranscriptAuthority(chatId, projection) &&
+        this.#foreignDisplayReady(chatId, projection)
+      ) {
+        this.#validatedDisplays.set(actor, {
+          views: projection.views,
+          remote: projection.remote,
+          resetVersion: projection.resetVersion,
+          sourceGeneration: projection.ledger.position.sourceGeneration,
+        });
+      }
+    }
     if (projectId !== undefined) {
       this.#refreshProjectRuns(projectId);
     }
     if (session === undefined || projection === undefined) {
       return;
     }
-    if (selectCaughtUp(projection)) {
-      this.#materializeProjectedTranscript(session, projection);
+    const hold = session.presentationHold;
+    const heldView = hold === undefined ? undefined : projection.views[hold.runId];
+    if (
+      hold !== undefined &&
+      (heldView === undefined ||
+        heldView.retired === true ||
+        heldView.segmentId !== hold.segmentId ||
+        (heldView.streamVersion ?? 0) !== hold.streamVersion ||
+        projection.ledger.position.sourceGeneration !== hold.sourceGeneration)
+    ) {
+      session.presentationHold = undefined;
+      this.#messagePresentations.delete(chatId);
     }
     this.#syncTools(session, projection);
     const run = selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
@@ -2383,6 +2627,9 @@ export class ChatSessionStore {
       session.watch = undefined;
       session.watchedRunId = undefined;
       session.materializeVersion++;
+    }
+    if (selectCaughtUp(projection)) {
+      this.#materializeProjectedTranscript(session, projection);
     }
     if (
       run?.lifecycle === 'cancelled' &&
@@ -2436,6 +2683,15 @@ export class ChatSessionStore {
     if (session.status === 'error') {
       this.#recoverPresentation(session);
     }
+    if (
+      session.refreshDeferred &&
+      selectCaughtUp(projection) &&
+      !retainsLiveRun(phase) &&
+      session.status === 'ready' &&
+      !session.commandInFlight
+    ) {
+      void this.refreshFromStorage(chatId);
+    }
   }
 
   /** Reattach a viewed live run through its projection, never through the old host stream. */
@@ -2445,7 +2701,10 @@ export class ChatSessionStore {
     session.watchedStreamVersion = projection.views[runId]?.streamVersion ?? 0;
     const version = ++session.materializeVersion;
     try {
-      const messages = await materializeTranscript(projection, runId);
+      const [messages, presentation] = await Promise.all([
+        materializeTranscript(projection, runId),
+        materializeTranscript(projection),
+      ]);
       const current = this.#projectionContext(session.chatId);
       if (
         this.#sessions.get(session.chatId) !== session ||
@@ -2465,6 +2724,15 @@ export class ChatSessionStore {
         }
         return;
       }
+      session.presentationHold = {
+        messages: this.#retainSeedUntilLogged(session, presentation),
+        prefixOffset: messages.length,
+        prefix: presentation.slice(messages.length),
+        runId,
+        segmentId: session.watchedSegmentId,
+        streamVersion: session.watchedStreamVersion,
+        sourceGeneration: projection.ledger.position.sourceGeneration,
+      };
       this.#messagePresentations.delete(session.chatId);
       session.chat.messages = this.#retainSeedUntilLogged(session, messages);
       const watch = createActor(sdkWatch, {
@@ -2560,9 +2828,72 @@ export class ChatSessionStore {
     return [...messages, seed];
   }
 
+  /** Initial empty cursors prove nothing; foreign history requires its completed authoritative scan. */
+  #hasTranscriptAuthority(chatId: string, projection: ChatProjection): boolean {
+    const actor = this.#projections.get(chatId);
+    if (actor !== undefined && this.#deletedProjections.has(actor)) {
+      return false;
+    }
+    if (this.#answeredLogReads.has(chatId)) {
+      return true;
+    }
+    const views = projection.remote?.views;
+    if (
+      views === undefined ||
+      !this.#remoteReadCompletedVersions.has(chatId) ||
+      this.#remoteReadCompletedVersions.get(chatId) !== this.#remoteReadVersions.get(chatId)
+    ) {
+      return false;
+    }
+    let present = this.#remoteHistoryPresence.get(views);
+    if (present === undefined) {
+      present = Object.keys(views).length > 0;
+      this.#remoteHistoryPresence.set(views, present);
+    }
+    return present;
+  }
+
+  /** Local proof cannot certify foreign views while their current authoritative scan is pending. */
+  #foreignDisplayReady(chatId: string, projection: ChatProjection): boolean {
+    const completed = this.#remoteReadCompletedVersions.get(chatId);
+    return (
+      projection.remote === undefined || (completed !== undefined && completed === this.#remoteReadVersions.get(chatId))
+    );
+  }
+
+  /** Retain validated presentation during private refresh without authorizing current operations. */
+  #hasDisplayAuthority(chatId: string, projection: ChatProjection): boolean {
+    const actor = this.#projections.get(chatId);
+    const current = actor?.getSnapshot().context;
+    if (
+      actor === undefined ||
+      this.#deletedProjections.has(actor) ||
+      current === undefined ||
+      current.views !== projection.views ||
+      current.remote?.views !== projection.remote?.views ||
+      current.resetVersion !== projection.resetVersion ||
+      current.ledger.position.sourceGeneration !== projection.ledger.position.sourceGeneration
+    ) {
+      return false;
+    }
+    if (this.#hasTranscriptAuthority(chatId, current) && this.#foreignDisplayReady(chatId, current)) {
+      return true;
+    }
+    const retained = this.#validatedDisplays.get(actor);
+    return (
+      retained !== undefined &&
+      selectCaughtUp(current) &&
+      retained.views === current.views &&
+      retained.remote?.views === current.remote?.views &&
+      retained.resetVersion === current.resetVersion &&
+      retained.sourceGeneration === current.ledger.position.sourceGeneration
+    );
+  }
+
   /** Version async SDK materialization so only the newest caught-up log can replace a ready transcript. */
   #materializeProjectedTranscript(session: InternalSession, projection: ChatProjection): void {
     if (
+      !this.#hasDisplayAuthority(session.chatId, projection) ||
       (session.status !== 'ready' && session.status !== 'error') ||
       session.watchedRunId !== undefined ||
       session.recoveringPresentation ||
@@ -2589,13 +2920,16 @@ export class ChatSessionStore {
       const messages = await materializeTranscript(projection);
       if (
         this.#sessions.get(session.chatId) === session &&
+        this.#hasDisplayAuthority(session.chatId, projection) &&
         (session.status === 'ready' || session.status === 'error') &&
         session.watchedRunId === undefined &&
         session.materializeVersion === version
       ) {
+        session.presentationHold = undefined;
         const retained = this.#retainSeedUntilLogged(session, messages);
         const previous = session.chat.messages;
         if (previous.length !== retained.length || retained.some((message, index) => message !== previous[index])) {
+          this.#messagePresentations.delete(session.chatId);
           session.chat.messages = retained;
         }
         session.failedTranscriptProjection = undefined;
@@ -2743,7 +3077,9 @@ export class ChatSessionStore {
   /** The chat's newest attention row, once this page holds its whole log; `undefined` while it is unknown. */
   #knownAttention(chatId: string): RowKey | undefined {
     const projection = this.#projectionContext(chatId);
-    return projection === undefined || !selectCaughtUp(projection) ? undefined : selectAttentionRow(projection);
+    return projection === undefined || !selectCaughtUp(projection) || !this.#hasTranscriptAuthority(chatId, projection)
+      ? undefined
+      : selectAttentionRow(projection);
   }
 
   /**
@@ -2937,7 +3273,6 @@ export class ChatSessionStore {
                 session.seedLocalLogEmpty = false;
                 session.seedLocalLogCheck = undefined;
                 this.#projectionOf(input.chatId).send({ type: 'reset' });
-                session.seedObservationRelease ??= this.observe(input.chatId, session.projectId);
                 if (observed !== undefined) {
                   this.#startObservedAttachment(input.chatId, observed);
                 }
@@ -3023,6 +3358,12 @@ export class ChatSessionStore {
     // the AI SDK's "internal-but-intended-for-subscribers" marker — see
     // node_modules/@ai-sdk/react/dist/index.d.ts).
     const unregisterMessages = chat['~registerMessagesCallback'](() => {
+      if (
+        session.presentationHold !== undefined &&
+        includesPresentedPrefix(chat.messages, session.presentationHold.prefix, session.presentationHold.prefixOffset)
+      ) {
+        session.presentationHold = undefined;
+      }
       this.#chatTopics.get(chatId)?.emit();
     });
     const unregisterStatus = chat['~registerStatusCallback'](() => {
@@ -3056,6 +3397,9 @@ export class ChatSessionStore {
     session = {
       chatId,
       chat,
+      get messages() {
+        return session.presentationHold?.messages ?? chat.messages;
+      },
       transport,
       projectId,
       chatRoot,
@@ -3072,7 +3416,7 @@ export class ChatSessionStore {
       seedRemoteReadVersion: undefined,
       seedLocalLogEmpty: false,
       seedLocalLogCheck: undefined,
-      seedObservationRelease: undefined,
+      observationRelease: undefined,
       pendingSeedGesture: undefined,
       activeCommand: undefined,
       commandAbort: undefined,
@@ -3080,6 +3424,7 @@ export class ChatSessionStore {
       watchedRunId: undefined,
       watchedSegmentId: undefined,
       watchedStreamVersion: undefined,
+      presentationHold: undefined,
       materializeVersion: 0,
       transcriptMaterialization: undefined,
       recoveredRunId: undefined,
@@ -3091,12 +3436,14 @@ export class ChatSessionStore {
       commandInFlight: false,
       stopRequested: false,
       stopOrigin: undefined,
+      refreshDeferred: false,
       restoredStoppedRunId: undefined,
       status: chat.status,
       turnSubscriptions: [],
       dispose: () => {
-        session.seedObservationRelease?.();
-        session.seedObservationRelease = undefined;
+        session.presentationHold = undefined;
+        session.observationRelease?.();
+        session.observationRelease = undefined;
         for (const subscription of session.turnSubscriptions) {
           subscription.unsubscribe();
         }
@@ -3185,8 +3532,74 @@ export class ChatSessionStore {
     clearChatTurnServices(session.chatId);
     clearLedger(session.chatId);
     this.#disposeChatTopics(session.chatId);
+    this.#retireProjection(session.chatId, session.projectId);
     this.#refreshSnapshot();
     this.#notifyMembership();
+  }
+
+  #invalidateDeletedProjection(chatId: string): void {
+    const actor = this.#projections.get(chatId);
+    if (actor === undefined) {
+      return;
+    }
+    this.#deletedProjections.add(actor);
+    const observed = this.#observed.get(chatId);
+    if (observed !== undefined) {
+      observed.status = 'lost';
+    }
+    this.#answeredLogReads.delete(chatId);
+    this.#validatedDisplays.delete(actor);
+    this.#historicalUsage.delete(chatId);
+    this.#messagePresentations.delete(chatId);
+    if (!this.#sessions.has(chatId) && !this.#observed.has(chatId)) {
+      this.#evictProjection(chatId, actor);
+    }
+  }
+
+  #evictProjection(chatId: string, actor: Actor<typeof chatProjectionLogic>): void {
+    if (this.#projections.get(chatId) !== actor) {
+      return;
+    }
+    this.#inactiveProjections.delete(chatId);
+    actor.stop();
+    this.#projections.delete(chatId);
+    this.#answeredLogReads.delete(chatId);
+    this.#validatedDisplays.delete(actor);
+    this.#messagePresentations.delete(chatId);
+    this.#historicalUsage.delete(chatId);
+    this.#stopRemoteObservationIfUnused(chatId);
+    this.#remoteReadCompletedVersions.delete(chatId);
+  }
+
+  #retireProjection(chatId: string, projectId: string): void {
+    if (this.#sessions.has(chatId) || this.#observed.has(chatId)) {
+      return;
+    }
+    const actor = this.#projections.get(chatId);
+    if (actor === undefined) {
+      return;
+    }
+    const projection = actor.getSnapshot().context;
+    if (this.#deletedProjections.has(actor) || !selectCaughtUp(projection)) {
+      this.#evictProjection(chatId, actor);
+      return;
+    }
+    const weight = projectionWeight(projection);
+    if (weight > inactiveProjectionWeightLimit) {
+      this.#evictProjection(chatId, actor);
+      return;
+    }
+    this.#inactiveProjections.delete(chatId);
+    this.#inactiveProjections.set(chatId, { projectId, actor, weight });
+    let total = [...this.#inactiveProjections.values()].reduce((sum, entry) => sum + entry.weight, 0);
+    while (this.#inactiveProjections.size > inactiveProjectionLimit || total > inactiveProjectionWeightLimit) {
+      const oldest = this.#inactiveProjections.entries().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      total -= oldest[1].weight;
+      this.#evictProjection(oldest[0], oldest[1].actor);
+    }
   }
 
   #addPerChatListener({
@@ -3208,7 +3621,7 @@ export class ChatSessionStore {
     const unsubscribe = topic.subscribe(listener);
     return () => {
       unsubscribe();
-      if (topic.size === 0) {
+      if (topic.size === 0 && bucket.get(chatId) === topic) {
         bucket.delete(chatId);
         topic.dispose();
       }
@@ -3266,8 +3679,8 @@ export class ChatSessionStore {
       (fence === undefined || fence.isCurrent()) &&
       (this.#observed.get(chatId)?.projectId === projectId || this.#sessions.get(chatId)?.projectId === projectId)
     ) {
-      this.#projectionOf(chatId).send({ type: 'remote', segments });
       this.#remoteReadCompletedVersions.set(chatId, version);
+      this.#projectionOf(chatId).send({ type: 'remote', segments });
       const session = this.#sessions.get(chatId);
       if (session?.pendingSeedGesture !== undefined) {
         session.seedRemoteReadVersion = version;

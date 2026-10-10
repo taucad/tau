@@ -3,11 +3,14 @@ import {
   emptyChatLedger,
   foldChatLedger,
   foldReadAnswer,
+  foldProjectionFacts,
   gateRows,
   replayedStartOutcome,
   stampRows,
 } from '#log/chat-ledger.js';
 import type { ChatLedger, LogRowBody } from '#log/chat-ledger.js';
+import { classifyLogRow } from '#log/event-schema.js';
+import { projectLogRow } from '#log/projection-facts.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
 /** Rows of one term, `e01` with epoch 1, numbered from 0 in order. */
@@ -89,8 +92,167 @@ describe('turn change proof', () => {
 });
 
 describe('foldReadAnswer', () => {
+  for (const pageSize of [1, 16]) {
+    it(`selects only semantic raw rows at physical page size ${pageSize}`, () => {
+      const source = term([life('admitted'), { type: 'future.presentation' }, life('completed')]);
+      const physical = [source[0], null, source[1], source[0], source[1], source[2]];
+      const semanticPositions = [0, 2, 5];
+      let ledger = emptyChatLedger;
+      for (let cursor = 0; cursor < physical.length; cursor += pageSize) {
+        const events = physical.slice(cursor, cursor + pageSize);
+        const result = foldReadAnswer(ledger, {
+          status: 'batch',
+          cursor,
+          nextCursor: cursor + events.length,
+          endCursor: physical.length,
+          events,
+        });
+        expect(result.kind).toBe('folded');
+        if (result.kind !== 'folded') {
+          throw new Error('Expected aligned raw rows');
+        }
+        expect(result.semanticRowIndices).toEqual(
+          semanticPositions
+            .filter((index) => index >= cursor && index < cursor + events.length)
+            .map((index) => index - cursor),
+        );
+        ledger = result.ledger;
+      }
+      expect(ledger.position).toEqual({ cursor: physical.length, last: { leaderEpoch: 'e01', sequence: 2 } });
+      expect(ledger.historyIntact).toBe(false);
+      expect(ledger.runs['run-1']?.lifecycle).toBe('completed');
+      expect(foldReadAnswer(ledger, batch(physical.length, []))).toMatchObject({
+        kind: 'folded',
+        semanticRowIndices: [],
+      });
+      expect(foldReadAnswer(ledger, batch(99, []))).toEqual({ kind: 'stale' });
+      expect(foldReadAnswer(ledger, { status: 'refused', reason: 'identity-mismatch' })).toEqual({
+        kind: 'reset',
+        reason: 'identity-mismatch',
+      });
+      expect(foldReadAnswer(ledger, { status: 'refused', reason: 'owner-fenced' })).toEqual({
+        kind: 'refused',
+        reason: 'owner-fenced',
+      });
+    });
+
+    it(`selects known and opaque compact semantic rows at physical page size ${pageSize}`, () => {
+      const source = term([life('admitted'), { type: 'future.presentation' }, life('completed')]);
+      const facts = [source[0], source[1], source[0], source[1], source[2]].map((row) => {
+        const classified = classifyLogRow(row);
+        if (classified.class === 'quarantined') {
+          throw new Error('Expected kept fixture row');
+        }
+        return projectLogRow({ event: classified.event, opaque: classified.class === 'opaque' });
+      });
+      const semanticPositions = [0, 1, 4];
+      let ledger = emptyChatLedger;
+      for (let cursor = 0; cursor < facts.length; cursor += pageSize) {
+        const page = facts.slice(cursor, cursor + pageSize);
+        const result = foldProjectionFacts({
+          ledger,
+          answer: {
+            status: 'batch',
+            chatId: 'chat-1',
+            sourceGeneration: 'source-1',
+            cursor,
+            nextCursor: cursor + page.length,
+            endCursor: facts.length,
+            facts: page,
+          },
+        });
+        expect(result.kind).toBe('folded');
+        if (result.kind !== 'folded') {
+          throw new Error('Expected aligned compact facts');
+        }
+        expect(result.semanticRowIndices).toEqual(
+          semanticPositions
+            .filter((index) => index >= cursor && index < cursor + page.length)
+            .map((index) => index - cursor),
+        );
+        ledger = result.ledger;
+      }
+      expect(ledger.position).toEqual({
+        cursor: facts.length,
+        sourceGeneration: 'source-1',
+        last: { leaderEpoch: 'e01', sequence: 2 },
+      });
+      expect(ledger.runs['run-1']?.lifecycle).toBe('completed');
+      expect(
+        foldProjectionFacts({
+          ledger,
+          answer: {
+            status: 'batch',
+            chatId: 'chat-1',
+            sourceGeneration: 'source-1',
+            cursor: facts.length,
+            nextCursor: facts.length,
+            endCursor: facts.length,
+            facts: [],
+          },
+        }),
+      ).toMatchObject({ kind: 'folded', semanticRowIndices: [] });
+    });
+  }
   const rows = term([life('admitted'), life('running'), life('completed')]);
   const read = foldChatLedger(emptyChatLedger, rows);
+
+  it('keeps semantic ordering across a duplicate while advancing physical command positions', () => {
+    const first = term(
+      [
+        { type: 'snapshot-context.refreshed', messageId: 'm', content: [] },
+        { type: 'snapshot-context.refreshed', messageId: 'm', content: [], commandId: 'after-duplicate' },
+      ],
+      'first',
+      1,
+    );
+    const second = term([{ type: 'snapshot-context.refreshed', messageId: 'm', content: [] }], 'second', 2);
+    const physical = [first[0]!, second[0]!, first[0]!, first[1]!];
+
+    const folded = foldReadAnswer(emptyChatLedger, batch(0, physical));
+
+    expect(folded.kind).toBe('folded');
+    if (folded.kind !== 'folded') {
+      throw new Error('Expected an aligned physical batch');
+    }
+    expect(folded.ledger.anomalies).toEqual(foldChatLedger(emptyChatLedger, physical).anomalies);
+    expect(folded.ledger.anomalies).toContainEqual({ kind: 'order', row: { leaderEpoch: 'first', sequence: 1 } });
+    expect(folded.ledger.position).toEqual({ cursor: 4, last: { leaderEpoch: 'first', sequence: 1 } });
+    expect(folded.ledger.applied['after-duplicate']?.cursor).toBe(3);
+
+    const endingAtDuplicate = foldReadAnswer(emptyChatLedger, batch(0, physical.slice(0, 3)));
+    expect(endingAtDuplicate).toMatchObject({
+      kind: 'folded',
+      ledger: { position: { cursor: 3, last: { leaderEpoch: 'first', sequence: 0 } } },
+    });
+  });
+
+  it('keeps a closed semantic term closed when a duplicate ends the previous physical page', () => {
+    const first = term(
+      [
+        { type: 'snapshot-context.refreshed', messageId: 'm', content: [] },
+        { type: 'snapshot-context.refreshed', messageId: 'm', content: [], commandId: 'after-duplicate' },
+      ],
+      'first',
+      1,
+    );
+    const second = term([{ type: 'snapshot-context.refreshed', messageId: 'm', content: [] }], 'second', 2);
+    const prefix = foldReadAnswer(emptyChatLedger, batch(0, [first[0]!, second[0]!, first[0]!], 4));
+    if (prefix.kind !== 'folded') {
+      throw new Error('Expected an aligned prefix');
+    }
+    expect(prefix.ledger.position).toEqual({ cursor: 3, last: { leaderEpoch: 'first', sequence: 0 } });
+
+    const suffix = foldReadAnswer(prefix.ledger, batch(3, [first[1]!]));
+    expect(suffix).toMatchObject({
+      kind: 'folded',
+      ledger: {
+        position: { cursor: 4, last: { leaderEpoch: 'first', sequence: 1 } },
+        anomalies: [{ kind: 'order', row: { leaderEpoch: 'first', sequence: 1 } }],
+        applied: { 'after-duplicate': { cursor: 3 } },
+      },
+    });
+  });
 
   // CL-A4, T5
   it('should report a clamped read from a v1 server', () => {

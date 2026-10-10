@@ -4,8 +4,12 @@ import { Topic } from '@taucad/events';
 import type { WorkbenchEntries } from '@taucad/workbench';
 import type { RecordHealth } from '#workbench-records/record-health.js';
 
-/** Where a settings record stands, most urgent first. */
-export type RecordIssueState = 'unconfirmed' | 'invalid' | 'newer' | 'unavailable' | 'reading';
+/**
+ * Where a settings record stands, most urgent first. Every state is a problem a
+ * person can act on: routine re-reads and bounded read retries publish nothing,
+ * so the header trigger never flashes while a record is fine.
+ */
+export type RecordIssueState = 'unconfirmed' | 'invalid' | 'newer' | 'unavailable';
 export type RecordIssueKind = 'entries' | 'view' | 'layout';
 
 /** One settings record that needs a person, published by the host that owns its store. */
@@ -30,13 +34,7 @@ export type RecordIssue = Readonly<{
   repair?: (record: WorkbenchEntries, reviewed: Uint8Array<ArrayBuffer> | null) => Promise<boolean>;
 }>;
 
-export const recordIssueUrgency: readonly RecordIssueState[] = [
-  'unconfirmed',
-  'invalid',
-  'newer',
-  'unavailable',
-  'reading',
-];
+export const recordIssueUrgency: readonly RecordIssueState[] = ['unconfirmed', 'invalid', 'newer', 'unavailable'];
 
 /**
  * One record's issue state from its refusal and health, or none while it is fine.
@@ -55,10 +53,7 @@ export function recordIssueState(
   if (refusal) {
     return refusal.code === 'INVALID_RECORD' ? 'invalid' : 'newer';
   }
-  if (health?.read === 'unavailable') {
-    return 'unavailable';
-  }
-  return health?.read === 'retrying' ? 'reading' : undefined;
+  return health?.read === 'unavailable' ? 'unavailable' : undefined;
 }
 
 /** The trigger's and the sidebar's words for a project's records: the most urgent label and the count. */
@@ -74,9 +69,7 @@ export function summarizeRecordIssues(
       ? 'Save not confirmed'
       : state === 'invalid' || state === 'newer'
         ? 'Settings not applied'
-        : state === 'unavailable'
-          ? 'Settings unavailable'
-          : 'Reading settings…';
+        : 'Settings unavailable';
   return { state, label, count: issues.length };
 }
 

@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandAnswer, HostCommand, ReadAnswer } from '@taucad/agent-host/wire';
 import { ChatSessionStore } from '#services/chat-session-store.js';
+import { chunksOf } from '#machines/chat-projection.logic.js';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
-import { lifecycleRow } from '#machines/chat-projection.fixture.js';
+import { compactRow, lifecycleRow, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 
@@ -11,6 +12,174 @@ const unusedHostCommand = async (): Promise<never> => {
 };
 
 describe('ChatSessionStore.observe', () => {
+  for (const { ending, sameTurn } of [
+    { ending: 'live-ended', sameTurn: false },
+    { ending: 'unreadable', sameTurn: false },
+    { ending: 'live-ended', sameTurn: true },
+    { ending: 'unreadable', sameTurn: true },
+  ] as const) {
+    it(`retires the fenced-reader retry when its retained attachment becomes ${ending} ${sameTurn ? 'before' : 'after'} retry scheduling`, async () => {
+      const store = new ChatSessionStore();
+      const release = store.observe('chat_retry_owner', 'project_1');
+      let answer: Parameters<AgentHostClient['subscribe']>[3];
+      let endLive: (() => void) | undefined;
+      const connect = vi.fn(async () => ({
+        catchUp: writerOwnedCatchUp,
+        read: vi.fn(),
+        close: async () => undefined,
+        hostCommand: unusedHostCommand,
+        subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+          answer = parameters[3];
+          return vi.fn();
+        },
+        subscribeLive: (
+          _chatId: string,
+          _listener: Parameters<AgentHostClient['subscribeLive']>[1],
+          ended?: () => void,
+        ) => {
+          endLive = ended;
+          return vi.fn();
+        },
+      }));
+      const unpublish = store.publishProjectHostConnector('project_1', connect);
+      try {
+        await vi.waitFor(() => {
+          expect(answer).toBeDefined();
+        });
+        vi.useFakeTimers();
+        answer?.({ status: 'refused', chatId: 'chat_retry_owner', reason: 'owner-fenced' });
+        if (!sameTurn) {
+          await Promise.resolve();
+        }
+        if (ending === 'live-ended') {
+          endLive?.();
+        } else {
+          answer?.({ status: 'refused', chatId: 'chat_retry_owner', reason: 'unreadable' });
+        }
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(250);
+        expect(connect).toHaveBeenCalledOnce();
+        await vi.advanceTimersByTimeAsync(250);
+        expect(connect).toHaveBeenCalledTimes(ending === 'live-ended' ? 2 : 1);
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(connect).toHaveBeenCalledTimes(ending === 'live-ended' ? 2 : 1);
+      } finally {
+        unpublish();
+        release();
+        vi.useRealTimers();
+      }
+    });
+  }
+
+  it('retains live delivery while the existing retry owner recaptures a fenced reader', async () => {
+    const store = new ChatSessionStore();
+    const release = store.observe('chat_reader_recovery', 'project_1');
+    let answer: Parameters<AgentHostClient['subscribe']>[3];
+    let ended: (() => void) | undefined;
+    let live: Parameters<AgentHostClient['subscribeLive']>[1] | undefined;
+    const liveState = { active: false };
+    let captures = 0;
+    const close = vi.fn(async () => undefined);
+    const stopLive = vi.fn(() => {
+      liveState.active = false;
+    });
+    const subscribeLive = vi.fn((_chatId: string, listener: Parameters<AgentHostClient['subscribeLive']>[1]) => {
+      liveState.active = true;
+      live = listener;
+      return stopLive;
+    });
+    const catchUp = async function* (): ReturnType<AgentHostClient['catchUp']> {
+      captures += 1;
+      if (captures === 1) {
+        yield {
+          type: 'refused',
+          answer: { status: 'refused', chatId: 'chat_reader_recovery', reason: 'writer-owned' },
+        };
+        return;
+      }
+      yield {
+        type: 'page',
+        answer: {
+          status: 'batch',
+          chatId: 'chat_reader_recovery',
+          sourceGeneration: 'replacement-writer',
+          cursor: 0,
+          nextCursor: 2,
+          endCursor: 2,
+          facts: [lifecycleRow(0, 'admitted', 'same-run'), lifecycleRow(1, 'running', 'same-run')].map((row) =>
+            compactRow(row),
+          ),
+        },
+      };
+      yield {
+        type: 'validated',
+        health: { historyIntact: true, newerHistory: false, quarantined: false },
+        position: {
+          cursor: 2,
+          sourceGeneration: 'replacement-writer',
+          last: { leaderEpoch: 'g1', sequence: 1 },
+        },
+        observedEndCursor: 2,
+      };
+    };
+    const connect = vi.fn(async () => ({
+      catchUp,
+      read: vi.fn(),
+      close,
+      hostCommand: unusedHostCommand,
+      subscribeLive,
+      subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+        answer = parameters[3];
+        ended = parameters[2];
+        return vi.fn();
+      },
+    }));
+    const unpublish = store.publishProjectHostConnector('project_1', connect);
+    try {
+      await vi.waitFor(() => {
+        expect(answer).toBeDefined();
+      });
+      answer?.({ status: 'refused', chatId: 'chat_reader_recovery', reason: 'owner-fenced' });
+      ended?.();
+      await Promise.resolve();
+      if (liveState.active) {
+        live?.('chat_reader_recovery', {
+          chatId: 'chat_reader_recovery',
+          runId: 'same-run',
+          sourceGeneration: 'replacement-writer',
+          type: 'text-delta',
+          messageId: 'assistant-1',
+          contentIndex: 0,
+          delta: 'first resumed prefix',
+        });
+      }
+      await vi.waitFor(() => {
+        expect(captures).toBe(2);
+      });
+      expect(connect).toHaveBeenCalledOnce();
+      expect(subscribeLive).toHaveBeenCalledOnce();
+      expect(stopLive).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
+      expect(chunksOf(store.getProjection('chat_reader_recovery')?.live?.chunks)).toContainEqual(
+        expect.objectContaining({ type: 'text-delta', delta: 'first resumed prefix' }),
+      );
+    } finally {
+      unpublish();
+      release();
+    }
+  });
+
+  it('should refuse cross-project acquisition before allocating a retained session', () => {
+    const store = new ChatSessionStore();
+    const release = store.observe('shared-chat', 'original-project');
+    expect(() => store.acquire('shared-chat', 'other-project')).toThrow('already observed');
+    expect(store.get('shared-chat')).toBeUndefined();
+    expect(store.observedChatIdsOf('original-project')).toEqual(['shared-chat']);
+    expect(store.observedChatIdsOf('other-project')).toEqual([]);
+    release();
+    expect(store.observedChatIdsOf('original-project')).toEqual([]);
+  });
+
   it('answers a reloaded approval from the projected run without acquiring a chat or sending Start', async () => {
     const store = new ChatSessionStore();
     const release = store.observe('chat_approval', 'project_1');
@@ -24,11 +193,13 @@ describe('ChatSessionStore.observe', () => {
       }),
     );
     const unpublish = store.publishProjectHostConnector('project_1', async () => ({
+      catchUp: writerOwnedCatchUp,
       read: vi.fn(),
       subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
         queueMicrotask(() => {
           parameters[3]?.({
             status: 'batch',
+            sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
             chatId: 'chat_approval',
             cursor: 0,
             nextCursor: 4,
@@ -88,12 +259,14 @@ describe('ChatSessionStore.observe', () => {
     const unpublish = store.publishProjectHostConnector(
       'project_close',
       async () => ({
+        catchUp: writerOwnedCatchUp,
         read: vi.fn(),
         subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
           const { chatId } = parameters[0];
           queueMicrotask(() => {
             parameters[3]?.({
               status: 'batch',
+              sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
               chatId,
               cursor: 0,
               nextCursor: 2,
@@ -141,11 +314,13 @@ describe('ChatSessionStore.observe', () => {
       }),
     );
     const unpublish = store.publishProjectHostConnector('project_1', async () => ({
+      catchUp: writerOwnedCatchUp,
       read: vi.fn(),
       subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
         queueMicrotask(() => {
           parameters[3]?.({
             status: 'batch',
+            sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
             chatId: 'chat_unseen',
             cursor: 0,
             nextCursor: 2,
@@ -177,6 +352,7 @@ describe('ChatSessionStore.observe', () => {
     const store = new ChatSessionStore();
     const release = store.observe('chat_unreadable', 'project_1');
     const connect = vi.fn(async () => ({
+      catchUp: writerOwnedCatchUp,
       read: vi.fn(),
       subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
         queueMicrotask(() => {
@@ -205,6 +381,7 @@ describe('ChatSessionStore.observe', () => {
     const read = vi.fn(
       async ({ chatId, cursor }: { chatId: string; cursor: number }): Promise<ReadAnswer> => ({
         status: 'batch',
+        sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
         chatId,
         cursor,
         nextCursor: cursor === 0 ? 1 : cursor,
@@ -219,6 +396,7 @@ describe('ChatSessionStore.observe', () => {
         queueMicrotask(() => {
           onAnswer?.({
             status: 'batch',
+            sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
             chatId: input.chatId,
             cursor: 0,
             nextCursor: 1,
@@ -230,7 +408,10 @@ describe('ChatSessionStore.observe', () => {
       return vi.fn();
     });
     const connect = vi.fn(
-      async (_chatId: string): Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'hostCommand' | 'close'>> => ({
+      async (
+        _chatId: string,
+      ): Promise<Pick<AgentHostClient, 'read' | 'catchUp' | 'subscribe' | 'hostCommand' | 'close'>> => ({
+        catchUp: writerOwnedCatchUp,
         read,
         subscribe,
         hostCommand: unusedHostCommand,
@@ -268,8 +449,10 @@ describe('ChatSessionStore.observe', () => {
     const unpublish = store.publishProjectHostConnector(
       'project_2',
       async () => ({
+        catchUp: writerOwnedCatchUp,
         read: async (): Promise<ReadAnswer> => ({
           status: 'batch',
+          sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
           chatId: 'chat_unopened',
           cursor: 0,
           nextCursor: 2,
@@ -281,6 +464,7 @@ describe('ChatSessionStore.observe', () => {
           queueMicrotask(() => {
             onAnswer?.({
               status: 'batch',
+              sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
               chatId: 'chat_unopened',
               cursor: 0,
               nextCursor: 2,

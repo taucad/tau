@@ -50,3 +50,17 @@ it('keeps a delayed settings write and watch within the project that started the
     stopOld();
   }
 });
+
+it('acknowledges the in-memory settings watch and closes its captured lifecycle on disposal', async () => {
+  const changed = vi.fn();
+  const watch = projectFiles.fileManager.contentService.watchReady({ paths: [settingsPath] }, changed);
+  await watch.ready;
+  projectFiles.write('unrelated.txt', 'unrelated');
+  expect(changed).not.toHaveBeenCalled();
+  projectFiles.write(settingsPath, settingsBytes);
+  expect(changed).toHaveBeenCalledOnce();
+  watch.dispose();
+  await watch.closed;
+  projectFiles.write(settingsPath, settingsBytes);
+  expect(changed).toHaveBeenCalledOnce();
+});

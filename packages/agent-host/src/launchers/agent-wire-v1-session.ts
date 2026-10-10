@@ -1,6 +1,6 @@
 /**
  * The daemon's v1 half during the compatibility window (seam blueprint "Mixed builds", I32): one connection's `request`
- * call and its all-chat `events` and `liveEvents` streams, answered by the v2 launcher. A keyless v1 `start` keeps the
+ * call and its all-chat `events` and `liveEvents` streams, answered by the current launcher. A keyless v1 `start` keeps the
  * run-id replay here, and only here: a v2 start is keyed, and a fresh key on a taken run id is refused.
  *
  * ponytail: the v1 streams carry the chats this connection named in a request, from the moment it named them; the v1
@@ -90,26 +90,45 @@ export const createV1Session = (
   const rows = createStreams<V1Addressed<AgentLogEvent>>();
   const live = createStreams<V1Addressed<AgentLiveEvent>>();
   const named = new Set<string>();
+  const sourceGenerations = new Map<string, string>();
 
-  /** One read that never parks: a v1 `tail` answers at once, and clamps a cursor past the end. */
+  /** One read that never parks: omitting prior health requests a fresh observation; v1 tail still clamps. */
   const tail = async ({
     chatId,
     cursor,
     limit,
     maxBytes = batchBytes,
   }: Readonly<{ chatId: string; cursor: number; limit: number; maxBytes?: number | undefined }>): Promise<V1Batch> => {
+    if (cursor > 0 && !sourceGenerations.has(chatId)) {
+      const initial = await launcher.read({
+        chatId,
+        cursor: 0,
+        limit: 1,
+        maxBytes: batchBytes,
+      });
+      if (initial.status === 'batch' && initial.sourceGeneration !== undefined) {
+        sourceGenerations.set(chatId, initial.sourceGeneration);
+      }
+    }
     const answer: ReadAnswer = await launcher.read({
       chatId,
       cursor,
+      // A v1 cursor-zero observation bootstraps current authority, including after reader-to-writer handoff.
+      ...(cursor > 0 && sourceGenerations.has(chatId) ? { sourceGeneration: sourceGenerations.get(chatId)! } : {}),
       limit,
       maxBytes: Math.min(maxBytes, batchBytes),
-      signal: AbortSignal.abort(),
     });
     if (answer.status === 'batch') {
+      if (answer.sourceGeneration !== undefined) {
+        sourceGenerations.set(chatId, answer.sourceGeneration);
+      }
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- in-process rows are the launcher's own log events.
       return { ...answer, events: answer.events as readonly AgentLogEvent[] };
     }
-    const end = answer.expected?.endCursor ?? 0;
+    if (answer.reason === 'identity-mismatch') {
+      sourceGenerations.delete(chatId);
+    }
+    const end = answer.reason === 'identity-mismatch' ? 0 : (answer.expected?.endCursor ?? 0);
     return { cursor: end, nextCursor: end, endCursor: end, events: [] };
   };
 
@@ -121,7 +140,14 @@ export const createV1Session = (
       let cursor = end.endCursor;
       for (;;) {
         // oxlint-disable-next-line no-await-in-loop -- a long poll reads after each batch.
-        const answer = await launcher.read({ chatId, cursor, limit: 16, maxBytes: batchBytes, signal: ended.signal });
+        const answer = await launcher.read({
+          chatId,
+          cursor,
+          sourceGeneration: sourceGenerations.get(chatId),
+          limit: 16,
+          maxBytes: batchBytes,
+          signal: ended.signal,
+        });
         if (answer.status === 'refused' || answer.events.length === 0) {
           return;
         }
@@ -130,6 +156,9 @@ export const createV1Session = (
           rows.push({ chatId, event: event as AgentLogEvent });
         }
         cursor = answer.nextCursor;
+        if (answer.sourceGeneration !== undefined) {
+          sourceGenerations.set(chatId, answer.sourceGeneration);
+        }
       }
     } catch {
       // Ended; see above.
@@ -138,7 +167,8 @@ export const createV1Session = (
   const followLive = async (chatId: string): Promise<void> => {
     try {
       for await (const event of launcher.liveEvents({ chatId, signal: ended.signal })) {
-        live.push({ chatId, event });
+        const { sourceGeneration: _sourceGeneration, ...portable } = event;
+        live.push({ chatId, event: portable });
       }
     } catch {
       // Ended; see above.

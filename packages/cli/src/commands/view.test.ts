@@ -103,6 +103,7 @@ describe('viewCommand', () => {
       expect(openFunction).toHaveBeenCalledWith({
         source: { path: 'model.ts' },
         parameters: {},
+        watch: false,
       });
       expect(exportFunction).toHaveBeenCalledWith('webp', { options: { quality: 0.8 } });
       await expect(readFile(previewPath)).resolves.toEqual(Buffer.from(bytes));
@@ -126,6 +127,7 @@ describe('viewCommand', () => {
     expect(openFunction).toHaveBeenCalledWith({
       source: { path: 'model.ts' },
       parameters: { teeth: 24 },
+      watch: false,
     });
     expect(exportFunction).toHaveBeenCalledWith('webp', { options: { quality: 0.8, width: 1024, height: 576 } });
     // Parameters travel as the document's overrides; the runtime resolves them at the kernel boundary.

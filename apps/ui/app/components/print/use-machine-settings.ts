@@ -42,6 +42,7 @@ export type MachineSettingsHandle = SettingsProjection & {
   readonly flush: () => Promise<void>;
   readonly checkSave: () => Promise<void>;
   readonly useLatest: () => Promise<void>;
+  readonly retry: () => Promise<void>;
 };
 
 type ResolvedPreferences = Readonly<{ preferences?: PrintPreferences; machine?: BambuPreferences; error?: string }>;
@@ -235,9 +236,8 @@ export const useMachineSettings = (manifest: MachineManifest | undefined): Machi
     resolved.error ??
     (state.failure
       ? state.failure.result.message
-      : state.file.status === 'refused' || state.file.status === 'unavailable'
-        ? state.file.message
-        : undefined);
+      : (state.observation?.error ??
+        (state.file.status === 'refused' || state.file.status === 'unavailable' ? state.file.message : undefined)));
   return {
     ...state,
     record,
@@ -250,9 +250,17 @@ export const useMachineSettings = (manifest: MachineManifest | undefined): Machi
     updateRecord,
     reset,
     startingProfiles,
-    blocked: Boolean(error) || state.file.status === 'loading',
+    blocked:
+      Boolean(error) ||
+      state.file.status === 'loading' ||
+      state.observation?.status === 'registering' ||
+      state.observation?.status === 'pending',
     selectionBlocked:
       Boolean(state.failure) ||
+      state.observation?.status === 'registering' ||
+      state.observation?.status === 'pending' ||
+      state.observation?.status === 'closed' ||
+      state.observation?.status === 'error' ||
       state.file.status === 'loading' ||
       state.file.status === 'refused' ||
       state.file.status === 'unavailable',
@@ -267,6 +275,11 @@ export const useMachineSettings = (manifest: MachineManifest | undefined): Machi
     checkSave: async (): Promise<void> => {
       if (typeId) {
         await machineSettings.checkSave(typeId);
+      }
+    },
+    retry: async (): Promise<void> => {
+      if (typeId) {
+        await machineSettings.refresh(typeId);
       }
     },
     useLatest: async (): Promise<void> => {

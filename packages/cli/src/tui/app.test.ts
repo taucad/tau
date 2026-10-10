@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import type { AgentLogEvent } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
-import type { CommandAnswer } from '@taucad/agent-host/wire';
+import type { CommandAnswer, ReadAnswer } from '@taucad/agent-host/wire';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -655,7 +655,7 @@ describe('tau tui', () => {
           { once: true },
         );
       });
-      return { ledger, events: [], endCursor: 0, reset: false };
+      return { ledger, events: [], endCursor: 0, reset: false, sourceHealth: undefined };
     });
     try {
       const terminal = createTerminal();
@@ -718,7 +718,13 @@ describe('tau tui', () => {
     };
     const replay = vi.spyOn(agentClient, 'readNext').mockImplementation(async ({ ledger, signal }) => {
       if (ledger.position.cursor === 0) {
-        return { ledger: { ...ledger, position: { cursor: 1 } }, events: [oldRun], endCursor: 1, reset: false };
+        return {
+          ledger: { ...ledger, position: { cursor: 1 } },
+          events: [oldRun],
+          endCursor: 1,
+          reset: false,
+          sourceHealth: undefined,
+        };
       }
       await new Promise<void>((resolve) => {
         signal?.addEventListener(
@@ -729,7 +735,7 @@ describe('tau tui', () => {
           { once: true },
         );
       });
-      return { ledger, events: [], endCursor: 1, reset: false };
+      return { ledger, events: [], endCursor: 1, reset: false, sourceHealth: undefined };
     });
     try {
       const terminal = createTerminal();
@@ -848,6 +854,7 @@ describe('tau tui', () => {
           events,
           endCursor: events.length,
           reset: false,
+          sourceHealth: undefined,
         };
       }
       await new Promise<void>((resolve) => {
@@ -859,7 +866,7 @@ describe('tau tui', () => {
           { once: true },
         );
       });
-      return { ledger, events: [], endCursor: events.length, reset: false };
+      return { ledger, events: [], endCursor: events.length, reset: false, sourceHealth: undefined };
     });
     try {
       const terminal = createTerminal();
@@ -948,6 +955,7 @@ describe('tau tui', () => {
           events,
           endCursor: events.length,
           reset: false,
+          sourceHealth: undefined,
         };
       }
       await new Promise<void>((resolve) => {
@@ -959,7 +967,7 @@ describe('tau tui', () => {
           { once: true },
         );
       });
-      return { ledger, events: [], endCursor: events.length, reset: false };
+      return { ledger, events: [], endCursor: events.length, reset: false, sourceHealth: undefined };
     });
     try {
       const terminal = createTerminal();
@@ -1071,4 +1079,96 @@ describe('tau tui', () => {
     expect(stderr.join('')).toContain('needs an interactive terminal');
     expect(stderr.join('')).toContain('tau agent tail <chat> --jsonl');
   }, 120_000);
+});
+
+describe('TUI authoritative read health', () => {
+  it.each(['first-chat', 'another-chat'])(
+    'echoes exact host health, clears it on replacement, and aborts the parked %s read',
+    async (chatId) => {
+      const client = mock<AgentChannelClient>();
+      const healthy = { historyIntact: true, newerHistory: false, quarantined: false };
+      const damaged = { historyIntact: false, newerHistory: false, quarantined: true };
+      const observed = Promise.withResolvers<void>();
+      const cancelled = Promise.withResolvers<void>();
+      const batch = (sourceGeneration: string, sourceHealth: typeof healthy): ReadAnswer => ({
+        status: 'batch',
+        chatId,
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+        sourceGeneration,
+        sourceHealth,
+      });
+      const answers = [
+        batch('owner-a', healthy),
+        batch('owner-a', damaged),
+        batch('owner-b', healthy),
+        batch('owner-b', healthy),
+      ];
+      let index = 0;
+      client.execute.mockImplementation(async (command) => ({
+        commandId: command.commandId,
+        generation: 1,
+        status: 'applied',
+        effect: 'not-applied',
+        details: { endCursor: 0 },
+      }));
+      client.read.mockImplementation(async ({ signal }) => {
+        const answer = answers[index++];
+        if (answer !== undefined) {
+          return answer;
+        }
+        observed.resolve();
+        return new Promise<ReadAnswer>((_resolve, reject) => {
+          const abort = (): void => {
+            cancelled.resolve();
+            reject(new DOMException('Read cancelled', 'AbortError'));
+          };
+          if (signal?.aborted) {
+            abort();
+          } else {
+            signal?.addEventListener('abort', abort, { once: true });
+          }
+        });
+      });
+      const opened = vi
+        .spyOn(agentClient, 'openAgentChannel')
+        .mockResolvedValue({ client, url: new URL('http://127.0.0.1:1') });
+      const terminal = createTerminal();
+      const finished = runTui({
+        host: 'http://127.0.0.1:1',
+        chatId,
+        from: 0,
+        stdin: terminal.stdin,
+        stdout: terminal.stdout,
+      });
+      try {
+        await observed.promise;
+        expect(client.read.mock.calls.map(([input]) => input.sourceHealth)).toEqual([
+          undefined,
+          healthy,
+          damaged,
+          undefined,
+          healthy,
+        ]);
+        expect(client.read.mock.calls.map(([input]) => input.sourceGeneration)).toEqual([
+          undefined,
+          'owner-a',
+          'owner-a',
+          undefined,
+          'owner-b',
+        ]);
+        expect(client.read.mock.calls.every(([input]) => input.chatId === chatId)).toBe(true);
+      } finally {
+        terminal.stdin.write('q');
+        await finished;
+        await cancelled.promise;
+        opened.mockRestore();
+      }
+      expect(client.read).toHaveBeenCalledTimes(5);
+      expect(client.close).toHaveBeenCalledWith('tau tui detached');
+      expect(terminal.output()).not.toContain('The channel stopped');
+    },
+  );
 });

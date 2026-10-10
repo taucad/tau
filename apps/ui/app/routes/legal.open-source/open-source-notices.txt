@@ -796,7 +796,7 @@ The circuit kernel bundles the following components. Their full license texts ac
 | jscad-to-gltf | 0.0.5 | MIT |
 | minicssgrid | 0.0.9 | MIT |
 | ms | 2.1.3 | MIT |
-| nanoid | 3.3.16 | MIT |
+| nanoid | 5.1.14 | MIT |
 | nth-check | 2.1.1 | BSD-2-Clause |
 | object-hash | 3.0.0 | MIT |
 | papaparse | 5.5.4 | MIT |

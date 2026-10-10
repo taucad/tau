@@ -102,6 +102,12 @@ export const serveAgentChannel = (
     },
     // oxlint-disable-next-line eslint/max-params -- @taucad/rpc ChannelServer callback contract.
     listen: (_context, name, args, signal) => {
+      if (name === 'catchUp') {
+        return launcher.catchUp({
+          ...(args as AgentWireProtocol['listens']['catchUp']['args']),
+          signal,
+        }) as AsyncIterable<never>;
+      }
       if (name === 'events') {
         return v1.events(signal) as AsyncIterable<never>;
       }

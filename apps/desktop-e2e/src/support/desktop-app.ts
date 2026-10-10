@@ -2,10 +2,10 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Environment variables retain their wire names. */
 import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import process from 'node:process';
 import { setTimeout as wait } from 'node:timers/promises';
-import type { DownloadItem, Event } from 'electron';
+import type { BrowserWindow, DownloadItem, Event } from 'electron';
 import { _electron as electron } from 'playwright';
 import type { ElectronApplication, Page } from 'playwright';
 import { expect } from 'vitest';
@@ -77,6 +77,141 @@ export const desktopDescendants = (
     })
     .map(({ pid, command }) => ({ pid, command }));
 };
+/** Observe only the launched window's main-process navigation; serialized into Electron by Playwright. */
+export const observeDesktopNavigation = (
+  window: BrowserWindow,
+  action: 'install' | 'snapshot' | 'dispose',
+): string | undefined => {
+  const owner = window as BrowserWindow & {
+    __tauNavigationObservation?: { snapshot: () => string | undefined; dispose: () => void };
+  };
+  if (action !== 'install') {
+    if (action === 'snapshot') {
+      return owner.__tauNavigationObservation?.snapshot();
+    }
+    owner.__tauNavigationObservation?.dispose();
+    return undefined;
+  }
+  owner.__tauNavigationObservation?.dispose();
+  const contents = window.webContents;
+  const emitter: NodeJS.EventEmitter = contents;
+  const started = performance.now();
+  let recorded = 0;
+  let dropped = 0;
+  let disposed = false;
+  const location = (value: unknown): Record<string, string> => {
+    if (typeof value !== 'string') {
+      return {};
+    }
+    try {
+      const url = new URL(value);
+      return { protocol: url.protocol, host: url.host, pathname: url.pathname };
+    } catch {
+      return {};
+    }
+  };
+  const scalar = (value: unknown): Record<string, number | boolean> => {
+    if (typeof value !== 'object' || value === null) {
+      return {};
+    }
+    const selected: Record<string, number | boolean> = {};
+    for (const key of ['isMainFrame', 'processId', 'routingId', 'frameProcessId', 'frameRoutingId', 'exitCode']) {
+      const entry: unknown = Reflect.get(value, key);
+      if (typeof entry === 'boolean' || (typeof entry === 'number' && Number.isFinite(entry))) {
+        selected[key] = entry;
+      }
+    }
+    return selected;
+  };
+  const write = (event: string, detail: Record<string, unknown> = {}): string | undefined => {
+    if (disposed) {
+      return;
+    }
+    if (event !== 'snapshot' && recorded >= 128) {
+      dropped += 1;
+      return;
+    }
+    recorded += 1;
+    const destroyed = contents.isDestroyed();
+    const receipt = JSON.stringify({
+      event,
+      elapsedMilliseconds: Math.round(performance.now() - started),
+      webContentsId: contents.id,
+      destroyed,
+      ...(destroyed
+        ? {}
+        : {
+            rendererPid: contents.getOSProcessId(),
+            loading: contents.isLoading(),
+            loadingMainFrame: contents.isLoadingMainFrame(),
+            ...location(contents.getURL()),
+          }),
+      ...detail,
+      recorded,
+      dropped,
+    });
+    console.info('DESKTOP MAIN NAVIGATION', receipt);
+    return receipt;
+  };
+  const listeners: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
+  const listen = (event: string, select: (args: unknown[]) => Record<string, unknown> = () => ({})): void => {
+    const handler = (...args: unknown[]): void => {
+      write(event, select(args));
+    };
+    emitter.on(event, handler);
+    listeners.push({ event, handler });
+  };
+  for (const event of [
+    'did-start-loading',
+    'did-stop-loading',
+    'dom-ready',
+    'did-finish-load',
+    'unresponsive',
+    'responsive',
+    'will-prevent-unload',
+  ]) {
+    listen(event);
+  }
+  for (const event of ['will-navigate', 'will-frame-navigate', 'did-start-navigation']) {
+    listen(event, ([details, url, , isMainFrame, frameProcessId, frameRoutingId]) => ({
+      ...scalar({ isMainFrame, frameProcessId, frameRoutingId }),
+      ...scalar(details),
+      ...scalar(typeof details === 'object' && details !== null ? Reflect.get(details, 'frame') : undefined),
+      ...location(typeof details === 'object' && details !== null ? (Reflect.get(details, 'url') ?? url) : url),
+    }));
+  }
+  listen('did-frame-navigate', ([, url, status, , isMainFrame, frameProcessId, frameRoutingId]) => ({
+    ...location(url),
+    ...scalar({ isMainFrame, frameProcessId, frameRoutingId }),
+    ...(typeof status === 'number' ? { status } : {}),
+  }));
+  listen('did-frame-finish-load', ([, isMainFrame, frameProcessId, frameRoutingId]) =>
+    scalar({ isMainFrame, frameProcessId, frameRoutingId }),
+  );
+  for (const event of ['did-fail-provisional-load', 'did-fail-load']) {
+    listen(event, ([, errorCode, , url, isMainFrame, frameProcessId, frameRoutingId]) => ({
+      ...location(url),
+      ...scalar({ isMainFrame, frameProcessId, frameRoutingId }),
+      ...(typeof errorCode === 'number' ? { errorCode } : {}),
+    }));
+  }
+  listen('render-process-gone', ([, details]) => scalar(details));
+  const dispose = (): void => {
+    if (disposed) {
+      return;
+    }
+    for (const { event, handler } of listeners) {
+      emitter.removeListener(event, handler);
+    }
+    window.removeListener('closed', dispose);
+    disposed = true;
+    delete owner.__tauNavigationObservation;
+  };
+  owner.__tauNavigationObservation = { snapshot: () => write('snapshot'), dispose };
+  window.once('closed', dispose);
+  return write('installed');
+};
+
 const completedArtifactForbiddenEnvironment = [
   'NODE_OPTIONS',
   'NODE_PATH',
@@ -201,6 +336,10 @@ export const launchDesktopApp = async (options: {
   readonly profileRoot?: string | undefined;
   /** The caller will relaunch this profile and dispose it after the final run. */
   readonly preserveProfile?: boolean | undefined;
+  /** Show the isolated fixture window for a manual operator session. */
+  readonly visible?: boolean | undefined;
+  /** Give the isolated operator window a persistent, unambiguous title. */
+  readonly windowTitle?: string | undefined;
   /** Capture startup traffic before Playwright can attach its request listener. */
   readonly captureStartupNetwork?: boolean | undefined;
   /** WAV input for Chromium's fake capture driver; leaves the OS microphone unchanged. */
@@ -215,6 +354,17 @@ export const launchDesktopApp = async (options: {
   ) {
     throw new Error('A completed-artifact run cannot override Node or packaged runtime resource paths.');
   }
+  const configuredSnapshots = process.env['TAU_E2E_TRACE_SNAPSHOTS'];
+  if (configuredSnapshots !== undefined && configuredSnapshots !== 'true' && configuredSnapshots !== 'false') {
+    throw new Error('TAU_E2E_TRACE_SNAPSHOTS must be true or false.');
+  }
+  const manual =
+    options.visible === true ||
+    Object.entries(process.env).some(
+      ([key, value]) =>
+        key.startsWith('TAU_E2E_') && key.endsWith('_MANUAL') && value !== undefined && value !== 'false',
+    );
+  const snapshots = manual || configuredSnapshots !== 'false';
   const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
   const startupNetworkLogPath = options.captureStartupNetwork ? join(userData, 'startup-network.json') : undefined;
   /* A fixed, already-lowercase leaf inside the random parent: the workspace
@@ -225,6 +375,44 @@ export const launchDesktopApp = async (options: {
   const pickedDirectory = join(pickedParent, 'tau-desktop-workspace');
   await mkdir(pickedDirectory, { recursive: true });
   const output: string[] = [];
+  const startupStarted = performance.now();
+  const startupPhases: Array<{ phase: string; elapsedMilliseconds: number }> = [];
+  const recordStartupPhase = (phase: string, url?: string): void => {
+    const receipt = { phase, elapsedMilliseconds: Math.round(performance.now() - startupStarted) };
+    startupPhases.push(receipt);
+    const location = url === undefined ? undefined : new URL(url);
+    console.info(
+      'DESKTOP STARTUP',
+      JSON.stringify({
+        ...receipt,
+        userData,
+        ...(location === undefined
+          ? {}
+          : { protocol: location.protocol, host: location.host, pathname: location.pathname }),
+      }),
+    );
+  };
+  const preserveStartupFailure = async (error: unknown): Promise<void> => {
+    const directory = join(diagnosticsRoot, `launch-${basename(userData)}`);
+    const desktopLog = await readFile(join(userData, 'logs/desktop.log'), 'utf8').catch(() => '(no desktop.log)');
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, 'diagnostics.log'),
+      [
+        `userData: ${userData}`,
+        `pickedDirectory: ${pickedDirectory}`,
+        `failure: ${error instanceof Error ? error.stack : String(error)}`,
+        '--- startup phases ---',
+        JSON.stringify(startupPhases),
+        '--- process output ---',
+        output.join(''),
+        '--- desktop.log ---',
+        desktopLog,
+      ].join('\n'),
+      'utf8',
+    );
+    console.info('DESKTOP STARTUP FAILURE', directory);
+  };
   const inheritedEnvironment = { ...(process.env as Record<string, string>) };
   const packaged = desktopE2ECompletedArtifact || options.packaged === true;
   const packagedExecutable = desktopE2ECompletedArtifact ? desktopE2EPackagedExecutable() : defaultPackagedExecutable;
@@ -241,54 +429,62 @@ export const launchDesktopApp = async (options: {
     delete inheritedEnvironment['TAU_FRONTEND_URL'];
   }
 
-  const application = await electron.launch({
-    ...(packaged ? { executablePath: packagedExecutable } : {}),
-    args: [
-      ...(packaged ? [] : [desktopRoot]),
-      `--user-data-dir=${userData}`,
-      ...(startupNetworkLogPath ? [`--log-net-log=${startupNetworkLogPath}`] : []),
-      ...webGpuArguments(),
-      ...(options.fakeMicrophonePath
-        ? [
-            '--use-fake-device-for-media-stream',
-            '--use-fake-ui-for-media-stream',
-            // Chromium's sandboxed audio service cannot read the test-owned WAV on macOS.
-            '--no-sandbox',
-            `--use-file-for-fake-audio-capture=${options.fakeMicrophonePath}`,
-          ]
-        : []),
-    ],
-    cwd: packaged ? userData : desktopRoot,
-    env: {
-      ...inheritedEnvironment,
-      NODE_ENV: 'production',
-      /* Forwarded into `window.ENV` by the shell's client allowlist, where it
-       * turns on the `tauDebug` feature flag that mounts
-       * `SectionViewTestBridge` — the viewport-framing observable. `ui-e2e`
-       * sets the same variable on its UI server for the same reason. */
-      TAU_DEBUG: process.env['TAU_DEBUG'] ?? 'true',
-      TAU_S3_ENDPOINT: process.env['TAU_S3_ENDPOINT'] ?? 'http://localhost:9000',
-      ...(options.useProductionEndpointDefaults
-        ? {}
-        : {
-            TAU_API_URL: desktopE2EApiUrl,
-            TAU_WEBSOCKET_URL: desktopE2EApiUrl.replace(/^http/u, 'ws'),
-            TAU_FRONTEND_URL: desktopE2EFrontendUrl,
-          }),
-      ...(packaged ? {} : { TAU_DESKTOP_CLIENT_ROOT: clientRoot }),
-      TAU_DESKTOP_TOKEN: options.token,
-      TAU_E2E_PICK_DIRECTORY: pickedDirectory,
-      /* Printer access codes go to the throwaway profile's file vault, never the
-       * person's login keychain, whatever the shell running the suite sets. */
-      TAU_SECRET_VAULT: 'file',
-      /* The per-user machine store and every other Tau config live in the
-       * throwaway profile too, never the person's own. */
-      TAU_CONFIG_DIR: join(userData, 'config'),
-      ...options.env,
-      TAU_E2E_HIDE_WINDOW: '1',
-      ...(packaged ? { TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1' } : {}),
-    },
-  });
+  let application: ElectronApplication;
+  recordStartupPhase('launch.before');
+  try {
+    application = await electron.launch({
+      ...(packaged ? { executablePath: packagedExecutable } : {}),
+      args: [
+        ...(packaged ? [] : [desktopRoot]),
+        `--user-data-dir=${userData}`,
+        ...(startupNetworkLogPath ? [`--log-net-log=${startupNetworkLogPath}`] : []),
+        ...webGpuArguments(),
+        ...(options.fakeMicrophonePath
+          ? [
+              '--use-fake-device-for-media-stream',
+              '--use-fake-ui-for-media-stream',
+              // Chromium's sandboxed audio service cannot read the test-owned WAV on macOS.
+              '--no-sandbox',
+              `--use-file-for-fake-audio-capture=${options.fakeMicrophonePath}`,
+            ]
+          : []),
+      ],
+      cwd: packaged ? userData : desktopRoot,
+      env: {
+        ...inheritedEnvironment,
+        NODE_ENV: 'production',
+        /* Forwarded into `window.ENV` by the shell's client allowlist, where it
+         * turns on the `tauDebug` feature flag that mounts
+         * `SectionViewTestBridge` — the viewport-framing observable. `ui-e2e`
+         * sets the same variable on its UI server for the same reason. */
+        TAU_DEBUG: process.env['TAU_DEBUG'] ?? 'true',
+        TAU_S3_ENDPOINT: process.env['TAU_S3_ENDPOINT'] ?? 'http://localhost:9000',
+        ...(options.useProductionEndpointDefaults
+          ? {}
+          : {
+              TAU_API_URL: desktopE2EApiUrl,
+              TAU_WEBSOCKET_URL: desktopE2EApiUrl.replace(/^http/u, 'ws'),
+              TAU_FRONTEND_URL: desktopE2EFrontendUrl,
+            }),
+        ...(packaged ? {} : { TAU_DESKTOP_CLIENT_ROOT: clientRoot }),
+        TAU_DESKTOP_TOKEN: options.token,
+        TAU_E2E_PICK_DIRECTORY: pickedDirectory,
+        /* Printer access codes go to the throwaway profile's file vault, never the
+         * person's login keychain, whatever the shell running the suite sets. */
+        TAU_SECRET_VAULT: 'file',
+        /* The per-user machine store and every other Tau config live in the
+         * throwaway profile too, never the person's own. */
+        TAU_CONFIG_DIR: join(userData, 'config'),
+        ...options.env,
+        TAU_E2E_HIDE_WINDOW: options.visible === true ? '0' : '1',
+        ...(packaged ? { TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1' } : {}),
+      },
+    });
+  } catch (error) {
+    await preserveStartupFailure(error).catch(() => undefined);
+    throw error;
+  }
+  recordStartupPhase('launch.after');
   const child = application.process();
   /* Installed before the first window loads, and kept for the whole session, so
    * startup and late traffic are both observed. */
@@ -309,11 +505,59 @@ export const launchDesktopApp = async (options: {
    * received a session to close. */
   const consoleErrors: string[] = [];
   let page: Page;
+  let navigationWindow: Awaited<ReturnType<ElectronApplication['browserWindow']>> | undefined;
+  let navigationInstallation: 'pending' | 'installed' | 'unavailable' = 'pending';
+  let navigationDisposed = false;
+  let navigationObservation = Promise.resolve();
+  const isNavigationDisposed = (): boolean => navigationDisposed;
+  const disposeNavigation = async (): Promise<void> => {
+    navigationDisposed = true;
+    try {
+      await navigationWindow?.evaluate<string | undefined, 'dispose'>(observeDesktopNavigation, 'dispose');
+    } catch {
+      // Process/window teardown may already have closed the diagnostic inspector.
+    }
+  };
   try {
     /* A packaged launch releases main bootstrap before its first window exists.
      * Configure the main-process test overrides only after that startup boundary. */
+    recordStartupPhase('firstWindow.before');
     page = await application.firstWindow();
+    recordStartupPhase('firstWindow.after', page.url());
+    navigationObservation = (async () => {
+      try {
+        const ownedWindow = await application.browserWindow(page);
+        navigationWindow = ownedWindow;
+        if (isNavigationDisposed()) {
+          navigationInstallation = 'unavailable';
+          return;
+        }
+        await ownedWindow.evaluate<string | undefined, 'install'>(observeDesktopNavigation, 'install');
+        navigationInstallation = 'installed';
+        if (isNavigationDisposed()) {
+          await ownedWindow.evaluate<string | undefined, 'dispose'>(observeDesktopNavigation, 'dispose');
+        }
+      } catch {
+        navigationInstallation = 'unavailable';
+      }
+    })();
+    recordStartupPhase('domcontentloaded.before');
     await page.waitForLoadState('domcontentloaded');
+    recordStartupPhase('domcontentloaded.after', page.url());
+    // Main bootstrap still awaits its initial loadURL after DOM readiness.
+    recordStartupPhase('initial-app-load.before', page.url());
+    await page.waitForURL((url) => url.protocol === 'app:' && url.host === 'tau', { waitUntil: 'load' });
+    recordStartupPhase('initial-app-load.after', page.url());
+    if (options.windowTitle !== undefined) {
+      const ownedWindow = await application.browserWindow(page);
+      await ownedWindow.evaluate((window: BrowserWindow, title) => {
+        window.setTitle(title);
+        window.on('page-title-updated', (event: { preventDefault: () => void }) => {
+          event.preventDefault();
+          window.setTitle(title);
+        });
+      }, options.windowTitle);
+    }
     if (options.fakeMicrophonePath) {
       // Chromium recommends disabling DSP for calibrated file microphone input.
       // Keep the real capture driver; change only its audio-processing constraints.
@@ -335,6 +579,7 @@ export const launchDesktopApp = async (options: {
         };
       });
     }
+    recordStartupPhase('main-overrides.before');
     await application.evaluate(({ dialog, shell }, selectedDirectory) => {
       const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
       shell.openExternal = async (url): Promise<void> => {
@@ -343,6 +588,7 @@ export const launchDesktopApp = async (options: {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selectedDirectory] });
       dialog.showMessageBox = async () => ({ checkboxChecked: false, response: 1 });
     }, pickedDirectory);
+    recordStartupPhase('main-overrides.after');
     page.setDefaultTimeout(60_000);
     page.on('console', (message) => {
       if (message.type() === 'error') {
@@ -350,9 +596,14 @@ export const launchDesktopApp = async (options: {
       }
     });
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
-    await page.context().tracing.start({ screenshots: true, snapshots: true });
+    console.info('DESKTOP TRACE OPTIONS', JSON.stringify({ screenshots: true, snapshots, manual }));
+    recordStartupPhase('tracing.before');
+    await page.context().tracing.start({ screenshots: true, snapshots });
+    recordStartupPhase('tracing.after', page.url());
   } catch (error) {
+    void disposeNavigation();
     child.kill('SIGKILL');
+    await preserveStartupFailure(error).catch(() => undefined);
     /* The shell's own output is the only account of why it went away, and the
      * caller has no session to read it from. */
     throw new Error(`The desktop shell did not survive launch.\n${output.join('')}`, { cause: error });
@@ -378,30 +629,101 @@ export const launchDesktopApp = async (options: {
     captured = true;
     const directory = join(diagnosticsRoot, label);
     await mkdir(directory, { recursive: true });
+    const location = new URL(page.url());
+    const url = { protocol: location.protocol, host: location.host, pathname: location.pathname };
+    const desktopLog = await readFile(join(userData, 'logs/desktop.log'), 'utf8').catch(() => '(no desktop.log)');
+    const pickedTree = await tree(pickedDirectory);
+    const homeTree = await tree(join(userData, 'home'));
+    const grants = await readFile(join(userData, 'granted-roots.json'), 'utf8').catch(() => '(none)');
+    // Persist available evidence before any renderer or trace operation can stall.
+    await writeFile(
+      join(directory, 'diagnostics.log'),
+      [
+        `url: ${JSON.stringify(url)}`,
+        `userData: ${userData}`,
+        `pickedDirectory: ${pickedDirectory}`,
+        '--- console errors ---',
+        consoleErrors.join('\n'),
+        '--- process output ---',
+        output.join(''),
+        '--- desktop.log ---',
+        desktopLog,
+        '--- picked directory ---',
+        pickedTree.join('\n'),
+        '--- home root ---',
+        homeTree.join('\n'),
+        '--- granted roots ---',
+        grants,
+        '--- renderer/trace collection pending ---',
+      ].join('\n'),
+      'utf8',
+    );
+    // Main observation is best-effort and never delays the original renderer failure or trace collection.
+    const navigationPath = join(directory, 'main-navigation.json');
+    await writeFile(
+      navigationPath,
+      JSON.stringify({ status: 'pending', installation: navigationInstallation }),
+      'utf8',
+    );
+    const captureNavigation = async (): Promise<void> => {
+      try {
+        await navigationObservation;
+        if (navigationInstallation !== 'installed' || navigationWindow === undefined) {
+          await writeFile(
+            navigationPath,
+            JSON.stringify({ status: 'unavailable', installation: navigationInstallation }),
+            'utf8',
+          );
+          return;
+        }
+        const receipt = await navigationWindow.evaluate<string | undefined, 'snapshot'>(
+          observeDesktopNavigation,
+          'snapshot',
+        );
+        await writeFile(
+          navigationPath,
+          JSON.stringify({ status: receipt === undefined ? 'unavailable' : 'complete', receipt }),
+          'utf8',
+        );
+      } catch {
+        try {
+          await writeFile(
+            navigationPath,
+            JSON.stringify({ status: 'unavailable', installation: navigationInstallation }),
+            'utf8',
+          );
+        } catch {
+          // The initial pending receipt survives an unavailable process or artifact destination.
+        }
+      }
+    };
+    void captureNavigation();
     if (tracing) {
       tracing = false;
       /* A quit-path failure can close the renderer before diagnostics run;
        * retain Home/process/event logs even when its trace can no longer stop. */
-      await page
-        .context()
-        .tracing.stop({ path: join(directory, 'trace.zip') })
-        .catch(() => undefined);
+      await Promise.race([
+        page
+          .context()
+          .tracing.stop({ path: join(directory, 'trace.zip') })
+          .catch(() => undefined),
+        wait(5000),
+      ]);
     }
     await page
       .screenshot({ path: join(directory, 'screenshot.png'), fullPage: true, timeout: 10_000 })
       .catch(() => undefined);
-    const desktopLog = await readFile(join(userData, 'logs/desktop.log'), 'utf8').catch(() => '(no desktop.log)');
-    const bodyText = await page
-      // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- `innerText` keeps the rendered line breaks that make this readable.
-      .evaluate(() => document.body.innerText.slice(0, 2000))
-      .catch(() => '(unavailable)');
-    const pickedTree = await tree(pickedDirectory);
-    const homeTree = await tree(join(userData, 'home'));
-    const grants = await readFile(join(userData, 'granted-roots.json'), 'utf8').catch(() => '(none)');
+    const bodyText = await Promise.race([
+      page
+        // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- `innerText` preserves rendered line breaks in diagnostics.
+        .evaluate(() => document.body.innerText.slice(0, 2000))
+        .catch(() => '(unavailable)'),
+      wait(5000, '(unavailable: renderer collection deadline)'),
+    ]);
     await writeFile(
       join(directory, 'diagnostics.log'),
       [
-        `url: ${page.url()}`,
+        `url: ${JSON.stringify(url)}`,
         `body: ${bodyText}`,
         `userData: ${userData}`,
         `pickedDirectory: ${pickedDirectory}`,
@@ -424,12 +746,16 @@ export const launchDesktopApp = async (options: {
   };
 
   const close = async (): Promise<void> => {
+    void disposeNavigation();
     if (tracing) {
       tracing = false;
-      await page
-        .context()
-        .tracing.stop()
-        .catch(() => undefined);
+      await Promise.race([
+        page
+          .context()
+          .tracing.stop()
+          .catch(() => undefined),
+        wait(5000),
+      ]);
     }
     const exited =
       child.exitCode === null && child.signalCode === null

@@ -614,6 +614,49 @@
       "kind": "witness",
       "ref": "W6.r1 finding 8 (Restore = FALSE): a failed open unregisters the previous host, which stays open with nothing to close it (6-state trace)"
     },
+    "SeamCatchUp.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "T6: provisional captured pages remain hidden; fresh final source proof gates atomic commit and all terminal paths release."
+    },
+    "SeamCatchUp.today-CapturedHealth.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "SourceHealthTruth" },
+      "kind": "defect",
+      "ref": "Captured kept rows omit malformed-line health; atomic validated publication must retain captured host history integrity.",
+      "fixedBy": "D20 compact projection source health"
+    },
+    "SeamCatchUp.today-ReadHealth.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "SourceHealthTruth" },
+      "kind": "defect",
+      "ref": "Appended malformed bytes preserve kept cursor but change host health; a matching health echo is required before parking.",
+      "fixedBy": "D20 source health echo on ordinary reads"
+    },
+    "SeamCatchUp.unsafe-ByteProof.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ValidatedSource"
+      },
+      "kind": "witness",
+      "ref": "T6 D14: ignoring exact prefix proof accepts silent same-epoch same-length replacement despite valid owner."
+    },
+    "SeamCatchUp.unsafe-NoPartialCommit.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoPartialCommit"
+      },
+      "kind": "witness",
+      "ref": "T6: publishing a provisional page exposes unvalidated capture before atomic Read refinement."
+    },
+    "SeamCatchUp.unsafe-ValidatedSource.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ValidatedSource"
+      },
+      "kind": "witness",
+      "ref": "T6: removing final proof can validate captured rows after source replacement or writer claim."
+    },
     "SeamDelivery.clamp-ProjectionIsPrefix.cfg": {
       "tier": "pr",
       "expect": {

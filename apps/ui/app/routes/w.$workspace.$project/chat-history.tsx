@@ -123,6 +123,9 @@ const ChatHistoryEmptyPlaceholder = (): React.JSX.Element => (
     <ChatHistoryEmpty />
   </div>
 );
+// Initial positioning waits for Virtuoso's measured content, including an initially empty pane.
+const initialChatTurn = { index: 'LAST', align: 'start' } as const;
+
 const virtuosoComponents = {
   Scroller: ChatScroller,
   Header: ChatHistoryHeader,
@@ -256,13 +259,13 @@ const ExpandedChatHistory = memo(function ({
   // defers the scroll until after Virtuoso lays out the new last item, so
   // `scrollToIndex` measures the spacer height correctly.
   const lastTurnId = groups.at(-1)?.messageIds[0];
-  const previousLastTurnIdRef = useRef(lastTurnId);
+  // A populated transcript may arrive before this pane mounts; it still opens at its latest turn.
+  const previousLastTurnIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (lastTurnId === previousLastTurnIdRef.current) {
       return;
     }
-    previousLastTurnIdRef.current = lastTurnId;
     const frame = requestAnimationFrame(() => {
       const scroller = virtuosoRef.current;
       if (!scroller) {
@@ -273,6 +276,7 @@ const ExpandedChatHistory = memo(function ({
         align: 'start',
         behavior: instantScrollBehavior,
       });
+      previousLastTurnIdRef.current = lastTurnId;
     });
     return () => {
       cancelAnimationFrame(frame);
@@ -328,6 +332,7 @@ const ExpandedChatHistory = memo(function ({
               <Virtuoso
                 ref={virtuosoRef}
                 data={groups}
+                initialTopMostItemIndex={initialChatTurn}
                 itemContent={renderItem}
                 computeItemKey={computeItemKey}
                 followOutput={followOutput}

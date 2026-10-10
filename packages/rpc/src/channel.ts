@@ -439,16 +439,37 @@ const resolveStreamFlowControl = (options?: StreamFlowControlOptions): ResolvedS
   return { initialCredits, maxFrameBytes, maxOwnedBytes };
 };
 
-const textEncoder = new TextEncoder();
-
-/** Deterministic structured-clone payload estimate used for stream ownership bounds. */
+/**
+ * Deterministic structured-clone payload estimate used for stream ownership bounds.
+ * @param value - Owned structured-clone payload.
+ * @returns The charge against the existing stream ownership budget.
+ */
 const estimateOwnedBytes = (value: unknown): number => {
+  // TextEncoder replaces unpaired UTF-16 surrogates with the three-byte U+FFFD.
+  // Count that exact representation without allocating a payload-sized encoded copy.
+  const utf8ByteLength = (text: string): number => {
+    let bytes = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.codePointAt(index)!;
+      if (code < 0x80) {
+        bytes += 1;
+      } else if (code < 0x8_00) {
+        bytes += 2;
+      } else if (code <= 0xff_ff) {
+        bytes += 3;
+      } else {
+        bytes += 4;
+        index += 1;
+      }
+    }
+    return bytes;
+  };
   const seenObjects = new Set<unknown>();
   const seenBuffers = new Set<ArrayBufferLike>();
   // oxlint-disable-next-line eslint/complexity -- every structured-clone collection kind must share cycle tracking.
   const visit = (item: unknown): number => {
     if (typeof item === 'string') {
-      return textEncoder.encode(item).byteLength;
+      return utf8ByteLength(item);
     }
     if (typeof item === 'number' || typeof item === 'bigint') {
       return 8;
@@ -484,7 +505,7 @@ const estimateOwnedBytes = (value: unknown): number => {
       return 8;
     }
     if (item instanceof RegExp) {
-      return textEncoder.encode(item.source + item.flags).byteLength;
+      return utf8ByteLength(item.source) + utf8ByteLength(item.flags);
     }
     if (typeof Blob !== 'undefined' && item instanceof Blob) {
       return item.size;
@@ -511,7 +532,7 @@ const estimateOwnedBytes = (value: unknown): number => {
       return total;
     }
     return Object.entries(item as Record<string, unknown>).reduce(
-      (total, [key, entry]) => total + textEncoder.encode(key).byteLength + visit(entry),
+      (total, [key, entry]) => total + utf8ByteLength(key) + visit(entry),
       0,
     );
   };

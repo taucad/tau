@@ -236,7 +236,7 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
   );
   const getSnapshot = useCallback((): T => {
     const chat = store.get(activeChatId)?.chat;
-    const messages = chat?.messages ?? emptyMessages;
+    const messages = store.get(activeChatId)?.messages ?? emptyMessages;
     const projection = store.getProjection(activeChatId);
     const status = selectVisibleChatStatus(chat?.status ?? 'ready', projection);
     const draftContext = draftActorRef.getSnapshot().context;

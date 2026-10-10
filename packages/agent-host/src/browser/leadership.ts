@@ -15,7 +15,7 @@ import type { LeadershipFrame } from '#launchers/leadership/frames.js';
 import { firedLate, leadershipMachine } from '#launchers/leadership/leadership.machine.js';
 import type { LeadershipEffectArgs, LockMode } from '#launchers/leadership/leadership.machine.js';
 import { chatLeadershipNames } from '#launchers/leadership/names.js';
-import type { AgentLiveEvent } from '#waist/ports.js';
+import type { SourceLiveEvent } from '#waist/ports.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
 import { agentWireVersion } from '#wire/frames.schema.js';
 import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
@@ -465,7 +465,7 @@ export const createBrowserLeadership =
       quiescent: (chatId, quiescent) => {
         chats.get(chatId)?.actor.send({ type: 'quiescent', quiescent });
       },
-      liveEvent: (event: AgentLiveEvent) => {
+      liveEvent: (event: SourceLiveEvent) => {
         const chat = chats.get(event.chatId);
         const snapshot = chat?.actor.getSnapshot();
         if (chat !== undefined && snapshot?.hasTag('leading') === true) {

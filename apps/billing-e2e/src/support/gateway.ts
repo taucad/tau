@@ -44,11 +44,11 @@ export const insufficientCreditDetailsSchema = z
 /** The catalog routes the rows call: the program's Haiku pathway, and the route that proves settlement end to end. */
 export const gatewayRoutes = {
   haiku: {
-    routeId: 'anthropic-claude-haiku-4.5',
-    modelName: 'Haiku 4.5',
+    routeId: 'anthropic-claude-haiku-5.5',
+    modelName: 'Haiku 5.5',
     path: '/v1/llm/anthropic/v1/messages',
     body: (prompt: string, maximumTokens: number): Record<string, unknown> => ({
-      model: 'anthropic-claude-haiku-4.5',
+      model: 'anthropic-claude-haiku-5.5',
       messages: [{ role: 'user', content: prompt }],
       // eslint-disable-next-line @typescript-eslint/naming-convention -- provider wire field
       max_tokens: maximumTokens,

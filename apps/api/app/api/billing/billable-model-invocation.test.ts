@@ -162,7 +162,7 @@ describe('BillableModelInvocationService', () => {
         ['anthropic-claude-sonnet-5.5', 'claude-sonnet-5-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-sonnet-5', 'claude-sonnet-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-sonnet-4.6', 'claude-sonnet-4-6', 'anthropic', 'max_tokens'],
-        ['anthropic-claude-haiku-4.5', 'claude-haiku-4-5-20251001', 'anthropic', 'max_tokens'],
+        ['anthropic-claude-haiku-5.5', 'claude-haiku-5-5', 'anthropic', 'max_tokens'],
         ['openai-gpt-6-astra', 'gpt-6-astra', 'openai-responses', 'max_output_tokens'],
         ['openai-gpt-6-sol', 'gpt-6-sol', 'openai-responses', 'max_output_tokens'],
         ['openai-gpt-6-luna', 'gpt-6-luna', 'openai-responses', 'max_output_tokens'],

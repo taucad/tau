@@ -32,6 +32,75 @@ function createDefaultOptions(overrides?: Partial<UseChatEditorOptions>): UseCha
 }
 
 describe('useChatEditor', () => {
+  it('should refresh an open slash query when catalog commands arrive without another keystroke', async () => {
+    const command = {
+      id: 'gateway-observation',
+      label: '/gateway-observation',
+      description: 'Settled gateway skill',
+      group: 'Skills',
+    };
+    const { result, rerender } = renderHook(
+      ({ items }) => useChatEditor(createDefaultOptions({ slashCommandItems: items })),
+      {
+        initialProps: { items: [] as NonNullable<UseChatEditorOptions['slashCommandItems']> },
+      },
+    );
+    await waitFor(() => {
+      expect(result.current.editor).not.toBeNull();
+    });
+    act(() => {
+      result.current.editor!.commands.focus();
+      result.current.editor!.commands.insertContent('/gateway-');
+    });
+    await waitFor(() => {
+      expect(result.current.slashCommandState?.query).toBe('gateway-');
+    });
+    expect(result.current.slashCommandState?.items).toEqual([]);
+    const { editor } = result.current;
+    rerender({ items: [command] });
+    await waitFor(() => {
+      expect(result.current.slashCommandState?.items).toEqual([command]);
+    });
+    expect(result.current.editor).toBe(editor);
+    expect(extractContent(editor!).text).toBe('/gateway-');
+  });
+
+  it('should withdraw an open slash command and refuse a previously captured selection after catalog removal', async () => {
+    const command = {
+      id: 'gateway-observation',
+      label: '/gateway-observation',
+      description: 'Settled gateway skill',
+      group: 'Skills',
+    };
+    const onSlashCommand = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ items }) => useChatEditor(createDefaultOptions({ slashCommandItems: items, onSlashCommand })),
+      {
+        initialProps: { items: [command] as NonNullable<UseChatEditorOptions['slashCommandItems']> },
+      },
+    );
+    await waitFor(() => {
+      expect(result.current.editor).not.toBeNull();
+    });
+    act(() => {
+      result.current.editor!.commands.focus();
+      result.current.editor!.commands.insertContent('/gateway-');
+    });
+    await waitFor(() => {
+      expect(result.current.slashCommandState?.items).toEqual([command]);
+    });
+    const selectRetired = result.current.slashCommandState!.command;
+    rerender({ items: [] });
+    act(() => {
+      selectRetired(command);
+    });
+    expect(onSlashCommand).not.toHaveBeenCalled();
+    expect(extractContent(result.current.editor!).text).toBe('/gateway-');
+    await waitFor(() => {
+      expect(result.current.slashCommandState?.items ?? []).toEqual([]);
+    });
+  });
+
   it('should register /compress as a disabled default slash command', () => {
     expect(defaultCommands).toEqual([
       expect.objectContaining({
@@ -148,6 +217,37 @@ describe('useChatEditor', () => {
     await waitFor(() => {
       expect(result.current.slashCommandState?.items).toEqual([dollarSkill]);
     });
+  });
+
+  it('should refresh an unchanged dollar query from an inline mixed catalog without replacing the editor or selection', async () => {
+    const dollar = { id: 'dollar', label: '$gateway-skill', description: 'Initial', group: 'Skills' };
+    const slash = { id: 'slash', label: '/gateway-command', description: 'Slash', group: 'Commands' };
+    const { result, rerender } = renderHook(
+      ({ items }: { items: NonNullable<UseChatEditorOptions['slashCommandItems']> }) =>
+        useChatEditor(createDefaultOptions({ slashCommandItems: [...items] })),
+      { initialProps: { items: [dollar, slash] } },
+    );
+    await waitFor(() => {
+      expect(result.current.editor).not.toBeNull();
+    });
+    act(() => {
+      result.current.editor!.commands.focus();
+      result.current.editor!.commands.insertContent('$gateway-');
+    });
+    await waitFor(() => {
+      expect(result.current.slashCommandState?.items).toEqual([dollar]);
+    });
+    const editor = result.current.editor!;
+    const { selection } = editor.state;
+    const updated = { ...dollar, description: 'Updated' };
+    const added = { id: 'added', label: '$gateway-added', description: 'Added', group: 'Skills' };
+    rerender({ items: [updated, slash, added] });
+    expect(result.current.slashCommandState?.items).toEqual([updated, added]);
+    rerender({ items: [updated, slash, added] });
+    expect(result.current.slashCommandState?.items).toEqual([updated, added]);
+    expect(result.current.editor).toBe(editor);
+    expect(editor.state.selection).toBe(selection);
+    expect(extractContent(editor).text).toBe('$gateway-');
   });
 
   it('should not open a $ menu when the agent offers no $ skills', async () => {

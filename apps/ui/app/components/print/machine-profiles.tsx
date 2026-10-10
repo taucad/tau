@@ -448,6 +448,24 @@ export function MachineProfiles({
               : ''}
             {settings.error}
           </p>
+          {(settings.file.status === 'unavailable' ||
+            settings.observation?.status === 'closed' ||
+            settings.observation?.status === 'error') && (
+            <Button
+              size='xs'
+              variant='outline'
+              aria-label='Retry settings updates'
+              onClick={async () => {
+                try {
+                  await settings.retry();
+                } catch (error) {
+                  setMessage(String(error));
+                }
+              }}
+            >
+              Retry updates
+            </Button>
+          )}
           {settings.failure?.result.status === 'uncertain' ? (
             <Button
               size='xs'

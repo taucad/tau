@@ -299,6 +299,9 @@ export class GitRepositoryService {
    */
   #inFlightLeases = 0;
 
+  /** The boot sweep, which admission waits on so it never builds a lease the sweep is removing. */
+  readonly #bootSweep: Promise<void>;
+
   /**
    * The same leases, per owner, so admission can be fair (D22, L6-F3): an
    * owner who already holds a lease never takes this worker's last free slot,
@@ -334,7 +337,8 @@ export class GitRepositoryService {
     /* A crash restarts a Machine in place on the same rootfs, so boot is the
        first chance to give the dead worker's disk back (W10 defect 2). Tracked
        rather than awaited: nothing may wait on a sweep to serve a request. */
-    this.track(this.sweepAbandonedLeases());
+    this.#bootSweep = this.sweepAbandonedLeases({ atBoot: true });
+    this.track(this.#bootSweep);
   }
 
   /**
@@ -1030,10 +1034,15 @@ export class GitRepositoryService {
    * worker is the only process that will ever boot again after a crash in
    * place, and admission is the moment the leaked bytes matter.
    *
+   * At boot it also removes this process's own directory. A Machine restarted
+   * in place usually starts the API under the same pid, so the dead run's
+   * directory looks alive to the sibling check forever; and at boot this
+   * process holds no lease yet, so whatever is there is the dead run's.
+   *
    * ponytail: unthrottled — a `readdir` of a handful of names plus a signal-0
    * per name. Add a throttle if a machine ever hosts thousands of siblings.
    */
-  private async sweepAbandonedLeases(): Promise<void> {
+  private async sweepAbandonedLeases({ atBoot = false }: { readonly atBoot?: boolean } = {}): Promise<void> {
     const root = path.dirname(this.#leaseParent);
     let siblings: readonly string[];
     try {
@@ -1042,7 +1051,9 @@ export class GitRepositoryService {
       /* Nothing has run on this machine yet. */
       return;
     }
-    const abandoned = siblings.filter((name) => /^\d+$/u.test(name) && !processAlive(Number(name)));
+    const abandoned = siblings.filter(
+      (name) => /^\d+$/u.test(name) && ((atBoot && Number(name) === process.pid) || !processAlive(Number(name))),
+    );
     if (abandoned.length === 0) {
       return;
     }
@@ -1091,6 +1102,7 @@ export class GitRepositoryService {
    */
   private async admitLease(access: Pick<GitAccess, 'ownerId' | 'callerId' | 'viaDevice'>): Promise<() => void> {
     const { ownerId } = access;
+    await this.#bootSweep;
     await this.sweepAbandonedLeases();
     await mkdir(this.#leaseParent, { recursive: true });
     const { bavail, bsize } = await statfs(this.#leaseParent);

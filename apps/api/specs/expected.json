@@ -77,6 +77,14 @@
       "kind": "witness",
       "ref": "RV5-F1 HostDiscard: the overflow retry drops a completed reply and sends again (KeepCompleted off); W0.20 lands first (RV6-F3)"
     },
+    "GatewayInvocation.service-stop-NoLiveAbsorb.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoLiveAbsorb"
+      },
+      "kind": "witness",
+      "ref": "API graceful-shutdown R10: a stopping API absorbs a live step at once under the admitting generation"
+    },
     "GatewayInvocation.target-2workers-refunds.cfg": {
       "tier": "nightly",
       "expect": "pass",

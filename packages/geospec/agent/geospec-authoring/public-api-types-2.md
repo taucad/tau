@@ -35,37 +35,37 @@ LoadModelSourceOptions: {
   source: MeshSource | StepSource
 
   // Named external resources consumed alongside the direct geometry bytes
-  resources: ReadonlyArray<{
+  resources?: ReadonlyArray<{
           readonly name: string;
           readonly source: MeshSource | StepSource;
       }>
 
   // Source geometry format
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Source path recorded in provenance
-  path: string
+  path?: string
 
   // Human-readable source name recorded in provenance
-  name: string
+  name?: string
 
   // Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical millimetre normalization
-  sourceUnit: GeoSpecUnit
+  sourceUnit?: GeoSpecUnit
 
   // Explicit parameters recorded in provenance
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP sources
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
 // Collects suites, tests, assertions, and async completion state for one GeoSpec module execution
 GeoSpecCollector: {
@@ -105,9 +105,9 @@ GeoSpecCollectorOptions: {
     nativeAssertions: GeoSpecAssertionClientOptions;
 }
 
-  matcherWallBackstop: number
+  matcherWallBackstop?: number
 
-  forensic: boolean
+  forensic?: boolean
 
   nativeAssertions: GeoSpecAssertionClientOptions
 
@@ -129,13 +129,13 @@ DiscoverGeoSpecFilesOptions: {
 
   projectPath: string
 
-  files: readonly string[]
+  files?: readonly string[]
 
-  include: readonly string[]
+  include?: readonly string[]
 
-  exclude: readonly string[]
+  exclude?: readonly string[]
 
-  ignoredDirectories: readonly string[]
+  ignoredDirectories?: readonly string[]
 
 // File kind returned by a GeoSpec discovery filesystem
 GeoSpecDiscoveryFileKind: 'file' | 'directory'
@@ -205,28 +205,28 @@ GeoSpecRunFailure: {
 
   issues: VmIssue[]
 
-  bundle: BundleResult
+  bundle?: BundleResult
 
-  accounting: GeoSpecTestAccounting
+  accounting?: GeoSpecTestAccounting
 
-  lineage: GeoSpecRunLineage
+  lineage?: GeoSpecRunLineage
 
   // Tests registered before a module execution failure, including their retained assertions
-  tests: GeoSpecTestCase[]
+  tests?: GeoSpecTestCase[]
 
 // Result returned by {@link import ('./run-geospec-module.js').runGeoSpecModule}
 GeoSpecRunResult: GeoSpecRunSuccess | GeoSpecRunFailure
 
   success: false
 
-  bundle: BundleResult
+  bundle?: BundleResult
 
-  accounting: GeoSpecTestAccounting
+  accounting?: GeoSpecTestAccounting
 
-  lineage: GeoSpecRunLineage
+  lineage?: GeoSpecRunLineage
 
   // Tests registered before a module execution failure, including their retained assertions
-  tests: GeoSpecTestCase[]
+  tests?: GeoSpecTestCase[]
 
 // Successful GeoSpec run result
 GeoSpecRunSuccess: {
@@ -248,9 +248,9 @@ GeoSpecRunSuccess: {
 
   bundle: BundleResult
 
-  accounting: GeoSpecTestAccounting
+  accounting?: GeoSpecTestAccounting
 
-  lineage: GeoSpecRunLineage
+  lineage?: GeoSpecRunLineage
 
 // A collected GeoSpec test case
 GeoSpecTestCase: {
@@ -271,7 +271,7 @@ GeoSpecTestCase: {
 }
 
   // Registration ordinal before filtering, scoped to the source module's collection
-  ordinal: number
+  ordinal?: number
 
   // Hierarchical suite path
   suite: string[]
@@ -289,7 +289,7 @@ GeoSpecTestCase: {
   diagnostics: GeometryDiagnostic[]
 
   // Wall-clock cost of the test body plus its pending assertions, in milliseconds (R1)
-  durationMs: number
+  durationMs?: number
 
 // Test case status after runner collection
 GeoSpecTestStatus: 'passed' | 'failed' | 'unsupported' | 'inconclusive' | 'not-run' | 'skipped'
@@ -338,49 +338,49 @@ RunGeoSpecModuleOptions: {
   entryPath: string
 
   // JavaScript regular expression matched against full `suite > test` names
-  testNamePattern: string | RegExp
+  testNamePattern?: string | RegExp
 
   // Timeout for async test callbacks, in milliseconds
-  testTimeout: number
+  testTimeout?: number
 
   // Milliseconds
-  matcherWallBackstop: number
+  matcherWallBackstop?: number
 
   // Emit structured forensic events for this run
-  forensic: boolean
+  forensic?: boolean
 
   // Host-provided protocol-3 compiled assertion client
   nativeAssertions: GeoSpecAssertionClientOptions
 
   // Host-composed identity loader
-  nativeModelLoader: (options: Parameters<GeoSpecNativeModelLoader>[0]) => Promise<GeoSpecNativeSubject & {
+  nativeModelLoader?: (options: Parameters<GeoSpecNativeModelLoader>[0]) => Promise<GeoSpecNativeSubject & {
           readonly load?: GeoSpecModelLoadEvidence;
       }>
 
   // Additional in-memory modules made available to the VM
-  builtinModules: Record<string, BuiltinModule>
+  builtinModules?: Record<string, BuiltinModule>
 
   // Successful bundle cache owned by a serial runner worker
-  bundleCache: GeoSpecModuleBundleCache
+  bundleCache?: GeoSpecModuleBundleCache
 
   // List-only collection pass (R3 shard splitting)
-  collectOnly: boolean
+  collectOnly?: boolean
 
 // Native assertion options whose engine can also admit and release subjects
 GeoSpecNativeRunnerAssertions: Omit<GeoSpecAssertionClientOptions, 'engine'> & {
     readonly engine: GeoSpecNativeModelEngine;
 }
 
-  claimId: (matcher: GeoSpecMatcherName, sequence: number) => string
+  readonly claimId?: (matcher: GeoSpecMatcherName, sequence: number) => string
 
   // Success-evidence profile of every claim and query
-  evidenceProfile: GeoSpecNativeEvidenceProfile
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
 
-  subjectSlot: string
+  readonly subjectSlot?: string
 
-  workUnitLimit: number
+  readonly workUnitLimit?: number
 
-  engine: GeoSpecNativeModelEngine
+  readonly engine: GeoSpecNativeModelEngine
 
 // Options for the native serial runner
 GeoSpecNativeRunnerOptions: Omit<GeoSpecRunnerOptions, 'nativeAssertions' | 'nativeModelLoader'> & {
@@ -396,16 +396,16 @@ GeoSpecNativeRunnerOptions: Omit<GeoSpecRunnerOptions, 'nativeAssertions' | 'nat
   filesystem: VmFileSystem
 
   // Additional in-memory modules made available to the VM
-  builtinModules: RunGeoSpecModuleOptions['builtinModules']
+  builtinModules?: RunGeoSpecModuleOptions['builtinModules']
 
   // Actual protocol-3 engine used by authored assertions
-  nativeAssertions: GeoSpecNativeRunnerAssertions
+  readonly nativeAssertions: GeoSpecNativeRunnerAssertions
 
   // Optional managed loader
-  nativeModelLoader: ManagedGeoSpecNativeModelLoader
+  readonly nativeModelLoader?: ManagedGeoSpecNativeModelLoader
 
   // Defaults used when the runner constructs its own native loader
-  model: Omit<CreateGeoSpecNativeModelLoaderOptions, 'engine'>
+  readonly model?: Omit<CreateGeoSpecNativeModelLoaderOptions, 'engine'>
 
 // Defaults and host dependencies for a managed native model loader
 CreateGeoSpecNativeModelLoaderOptions: {
@@ -425,20 +425,20 @@ CreateGeoSpecNativeModelLoaderOptions: {
     readonly carried?: Map<string, unknown>;
 }
 
-  engine: GeoSpecNativeModelEngine
+  readonly engine: GeoSpecNativeModelEngine
 
-  format: Extract<GeoSpecModelFormat, 'glb' | 'step' | 'stp'>
+  readonly format?: Extract<GeoSpecModelFormat, 'glb' | 'step' | 'stp'>
 
-  projectPath: string
+  readonly projectPath?: string
 
-  readSource: GeoSpecNativeSourceReader
+  readonly readSource?: GeoSpecNativeSourceReader
 
-  runtime: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
+  readonly runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
 
-  sourceAdapters: readonly GeoSpecRuntimeSourceAdapter[]
+  readonly sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
 
   // Subject handles carried between the release scopes of loaders that share one engine, keyed by subjectHash
-  carried: Map<string, unknown>
+  readonly carried?: Map<string, unknown>
 
 // Native additions accepted by the injected `geospec/runner/native` loader
 GeoSpecNativeLoadModelOptions: LoadModelOptions<Code> & {
@@ -449,28 +449,28 @@ GeoSpecNativeLoadModelOptions: LoadModelOptions<Code> & {
 }
 
   // Geometry format to export
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Explicit parameters passed to the runtime
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP exports
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
   // Ordered external resource payloads declared to the native admission request
-  resources: readonly GeoSpecNativeModelResource[]
+  readonly resources?: readonly GeoSpecNativeModelResource[]
 
   // Format-specific native ingest options
-  ingestOptions: Readonly<Record<string, unknown>>
+  readonly ingestOptions?: Readonly<Record<string, unknown>>
 
 // Native engine operations required for model admission and run-level cleanup
 GeoSpecNativeModelEngine: GeoSpecNativeEngine & {
@@ -505,12 +505,12 @@ GeoSpecNativeModelSubject: GeoSpecNativeSubject & {
     readonly load?: GeoSpecModelLoadEvidence;
 }
 
-  contentHash: string
+  readonly contentHash?: string
 
-  subjectHash: string
+  readonly subjectHash?: string
 
   // Exact successful-load evidence retained by the admitting host, when available
-  load: GeoSpecModelLoadEvidence
+  readonly load?: GeoSpecModelLoadEvidence
 
 // One named external resource referenced by a direct glTF-family source
 GeoSpecNativeModelResource: {
@@ -518,9 +518,9 @@ GeoSpecNativeModelResource: {
     readonly source: LoadModelSourceOptions['source'];
 }
 
-  name: string
+  readonly name: string
 
-  source: LoadModelSourceOptions['source']
+  readonly source: LoadModelSourceOptions['source']
 
 // Resolve a non-memory source into ordinary ArrayBuffer-backed bytes
 // Remarks: The loader takes ownership of the returned bytes and admits them without a copy, so a reader must return bytes that nothing mutates afterwards (a fresh read, not a view of a shared or reused buffer).
@@ -588,7 +588,7 @@ GeoSpecPoolShard: {
   file: string
 
   // Exact-test pattern for split shards (R3
-  testNamePattern: string
+  testNamePattern?: string
 
 GeoSpecPoolWorkerHandle: {
     postMessage(message: GeoSpecPoolHostMessage): void;
@@ -679,7 +679,7 @@ GeoSpecForensicEvent: {
 
   unit: 'milliseconds' | 'count'
 
-  shardId: number
+  shardId?: number
 
 // Public GeoSpec runner lifecycle surface
 GeoSpecRunner: {
@@ -760,13 +760,13 @@ GeoSpecRunnerFileResult: {
   result: GeoSpecRunResult
 
   // Wall-clock cost of executing this file, in milliseconds (R1)
-  durationMs: number
+  durationMs?: number
 
   // First deterministic model-load cache key observed in this file (R9 affinity telemetry)
-  primaryLoadKey: string
+  primaryLoadKey?: string
 
   // Executing worker's isolate-resident memory at file completion, in bytes (R15 memory-class telemetry)
-  workerMemoryBytes: number
+  workerMemoryBytes?: number
 
 // Shared options for GeoSpec runner factories
 GeoSpecRunnerOptions: {
@@ -787,10 +787,10 @@ GeoSpecRunnerOptions: {
   nativeAssertions: RunGeoSpecModuleOptions['nativeAssertions']
 
   // Managed native model loader released after each settled run
-  nativeModelLoader: ManagedGeoSpecNativeModelLoader
+  nativeModelLoader?: ManagedGeoSpecNativeModelLoader
 
   // Additional in-memory modules made available to the VM
-  builtinModules: RunGeoSpecModuleOptions['builtinModules']
+  builtinModules?: RunGeoSpecModuleOptions['builtinModules']
 
 // Aggregate result returned by GeoSpec worker-style runners
 GeoSpecRunnerResult: {
@@ -830,16 +830,16 @@ GeoSpecRunnerResult: {
   files: GeoSpecRunnerFileResult[]
 
   // Run-level issues such as aborts or empty filter selections
-  issues: VmIssue[]
+  issues?: VmIssue[]
 
   // Wall-clock cost of the whole run, in milliseconds (R1)
-  durationMs: number
+  durationMs?: number
 
   // Complete requested-file accounting
-  accounting: GeoSpecRunnerAccounting
+  accounting?: GeoSpecRunnerAccounting
 
   // Coherence of the consumed source graphs, not a geometry verdict
-  lineageStatus: 'complete' | 'unavailable' | 'mixed'
+  lineageStatus?: 'complete' | 'unavailable' | 'mixed'
 
 // Options accepted by a GeoSpec worker-style runner run
 GeoSpecRunnerRunOptions: {
@@ -864,19 +864,19 @@ GeoSpecRunnerRunOptions: {
   files: readonly string[]
 
   // JavaScript regular expression matched against full `suite > test` names
-  testNamePattern: string | RegExp
+  testNamePattern?: string | RegExp
 
   // Timeout for each async test callback, in milliseconds
-  testTimeout: number
+  testTimeout?: number
 
   // Non-verdict matcher wall backstop
-  matcherWallBackstop: number
+  matcherWallBackstop?: number
 
   // Emit structured forensic measurements for this run
-  forensic: boolean
+  forensic?: boolean
 
   // Stop after the first failing file (R1)
-  bail: boolean
+  bail?: boolean
 
 // Runner-independent native assertion client
 GeoSpecAssertionClient: {
@@ -902,23 +902,23 @@ GeoSpecAssertionClientOptions: {
     readonly workUnitLimit?: number;
 }
 
-  claimId: (matcher: GeoSpecMatcherName, sequence: number) => string
+  readonly claimId?: (matcher: GeoSpecMatcherName, sequence: number) => string
 
-  engine: GeoSpecNativeEngine
+  readonly engine: GeoSpecNativeEngine
 
   // Success-evidence profile of every claim and query
-  evidenceProfile: GeoSpecNativeEvidenceProfile
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
 
-  subjectSlot: string
+  readonly subjectSlot?: string
 
-  workUnitLimit: number
+  readonly workUnitLimit?: number
 
 // Standalone native matcher chain, including core-owned negation
 GeoSpecAssertionMatchers: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport> & {
     readonly not: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>;
 }
 
-  not: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>
+  readonly not: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>
 
 // One authored call shared by the collector and native assertion client
 GeoSpecAuthoringInvocation: {
@@ -930,17 +930,17 @@ GeoSpecAuthoringInvocation: {
     readonly subject: unknown;
 }
 
-  arguments: readonly unknown[]
+  readonly arguments: readonly unknown[]
 
-  expected: unknown
+  readonly expected: unknown
 
-  kind: GeoSpecAssertion['kind']
+  readonly kind: GeoSpecAssertion['kind']
 
-  matcher: GeoSpecMatcherName
+  readonly matcher: GeoSpecMatcherName
 
-  polarity: GeoSpecClaimPolarity
+  readonly polarity: GeoSpecClaimPolarity
 
-  subject: unknown
+  readonly subject: unknown
 
 // Matcher methods derived mechanically from the existing GeoSpec registry
 GeoSpecMatcherMethods: {
@@ -956,13 +956,13 @@ GeoSpecQueryOptions: {
     readonly subject: GeoSpecNativeSubject;
 }
 
-  capability: GeoSpecQueryCapability
+  readonly capability: GeoSpecQueryCapability
 
-  claimId: string
+  readonly claimId?: string
 
-  payload: unknown
+  readonly payload?: unknown
 
-  subject: GeoSpecNativeSubject
+  readonly subject: GeoSpecNativeSubject
 
 // Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
 MinimumDistanceFact: {
@@ -977,23 +977,23 @@ MinimumDistanceFact: {
     readonly points: readonly [readonly [number, number, number], readonly [number, number, number]];
 }
 
-  source: 'ap242'
+  readonly source: 'ap242'
 
-  assurance: 'exact-brep'
+  readonly assurance: 'exact-brep'
 
-  unit: 'mm'
+  readonly unit: 'mm'
 
-  coordinateSystem: 'z-up'
+  readonly coordinateSystem: 'z-up'
 
-  subjectHash: string
+  readonly subjectHash: string
 
-  algorithmProfile: 'geospec-minimum-distance-v1'
+  readonly algorithmProfile: 'geospec-minimum-distance-v1'
 
-  occurrences: readonly [string, string]
+  readonly occurrences: readonly [string, string]
 
-  distance: number
+  readonly distance: number
 
-  points: readonly [readonly [number, number, number], readonly [number, number, number]]
+  readonly points: readonly [readonly [number, number, number], readonly [number, number, number]]
 
 // Complete AP242 minimum over two subject-bound occurrence paths
 MinimumDistanceQuery: {
@@ -1008,11 +1008,11 @@ MinimumDistanceQuery: {
     };
 }
 
-  capability: 'minimumDistance'
+  readonly capability: 'minimumDistance'
 
-  subject: GeoSpecNativeSubject
+  readonly subject: GeoSpecNativeSubject
 
-  payload: {
+  readonly payload: {
           readonly pair: readonly [{
               readonly occurrencePath: string;
           }, {
@@ -1034,7 +1034,7 @@ MinimumDistanceResult: {
     readonly message: string;
 }
 
-  status: 'complete'
+  readonly status: 'complete'
 
 // Flat native query transport options
 GeoSpecNativeQueryOptions: Omit<GeoSpecNativeClaimOptions, 'arguments' | 'capability' | 'kind' | 'polarity'> & {
@@ -1042,21 +1042,21 @@ GeoSpecNativeQueryOptions: Omit<GeoSpecNativeClaimOptions, 'arguments' | 'capabi
     readonly payload?: unknown;
 }
 
-  engine: GeoSpecNativeEngine
+  readonly engine: GeoSpecNativeEngine
 
-  claimId: string
+  readonly claimId: string
 
-  evidenceProfile: GeoSpecNativeEvidenceProfile
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
 
-  subjectSlot: string
+  readonly subjectSlot: string
 
-  workUnitLimit: number
+  readonly workUnitLimit: number
 
-  subject: GeoSpecNativeSubject
+  readonly subject: GeoSpecNativeSubject
 
-  capability: GeoSpecQueryCapability | 'minimumDistance'
+  readonly capability: GeoSpecQueryCapability | 'minimumDistance'
 
-  payload: unknown
+  readonly payload?: unknown
 
 // Existing positive-only ancillary operations owned by the native core
 GeoSpecQueryCapability: Exclude<(typeof geoSpecQueryCapabilities)[number], 'minimumDistance'>
@@ -1068,11 +1068,11 @@ GeoSpecPmiField: {
     readonly reason: string | null;
 }
 
-  status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported'
+  readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported'
 
-  value: Value | null
+  readonly value: Value | null
 
-  reason: string | null
+  readonly reason: string | null
 
 // Original Part21 entity ID and exact source argument tokens
 GeoSpecPmiRawEntity: {
@@ -1081,11 +1081,11 @@ GeoSpecPmiRawEntity: {
     readonly arguments: readonly string[];
 }
 
-  sourceId: number
+  readonly sourceId: number
 
-  kind: string
+  readonly kind: string
 
-  arguments: readonly string[]
+  readonly arguments: readonly string[]
 
 // Source-authored scalar and Rust-normalized reduced rational millimetres
 GeoSpecPmiNumber: {
@@ -1097,17 +1097,17 @@ GeoSpecPmiNumber: {
     readonly name: string;
 }
 
-  sourceId: number
+  readonly sourceId: number
 
-  authoredText: string
+  readonly authoredText: string
 
-  unitId: number
+  readonly unitId: number
 
-  unitRecords: readonly GeoSpecPmiRawEntity[]
+  readonly unitRecords: readonly GeoSpecPmiRawEntity[]
 
-  millimetres: string
+  readonly millimetres: string
 
-  name: string
+  readonly name: string
 
 // A uniquely forward-transferred face
 GeoSpecPmiFaceAssociation: {
@@ -1117,13 +1117,13 @@ GeoSpecPmiFaceAssociation: {
     readonly publicFaceOrdinal: number;
 }
 
-  sourceFaceId: number
+  readonly sourceFaceId: number
 
-  occurrenceRoute: readonly number[]
+  readonly occurrenceRoute: readonly number[]
 
-  occurrence: number | null
+  readonly occurrence: number | null
 
-  publicFaceOrdinal: number
+  readonly publicFaceOrdinal: number
 
 // One ordered role reference, including incomplete source/transfer evidence
 GeoSpecPmiShapeReference: {
@@ -1134,15 +1134,15 @@ GeoSpecPmiShapeReference: {
     readonly associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>;
 }
 
-  sourceAspectId: number | null
+  readonly sourceAspectId: number | null
 
-  sourceUsageIds: readonly number[]
+  readonly sourceUsageIds: readonly number[]
 
-  sourceItemIds: readonly number[]
+  readonly sourceItemIds: readonly number[]
 
-  requestedRoute: GeoSpecPmiField<readonly number[]>
+  readonly requestedRoute: GeoSpecPmiField<readonly number[]>
 
-  associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>
+  readonly associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>
 
 // Normalized authored limits
 GeoSpecPmiLimits: {
@@ -1151,11 +1151,11 @@ GeoSpecPmiLimits: {
     readonly basis: 'authored-limits' | 'nominal-plus-minus';
 }
 
-  lowerMillimetres: string
+  readonly lowerMillimetres: string
 
-  upperMillimetres: string
+  readonly upperMillimetres: string
 
-  basis: 'authored-limits' | 'nominal-plus-minus'
+  readonly basis: 'authored-limits' | 'nominal-plus-minus'
 
 // Source record preserving semantic/presentation separation and ordered roles
 GeoSpecPmiRecord: {
@@ -1172,27 +1172,27 @@ GeoSpecPmiRecord: {
     readonly raw: readonly GeoSpecPmiRawEntity[];
 }
 
-  sourceId: number
+  readonly sourceId: number
 
-  family: 'dimension' | 'datum' | 'tolerance' | 'presentation'
+  readonly family: 'dimension' | 'datum' | 'tolerance' | 'presentation'
 
-  channel: 'semantic' | 'presentation'
+  readonly channel: 'semantic' | 'presentation'
 
-  kind: string
+  readonly kind: string
 
-  name: GeoSpecPmiField<string>
+  readonly name: GeoSpecPmiField<string>
 
-  first: readonly GeoSpecPmiShapeReference[]
+  readonly first: readonly GeoSpecPmiShapeReference[]
 
-  second: readonly GeoSpecPmiShapeReference[]
+  readonly second: readonly GeoSpecPmiShapeReference[]
 
-  numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>
+  readonly numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>
 
-  limits: GeoSpecPmiField<GeoSpecPmiLimits>
+  readonly limits: GeoSpecPmiField<GeoSpecPmiLimits>
 
-  interpretation: GeoSpecPmiField<string>
+  readonly interpretation: GeoSpecPmiField<string>
 
-  raw: readonly GeoSpecPmiRawEntity[]
+  readonly raw: readonly GeoSpecPmiRawEntity[]
 
 // Positive-only inventory value inside the ordinary canonical query report
 GeoSpecPmiInventory: {
@@ -1203,15 +1203,15 @@ GeoSpecPmiInventory: {
     readonly records: readonly GeoSpecPmiRecord[];
 }
 
-  contract: 'geospec.pmi.inventory/v1'
+  readonly contract: 'geospec.pmi.inventory/v1'
 
-  status: 'semantic' | 'graphical-only' | 'empty'
+  readonly status: 'semantic' | 'graphical-only' | 'empty'
 
-  fileSchema: string
+  readonly fileSchema: string
 
-  editionValidation: 'not-validated'
+  readonly editionValidation: 'not-validated'
 
-  records: readonly GeoSpecPmiRecord[]
+  readonly records: readonly GeoSpecPmiRecord[]
 
 // Strict inventory output limits
 GeoSpecPmiQueryPayload: {
@@ -1219,9 +1219,9 @@ GeoSpecPmiQueryPayload: {
     readonly maxOutputBytes?: number;
 }
 
-  maxRecords: number
+  readonly maxRecords?: number
 
-  maxOutputBytes: number
+  readonly maxOutputBytes?: number
 
 // Complete inventory value
 GeoSpecPmiQueryValue: {
@@ -1230,11 +1230,11 @@ GeoSpecPmiQueryValue: {
     readonly provenance: Readonly<Record<string, unknown>>;
 }
 
-  inventory: GeoSpecPmiInventory
+  readonly inventory: GeoSpecPmiInventory
 
-  subjectHash: string
+  readonly subjectHash: string
 
-  provenance: Readonly<Record<string, unknown>>
+  readonly provenance: Readonly<Record<string, unknown>>
 
 // Full native assertion result with the exact core-owned bytes retained
 GeoSpecCanonicalClaimReport: {
@@ -1250,25 +1250,25 @@ GeoSpecCanonicalClaimReport: {
     readonly status: GeoSpecCanonicalClaimStatus;
 }
 
-  canonicalClaim: Uint8Array<ArrayBuffer>
+  readonly canonicalClaim: Uint8Array<ArrayBuffer>
 
-  canonicalPlan: Uint8Array<ArrayBuffer>
+  readonly canonicalPlan: Uint8Array<ArrayBuffer>
 
-  canonicalResult: Uint8Array<ArrayBuffer>
+  readonly canonicalResult: Uint8Array<ArrayBuffer>
 
-  claim: Readonly<Record<string, JSONValue>>
+  readonly claim: Readonly<Record<string, JSONValue>>
 
-  claimId: string
+  readonly claimId: string
 
-  diagnostics: readonly JSONValue[]
+  readonly diagnostics: readonly JSONValue[]
 
-  evidence: JSONValue
+  readonly evidence?: JSONValue
 
-  polarity: GeoSpecClaimPolarity
+  readonly polarity: GeoSpecClaimPolarity
 
-  result: Readonly<Record<string, JSONValue>>
+  readonly result: Readonly<Record<string, JSONValue>>
 
-  status: GeoSpecCanonicalClaimStatus
+  readonly status: GeoSpecCanonicalClaimStatus
 
 // Exact core bytes of one claim evaluated in one engine call
 GeoSpecNativeClaimEvaluation: {
@@ -1277,11 +1277,11 @@ GeoSpecNativeClaimEvaluation: {
     readonly canonicalResult: Uint8Array<ArrayBuffer>;
 }
 
-  canonicalClaim: Uint8Array<ArrayBuffer>
+  readonly canonicalClaim: Uint8Array<ArrayBuffer>
 
-  canonicalPlan: Uint8Array<ArrayBuffer>
+  readonly canonicalPlan: Uint8Array<ArrayBuffer>
 
-  canonicalResult: Uint8Array<ArrayBuffer>
+  readonly canonicalResult: Uint8Array<ArrayBuffer>
 
 // Byte-only engine surface consumed by the runner-independent assertion client
 GeoSpecNativeEngine: {
@@ -1304,9 +1304,9 @@ GeoSpecNativeSubject: {
     readonly subjectHash?: string;
 }
 
-  contentHash: string
+  readonly contentHash?: string
 
-  subjectHash: string
+  readonly subjectHash?: string
 
 // A canonical fixed-contract matcher
 GeoSpecFixedMatcherDescriptor: {
@@ -1315,11 +1315,11 @@ GeoSpecFixedMatcherDescriptor: {
     readonly mode: 'sync';
 }
 
-  contract: 'geospec.plate-two-windows/v1' | 'geospec.pmi.parallel-plane-distance/v1'
+  readonly contract: 'geospec.plate-two-windows/v1' | 'geospec.pmi.parallel-plane-distance/v1'
 
-  expected: 'true'
+  readonly expected: 'true'
 
-  mode: 'sync'
+  readonly mode: 'sync'
 
 // Installed Vitest matcher map and lifecycle settlement hook
 GeoSpecVitestAdapter: {
@@ -1327,7 +1327,7 @@ GeoSpecVitestAdapter: {
     flush(): Promise<void>;
 }
 
-  matchers: GeoSpecVitestMatcherMap
+  readonly matchers: GeoSpecVitestMatcherMap
 
   // GeoSpecVitestAdapter.flush (method)
   flush(): Promise<void>;
@@ -1340,12 +1340,12 @@ ExportTauProjectArtifactOptions: {
     readonly signal?: AbortSignal;
 }
 
-  descriptor: GeoSpecTauProjectDescriptor
+  readonly descriptor: GeoSpecTauProjectDescriptor
 
   // Called twice so source discovery and export use separate runtime lifetimes
-  createRuntime: () => GeoSpecTauProjectRuntime | Promise<GeoSpecTauProjectRuntime>
+  readonly createRuntime: () => GeoSpecTauProjectRuntime | Promise<GeoSpecTauProjectRuntime>
 
-  signal: AbortSignal
+  readonly signal?: AbortSignal
 
 // Finalized geometry bytes and the exact source/export metadata that produced them
 GeoSpecTauProjectArtifact: {
@@ -1373,21 +1373,21 @@ GeoSpecTauProjectArtifact: {
     };
 }
 
-  format: 'step' | 'glb'
+  readonly format: 'step' | 'glb'
 
-  name: string
+  readonly name: string
 
-  mimeType: string
+  readonly mimeType: string
 
-  bytes: Uint8Array<ArrayBuffer>
+  readonly bytes: Uint8Array<ArrayBuffer>
 
-  frame: {
+  readonly frame: {
           readonly coordinateSystem: 'z-up';
           readonly lengthUnit: 'millimeter';
           readonly sourceUnit: 'mm';
       }
 
-  source: {
+  readonly source: {
           readonly manifestPath: string;
           readonly manifestBytes: Uint8Array<ArrayBuffer>;
           readonly manifest: ProjectManifest;
@@ -1397,7 +1397,7 @@ GeoSpecTauProjectArtifact: {
           readonly files: readonly RuntimeSourceSnapshotFile[];
       }
 
-  export: {
+  readonly export: {
           readonly options: Readonly<Record<string, unknown>>;
           readonly route: NonNullable<GeometryExportIntent['route']>;
       }
@@ -1440,28 +1440,28 @@ GeoSpecConfig: {
     subjects?: Readonly<Record<string, GeoSpecTauProjectDescriptor>>;
 }
 
-  include: readonly string[]
+  include?: readonly string[]
 
-  exclude: readonly string[]
+  exclude?: readonly string[]
 
-  testNamePattern: string
-
-  // Positive finite milliseconds
-  testTimeout: number
+  testNamePattern?: string
 
   // Positive finite milliseconds
-  matcherWallBackstop: number
+  testTimeout?: number
 
-  bail: boolean
+  // Positive finite milliseconds
+  matcherWallBackstop?: number
 
-  forensic: boolean
+  bail?: boolean
 
-  cache: boolean
+  forensic?: boolean
+
+  cache?: boolean
 
   // Requested cache location only
-  cacheDirectory: string
+  cacheDirectory?: string
 
-  subjects: Readonly<Record<string, GeoSpecTauProjectDescriptor>>
+  subjects?: Readonly<Record<string, GeoSpecTauProjectDescriptor>>
 
 // Imported Tau project data for later host resolution
 // Remarks: This descriptor does not validate the original manifest bytes or its schema, admit an asset, export geometry, or establish finalized-artifact provenance.
@@ -1474,16 +1474,16 @@ GeoSpecTauProjectDescriptor: {
     readonly parameters?: Readonly<Record<string, JSONValue>>;
 }
 
-  kind: 'tau-project'
+  readonly kind: 'tau-project'
 
   // Normalized project-relative POSIX path identifying the imported manifest
-  manifestPath: string
+  readonly manifestPath: string
 
-  manifest: Readonly<Record<string, JSONValue>>
+  readonly manifest: Readonly<Record<string, JSONValue>>
 
-  format: 'step' | 'glb'
+  readonly format: 'step' | 'glb'
 
-  parameters: Readonly<Record<string, JSONValue>>
+  readonly parameters?: Readonly<Record<string, JSONValue>>
 
 // Resolved file identity and validated configuration data
 LoadedGeoSpecConfig: {
@@ -1491,9 +1491,9 @@ LoadedGeoSpecConfig: {
     readonly options: GeoSpecConfig;
 }
 
-  configPath: string
+  readonly configPath?: string
 
-  options: GeoSpecConfig
+  readonly options: GeoSpecConfig
 
 // Options for one trusted Node configuration load
 LoadGeoSpecConfigOptions: {
@@ -1504,10 +1504,10 @@ LoadGeoSpecConfigOptions: {
     readonly overrides?: GeoSpecConfig;
 }
 
-  projectPath: string
+  readonly projectPath: string
 
   // Explicit file, resolved relative to the project unless absolute
-  configPath: string
+  readonly configPath?: string
 
   // Own defined fields override configuration without deep merging
-  overrides: GeoSpecConfig
+  readonly overrides?: GeoSpecConfig

@@ -2,7 +2,7 @@ name: 'GeoSpec artifact from main'
 description: >-
   Takes the GeoSpec engine products for a commit from the `ci.yml` push run on
   `main`, after that run has passed, and verifies them against the checkout: the
-  run's `geospec-ci-<sha>-<attempt>` artifact when its producer ran, otherwise the
+  run's `geospec-ci-<sha>` artifact when its producer ran, otherwise the
   products cache entry it restored under the same product-closure key. Release
   builds and production UI deploys run on Linux and Windows, where the macOS-only
   producer cannot run.
@@ -63,7 +63,7 @@ runs:
           exit 1
         fi
         name=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
-          --jq "[.artifacts[] | select(.expired == false and (.name | startswith(\"geospec-ci-$SHA-\")))] | sort_by(.name) | last | .name // empty")
+          --jq "first(.artifacts[] | select(.expired == false and .name == \"geospec-ci-$SHA\") | .name) // empty")
         if [ "$conclusion" != success ]; then
           # From a failed run only the producer's own artifact is taken, and it is still
           # verified against this checkout below; the cache fallback is not.

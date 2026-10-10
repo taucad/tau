@@ -12,7 +12,7 @@ Build output is `apps/www/dist`. Every marketing stylesheet, script, image, font
 
 ## Editorial workflow
 
-`content/drafts/` contains outlines only and is never copied to the deployment. `content/articles.json` is empty until a human submits an article. Each published item requires `status: "published"`, `authorship: "human"`, `author`, `reviewedBy`, `date` (YYYY-MM-DD), `slug`, `title`, `description`, and a `paragraphs` array. The author and reviewer must genuinely write/review the text; these fields do not turn generated prose into human authorship. Review the change in a PR. Build validation rejects incomplete publication metadata, unsafe/duplicate slugs and future dates; article text is escaped. The journal index and `/blog/<slug>/` detail page are generated together. Image ideas are pending; no fabricated founder essay is published.
+`content/drafts/` contains outlines only and is never copied to the deployment. `content/articles.json` is empty until a human submits an article. Each published item requires `status: "published"`, `authorship: "human"`, `author`, `reviewedBy`, `date` (YYYY-MM-DD), `slug`, `title`, `description`, and a `paragraphs` array. The author and reviewer must genuinely write/review the text; these fields do not turn generated prose into human authorship. Review the change in a PR. Build validation rejects incomplete publication metadata, unsafe/duplicate slugs and future dates; article text is escaped. The blog index and `/blog/<slug>/` detail page are generated together. Image ideas are pending; no fabricated founder essay is published.
 
 ## Content evidence
 
@@ -87,7 +87,7 @@ Start `node apps/www/scripts/serve.mjs`, then run `node apps/www/scripts/browser
 
 ## Claims
 
-Tau Cloud backup and sync are presented as available on Pro (10 GB) and Enterprise (100 GB) from `apps/libs/billing`; Free shows GitHub backup only, because free-tier sync is held off in production. Hosted verification and Enterprise signed evidence/CI keep their “Coming soon” labels. Tau Desktop is “in development” with no download link, because no installer is published. The journal stays empty until a human writes and reviews an article.
+Tau Cloud backup and sync are presented as available on Pro (10 GB) and Enterprise (100 GB) from `apps/libs/billing`; Free shows GitHub backup only, because free-tier sync is held off in production. Hosted verification and Enterprise signed evidence/CI keep their “Coming soon” labels. Tau Desktop is “in development” with no download link, because no installer is published. The blog stays empty until a human writes and reviews an article.
 
 ## Lint
 

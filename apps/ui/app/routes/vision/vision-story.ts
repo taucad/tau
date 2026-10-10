@@ -7,7 +7,7 @@ export const visionChapters = [
     eyebrow: 'An idea is a beginning',
     title: 'Give ideas\nphysical form',
     body: 'A thought becomes words. Words become a model. A model becomes something you can hold. Tau is building the open tools that connect those steps.',
-    caption: 'One idea. Fourteen parts. A world of possibilities.',
+    caption: 'One idea. Thirty-four parts. A world of possibilities.',
     status: 'The vision',
     detail:
       'For most of history, the distance between imagining an object and making it has been filled with specialist tools, handoffs and expense. AI can shorten that distance. The opportunity is to give more people a way to act on what they imagine, while keeping the design inspectable and the decisions accountable.',
@@ -18,10 +18,10 @@ export const visionChapters = [
     eyebrow: 'Language → editable design',
     title: 'Start with\nwhat you need',
     body: 'Describe a mechanism. Let an agent help write the design. Change its dimensions, read its source, and keep refining the same object.',
-    caption: '“Create a planetary gearbox with a 4:1 reduction.”',
+    caption: '“Create a planetary gearbox with a 4:1 reduction, three planets and socket screws on top.”',
     status: 'In Tau today',
     detail:
-      'Tau connects AI-assisted authoring to code-based CAD kernels. Code records the choices that produce the geometry, making a design repeatable and changeable. The gearbox on screen is an existing Tau model, rendered from its saved geometry; this presentation does not run an AI generation in the background.',
+      'Tau connects AI-assisted authoring to code-based CAD kernels. Code records the choices that produce the geometry, making a design repeatable and changeable. The gearbox on screen is Tau’s authored planetary gearbox example, rendered from geometry exported from its source; this presentation does not run an AI generation in the background.',
   },
   {
     id: 'evaluate',
@@ -62,7 +62,7 @@ export const visionChapters = [
     eyebrow: 'A design meets a machine',
     title: 'The next step\nis physical',
     body: 'Connect a design to a suitable printer, CNC machine or workshop. Prepare the process, inspect the plan, and follow the job through to a real result.',
-    caption: 'Manufacturing workflow concept · No live machine connected',
+    caption: 'Ring gear on a 256 mm build plate · Illustration, no print job is sent',
     status: 'Future workflow',
     detail:
       'Tau already has a machine-provider foundation and a Bambu Developer LAN plugin. The larger goal is qualified adapters for more machines and factories. Each process needs its own material, tooling, fixture and operating constraints. A command being sent is not proof that the machine accepted it, or that the finished part meets its requirements.',

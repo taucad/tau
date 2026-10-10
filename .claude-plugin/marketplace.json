@@ -1,0 +1,12 @@
+{
+  "name": "taucad",
+  "description": "Tau's code-CAD plugin: kernel skills and the tau MCP server, installed from npm.",
+  "owner": { "name": "taucad", "url": "https://tau.new" },
+  "plugins": [
+    {
+      "name": "tau",
+      "source": { "source": "npm", "package": "@taucad/agent-plugin", "version": "beta" },
+      "description": "Evaluate, test, screenshot and export code-CAD models with Tau."
+    }
+  ]
+}

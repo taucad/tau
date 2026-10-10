@@ -2,989 +2,989 @@
 
 picovoxel 0.1.0-beta.0 · 964 symbols · extracted by TypeScript 5.9.3.
 
-Every symbol appears here exactly once. The heading above each block names the file with its signature.
+Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 
 ## Interfaces — `api-interfaces.md`
 
-AddBeamOptions (interface) [6 members] [id: typescript:AddBeamOptions]
-  AddBeamOptions.start (property) [id: typescript:AddBeamOptions.start]
-  AddBeamOptions.end (property) [id: typescript:AddBeamOptions.end]
-  AddBeamOptions.radius (property) — Uniform radius [id: typescript:AddBeamOptions.radius]
-  AddBeamOptions.startRadius (property) [id: typescript:AddBeamOptions.startRadius]
-  AddBeamOptions.endRadius (property) [id: typescript:AddBeamOptions.endRadius]
-  AddBeamOptions.roundCap (property) — Hemispherical end caps (default true, as upstream) [id: typescript:AddBeamOptions.roundCap]
-Bounds (interface) [2 members] — An axis-aligned box in millimetres [id: typescript:Bounds]
-  Bounds.min (property) [id: typescript:Bounds.min]
-  Bounds.max (property) [id: typescript:Bounds.max]
-CreatePicoOptions (interface) — `createPico` options [id: typescript:CreatePicoOptions]
-CreatePicoRuntimeOptions (interface) [2 members] — Options that shape a runtime [id: typescript:CreatePicoRuntimeOptions]
-  CreatePicoRuntimeOptions.wasm (property) — Emscripten Module overrides forwarded to instantiation [id: typescript:CreatePicoRuntimeOptions.wasm]
-  CreatePicoRuntimeOptions.wasmModule (property) — A compiled `WebAssembly.Module` of this entry's wasm (`pico.wasm` for the… [id: typescript:CreatePicoRuntimeOptions.wasmModule]
-CreatePicoSessionOptions (interface) [7 members] — Options that shape a session [id: typescript:CreatePicoSessionOptions]
-  CreatePicoSessionOptions.voxelSize (property) — Voxel edge length in millimetres [id: typescript:CreatePicoSessionOptions.voxelSize]
-  CreatePicoSessionOptions.memoryWarningBytes (property) — Native-memory warning threshold in bytes (default 1 GiB) [id: typescript:CreatePicoSessionOptions.memoryWarningBytes]
-  CreatePicoSessionOptions.lane (property) — The session's lane, a policy claim about every value it… [id: typescript:CreatePicoSessionOptions.lane]
-  CreatePicoSessionOptions.fastRenorm (property) — Session-wide default for the offset family's `fastRenorm` (first-order renormalization —… [id: typescript:CreatePicoSessionOptions.fastRenorm]
-  CreatePicoSessionOptions.serialLattice (property) — Routes lattice rendering down the serial C#-identical `Voxels::RenderLattice` loop instead… [id: typescript:CreatePicoSessionOptions.serialLattice]
-  CreatePicoSessionOptions.registry (property) [id: typescript:CreatePicoSessionOptions.registry]
-  CreatePicoSessionOptions.now (property) [id: typescript:CreatePicoSessionOptions.now]
-FromStlOptions (interface) [3 members] [id: typescript:FromStlOptions]
-  FromStlOptions.unit (property) — 'auto' honours the UNITS= header, defaulting to mm [id: typescript:FromStlOptions.unit]
-  FromStlOptions.scale (property) — Post-scale applied after unit conversion [id: typescript:FromStlOptions.scale]
-  FromStlOptions.offset (property) — Post-offset in mm, applied last [id: typescript:FromStlOptions.offset]
-Lattice (interface) [7 members] [id: typescript:Lattice]
-  Lattice.addSphere (method) [id: typescript:Lattice.addSphere]
-  Lattice.addBeam (method) [id: typescript:Lattice.addBeam]
-  Lattice.toVoxels (method) — Renders the lattice into a fresh voxel field [id: typescript:Lattice.toVoxels]
-  Lattice.memUsage (property) [id: typescript:Lattice.memUsage]
-  Lattice.handle (property) — Raw ABI handle — escape hatch [id: typescript:Lattice.handle]
-  Lattice.dispose (method) — Optional [id: typescript:Lattice.dispose]
-  Lattice.[Symbol.dispose] (method) [id: typescript:Lattice.[Symbol.dispose]]
-MemoryUsage (interface) [9 members] [id: typescript:MemoryUsage]
-  MemoryUsage.total (property) [id: typescript:MemoryUsage.total]
-  MemoryUsage.voxels (property) [id: typescript:MemoryUsage.voxels]
-  MemoryUsage.meshes (property) [id: typescript:MemoryUsage.meshes]
-  MemoryUsage.lattices (property) [id: typescript:MemoryUsage.lattices]
-  MemoryUsage.polyLines (property) [id: typescript:MemoryUsage.polyLines]
-  MemoryUsage.scalarFields (property) [id: typescript:MemoryUsage.scalarFields]
-  MemoryUsage.vectorFields (property) [id: typescript:MemoryUsage.vectorFields]
-  MemoryUsage.vdbFiles (property) [id: typescript:MemoryUsage.vdbFiles]
-  MemoryUsage.metadata (property) [id: typescript:MemoryUsage.metadata]
-Mesh (interface) [17 members] [id: typescript:Mesh]
-  Mesh.vertices (property) — Vertex positions, xyz triples in mm [id: typescript:Mesh.vertices]
-  Mesh.triangles (property) — Triangle corner indices, triples [id: typescript:Mesh.triangles]
-  Mesh.vertexCount (property) [id: typescript:Mesh.vertexCount]
-  Mesh.triangleCount (property) [id: typescript:Mesh.triangleCount]
-  Mesh.bounds (method) — Bounding box [id: typescript:Mesh.bounds]
-  Mesh.measure (method) — Enclosed volume (mm³) and surface area (mm²) from the triangles [id: typescript:Mesh.measure]
-  Mesh.transform (method) — Pure transformed copy [id: typescript:Mesh.transform]
-  Mesh.mirror (method) — Pure mirrored copy across the plane through `point` with `normal` [id: typescript:Mesh.mirror]
-  Mesh.merged (method) — Pure concatenation — no dedup, no boolean (as upstream Append… [id: typescript:Mesh.merged]
-  Mesh.toVoxels (method) — Voxelizes the (closed) mesh [id: typescript:Mesh.toVoxels]
-  Mesh.shellVoxels (method) — Offset in ALL directions from a not-necessarily-closed mesh [id: typescript:Mesh.shellVoxels]
-  Mesh.toStl (method) — Binary STL bytes with the UNITS= header convention [id: typescript:Mesh.toStl]
-  Mesh.toGlb (method) — GLB container (positions + indices) [id: typescript:Mesh.toGlb]
-  Mesh.lane (property) — Value provenance, inherited from the producing voxels/mesh chain [id: typescript:Mesh.lane]
-  Mesh.handle (property) — Raw ABI handle — escape hatch [id: typescript:Mesh.handle]
-  Mesh.dispose (method) — Optional [id: typescript:Mesh.dispose]
-  Mesh.[Symbol.dispose] (method) [id: typescript:Mesh.[Symbol.dispose]]
-Metadata (interface) [9 members] [id: typescript:Metadata]
-  Metadata.count (property) — Number of entries in the table [id: typescript:Metadata.count]
-  Metadata.names (method) — Every entry name, index order [id: typescript:Metadata.names]
-  Metadata.typeOf (method) [id: typescript:Metadata.typeOf]
-  Metadata.get (method) — Typed read [id: typescript:Metadata.get]
-  Metadata.set (method) — Reserved names (`PicoGK.*`, `PicoVoxel.*`, `class`, `name`, `file_*`) throw [id: typescript:Metadata.set]
-  Metadata.remove (method) — The reserved-name guard applies here too [id: typescript:Metadata.remove]
-  Metadata.handle (property) — Raw ABI handle — escape hatch [id: typescript:Metadata.handle]
-  Metadata.dispose (method) — Optional [id: typescript:Metadata.dispose]
-  Metadata.[Symbol.dispose] (method) [id: typescript:Metadata.[Symbol.dispose]]
-Pico (interface) [24 members] [id: typescript:Pico]
-  Pico.voxelSize (property) [id: typescript:Pico.voxelSize]
-  Pico.lane (property) — The RESOLVED session lane (never `'auto'` [id: typescript:Pico.lane]
-  Pico.name (property) [id: typescript:Pico.name]
-  Pico.version (property) [id: typescript:Pico.version]
-  Pico.buildInfo (property) [id: typescript:Pico.buildInfo]
-  Pico.voxelToMm (method) — Convert voxel-index coordinates to world millimetres [id: typescript:Pico.voxelToMm]
-  Pico.mmToVoxel (method) — Convert world millimetres to integer voxel indices (upstream `MmToVoxels` converts… [id: typescript:Pico.mmToVoxel]
-  Pico.createVoxels (method) [id: typescript:Pico.createVoxels]
-  Pico.createMesh (method) — Builds a mesh from vertex/triangle data via the bulk imports… [id: typescript:Pico.createMesh]
-  Pico.createLattice (method) [id: typescript:Pico.createLattice]
-  Pico.createPolyLine (method) [id: typescript:Pico.createPolyLine]
-  Pico.createScalarField (method) [id: typescript:Pico.createScalarField]
-  Pico.createVectorField (method) [id: typescript:Pico.createVectorField]
-  Pico.createVdb (method) — An empty writable .vdb container [id: typescript:Pico.createVdb]
-  Pico.openVdb (method) — Opens .vdb bytes as a container for field-level access [id: typescript:Pico.openVdb]
-  Pico.vdbVoxelSize (method) — The voxel-size handshake — the voxel size recorded in .vdb… [id: typescript:Pico.vdbVoxelSize]
-  Pico.voxelsFromVdb (method) — The first GRID_LEVEL_SET field wins [id: typescript:Pico.voxelsFromVdb]
-  Pico.meshFromStl (method) — Binary STL bytes to a mesh (UNITS= header honoured on… [id: typescript:Pico.meshFromStl]
-  Pico.memory (property) — PicoGK-side memory usage in bytes, per object type [id: typescript:Pico.memory]
-  Pico.allocated (property) — PicoGK's own per-type allocation counters — the leak oracle [id: typescript:Pico.allocated]
-  Pico.module (property) — Escape hatch [id: typescript:Pico.module]
-  Pico.handle (property) — Escape hatch [id: typescript:Pico.handle]
-  Pico.dispose (method) — Deterministic teardown [id: typescript:Pico.dispose]
-  Pico.[Symbol.dispose] (method) [id: typescript:Pico.[Symbol.dispose]]
-PicoRuntime (interface) [3 members] — One instantiated wasm module — plus, on `picovoxel/multi`, its warm… [id: typescript:PicoRuntime]
-  PicoRuntime.createPico (method) — Opens a session on this runtime [id: typescript:PicoRuntime.createPico]
-  PicoRuntime.dispose (method) — Disposes every open session, then terminates the pthread pool [id: typescript:PicoRuntime.dispose]
-  PicoRuntime.[Symbol.dispose] (method) [id: typescript:PicoRuntime.[Symbol.dispose]]
-PicoWasmOverrides (interface) [4 members] — The Emscripten Module overrides picovoxel forwards to its glue [id: typescript:PicoWasmOverrides]
-  PicoWasmOverrides.locateFile (property) — Returns the URL of the wasm file (a filesystem path… [id: typescript:PicoWasmOverrides.locateFile]
-  PicoWasmOverrides.mainScriptUrlOrBlob (property) — The pthread worker script (`picovoxel/multi/worker`), loaded by every worker as… [id: typescript:PicoWasmOverrides.mainScriptUrlOrBlob]
-  PicoWasmOverrides.instantiateWasm (property) — Instantiates the module yourself [id: typescript:PicoWasmOverrides.instantiateWasm]
-  PicoWasmOverrides.wasmBinary (property) — The wasm file's bytes, compiled in place of fetching the… [id: typescript:PicoWasmOverrides.wasmBinary]
-PolyLine (interface) [10 members] [id: typescript:PolyLine]
-  PolyLine.addVertex (method) — Appends one vertex [id: typescript:PolyLine.addVertex]
-  PolyLine.addVertices (method) — Appends many vertices [id: typescript:PolyLine.addVertices]
-  PolyLine.vertices (property) — All vertices, index order [id: typescript:PolyLine.vertices]
-  PolyLine.vertexCount (property) [id: typescript:PolyLine.vertexCount]
-  PolyLine.color (property) — RGBA, each 0..1, as the line was created [id: typescript:PolyLine.color]
-  PolyLine.bounds (method) [id: typescript:PolyLine.bounds]
-  PolyLine.memUsage (property) [id: typescript:PolyLine.memUsage]
-  PolyLine.handle (property) — Raw ABI handle — escape hatch [id: typescript:PolyLine.handle]
-  PolyLine.dispose (method) — Optional [id: typescript:PolyLine.dispose]
-  PolyLine.[Symbol.dispose] (method) [id: typescript:PolyLine.[Symbol.dispose]]
-ScalarField (interface) [9 members] [id: typescript:ScalarField]
-  ScalarField.set (method) — Sets (and activates) the value at a position in mm [id: typescript:ScalarField.set]
-  ScalarField.get (method) — Value at the position, or null when the position holds… [id: typescript:ScalarField.get]
-  ScalarField.remove (method) [id: typescript:ScalarField.remove]
-  ScalarField.traverse (method) — Visits every active value [id: typescript:ScalarField.traverse]
-  ScalarField.dimensions (method) — Field extent in discrete voxel units [id: typescript:ScalarField.dimensions]
-  ScalarField.getSlice (method) — One Z slice of raw field values [id: typescript:ScalarField.getSlice]
-  ScalarField.bounds (method) — Bounding box of active voxels in mm (dims × voxel… [id: typescript:ScalarField.bounds]
-  ScalarField.signedDistanceAt (method) — Stored values are voxel-unit signed distance [id: typescript:ScalarField.signedDistanceAt]
-  ScalarField.clone (method) [id: typescript:ScalarField.clone]
-ScalarFieldSlice (interface) [3 members] [id: typescript:ScalarFieldSlice]
-  ScalarFieldSlice.width (property) [id: typescript:ScalarFieldSlice.width]
-  ScalarFieldSlice.height (property) [id: typescript:ScalarFieldSlice.height]
-  ScalarFieldSlice.data (property) — Raw field values, row-major [id: typescript:ScalarFieldSlice.data]
-ShellOptions (interface) [5 members] [id: typescript:ShellOptions]
-  ShellOptions.offset (property) [id: typescript:ShellOptions.offset]
-  ShellOptions.inner (property) [id: typescript:ShellOptions.inner]
-  ShellOptions.outer (property) [id: typescript:ShellOptions.outer]
-  ShellOptions.smoothInner (property) [id: typescript:ShellOptions.smoothInner]
-  ShellOptions.fastRenorm (property) — See `offset({ fastRenorm })` [id: typescript:ShellOptions.fastRenorm]
-SurfaceNormalFieldOptions (interface) [4 members] [id: typescript:SurfaceNormalFieldOptions]
-  SurfaceNormalFieldOptions.surfaceThresholdVx (property) — Active values with |sd| above this (voxel units) are skipped… [id: typescript:SurfaceNormalFieldOptions.surfaceThresholdVx]
-  SurfaceNormalFieldOptions.directionFilter (property) — Keep only normals within the tolerance of this direction (C#… [id: typescript:SurfaceNormalFieldOptions.directionFilter]
-  SurfaceNormalFieldOptions.directionFilterTolerance (property) — Allowed |1 - dot| deviation, 0..1 (C# `fDirectionFilterTolerance`) [id: typescript:SurfaceNormalFieldOptions.directionFilterTolerance]
-  SurfaceNormalFieldOptions.scaleBy (property) — Component-wise scale applied to stored normals (C# `vecScaleBy`) [id: typescript:SurfaceNormalFieldOptions.scaleBy]
-ToStlOptions (interface) [4 members] [id: typescript:ToStlOptions]
-  ToStlOptions.unit (property) [id: typescript:ToStlOptions.unit]
-  ToStlOptions.scale (property) — Scale applied while still in mm, after offset [id: typescript:ToStlOptions.scale]
-  ToStlOptions.offset (property) — Offset in mm, applied first [id: typescript:ToStlOptions.offset]
-  ToStlOptions.acceptLane (property) — Acknowledges, for this one export, that the geometry has non-exact… [id: typescript:ToStlOptions.acceptLane]
-VdbFile (interface) [10 members] [id: typescript:VdbFile]
-  VdbFile.fieldCount (property) [id: typescript:VdbFile.fieldCount]
-  VdbFile.fields (method) — Name + type of every field, index order [id: typescript:VdbFile.fields]
-  VdbFile.add (method) — Adds a field under `name` [id: typescript:VdbFile.add]
-  VdbFile.getVoxels (method) [id: typescript:VdbFile.getVoxels]
-  VdbFile.getScalarField (method) [id: typescript:VdbFile.getScalarField]
-  VdbFile.getVectorField (method) [id: typescript:VdbFile.getVectorField]
-  VdbFile.toBytes (method) — Serialises the container to .vdb bytes [id: typescript:VdbFile.toBytes]
-  VdbFile.handle (property) — Raw ABI handle — escape hatch [id: typescript:VdbFile.handle]
-  VdbFile.dispose (method) — Optional [id: typescript:VdbFile.dispose]
-  VdbFile.[Symbol.dispose] (method) [id: typescript:VdbFile.[Symbol.dispose]]
-VectorField (interface) [5 members] [id: typescript:VectorField]
-  VectorField.set (method) [id: typescript:VectorField.set]
-  VectorField.get (method) [id: typescript:VectorField.get]
-  VectorField.remove (method) [id: typescript:VectorField.remove]
-  VectorField.traverse (method) — Visits every active value [id: typescript:VectorField.traverse]
-  VectorField.clone (method) [id: typescript:VectorField.clone]
-VoxelSlice (interface) [4 members] [id: typescript:VoxelSlice]
-  VoxelSlice.width (property) [id: typescript:VoxelSlice.width]
-  VoxelSlice.height (property) [id: typescript:VoxelSlice.height]
-  VoxelSlice.data (property) — Row-major samples [id: typescript:VoxelSlice.data]
-  VoxelSlice.background (property) — The native background (outside-narrow-band) value of the raw sdf data [id: typescript:VoxelSlice.background]
-Voxels (interface) [40 members] [id: typescript:Voxels]
-  Voxels.clone (method) — An independent copy of this field [id: typescript:Voxels.clone]
-  Voxels.union (method) — Pure union [id: typescript:Voxels.union]
-  Voxels.subtract (method) — Pure subtraction of every operand [id: typescript:Voxels.subtract]
-  Voxels.intersect (method) — Pure intersection [id: typescript:Voxels.intersect]
-  Voxels.equals (method) — Content equality [id: typescript:Voxels.equals]
-  Voxels.isEmpty (property) — THE emptiness oracle [id: typescript:Voxels.isEmpty]
-  Voxels.offset (method) — Pure surface offset [id: typescript:Voxels.offset]
-  Voxels.doubleOffset (method) — Two offsets in sequence (closing/opening when signs differ) [id: typescript:Voxels.doubleOffset]
-  Voxels.smoothen (method) — In, 2× out, in again [id: typescript:Voxels.smoothen]
-  Voxels.fillet (method) — Over-offset composition [id: typescript:Voxels.fillet]
-  Voxels.shell (method) — Shell [id: typescript:Voxels.shell]
-  Voxels.trim (method) — Everything outside the box is trimmed away (cube-mesh intersect, as… [id: typescript:Voxels.trim]
-  Voxels.projectZSlice (method) — Projects the slice at startZ through endZ (mm) [id: typescript:Voxels.projectZSlice]
-  Voxels.withMesh (method) — Pure [id: typescript:Voxels.withMesh]
-  Voxels.withLattice (method) — Pure [id: typescript:Voxels.withLattice]
-  Voxels.withImplicit (method) — Pure [id: typescript:Voxels.withImplicit]
-  Voxels.maskedByImplicit (method) — The gyroid-in-sphere idiom [id: typescript:Voxels.maskedByImplicit]
-  Voxels.volume (property) — Volume in mm³ from the raw grid — fast but… [id: typescript:Voxels.volume]
-  Voxels.properties (method) — Volume (mm³), surface area (mm²) and bounds free of boolean… [id: typescript:Voxels.properties]
-  Voxels.gridHash (method) — The canonical grid hash [id: typescript:Voxels.gridHash]
-  Voxels.densifyInterior (method) — Oracle test tooling [id: typescript:Voxels.densifyInterior]
-  Voxels.bounds (method) — Bounding box via the intermediate mesh (the only accurate way) [id: typescript:Voxels.bounds]
-  Voxels.isInside (method) — True if the point is at or below the surface [id: typescript:Voxels.isInside]
-  Voxels.surfaceNormal (method) — Surface normal at a point on the surface (use after… [id: typescript:Voxels.surfaceNormal]
-  Voxels.closestPointOnSurface (method) — Closest surface point, or null when the field is empty [id: typescript:Voxels.closestPointOnSurface]
-  Voxels.raycastToSurface (method) — Ray-surface intersection, or null on a miss [id: typescript:Voxels.raycastToSurface]
-  Voxels.raycastBatch (method) — N rays over ONE cached intersector and one ABI crossing [id: typescript:Voxels.raycastBatch]
-  Voxels.closestPointsOnSurface (method) — N closest-surface-point queries over one index build (openvdb ClosestSurfacePoint) [id: typescript:Voxels.closestPointsOnSurface]
-  Voxels.dimensions (method) — Field extent in discrete voxel units [id: typescript:Voxels.dimensions]
-  Voxels.sliceCount (property) — Number of Z slices [id: typescript:Voxels.sliceCount]
-  Voxels.sliceOrigin (method) — Real-world origin of slice `index` in mm [id: typescript:Voxels.sliceOrigin]
-  Voxels.getSlice (method) — One slice image [id: typescript:Voxels.getSlice]
-  Voxels.toMesh (method) [id: typescript:Voxels.toMesh]
-  Voxels.toScalarField (method) [id: typescript:Voxels.toScalarField]
-  Voxels.metadata (property) [id: typescript:Voxels.metadata]
-  Voxels.memUsage (property) [id: typescript:Voxels.memUsage]
-  Voxels.lane (property) — Value provenance [id: typescript:Voxels.lane]
-  Voxels.handle (property) — Raw ABI handle — escape hatch [id: typescript:Voxels.handle]
-  Voxels.dispose (method) — Optional [id: typescript:Voxels.dispose]
-  Voxels.[Symbol.dispose] (method) [id: typescript:Voxels.[Symbol.dispose]]
-BeamThickness (interface) [3 members] — Beam thickness for a given point in space (C# `IBeamThickness`) [id: typescript:BeamThickness]
-  BeamThickness.beamThickness (method) [id: typescript:BeamThickness.beamThickness]
-  BeamThickness.updateCell (method) [id: typescript:BeamThickness.updateCell]
-  BeamThickness.setBoundingVoxels (method) [id: typescript:BeamThickness.setBoundingVoxels]
-CellArray (interface) [1 members] — A collection of unit cells (C# `ICellArray`) [id: typescript:CellArray]
-  CellArray.unitCells (method) [id: typescript:CellArray.unitCells]
-CoordinateTrafo (interface) [1 members] — Coordinate transformation ahead of a raw TPMS lookup (C# `ICoordinateTrafo`) [id: typescript:CoordinateTrafo]
-  CoordinateTrafo.apply (method) [id: typescript:CoordinateTrafo.apply]
-LatticeType (interface) [1 members] — Beam-connecting logic for one unit cell (C# `ILatticeType`) [id: typescript:LatticeType]
-  LatticeType.addCell (method) [id: typescript:LatticeType.addCell]
-RawTpmsPattern (interface) [1 members] — Raw TPMS surface equation (C# `IRawTPMSPattern`) [id: typescript:RawTpmsPattern]
-  RawTpmsPattern.signedDistance (method) [id: typescript:RawTpmsPattern.signedDistance]
-SplittingLogic (interface) [1 members] — Turns a raw signed distance + wall thickness into the… [id: typescript:SplittingLogic]
-  SplittingLogic.advancedSignedDistance (method) [id: typescript:SplittingLogic.advancedSignedDistance]
-UnitCell (interface) [3 members] — A lattice unit cell (C# `IUnitCell`, preview dropped) [id: typescript:UnitCell]
-  UnitCell.cornerPoints (method) [id: typescript:UnitCell.cornerPoints]
-  UnitCell.cellCentre (method) [id: typescript:UnitCell.cellCentre]
-  UnitCell.cellBounding (method) [id: typescript:UnitCell.cellBounding]
-Cylindrical (interface) [3 members] — A cylindrical coordinate (C# `Cylindrical`) [id: typescript:Cylindrical]
-  Cylindrical.r (property) [id: typescript:Cylindrical.r]
-  Cylindrical.phi (property) [id: typescript:Cylindrical.phi]
-  Cylindrical.z (property) [id: typescript:Cylindrical.z]
-Frame (interface) [4 members] — A rigid transform stored as explicit axes (C# `PicoGK.Shapes.Frame3d`) [id: typescript:Frame]
-  Frame.pos (property) — Origin of the frame in world coordinates (C# `vecPos`) [id: typescript:Frame.pos]
-  Frame.lx (property) — Local X axis in world coordinates (C# `vecLx`) [id: typescript:Frame.lx]
-  Frame.ly (property) — Local Y axis in world coordinates (C# `vecLy`) [id: typescript:Frame.ly]
-  Frame.lz (property) — Local Z axis in world coordinates (C# `vecLz`) [id: typescript:Frame.lz]
-Polar (interface) [2 members] — A polar coordinate (C# `PicoGK.Numerics.Polar`) [id: typescript:Polar]
-  Polar.r (property) [id: typescript:Polar.r]
-  Polar.phi (property) [id: typescript:Polar.phi]
-Spherical (interface) [3 members] — A spherical coordinate (C# `Spherical`) [id: typescript:Spherical]
-  Spherical.r (property) [id: typescript:Spherical.r]
-  Spherical.phi (property) [id: typescript:Spherical.phi]
-  Spherical.theta (property) [id: typescript:Spherical.theta]
-Implicit (interface) [2 members] [id: typescript:Implicit]
-  Implicit.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction [id: typescript:Implicit.sdf]
-  Implicit.expression (property) — The same field as a tape expression for the parallel… [id: typescript:Implicit.expression]
-LatticeBaseShape (interface) [1 members] — C# `ILatticeBaseShape` [id: typescript:LatticeBaseShape]
-  LatticeBaseShape.latConstruct (method) [id: typescript:LatticeBaseShape.latConstruct]
-LatticeManifoldOptions (interface) [5 members] [id: typescript:LatticeManifoldOptions]
-  LatticeManifoldOptions.length (property) — Required for the Frame form [id: typescript:LatticeManifoldOptions.length]
-  LatticeManifoldOptions.radius (property) [id: typescript:LatticeManifoldOptions.radius]
-  LatticeManifoldOptions.maxOverhangAngle (property) — Degrees [id: typescript:LatticeManifoldOptions.maxOverhangAngle]
-  LatticeManifoldOptions.extendBothSides (property) — Extend the teardrop in -Z as well (C# `bExtendBothSides =… [id: typescript:LatticeManifoldOptions.extendBothSides]
-  LatticeManifoldOptions.minPrintableRadius (property) — C# `fMinPrintableRadius = 0.1` [id: typescript:LatticeManifoldOptions.minPrintableRadius]
-MeshBaseShape (interface) [1 members] — C# `IMeshBaseShape` [id: typescript:MeshBaseShape]
-  MeshBaseShape.mshConstruct (method) [id: typescript:MeshBaseShape.mshConstruct]
-PipeSegmentOptions (interface) [6 members] [id: typescript:PipeSegmentOptions]
-  PipeSegmentOptions.length (property) — Required for the Frame form [id: typescript:PipeSegmentOptions.length]
-  PipeSegmentOptions.innerRadius (property) [id: typescript:PipeSegmentOptions.innerRadius]
-  PipeSegmentOptions.outerRadius (property) [id: typescript:PipeSegmentOptions.outerRadius]
-  PipeSegmentOptions.startOrMid (property) — START_END [id: typescript:PipeSegmentOptions.startOrMid]
-  PipeSegmentOptions.endOrRange (property) — START_END [id: typescript:PipeSegmentOptions.endOrRange]
-  PipeSegmentOptions.method (property) [id: typescript:PipeSegmentOptions.method]
-SpineBaseShape (interface) [1 members] — C# `ISpineBaseShape` [id: typescript:SpineBaseShape]
-  SpineBaseShape.spinePoint (method) [id: typescript:SpineBaseShape.spinePoint]
-Spline (interface) [1 members] — ShapeKernel `ISpline` [id: typescript:Spline]
-  Spline.points (method) [id: typescript:Spline.points]
-SurfaceBaseShape (interface) [1 members] — C# `ISurfaceBaseShape` [id: typescript:SurfaceBaseShape]
-  SurfaceBaseShape.surfacePoint (method) [id: typescript:SurfaceBaseShape.surfacePoint]
-TangentOptions (interface) [4 members] [id: typescript:TangentOptions]
-  TangentOptions.startTangentStrength (property) [id: typescript:TangentOptions.startTangentStrength]
-  TangentOptions.endTangentStrength (property) [id: typescript:TangentOptions.endTangentStrength]
-  TangentOptions.relativeStartStrength (property) [id: typescript:TangentOptions.relativeStartStrength]
-  TangentOptions.relativeEndStrength (property) [id: typescript:TangentOptions.relativeEndStrength]
+AddBeamOptions (interface) [6 members]
+  AddBeamOptions.start (property)
+  AddBeamOptions.end (property)
+  AddBeamOptions.radius (property) — Uniform radius
+  AddBeamOptions.startRadius (property)
+  AddBeamOptions.endRadius (property)
+  AddBeamOptions.roundCap (property) — Hemispherical end caps (default true, as upstream)
+Bounds (interface) [2 members] — An axis-aligned box in millimetres
+  Bounds.min (property)
+  Bounds.max (property)
+CreatePicoOptions (interface) — `createPico` options
+CreatePicoRuntimeOptions (interface) [2 members] — Options that shape a runtime
+  CreatePicoRuntimeOptions.wasm (property) — Emscripten Module overrides forwarded to instantiation
+  CreatePicoRuntimeOptions.wasmModule (property) — A compiled `WebAssembly.Module` of this entry's wasm (`pico.wasm` for the…
+CreatePicoSessionOptions (interface) [7 members] — Options that shape a session
+  CreatePicoSessionOptions.voxelSize (property) — Voxel edge length in millimetres
+  CreatePicoSessionOptions.memoryWarningBytes (property) — Native-memory warning threshold in bytes (default 1 GiB)
+  CreatePicoSessionOptions.lane (property) — The session's lane, a policy claim about every value it…
+  CreatePicoSessionOptions.fastRenorm (property) — Session-wide default for the offset family's `fastRenorm` (first-order renormalization —…
+  CreatePicoSessionOptions.serialLattice (property) — Routes lattice rendering down the serial C#-identical `Voxels::RenderLattice` loop instead…
+  CreatePicoSessionOptions.registry (property)
+  CreatePicoSessionOptions.now (property)
+FromStlOptions (interface) [3 members]
+  FromStlOptions.unit (property) — 'auto' honours the UNITS= header, defaulting to mm
+  FromStlOptions.scale (property) — Post-scale applied after unit conversion
+  FromStlOptions.offset (property) — Post-offset in mm, applied last
+Lattice (interface) [7 members]
+  Lattice.addSphere (method)
+  Lattice.addBeam (method)
+  Lattice.toVoxels (method) — Renders the lattice into a fresh voxel field
+  Lattice.memUsage (property)
+  Lattice.handle (property) — Raw ABI handle — escape hatch
+  Lattice.dispose (method) — Optional
+  Lattice.[Symbol.dispose] (method)
+MemoryUsage (interface) [9 members]
+  MemoryUsage.total (property)
+  MemoryUsage.voxels (property)
+  MemoryUsage.meshes (property)
+  MemoryUsage.lattices (property)
+  MemoryUsage.polyLines (property)
+  MemoryUsage.scalarFields (property)
+  MemoryUsage.vectorFields (property)
+  MemoryUsage.vdbFiles (property)
+  MemoryUsage.metadata (property)
+Mesh (interface) [17 members]
+  Mesh.vertices (property) — Vertex positions, xyz triples in mm
+  Mesh.triangles (property) — Triangle corner indices, triples
+  Mesh.vertexCount (property)
+  Mesh.triangleCount (property)
+  Mesh.bounds (method) — Bounding box
+  Mesh.measure (method) — Enclosed volume (mm³) and surface area (mm²) from the triangles
+  Mesh.transform (method) — Pure transformed copy
+  Mesh.mirror (method) — Pure mirrored copy across the plane through `point` with `normal`
+  Mesh.merged (method) — Pure concatenation — no dedup, no boolean (as upstream Append…
+  Mesh.toVoxels (method) — Voxelizes the (closed) mesh
+  Mesh.shellVoxels (method) — Offset in ALL directions from a not-necessarily-closed mesh
+  Mesh.toStl (method) — Binary STL bytes with the UNITS= header convention
+  Mesh.toGlb (method) — GLB container (positions + indices)
+  Mesh.lane (property) — Value provenance, inherited from the producing voxels/mesh chain
+  Mesh.handle (property) — Raw ABI handle — escape hatch
+  Mesh.dispose (method) — Optional
+  Mesh.[Symbol.dispose] (method)
+Metadata (interface) [9 members]
+  Metadata.count (property) — Number of entries in the table
+  Metadata.names (method) — Every entry name, index order
+  Metadata.typeOf (method)
+  Metadata.get (method) — Typed read
+  Metadata.set (method) — Reserved names (`PicoGK.*`, `PicoVoxel.*`, `class`, `name`, `file_*`) throw
+  Metadata.remove (method) — The reserved-name guard applies here too
+  Metadata.handle (property) — Raw ABI handle — escape hatch
+  Metadata.dispose (method) — Optional
+  Metadata.[Symbol.dispose] (method)
+Pico (interface) [24 members]
+  Pico.voxelSize (property)
+  Pico.lane (property) — The RESOLVED session lane (never `'auto'`
+  Pico.name (property)
+  Pico.version (property)
+  Pico.buildInfo (property)
+  Pico.voxelToMm (method) — Convert voxel-index coordinates to world millimetres
+  Pico.mmToVoxel (method) — Convert world millimetres to integer voxel indices (upstream `MmToVoxels` converts…
+  Pico.createVoxels (method)
+  Pico.createMesh (method) — Builds a mesh from vertex/triangle data via the bulk imports…
+  Pico.createLattice (method)
+  Pico.createPolyLine (method)
+  Pico.createScalarField (method)
+  Pico.createVectorField (method)
+  Pico.createVdb (method) — An empty writable .vdb container
+  Pico.openVdb (method) — Opens .vdb bytes as a container for field-level access
+  Pico.vdbVoxelSize (method) — The voxel-size handshake — the voxel size recorded in .vdb…
+  Pico.voxelsFromVdb (method) — The first GRID_LEVEL_SET field wins
+  Pico.meshFromStl (method) — Binary STL bytes to a mesh (UNITS= header honoured on…
+  Pico.memory (property) — PicoGK-side memory usage in bytes, per object type
+  Pico.allocated (property) — PicoGK's own per-type allocation counters — the leak oracle
+  Pico.module (property) — Escape hatch
+  Pico.handle (property) — Escape hatch
+  Pico.dispose (method) — Deterministic teardown
+  Pico.[Symbol.dispose] (method)
+PicoRuntime (interface) [3 members] — One instantiated wasm module — plus, on `picovoxel/multi`, its warm…
+  PicoRuntime.createPico (method) — Opens a session on this runtime
+  PicoRuntime.dispose (method) — Disposes every open session, then terminates the pthread pool
+  PicoRuntime.[Symbol.dispose] (method)
+PicoWasmOverrides (interface) [4 members] — The Emscripten Module overrides picovoxel forwards to its glue
+  PicoWasmOverrides.locateFile (property) — Returns the URL of the wasm file (a filesystem path…
+  PicoWasmOverrides.mainScriptUrlOrBlob (property) — The pthread worker script (`picovoxel/multi/worker`), loaded by every worker as…
+  PicoWasmOverrides.instantiateWasm (property) — Instantiates the module yourself
+  PicoWasmOverrides.wasmBinary (property) — The wasm file's bytes, compiled in place of fetching the…
+PolyLine (interface) [10 members]
+  PolyLine.addVertex (method) — Appends one vertex
+  PolyLine.addVertices (method) — Appends many vertices
+  PolyLine.vertices (property) — All vertices, index order
+  PolyLine.vertexCount (property)
+  PolyLine.color (property) — RGBA, each 0..1, as the line was created
+  PolyLine.bounds (method)
+  PolyLine.memUsage (property)
+  PolyLine.handle (property) — Raw ABI handle — escape hatch
+  PolyLine.dispose (method) — Optional
+  PolyLine.[Symbol.dispose] (method)
+ScalarField (interface) [9 members]
+  ScalarField.set (method) — Sets (and activates) the value at a position in mm
+  ScalarField.get (method) — Value at the position, or null when the position holds…
+  ScalarField.remove (method)
+  ScalarField.traverse (method) — Visits every active value
+  ScalarField.dimensions (method) — Field extent in discrete voxel units
+  ScalarField.getSlice (method) — One Z slice of raw field values
+  ScalarField.bounds (method) — Bounding box of active voxels in mm (dims × voxel…
+  ScalarField.signedDistanceAt (method) — Stored values are voxel-unit signed distance
+  ScalarField.clone (method)
+ScalarFieldSlice (interface) [3 members]
+  ScalarFieldSlice.width (property)
+  ScalarFieldSlice.height (property)
+  ScalarFieldSlice.data (property) — Raw field values, row-major
+ShellOptions (interface) [5 members]
+  ShellOptions.offset (property)
+  ShellOptions.inner (property)
+  ShellOptions.outer (property)
+  ShellOptions.smoothInner (property)
+  ShellOptions.fastRenorm (property) — See `offset({ fastRenorm })`
+SurfaceNormalFieldOptions (interface) [4 members]
+  SurfaceNormalFieldOptions.surfaceThresholdVx (property) — Active values with |sd| above this (voxel units) are skipped…
+  SurfaceNormalFieldOptions.directionFilter (property) — Keep only normals within the tolerance of this direction (C#…
+  SurfaceNormalFieldOptions.directionFilterTolerance (property) — Allowed |1 - dot| deviation, 0..1 (C# `fDirectionFilterTolerance`)
+  SurfaceNormalFieldOptions.scaleBy (property) — Component-wise scale applied to stored normals (C# `vecScaleBy`)
+ToStlOptions (interface) [4 members]
+  ToStlOptions.unit (property)
+  ToStlOptions.scale (property) — Scale applied while still in mm, after offset
+  ToStlOptions.offset (property) — Offset in mm, applied first
+  ToStlOptions.acceptLane (property) — Acknowledges, for this one export, that the geometry has non-exact…
+VdbFile (interface) [10 members]
+  VdbFile.fieldCount (property)
+  VdbFile.fields (method) — Name + type of every field, index order
+  VdbFile.add (method) — Adds a field under `name`
+  VdbFile.getVoxels (method)
+  VdbFile.getScalarField (method)
+  VdbFile.getVectorField (method)
+  VdbFile.toBytes (method) — Serialises the container to .vdb bytes
+  VdbFile.handle (property) — Raw ABI handle — escape hatch
+  VdbFile.dispose (method) — Optional
+  VdbFile.[Symbol.dispose] (method)
+VectorField (interface) [5 members]
+  VectorField.set (method)
+  VectorField.get (method)
+  VectorField.remove (method)
+  VectorField.traverse (method) — Visits every active value
+  VectorField.clone (method)
+VoxelSlice (interface) [4 members]
+  VoxelSlice.width (property)
+  VoxelSlice.height (property)
+  VoxelSlice.data (property) — Row-major samples
+  VoxelSlice.background (property) — The native background (outside-narrow-band) value of the raw sdf data
+Voxels (interface) [40 members]
+  Voxels.clone (method) — An independent copy of this field
+  Voxels.union (method) — Pure union
+  Voxels.subtract (method) — Pure subtraction of every operand
+  Voxels.intersect (method) — Pure intersection
+  Voxels.equals (method) — Content equality
+  Voxels.isEmpty (property) — THE emptiness oracle
+  Voxels.offset (method) — Pure surface offset
+  Voxels.doubleOffset (method) — Two offsets in sequence (closing/opening when signs differ)
+  Voxels.smoothen (method) — In, 2× out, in again
+  Voxels.fillet (method) — Over-offset composition
+  Voxels.shell (method) — Shell
+  Voxels.trim (method) — Everything outside the box is trimmed away (cube-mesh intersect, as…
+  Voxels.projectZSlice (method) — Projects the slice at startZ through endZ (mm)
+  Voxels.withMesh (method) — Pure
+  Voxels.withLattice (method) — Pure
+  Voxels.withImplicit (method) — Pure
+  Voxels.maskedByImplicit (method) — The gyroid-in-sphere idiom
+  Voxels.volume (property) — Volume in mm³ from the raw grid — fast but…
+  Voxels.properties (method) — Volume (mm³), surface area (mm²) and bounds free of boolean…
+  Voxels.gridHash (method) — The canonical grid hash
+  Voxels.densifyInterior (method) — Oracle test tooling
+  Voxels.bounds (method) — Bounding box via the intermediate mesh (the only accurate way)
+  Voxels.isInside (method) — True if the point is at or below the surface
+  Voxels.surfaceNormal (method) — Surface normal at a point on the surface (use after…
+  Voxels.closestPointOnSurface (method) — Closest surface point, or null when the field is empty
+  Voxels.raycastToSurface (method) — Ray-surface intersection, or null on a miss
+  Voxels.raycastBatch (method) — N rays over ONE cached intersector and one ABI crossing
+  Voxels.closestPointsOnSurface (method) — N closest-surface-point queries over one index build (openvdb ClosestSurfacePoint)
+  Voxels.dimensions (method) — Field extent in discrete voxel units
+  Voxels.sliceCount (property) — Number of Z slices
+  Voxels.sliceOrigin (method) — Real-world origin of slice `index` in mm
+  Voxels.getSlice (method) — One slice image
+  Voxels.toMesh (method)
+  Voxels.toScalarField (method)
+  Voxels.metadata (property)
+  Voxels.memUsage (property)
+  Voxels.lane (property) — Value provenance
+  Voxels.handle (property) — Raw ABI handle — escape hatch
+  Voxels.dispose (method) — Optional
+  Voxels.[Symbol.dispose] (method)
+BeamThickness (interface) [3 members] — Beam thickness for a given point in space (C# `IBeamThickness`)
+  BeamThickness.beamThickness (method)
+  BeamThickness.updateCell (method)
+  BeamThickness.setBoundingVoxels (method)
+CellArray (interface) [1 members] — A collection of unit cells (C# `ICellArray`)
+  CellArray.unitCells (method)
+CoordinateTrafo (interface) [1 members] — Coordinate transformation ahead of a raw TPMS lookup (C# `ICoordinateTrafo`)
+  CoordinateTrafo.apply (method)
+LatticeType (interface) [1 members] — Beam-connecting logic for one unit cell (C# `ILatticeType`)
+  LatticeType.addCell (method)
+RawTpmsPattern (interface) [1 members] — Raw TPMS surface equation (C# `IRawTPMSPattern`)
+  RawTpmsPattern.signedDistance (method)
+SplittingLogic (interface) [1 members] — Turns a raw signed distance + wall thickness into the…
+  SplittingLogic.advancedSignedDistance (method)
+UnitCell (interface) [3 members] — A lattice unit cell (C# `IUnitCell`, preview dropped)
+  UnitCell.cornerPoints (method)
+  UnitCell.cellCentre (method)
+  UnitCell.cellBounding (method)
+Cylindrical (interface) [3 members] — A cylindrical coordinate (C# `Cylindrical`)
+  Cylindrical.r (property)
+  Cylindrical.phi (property)
+  Cylindrical.z (property)
+Frame (interface) [4 members] — A rigid transform stored as explicit axes (C# `PicoGK.Shapes.Frame3d`)
+  Frame.pos (property) — Origin of the frame in world coordinates (C# `vecPos`)
+  Frame.lx (property) — Local X axis in world coordinates (C# `vecLx`)
+  Frame.ly (property) — Local Y axis in world coordinates (C# `vecLy`)
+  Frame.lz (property) — Local Z axis in world coordinates (C# `vecLz`)
+Polar (interface) [2 members] — A polar coordinate (C# `PicoGK.Numerics.Polar`)
+  Polar.r (property)
+  Polar.phi (property)
+Spherical (interface) [3 members] — A spherical coordinate (C# `Spherical`)
+  Spherical.r (property)
+  Spherical.phi (property)
+  Spherical.theta (property)
+Implicit (interface) [2 members]
+  Implicit.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  Implicit.expression (property) — The same field as a tape expression for the parallel…
+LatticeBaseShape (interface) [1 members] — C# `ILatticeBaseShape`
+  LatticeBaseShape.latConstruct (method)
+LatticeManifoldOptions (interface) [5 members]
+  LatticeManifoldOptions.length (property) — Required for the Frame form
+  LatticeManifoldOptions.radius (property)
+  LatticeManifoldOptions.maxOverhangAngle (property) — Degrees
+  LatticeManifoldOptions.extendBothSides (property) — Extend the teardrop in -Z as well (C# `bExtendBothSides =…
+  LatticeManifoldOptions.minPrintableRadius (property) — C# `fMinPrintableRadius = 0.1`
+MeshBaseShape (interface) [1 members] — C# `IMeshBaseShape`
+  MeshBaseShape.mshConstruct (method)
+PipeSegmentOptions (interface) [6 members]
+  PipeSegmentOptions.length (property) — Required for the Frame form
+  PipeSegmentOptions.innerRadius (property)
+  PipeSegmentOptions.outerRadius (property)
+  PipeSegmentOptions.startOrMid (property) — START_END
+  PipeSegmentOptions.endOrRange (property) — START_END
+  PipeSegmentOptions.method (property)
+SpineBaseShape (interface) [1 members] — C# `ISpineBaseShape`
+  SpineBaseShape.spinePoint (method)
+Spline (interface) [1 members] — ShapeKernel `ISpline`
+  Spline.points (method)
+SurfaceBaseShape (interface) [1 members] — C# `ISurfaceBaseShape`
+  SurfaceBaseShape.surfacePoint (method)
+TangentOptions (interface) [4 members]
+  TangentOptions.startTangentStrength (property)
+  TangentOptions.endTangentStrength (property)
+  TangentOptions.relativeStartStrength (property)
+  TangentOptions.relativeEndStrength (property)
 
 ## Interfaces (2) — `api-interfaces-2.md`
 
-FromCliResult (interface) [4 members] [id: typescript:FromCliResult]
-  FromCliResult.unitsHeader (property) [id: typescript:FromCliResult.unitsHeader]
-  FromCliResult.date (property) [id: typescript:FromCliResult.date]
-  FromCliResult.headerLayerCount (property) [id: typescript:FromCliResult.headerLayerCount]
-  FromCliResult.warnings (property) [id: typescript:FromCliResult.warnings]
-SdfImage (interface) [3 members] [id: typescript:SdfImage]
-  SdfImage.width (property) [id: typescript:SdfImage.width]
-  SdfImage.height (property) [id: typescript:SdfImage.height]
-  SdfImage.data (property) — Row-major samples, negative inside [id: typescript:SdfImage.data]
-Slice (interface) [3 members] [id: typescript:Slice]
-  Slice.z (property) — Layer height position in mm (first layer at one layerHeight,… [id: typescript:Slice.z]
-  Slice.contours (property) [id: typescript:Slice.contours]
-  Slice.lane (property) — Value provenance of the sliced voxels (`'exact'` or absent =… [id: typescript:Slice.lane]
-SliceContour (interface) [2 members] [id: typescript:SliceContour]
-  SliceContour.points (property) — Flat [x0, y0, x1, y1, …] loop in mm [id: typescript:SliceContour.points]
-  SliceContour.winding (property) — Solid boundaries are CCW, holes CW (upstream contract) [id: typescript:SliceContour.winding]
-SliceStack (interface) [3 members] [id: typescript:SliceStack]
-  SliceStack.slices (property) [id: typescript:SliceStack.slices]
-  SliceStack.bounds (property) — XY bounds over every contour + Z from first/last layer [id: typescript:SliceStack.bounds]
-  SliceStack.lane (property) — Value provenance (`'exact'` or absent = exact) [id: typescript:SliceStack.lane]
-SliceVoxelsOptions (interface) [3 members] [id: typescript:SliceVoxelsOptions]
-  SliceVoxelsOptions.layerHeight (property) — Layer height in mm [id: typescript:SliceVoxelsOptions.layerHeight]
-  SliceVoxelsOptions.useAbsoluteXY (property) — Keep absolute XY coordinates instead of the bbox-relative default [id: typescript:SliceVoxelsOptions.useAbsoluteXY]
-  SliceVoxelsOptions.onProgress (property) — Monotonic 0→1 [id: typescript:SliceVoxelsOptions.onProgress]
-ToCliOptions (interface) [4 members] [id: typescript:ToCliOptions]
-  ToCliOptions.units (property) — Units in mm per CLI unit (1 = mm, upstream… [id: typescript:ToCliOptions.units]
-  ToCliOptions.emptyFirstLayer (property) — Emit an intentionally-empty first layer so readers can infer layer… [id: typescript:ToCliOptions.emptyFirstLayer]
-  ToCliOptions.date (property) — Header date string [id: typescript:ToCliOptions.date]
-  ToCliOptions.onProgress (property) [id: typescript:ToCliOptions.onProgress]
-ToSvgOptions (interface) [3 members] [id: typescript:ToSvgOptions]
-  ToSvgOptions.solid (property) — Filled single-path rendering (holes via winding) instead of stroked outlines [id: typescript:ToSvgOptions.solid]
-  ToSvgOptions.strokeWidth (property) [id: typescript:ToSvgOptions.strokeWidth]
-  ToSvgOptions.viewBox (property) — Override the viewBox [minX, minY, width, height] [id: typescript:ToSvgOptions.viewBox]
+FromCliResult (interface) [4 members]
+  FromCliResult.unitsHeader (property)
+  FromCliResult.date (property)
+  FromCliResult.headerLayerCount (property)
+  FromCliResult.warnings (property)
+SdfImage (interface) [3 members]
+  SdfImage.width (property)
+  SdfImage.height (property)
+  SdfImage.data (property) — Row-major samples, negative inside
+Slice (interface) [3 members]
+  Slice.z (property) — Layer height position in mm (first layer at one layerHeight,…
+  Slice.contours (property)
+  Slice.lane (property) — Value provenance of the sliced voxels (`'exact'` or absent =…
+SliceContour (interface) [2 members]
+  SliceContour.points (property) — Flat [x0, y0, x1, y1, …] loop in mm
+  SliceContour.winding (property) — Solid boundaries are CCW, holes CW (upstream contract)
+SliceStack (interface) [3 members]
+  SliceStack.slices (property)
+  SliceStack.bounds (property) — XY bounds over every contour + Z from first/last layer
+  SliceStack.lane (property) — Value provenance (`'exact'` or absent = exact)
+SliceVoxelsOptions (interface) [3 members]
+  SliceVoxelsOptions.layerHeight (property) — Layer height in mm
+  SliceVoxelsOptions.useAbsoluteXY (property) — Keep absolute XY coordinates instead of the bbox-relative default
+  SliceVoxelsOptions.onProgress (property) — Monotonic 0→1
+ToCliOptions (interface) [4 members]
+  ToCliOptions.units (property) — Units in mm per CLI unit (1 = mm, upstream…
+  ToCliOptions.emptyFirstLayer (property) — Emit an intentionally-empty first layer so readers can infer layer…
+  ToCliOptions.date (property) — Header date string
+  ToCliOptions.onProgress (property)
+ToSvgOptions (interface) [3 members]
+  ToSvgOptions.solid (property) — Filled single-path rendering (holes via winding) instead of stroked outlines
+  ToSvgOptions.strokeWidth (property)
+  ToSvgOptions.viewBox (property) — Override the viewBox [minX, minY, width, height]
 
 ## Types — `api-types.md`
 
-AllocatedCounts (type) [8 members] [id: typescript:AllocatedCounts]
-  AllocatedCounts.voxels (property) [id: typescript:AllocatedCounts.voxels]
-  AllocatedCounts.meshes (property) [id: typescript:AllocatedCounts.meshes]
-  AllocatedCounts.lattices (property) [id: typescript:AllocatedCounts.lattices]
-  AllocatedCounts.polyLines (property) [id: typescript:AllocatedCounts.polyLines]
-  AllocatedCounts.scalarFields (property) [id: typescript:AllocatedCounts.scalarFields]
-  AllocatedCounts.vectorFields (property) [id: typescript:AllocatedCounts.vectorFields]
-  AllocatedCounts.vdbFiles (property) [id: typescript:AllocatedCounts.vdbFiles]
-  AllocatedCounts.metadata (property) [id: typescript:AllocatedCounts.metadata]
-Color (type) — RGBA color, each channel 0..1 [id: typescript:Color]
-CreateScalarFieldOptions (type) [3 members] [id: typescript:CreateScalarFieldOptions]
-  CreateScalarFieldOptions.from (property) [id: typescript:CreateScalarFieldOptions.from]
-  CreateScalarFieldOptions.value (property) [id: typescript:CreateScalarFieldOptions.value]
-  CreateScalarFieldOptions.sdThreshold (property) [id: typescript:CreateScalarFieldOptions.sdThreshold]
-CreateVectorFieldOptions (type) [3 members] [id: typescript:CreateVectorFieldOptions]
-  CreateVectorFieldOptions.from (property) [id: typescript:CreateVectorFieldOptions.from]
-  CreateVectorFieldOptions.value (property) [id: typescript:CreateVectorFieldOptions.value]
-  CreateVectorFieldOptions.sdThreshold (property) [id: typescript:CreateVectorFieldOptions.sdThreshold]
-CreateVoxelsOptions (type) [1 members] [id: typescript:CreateVoxelsOptions]
-  CreateVoxelsOptions.shape (property) [id: typescript:CreateVoxelsOptions.shape]
-GetSliceOptions (type) [1 members] [id: typescript:GetSliceOptions]
-  GetSliceOptions.mode (property) [id: typescript:GetSliceOptions.mode]
-Mat4 (type) — 4x4 transform, column-major in System.Numerics order (row-vector convention [id: typescript:Mat4]
-MetadataType (type) [id: typescript:MetadataType]
-MetadataValue (type) [id: typescript:MetadataValue]
-PicoErrorCode (type) [id: typescript:PicoErrorCode]
-SdfExpression (type) — A serializable SDF [id: typescript:SdfExpression]
-SdfFunction (type) — Signed distance in millimetres at (x, y, z) — scalars,… [id: typescript:SdfFunction]
-SdfOperator (type) [id: typescript:SdfOperator]
-SliceAxis (type) [id: typescript:SliceAxis]
-SliceMode (type) — Slice modes are pure post-processing over the native narrow-band floats [id: typescript:SliceMode]
-StlUnit (type) [id: typescript:StlUnit]
-TransformOptions (type) [id: typescript:TransformOptions]
-VdbFieldType (type) [id: typescript:VdbFieldType]
-Vec3 (type) — A 3D coordinate or direction, `[x, y, z]`, in millimetres… [id: typescript:Vec3]
-Overhang (type) [1 members] — Normalized overhang severity 0..1 (C# `PicoGK.Numerics.Overhang`) [id: typescript:Overhang]
-  Overhang.[overhangBrand] (property) [id: typescript:Overhang.[overhangBrand]]
-Quat (type) — A rotation quaternion as [x, y, z, w] (System.Numerics `Quaternion`… [id: typescript:Quat]
-Rad (type) [1 members] — An angle in radians (C# `PicoGK.Numerics.Rad`) [id: typescript:Rad]
-  Rad.[radBrand] (property) [id: typescript:Rad.[radBrand]]
-Vec2 (type) — A 2D vector as an immutable tuple (System.Numerics `Vector2` analog) [id: typescript:Vec2]
-CylindricalDirection (type) [id: typescript:CylindricalDirection]
-FrameType (type) [id: typescript:FrameType]
-ModulationCoord (type) [id: typescript:ModulationCoord]
-ModulationLine (type) [id: typescript:ModulationLine]
-PipeSegmentMethod (type) [id: typescript:PipeSegmentMethod]
-PolygonPreset (type) [id: typescript:PolygonPreset]
-RandomSource (type) — A uniform [0, 1) source (the C# `Random.NextDouble` role) [id: typescript:RandomSource]
-RatioFunc (type) [id: typescript:RatioFunc]
-SplineEnds (type) [id: typescript:SplineEnds]
-SuperShapePreset (type) [id: typescript:SuperShapePreset]
-SurfaceRatioFunc (type) [id: typescript:SurfaceRatioFunc]
-VertexTransformation (type) — Point-wise vertex transformation applied during construction (C# `fnVertexTransformation`) [id: typescript:VertexTransformation]
-ContourWinding (type) [id: typescript:ContourWinding]
+AllocatedCounts (type) [8 members]
+  AllocatedCounts.voxels (property)
+  AllocatedCounts.meshes (property)
+  AllocatedCounts.lattices (property)
+  AllocatedCounts.polyLines (property)
+  AllocatedCounts.scalarFields (property)
+  AllocatedCounts.vectorFields (property)
+  AllocatedCounts.vdbFiles (property)
+  AllocatedCounts.metadata (property)
+Color (type) — RGBA color, each channel 0..1
+CreateScalarFieldOptions (type) [3 members]
+  CreateScalarFieldOptions.from (property)
+  CreateScalarFieldOptions.value (property)
+  CreateScalarFieldOptions.sdThreshold (property)
+CreateVectorFieldOptions (type) [3 members]
+  CreateVectorFieldOptions.from (property)
+  CreateVectorFieldOptions.value (property)
+  CreateVectorFieldOptions.sdThreshold (property)
+CreateVoxelsOptions (type) [1 members]
+  CreateVoxelsOptions.shape (property)
+GetSliceOptions (type) [1 members]
+  GetSliceOptions.mode (property)
+Mat4 (type) — 4x4 transform, column-major in System.Numerics order (row-vector convention
+MetadataType (type)
+MetadataValue (type)
+PicoErrorCode (type)
+SdfExpression (type) — A serializable SDF
+SdfFunction (type) — Signed distance in millimetres at (x, y, z) — scalars,…
+SdfOperator (type)
+SliceAxis (type)
+SliceMode (type) — Slice modes are pure post-processing over the native narrow-band floats
+StlUnit (type)
+TransformOptions (type)
+VdbFieldType (type)
+Vec3 (type) — A 3D coordinate or direction, `[x, y, z]`, in millimetres…
+Overhang (type) [1 members] — Normalized overhang severity 0..1 (C# `PicoGK.Numerics.Overhang`)
+  Overhang.[overhangBrand] (property)
+Quat (type) — A rotation quaternion as [x, y, z, w] (System.Numerics `Quaternion`…
+Rad (type) [1 members] — An angle in radians (C# `PicoGK.Numerics.Rad`)
+  Rad.[radBrand] (property)
+Vec2 (type) — A 2D vector as an immutable tuple (System.Numerics `Vector2` analog)
+CylindricalDirection (type)
+FrameType (type)
+ModulationCoord (type)
+ModulationLine (type)
+PipeSegmentMethod (type)
+PolygonPreset (type)
+RandomSource (type) — A uniform [0, 1) source (the C# `Random.NextDouble` role)
+RatioFunc (type)
+SplineEnds (type)
+SuperShapePreset (type)
+SurfaceRatioFunc (type)
+VertexTransformation (type) — Point-wise vertex transformation applied during construction (C# `fnVertexTransformation`)
+ContourWinding (type)
 
 ## Classes — `api-classes.md`
 
-PicoError (class) [2 members] [id: typescript:PicoError]
-  PicoError.code (property) [id: typescript:PicoError.code]
-  PicoError.constructor (constructor) [id: typescript:PicoError.constructor]
-BodyCentreLattice (class) [1 members] — Body-centred lattice [id: typescript:BodyCentreLattice]
-  BodyCentreLattice.addCell (method) [id: typescript:BodyCentreLattice.addCell]
-BoundaryBeamThickness (class) [4 members] — Thickness from the distance to the bounding voxel surface [id: typescript:BoundaryBeamThickness]
-  BoundaryBeamThickness.constructor (constructor) [id: typescript:BoundaryBeamThickness.constructor]
-  BoundaryBeamThickness.beamThickness (method) [id: typescript:BoundaryBeamThickness.beamThickness]
-  BoundaryBeamThickness.updateCell (method) [id: typescript:BoundaryBeamThickness.updateCell]
-  BoundaryBeamThickness.setBoundingVoxels (method) [id: typescript:BoundaryBeamThickness.setBoundingVoxels]
-CellBasedBeamThickness (class) [4 members] — Thickness from the point's position within the current unit cell [id: typescript:CellBasedBeamThickness]
-  CellBasedBeamThickness.constructor (constructor) [id: typescript:CellBasedBeamThickness.constructor]
-  CellBasedBeamThickness.updateCell (method) [id: typescript:CellBasedBeamThickness.updateCell]
-  CellBasedBeamThickness.beamThickness (method) [id: typescript:CellBasedBeamThickness.beamThickness]
-  CellBasedBeamThickness.setBoundingVoxels (method) [id: typescript:CellBasedBeamThickness.setBoundingVoxels]
-CombinedTrafo (class) [2 members] — Sequential composition of trafos [id: typescript:CombinedTrafo]
-  CombinedTrafo.constructor (constructor) [id: typescript:CombinedTrafo.constructor]
-  CombinedTrafo.apply (method) [id: typescript:CombinedTrafo.apply]
-ConformalCellArray (class) [2 members] — Regular grid cell array conformal to a BaseBox, BaseLens or… [id: typescript:ConformalCellArray]
-  ConformalCellArray.constructor (constructor) [id: typescript:ConformalCellArray.constructor]
-  ConformalCellArray.unitCells (method) [id: typescript:ConformalCellArray.unitCells]
-ConstantBeamThickness (class) [4 members] — Constant thickness, independent of cell or boundary (C# `ConstantBeamThickness`) [id: typescript:ConstantBeamThickness]
-  ConstantBeamThickness.constructor (constructor) [id: typescript:ConstantBeamThickness.constructor]
-  ConstantBeamThickness.beamThickness (method) [id: typescript:ConstantBeamThickness.beamThickness]
-  ConstantBeamThickness.updateCell (method) [id: typescript:ConstantBeamThickness.updateCell]
-  ConstantBeamThickness.setBoundingVoxels (method) [id: typescript:ConstantBeamThickness.setBoundingVoxels]
-CuboidCell (class) [4 members] — Simple unit cell with 8 corner points in the shape… [id: typescript:CuboidCell]
-  CuboidCell.constructor (constructor) [id: typescript:CuboidCell.constructor]
-  CuboidCell.cornerPoints (method) [id: typescript:CuboidCell.cornerPoints]
-  CuboidCell.cellCentre (method) [id: typescript:CuboidCell.cellCentre]
-  CuboidCell.cellBounding (method) [id: typescript:CuboidCell.cellBounding]
-FullVoidLogic (class) [1 members] — Complement of the full wall (C# `FullVoidLogic`) [id: typescript:FullVoidLogic]
-  FullVoidLogic.advancedSignedDistance (method) [id: typescript:FullVoidLogic.advancedSignedDistance]
-FullWallLogic (class) [1 members] — Wall on both sides of the zero surface (C# `FullWallLogic`) [id: typescript:FullWallLogic]
-  FullWallLogic.advancedSignedDistance (method) [id: typescript:FullWallLogic.advancedSignedDistance]
-FunctionalScaleTrafo (class) [1 members] — Z-dependent scale ramp 20→5 over z 0..50 [id: typescript:FunctionalScaleTrafo]
-  FunctionalScaleTrafo.apply (method) [id: typescript:FunctionalScaleTrafo.apply]
-GlobalFuncBeamThickness (class) [4 members] — Thickness from a global function of the point — upstream… [id: typescript:GlobalFuncBeamThickness]
-  GlobalFuncBeamThickness.constructor (constructor) [id: typescript:GlobalFuncBeamThickness.constructor]
-  GlobalFuncBeamThickness.beamThickness (method) [id: typescript:GlobalFuncBeamThickness.beamThickness]
-  GlobalFuncBeamThickness.updateCell (method) [id: typescript:GlobalFuncBeamThickness.updateCell]
-  GlobalFuncBeamThickness.setBoundingVoxels (method) [id: typescript:GlobalFuncBeamThickness.setBoundingVoxels]
-ImplicitLidinoid (class) [3 members] — Implicit lidinoid [id: typescript:ImplicitLidinoid]
-  ImplicitLidinoid.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction [id: typescript:ImplicitLidinoid.sdf]
-  ImplicitLidinoid.expression (property) — The same field as a tape expression for the parallel… [id: typescript:ImplicitLidinoid.expression]
-  ImplicitLidinoid.constructor (constructor) [id: typescript:ImplicitLidinoid.constructor]
-ImplicitModular (class) [2 members] — Modular implicit [id: typescript:ImplicitModular]
-  ImplicitModular.sdf (property) [id: typescript:ImplicitModular.sdf]
-  ImplicitModular.constructor (constructor) [id: typescript:ImplicitModular.constructor]
-ImplicitRadialGyroid (class) [2 members] — Gyroid unwrapped around the Z axis [id: typescript:ImplicitRadialGyroid]
-  ImplicitRadialGyroid.sdf (property) [id: typescript:ImplicitRadialGyroid.sdf]
-  ImplicitRadialGyroid.constructor (constructor) [id: typescript:ImplicitRadialGyroid.constructor]
-ImplicitRandomizedSchwarzPrimitive (class) [2 members] — Schwarz primitive over a randomly deformed grid [id: typescript:ImplicitRandomizedSchwarzPrimitive]
-  ImplicitRandomizedSchwarzPrimitive.sdf (property) [id: typescript:ImplicitRandomizedSchwarzPrimitive.sdf]
-  ImplicitRandomizedSchwarzPrimitive.constructor (constructor) [id: typescript:ImplicitRandomizedSchwarzPrimitive.constructor]
-ImplicitSchwarzDiamond (class) [3 members] — Implicit Schwarz diamond [id: typescript:ImplicitSchwarzDiamond]
-  ImplicitSchwarzDiamond.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction [id: typescript:ImplicitSchwarzDiamond.sdf]
-  ImplicitSchwarzDiamond.expression (property) — The same field as a tape expression for the parallel… [id: typescript:ImplicitSchwarzDiamond.expression]
-  ImplicitSchwarzDiamond.constructor (constructor) [id: typescript:ImplicitSchwarzDiamond.constructor]
-ImplicitSchwarzPrimitive (class) [3 members] — Implicit Schwarz primitive (C# `ImplicitSchwarzPrimitive`) [id: typescript:ImplicitSchwarzPrimitive]
-  ImplicitSchwarzPrimitive.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction [id: typescript:ImplicitSchwarzPrimitive.sdf]
-  ImplicitSchwarzPrimitive.expression (property) — The same field as a tape expression for the parallel… [id: typescript:ImplicitSchwarzPrimitive.expression]
-  ImplicitSchwarzPrimitive.constructor (constructor) [id: typescript:ImplicitSchwarzPrimitive.constructor]
-ImplicitSplitVoidGyroid (class) [3 members] — One side of the gyroid surface as a void, shrunk… [id: typescript:ImplicitSplitVoidGyroid]
-  ImplicitSplitVoidGyroid.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction [id: typescript:ImplicitSplitVoidGyroid.sdf]
-  ImplicitSplitVoidGyroid.expression (property) — The same field as a tape expression for the parallel… [id: typescript:ImplicitSplitVoidGyroid.expression]
-  ImplicitSplitVoidGyroid.constructor (constructor) [id: typescript:ImplicitSplitVoidGyroid.constructor]
-ImplicitSplitWallGyroid (class) [3 members] — Gyroid wall on one side of the surface, solid on… [id: typescript:ImplicitSplitWallGyroid]
-  ImplicitSplitWallGyroid.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction [id: typescript:ImplicitSplitWallGyroid.sdf]
-  ImplicitSplitWallGyroid.expression (property) — The same field as a tape expression for the parallel… [id: typescript:ImplicitSplitWallGyroid.expression]
-  ImplicitSplitWallGyroid.constructor (constructor) [id: typescript:ImplicitSplitWallGyroid.constructor]
-NegativeHalfWallLogic (class) [1 members] — Wall only on the negative side (C# `NegativeHalfWallLogic`) [id: typescript:NegativeHalfWallLogic]
-  NegativeHalfWallLogic.advancedSignedDistance (method) [id: typescript:NegativeHalfWallLogic.advancedSignedDistance]
-NegativeVoidLogic (class) [1 members] — Negative-side volume shrunk by the half wall (C# `NegativeVoidLogic`) [id: typescript:NegativeVoidLogic]
-  NegativeVoidLogic.advancedSignedDistance (method) [id: typescript:NegativeVoidLogic.advancedSignedDistance]
-OctahedronLattice (class) [1 members] — Octahedron lattice [id: typescript:OctahedronLattice]
-  OctahedronLattice.addCell (method) [id: typescript:OctahedronLattice.addCell]
-PositiveHalfWallLogic (class) [1 members] — Wall only on the positive side (C# `PositiveHalfWallLogic`) [id: typescript:PositiveHalfWallLogic]
-  PositiveHalfWallLogic.advancedSignedDistance (method) [id: typescript:PositiveHalfWallLogic.advancedSignedDistance]
-PositiveVoidLogic (class) [1 members] — Positive-side volume shrunk by the half wall (C# `PositiveVoidLogic`) [id: typescript:PositiveVoidLogic]
-  PositiveVoidLogic.advancedSignedDistance (method) [id: typescript:PositiveVoidLogic.advancedSignedDistance]
-RadialTrafo (class) [2 members] — Cylindrical unwrap [id: typescript:RadialTrafo]
-  RadialTrafo.constructor (constructor) [id: typescript:RadialTrafo.constructor]
-  RadialTrafo.apply (method) [id: typescript:RadialTrafo.apply]
-RandomDeformationField (class) [2 members] — Regular cuboid 3D grid with a random 3D value at… [id: typescript:RandomDeformationField]
-  RandomDeformationField.constructor (constructor) [id: typescript:RandomDeformationField.constructor]
-  RandomDeformationField.dataAt (method) — Tri-linear interpolation of the noise grid at the point, clamped… [id: typescript:RandomDeformationField.dataAt]
-RandomSplineLattice (class) [2 members] — Custom lattice type connecting random corners of a cell through… [id: typescript:RandomSplineLattice]
-  RandomSplineLattice.constructor (constructor) [id: typescript:RandomSplineLattice.constructor]
-  RandomSplineLattice.addCell (method) [id: typescript:RandomSplineLattice.addCell]
-RawGyroidTpmsPattern (class) [1 members] — C# `RawGyroidTPMSPattern` [id: typescript:RawGyroidTpmsPattern]
-  RawGyroidTpmsPattern.signedDistance (method) [id: typescript:RawGyroidTpmsPattern.signedDistance]
-RawLidinoidTpmsPattern (class) [1 members] — C# `RawLidinoidTPMSPattern` [id: typescript:RawLidinoidTpmsPattern]
-  RawLidinoidTpmsPattern.signedDistance (method) [id: typescript:RawLidinoidTpmsPattern.signedDistance]
-RawSchwarzDiamondTpmsPattern (class) [1 members] — C# `RawSchwarzDiamondTPMSPattern` [id: typescript:RawSchwarzDiamondTpmsPattern]
-  RawSchwarzDiamondTpmsPattern.signedDistance (method) [id: typescript:RawSchwarzDiamondTpmsPattern.signedDistance]
-RawSchwarzPrimitiveTpmsPattern (class) [1 members] — C# `RawSchwarzPrimitiveTPMSPattern` [id: typescript:RawSchwarzPrimitiveTpmsPattern]
-  RawSchwarzPrimitiveTpmsPattern.signedDistance (method) [id: typescript:RawSchwarzPrimitiveTpmsPattern.signedDistance]
-RawTransitionTpmsPattern (class) [1 members] — Schwarz diamond blending into Schwarz primitive over x in -2..3… [id: typescript:RawTransitionTpmsPattern]
-  RawTransitionTpmsPattern.signedDistance (method) [id: typescript:RawTransitionTpmsPattern.signedDistance]
-RegularCellArray (class) [2 members] — Regular grid cell array housing the bounding box of the… [id: typescript:RegularCellArray]
-  RegularCellArray.constructor (constructor) [id: typescript:RegularCellArray.constructor]
-  RegularCellArray.unitCells (method) [id: typescript:RegularCellArray.unitCells]
-RegularUnitCell (class) [2 members] — A grid of exactly one unit cell, centred in XY… [id: typescript:RegularUnitCell]
-  RegularUnitCell.constructor (constructor) [id: typescript:RegularUnitCell.constructor]
-  RegularUnitCell.unitCells (method) [id: typescript:RegularUnitCell.unitCells]
-ScaleTrafo (class) [2 members] — Per-axis division by the unit sizes (C# `ScaleTrafo`) [id: typescript:ScaleTrafo]
-  ScaleTrafo.constructor (constructor) [id: typescript:ScaleTrafo.constructor]
-  ScaleTrafo.apply (method) [id: typescript:ScaleTrafo.apply]
-BaseBox (class) [19 members] — Box along a straight frame or spine with width/depth line… [id: typescript:BaseBox]
-  BaseBox.lengthSteps (property) [id: typescript:BaseBox.lengthSteps]
-  BaseBox.widthSteps (property) [id: typescript:BaseBox.widthSteps]
-  BaseBox.depthSteps (property) [id: typescript:BaseBox.depthSteps]
-  BaseBox.widthModulation (property) [id: typescript:BaseBox.widthModulation]
-  BaseBox.depthModulation (property) [id: typescript:BaseBox.depthModulation]
-  BaseBox.frames (property) [id: typescript:BaseBox.frames]
-  BaseBox.constructor (constructor) [id: typescript:BaseBox.constructor]
-  BaseBox.fromBounds (method) — From a bounding box [id: typescript:BaseBox.fromBounds]
-  BaseBox.setWidth (method) — C# `SetWidth` — modulated width bumps width+length sampling to 500 [id: typescript:BaseBox.setWidth]
-  BaseBox.setDepth (method) — C# `SetDepth` — modulated depth bumps depth+length sampling to 500 [id: typescript:BaseBox.setDepth]
-  BaseBox.setWidthSteps (method) [id: typescript:BaseBox.setWidthSteps]
-  BaseBox.setDepthSteps (method) [id: typescript:BaseBox.setDepthSteps]
-  BaseBox.setLengthSteps (method) [id: typescript:BaseBox.setLengthSteps]
-  BaseBox.voxConstruct (method) [id: typescript:BaseBox.voxConstruct]
-  BaseBox.mshConstruct (method) [id: typescript:BaseBox.mshConstruct]
-  BaseBox.depthRatioFromStep (method) [id: typescript:BaseBox.depthRatioFromStep]
-  BaseBox.widthRatioFromStep (method) [id: typescript:BaseBox.widthRatioFromStep]
-  BaseBox.lengthRatioFromStep (method) [id: typescript:BaseBox.lengthRatioFromStep]
-  BaseBox.surfacePoint (method) — Surface point [id: typescript:BaseBox.surfacePoint]
-BaseCone (class) [4 members] — Cone [id: typescript:BaseCone]
-  BaseCone.cylinder (property) [id: typescript:BaseCone.cylinder]
-  BaseCone.constructor (constructor) [id: typescript:BaseCone.constructor]
-  BaseCone.voxConstruct (method) [id: typescript:BaseCone.voxConstruct]
-  BaseCone.baseCylinder (method) — The underlying cylinder (C# `oGetBaseCylinder`) [id: typescript:BaseCone.baseCylinder]
-BaseCylinder (class) [19 members] — Cylinder along a straight frame or a spine, with a… [id: typescript:BaseCylinder]
-  BaseCylinder.lengthSteps (property) [id: typescript:BaseCylinder.lengthSteps]
-  BaseCylinder.polarSteps (property) [id: typescript:BaseCylinder.polarSteps]
-  BaseCylinder.radialSteps (property) [id: typescript:BaseCylinder.radialSteps]
-  BaseCylinder.radiusModulation (property) [id: typescript:BaseCylinder.radiusModulation]
-  BaseCylinder.frames (property) [id: typescript:BaseCylinder.frames]
-  BaseCylinder.constructor (constructor) [id: typescript:BaseCylinder.constructor]
-  BaseCylinder.setRadius (method) — C# `SetRadius` — modulated radii bump the length sampling to… [id: typescript:BaseCylinder.setRadius]
-  BaseCylinder.setRadialSteps (method) [id: typescript:BaseCylinder.setRadialSteps]
-  BaseCylinder.setPolarSteps (method) [id: typescript:BaseCylinder.setPolarSteps]
-  BaseCylinder.setLengthSteps (method) [id: typescript:BaseCylinder.setLengthSteps]
-  BaseCylinder.voxConstruct (method) [id: typescript:BaseCylinder.voxConstruct]
-  BaseCylinder.mshConstruct (method) [id: typescript:BaseCylinder.mshConstruct]
-  BaseCylinder.addTopSurface (method) — Top disc at full length (C# `AddTopSurface`) [id: typescript:BaseCylinder.addTopSurface]
-  BaseCylinder.addBottomSurface (method) — Bottom disc, wound the other way (C# `AddBottomSurface`) [id: typescript:BaseCylinder.addBottomSurface]
-  BaseCylinder.addOuterMantle (method) — Outer mantle across phi and length (C# `AddOuterMantle`) [id: typescript:BaseCylinder.addOuterMantle]
-  BaseCylinder.radiusRatioFromStep (method) [id: typescript:BaseCylinder.radiusRatioFromStep]
-  BaseCylinder.phiRatioFromStep (method) [id: typescript:BaseCylinder.phiRatioFromStep]
-  BaseCylinder.lengthRatioFromStep (method) [id: typescript:BaseCylinder.lengthRatioFromStep]
-  BaseCylinder.surfacePoint (method) — Surface point at (lengthRatio, phiRatio, radiusRatio), all 0..1 (C# `vecGetSurfacePoint`) [id: typescript:BaseCylinder.surfacePoint]
-BaseLens (class) [19 members] — Lens/washer [id: typescript:BaseLens]
-  BaseLens.radialSteps (property) [id: typescript:BaseLens.radialSteps]
-  BaseLens.polarSteps (property) [id: typescript:BaseLens.polarSteps]
-  BaseLens.heightSteps (property) [id: typescript:BaseLens.heightSteps]
-  BaseLens.innerRadius (property) [id: typescript:BaseLens.innerRadius]
-  BaseLens.outerRadius (property) [id: typescript:BaseLens.outerRadius]
-  BaseLens.upperModulation (property) [id: typescript:BaseLens.upperModulation]
-  BaseLens.lowerModulation (property) [id: typescript:BaseLens.lowerModulation]
-  BaseLens.frame (property) [id: typescript:BaseLens.frame]
-  BaseLens.constructor (constructor) [id: typescript:BaseLens.constructor]
-  BaseLens.setHeight (method) — C# `SetHeight` — modulated faces bump radial sampling to 500 [id: typescript:BaseLens.setHeight]
-  BaseLens.setRadialSteps (method) [id: typescript:BaseLens.setRadialSteps]
-  BaseLens.setPolarSteps (method) [id: typescript:BaseLens.setPolarSteps]
-  BaseLens.setHeightSteps (method) [id: typescript:BaseLens.setHeightSteps]
-  BaseLens.voxConstruct (method) [id: typescript:BaseLens.voxConstruct]
-  BaseLens.mshConstruct (method) [id: typescript:BaseLens.mshConstruct]
-  BaseLens.radiusRatioFromStep (method) [id: typescript:BaseLens.radiusRatioFromStep]
-  BaseLens.phiRatioFromStep (method) [id: typescript:BaseLens.phiRatioFromStep]
-  BaseLens.heightRatioFromStep (method) [id: typescript:BaseLens.heightRatioFromStep]
-  BaseLens.surfacePoint (method) — Surface point (C# `vecGetSurfacePoint` [id: typescript:BaseLens.surfacePoint]
-BasePipe (class) [22 members] — Pipe (annular cylinder) along a straight frame or spine (C#… [id: typescript:BasePipe]
-  BasePipe.lengthSteps (property) [id: typescript:BasePipe.lengthSteps]
-  BasePipe.polarSteps (property) [id: typescript:BasePipe.polarSteps]
-  BasePipe.radialSteps (property) [id: typescript:BasePipe.radialSteps]
-  BasePipe.outerRadiusModulation (property) [id: typescript:BasePipe.outerRadiusModulation]
-  BasePipe.innerRadiusModulation (property) [id: typescript:BasePipe.innerRadiusModulation]
-  BasePipe.frames (property) [id: typescript:BasePipe.frames]
-  BasePipe.constructor (constructor) [id: typescript:BasePipe.constructor]
-  BasePipe.setRadius (method) — C# `SetRadius(inner, outer)` — bumps length sampling to 500 [id: typescript:BasePipe.setRadius]
-  BasePipe.setRadialSteps (method) [id: typescript:BasePipe.setRadialSteps]
-  BasePipe.setPolarSteps (method) [id: typescript:BasePipe.setPolarSteps]
-  BasePipe.setLengthSteps (method) [id: typescript:BasePipe.setLengthSteps]
-  BasePipe.voxConstruct (method) [id: typescript:BasePipe.voxConstruct]
-  BasePipe.mshConstruct (method) [id: typescript:BasePipe.mshConstruct]
-  BasePipe.addTopSurface (method) [id: typescript:BasePipe.addTopSurface]
-  BasePipe.addBottomSurface (method) [id: typescript:BasePipe.addBottomSurface]
-  BasePipe.addOuterMantle (method) [id: typescript:BasePipe.addOuterMantle]
-  BasePipe.addInnerMantle (method) [id: typescript:BasePipe.addInnerMantle]
-  BasePipe.radiusRatioFromStep (method) [id: typescript:BasePipe.radiusRatioFromStep]
-  BasePipe.phiRatioFromStep (method) [id: typescript:BasePipe.phiRatioFromStep]
-  BasePipe.lengthRatioFromStep (method) [id: typescript:BasePipe.lengthRatioFromStep]
-  BasePipe.axesAt (method) — Spine point and local axes at a length ratio [id: typescript:BasePipe.axesAt]
-  BasePipe.surfacePoint (method) — Surface point [id: typescript:BasePipe.surfacePoint]
-BasePipeSegment (class) [5 members] — Angular pipe segment [id: typescript:BasePipeSegment]
-  BasePipeSegment.rangeModulation (property) [id: typescript:BasePipeSegment.rangeModulation]
-  BasePipeSegment.midModulation (property) [id: typescript:BasePipeSegment.midModulation]
-  BasePipeSegment.constructor (constructor) [id: typescript:BasePipeSegment.constructor]
-  BasePipeSegment.mshConstruct (method) [id: typescript:BasePipeSegment.mshConstruct]
-  BasePipeSegment.surfacePoint (method) — Phi spans mid ± range/2 at the length ratio (C#… [id: typescript:BasePipeSegment.surfacePoint]
-BaseRevolve (class) [22 members] — Revolves a spine cross-section about the reference frame's Z axis… [id: typescript:BaseRevolve]
-  BaseRevolve.lengthSteps (property) [id: typescript:BaseRevolve.lengthSteps]
-  BaseRevolve.polarSteps (property) [id: typescript:BaseRevolve.polarSteps]
-  BaseRevolve.radialSteps (property) [id: typescript:BaseRevolve.radialSteps]
-  BaseRevolve.frames (property) [id: typescript:BaseRevolve.frames]
-  BaseRevolve.frame (property) [id: typescript:BaseRevolve.frame]
-  BaseRevolve.outerRadiusModulation (property) [id: typescript:BaseRevolve.outerRadiusModulation]
-  BaseRevolve.innerRadiusModulation (property) [id: typescript:BaseRevolve.innerRadiusModulation]
-  BaseRevolve.constructor (constructor) [id: typescript:BaseRevolve.constructor]
-  BaseRevolve.setRadius (method) [id: typescript:BaseRevolve.setRadius]
-  BaseRevolve.setRadialSteps (method) [id: typescript:BaseRevolve.setRadialSteps]
-  BaseRevolve.setPolarSteps (method) [id: typescript:BaseRevolve.setPolarSteps]
-  BaseRevolve.setLengthSteps (method) [id: typescript:BaseRevolve.setLengthSteps]
-  BaseRevolve.voxConstruct (method) [id: typescript:BaseRevolve.voxConstruct]
-  BaseRevolve.mshConstruct (method) [id: typescript:BaseRevolve.mshConstruct]
-  BaseRevolve.radiusRatioFromStep (method) [id: typescript:BaseRevolve.radiusRatioFromStep]
-  BaseRevolve.phiRatioFromStep (method) [id: typescript:BaseRevolve.phiRatioFromStep]
-  BaseRevolve.lengthRatioFromStep (method) [id: typescript:BaseRevolve.lengthRatioFromStep]
-  BaseRevolve.surfacePoint (method) — Spine offset along local X, revolved about the reference frame's… [id: typescript:BaseRevolve.surfacePoint]
-  BaseRevolve.spinePoint (method) — Spine position (C# `vecGetSpineAlongLength`) [id: typescript:BaseRevolve.spinePoint]
-  BaseRevolve.outerSurfacePoint (method) — Outer surface point at (phi, lengthRatio) (C# `vecGetOuterSurfacePoint`) [id: typescript:BaseRevolve.outerSurfacePoint]
-  BaseRevolve.innerSurfacePoint (method) — Inner surface point at (phi, lengthRatio) (C# `vecGetInnerSurfacePoint`) [id: typescript:BaseRevolve.innerSurfacePoint]
-  BaseRevolve.framesFromContour (method) — Cylindrical frames traced from a rotationally-symmetric contour (C# `aGetFramesFromContour`) [id: typescript:BaseRevolve.framesFromContour]
-BaseRing (class) [14 members] — Torus ring on a local frame [id: typescript:BaseRing]
-  BaseRing.polarSteps (property) [id: typescript:BaseRing.polarSteps]
-  BaseRing.radialSteps (property) [id: typescript:BaseRing.radialSteps]
-  BaseRing.ringRadius (property) [id: typescript:BaseRing.ringRadius]
-  BaseRing.radiusModulation (property) [id: typescript:BaseRing.radiusModulation]
-  BaseRing.frame (property) [id: typescript:BaseRing.frame]
-  BaseRing.constructor (constructor) [id: typescript:BaseRing.constructor]
-  BaseRing.setRadius (method) [id: typescript:BaseRing.setRadius]
-  BaseRing.setRadialSteps (method) [id: typescript:BaseRing.setRadialSteps]
-  BaseRing.setPolarSteps (method) [id: typescript:BaseRing.setPolarSteps]
-  BaseRing.voxConstruct (method) [id: typescript:BaseRing.voxConstruct]
-  BaseRing.mshConstruct (method) [id: typescript:BaseRing.mshConstruct]
-  BaseRing.alphaRatioFromStep (method) [id: typescript:BaseRing.alphaRatioFromStep]
-  BaseRing.phiRatioFromStep (method) [id: typescript:BaseRing.phiRatioFromStep]
-  BaseRing.surfacePoint (method) — Surface point on the torus [id: typescript:BaseRing.surfacePoint]
-BaseShape (class) [3 members] — C# `BaseShape` — the vertex-transformation seam every shape shares [id: typescript:BaseShape]
-  BaseShape.trafo (property) [id: typescript:BaseShape.trafo]
-  BaseShape.setTransformation (method) — Point-wise transformation applied during construction (C# `SetTransformation`) [id: typescript:BaseShape.setTransformation]
-  BaseShape.voxConstruct (method) [id: typescript:BaseShape.voxConstruct]
-BaseSphere (class) [11 members] — Sphere on a local frame with a surface-modulated radius (C#… [id: typescript:BaseSphere]
-  BaseSphere.azimuthalSteps (property) [id: typescript:BaseSphere.azimuthalSteps]
-  BaseSphere.polarSteps (property) [id: typescript:BaseSphere.polarSteps]
-  BaseSphere.radiusModulation (property) [id: typescript:BaseSphere.radiusModulation]
-  BaseSphere.frame (property) [id: typescript:BaseSphere.frame]
-  BaseSphere.constructor (constructor) [id: typescript:BaseSphere.constructor]
-  BaseSphere.setRadius (method) [id: typescript:BaseSphere.setRadius]
-  BaseSphere.setAzimuthalSteps (method) — No lower clamp upstream (unlike the other shapes' step setters) [id: typescript:BaseSphere.setAzimuthalSteps]
-  BaseSphere.setPolarSteps (method) [id: typescript:BaseSphere.setPolarSteps]
-  BaseSphere.voxConstruct (method) [id: typescript:BaseSphere.voxConstruct]
-  BaseSphere.mshConstruct (method) [id: typescript:BaseSphere.mshConstruct]
-  BaseSphere.surfacePoint (method) — Surface point [id: typescript:BaseSphere.surfacePoint]
-ControlPointSpline (class) [3 members] — BSpline-based control point spline, open or closed ends (C# `ControlPointSpline`) [id: typescript:ControlPointSpline]
-  ControlPointSpline.constructor (constructor) [id: typescript:ControlPointSpline.constructor]
-  ControlPointSpline.points (method) — Render with the given sample count (C# `aGetPoints`) [id: typescript:ControlPointSpline.points]
-  ControlPointSpline.pointAt (method) — Sample dynamically at a length ratio (C# `vecGetPointAt`) [id: typescript:ControlPointSpline.pointAt]
-CylindricalControlSpline (class) [4 members] — Step-wise cylindrical path builder (C# `CylindricalControlSpline`) [id: typescript:CylindricalControlSpline]
-  CylindricalControlSpline.constructor (constructor) [id: typescript:CylindricalControlSpline.constructor]
-  CylindricalControlSpline.addRelativeStep (method) — Append a step relative to the last position (C# `AddRelativeStep`) [id: typescript:CylindricalControlSpline.addRelativeStep]
-  CylindricalControlSpline.addAbsoluteStep (method) — Append a step to an absolute radius or z (C#… [id: typescript:CylindricalControlSpline.addAbsoluteStep]
-  CylindricalControlSpline.points (method) [id: typescript:CylindricalControlSpline.points]
-Distribution (class) [3 members] — Bundles a normalized line modulation with a physical length (C#… [id: typescript:Distribution]
-  Distribution.totalLength (property) [id: typescript:Distribution.totalLength]
-  Distribution.modulation (property) [id: typescript:Distribution.modulation]
-  Distribution.constructor (constructor) [id: typescript:Distribution.constructor]
-Frames (class) [13 members] [id: typescript:Frames]
-  Frames.alongLine (method) — Extrude a const local frame along a straight line (C#… [id: typescript:Frames.alongLine]
-  Frames.alongSpline (method) — Extrude a const local frame along a spline (C# `Frames(aPoints,… [id: typescript:Frames.alongSpline]
-  Frames.withTargetX (method) — Tangential Z along the spline, X aligned to a const… [id: typescript:Frames.withTargetX]
-  Frames.ofType (method) — Tangential Z along the spline, X from a coordinate-system-dependent target… [id: typescript:Frames.ofType]
-  Frames.applyToFrame (method) — Transform all points and axes onto a frame's coordinate system,… [id: typescript:Frames.applyToFrame]
-  Frames.alignWithTargetX (method) — Best in-plane direction matching the target [id: typescript:Frames.alignWithTargetX]
-  Frames.targetXFor (method) — The alignment target per frame type (C# `vecGetTargetX`) [id: typescript:Frames.targetXFor]
-  Frames.spineAt (method) — Spine position at a length ratio 0..1 (C# `vecGetSpineAlongLength`) [id: typescript:Frames.spineAt]
-  Frames.localXAt (method) — Local X at a length ratio (C# `vecGetLocalXAlongLength`) [id: typescript:Frames.localXAt]
-  Frames.localYAt (method) — Local Y at a length ratio (C# `vecGetLocalYAlongLength`) [id: typescript:Frames.localYAt]
-  Frames.localZAt (method) — Local Z at a length ratio (C# `vecGetLocalZAlongLength`) [id: typescript:Frames.localZAt]
-  Frames.frameAt (method) — The full local frame at a length ratio (C# `oGetLocalFrame`) [id: typescript:Frames.frameAt]
-  Frames.points (method) — The spine points (C# `aGetPoints()`) [id: typescript:Frames.points]
-GenericContour (class) — A Distribution describing contours of rotationally symmetric objects (C# `GenericContour`) [id: typescript:GenericContour]
-ImplicitGenus (class) [3 members] — Implicit genus-2 surface [id: typescript:ImplicitGenus]
-  ImplicitGenus.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction [id: typescript:ImplicitGenus.sdf]
-  ImplicitGenus.expression (property) — The same field as a tape expression for the parallel… [id: typescript:ImplicitGenus.expression]
-  ImplicitGenus.constructor (constructor) [id: typescript:ImplicitGenus.constructor]
-ImplicitGyroid (class) [4 members] — Gyroid pattern with a wall-thickness ratio (C# `ImplicitGyroid`) [id: typescript:ImplicitGyroid]
-  ImplicitGyroid.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction [id: typescript:ImplicitGyroid.sdf]
-  ImplicitGyroid.expression (property) — The same field as a tape expression for the parallel… [id: typescript:ImplicitGyroid.expression]
-  ImplicitGyroid.constructor (constructor) [id: typescript:ImplicitGyroid.constructor]
-  ImplicitGyroid.thicknessRatio (method) — Thickness ratio for a target wall thickness in mm (C#… [id: typescript:ImplicitGyroid.thicknessRatio]
-ImplicitSphere (class) [3 members] — Implicit sphere (C# `ImplicitSphere`) [id: typescript:ImplicitSphere]
-  ImplicitSphere.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction [id: typescript:ImplicitSphere.sdf]
-  ImplicitSphere.expression (property) — The same field as a tape expression for the parallel… [id: typescript:ImplicitSphere.expression]
-  ImplicitSphere.constructor (constructor) [id: typescript:ImplicitSphere.constructor]
-ImplicitSuperEllipsoid (class) [3 members] — Implicit superellipsoid (C# `ImplicitSuperEllipsoid` [id: typescript:ImplicitSuperEllipsoid]
-  ImplicitSuperEllipsoid.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction [id: typescript:ImplicitSuperEllipsoid.sdf]
-  ImplicitSuperEllipsoid.expression (property) — The same field as a tape expression for the parallel… [id: typescript:ImplicitSuperEllipsoid.expression]
-  ImplicitSuperEllipsoid.constructor (constructor) [id: typescript:ImplicitSuperEllipsoid.constructor]
-LatticeManifold (class) [6 members] — Manifold pipe [id: typescript:LatticeManifold]
-  LatticeManifold.maxPrintableRadius (property) [id: typescript:LatticeManifold.maxPrintableRadius]
-  LatticeManifold.limitAngle (property) [id: typescript:LatticeManifold.limitAngle]
-  LatticeManifold.extendBothSides (property) [id: typescript:LatticeManifold.extendBothSides]
-  LatticeManifold.constructor (constructor) [id: typescript:LatticeManifold.constructor]
-  LatticeManifold.latConstruct (method) — Chained beams along the spine (C# `latConstruct`) [id: typescript:LatticeManifold.latConstruct]
-  LatticeManifold.addTip (method) — Teardrop tip via circular-segment geometry (C# `AddTip`) [id: typescript:LatticeManifold.addTip]
-LatticePipe (class) [10 members] — Round pipe built from lattice beams along a frame or… [id: typescript:LatticePipe]
-  LatticePipe.radiusModulation (property) [id: typescript:LatticePipe.radiusModulation]
-  LatticePipe.lengthSteps (property) [id: typescript:LatticePipe.lengthSteps]
-  LatticePipe.frames (property) [id: typescript:LatticePipe.frames]
-  LatticePipe.constructor (constructor) [id: typescript:LatticePipe.constructor]
-  LatticePipe.setRadius (method) [id: typescript:LatticePipe.setRadius]
-  LatticePipe.setLengthSteps (method) — No lower clamp upstream [id: typescript:LatticePipe.setLengthSteps]
-  LatticePipe.voxConstruct (method) [id: typescript:LatticePipe.voxConstruct]
-  LatticePipe.latConstruct (method) — Chained beams along the spine (C# `latConstruct`) [id: typescript:LatticePipe.latConstruct]
-  LatticePipe.spinePoint (method) — Centre-axis position along the pipe (C# `vecGetSpinePoint`) [id: typescript:LatticePipe.spinePoint]
-  LatticePipe.radius (method) [id: typescript:LatticePipe.radius]
+PicoError (class) [2 members]
+  PicoError.code (property)
+  PicoError.constructor (constructor)
+BodyCentreLattice (class) [1 members] — Body-centred lattice
+  BodyCentreLattice.addCell (method)
+BoundaryBeamThickness (class) [4 members] — Thickness from the distance to the bounding voxel surface
+  BoundaryBeamThickness.constructor (constructor)
+  BoundaryBeamThickness.beamThickness (method)
+  BoundaryBeamThickness.updateCell (method)
+  BoundaryBeamThickness.setBoundingVoxels (method)
+CellBasedBeamThickness (class) [4 members] — Thickness from the point's position within the current unit cell
+  CellBasedBeamThickness.constructor (constructor)
+  CellBasedBeamThickness.updateCell (method)
+  CellBasedBeamThickness.beamThickness (method)
+  CellBasedBeamThickness.setBoundingVoxels (method)
+CombinedTrafo (class) [2 members] — Sequential composition of trafos
+  CombinedTrafo.constructor (constructor)
+  CombinedTrafo.apply (method)
+ConformalCellArray (class) [2 members] — Regular grid cell array conformal to a BaseBox, BaseLens or…
+  ConformalCellArray.constructor (constructor)
+  ConformalCellArray.unitCells (method)
+ConstantBeamThickness (class) [4 members] — Constant thickness, independent of cell or boundary (C# `ConstantBeamThickness`)
+  ConstantBeamThickness.constructor (constructor)
+  ConstantBeamThickness.beamThickness (method)
+  ConstantBeamThickness.updateCell (method)
+  ConstantBeamThickness.setBoundingVoxels (method)
+CuboidCell (class) [4 members] — Simple unit cell with 8 corner points in the shape…
+  CuboidCell.constructor (constructor)
+  CuboidCell.cornerPoints (method)
+  CuboidCell.cellCentre (method)
+  CuboidCell.cellBounding (method)
+FullVoidLogic (class) [1 members] — Complement of the full wall (C# `FullVoidLogic`)
+  FullVoidLogic.advancedSignedDistance (method)
+FullWallLogic (class) [1 members] — Wall on both sides of the zero surface (C# `FullWallLogic`)
+  FullWallLogic.advancedSignedDistance (method)
+FunctionalScaleTrafo (class) [1 members] — Z-dependent scale ramp 20→5 over z 0..50
+  FunctionalScaleTrafo.apply (method)
+GlobalFuncBeamThickness (class) [4 members] — Thickness from a global function of the point — upstream…
+  GlobalFuncBeamThickness.constructor (constructor)
+  GlobalFuncBeamThickness.beamThickness (method)
+  GlobalFuncBeamThickness.updateCell (method)
+  GlobalFuncBeamThickness.setBoundingVoxels (method)
+ImplicitLidinoid (class) [3 members] — Implicit lidinoid
+  ImplicitLidinoid.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  ImplicitLidinoid.expression (property) — The same field as a tape expression for the parallel…
+  ImplicitLidinoid.constructor (constructor)
+ImplicitModular (class) [2 members] — Modular implicit
+  ImplicitModular.sdf (property)
+  ImplicitModular.constructor (constructor)
+ImplicitRadialGyroid (class) [2 members] — Gyroid unwrapped around the Z axis
+  ImplicitRadialGyroid.sdf (property)
+  ImplicitRadialGyroid.constructor (constructor)
+ImplicitRandomizedSchwarzPrimitive (class) [2 members] — Schwarz primitive over a randomly deformed grid
+  ImplicitRandomizedSchwarzPrimitive.sdf (property)
+  ImplicitRandomizedSchwarzPrimitive.constructor (constructor)
+ImplicitSchwarzDiamond (class) [3 members] — Implicit Schwarz diamond
+  ImplicitSchwarzDiamond.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  ImplicitSchwarzDiamond.expression (property) — The same field as a tape expression for the parallel…
+  ImplicitSchwarzDiamond.constructor (constructor)
+ImplicitSchwarzPrimitive (class) [3 members] — Implicit Schwarz primitive (C# `ImplicitSchwarzPrimitive`)
+  ImplicitSchwarzPrimitive.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  ImplicitSchwarzPrimitive.expression (property) — The same field as a tape expression for the parallel…
+  ImplicitSchwarzPrimitive.constructor (constructor)
+ImplicitSplitVoidGyroid (class) [3 members] — One side of the gyroid surface as a void, shrunk…
+  ImplicitSplitVoidGyroid.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  ImplicitSplitVoidGyroid.expression (property) — The same field as a tape expression for the parallel…
+  ImplicitSplitVoidGyroid.constructor (constructor)
+ImplicitSplitWallGyroid (class) [3 members] — Gyroid wall on one side of the surface, solid on…
+  ImplicitSplitWallGyroid.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  ImplicitSplitWallGyroid.expression (property) — The same field as a tape expression for the parallel…
+  ImplicitSplitWallGyroid.constructor (constructor)
+NegativeHalfWallLogic (class) [1 members] — Wall only on the negative side (C# `NegativeHalfWallLogic`)
+  NegativeHalfWallLogic.advancedSignedDistance (method)
+NegativeVoidLogic (class) [1 members] — Negative-side volume shrunk by the half wall (C# `NegativeVoidLogic`)
+  NegativeVoidLogic.advancedSignedDistance (method)
+OctahedronLattice (class) [1 members] — Octahedron lattice
+  OctahedronLattice.addCell (method)
+PositiveHalfWallLogic (class) [1 members] — Wall only on the positive side (C# `PositiveHalfWallLogic`)
+  PositiveHalfWallLogic.advancedSignedDistance (method)
+PositiveVoidLogic (class) [1 members] — Positive-side volume shrunk by the half wall (C# `PositiveVoidLogic`)
+  PositiveVoidLogic.advancedSignedDistance (method)
+RadialTrafo (class) [2 members] — Cylindrical unwrap
+  RadialTrafo.constructor (constructor)
+  RadialTrafo.apply (method)
+RandomDeformationField (class) [2 members] — Regular cuboid 3D grid with a random 3D value at…
+  RandomDeformationField.constructor (constructor)
+  RandomDeformationField.dataAt (method) — Tri-linear interpolation of the noise grid at the point, clamped…
+RandomSplineLattice (class) [2 members] — Custom lattice type connecting random corners of a cell through…
+  RandomSplineLattice.constructor (constructor)
+  RandomSplineLattice.addCell (method)
+RawGyroidTpmsPattern (class) [1 members] — C# `RawGyroidTPMSPattern`
+  RawGyroidTpmsPattern.signedDistance (method)
+RawLidinoidTpmsPattern (class) [1 members] — C# `RawLidinoidTPMSPattern`
+  RawLidinoidTpmsPattern.signedDistance (method)
+RawSchwarzDiamondTpmsPattern (class) [1 members] — C# `RawSchwarzDiamondTPMSPattern`
+  RawSchwarzDiamondTpmsPattern.signedDistance (method)
+RawSchwarzPrimitiveTpmsPattern (class) [1 members] — C# `RawSchwarzPrimitiveTPMSPattern`
+  RawSchwarzPrimitiveTpmsPattern.signedDistance (method)
+RawTransitionTpmsPattern (class) [1 members] — Schwarz diamond blending into Schwarz primitive over x in -2..3…
+  RawTransitionTpmsPattern.signedDistance (method)
+RegularCellArray (class) [2 members] — Regular grid cell array housing the bounding box of the…
+  RegularCellArray.constructor (constructor)
+  RegularCellArray.unitCells (method)
+RegularUnitCell (class) [2 members] — A grid of exactly one unit cell, centred in XY…
+  RegularUnitCell.constructor (constructor)
+  RegularUnitCell.unitCells (method)
+ScaleTrafo (class) [2 members] — Per-axis division by the unit sizes (C# `ScaleTrafo`)
+  ScaleTrafo.constructor (constructor)
+  ScaleTrafo.apply (method)
+BaseBox (class) [19 members] — Box along a straight frame or spine with width/depth line…
+  BaseBox.lengthSteps (property)
+  BaseBox.widthSteps (property)
+  BaseBox.depthSteps (property)
+  BaseBox.widthModulation (property)
+  BaseBox.depthModulation (property)
+  BaseBox.frames (property)
+  BaseBox.constructor (constructor)
+  BaseBox.fromBounds (method) — From a bounding box
+  BaseBox.setWidth (method) — C# `SetWidth` — modulated width bumps width+length sampling to 500
+  BaseBox.setDepth (method) — C# `SetDepth` — modulated depth bumps depth+length sampling to 500
+  BaseBox.setWidthSteps (method)
+  BaseBox.setDepthSteps (method)
+  BaseBox.setLengthSteps (method)
+  BaseBox.voxConstruct (method)
+  BaseBox.mshConstruct (method)
+  BaseBox.depthRatioFromStep (method)
+  BaseBox.widthRatioFromStep (method)
+  BaseBox.lengthRatioFromStep (method)
+  BaseBox.surfacePoint (method) — Surface point
+BaseCone (class) [4 members] — Cone
+  BaseCone.cylinder (property)
+  BaseCone.constructor (constructor)
+  BaseCone.voxConstruct (method)
+  BaseCone.baseCylinder (method) — The underlying cylinder (C# `oGetBaseCylinder`)
+BaseCylinder (class) [19 members] — Cylinder along a straight frame or a spine, with a…
+  BaseCylinder.lengthSteps (property)
+  BaseCylinder.polarSteps (property)
+  BaseCylinder.radialSteps (property)
+  BaseCylinder.radiusModulation (property)
+  BaseCylinder.frames (property)
+  BaseCylinder.constructor (constructor)
+  BaseCylinder.setRadius (method) — C# `SetRadius` — modulated radii bump the length sampling to…
+  BaseCylinder.setRadialSteps (method)
+  BaseCylinder.setPolarSteps (method)
+  BaseCylinder.setLengthSteps (method)
+  BaseCylinder.voxConstruct (method)
+  BaseCylinder.mshConstruct (method)
+  BaseCylinder.addTopSurface (method) — Top disc at full length (C# `AddTopSurface`)
+  BaseCylinder.addBottomSurface (method) — Bottom disc, wound the other way (C# `AddBottomSurface`)
+  BaseCylinder.addOuterMantle (method) — Outer mantle across phi and length (C# `AddOuterMantle`)
+  BaseCylinder.radiusRatioFromStep (method)
+  BaseCylinder.phiRatioFromStep (method)
+  BaseCylinder.lengthRatioFromStep (method)
+  BaseCylinder.surfacePoint (method) — Surface point at (lengthRatio, phiRatio, radiusRatio), all 0..1 (C# `vecGetSurfacePoint`)
+BaseLens (class) [19 members] — Lens/washer
+  BaseLens.radialSteps (property)
+  BaseLens.polarSteps (property)
+  BaseLens.heightSteps (property)
+  BaseLens.innerRadius (property)
+  BaseLens.outerRadius (property)
+  BaseLens.upperModulation (property)
+  BaseLens.lowerModulation (property)
+  BaseLens.frame (property)
+  BaseLens.constructor (constructor)
+  BaseLens.setHeight (method) — C# `SetHeight` — modulated faces bump radial sampling to 500
+  BaseLens.setRadialSteps (method)
+  BaseLens.setPolarSteps (method)
+  BaseLens.setHeightSteps (method)
+  BaseLens.voxConstruct (method)
+  BaseLens.mshConstruct (method)
+  BaseLens.radiusRatioFromStep (method)
+  BaseLens.phiRatioFromStep (method)
+  BaseLens.heightRatioFromStep (method)
+  BaseLens.surfacePoint (method) — Surface point (C# `vecGetSurfacePoint`
+BasePipe (class) [22 members] — Pipe (annular cylinder) along a straight frame or spine (C#…
+  BasePipe.lengthSteps (property)
+  BasePipe.polarSteps (property)
+  BasePipe.radialSteps (property)
+  BasePipe.outerRadiusModulation (property)
+  BasePipe.innerRadiusModulation (property)
+  BasePipe.frames (property)
+  BasePipe.constructor (constructor)
+  BasePipe.setRadius (method) — C# `SetRadius(inner, outer)` — bumps length sampling to 500
+  BasePipe.setRadialSteps (method)
+  BasePipe.setPolarSteps (method)
+  BasePipe.setLengthSteps (method)
+  BasePipe.voxConstruct (method)
+  BasePipe.mshConstruct (method)
+  BasePipe.addTopSurface (method)
+  BasePipe.addBottomSurface (method)
+  BasePipe.addOuterMantle (method)
+  BasePipe.addInnerMantle (method)
+  BasePipe.radiusRatioFromStep (method)
+  BasePipe.phiRatioFromStep (method)
+  BasePipe.lengthRatioFromStep (method)
+  BasePipe.axesAt (method) — Spine point and local axes at a length ratio
+  BasePipe.surfacePoint (method) — Surface point
+BasePipeSegment (class) [5 members] — Angular pipe segment
+  BasePipeSegment.rangeModulation (property)
+  BasePipeSegment.midModulation (property)
+  BasePipeSegment.constructor (constructor)
+  BasePipeSegment.mshConstruct (method)
+  BasePipeSegment.surfacePoint (method) — Phi spans mid ± range/2 at the length ratio (C#…
+BaseRevolve (class) [22 members] — Revolves a spine cross-section about the reference frame's Z axis…
+  BaseRevolve.lengthSteps (property)
+  BaseRevolve.polarSteps (property)
+  BaseRevolve.radialSteps (property)
+  BaseRevolve.frames (property)
+  BaseRevolve.frame (property)
+  BaseRevolve.outerRadiusModulation (property)
+  BaseRevolve.innerRadiusModulation (property)
+  BaseRevolve.constructor (constructor)
+  BaseRevolve.setRadius (method)
+  BaseRevolve.setRadialSteps (method)
+  BaseRevolve.setPolarSteps (method)
+  BaseRevolve.setLengthSteps (method)
+  BaseRevolve.voxConstruct (method)
+  BaseRevolve.mshConstruct (method)
+  BaseRevolve.radiusRatioFromStep (method)
+  BaseRevolve.phiRatioFromStep (method)
+  BaseRevolve.lengthRatioFromStep (method)
+  BaseRevolve.surfacePoint (method) — Spine offset along local X, revolved about the reference frame's…
+  BaseRevolve.spinePoint (method) — Spine position (C# `vecGetSpineAlongLength`)
+  BaseRevolve.outerSurfacePoint (method) — Outer surface point at (phi, lengthRatio) (C# `vecGetOuterSurfacePoint`)
+  BaseRevolve.innerSurfacePoint (method) — Inner surface point at (phi, lengthRatio) (C# `vecGetInnerSurfacePoint`)
+  BaseRevolve.framesFromContour (method) — Cylindrical frames traced from a rotationally-symmetric contour (C# `aGetFramesFromContour`)
+BaseRing (class) [14 members] — Torus ring on a local frame
+  BaseRing.polarSteps (property)
+  BaseRing.radialSteps (property)
+  BaseRing.ringRadius (property)
+  BaseRing.radiusModulation (property)
+  BaseRing.frame (property)
+  BaseRing.constructor (constructor)
+  BaseRing.setRadius (method)
+  BaseRing.setRadialSteps (method)
+  BaseRing.setPolarSteps (method)
+  BaseRing.voxConstruct (method)
+  BaseRing.mshConstruct (method)
+  BaseRing.alphaRatioFromStep (method)
+  BaseRing.phiRatioFromStep (method)
+  BaseRing.surfacePoint (method) — Surface point on the torus
+BaseShape (class) [3 members] — C# `BaseShape` — the vertex-transformation seam every shape shares
+  BaseShape.trafo (property)
+  BaseShape.setTransformation (method) — Point-wise transformation applied during construction (C# `SetTransformation`)
+  BaseShape.voxConstruct (method)
+BaseSphere (class) [11 members] — Sphere on a local frame with a surface-modulated radius (C#…
+  BaseSphere.azimuthalSteps (property)
+  BaseSphere.polarSteps (property)
+  BaseSphere.radiusModulation (property)
+  BaseSphere.frame (property)
+  BaseSphere.constructor (constructor)
+  BaseSphere.setRadius (method)
+  BaseSphere.setAzimuthalSteps (method) — No lower clamp upstream (unlike the other shapes' step setters)
+  BaseSphere.setPolarSteps (method)
+  BaseSphere.voxConstruct (method)
+  BaseSphere.mshConstruct (method)
+  BaseSphere.surfacePoint (method) — Surface point
+ControlPointSpline (class) [3 members] — BSpline-based control point spline, open or closed ends (C# `ControlPointSpline`)
+  ControlPointSpline.constructor (constructor)
+  ControlPointSpline.points (method) — Render with the given sample count (C# `aGetPoints`)
+  ControlPointSpline.pointAt (method) — Sample dynamically at a length ratio (C# `vecGetPointAt`)
+CylindricalControlSpline (class) [4 members] — Step-wise cylindrical path builder (C# `CylindricalControlSpline`)
+  CylindricalControlSpline.constructor (constructor)
+  CylindricalControlSpline.addRelativeStep (method) — Append a step relative to the last position (C# `AddRelativeStep`)
+  CylindricalControlSpline.addAbsoluteStep (method) — Append a step to an absolute radius or z (C#…
+  CylindricalControlSpline.points (method)
+Distribution (class) [3 members] — Bundles a normalized line modulation with a physical length (C#…
+  Distribution.totalLength (property)
+  Distribution.modulation (property)
+  Distribution.constructor (constructor)
+Frames (class) [13 members]
+  Frames.alongLine (method) — Extrude a const local frame along a straight line (C#…
+  Frames.alongSpline (method) — Extrude a const local frame along a spline (C# `Frames(aPoints,…
+  Frames.withTargetX (method) — Tangential Z along the spline, X aligned to a const…
+  Frames.ofType (method) — Tangential Z along the spline, X from a coordinate-system-dependent target…
+  Frames.applyToFrame (method) — Transform all points and axes onto a frame's coordinate system,…
+  Frames.alignWithTargetX (method) — Best in-plane direction matching the target
+  Frames.targetXFor (method) — The alignment target per frame type (C# `vecGetTargetX`)
+  Frames.spineAt (method) — Spine position at a length ratio 0..1 (C# `vecGetSpineAlongLength`)
+  Frames.localXAt (method) — Local X at a length ratio (C# `vecGetLocalXAlongLength`)
+  Frames.localYAt (method) — Local Y at a length ratio (C# `vecGetLocalYAlongLength`)
+  Frames.localZAt (method) — Local Z at a length ratio (C# `vecGetLocalZAlongLength`)
+  Frames.frameAt (method) — The full local frame at a length ratio (C# `oGetLocalFrame`)
+  Frames.points (method) — The spine points (C# `aGetPoints()`)
+GenericContour (class) — A Distribution describing contours of rotationally symmetric objects (C# `GenericContour`)
+ImplicitGenus (class) [3 members] — Implicit genus-2 surface
+  ImplicitGenus.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  ImplicitGenus.expression (property) — The same field as a tape expression for the parallel…
+  ImplicitGenus.constructor (constructor)
+ImplicitGyroid (class) [4 members] — Gyroid pattern with a wall-thickness ratio (C# `ImplicitGyroid`)
+  ImplicitGyroid.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  ImplicitGyroid.expression (property) — The same field as a tape expression for the parallel…
+  ImplicitGyroid.constructor (constructor)
+  ImplicitGyroid.thicknessRatio (method) — Thickness ratio for a target wall thickness in mm (C#…
+ImplicitSphere (class) [3 members] — Implicit sphere (C# `ImplicitSphere`)
+  ImplicitSphere.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  ImplicitSphere.expression (property) — The same field as a tape expression for the parallel…
+  ImplicitSphere.constructor (constructor)
+ImplicitSuperEllipsoid (class) [3 members] — Implicit superellipsoid (C# `ImplicitSuperEllipsoid`
+  ImplicitSuperEllipsoid.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  ImplicitSuperEllipsoid.expression (property) — The same field as a tape expression for the parallel…
+  ImplicitSuperEllipsoid.constructor (constructor)
+LatticeManifold (class) [6 members] — Manifold pipe
+  LatticeManifold.maxPrintableRadius (property)
+  LatticeManifold.limitAngle (property)
+  LatticeManifold.extendBothSides (property)
+  LatticeManifold.constructor (constructor)
+  LatticeManifold.latConstruct (method) — Chained beams along the spine (C# `latConstruct`)
+  LatticeManifold.addTip (method) — Teardrop tip via circular-segment geometry (C# `AddTip`)
+LatticePipe (class) [10 members] — Round pipe built from lattice beams along a frame or…
+  LatticePipe.radiusModulation (property)
+  LatticePipe.lengthSteps (property)
+  LatticePipe.frames (property)
+  LatticePipe.constructor (constructor)
+  LatticePipe.setRadius (method)
+  LatticePipe.setLengthSteps (method) — No lower clamp upstream
+  LatticePipe.voxConstruct (method)
+  LatticePipe.latConstruct (method) — Chained beams along the spine (C# `latConstruct`)
+  LatticePipe.spinePoint (method) — Centre-axis position along the pipe (C# `vecGetSpinePoint`)
+  LatticePipe.radius (method)
 
 ## Classes (2) — `api-classes-2.md`
 
-LineModulation (class) [7 members] — 1D modulation [id: typescript:LineModulation]
-  LineModulation.constValue (property) — The constant value when built from one (C# public `m_fConstValue`) [id: typescript:LineModulation.constValue]
-  LineModulation.constructor (constructor) [id: typescript:LineModulation.constructor]
-  LineModulation.fromPoints (method) — From a discrete point list [id: typescript:LineModulation.fromPoints]
-  LineModulation.modulation (method) — The modulation value at a 0..1 ratio (C# `fGetModulation`) [id: typescript:LineModulation.modulation]
-  LineModulation.add (method) — Sum of two modulations (C# `operator +`) [id: typescript:LineModulation.add]
-  LineModulation.sub (method) — Difference of two modulations (C# `operator -`) [id: typescript:LineModulation.sub]
-  LineModulation.scale (method) — Scaled modulation (C# `operator *`) [id: typescript:LineModulation.scale]
-MeshBuilder (class) [6 members] — Accumulates upstream-style per-triangle geometry, built through ONE bulk `createMesh` call [id: typescript:MeshBuilder]
-  MeshBuilder.vertexCount (property) — Number of vertices added so far [id: typescript:MeshBuilder.vertexCount]
-  MeshBuilder.addVertex (method) — Adds one vertex and returns its index, for {@link MeshBuilder.addIndexedTriangle}… [id: typescript:MeshBuilder.addVertex]
-  MeshBuilder.addIndexedTriangle (method) — One triangle over vertices already added, by index (C# `Mesh.nAddTriangle(Triangle)`) [id: typescript:MeshBuilder.addIndexedTriangle]
-  MeshBuilder.addTriangle (method) — Three fresh vertices + one triangle, exactly like C# `Mesh.nAddTriangle(v0,… [id: typescript:MeshBuilder.addTriangle]
-  MeshBuilder.addQuad (method) — The two-triangle quad both upstream mesh helpers and shape mantles… [id: typescript:MeshBuilder.addQuad]
-  MeshBuilder.build (method) [id: typescript:MeshBuilder.build]
-SurfaceModulation (class) [6 members] — 2D modulation over (phi, lengthRatio) (C# `SurfaceModulation` [id: typescript:SurfaceModulation]
-  SurfaceModulation.constructor (constructor) [id: typescript:SurfaceModulation.constructor]
-  SurfaceModulation.fromLineModulation (method) — Lift a 1D modulation [id: typescript:SurfaceModulation.fromLineModulation]
-  SurfaceModulation.modulation (method) — The modulation value at the given ratios (C# `fGetModulation`) [id: typescript:SurfaceModulation.modulation]
-  SurfaceModulation.add (method) — Sum of two modulations (C# `operator +`) [id: typescript:SurfaceModulation.add]
-  SurfaceModulation.sub (method) — Difference of two modulations (C# `operator -`) [id: typescript:SurfaceModulation.sub]
-  SurfaceModulation.scale (method) — Scaled modulation (C# `operator *`) [id: typescript:SurfaceModulation.scale]
-TangentialControlSpline (class) [3 members] — Cubic-feel connector between two points/frames with tangent control (C# `TangentialControlSpline`) [id: typescript:TangentialControlSpline]
-  TangentialControlSpline.constructor (constructor) [id: typescript:TangentialControlSpline.constructor]
-  TangentialControlSpline.betweenFrames (method) — The frame-to-frame form [id: typescript:TangentialControlSpline.betweenFrames]
-  TangentialControlSpline.points (method) [id: typescript:TangentialControlSpline.points]
+LineModulation (class) [7 members] — 1D modulation
+  LineModulation.constValue (property) — The constant value when built from one (C# public `m_fConstValue`)
+  LineModulation.constructor (constructor)
+  LineModulation.fromPoints (method) — From a discrete point list
+  LineModulation.modulation (method) — The modulation value at a 0..1 ratio (C# `fGetModulation`)
+  LineModulation.add (method) — Sum of two modulations (C# `operator +`)
+  LineModulation.sub (method) — Difference of two modulations (C# `operator -`)
+  LineModulation.scale (method) — Scaled modulation (C# `operator *`)
+MeshBuilder (class) [6 members] — Accumulates upstream-style per-triangle geometry, built through ONE bulk `createMesh` call
+  MeshBuilder.vertexCount (property) — Number of vertices added so far
+  MeshBuilder.addVertex (method) — Adds one vertex and returns its index, for {@link MeshBuilder.addIndexedTriangle}…
+  MeshBuilder.addIndexedTriangle (method) — One triangle over vertices already added, by index (C# `Mesh.nAddTriangle(Triangle)`)
+  MeshBuilder.addTriangle (method) — Three fresh vertices + one triangle, exactly like C# `Mesh.nAddTriangle(v0,…
+  MeshBuilder.addQuad (method) — The two-triangle quad both upstream mesh helpers and shape mantles…
+  MeshBuilder.build (method)
+SurfaceModulation (class) [6 members] — 2D modulation over (phi, lengthRatio) (C# `SurfaceModulation`
+  SurfaceModulation.constructor (constructor)
+  SurfaceModulation.fromLineModulation (method) — Lift a 1D modulation
+  SurfaceModulation.modulation (method) — The modulation value at the given ratios (C# `fGetModulation`)
+  SurfaceModulation.add (method) — Sum of two modulations (C# `operator +`)
+  SurfaceModulation.sub (method) — Difference of two modulations (C# `operator -`)
+  SurfaceModulation.scale (method) — Scaled modulation (C# `operator *`)
+TangentialControlSpline (class) [3 members] — Cubic-feel connector between two points/frames with tangent control (C# `TangentialControlSpline`)
+  TangentialControlSpline.constructor (constructor)
+  TangentialControlSpline.betweenFrames (method) — The frame-to-frame form
+  TangentialControlSpline.points (method)
 
 ## Functions — `api-functions.md`
 
-createPico (function) — Creates a single-threaded PicoGK session [id: typescript:createPico]
-createPicoRuntime (function) — Creates a single-threaded runtime [id: typescript:createPicoRuntime]
-emptyBounds (function) — The empty-bounds sentinel the ABI structs use (`BBox3()` default [id: typescript:emptyBounds]
-isEmptyBounds (function) — True for the empty-bounds sentinel (an empty mesh/field produced it) [id: typescript:isEmptyBounds]
-meshToStlBytes (function) — Serialises indexed geometry to binary STL bytes (deindexed, as the… [id: typescript:meshToStlBytes]
-surfaceNormalFieldExtractor (function) — Builds a VectorField of surface normals from a voxel field's… [id: typescript:surfaceNormalFieldExtractor]
-vectorFieldMerge (function) — Writes every active value of `source` into `target` (C# `VectorFieldMerge.Merge`) [id: typescript:vectorFieldMerge]
-createRandom (function) — Reproducible mulberry32 stream from a 32-bit seed [id: typescript:createRandom]
-inverseGrid (function) — Row/column swap for point grids (C# `GridOperations.aGetInverseGrid`) [id: typescript:inverseGrid]
-contoursFromSdf (function) — Vectorizes one signed-distance slice image into closed contours [id: typescript:contoursFromSdf]
-detectWinding (function) — Signed-area winding detection over a flat point loop [id: typescript:detectWinding]
-sliceToSvg (function) — Renders one slice as a standalone SVG document string [id: typescript:sliceToSvg]
-sliceVoxels (function) — Vectorizes a voxel field slice-by-slice via interpolated Z slices [id: typescript:sliceVoxels]
-slicesFromCli (function) — Parses ASCII CLI bytes back into a slice stack [id: typescript:slicesFromCli]
-slicesToCli (function) — Serialises a slice stack to ASCII CLI bytes [id: typescript:slicesToCli]
+createPico (function) — Creates a single-threaded PicoGK session
+createPicoRuntime (function) — Creates a single-threaded runtime
+emptyBounds (function) — The empty-bounds sentinel the ABI structs use (`BBox3()` default
+isEmptyBounds (function) — True for the empty-bounds sentinel (an empty mesh/field produced it)
+meshToStlBytes (function) — Serialises indexed geometry to binary STL bytes (deindexed, as the…
+surfaceNormalFieldExtractor (function) — Builds a VectorField of surface normals from a voxel field's…
+vectorFieldMerge (function) — Writes every active value of `source` into `target` (C# `VectorFieldMerge.Merge`)
+createRandom (function) — Reproducible mulberry32 stream from a 32-bit seed
+inverseGrid (function) — Row/column swap for point grids (C# `GridOperations.aGetInverseGrid`)
+contoursFromSdf (function) — Vectorizes one signed-distance slice image into closed contours
+detectWinding (function) — Signed-area winding detection over a flat point loop
+sliceToSvg (function) — Renders one slice as a standalone SVG document string
+sliceVoxels (function) — Vectorizes a voxel field slice-by-slice via interpolated Z slices
+slicesFromCli (function) — Parses ASCII CLI bytes back into a slice stack
+slicesToCli (function) — Serialises a slice stack to ASCII CLI bytes
 
 ## Constants — `api-constants.md`
 
-conformalShowcaseShapes (constant) [3 members] — The three modulated demo shapes conformal arrays showcase (C# `ConformalShowcaseShapes`) [id: typescript:conformalShowcaseShapes]
-  conformalShowcaseShapes.box01 (property) — Modulated box, length 100 (C# `oGetBox_01`) [id: typescript:conformalShowcaseShapes.box01]
-  conformalShowcaseShapes.lens01 (property) — Height-modulated lens (C# `oGetLens_01`) [id: typescript:conformalShowcaseShapes.lens01]
-  conformalShowcaseShapes.segment01 (property) — Radius- and phi-range-modulated pipe segment (C# `oGetSegment_01`) [id: typescript:conformalShowcaseShapes.segment01]
-TWO_PI (constant) — 2π (C# `Rad.TwoPi`) [id: typescript:TWO_PI]
-cylindrical (constant) [6 members] — `Cylindrical` factories and conversions [id: typescript:cylindrical]
-  cylindrical.create (property) — Validated constructor (C# `Cylindrical(fR, rPhi, fZ)`) [id: typescript:cylindrical.create]
-  cylindrical.fromPolar (property) — From a polar coordinate plus height (C# `Cylindrical(Polar, fZ)`) [id: typescript:cylindrical.fromPolar]
-  cylindrical.fromCartesian (property) — From a cartesian point (C# `Cylindrical(Vector3)`) [id: typescript:cylindrical.fromCartesian]
-  cylindrical.fromSpherical (property) — From a spherical coordinate (C# `Cylindrical(Spherical)`) [id: typescript:cylindrical.fromSpherical]
-  cylindrical.toCartesian (property) — To cartesian (C# `vecAsCartesian`) [id: typescript:cylindrical.toCartesian]
-  cylindrical.lerp (property) — Lerp in cylindrical space [id: typescript:cylindrical.lerp]
-frame (constant) [25 members] — `Frame` factories and operations (C# `Frame3d` surface [id: typescript:frame]
-  frame.world (property) — The world coordinate system (C# `frmWorld`) [id: typescript:frame.world]
-  frame.fromPos (property) — World-aligned axes at a position (C# `frmFromPos` / `Frame3d(vecPos)`) [id: typescript:frame.fromPos]
-  frame.fromZX (property) — From approximate Z and X directions [id: typescript:frame.fromZX]
-  frame.fromMat4 (property) — From a row-vector rigid matrix — rows [X [id: typescript:frame.fromMat4]
-  frame.ptToWorld (property) — Local point (2D points lie in the frame's XY plane)… [id: typescript:frame.ptToWorld]
-  frame.dirToWorld (property) — Local direction → world direction, safe-normalized (C# `vecDirToWorld`) [id: typescript:frame.dirToWorld]
-  frame.ptFromWorld (property) — World point → local coordinates (C# `vecPtFromWorld`) [id: typescript:frame.ptFromWorld]
-  frame.dirFromWorld (property) — World direction → local direction, safe-normalized (C# `vecDirFromWorld`) [id: typescript:frame.dirFromWorld]
-  frame.compose (property) — Combined transform [id: typescript:frame.compose]
-  frame.inverse (property) — The inverse transform — maps world to local (C# `frmInverse`),… [id: typescript:frame.inverse]
-  frame.movedLocal (property) — Origin moved by a local-space distance (C# `frmMovedLocal`) [id: typescript:frame.movedLocal]
-  frame.movedLocalX (property) — Origin moved along local X (C# `frmMovedLocalX`) [id: typescript:frame.movedLocalX]
-  frame.movedLocalY (property) — Origin moved along local Y (C# `frmMovedLocalY`) [id: typescript:frame.movedLocalY]
-  frame.movedLocalZ (property) — Origin moved along local Z (C# `frmMovedLocalZ`) [id: typescript:frame.movedLocalZ]
-  frame.movedWorld (property) — Origin moved by a world-space distance (C# `frmMovedWorld`) [id: typescript:frame.movedWorld]
-  frame.movedWorldX (property) — Origin moved along world X (C# `frmMovedWorldX`) [id: typescript:frame.movedWorldX]
-  frame.movedWorldY (property) — Origin moved along world Y (C# `frmMovedWorldY`) [id: typescript:frame.movedWorldY]
-  frame.movedWorldZ (property) — Origin moved along world Z (C# `frmMovedWorldZ`) [id: typescript:frame.movedWorldZ]
-  frame.rotatedWorld (property) — Rotated about a world-space axis through the frame's origin (C#… [id: typescript:frame.rotatedWorld]
-  frame.repositioned (property) — Same orientation at a new origin (C# `frmRepositioned`) [id: typescript:frame.repositioned]
-  frame.toMat4 (property) — As a row-vector rigid `Mat4` — basis in rows, translation… [id: typescript:frame.toMat4]
-  frame.composeWithScale (property) — Scale-then-frame model matrix for drawing scaled geometry (C# `matComposeWithScale`) [id: typescript:frame.composeWithScale]
-  frame.asRigid (property) — The transform as rotation quaternion + origin (C# `AsRigid` [id: typescript:frame.asRigid]
-  frame.interpolate (property) — Interpolate two frames [id: typescript:frame.interpolate]
-  frame.equals (property) — Exact component equality (C# `Equals`) [id: typescript:frame.equals]
-mat4 (constant) [3 members] — `Matrix4x4` operations [id: typescript:mat4]
-  mat4.identity (property) — The identity matrix (C# `Matrix4x4.Identity`) [id: typescript:mat4.identity]
-  mat4.createScale (property) — Scale matrix (C# `Matrix4x4.CreateScale`) [id: typescript:mat4.createScale]
-  mat4.multiply (property) — Matrix product `a·b` (C# `Matrix4x4.operator *`) [id: typescript:mat4.multiply]
-overhang (constant) [11 members] — `Overhang` factories and accessors [id: typescript:overhang]
-  overhang.none (property) — No overhang — vertical, self-supporting (C# `uNone`) [id: typescript:overhang.none]
-  overhang.full (property) — Maximum overhang — horizontal (C# `uFull`) [id: typescript:overhang.full]
-  overhang.fromNormalized (property) — From normalized severity 0..1 (C# `uFromNormalized`) [id: typescript:overhang.fromNormalized]
-  overhang.fromPercent (property) — From percent 0..100 (C# `uFromPercent`) [id: typescript:overhang.fromPercent]
-  overhang.fromRad (property) — From radians 0..π/2 (C# `uFromRad`) [id: typescript:overhang.fromRad]
-  overhang.fromDeg (property) — From degrees 0..90 (C# `uFromDeg`) [id: typescript:overhang.fromDeg]
-  overhang.fromDegFromHorizontal (property) — From degrees measured from the horizontal plane — some 3D-printing… [id: typescript:overhang.fromDegFromHorizontal]
-  overhang.percent (property) — Severity as percent 0..100 (C# `fPercent`) [id: typescript:overhang.percent]
-  overhang.rad (property) — Overhang angle in radians 0..π/2 (C# `fRad`) [id: typescript:overhang.rad]
-  overhang.deg (property) — Overhang angle in degrees 0..90 (C# `fDeg`) [id: typescript:overhang.deg]
-  overhang.degFromHorizontal (property) — Degrees from horizontal — the inverted vendor convention (C# `fDegFromHorizontal`) [id: typescript:overhang.degFromHorizontal]
-polar (constant) [4 members] — `Polar` factories and conversions [id: typescript:polar]
-  polar.create (property) — Validated constructor (C# `Polar(fR, rPhi)`) [id: typescript:polar.create]
-  polar.fromCartesian (property) — From a 2D cartesian point (C# `Polar(Vector2)` [id: typescript:polar.fromCartesian]
-  polar.toCartesian (property) — To 2D cartesian (C# `vecAsCartesian`) [id: typescript:polar.toCartesian]
-  polar.lerp (property) — Lerp in polar space [id: typescript:polar.lerp]
-quat (constant) [7 members] — `Quaternion` operations [id: typescript:quat]
-  quat.identity (property) — The identity rotation (C# `Quaternion.Identity`) [id: typescript:quat.identity]
-  quat.fromAxisAngle (property) — From a rotation axis and angle (C# `Quaternion.CreateFromAxisAngle`) [id: typescript:quat.fromAxisAngle]
-  quat.fromMat4 (property) — Extract the rotation from a rigid row-vector matrix (C# `Quaternion.CreateFromRotationMatrix`,… [id: typescript:quat.fromMat4]
-  quat.dot (property) — Dot product (C# `Quaternion.Dot`) [id: typescript:quat.dot]
-  quat.neg (property) — Component-wise negation — the same rotation, opposite hemisphere [id: typescript:quat.neg]
-  quat.slerp (property) — Spherical linear interpolation (C# `Quaternion.Slerp`) [id: typescript:quat.slerp]
-  quat.transform (property) — Rotate a vector by the quaternion (C# `Vector3.Transform(v, q)`) [id: typescript:quat.transform]
-rad (constant) [25 members] — `Rad` factories, constants and helpers [id: typescript:rad]
-  rad.zero (property) — 0º (C# `Rad.Zero` / `Rad.Deg0`) [id: typescript:rad.zero]
-  rad.full (property) — 360º (C# `Rad.Full` / `Rad.Deg360`) [id: typescript:rad.full]
-  rad.half (property) — 180º (C# `Rad.Half` / `Rad.Deg180`) [id: typescript:rad.half]
-  rad.quarter (property) — 90º (C# `Rad.Quarter` / `Rad.Deg90`) [id: typescript:rad.quarter]
-  rad.deg45 (property) — 45º (C# `Rad.Deg45`) [id: typescript:rad.deg45]
-  rad.fromRad (property) — Brand a radians value (C# `rFromRad` / the explicit float→Rad… [id: typescript:rad.fromRad]
-  rad.fromDeg (property) — From degrees (C# `rFromDeg`) [id: typescript:rad.fromDeg]
-  rad.fromNormalized (property) — From a normalized 0..1 value mapped to 0..360º, clamped (C#… [id: typescript:rad.fromNormalized]
-  rad.deg (property) — The angle in degrees (C# `fDeg`) [id: typescript:rad.deg]
-  rad.normalizedSigned (property) — Normalize to -π..+π (C# `rNormalizedSigned` [id: typescript:rad.normalizedSigned]
-  rad.normalizedPositive (property) — Normalize to [0, 2π) (C# `rNormalizedPositive`) [id: typescript:rad.normalizedPositive]
-  rad.almostEqual (property) — Fuzzy equality (C# `bAlmostEqual`) [id: typescript:rad.almostEqual]
-  rad.almostEqualPeriodic (property) — Fuzzy equality of the normalized angle — 0º == 360º… [id: typescript:rad.almostEqualPeriodic]
-  rad.atan2 (property) — Quadrant-correct angle from +X (C# `rAtan2`) [id: typescript:rad.atan2]
-  rad.atan (property) — Arc tangent (C# `rAtan`) [id: typescript:rad.atan]
-  rad.acos (property) — Arc cosine (C# `rAcos`) [id: typescript:rad.acos]
-  rad.acosClamped (property) — Arc cosine of the value clamped to [-1, 1] —… [id: typescript:rad.acosClamped]
-  rad.asin (property) — Arc sine (C# `rAsin`) [id: typescript:rad.asin]
-  rad.asinClamped (property) — Arc sine of the value clamped to [-1, 1] (C#… [id: typescript:rad.asinClamped]
-  rad.add (property) [id: typescript:rad.add]
-  rad.sub (property) [id: typescript:rad.sub]
-  rad.scale (property) [id: typescript:rad.scale]
-  rad.div (property) [id: typescript:rad.div]
-  rad.ratio (property) — Dimensionless ratio of two angles (C# `Rad / Rad`) [id: typescript:rad.ratio]
-  rad.neg (property) [id: typescript:rad.neg]
-scalar (constant) [4 members] — Fuzzy scalar comparisons (C# `ComparisonExtensions` on `float`) [id: typescript:scalar]
-  scalar.almostEqual (property) — Fuzzy equality with both an absolute and a relative tolerance… [id: typescript:scalar.almostEqual]
-  scalar.almostLessOrEqual (property) — `a <= b + tol` (C# `bAlmostLessOrEqual`) [id: typescript:scalar.almostLessOrEqual]
-  scalar.almostMoreOrEqual (property) — `a >= b - tol` (C# `bAlmostMoreOrEqual`) [id: typescript:scalar.almostMoreOrEqual]
-  scalar.almostZero (property) — Fuzzy zero test (C# `bAlmostZero`) [id: typescript:scalar.almostZero]
-spherical (constant) [5 members] — `Spherical` factories and conversions [id: typescript:spherical]
-  spherical.create (property) — Validated constructor (C# `Spherical(fR, rPhi, rTheta)` [id: typescript:spherical.create]
-  spherical.fromCartesian (property) — From a cartesian point (C# `Spherical(Vector3)` [id: typescript:spherical.fromCartesian]
-  spherical.fromCylindrical (property) — From a cylindrical coordinate (C# `Spherical(Cylindrical)`) [id: typescript:spherical.fromCylindrical]
-  spherical.toCartesian (property) — To cartesian (C# `vecAsCartesian`) [id: typescript:spherical.toCartesian]
-  spherical.lerp (property) — Lerp in spherical space [id: typescript:spherical.lerp]
-tolerances (constant) [4 members] — Default tolerances for fuzzy comparisons (C# `PicoGK.Numerics.Tolerances`) [id: typescript:tolerances]
-  tolerances.def (property) — Default tolerance for fuzzy comparisons (`Tolerances.fDef`) [id: typescript:tolerances.def]
-  tolerances.defSquared (property) — `Tolerances.fDefSquared` — for squared-distance comparisons [id: typescript:tolerances.defSquared]
-  tolerances.zero (property) — Value regarded as zero in fuzzy zero checks (`Tolerances.fZero`) [id: typescript:tolerances.zero]
-  tolerances.zeroSquared (property) — `Tolerances.fZeroSquared` — squared variant [id: typescript:tolerances.zeroSquared]
-vec2 (constant) [15 members] — `Vector2` operations [id: typescript:vec2]
-  vec2.zero (property) [id: typescript:vec2.zero]
-  vec2.add (property) [id: typescript:vec2.add]
-  vec2.sub (property) [id: typescript:vec2.sub]
-  vec2.scale (property) [id: typescript:vec2.scale]
-  vec2.dot (property) [id: typescript:vec2.dot]
-  vec2.lengthSquared (property) [id: typescript:vec2.lengthSquared]
-  vec2.length (property) [id: typescript:vec2.length]
-  vec2.distanceSquared (property) [id: typescript:vec2.distanceSquared]
-  vec2.lerp (property) [id: typescript:vec2.lerp]
-  vec2.normalized (property) — Unit-length copy [id: typescript:vec2.normalized]
-  vec2.safeNormalized (property) — Unit-length copy, or (0,0) for (almost) zero-length input (C# `vecSafeNormalized`) [id: typescript:vec2.safeNormalized]
-  vec2.asVec3 (property) — Lift to 3D by appending Z (C# `vecAsVector3`) [id: typescript:vec2.asVec3]
-  vec2.almostEqual (property) — Fuzzy equality by squared distance (C# `Vector2.bAlmostEqual`) [id: typescript:vec2.almostEqual]
-  vec2.almostZero (property) — Fuzzy zero-length test (C# `Vector2.bAlmostZero`) [id: typescript:vec2.almostZero]
-  vec2.isFinite (property) — All components finite (C# `Vector2.bIsFinite`) [id: typescript:vec2.isFinite]
-vec3 (constant) [24 members] — `Vector3` operations [id: typescript:vec3]
-  vec3.zero (property) [id: typescript:vec3.zero]
-  vec3.unitX (property) [id: typescript:vec3.unitX]
-  vec3.unitY (property) [id: typescript:vec3.unitY]
-  vec3.unitZ (property) [id: typescript:vec3.unitZ]
-  vec3.one (property) [id: typescript:vec3.one]
-  vec3.add (property) [id: typescript:vec3.add]
-  vec3.sub (property) [id: typescript:vec3.sub]
-  vec3.neg (property) [id: typescript:vec3.neg]
-  vec3.scale (property) [id: typescript:vec3.scale]
-  vec3.dot (property) [id: typescript:vec3.dot]
-  vec3.cross (property) [id: typescript:vec3.cross]
-  vec3.lengthSquared (property) [id: typescript:vec3.lengthSquared]
-  vec3.length (property) [id: typescript:vec3.length]
-  vec3.distanceSquared (property) [id: typescript:vec3.distanceSquared]
-  vec3.distance (property) [id: typescript:vec3.distance]
-  vec3.lerp (property) [id: typescript:vec3.lerp]
-  vec3.normalized (property) — Unit-length copy [id: typescript:vec3.normalized]
-  vec3.safeNormalized (property) — Unit-length copy, or (0,0,0) for (almost) zero-length input (C# `vecSafeNormalized`) [id: typescript:vec3.safeNormalized]
-  vec3.stripZ (property) — Drop Z (C# `vecStripZ`) [id: typescript:vec3.stripZ]
-  vec3.transformed (property) — Row-vector matrix transform — translation lives in elements 12–14, the… [id: typescript:vec3.transformed]
-  vec3.mirrored (property) — Mirror a point across the plane through `planePoint` with `planeNormal`… [id: typescript:vec3.mirrored]
-  vec3.almostEqual (property) — Fuzzy equality by squared distance (C# `Vector3.bAlmostEqual`) [id: typescript:vec3.almostEqual]
-  vec3.almostZero (property) — Fuzzy zero-length test (C# `Vector3.bAlmostZero`) [id: typescript:vec3.almostZero]
-  vec3.isFinite (property) — All components finite (C# `Vector3.bIsFinite`) [id: typescript:vec3.isFinite]
-localFrame (constant) [9 members] — ShapeKernel `LocalFrame` construction helpers over the numerics `Frame` [id: typescript:localFrame]
-  localFrame.identity (property) — World-aligned frame at the origin (C# `LocalFrame()`) [id: typescript:localFrame.identity]
-  localFrame.create (property) — World-aligned axes at a position (C# `LocalFrame(vecPos)`) [id: typescript:localFrame.create]
-  localFrame.at (property) — Same axes as the base frame at a new position… [id: typescript:localFrame.at]
-  localFrame.createZ (property) — Position + local Z [id: typescript:localFrame.createZ]
-  localFrame.createZX (property) — Position + local Z + local X [id: typescript:localFrame.createZX]
-  localFrame.translated (property) — Translated frame, axes unchanged (C# `oTranslate` / `oGetTranslatedFrame`) [id: typescript:localFrame.translated]
-  localFrame.rotated (property) — All axes rotated about an axis, position unchanged (C# `oRotate`… [id: typescript:localFrame.rotated]
-  localFrame.inverted (property) — Selected axes negated, position unchanged (C# `oGetInvertFrame` [id: typescript:localFrame.inverted]
-  localFrame.localY (property) — Y completing Z and X right-handedly (C# `vecGetLocalY` [id: typescript:localFrame.localY]
-meshUtility (constant) [5 members] — ShapeKernel `MeshUtility` (static class → const object [id: typescript:meshUtility]
-  meshUtility.meshFromGrid (property) — Mesh from a regular point grid, quad by quad (C#… [id: typescript:meshUtility.meshFromGrid]
-  meshUtility.meshFromQuad (property) — Mesh from one quad (C# `mshFromQuad`) [id: typescript:meshUtility.meshFromQuad]
-  meshUtility.applyTransformation (property) — New mesh with the transformation applied per vertex (C# `mshApplyTransformation`) [id: typescript:meshUtility.applyTransformation]
-  meshUtility.voxApplyTransformation (property) — Voxels → mesh → per-vertex transform → voxels (C# `voxApplyTransformation`) [id: typescript:meshUtility.voxApplyTransformation]
-  meshUtility.translateMeshOntoFrame (property) — Mesh re-expressed from the input frame onto the output frame… [id: typescript:meshUtility.translateMeshOntoFrame]
-sh (constant) [12 members] — ShapeKernel `Sh` — the headless subset, session-first [id: typescript:sh]
-  sh.latFromLine (property) — Beams along a point list (C# `latFromLine`) [id: typescript:sh.latFromLine]
-  sh.addLine (property) — Adds a point list to an existing lattice (C# `AddLine`) [id: typescript:sh.addLine]
-  sh.latFromPoints (property) — Node-only lattice from a point cloud (C# `latFromPoints`) [id: typescript:sh.latFromPoints]
-  sh.latFromEdges (property) — Beams along multiple point lists (C# `latFromEdges`) [id: typescript:sh.latFromEdges]
-  sh.latFromPoint (property) — Node-only lattice from one point (C# `latFromPoint`) [id: typescript:sh.latFromPoint]
-  sh.latFromGrid (property) — Lattice from a grid [id: typescript:sh.latFromGrid]
-  sh.latFromBeam (property) — One beam, constant radius (C# `latFromBeam`) [id: typescript:sh.latFromBeam]
-  sh.latFromTaperedBeam (property) — One beam, variable radius (C# `latFromBeam` overload) [id: typescript:sh.latFromTaperedBeam]
-  sh.exportMeshToStl (property) — Binary STL bytes of a mesh (C# `ExportMeshToSTLFile` — bytes,… [id: typescript:sh.exportMeshToStl]
-  sh.exportVoxelsToStl (property) — Binary STL bytes of a voxel field via meshing (C#… [id: typescript:sh.exportVoxelsToStl]
-  sh.exportVoxelsToVdb (property) — VDB bytes of a voxel field (C# `ExportVoxelsToVDBFile`) [id: typescript:sh.exportVoxelsToVdb]
-  sh.exportVoxelsToCli (property) — CLI slice bytes of a voxel field (C# `ExportVoxelsToCLIFile`) [id: typescript:sh.exportVoxelsToCli]
-splineOps (constant) [22 members] — ShapeKernel `SplineOperations` (static class → const object) [id: typescript:splineOps]
-  splineOps.linearInterpolation (property) — Linearly interpolated points from start to end inclusive (C# `aGetLinearInterpolation`) [id: typescript:splineOps.linearInterpolation]
-  splineOps.snappedSpline (property) — Each point snapped to the closest surface point of the… [id: typescript:splineOps.snappedSpline]
-  splineOps.reparametrizedByCount (property) — Resample to a target count with constant spacing [id: typescript:splineOps.reparametrizedByCount]
-  splineOps.reparametrizedBySpacing (property) — Resample to a target spacing (min 10 samples, C# spacing… [id: typescript:splineOps.reparametrizedBySpacing]
-  splineOps.lengthsAtIndices (property) — Cumulative arc length at each index (C# `aGetLengthsAtIndices`) [id: typescript:splineOps.lengthsAtIndices]
-  splineOps.averagePointSpacing (property) — Average spacing between consecutive points (C# `fGetAveragePointSpacing`) [id: typescript:splineOps.averagePointSpacing]
-  splineOps.totalLength (property) — Total arc length (C# `fGetTotalLength`) [id: typescript:splineOps.totalLength]
-  splineOps.splitAt (property) — Split at an index into two non-overlapping lists (C# `aSplitLists`) [id: typescript:splineOps.splitAt]
-  splineOps.combine (property) — Concatenate lists (C# `aCombineLists`) [id: typescript:splineOps.combine]
-  splineOps.rotatedAroundZ (property) — Every point rotated about the absolute Z axis (C# `aRotateListAroundZ`) [id: typescript:splineOps.rotatedAroundZ]
-  splineOps.translated (property) — Every point translated (C# `aTranslateList`) [id: typescript:splineOps.translated]
-  splineOps.scaled (property) — Every point scaled about the origin (C# `aScaleList`) [id: typescript:splineOps.scaled]
-  splineOps.nurbsSpline (property) — NURBS smoothing via a degree-2 open BSpline (C# `aGetNURBSpline`) [id: typescript:splineOps.nurbsSpline]
-  splineOps.overSampled (property) — Linear oversampling with N samples per step (C# `aOverSampleList`) [id: typescript:splineOps.overSampled]
-  splineOps.subSampled (property) — Every Nth point, end preserved (C# `aSubSampleList`) [id: typescript:splineOps.subSampled]
-  splineOps.ontoFrame (property) — Every point moved onto a frame's coordinate system (C# `aTranslateListOntoFrame`) [id: typescript:splineOps.ontoFrame]
-  splineOps.inFrame (property) — Every point expressed relative to a frame (C# `aExpressListInFrame`) [id: typescript:splineOps.inFrame]
-  splineOps.rotatedAroundAxis (property) — Every point rotated about an arbitrary axis (C# `aRotateListAroundAxis`) [id: typescript:splineOps.rotatedAroundAxis]
-  splineOps.average (property) — Average of all positions (C# `vecGetAverage`) [id: typescript:splineOps.average]
-  splineOps.closestPoint (property) — The list point closest to `start` (C# `vecGetClosestPoint`) [id: typescript:splineOps.closestPoint]
-  splineOps.distanceToClosestPoint (property) — Distance to the closest list point (C# `fGetDistanceToClosestPoint`) [id: typescript:splineOps.distanceToClosestPoint]
-  splineOps.clusteredPoints (property) — Greedy clustering [id: typescript:splineOps.clusteredPoints]
-uf (constant) [13 members] — ShapeKernel `Uf` (the "useful formulas" grab-bag) [id: typescript:uf]
-  uf.transFixed (property) — BSpline-eased transition between two values at position s in 0..1… [id: typescript:uf.transFixed]
-  uf.vecTransFixed (property) — Component-wise transFixed between two points (C# `vecTransFixed`) [id: typescript:uf.vecTransFixed]
-  uf.transSmooth (property) — tanh-smoothed transition between two values (C# `fTransSmooth`) [id: typescript:uf.transSmooth]
-  uf.vecTransSmooth (property) — tanh-smoothed transition between two points (C# `vecTransSmooth`) [id: typescript:uf.vecTransSmooth]
-  uf.randomGaussian (property) — Box-Muller gaussian sample (C# `fGetRandomGaussian`) [id: typescript:uf.randomGaussian]
-  uf.randomLinear (property) — Uniform sample in [min, max) (C# `fGetRandomLinear`) [id: typescript:uf.randomLinear]
-  uf.randomBool (property) — Fair coin (C# `bGetRandomBool`) [id: typescript:uf.randomBool]
-  uf.fibonacciCirclePoints (property) — Fibonacci-distributed points in a 2D disc (C# `aGetFibonacciCirlePoints`) [id: typescript:uf.fibonacciCirclePoints]
-  uf.fibonacciSpherePoints (property) — Fibonacci-distributed points on a 3D sphere surface (C# `aGetFibonacciSpherePoints`) [id: typescript:uf.fibonacciSpherePoints]
-  uf.superShapeRadius (property) — Superformula radius at a polar angle, reference radius 1 (C#… [id: typescript:uf.superShapeRadius]
-  uf.superShapeRadiusPreset (property) — Superformula radius from a preset (C# preset overload) [id: typescript:uf.superShapeRadiusPreset]
-  uf.polygonRadius (property) — Regular-polygon radius at a polar angle, inscribed in the unit… [id: typescript:uf.polygonRadius]
-  uf.polygonRadiusPreset (property) — Regular-polygon radius from a preset (C# preset overload) [id: typescript:uf.polygonRadiusPreset]
-vecOps (constant) [24 members] — ShapeKernel `VecOperations` (Hungarian prefixes dropped) [id: typescript:vecOps]
-  vecOps.cylPoint (property) — Cartesian point from cylindrical coordinates (C# `vecGetCylPoint`) [id: typescript:vecOps.cylPoint]
-  vecOps.sphPoint (property) — Cartesian point from spherical coordinates, theta measured from the XY… [id: typescript:vecOps.sphPoint]
-  vecOps.radius (property) — Planar (XY) radius about the absolute Z axis (C# `fGetRadius`… [id: typescript:vecOps.radius]
-  vecOps.phi (property) — Planar polar angle about the absolute Z axis, radians (C#… [id: typescript:vecOps.phi]
-  vecOps.theta (property) — Elevation angle from the XY plane, radians (C# `fGetTheta`) [id: typescript:vecOps.theta]
-  vecOps.setRadius (property) — Same phi and z, new radius (C# `vecSetRadius`) [id: typescript:vecOps.setRadius]
-  vecOps.setPhi (property) — Same radius and z, new phi (C# `vecSetPhi`) [id: typescript:vecOps.setPhi]
-  vecOps.setZ (property) — Same radius and phi, new z (C# `vecSetZ`) [id: typescript:vecOps.setZ]
-  vecOps.updateRadius (property) — Radially shifted by deltaRadius (C# `vecUpdateRadius`) [id: typescript:vecOps.updateRadius]
-  vecOps.updatePhi (property) — Turned about the absolute Z axis by deltaPhi (C# `vecUpdatePhi`) [id: typescript:vecOps.updatePhi]
-  vecOps.updateZ (property) — Vertically shifted by deltaZ (C# `vecUpdateZ`) [id: typescript:vecOps.updateZ]
-  vecOps.planarDir (property) — Normalized planar radial direction from the Z axis to the… [id: typescript:vecOps.planarDir]
-  vecOps.flipForAlignment (property) — The vector or its negation, whichever aligns better with the… [id: typescript:vecOps.flipForAlignment]
-  vecOps.checkAlignment (property) — True when the direction points the same way as the… [id: typescript:vecOps.checkAlignment]
-  vecOps.rotateAroundZ (property) — Rotate a point about the absolute Z axis through an… [id: typescript:vecOps.rotateAroundZ]
-  vecOps.orthogonalDir (property) — An arbitrary direction orthogonal to the given one (C# `vecGetOrthogonalDir`) [id: typescript:vecOps.orthogonalDir]
-  vecOps.angleBetween (property) — Minimum angle between two vectors, radians (C# `fGetAngleBetween`) [id: typescript:vecOps.angleBetween]
-  vecOps.signedAngleBetween (property) — Minimum SIGNED angle between two vectors about a reference normal… [id: typescript:vecOps.signedAngleBetween]
-  vecOps.rotateAroundAxis (property) — Rotate a point about an arbitrary axis through an optional… [id: typescript:vecOps.rotateAroundAxis]
-  vecOps.directionToAxis (property) — Radial direction from a frame's Z axis to the point,… [id: typescript:vecOps.directionToAxis]
-  vecOps.radiusToAxis (property) — Radius from a frame's Z axis to the point (C#… [id: typescript:vecOps.radiusToAxis]
-  vecOps.phiToAxis (property) — Polar angle about a frame's Z axis to the point… [id: typescript:vecOps.phiToAxis]
-  vecOps.cylindricalInterpolation (property) — Cylindrically interpolated point between two points (C# `vecCylindricalInterpolation`) [id: typescript:vecOps.cylindricalInterpolation]
-  vecOps.sphericalInterpolation (property) — Spherically interpolated point between two points (C# `vecSphericalInterpolation`) [id: typescript:vecOps.sphericalInterpolation]
+conformalShowcaseShapes (constant) [3 members] — The three modulated demo shapes conformal arrays showcase (C# `ConformalShowcaseShapes`)
+  conformalShowcaseShapes.box01 (property) — Modulated box, length 100 (C# `oGetBox_01`)
+  conformalShowcaseShapes.lens01 (property) — Height-modulated lens (C# `oGetLens_01`)
+  conformalShowcaseShapes.segment01 (property) — Radius- and phi-range-modulated pipe segment (C# `oGetSegment_01`)
+TWO_PI (constant) — 2π (C# `Rad.TwoPi`)
+cylindrical (constant) [6 members] — `Cylindrical` factories and conversions
+  cylindrical.create (property) — Validated constructor (C# `Cylindrical(fR, rPhi, fZ)`)
+  cylindrical.fromPolar (property) — From a polar coordinate plus height (C# `Cylindrical(Polar, fZ)`)
+  cylindrical.fromCartesian (property) — From a cartesian point (C# `Cylindrical(Vector3)`)
+  cylindrical.fromSpherical (property) — From a spherical coordinate (C# `Cylindrical(Spherical)`)
+  cylindrical.toCartesian (property) — To cartesian (C# `vecAsCartesian`)
+  cylindrical.lerp (property) — Lerp in cylindrical space
+frame (constant) [25 members] — `Frame` factories and operations (C# `Frame3d` surface
+  frame.world (property) — The world coordinate system (C# `frmWorld`)
+  frame.fromPos (property) — World-aligned axes at a position (C# `frmFromPos` / `Frame3d(vecPos)`)
+  frame.fromZX (property) — From approximate Z and X directions
+  frame.fromMat4 (property) — From a row-vector rigid matrix — rows [X
+  frame.ptToWorld (property) — Local point (2D points lie in the frame's XY plane)…
+  frame.dirToWorld (property) — Local direction → world direction, safe-normalized (C# `vecDirToWorld`)
+  frame.ptFromWorld (property) — World point → local coordinates (C# `vecPtFromWorld`)
+  frame.dirFromWorld (property) — World direction → local direction, safe-normalized (C# `vecDirFromWorld`)
+  frame.compose (property) — Combined transform
+  frame.inverse (property) — The inverse transform — maps world to local (C# `frmInverse`),…
+  frame.movedLocal (property) — Origin moved by a local-space distance (C# `frmMovedLocal`)
+  frame.movedLocalX (property) — Origin moved along local X (C# `frmMovedLocalX`)
+  frame.movedLocalY (property) — Origin moved along local Y (C# `frmMovedLocalY`)
+  frame.movedLocalZ (property) — Origin moved along local Z (C# `frmMovedLocalZ`)
+  frame.movedWorld (property) — Origin moved by a world-space distance (C# `frmMovedWorld`)
+  frame.movedWorldX (property) — Origin moved along world X (C# `frmMovedWorldX`)
+  frame.movedWorldY (property) — Origin moved along world Y (C# `frmMovedWorldY`)
+  frame.movedWorldZ (property) — Origin moved along world Z (C# `frmMovedWorldZ`)
+  frame.rotatedWorld (property) — Rotated about a world-space axis through the frame's origin (C#…
+  frame.repositioned (property) — Same orientation at a new origin (C# `frmRepositioned`)
+  frame.toMat4 (property) — As a row-vector rigid `Mat4` — basis in rows, translation…
+  frame.composeWithScale (property) — Scale-then-frame model matrix for drawing scaled geometry (C# `matComposeWithScale`)
+  frame.asRigid (property) — The transform as rotation quaternion + origin (C# `AsRigid`
+  frame.interpolate (property) — Interpolate two frames
+  frame.equals (property) — Exact component equality (C# `Equals`)
+mat4 (constant) [3 members] — `Matrix4x4` operations
+  mat4.identity (property) — The identity matrix (C# `Matrix4x4.Identity`)
+  mat4.createScale (property) — Scale matrix (C# `Matrix4x4.CreateScale`)
+  mat4.multiply (property) — Matrix product `a·b` (C# `Matrix4x4.operator *`)
+overhang (constant) [11 members] — `Overhang` factories and accessors
+  overhang.none (property) — No overhang — vertical, self-supporting (C# `uNone`)
+  overhang.full (property) — Maximum overhang — horizontal (C# `uFull`)
+  overhang.fromNormalized (property) — From normalized severity 0..1 (C# `uFromNormalized`)
+  overhang.fromPercent (property) — From percent 0..100 (C# `uFromPercent`)
+  overhang.fromRad (property) — From radians 0..π/2 (C# `uFromRad`)
+  overhang.fromDeg (property) — From degrees 0..90 (C# `uFromDeg`)
+  overhang.fromDegFromHorizontal (property) — From degrees measured from the horizontal plane — some 3D-printing…
+  overhang.percent (property) — Severity as percent 0..100 (C# `fPercent`)
+  overhang.rad (property) — Overhang angle in radians 0..π/2 (C# `fRad`)
+  overhang.deg (property) — Overhang angle in degrees 0..90 (C# `fDeg`)
+  overhang.degFromHorizontal (property) — Degrees from horizontal — the inverted vendor convention (C# `fDegFromHorizontal`)
+polar (constant) [4 members] — `Polar` factories and conversions
+  polar.create (property) — Validated constructor (C# `Polar(fR, rPhi)`)
+  polar.fromCartesian (property) — From a 2D cartesian point (C# `Polar(Vector2)`
+  polar.toCartesian (property) — To 2D cartesian (C# `vecAsCartesian`)
+  polar.lerp (property) — Lerp in polar space
+quat (constant) [7 members] — `Quaternion` operations
+  quat.identity (property) — The identity rotation (C# `Quaternion.Identity`)
+  quat.fromAxisAngle (property) — From a rotation axis and angle (C# `Quaternion.CreateFromAxisAngle`)
+  quat.fromMat4 (property) — Extract the rotation from a rigid row-vector matrix (C# `Quaternion.CreateFromRotationMatrix`,…
+  quat.dot (property) — Dot product (C# `Quaternion.Dot`)
+  quat.neg (property) — Component-wise negation — the same rotation, opposite hemisphere
+  quat.slerp (property) — Spherical linear interpolation (C# `Quaternion.Slerp`)
+  quat.transform (property) — Rotate a vector by the quaternion (C# `Vector3.Transform(v, q)`)
+rad (constant) [25 members] — `Rad` factories, constants and helpers
+  rad.zero (property) — 0º (C# `Rad.Zero` / `Rad.Deg0`)
+  rad.full (property) — 360º (C# `Rad.Full` / `Rad.Deg360`)
+  rad.half (property) — 180º (C# `Rad.Half` / `Rad.Deg180`)
+  rad.quarter (property) — 90º (C# `Rad.Quarter` / `Rad.Deg90`)
+  rad.deg45 (property) — 45º (C# `Rad.Deg45`)
+  rad.fromRad (property) — Brand a radians value (C# `rFromRad` / the explicit float→Rad…
+  rad.fromDeg (property) — From degrees (C# `rFromDeg`)
+  rad.fromNormalized (property) — From a normalized 0..1 value mapped to 0..360º, clamped (C#…
+  rad.deg (property) — The angle in degrees (C# `fDeg`)
+  rad.normalizedSigned (property) — Normalize to -π..+π (C# `rNormalizedSigned`
+  rad.normalizedPositive (property) — Normalize to [0, 2π) (C# `rNormalizedPositive`)
+  rad.almostEqual (property) — Fuzzy equality (C# `bAlmostEqual`)
+  rad.almostEqualPeriodic (property) — Fuzzy equality of the normalized angle — 0º == 360º…
+  rad.atan2 (property) — Quadrant-correct angle from +X (C# `rAtan2`)
+  rad.atan (property) — Arc tangent (C# `rAtan`)
+  rad.acos (property) — Arc cosine (C# `rAcos`)
+  rad.acosClamped (property) — Arc cosine of the value clamped to [-1, 1] —…
+  rad.asin (property) — Arc sine (C# `rAsin`)
+  rad.asinClamped (property) — Arc sine of the value clamped to [-1, 1] (C#…
+  rad.add (property)
+  rad.sub (property)
+  rad.scale (property)
+  rad.div (property)
+  rad.ratio (property) — Dimensionless ratio of two angles (C# `Rad / Rad`)
+  rad.neg (property)
+scalar (constant) [4 members] — Fuzzy scalar comparisons (C# `ComparisonExtensions` on `float`)
+  scalar.almostEqual (property) — Fuzzy equality with both an absolute and a relative tolerance…
+  scalar.almostLessOrEqual (property) — `a <= b + tol` (C# `bAlmostLessOrEqual`)
+  scalar.almostMoreOrEqual (property) — `a >= b - tol` (C# `bAlmostMoreOrEqual`)
+  scalar.almostZero (property) — Fuzzy zero test (C# `bAlmostZero`)
+spherical (constant) [5 members] — `Spherical` factories and conversions
+  spherical.create (property) — Validated constructor (C# `Spherical(fR, rPhi, rTheta)`
+  spherical.fromCartesian (property) — From a cartesian point (C# `Spherical(Vector3)`
+  spherical.fromCylindrical (property) — From a cylindrical coordinate (C# `Spherical(Cylindrical)`)
+  spherical.toCartesian (property) — To cartesian (C# `vecAsCartesian`)
+  spherical.lerp (property) — Lerp in spherical space
+tolerances (constant) [4 members] — Default tolerances for fuzzy comparisons (C# `PicoGK.Numerics.Tolerances`)
+  tolerances.def (property) — Default tolerance for fuzzy comparisons (`Tolerances.fDef`)
+  tolerances.defSquared (property) — `Tolerances.fDefSquared` — for squared-distance comparisons
+  tolerances.zero (property) — Value regarded as zero in fuzzy zero checks (`Tolerances.fZero`)
+  tolerances.zeroSquared (property) — `Tolerances.fZeroSquared` — squared variant
+vec2 (constant) [15 members] — `Vector2` operations
+  vec2.zero (property)
+  vec2.add (property)
+  vec2.sub (property)
+  vec2.scale (property)
+  vec2.dot (property)
+  vec2.lengthSquared (property)
+  vec2.length (property)
+  vec2.distanceSquared (property)
+  vec2.lerp (property)
+  vec2.normalized (property) — Unit-length copy
+  vec2.safeNormalized (property) — Unit-length copy, or (0,0) for (almost) zero-length input (C# `vecSafeNormalized`)
+  vec2.asVec3 (property) — Lift to 3D by appending Z (C# `vecAsVector3`)
+  vec2.almostEqual (property) — Fuzzy equality by squared distance (C# `Vector2.bAlmostEqual`)
+  vec2.almostZero (property) — Fuzzy zero-length test (C# `Vector2.bAlmostZero`)
+  vec2.isFinite (property) — All components finite (C# `Vector2.bIsFinite`)
+vec3 (constant) [24 members] — `Vector3` operations
+  vec3.zero (property)
+  vec3.unitX (property)
+  vec3.unitY (property)
+  vec3.unitZ (property)
+  vec3.one (property)
+  vec3.add (property)
+  vec3.sub (property)
+  vec3.neg (property)
+  vec3.scale (property)
+  vec3.dot (property)
+  vec3.cross (property)
+  vec3.lengthSquared (property)
+  vec3.length (property)
+  vec3.distanceSquared (property)
+  vec3.distance (property)
+  vec3.lerp (property)
+  vec3.normalized (property) — Unit-length copy
+  vec3.safeNormalized (property) — Unit-length copy, or (0,0,0) for (almost) zero-length input (C# `vecSafeNormalized`)
+  vec3.stripZ (property) — Drop Z (C# `vecStripZ`)
+  vec3.transformed (property) — Row-vector matrix transform — translation lives in elements 12–14, the…
+  vec3.mirrored (property) — Mirror a point across the plane through `planePoint` with `planeNormal`…
+  vec3.almostEqual (property) — Fuzzy equality by squared distance (C# `Vector3.bAlmostEqual`)
+  vec3.almostZero (property) — Fuzzy zero-length test (C# `Vector3.bAlmostZero`)
+  vec3.isFinite (property) — All components finite (C# `Vector3.bIsFinite`)
+localFrame (constant) [9 members] — ShapeKernel `LocalFrame` construction helpers over the numerics `Frame`
+  localFrame.identity (property) — World-aligned frame at the origin (C# `LocalFrame()`)
+  localFrame.create (property) — World-aligned axes at a position (C# `LocalFrame(vecPos)`)
+  localFrame.at (property) — Same axes as the base frame at a new position…
+  localFrame.createZ (property) — Position + local Z
+  localFrame.createZX (property) — Position + local Z + local X
+  localFrame.translated (property) — Translated frame, axes unchanged (C# `oTranslate` / `oGetTranslatedFrame`)
+  localFrame.rotated (property) — All axes rotated about an axis, position unchanged (C# `oRotate`…
+  localFrame.inverted (property) — Selected axes negated, position unchanged (C# `oGetInvertFrame`
+  localFrame.localY (property) — Y completing Z and X right-handedly (C# `vecGetLocalY`
+meshUtility (constant) [5 members] — ShapeKernel `MeshUtility` (static class → const object
+  meshUtility.meshFromGrid (property) — Mesh from a regular point grid, quad by quad (C#…
+  meshUtility.meshFromQuad (property) — Mesh from one quad (C# `mshFromQuad`)
+  meshUtility.applyTransformation (property) — New mesh with the transformation applied per vertex (C# `mshApplyTransformation`)
+  meshUtility.voxApplyTransformation (property) — Voxels → mesh → per-vertex transform → voxels (C# `voxApplyTransformation`)
+  meshUtility.translateMeshOntoFrame (property) — Mesh re-expressed from the input frame onto the output frame…
+sh (constant) [12 members] — ShapeKernel `Sh` — the headless subset, session-first
+  sh.latFromLine (property) — Beams along a point list (C# `latFromLine`)
+  sh.addLine (property) — Adds a point list to an existing lattice (C# `AddLine`)
+  sh.latFromPoints (property) — Node-only lattice from a point cloud (C# `latFromPoints`)
+  sh.latFromEdges (property) — Beams along multiple point lists (C# `latFromEdges`)
+  sh.latFromPoint (property) — Node-only lattice from one point (C# `latFromPoint`)
+  sh.latFromGrid (property) — Lattice from a grid
+  sh.latFromBeam (property) — One beam, constant radius (C# `latFromBeam`)
+  sh.latFromTaperedBeam (property) — One beam, variable radius (C# `latFromBeam` overload)
+  sh.exportMeshToStl (property) — Binary STL bytes of a mesh (C# `ExportMeshToSTLFile` — bytes,…
+  sh.exportVoxelsToStl (property) — Binary STL bytes of a voxel field via meshing (C#…
+  sh.exportVoxelsToVdb (property) — VDB bytes of a voxel field (C# `ExportVoxelsToVDBFile`)
+  sh.exportVoxelsToCli (property) — CLI slice bytes of a voxel field (C# `ExportVoxelsToCLIFile`)
+splineOps (constant) [22 members] — ShapeKernel `SplineOperations` (static class → const object)
+  splineOps.linearInterpolation (property) — Linearly interpolated points from start to end inclusive (C# `aGetLinearInterpolation`)
+  splineOps.snappedSpline (property) — Each point snapped to the closest surface point of the…
+  splineOps.reparametrizedByCount (property) — Resample to a target count with constant spacing
+  splineOps.reparametrizedBySpacing (property) — Resample to a target spacing (min 10 samples, C# spacing…
+  splineOps.lengthsAtIndices (property) — Cumulative arc length at each index (C# `aGetLengthsAtIndices`)
+  splineOps.averagePointSpacing (property) — Average spacing between consecutive points (C# `fGetAveragePointSpacing`)
+  splineOps.totalLength (property) — Total arc length (C# `fGetTotalLength`)
+  splineOps.splitAt (property) — Split at an index into two non-overlapping lists (C# `aSplitLists`)
+  splineOps.combine (property) — Concatenate lists (C# `aCombineLists`)
+  splineOps.rotatedAroundZ (property) — Every point rotated about the absolute Z axis (C# `aRotateListAroundZ`)
+  splineOps.translated (property) — Every point translated (C# `aTranslateList`)
+  splineOps.scaled (property) — Every point scaled about the origin (C# `aScaleList`)
+  splineOps.nurbsSpline (property) — NURBS smoothing via a degree-2 open BSpline (C# `aGetNURBSpline`)
+  splineOps.overSampled (property) — Linear oversampling with N samples per step (C# `aOverSampleList`)
+  splineOps.subSampled (property) — Every Nth point, end preserved (C# `aSubSampleList`)
+  splineOps.ontoFrame (property) — Every point moved onto a frame's coordinate system (C# `aTranslateListOntoFrame`)
+  splineOps.inFrame (property) — Every point expressed relative to a frame (C# `aExpressListInFrame`)
+  splineOps.rotatedAroundAxis (property) — Every point rotated about an arbitrary axis (C# `aRotateListAroundAxis`)
+  splineOps.average (property) — Average of all positions (C# `vecGetAverage`)
+  splineOps.closestPoint (property) — The list point closest to `start` (C# `vecGetClosestPoint`)
+  splineOps.distanceToClosestPoint (property) — Distance to the closest list point (C# `fGetDistanceToClosestPoint`)
+  splineOps.clusteredPoints (property) — Greedy clustering
+uf (constant) [13 members] — ShapeKernel `Uf` (the "useful formulas" grab-bag)
+  uf.transFixed (property) — BSpline-eased transition between two values at position s in 0..1…
+  uf.vecTransFixed (property) — Component-wise transFixed between two points (C# `vecTransFixed`)
+  uf.transSmooth (property) — tanh-smoothed transition between two values (C# `fTransSmooth`)
+  uf.vecTransSmooth (property) — tanh-smoothed transition between two points (C# `vecTransSmooth`)
+  uf.randomGaussian (property) — Box-Muller gaussian sample (C# `fGetRandomGaussian`)
+  uf.randomLinear (property) — Uniform sample in [min, max) (C# `fGetRandomLinear`)
+  uf.randomBool (property) — Fair coin (C# `bGetRandomBool`)
+  uf.fibonacciCirclePoints (property) — Fibonacci-distributed points in a 2D disc (C# `aGetFibonacciCirlePoints`)
+  uf.fibonacciSpherePoints (property) — Fibonacci-distributed points on a 3D sphere surface (C# `aGetFibonacciSpherePoints`)
+  uf.superShapeRadius (property) — Superformula radius at a polar angle, reference radius 1 (C#…
+  uf.superShapeRadiusPreset (property) — Superformula radius from a preset (C# preset overload)
+  uf.polygonRadius (property) — Regular-polygon radius at a polar angle, inscribed in the unit…
+  uf.polygonRadiusPreset (property) — Regular-polygon radius from a preset (C# preset overload)
+vecOps (constant) [24 members] — ShapeKernel `VecOperations` (Hungarian prefixes dropped)
+  vecOps.cylPoint (property) — Cartesian point from cylindrical coordinates (C# `vecGetCylPoint`)
+  vecOps.sphPoint (property) — Cartesian point from spherical coordinates, theta measured from the XY…
+  vecOps.radius (property) — Planar (XY) radius about the absolute Z axis (C# `fGetRadius`…
+  vecOps.phi (property) — Planar polar angle about the absolute Z axis, radians (C#…
+  vecOps.theta (property) — Elevation angle from the XY plane, radians (C# `fGetTheta`)
+  vecOps.setRadius (property) — Same phi and z, new radius (C# `vecSetRadius`)
+  vecOps.setPhi (property) — Same radius and z, new phi (C# `vecSetPhi`)
+  vecOps.setZ (property) — Same radius and phi, new z (C# `vecSetZ`)
+  vecOps.updateRadius (property) — Radially shifted by deltaRadius (C# `vecUpdateRadius`)
+  vecOps.updatePhi (property) — Turned about the absolute Z axis by deltaPhi (C# `vecUpdatePhi`)
+  vecOps.updateZ (property) — Vertically shifted by deltaZ (C# `vecUpdateZ`)
+  vecOps.planarDir (property) — Normalized planar radial direction from the Z axis to the…
+  vecOps.flipForAlignment (property) — The vector or its negation, whichever aligns better with the…
+  vecOps.checkAlignment (property) — True when the direction points the same way as the…
+  vecOps.rotateAroundZ (property) — Rotate a point about the absolute Z axis through an…
+  vecOps.orthogonalDir (property) — An arbitrary direction orthogonal to the given one (C# `vecGetOrthogonalDir`)
+  vecOps.angleBetween (property) — Minimum angle between two vectors, radians (C# `fGetAngleBetween`)
+  vecOps.signedAngleBetween (property) — Minimum SIGNED angle between two vectors about a reference normal…
+  vecOps.rotateAroundAxis (property) — Rotate a point about an arbitrary axis through an optional…
+  vecOps.directionToAxis (property) — Radial direction from a frame's Z axis to the point,…
+  vecOps.radiusToAxis (property) — Radius from a frame's Z axis to the point (C#…
+  vecOps.phiToAxis (property) — Polar angle about a frame's Z axis to the point…
+  vecOps.cylindricalInterpolation (property) — Cylindrically interpolated point between two points (C# `vecCylindricalInterpolation`)
+  vecOps.sphericalInterpolation (property) — Spherically interpolated point between two points (C# `vecSphericalInterpolation`)

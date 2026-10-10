@@ -20,7 +20,7 @@ Verified baseline: `faecc9ac8f456b7fa5639fc0eb146012e3e499c8` on remote `geospec
 
 - Product: `apps/ui/app/routes/_index/`, `apps/ui/app/routes/vision/vision-story.ts`, and `libs/tau-examples/src/kernels/replicad/planetary-gear-system/`. Distinguish current geometry checks from physical validation and future manufacturing workflows.
 - Prices and customer terms: current `apps/libs/billing/src/tau-plan-catalog.ts`, cross-checked against founder-ratified private commercial authority. No supplier economics are included in public output.
-- Routes: `/projects`, `/projects/new`, `/auth/sign-in`, `/auth/sign-up`, `/settings/billing` (existing settings redirect), `/legal/privacy`, `/legal/terms` verified in the app source.
+- Routes: `/projects`, `/projects/new`, `/auth/sign-in`, `/auth/sign-up`, `/?settings=billing` (the billing settings that `/settings/billing` redirects to), `/legal/privacy`, `/legal/terms` verified in the app source.
 - Downloads: release assets could not be verified; no platform installer or download event is invented.
 - Media: authored Tau example thumbnails and actual workspace screenshot. The live scene and stills derive from the committed 34-part Replicad model; motion does not imply a physical simulation. Verification shows one recorded GeoSpec run of the example spec, with inconclusive results labelled as such. Source license: Tau-authored Apache-2.0; preserve third-party terms.
 

@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { readProjectStorageState, readProjectTree } from '#support/project-storage-state.js';
 
 const seedRoute = '/__e2e/project-file-tree';
 const seedProjectName = 'sgenoud/models file-tree e2e';
@@ -231,32 +232,201 @@ const fieldNumber = async (input: Locator, surface?: target.TargetSurface): Prom
 
 const fieldDiagnostic = async (input: Locator, surface?: target.TargetSurface): Promise<string | undefined> => {
   const description = await target.getAttribute(input, 'aria-describedby', surface);
-  return description === null
-    ? undefined
-    : ((await target.textContent(selectors.getByCss(`#${description}`), surface)) ?? undefined);
+  if (!description) {
+    return undefined;
+  }
+  const values = await Promise.all(
+    description
+      .split(/\s+/u)
+      .filter(Boolean)
+      .map(async (id) => target.textContent(selectors.getByCss(`#${CSS.escape(id)}`), surface)),
+  );
+  return values.filter(Boolean).join(' ') || undefined;
 };
 
-const delayFirstMutationLock = async (surface: target.TargetSurface): Promise<void> =>
+const holdProjectMutationLock = async (projectId: string): Promise<string> => {
+  // MutationPipeline.mutationLockPaths includes the logical project root; withCrossTabLocks
+  // acquires sorted tokens. Native Web Locks share this namespace with the FM workers.
+  const name = `tau-fs-write:/projects/${projectId}`;
+  await target.evaluate(async (lockName) => {
+    const acquired = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const completed = navigator.locks.request(lockName, { mode: 'exclusive' }, async () => {
+      acquired.resolve();
+      await release.promise;
+    });
+    Reflect.set(globalThis, '__tauParameterLockHold', { release: release.resolve, completed });
+    await Promise.race([acquired.promise, completed]);
+  }, name);
+  return name;
+};
+
+const releaseProjectMutationLock = async (): Promise<void> =>
+  target.evaluate(async () => {
+    const held = Reflect.get(globalThis, '__tauParameterLockHold') as
+      | { release: () => void; completed: Promise<void> }
+      | undefined;
+    held?.release();
+    await held?.completed;
+    Reflect.deleteProperty(globalThis, '__tauParameterLockHold');
+  });
+
+/** Observe actual checked-write dispositions without altering the bridge or retaining file contents. */
+const installParameterWriteEvidence = async (surface: target.TargetSurface): Promise<void> =>
   target.evaluate(
     () => {
-      const originalRequest = navigator.locks.request.bind(navigator.locks);
-      let delayed = false;
-      Object.defineProperty(navigator.locks, 'request', {
-        configurable: true,
-        value: async (name: string, options: LockOptions, callback: LockGrantedCallback<unknown>) => {
-          if (!delayed && name.includes('/.tau/parameters/')) {
-            delayed = true;
-            await new Promise((resolve) => {
-              setTimeout(resolve, 3000);
+      type Frame = {
+        k?: string;
+        n?: string;
+        i?: string;
+        o?: number;
+        a?: Array<{ path?: string; preconditions?: Array<{ path: string; expected: unknown }> }>;
+        d?: { status?: string; conflicts?: Array<{ path: string; actual: unknown }> };
+      };
+      type Call = {
+        port: number;
+        id: string;
+        path: string;
+        requestedAt: number;
+        preconditions: Array<{ path: string; expected: 'absent' | 'present' }>;
+        respondedAt?: number;
+        response?: string;
+        conflicts?: Array<{ path: string; actual: 'absent' | 'present' }>;
+      };
+      const calls: Call[] = [];
+      const ports = new WeakMap<MessagePort, number>();
+      const subscriptions: Array<{ port: MessagePort; listener: EventListener }> = [];
+      const nodes = new WeakMap<Element, number>();
+      let nextNode = 0;
+      let dropped = 0;
+      const originalPost = MessagePort.prototype.postMessage;
+      const post: typeof originalPost = function (this: MessagePort, message, options): void {
+        const frame = message as Frame | undefined;
+        const input = frame?.a?.[0];
+        if (
+          frame?.k === 'rq' &&
+          frame.n === 'writeFileChecked' &&
+          frame.i &&
+          input?.path?.includes('.tau/parameters/')
+        ) {
+          if (calls.length < 64) {
+            let port = ports.get(this);
+            if (port === undefined) {
+              port = subscriptions.length + 1;
+              ports.set(this, port);
+              const identity = port;
+              const listener: EventListener = (event) => {
+                const answer = (event as MessageEvent<Frame | undefined>).data;
+                if (answer?.k !== 'rs') {
+                  return;
+                }
+                const call = calls.find((candidate) => candidate.port === identity && candidate.id === answer.i);
+                if (call !== undefined && call.respondedAt === undefined) {
+                  call.respondedAt = performance.now();
+                  call.response = answer.o === 1 ? (answer.d?.status ?? 'unknown') : 'error';
+                  call.conflicts = answer.d?.conflicts?.map((conflict) => ({
+                    path: conflict.path,
+                    actual: conflict.actual === null ? 'absent' : 'present',
+                  }));
+                }
+              };
+              this.addEventListener('message', listener);
+              subscriptions.push({ port: this, listener });
+            }
+            calls.push({
+              port,
+              id: frame.i,
+              path: input.path,
+              requestedAt: performance.now(),
+              preconditions: (input.preconditions ?? []).map((condition) => ({
+                path: condition.path,
+                expected: condition.expected === null ? 'absent' : 'present',
+              })),
             });
+          } else {
+            dropped += 1;
           }
-          return originalRequest(name, options, callback);
+        }
+        originalPost.call(this, message, Array.isArray(options) ? { transfer: options } : options);
+      };
+      MessagePort.prototype.postMessage = post;
+      Reflect.set(globalThis, '__tauParameterWriteEvidence', {
+        read: () => ({ calls, dropped }),
+        node: (element: Element) => {
+          let id = nodes.get(element);
+          if (id === undefined) {
+            id = ++nextNode;
+            nodes.set(element, id);
+          }
+          return id;
+        },
+        restore: () => {
+          if (MessagePort.prototype.postMessage === post) {
+            MessagePort.prototype.postMessage = originalPost;
+          }
+          for (const { port, listener } of subscriptions) {
+            port.removeEventListener('message', listener);
+          }
         },
       });
     },
     undefined,
     surface,
   );
+
+const captureStaleParameterState = async (stage: string): Promise<void> => {
+  const surfaces = await Promise.all(
+    (['primary', 'secondary'] as const).map(async (surface) => ({
+      surface,
+      state: await target.evaluate(
+        () => ({
+          focus: document.activeElement?.getAttribute('aria-label'),
+          writes: (Reflect.get(globalThis, '__tauParameterWriteEvidence') as { read(): unknown } | undefined)?.read(),
+          fields: [...document.querySelectorAll<HTMLInputElement>('[aria-label="Input for Width"]')].map((input) => ({
+            value: input.value,
+            nodeIdentity: (
+              Reflect.get(globalThis, '__tauParameterWriteEvidence') as { node(element: Element): number } | undefined
+            )?.node(input),
+            focused: document.activeElement === input,
+            describedBy: input.getAttribute('aria-describedby'),
+            descriptions: (input.getAttribute('aria-describedby') ?? '')
+              .split(/\s+/u)
+              .filter(Boolean)
+              .map((id) => ({
+                id,
+                text: document.querySelector(`#${CSS.escape(id)}`)?.textContent,
+              })),
+          })),
+          // Shared-worker lock state is captured separately through navigator.locks.query().
+        }),
+        undefined,
+        surface,
+      ),
+    })),
+  );
+  const locks = await target.evaluate(async () => navigator.locks.query());
+  await target.writeArtifact(`parameter-stale-${stage}-document.json`, JSON.stringify({ surfaces, locks }, null, 2));
+  const { pathname } = new URL(await target.currentUrl());
+  const { configs } = await readProjectStorageState();
+  const config = configs.find(
+    (candidate) => candidate.providerBasePath.split('/').findLast(Boolean) === pathname.split('/').at(-1),
+  );
+  if (!config) {
+    throw new Error('Stale parameter capture has no actual rooted project configuration.');
+  }
+  const tree = await readProjectTree(config);
+  await target.writeArtifact(
+    `parameter-stale-${stage}-physical.json`,
+    JSON.stringify(
+      {
+        config,
+        records: Object.fromEntries(Object.entries(tree).filter(([path]) => path.startsWith('/.tau/parameters/'))),
+      },
+      null,
+      2,
+    ),
+  );
+};
 
 test('rejects one of two stale browser-tab edits through the shared authority', async () => {
   await target.setViewport({ width: 1440, height: 900 });
@@ -279,10 +449,40 @@ test('rejects one of two stale browser-tab edits through the shared authority', 
     const width = selectors.getByLabelText('Input for Width').first();
     await target.expectVisible(width, 60_000);
     await target.expectVisible(width, 60_000, 'secondary');
+    await installParameterWriteEvidence('primary');
+    await installParameterWriteEvidence('secondary');
+    await captureStaleParameterState('before-primary-fill');
     await target.fill(width, '21');
+    await captureStaleParameterState('after-primary-fill');
     await target.fill(width, '22', 'secondary');
-    await Promise.all([delayFirstMutationLock('primary'), delayFirstMutationLock('secondary')]);
+    await captureStaleParameterState('after-secondary-fill');
+    const { pathname } = new URL(projectUrl);
+    const { configs } = await readProjectStorageState();
+    const config = configs.find(
+      (candidate) => candidate.providerBasePath.split('/').findLast(Boolean) === pathname.split('/').at(-1),
+    );
+    if (!config) {
+      throw new Error('The shared mutation lock requires the actual project identity.');
+    }
+    const beforeWrites = await readProjectTree(config);
+    const lockName = await holdProjectMutationLock(config.projectId);
+    await captureStaleParameterState('before-enter');
     await Promise.all([target.press(width, 'Enter'), target.press(width, 'Enter', 'secondary')]);
+    await expect
+      .poll(
+        async () =>
+          target.evaluate(async (name) => {
+            const { pending } = await navigator.locks.query();
+            return pending?.filter((lock) => lock.name === name).length ?? 0;
+          }, lockName),
+        { timeout: 60_000 },
+      )
+      .toBe(2);
+    const heldWrites = await readProjectTree(config);
+    expect(heldWrites[`/.tau/parameters/${mainPath}.json`]).toBe(beforeWrites[`/.tau/parameters/${mainPath}.json`]);
+    await captureStaleParameterState('both-writes-held');
+    await releaseProjectMutationLock();
+    await captureStaleParameterState('after-enter');
 
     await expect
       .poll(
@@ -305,7 +505,41 @@ test('rejects one of two stale browser-tab edits through the shared authority', 
     expect([21, 22]).toContain(winningValue);
     await expect.poll(async () => fieldNumber(width, 'primary')).toBe(winningValue);
     await expect.poll(async () => fieldNumber(width, 'secondary')).toBe(winningValue);
+    const settledTree = await readProjectTree(config);
+    const settledRecord = settledTree[`/.tau/parameters/${mainPath}.json`];
+    expect(settledRecord).toBeDefined();
+    expect(JSON.parse(settledRecord!)).toMatchObject({
+      activeGroup: 'default',
+      groups: { default: { values: { dimensions: { width: winningValue } } } },
+    });
+    await captureStaleParameterState('settled');
+  } catch (error) {
+    await captureStaleParameterState('failure').catch(async (captureError: unknown) => {
+      await target
+        .writeArtifact(
+          'parameter-stale-capture-error.json',
+          JSON.stringify({
+            originalFailure: String(error),
+            captureFailure: String(captureError),
+          }),
+        )
+        .catch(() => undefined);
+    });
+    throw error;
   } finally {
+    await releaseProjectMutationLock();
+    await Promise.all(
+      (['primary', 'secondary'] as const).map(async (surface) =>
+        target.evaluate(
+          () => {
+            (Reflect.get(globalThis, '__tauParameterWriteEvidence') as { restore(): void } | undefined)?.restore();
+            Reflect.deleteProperty(globalThis, '__tauParameterWriteEvidence');
+          },
+          undefined,
+          surface,
+        ),
+      ),
+    );
     await target.closeSecondary();
   }
 });
@@ -394,7 +628,7 @@ test('uses inferred units through checked edits, scrubbing, reopen, reset, and d
   const geometryBeforeDisplayChange = await target.evaluateLocator(canvas, (element) =>
     (element as HTMLCanvasElement).toDataURL(),
   );
-  await target.click(selectors.getByRole('button', { name: /^Grid 1 mm, unit settings$/u }).first());
+  await target.click(selectors.getByRole('button', { name: /^Grid 1 mm, units and grid$/u }).first());
   await target.click(selectors.getByRole('menuitemradio', { name: /Centimeter\s+cm/u }));
   await target.keyboardPress('Escape');
   const widthInCentimeters = selectors.getByLabelText('Input for Width').first();

@@ -2,7 +2,7 @@ import type { DirectoryListing, ListedDirectoryEntry } from '#directory-listing.
 import { ObservationService } from '#observation-service.js';
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import type { FileTreeNode } from '@taucad/filesystem';
 import { useDirectoryListing } from '#react/use-directory-listing.js';
@@ -48,6 +48,75 @@ function createTreeHarness(overrides?: { proxy?: ComposedViewClient }): {
 }
 
 describe('useDirectoryListing', () => {
+  it('should qualify retained rows as pending while an authoritative refresh is held', async () => {
+    const { tree, proxy, disposeChannel } = createTreeHarness();
+    const hook = renderHook(() => useDirectoryListing(tree, ''));
+    await waitFor(() => {
+      expect(hook.result.current.kind).toBe('ready');
+    });
+    const held = Promise.withResolvers<FileTreeNode[]>();
+    vi.mocked(proxy.readDirectory).mockReturnValueOnce(held.promise);
+    act(() => {
+      tree.observeDirectory('').refresh();
+    });
+    expect(hook.result.current).toMatchObject({ kind: 'ready', entries: [], pending: true });
+    await act(async () => {
+      held.resolve([]);
+    });
+    await waitFor(() => {
+      expect(hook.result.current).not.toHaveProperty('pending');
+    });
+    hook.unmount();
+    tree.dispose();
+    disposeChannel();
+  });
+
+  it('should surface isolated observation closure and retry the same mounted directory', async () => {
+    const closed = Promise.withResolvers<void>();
+    const ready = Promise.withResolvers<void>();
+    const watchReady = vi
+      .fn()
+      .mockReturnValueOnce({ ready: ready.promise, closed: closed.promise, unsubscribe: vi.fn() })
+      .mockReturnValue({
+        ready: Promise.resolve(),
+        closed: Promise.withResolvers<void>().promise,
+        unsubscribe: vi.fn(),
+      });
+    const channel = new WorkerChangeChannel({ transport: { listen: () => () => undefined, watchReady } });
+    const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([]);
+    const tree = new FileTreeService({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+      channel,
+      paths: new WorkspacePathResolver(workspaceRoot),
+      visibility: headlessVisibilityProvider,
+    });
+    const hook = renderHook(({ reloadToken }) => useDirectoryListing(tree, '', { reloadToken }), {
+      initialProps: { reloadToken: 0 },
+    });
+    expect(readDirectory).not.toHaveBeenCalled();
+    await act(async () => {
+      ready.resolve();
+    });
+    await waitFor(() => {
+      expect(hook.result.current.kind).toBe('ready');
+    });
+    await act(async () => {
+      closed.resolve();
+    });
+    await waitFor(() => {
+      expect(hook.result.current.kind).toBe('error');
+    });
+    hook.rerender({ reloadToken: 1 });
+    await waitFor(() => {
+      expect(hook.result.current.kind).toBe('ready');
+    });
+    expect(watchReady).toHaveBeenCalledTimes(2);
+    expect(readDirectory).toHaveBeenCalledTimes(2);
+    hook.unmount();
+    tree.dispose();
+    channel.dispose();
+  });
+
   it('should report unready when treeService is undefined', () => {
     const { result } = renderHook(() => useDirectoryListing(undefined, ''));
     expect(result.current).toEqual({ kind: 'unready' });

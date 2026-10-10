@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { CookieIcon } from 'lucide-react';
 import { Link } from 'react-router';
 import { useCookieConsent } from '#hooks/use-cookie-consent.js';
-import { isGlobalPrivacyControlEnabled } from '#lib/cookie-consent.lib.js';
+import { isGlobalPrivacyControlEnabled } from '#lib/global-privacy-control.lib.js';
 import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';

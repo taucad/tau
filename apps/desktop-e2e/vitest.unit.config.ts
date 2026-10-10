@@ -23,6 +23,7 @@ export default defineConfig({
     environment: 'node',
     include: [
       'src/support/desktop-app.test.ts',
+      'src/support/filesystem-projection-fixture.test.ts',
       'src/support/config.test.ts',
       'src/support/gateway-fixture.test.ts',
       'src/support/tau-account.test.ts',

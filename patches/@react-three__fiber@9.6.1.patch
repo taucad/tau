@@ -1,0 +1,294 @@
+diff --git a/dist/events-583399dd.cjs.prod.js b/dist/events-583399dd.cjs.prod.js
+index f3834fa28aa8504b48da031e326acb332a722965..dad8cf894d19a87f676f50595f46b37b62e4b95b 100644
+--- a/dist/events-583399dd.cjs.prod.js
++++ b/dist/events-583399dd.cjs.prod.js
+@@ -7403,10 +7403,8 @@ function createRoot(canvas) {
+   null // transitionCallbacks
+   );
+   // Map it
+-  if (!prevRoot) _roots.set(canvas, {
+-    fiber,
+-    store
+-  });
++  const root = prevRoot || { fiber, store, generation: 0, retired: false };
++  if (!prevRoot) _roots.set(canvas, root);
+ 
+   // Locals
+   let onCreated;
+@@ -7415,6 +7413,8 @@ function createRoot(canvas) {
+   let pending = null;
+   return {
+     async configure(props = {}) {
++      const generation = ++root.generation;
++      root.retired = false;
+       let resolve;
+       pending = new Promise(_resolve => resolve = _resolve);
+       let {
+@@ -7447,6 +7447,10 @@ function createRoot(canvas) {
+           alpha: true
+         };
+         const customRenderer = typeof glConfig === 'function' ? await glConfig(defaultProps) : glConfig;
++        if (root.retired || root.generation !== generation || _roots.get(canvas) !== root) {
++          resolve();
++          return this;
++        }
+         if (isRenderer(customRenderer)) {
+           gl = customRenderer;
+         } else {
+@@ -7643,7 +7647,9 @@ function createRoot(canvas) {
+     render(children) {
+       // The root has to be configured before it can be rendered
+       if (!configured && !pending) this.configure();
++      const generation = root.generation;
+       pending.then(() => {
++        if (root.retired || root.generation !== generation || _roots.get(canvas) !== root) return;
+         reconciler.updateContainer( /*#__PURE__*/jsxRuntime.jsx(Provider, {
+           store: store,
+           children: children,
+@@ -7689,18 +7695,21 @@ function unmountComponentAtNode(canvas, callback) {
+   const root = _roots.get(canvas);
+   const fiber = root == null ? void 0 : root.fiber;
+   if (fiber) {
++    const generation = ++root.generation;
++    root.retired = true;
+     const state = root == null ? void 0 : root.store.getState();
+     if (state) state.internal.active = false;
+     reconciler.updateContainer(null, fiber, null, () => {
+       if (state) {
+         setTimeout(() => {
++          if (_roots.get(canvas) !== root || !root.retired || root.generation !== generation) return;
+           try {
+             var _state$gl, _state$gl$renderLists, _state$gl2, _state$gl3;
+             state.events.disconnect == null ? void 0 : state.events.disconnect();
+             (_state$gl = state.gl) == null ? void 0 : (_state$gl$renderLists = _state$gl.renderLists) == null ? void 0 : _state$gl$renderLists.dispose == null ? void 0 : _state$gl$renderLists.dispose();
+             (_state$gl2 = state.gl) == null ? void 0 : _state$gl2.forceContextLoss == null ? void 0 : _state$gl2.forceContextLoss();
+             if ((_state$gl3 = state.gl) != null && _state$gl3.xr) state.xr.disconnect();
+-            dispose(state.scene);
++            if (state.scene) dispose(state.scene);
+             _roots.delete(canvas);
+             if (callback) callback(canvas);
+           } catch (e) {
+diff --git a/dist/events-b389eeca.esm.js b/dist/events-b389eeca.esm.js
+index 76f308c96cb09a20e854133e48ec9ef7682edecc..aecfa92eb1cc2c2ad1a28db055a6730ab4a2641e 100644
+--- a/dist/events-b389eeca.esm.js
++++ b/dist/events-b389eeca.esm.js
+@@ -15575,10 +15575,8 @@ function createRoot(canvas) {
+   null // transitionCallbacks
+   );
+   // Map it
+-  if (!prevRoot) _roots.set(canvas, {
+-    fiber,
+-    store
+-  });
++  const root = prevRoot || { fiber, store, generation: 0, retired: false };
++  if (!prevRoot) _roots.set(canvas, root);
+ 
+   // Locals
+   let onCreated;
+@@ -15587,6 +15585,8 @@ function createRoot(canvas) {
+   let pending = null;
+   return {
+     async configure(props = {}) {
++      const generation = ++root.generation;
++      root.retired = false;
+       let resolve;
+       pending = new Promise(_resolve => resolve = _resolve);
+       let {
+@@ -15619,6 +15619,10 @@ function createRoot(canvas) {
+           alpha: true
+         };
+         const customRenderer = typeof glConfig === 'function' ? await glConfig(defaultProps) : glConfig;
++        if (root.retired || root.generation !== generation || _roots.get(canvas) !== root) {
++          resolve();
++          return this;
++        }
+         if (isRenderer(customRenderer)) {
+           gl = customRenderer;
+         } else {
+@@ -15815,7 +15819,9 @@ function createRoot(canvas) {
+     render(children) {
+       // The root has to be configured before it can be rendered
+       if (!configured && !pending) this.configure();
++      const generation = root.generation;
+       pending.then(() => {
++        if (root.retired || root.generation !== generation || _roots.get(canvas) !== root) return;
+         reconciler.updateContainer( /*#__PURE__*/jsx(Provider, {
+           store: store,
+           children: children,
+@@ -15861,18 +15867,21 @@ function unmountComponentAtNode(canvas, callback) {
+   const root = _roots.get(canvas);
+   const fiber = root == null ? void 0 : root.fiber;
+   if (fiber) {
++    const generation = ++root.generation;
++    root.retired = true;
+     const state = root == null ? void 0 : root.store.getState();
+     if (state) state.internal.active = false;
+     reconciler.updateContainer(null, fiber, null, () => {
+       if (state) {
+         setTimeout(() => {
++          if (_roots.get(canvas) !== root || !root.retired || root.generation !== generation) return;
+           try {
+             var _state$gl, _state$gl$renderLists, _state$gl2, _state$gl3;
+             state.events.disconnect == null ? void 0 : state.events.disconnect();
+             (_state$gl = state.gl) == null ? void 0 : (_state$gl$renderLists = _state$gl.renderLists) == null ? void 0 : _state$gl$renderLists.dispose == null ? void 0 : _state$gl$renderLists.dispose();
+             (_state$gl2 = state.gl) == null ? void 0 : _state$gl2.forceContextLoss == null ? void 0 : _state$gl2.forceContextLoss();
+             if ((_state$gl3 = state.gl) != null && _state$gl3.xr) state.xr.disconnect();
+-            dispose(state.scene);
++            if (state.scene) dispose(state.scene);
+             _roots.delete(canvas);
+             if (callback) callback(canvas);
+           } catch (e) {
+diff --git a/dist/events-f19bcc32.cjs.dev.js b/dist/events-f19bcc32.cjs.dev.js
+index 07d45d4c0bd7d57301d338040e8aa71c88fce7c5..814ec7387b78c3161be1d4821c36bc4ba9ba6371 100644
+--- a/dist/events-f19bcc32.cjs.dev.js
++++ b/dist/events-f19bcc32.cjs.dev.js
+@@ -15600,10 +15600,8 @@ function createRoot(canvas) {
+   null // transitionCallbacks
+   );
+   // Map it
+-  if (!prevRoot) _roots.set(canvas, {
+-    fiber,
+-    store
+-  });
++  const root = prevRoot || { fiber, store, generation: 0, retired: false };
++  if (!prevRoot) _roots.set(canvas, root);
+ 
+   // Locals
+   let onCreated;
+@@ -15612,6 +15610,8 @@ function createRoot(canvas) {
+   let pending = null;
+   return {
+     async configure(props = {}) {
++      const generation = ++root.generation;
++      root.retired = false;
+       let resolve;
+       pending = new Promise(_resolve => resolve = _resolve);
+       let {
+@@ -15644,6 +15644,10 @@ function createRoot(canvas) {
+           alpha: true
+         };
+         const customRenderer = typeof glConfig === 'function' ? await glConfig(defaultProps) : glConfig;
++        if (root.retired || root.generation !== generation || _roots.get(canvas) !== root) {
++          resolve();
++          return this;
++        }
+         if (isRenderer(customRenderer)) {
+           gl = customRenderer;
+         } else {
+@@ -15840,7 +15844,9 @@ function createRoot(canvas) {
+     render(children) {
+       // The root has to be configured before it can be rendered
+       if (!configured && !pending) this.configure();
++      const generation = root.generation;
+       pending.then(() => {
++        if (root.retired || root.generation !== generation || _roots.get(canvas) !== root) return;
+         reconciler.updateContainer( /*#__PURE__*/jsxRuntime.jsx(Provider, {
+           store: store,
+           children: children,
+@@ -15886,18 +15892,21 @@ function unmountComponentAtNode(canvas, callback) {
+   const root = _roots.get(canvas);
+   const fiber = root == null ? void 0 : root.fiber;
+   if (fiber) {
++    const generation = ++root.generation;
++    root.retired = true;
+     const state = root == null ? void 0 : root.store.getState();
+     if (state) state.internal.active = false;
+     reconciler.updateContainer(null, fiber, null, () => {
+       if (state) {
+         setTimeout(() => {
++          if (_roots.get(canvas) !== root || !root.retired || root.generation !== generation) return;
+           try {
+             var _state$gl, _state$gl$renderLists, _state$gl2, _state$gl3;
+             state.events.disconnect == null ? void 0 : state.events.disconnect();
+             (_state$gl = state.gl) == null ? void 0 : (_state$gl$renderLists = _state$gl.renderLists) == null ? void 0 : _state$gl$renderLists.dispose == null ? void 0 : _state$gl$renderLists.dispose();
+             (_state$gl2 = state.gl) == null ? void 0 : _state$gl2.forceContextLoss == null ? void 0 : _state$gl2.forceContextLoss();
+             if ((_state$gl3 = state.gl) != null && _state$gl3.xr) state.xr.disconnect();
+-            dispose(state.scene);
++            if (state.scene) dispose(state.scene);
+             _roots.delete(canvas);
+             if (callback) callback(canvas);
+           } catch (e) {
+diff --git a/dist/react-three-fiber.cjs.dev.js b/dist/react-three-fiber.cjs.dev.js
+index b50702f8ade504373e4b04838ae3c93f31db74da..0af427ccba3befd4fcb5b34ac7617b7680e92e05 100644
+--- a/dist/react-three-fiber.cjs.dev.js
++++ b/dist/react-three-fiber.cjs.dev.js
+@@ -90,6 +90,7 @@ function CanvasImpl({
+     const canvas = canvasRef.current;
+     if (containerRect.width > 0 && containerRect.height > 0 && canvas) {
+       if (!root.current) root.current = events.createRoot(canvas);
++      let cancelled = false;
+       async function run() {
+         await root.current.configure({
+           gl,
+@@ -126,6 +127,7 @@ function CanvasImpl({
+             onCreated == null ? void 0 : onCreated(state);
+           }
+         });
++        if (cancelled) return;
+         root.current.render( /*#__PURE__*/jsxRuntime.jsx(Bridge, {
+           children: /*#__PURE__*/jsxRuntime.jsx(events.ErrorBoundary, {
+             set: setError,
+@@ -139,6 +141,7 @@ function CanvasImpl({
+         }));
+       }
+       run();
++      return () => { cancelled = true; };
+     }
+   });
+   React__namespace.useEffect(() => {
+diff --git a/dist/react-three-fiber.cjs.prod.js b/dist/react-three-fiber.cjs.prod.js
+index decc0b509b7f5bc1771567c41273be7e48db6faa..9022f72a9a17f2ccd12c8cabcd20ec68704368fe 100644
+--- a/dist/react-three-fiber.cjs.prod.js
++++ b/dist/react-three-fiber.cjs.prod.js
+@@ -90,6 +90,7 @@ function CanvasImpl({
+     const canvas = canvasRef.current;
+     if (containerRect.width > 0 && containerRect.height > 0 && canvas) {
+       if (!root.current) root.current = events.createRoot(canvas);
++      let cancelled = false;
+       async function run() {
+         await root.current.configure({
+           gl,
+@@ -126,6 +127,7 @@ function CanvasImpl({
+             onCreated == null ? void 0 : onCreated(state);
+           }
+         });
++        if (cancelled) return;
+         root.current.render( /*#__PURE__*/jsxRuntime.jsx(Bridge, {
+           children: /*#__PURE__*/jsxRuntime.jsx(events.ErrorBoundary, {
+             set: setError,
+@@ -139,6 +141,7 @@ function CanvasImpl({
+         }));
+       }
+       run();
++      return () => { cancelled = true; };
+     }
+   });
+   React__namespace.useEffect(() => {
+diff --git a/dist/react-three-fiber.esm.js b/dist/react-three-fiber.esm.js
+index 9260035ce1cccf5d9708714d8249283f7bfd975a..b669abaf18892e5f04ce4922a220ee76f2d14c4b 100644
+--- a/dist/react-three-fiber.esm.js
++++ b/dist/react-three-fiber.esm.js
+@@ -63,6 +63,7 @@ function CanvasImpl({
+     const canvas = canvasRef.current;
+     if (containerRect.width > 0 && containerRect.height > 0 && canvas) {
+       if (!root.current) root.current = createRoot(canvas);
++      let cancelled = false;
+       async function run() {
+         await root.current.configure({
+           gl,
+@@ -99,6 +100,7 @@ function CanvasImpl({
+             onCreated == null ? void 0 : onCreated(state);
+           }
+         });
++        if (cancelled) return;
+         root.current.render( /*#__PURE__*/jsx(Bridge, {
+           children: /*#__PURE__*/jsx(ErrorBoundary, {
+             set: setError,
+@@ -112,6 +114,7 @@ function CanvasImpl({
+         }));
+       }
+       run();
++      return () => { cancelled = true; };
+     }
+   });
+   React.useEffect(() => {

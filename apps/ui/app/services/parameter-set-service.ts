@@ -13,7 +13,6 @@ import type {
   ParameterSetAuthoritySnapshot,
   ParameterSetOperation,
   ParameterSetOutcome,
-  ParameterSetRequest,
   ParameterSetRequestBase,
   ParameterSetTarget,
   ParameterSnapshot,
@@ -42,7 +41,19 @@ export type ParameterDraft = Readonly<{
   text: string;
   /** Whether that text parses and admits; an invalid draft cannot be entered. */
   valid: boolean;
+  /** The service owns final settlement; rejected text remains separate from the authority value. */
+  final?:
+    | Readonly<{ status: 'pending'; requestId: string; base: ParameterSetRequestBase }>
+    | Readonly<{ status: 'refused'; requestId: string; base: ParameterSetRequestBase; message: string }>;
 }>;
+
+/** One field edit; only a final with an explicit base may retain widget-formatted recovery text. */
+export type ParameterValueEdit = Readonly<{ pointer: string; value: JSONValue }> &
+  (
+    | Readonly<{ pressure?: 'final'; base: ParameterSetRequestBase; draft: Pick<ParameterDraft, 'text' | 'valid'> }>
+    | Readonly<{ pressure?: 'final'; base?: ParameterSetRequestBase; draft?: never }>
+    | Readonly<{ pressure: 'transient'; base?: ParameterSetRequestBase; draft?: never }>
+  );
 
 /** One editor draft that has not reached the authority. */
 export type UnsavedParameterDraft = Readonly<{
@@ -75,8 +86,8 @@ export type ParameterSetService = Readonly<{
   /** The draft a row left behind, if it has one. */
   draft(key: ParameterDraftKey): ParameterDraft | undefined;
   /** Retain or clear one row's draft; `undefined` clears it. */
-  setDraft(key: ParameterDraftKey, draft: ParameterDraft | undefined): void;
-  /** Observe drafts being cleared or discarded (never set), so a mounted row re-reads its own. */
+  setDraft(key: ParameterDraftKey, draft: Pick<ParameterDraft, 'text' | 'valid'> | undefined): void;
+  /** Observe final settlement and discarded drafts; ordinary typing remains local. */
   subscribeDrafts(listener: () => void): () => void;
   /**
    * Commit one field of one group against the authority's current record. `base` scopes the
@@ -85,13 +96,7 @@ export type ParameterSetService = Readonly<{
   commitValue(
     target: ParameterSetTarget,
     manifest: ParameterManifest,
-    field: Readonly<{
-      group: string;
-      pointer: string;
-      value: JSONValue;
-      base?: ParameterSetRequestBase;
-      pressure?: ParameterSetRequest['pressure'];
-    }>,
+    field: ParameterValueEdit & Readonly<{ group: string }>,
   ): Promise<ParameterSetOutcome>;
   resolve(filePath: string, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot>;
   resolveTarget(target: ParameterSetTarget, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot>;
@@ -214,8 +219,19 @@ export const createParameterSetService = (
   const activeRelocations = new Set<Promise<void>>();
   const pendingCleanups = new Map<string, () => Promise<void>>();
   const cleanupInFlight = new Set<Promise<void>>();
+  const admittedFinals = new Map<Promise<unknown>, string>();
+  const trackFinal = async <Value>(entry: string, operation: Promise<Value>): Promise<Value> => {
+    admittedFinals.set(operation, entry);
+    try {
+      return await operation;
+    } finally {
+      admittedFinals.delete(operation);
+    }
+  };
   let closed = false;
   let closing = false;
+  let disposing = false;
+  const retiringPaths = new Set<string>();
   let closePromise: Promise<void> | undefined;
   const targetFor = (filePath: string, authority = 'browser-filesystem'): ParameterSetTarget => ({
     authority,
@@ -233,6 +249,8 @@ export const createParameterSetService = (
   const pathMatches = (candidate: string, path: string): boolean =>
     candidate === path || candidate.startsWith(`${path}/`);
   const isRelocating = (filePath: string): boolean => [...relocatingPaths].some((path) => pathMatches(filePath, path));
+  const canRetainDraft = (filePath: string): boolean =>
+    !closed && !disposing && ![...retiringPaths].some((path) => pathMatches(filePath, path));
   const assertNotRelocating = (filePath: string): void => {
     if (isRelocating(filePath)) {
       throw Object.assign(new Error(`Parameters for ${filePath} are being relocated.`), {
@@ -351,7 +369,22 @@ export const createParameterSetService = (
     if (snapshot.status !== 'done') {
       throw Object.assign(new Error('The last parameter write remains uncertain.'), { code: 'WRITE_UNCERTAIN' });
     }
+    const key = targetKey(state.target);
+    if (clients.get(key) === state) {
+      clients.delete(key);
+      actorsChanged();
+    }
   }
+
+  const closeStates = async (states: readonly TargetState[]): Promise<void> => {
+    const outcomes = await Promise.allSettled(states.map(async (state) => closeState(state)));
+    const failure = outcomes.find((outcome) => outcome.status === 'rejected');
+    if (failure !== undefined) {
+      throw failure.reason instanceof Error
+        ? failure.reason
+        : new Error('Parameter teardown failed.', { cause: failure.reason });
+    }
+  };
 
   /** A reader that arrives mid-relocation waits for the file operation to settle instead of failing. */
   const resolveTarget = async (
@@ -368,22 +401,6 @@ export const createParameterSetService = (
   const resolve = async (filePath: string, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot> =>
     resolveTarget(targetFor(filePath), manifest);
 
-  const submitRequest = async (
-    input: Readonly<{
-      filePath: string;
-      manifest: ParameterManifest;
-      request: ParameterSetRequest;
-      target: ParameterSetTarget;
-    }>,
-  ): Promise<ParameterSetOutcome> => {
-    const { filePath, manifest, request, target } = input;
-    const state = stateFor(filePath, manifest, target);
-    if (state.actor.getSnapshot().context.current === undefined) {
-      await resolveState(state);
-    }
-    return submitParameterRequest(state.actor, request);
-  };
-
   const submitOperation = async (
     input: Readonly<{
       filePath: string;
@@ -395,38 +412,28 @@ export const createParameterSetService = (
   ): Promise<void> => {
     const { filePath, manifest, operation, target } = input;
     const state = stateFor(filePath, manifest, target);
-    const current = state.actor.getSnapshot().context.current ?? (await resolveTarget(state.target, manifest));
     const requestId = `browser:${filePath}:${++sequence}`;
-    const outcome = await submitRequest({
+    return trackFinal(
       filePath,
-      manifest,
-      request: {
-        requestId,
-        expected: input.expected ?? current.identity,
-        pressure: 'final',
-        operation,
-      },
-      target: state.target,
-    });
-    if (outcome.status !== 'committed') {
-      throw operationError(outcome);
-    }
+      (async () => {
+        await Promise.resolve();
+        const current = state.actor.getSnapshot().context.current ?? (await resolveState(state));
+        const outcome = await submitParameterRequest(state.actor, {
+          requestId,
+          expected: input.expected ?? current.identity,
+          pressure: 'final',
+          operation,
+        });
+        if (outcome.status !== 'committed') {
+          throw operationError(outcome);
+        }
+      })(),
+    );
   };
 
   const valuesFor = (values: Readonly<Record<string, unknown>>): Readonly<Record<string, JSONValue>> =>
     fileParameterEntrySchema.parse({ activeGroup: 'default', groups: { default: { values } } }).groups['default']!
       .values;
-
-  const retire = async (filePath: string): Promise<void> => {
-    const items = [...clients].filter(([, state]) => state.target.entry === filePath);
-    await Promise.all(
-      items.map(async ([key, state]) => {
-        await closeState(state);
-        clients.delete(key);
-        actorsChanged();
-      }),
-    );
-  };
 
   const runCleanup = async (key: string): Promise<void> => {
     const cleanup = pendingCleanups.get(key);
@@ -465,18 +472,21 @@ export const createParameterSetService = (
       finished = true;
       for (const path of protectedPaths) {
         relocatingPaths.delete(path);
+        retiringPaths.delete(path);
       }
       activeRelocations.delete(settled.promise);
       settled.resolve();
     };
     const matches = (candidate: string): boolean => pathMatches(candidate, operationPath);
     try {
-      refuseUnsaved('relocate', operationPath);
-      await Promise.all(
-        [...new Set([...clients.values()].map(({ target }) => target.entry))]
-          .filter((candidate) => matches(candidate))
-          .map(async (candidate) => retire(candidate)),
+      await Promise.allSettled(
+        [...admittedFinals].filter(([, entry]) => matches(entry)).map(async ([operation]) => operation),
       );
+      refuseUnsaved('relocate', operationPath);
+      for (const path of protectedPaths) {
+        retiringPaths.add(path);
+      }
+      await closeStates([...clients.values()].filter(({ target }) => matches(target.entry)));
     } catch (error) {
       finish();
       throw error;
@@ -544,26 +554,77 @@ export const createParameterSetService = (
   };
 
   const commitValue: ParameterSetService['commitValue'] = async (target, manifest, field) => {
-    const state = stateFor(target.entry, manifest, target);
-    const current = state.actor.getSnapshot().context.current ?? (await resolveState(state));
+    if (!canRetainDraft(target.entry)) {
+      throw new DOMException('The parameter service is closed.', 'AbortError');
+    }
     const requestId = `browser:${target.entry}:${++sequence}`;
-    return submitRequest({
-      filePath: target.entry,
-      manifest,
-      target: state.target,
-      request: {
-        requestId,
-        expected: current.identity,
-        pressure: field.pressure ?? 'final',
-        ...(field.base === undefined ? {} : { base: field.base }),
-        operation: {
-          kind: 'native-value',
-          group: field.group,
-          pointer: field.pointer,
-          value: field.value,
-        },
-      },
-    });
+    const key: ParameterDraftKey = { target, group: field.group, pointer: field.pointer };
+    const mapKey = draftKey(key);
+    const pendingDraft =
+      field.draft === undefined
+        ? undefined
+        : ({
+            ...field.draft,
+            final: { status: 'pending', requestId, base: field.base },
+          } as const);
+    if (pendingDraft !== undefined) {
+      drafts.set(mapKey, { key, draft: pendingDraft, label: draftLabel(key.group, key.pointer) });
+    }
+    const settleDraft = (message?: string): void => {
+      if (pendingDraft === undefined || drafts.get(mapKey)?.draft !== pendingDraft) {
+        return;
+      }
+      if (message === undefined) {
+        drafts.delete(mapKey);
+      } else {
+        drafts.set(mapKey, {
+          key,
+          draft: { ...pendingDraft, final: { status: 'refused', requestId, base: pendingDraft.final.base, message } },
+          label: draftLabel(key.group, key.pointer),
+        });
+      }
+      draftChanges.emit();
+    };
+    let state: TargetState;
+    try {
+      state = stateFor(target.entry, manifest, target);
+    } catch (error) {
+      settleDraft(
+        error instanceof Error || error instanceof DOMException ? error.message : 'The parameter could not be saved.',
+      );
+      throw error;
+    }
+    const operation = (async () => {
+      await Promise.resolve();
+      try {
+        const current = state.actor.getSnapshot().context.current ?? (await resolveState(state));
+        const outcome = await submitParameterRequest(state.actor, {
+          requestId,
+          expected: current.identity,
+          pressure: field.pressure ?? 'final',
+          ...(field.base === undefined ? {} : { base: field.base }),
+          operation: { kind: 'native-value', group: field.group, pointer: field.pointer, value: field.value },
+        });
+        settleDraft(
+          outcome.status === 'committed' || outcome.status === 'cancelled-before-apply'
+            ? undefined
+            : 'message' in outcome
+              ? outcome.message
+              : 'The parameter could not be saved.',
+        );
+        return outcome;
+      } catch (error) {
+        settleDraft(
+          error instanceof Error || error instanceof DOMException ? error.message : 'The parameter could not be saved.',
+        );
+        throw error;
+      }
+    })();
+    const tracked = field.pressure === 'transient' ? operation : trackFinal(target.entry, operation);
+    if (pendingDraft !== undefined) {
+      draftChanges.emit();
+    }
+    return tracked;
   };
 
   return {
@@ -572,9 +633,12 @@ export const createParameterSetService = (
     actor: actorFor,
     draft: (key) => drafts.get(draftKey(key))?.draft,
     setDraft: (key, draft) => {
+      if (!canRetainDraft(key.target.entry)) {
+        return;
+      }
       const mapKey = draftKey(key);
       if (draft !== undefined) {
-        // Listeners act only on a cleared draft, so a keystroke notifies nobody.
+        // Typing stays local; final settlement and explicit clearing notify mounted rows.
         drafts.set(mapKey, { key, draft, label: draftLabel(key.group, key.pointer) });
         return;
       }
@@ -741,6 +805,7 @@ export const createParameterSetService = (
       closing = true;
       const operation = async (): Promise<void> => {
         await Promise.all(activeRelocations);
+        await Promise.allSettled(admittedFinals.keys());
         await Promise.all(cleanupInFlight);
         await Promise.all([...pendingCleanups].map(async ([key]) => runCleanup(key)));
         if (pendingCleanups.size > 0) {
@@ -749,8 +814,9 @@ export const createParameterSetService = (
           });
         }
         refuseUnsaved('close');
+        disposing = true;
         const states = [...clients.values()];
-        await Promise.all(states.map(async (state) => closeState(state)));
+        await closeStates(states);
         clients.clear();
         drafts.clear();
         closed = true;
@@ -762,6 +828,7 @@ export const createParameterSetService = (
       } catch (error) {
         closePromise = undefined;
         closing = false;
+        disposing = false;
         throw error;
       }
     },

@@ -31,7 +31,8 @@ function ProjectNameCell({
   readonly project: ProjectListItem & { readonly onCloud?: boolean };
   readonly actions: ProjectActions;
 }) {
-  const thumbnailSource = useProjectThumbnail(project.id);
+  const thumbnail = useProjectThumbnail(project.id);
+  const thumbnailSource = thumbnail.url;
   return (
     <div className='flex w-full items-center justify-between gap-3 pr-2'>
       <div className='flex items-center gap-3'>
@@ -48,6 +49,19 @@ function ProjectNameCell({
           )}
         </div>
         <div className='min-w-0'>
+          {thumbnail.status === 'error' || thumbnail.status === 'closed' ? (
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              title={thumbnail.error}
+              onClick={() => {
+                thumbnail.refresh();
+              }}
+            >
+              Retry thumbnail
+            </Button>
+          ) : null}
           <InlineTextEditor
             value={project.name}
             className='h-7 [&_[data-slot=button]]:font-medium'

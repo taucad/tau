@@ -1269,11 +1269,8 @@ export const FileEditor = memo(function ({
   const handleFileSelectorSelect = useCallback(
     (path: string) => {
       editorRef.send({ type: 'openFile', path, source: 'user' });
-      panelApi.updateParameters({ filePath: path });
-      const fileName = path.split('/').pop() ?? path;
-      panelApi.setTitle(fileName);
     },
-    [editorRef, panelApi],
+    [editorRef],
   );
 
   const handleForceOpenBinary = useCallback(() => {
@@ -1293,15 +1290,17 @@ export const FileEditor = memo(function ({
     void contentService.resolve(filePath, { sizeLimit: Number.MAX_SAFE_INTEGER });
   }, [contentService, filePath]);
 
+  const textContent = result.kind === 'text' ? result.content : undefined;
+  const binarySize = result.kind === 'binary' ? result.size : undefined;
   const handleReadAll = useCallback(async (): Promise<Uint8Array<ArrayBuffer>> => {
-    if (result.kind === 'text') {
-      return new Uint8Array(result.content);
+    if (textContent !== undefined) {
+      return new Uint8Array(textContent);
     }
-    if (result.kind === 'binary' && contentService) {
-      return contentService.readRawBytes(filePath, { sizeLimit: result.size });
+    if (binarySize !== undefined && contentService) {
+      return contentService.readRawBytes(filePath, { sizeLimit: binarySize });
     }
     throw new Error(`File '${filePath}' is not available to a viewer`);
-  }, [contentService, filePath, result]);
+  }, [contentService, filePath, textContent, binarySize]);
 
   const handleCodeChange = useCallback(
     (value: ComponentProps<typeof CodeEditor>['value']) => {
@@ -1495,7 +1494,17 @@ export const FileEditor = memo(function ({
         editorRef.send({ type: 'openFile', path, source: 'user', readOnly: fileReadOnly });
       }}
     >
-      {paneBody}
+      <div className='flex h-full min-h-0 flex-1 flex-col'>
+        {result.observation.status === 'closed' || result.observation.status === 'error' ? (
+          <div role='status' className='flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1 text-xs'>
+            <span>File updates unavailable</span>
+            <Button variant='ghost' size='sm' aria-label='Retry file updates' onClick={result.retry}>
+              Retry
+            </Button>
+          </div>
+        ) : undefined}
+        <div className='min-h-0 flex-1'>{paneBody}</div>
+      </div>
     </FileWorkbenchPane>
   );
 

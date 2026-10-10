@@ -37,3 +37,25 @@ UnitsMethods: declare class UnitsMethods
   [Symbol.dispose](): void;
 
 UnitsMethods_LengthUnit: typeof UnitsMethods_LengthUnit[keyof typeof UnitsMethods_LengthUnit]
+
+  readonly UnitsMethods_LengthUnit_Undefined: 'UnitsMethods_LengthUnit_Undefined'
+
+  readonly UnitsMethods_LengthUnit_Inch: 'UnitsMethods_LengthUnit_Inch'
+
+  readonly UnitsMethods_LengthUnit_Millimeter: 'UnitsMethods_LengthUnit_Millimeter'
+
+  readonly UnitsMethods_LengthUnit_Foot: 'UnitsMethods_LengthUnit_Foot'
+
+  readonly UnitsMethods_LengthUnit_Mile: 'UnitsMethods_LengthUnit_Mile'
+
+  readonly UnitsMethods_LengthUnit_Meter: 'UnitsMethods_LengthUnit_Meter'
+
+  readonly UnitsMethods_LengthUnit_Kilometer: 'UnitsMethods_LengthUnit_Kilometer'
+
+  readonly UnitsMethods_LengthUnit_Mil: 'UnitsMethods_LengthUnit_Mil'
+
+  readonly UnitsMethods_LengthUnit_Micron: 'UnitsMethods_LengthUnit_Micron'
+
+  readonly UnitsMethods_LengthUnit_Centimeter: 'UnitsMethods_LengthUnit_Centimeter'
+
+  readonly UnitsMethods_LengthUnit_Microinch: 'UnitsMethods_LengthUnit_Microinch'

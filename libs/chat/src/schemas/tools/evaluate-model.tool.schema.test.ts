@@ -27,4 +27,11 @@ describe('evaluateModelOutputSchema', () => {
     expect(description).not.toContain('pending');
     expect(description).toContain('sourceRevision');
   });
+
+  it('names its required targetFile up front, where agents that read only a prefix see it', () => {
+    expect(toolDescriptions[toolName.evaluateModel].split('\n')[0]).toContain('`targetFile`');
+    expect(toolDescriptions[toolName.exportModel]).toContain(
+      'evaluate_model({ targetFile, includeCapabilities: true })',
+    );
+  });
 });

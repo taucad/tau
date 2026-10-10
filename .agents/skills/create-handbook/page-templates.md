@@ -19,12 +19,12 @@ docs/handbooks/cloud/
                analytics-and-tracing.md desktop-app.md
                storage-gateway.md second-copy-b2.md cloud-host-provisioner.md hatchet.md        (planned: status draft)
   operate/     deploy-and-promote.md rollback-api.md rollback-ui.md hotfix.md break-glass-ui-deploy.md migrations.md
-               scaling.md terraform-change.md tariff-lifecycle.md supplier-budgets.md stripe-catalog-and-webhooks.md
+               scaling.md terraform-change.md tariff-lifecycle.md stripe-catalog-and-webhooks.md
                refunds-and-financial-cases.md billing-operator-levers.md postgres-backup-and-restore.md
                storage-maintenance.md verified-erasure.md share-takedown.md account-actions.md secret-rotation.md
                access-joiner-leaver.md desktop-release.md npm-release.md cli-billing-command.md cli-maintenance-command.md
   playbooks/   process.md triage.md site-down.md api-5xx.md sign-in-failing.md chat-llm-failing.md paid-not-credited.md
-               ledger-drift.md budget-exhausted.md tariff-incompatible.md storage-failure.md redis-loss.md
+               ledger-drift.md tariff-incompatible.md storage-failure.md redis-loss.md
                postgres-saturation.md dns-tls.md deploy-regression.md supplier-outage.md credential-leak.md abuse-takedown.md
   observe/     signals.md querying.md dashboards.md alerts.md health-endpoints.md log-lines.md slos.md
   readiness/   go-live-checklist.md known-gaps.md calendar.md unknowns.md

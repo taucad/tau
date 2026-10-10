@@ -1,0 +1,1 @@
+ALTER TABLE "user" ADD COLUMN "allows_usage_metrics" boolean DEFAULT true NOT NULL;

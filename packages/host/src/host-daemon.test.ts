@@ -1470,6 +1470,44 @@ describe('startHostDaemon', () => {
   }, 20_000);
 
   /*
+   * The API closes a route with 4003 when the device behind it is revoked —
+   * the code the control socket already treats as final. The session ends with
+   * it, now, rather than idling its other routes until the 15 s reap.
+   */
+  it('ends the whole session as REVOKED when the relay closes one route with 4003', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-revoked-route-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+
+    const relay = await startRelay();
+    const events: HostDaemonEvent[] = [];
+    const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, events);
+    const control = await relay.control;
+    await vi.waitFor(() => {
+      expect(relay.controlFrames).toContainEqual(expect.objectContaining({ type: 'ready' }));
+    });
+    control.send(JSON.stringify(agentOffer(relay.url, 'session-1')));
+    await vi.waitFor(() => {
+      expect(events).toContainEqual({ type: 'session', sessionId: 'session-1', state: 'connected' });
+    });
+    const agentSocket = await relay.route(routePath('session-1', 'agent'));
+
+    const runtimeSocket = await relay.route(routePath('session-1', 'runtime'));
+    runtimeSocket.close(4003, 'device revoked');
+    await vi.waitFor(() => {
+      expect(events).toContainEqual({
+        type: 'session',
+        sessionId: 'session-1',
+        state: 'disconnected',
+        code: 'REVOKED',
+      });
+    });
+    expect(agentSocket.readyState).not.toBe(WebSocket.OPEN);
+
+    await daemon.close();
+  }, 20_000);
+
+  /*
    * `sessionLifetimeSeconds` bounds an *unclaimed* offer — the API refreshes a
    * session's record for as long as it has a parked socket
    * (`HostsService.touchSession`). The daemon's own hard close at the offer's

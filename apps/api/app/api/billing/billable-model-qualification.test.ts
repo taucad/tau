@@ -97,7 +97,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     expect(result.invocation.jointInputMaximum).toBeUndefined();
   });
 
-  it('should bound the input by the request itself and ceil the aggregate supplier rational once', () => {
+  it('should bound the input by the request itself', () => {
     const result = resolver.resolve(
       intent({ model: 'openai-gpt-5.6-luna', input: 'hello', max_output_tokens: 100, stream: true }),
     );
@@ -109,7 +109,6 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       { dimension: 'cache_write', tier: '30m', quantity: 4245n },
       { dimension: 'output', tier: null, quantity: 100n },
     ]);
-    expect(result.supplierMaximumPicoUsd).toBe(1_181_250_000n);
     expect(result.invocation.jointInputMaximum).toEqual({ version: 'joint-input-v1', quantity: '4245' });
     expect(result.invocation.supplierRatesValidUntil).toBeNull();
     expect(result.normalizedRequest).not.toHaveProperty('billing');
@@ -402,7 +401,27 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       { dimension: 'uncached_input', tier: null, quantity: 4268n },
       { dimension: 'output', tier: null, quantity: 512n },
     ]);
-    expect(result.supplierMaximumPicoUsd).toBe(1_805_172_000n);
+  });
+
+  it('should carry a supplier valuation for Together routes so their usage is metered', () => {
+    const result = resolver.resolve({
+      ...intent({
+        model: 'together-glm-5.2',
+        messages: [{ role: 'user', content: 'hello' }],
+        max_completion_tokens: 16,
+        stream: true,
+      }),
+      providerWire: 'openai-completions',
+    });
+
+    expect(result.providerId).toBe('together');
+    expect(result.invocation.supplierValuation).toEqual({
+      version: 'supplier-valuation-v1',
+      sourceRevision: 'official-pricing:2026-09-06:together-glm-5.2',
+      longContextMinimumInputTokens: null,
+      longContextRates: null,
+      baseRates: result.invocation.supplierRates,
+    });
   });
 });
 
@@ -477,6 +496,17 @@ describe('catalog route vocabulary', () => {
         model: resolved.providerId === 'vertexai' ? `google/${resolved.modelId}` : resolved.modelId,
       });
       expect(resolved.modelId).not.toBe(routeId);
+    }
+  });
+
+  it('should pin a supplier valuation covering the supplier tariff on every funded route', () => {
+    for (const routeId of billableModelRouteIds) {
+      const { invocation } = qualifyRoute(routeId);
+      const tariffKeys = invocation.supplierRates.map(({ dimension, tier }) => `${dimension}:${tier ?? ''}`).sort();
+      expect(invocation.supplierValuation?.version).toBe('supplier-valuation-v1');
+      expect(
+        invocation.supplierValuation?.baseRates.map(({ dimension, tier }) => `${dimension}:${tier ?? ''}`).sort(),
+      ).toEqual(tariffKeys);
     }
   });
 

@@ -152,9 +152,10 @@ processes = ['app']
 # F-10: 512 MB, not 256. The worker loads the API's dependency graph (Nest, the drizzle
 # schema, Stripe, react-email through EmailService, OTel auto-instrumentations) and
 # measured ~213 MiB peak RSS locally; staging OOM-killed it twice at 256 MB, once with
-# a `provision-budgets` run inside it and once on a failing pass alone. One-shot
-# `billing-command.js` runs (`provision-budgets`, `recover-payments`, `lifecycle` and the
-# like) belong on an `app` Machine (`fly ssh console -g app`), never inside this worker.
+# a one-shot `billing-command.js` run inside it and once on a failing pass alone. One-shot
+# `billing-command.js` runs (`recover-payments`, `lifecycle`, `pause-route`, `resume-route`,
+# `export-supplier-legacy` and the like) belong on an `app` Machine (`fly ssh console -g app`),
+# never inside this worker.
 [[vm]]
 memory = '512mb'
 cpu_kind = 'shared'

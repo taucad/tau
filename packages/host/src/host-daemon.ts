@@ -285,6 +285,21 @@ type AgentFileSystemAuthority = Readonly<{
 const isPeerlessReap = (result: FrameSpliceCloseResult): boolean =>
   result.cause === 'peer-closed' && result.code === 1008 && result.reason === 'route peer did not connect';
 
+/**
+ * A route the API closed because this device is revoked: 4003, the code the
+ * control socket also treats as final. (A host route is never closed 4401;
+ * the API refuses a bad grant with 1008.)
+ *
+ * A browser can close with any 3000–4999 code and the relay mirrors it, so
+ * this ends only the one session; device-wide finality stays with the control
+ * socket, which only the API writes.
+ *
+ * @param result - How one splice ended.
+ * @returns True when the route was closed for a revoked device.
+ */
+const isRevokedRoute = (result: FrameSpliceCloseResult): boolean =>
+  result.cause === 'peer-closed' && result.code === 4003;
+
 const asHttpUrl = (relayUrl: URL, path: string): URL => {
   const url = new URL(path, relayUrl);
   if (url.protocol === 'ws:') {
@@ -1184,12 +1199,28 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         fileSystemSplice,
         ...(agentSplice ? [agentSplice] : []),
       ];
+      const closeSession = (code?: Exclude<HostSessionCloseCode, 'ROUTE_UNUSED'>): void => {
+        closeCode = code;
+        isDraining = true;
+        for (const splice of splices) {
+          splice.close();
+        }
+      };
       const sessionClosed = (async (): Promise<void> => {
-        const closures = splices.map(async (splice) => splice.closed);
+        const closures = splices.map(async (splice) => {
+          const result = await splice.closed;
+          /* A revoked route is final for the session: its sibling routes would
+           * otherwise idle until the relay reaps them 15 s later. */
+          if (isRevokedRoute(result) && closeCode === undefined) {
+            closeSession('REVOKED');
+          }
+          return result;
+        });
         /* Each route lives and dies on its own two sockets. Racing them bound
          * three routes to one fate, so the relay's 15 s reap of a route the
          * page never dialled ended the agent channel that *was* streaming —
-         * the whole rung-2 defect. The session is over when its last route is. */
+         * the whole rung-2 defect. The session is over when its last route is,
+         * unless one route reported a revocation, which closes the rest above. */
         await Promise.race(closures);
         isDraining = true;
         const results = await Promise.all(closures);
@@ -1219,13 +1250,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         });
       })();
       const session: ActiveSession = {
-        close(code): void {
-          closeCode = code;
-          isDraining = true;
-          for (const splice of splices) {
-            splice.close();
-          }
-        },
+        close: closeSession,
         closed: sessionClosed,
         isDraining: () => isDraining,
       };

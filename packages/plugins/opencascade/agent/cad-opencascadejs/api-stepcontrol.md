@@ -169,6 +169,22 @@ STEPControl_Reader: declare class STEPControl_Reader extends XSControl_Reader
 
 STEPControl_StepModelType: typeof STEPControl_StepModelType[keyof typeof STEPControl_StepModelType]
 
+  readonly STEPControl_AsIs: 'STEPControl_AsIs'
+
+  readonly STEPControl_ManifoldSolidBrep: 'STEPControl_ManifoldSolidBrep'
+
+  readonly STEPControl_BrepWithVoids: 'STEPControl_BrepWithVoids'
+
+  readonly STEPControl_FacetedBrep: 'STEPControl_FacetedBrep'
+
+  readonly STEPControl_FacetedBrepAndBrepWithVoids: 'STEPControl_FacetedBrepAndBrepWithVoids'
+
+  readonly STEPControl_ShellBasedSurfaceModel: 'STEPControl_ShellBasedSurfaceModel'
+
+  readonly STEPControl_GeometricCurveSet: 'STEPControl_GeometricCurveSet'
+
+  readonly STEPControl_Hybrid: 'STEPControl_Hybrid'
+
 STEPControl_Writer: declare class STEPControl_Writer
 
   // STEPControl_Writer.constructor (constructor)

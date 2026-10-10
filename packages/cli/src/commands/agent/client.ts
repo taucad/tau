@@ -13,7 +13,7 @@ import { readFile } from 'node:fs/promises';
 import { text as readStream } from 'node:stream/consumers';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import type { AgentLogEvent, ChatLedger, ProviderMessage } from '@taucad/agent-host';
+import type { AgentLogEvent, ChatLedger, ProjectionSourceHealth, ProviderMessage } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import type { CommandAnswer, ExternalAgentLogin, HostCommand, RetryClass } from '@taucad/agent-host/wire';
 
@@ -268,12 +268,14 @@ export const readNext = async (input: {
   readonly client: AgentChannelClient;
   readonly chatId: string;
   readonly ledger: ChatLedger;
+  readonly sourceHealth?: ProjectionSourceHealth | undefined;
   readonly signal?: AbortSignal | undefined;
 }): Promise<{
   readonly ledger: ChatLedger;
   readonly events: readonly AgentLogEvent[];
   readonly endCursor: number;
   readonly reset: boolean;
+  readonly sourceHealth: ProjectionSourceHealth | undefined;
 }> => {
   const { readFolded } = await import('@taucad/agent-host');
   const { ledger, chatId } = input;
@@ -283,6 +285,7 @@ export const readNext = async (input: {
       read: async (request) => input.client.read(request),
       chatId,
       ledger,
+      sourceHealth: input.sourceHealth,
       signal: input.signal,
     });
   } catch (error) {
@@ -296,13 +299,20 @@ export const readNext = async (input: {
         events: step.events as readonly AgentLogEvent[],
         endCursor: step.endCursor,
         reset: false,
+        sourceHealth: step.sourceHealth,
       };
     }
     case 'reset':
     case 'stale': {
       /* W3 CL-R13: a reset log is refolded from the start by the helper; SC-R13: a batch at another cursor is
        * discarded, and read again. */
-      return { ledger: step.ledger, events: [], endCursor: step.endCursor, reset: step.kind === 'reset' };
+      return {
+        ledger: step.ledger,
+        events: [],
+        endCursor: step.endCursor,
+        reset: step.kind === 'reset',
+        sourceHealth: step.kind === 'reset' ? undefined : input.sourceHealth,
+      };
     }
     case 'refused': {
       throw cliError(
@@ -374,6 +384,7 @@ export const replayChat = async (input: {
   /* The chat ledger over the rows read (W3 CL-S8): from a later `from` it holds only those rows, which still name
    * the chat's current run and its state. */
   let ledger: ChatLedger = { ...emptyChatLedger, position: { cursor: input.from } };
+  let sourceHealth: ProjectionSourceHealth | undefined;
   let login: ExternalAgentLogin | undefined;
   let refusal: ExternalRefusal | undefined;
   const stateOf = (): string | undefined =>
@@ -389,8 +400,9 @@ export const replayChat = async (input: {
   }
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- a cursored replay is sequential by definition.
-    const page = await readNext({ client: input.client, chatId: input.chatId, ledger });
+    const page = await readNext({ client: input.client, chatId: input.chatId, ledger, sourceHealth });
     ledger = page.ledger;
+    sourceHealth = page.sourceHealth;
     for (const event of page.events) {
       login = externalLoginOf(event) ?? login;
       const coded = externalRefusalOf(event);

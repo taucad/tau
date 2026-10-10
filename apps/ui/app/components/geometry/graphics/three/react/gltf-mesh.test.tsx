@@ -39,6 +39,7 @@ import {
   setModelComponentOwner,
 } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import { applyFatLineSegments } from '#components/geometry/graphics/three/materials/gltf-edges.js';
+import { applyGltfSurfaceDepthBias } from '#components/geometry/graphics/three/materials/gltf-surface-depth-bias.js';
 import { createSectionClip, installSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 import {
   applyModelMaterialAppearance,
@@ -915,6 +916,42 @@ describe('applyModelComponentVisualStateToScene', () => {
     expect(dimmedMaterial.transparent).toBe(true);
     expect(dimmedMaterial.depthWrite).toBe(false);
   });
+
+  it.each(['webgl', 'webgpu'] as const)(
+    'should restore the same surface bias through component dimming on %s',
+    (backend) => {
+      const scene = new Group();
+      const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+      assignComponentOwner(mesh, firstComponentId);
+      scene.add(mesh);
+      const material = getMeshBasicMaterial(mesh);
+      applyGltfSurfaceDepthBias(material, backend);
+
+      applyModelComponentVisualStateToScene({
+        scene,
+        componentManifest: createManifest(),
+        modelVisualState: createModelVisualState({ opacityByComponentId: { [firstComponentId]: 0.25 } }),
+        enableSurfaces: true,
+        enableLines: true,
+      });
+
+      expect(material.transparent).toBe(true);
+      expect(material.depthWrite).toBe(false);
+      expect(material.polygonOffset).toBe(false);
+      expect(material.customProgramCacheKey()).not.toContain('tau-gltf-surface-depth-bias');
+      applyModelComponentVisualStateToScene({
+        scene,
+        componentManifest: createManifest(),
+        modelVisualState: createModelVisualState(),
+        enableSurfaces: true,
+        enableLines: true,
+      });
+      expect(mesh.material).toBe(material);
+      expect(material.opacity).toBe(1);
+      expect(material.polygonOffset).toBe(true);
+      expect(material.polygonOffsetFactor).toBe(backend === 'webgl' ? 1.5 : -1.5);
+    },
+  );
 
   it('should restore depth writes after explicit opacity is cleared', () => {
     const scene = new Group();

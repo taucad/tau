@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { mock } from 'vitest-mock-extended';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import type { FileContentResult } from '@taucad/fs-client/file-content-service';
+import { FileContentService } from '@taucad/fs-client/file-content-service';
+import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
+import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
+import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { MemoryProvider } from '@taucad/filesystem/backend';
 import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute, Rendering } from '@taucad/runtime';
 import { createMockRuntimeDocument } from '@taucad/runtime-testing';
@@ -185,18 +194,73 @@ vi.mock('#hooks/use-keyboard.js', () => ({
 }));
 
 const mockWriteFiles = vi.fn().mockResolvedValue(undefined);
-const mockReadFile = vi.fn().mockRejectedValue(new Error('File not found'));
+const mockReadFile = vi.fn<() => Promise<Uint8Array<ArrayBuffer>>>().mockRejectedValue(new Error('File not found'));
 const mockExists = vi.fn(async (_path: string) => false);
 /** A content service whose preference watch is ready at once and never fires. */
-const contentServiceStub = (): unknown => ({
-  watchReady: () => ({
-    ready: Promise.resolve(),
-    closed: new Promise<never>(() => {
-      // Never closes.
+const contentServiceStub = (): unknown => {
+  const observed = new ObservationService<FileContentResult>({
+    resource: '.tau/export/preferences.json',
+    watch: () => ({
+      ready: Promise.resolve(),
+      closed: new Promise<never>(() => {
+        // Never closes.
+      }),
+      dispose: () => undefined,
     }),
-    dispose: () => undefined,
-  }),
-});
+    read: async () =>
+      (await mockExists('.tau/export/preferences.json'))
+        ? { kind: 'text', content: await mockReadFile() }
+        : { kind: 'orphaned' },
+  });
+  return { observeContent: () => observed };
+};
+
+/** Actual preference content owner with an independently mutable provider and watch acknowledgment. */
+const preferenceFaultFixture = async () => {
+  const path = '.tau/export/preferences.json';
+  const provider = new MemoryProvider();
+  await provider.writeFile(path, JSON.stringify({ shouldDownload: true, zipMultiple: false }));
+  const paths = new WorkspacePathResolver('/project');
+  const proxy = mock<ComposedViewClient>();
+  proxy.readFile.mockImplementation(async (absolute) => {
+    const relative = paths.toRelativePath(absolute);
+    if (relative === undefined) {
+      throw new Error(`Unexpected preferences read: ${absolute}`);
+    }
+    return provider.readFile(relative);
+  });
+  const closed = Promise.withResolvers<void>();
+  const ready = Promise.withResolvers<void>();
+  let held = false;
+  const channel = new WorkerChangeChannel({
+    transport: {
+      listen: () => () => undefined,
+      watchReady: () => ({
+        ready: held ? ready.promise : Promise.resolve(),
+        closed: held
+          ? new Promise<void>(() => {
+              /* The fixture keeps the acknowledged watch open. */
+            })
+          : closed.promise,
+        unsubscribe: () => undefined,
+      }),
+    },
+  });
+  const content = new FileContentService({ proxy, paths, channel, refreshGuard: new RefreshGenerationGuard() });
+  mockContentService = content;
+  return {
+    path,
+    provider,
+    content,
+    close: () => {
+      held = true;
+      closed.resolve();
+    },
+    release: () => {
+      ready.resolve();
+    },
+  };
+};
 /** Store preference bytes on disk: the reader checks existence before it reads. */
 const storePreferences = (bytes: Uint8Array<ArrayBuffer>): void => {
   mockExists.mockResolvedValue(true);
@@ -513,6 +577,81 @@ describe('ChatConverter', () => {
     mockViewSettings = {};
     mockParameterEntries.clear();
     mockParameterSnapshots.clear();
+  });
+
+  it('should retain export recovery in the mounted panel after its error toast is gone', async () => {
+    const fixture = await preferenceFaultFixture();
+    const view = render(<ChatConverter isExpanded />);
+    try {
+      await waitFor(() => {
+        expect(fixture.content.observeContent(fixture.path).getSnapshot().status).toBe('ready');
+      });
+      await act(async () => {
+        fixture.close();
+      });
+      // This panel has no mounted Toaster: recovery must remain in the owning surface.
+      vi.mocked(toast.error).mockClear();
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Download to disk' }));
+      expect(mockWriteFiles).not.toHaveBeenCalled();
+      fireEvent.click(await within(view.container).findByRole('button', { name: 'Retry export settings' }));
+      await fixture.provider.writeFile(
+        fixture.path,
+        JSON.stringify({ shouldDownload: true, shouldSaveToProject: true, zipMultiple: true }),
+      );
+      expect(screen.getByRole('checkbox', { name: 'Download to disk' })).not.toBeChecked();
+      expect(mockWriteFiles).not.toHaveBeenCalled();
+      await act(async () => {
+        fixture.release();
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('checkbox', { name: 'Save to project' })).toBeChecked();
+        expect(mockWriteFiles).toHaveBeenCalledOnce();
+      });
+      expect(screen.getByRole('checkbox', { name: 'Download to disk' })).not.toBeChecked();
+      expect(within(view.container).queryByRole('button', { name: 'Retry export settings' })).toBeNull();
+    } finally {
+      view.unmount();
+      fixture.content.dispose();
+    }
+  });
+
+  it('should retry a failed export settings write without replacing its pending local patch', async () => {
+    const fixture = await preferenceFaultFixture();
+    mockWriteFiles.mockRejectedValueOnce(new Error('Settings disk unavailable'));
+    mockWriteFiles.mockImplementation(async (files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => {
+      await fixture.provider.writeFile(fixture.path, files[fixture.path]!.content);
+    });
+    const view = render(<ChatConverter isExpanded />);
+    try {
+      await waitFor(() => {
+        expect(fixture.content.observeContent(fixture.path).getSnapshot().status).toBe('ready');
+      });
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Download to disk' }));
+      await waitFor(() => {
+        expect(mockWriteFiles).toHaveBeenCalledOnce();
+      });
+      expect(screen.getByRole('checkbox', { name: 'Download to disk' })).not.toBeChecked();
+      await fixture.provider.writeFile(
+        fixture.path,
+        JSON.stringify({ shouldDownload: true, shouldSaveToProject: true, zipMultiple: true }),
+      );
+      fireEvent.click(await within(view.container).findByRole('button', { name: 'Retry export settings' }));
+      await waitFor(() => {
+        expect(mockWriteFiles).toHaveBeenCalledTimes(2);
+      });
+      expect(JSON.parse(new TextDecoder().decode(await fixture.provider.readFile(fixture.path)))).toMatchObject({
+        shouldDownload: false,
+        shouldSaveToProject: true,
+        zipMultiple: true,
+      });
+      await waitFor(() => {
+        expect(within(view.container).queryByRole('button', { name: 'Retry export settings' })).toBeNull();
+      });
+    } finally {
+      view.unmount();
+      fixture.content.dispose();
+      mockWriteFiles.mockResolvedValue(undefined);
+    }
   });
 
   it('binds provider configuration RJSF forms to the checked parameter owner without a CAD actor', async () => {

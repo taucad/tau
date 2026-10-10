@@ -4,6 +4,7 @@ import type {
   BillableProviderWire,
 } from '#api/billing/billable-model-invocation.types.js';
 import type { NormalizedMeterItem, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
+import { providerFailureOf } from '#api/llm/provider-account-stream.js';
 
 type Usage = {
   input?: bigint;
@@ -140,6 +141,28 @@ const isVertexFinalUsageEvent = (value: unknown): boolean => {
   );
 };
 
+type FailureReason = Parameters<BillableInvocationEvidenceCollector['failed']>[0];
+
+/**
+ * The terminal kind of each failure that ends without complete usage; a refusal settles before
+ * this is asked. Exhaustive on purpose: a reason added without a case here fails to compile
+ * rather than silently absorbing the turn.
+ */
+const incompleteKindOf = (
+  failure: Exclude<FailureReason, 'provider_rejected'>,
+): 'absorbed_unknown' | 'authorized_exhausted' => {
+  switch (failure) {
+    case 'authorized_exhausted': {
+      return 'authorized_exhausted';
+    }
+    case 'client_abort':
+    case 'deadline':
+    case 'malformed_response': {
+      return 'absorbed_unknown';
+    }
+  }
+};
+
 /** Creates an exact protocol usage collector over preserved provider response bytes. */
 export const createBillableModelEvidenceCollector = (
   wire: BillableProviderWire,
@@ -180,6 +203,7 @@ export const createBillableModelEvidenceCollector = (
       }
     }
     const terminalEvent = events.some((event) => isTerminalEvent(wire, event));
+    const failureFrame = events.map((event) => providerFailureOf(event)).find((found) => found !== undefined);
     const terminal =
       wire === 'openai-completions'
         ? (terminalEvent && /(?:^|\r?\n)data:\s*\[DONE\](?:\r?\n|$)/u.test(new TextDecoder().decode(joined))) ||
@@ -252,9 +276,35 @@ export const createBillableModelEvidenceCollector = (
               },
             },
           };
+    /* A supplier that answered with a status ran nothing, so the refusal is proof of zero cost,
+     * not unknown cost: it keeps its own kind and releases the customer now, with a known zero
+     * supplier cost, instead of absorbing the turn as unpriced. */
+    if (failure === 'provider_rejected') {
+      return {
+        kind: 'provider_rejected',
+        executionStatus: 'rejected',
+        normalizationEvidence: { version: 'provider-usage-v1', terminalReason: failure, fields: {} },
+      };
+    }
+    /* A supplier that failed its own stream before reporting any usage ran nothing it can bill,
+     * the same proof a pre-stream refusal gives, so the turn settles released at zero now instead
+     * of holding the customer's credits until the recovery deadline: on staging (2026-10-09, FD-12)
+     * a GPT-6 Luna `response.failed` on Tau's exhausted account kept a 717-atom hold and a
+     * "Running" row open for 300 s. Usage reported before the failure keeps the unknown path, since
+     * the supplier may charge for what it generated. The evidence names only the reason: `fields`
+     * carries measured quantities, and the ledger's persisted-evidence schema rejects any other
+     * value, which is what kept the same hold open on the first fix (Run 2 FD-12): the supplier's
+     * own code is in the gateway's log line and in the frame the client received. */
+    if (failure === undefined && latest === undefined && failureFrame !== undefined) {
+      return {
+        kind: 'provider_rejected',
+        executionStatus: 'rejected',
+        normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_failed', fields: {} },
+      };
+    }
     /* A cut at the authorized ceiling is the designed outcome of an in-stream control (R8),
      * not a fault, so it keeps its own terminal kind instead of absorbing the turn at zero. */
-    const incompleteKind = failure === 'authorized_exhausted' ? 'authorized_exhausted' : 'absorbed_unknown';
+    const incompleteKind = failure === undefined ? 'absorbed_unknown' : incompleteKindOf(failure);
     if (
       latest?.input === undefined ||
       latest.output === undefined ||

@@ -69,7 +69,7 @@ These configure a cloud deployment after the master switch is enabled. They must
 | `BILLING_EXACT_INPUT_COUNT`                                    | Strict `true`/`false`, default false; qualified OpenAI input-count request before admission. Adds supplier requests/latency.                                                                                                                                                                                                                  |
 | `TAU_LLM_PROVIDER_UPSTREAM_URL`                                | Development-only test upstream; refused outside development financial scope today. Not a production provider-origin override or a charging bypass.                                                                                                                                                                                            |
 
-Automatic reload, promotions, model rates and supplier pauses remain policy/capability controls beneath cloud=true. There is no supported `FREE_TIER_AI_ENABLED` or separate `BILLING_ENABLED` presence switch. Paid Free accounts remain eligible for top-up/LLM use in Tau Cloud.
+Automatic reload, promotions and model rates remain policy/capability controls beneath cloud=true. A model route is stopped only by an operator (`billing-command pause-route`/`resume-route`, owner identity); no supplier condition pauses a route automatically. There is no supported `FREE_TIER_AI_ENABLED` or separate `BILLING_ENABLED` presence switch. Paid Free accounts remain eligible for top-up/LLM use in Tau Cloud.
 
 ## Browser feature flags
 

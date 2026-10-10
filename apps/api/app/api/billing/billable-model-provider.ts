@@ -1,6 +1,4 @@
 import { withBillableEvidenceCollector } from '#api/billing/billable-model-qualification.js';
-import { calculatePreliminarySupplierCost } from '#api/billing/billable-model-cost.js';
-import { invocationEvidenceDigest, serializeInvocationEvidence } from '#api/billing/credit-ledger.service.js';
 import type { BillableModelProviderAdapter } from '#api/billing/billable-model-invocation.types.js';
 import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
 import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
@@ -80,19 +78,6 @@ export const createBillableModelProviderAdapters = (
               signal,
               fetch: fetchOnce,
             });
-          },
-          classifyFinality: ({ qualification, evidence }) => {
-            const payloadDigest = invocationEvidenceDigest(serializeInvocationEvidence(evidence));
-            const supplierEvidence = calculatePreliminarySupplierCost({
-              invocation: qualification.invocation,
-              evidence,
-              payloadDigest,
-            });
-            return {
-              state: supplierEvidence ? 'preliminary' : 'unknown',
-              providerRequestId: evidence.normalizationEvidence?.providerRequestId,
-              supplierEvidence,
-            };
           },
         },
       );

@@ -204,11 +204,22 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
         `pattern: ${input.pattern}`,
         input.path ? `path: ${input.path}` : undefined,
         input.caseSensitive ? 'caseSensitive: true' : undefined,
+        input.context ? `context: ${input.context}` : undefined,
       ),
+    // Context lines use ripgrep's `file-line-` separator so they stay distinct from `file:line:` matches.
     output: (output) =>
       joinLines(
         `Total: ${output.totalMatches}`,
-        output.matches.map((match) => `${match.file}:${match.line}: ${match.content}`).join('\n'),
+        output.matches
+          .flatMap((match) => {
+            const firstLine = match.line - (match.before?.length ?? 0);
+            return [
+              ...(match.before ?? []).map((content, index) => `${match.file}-${firstLine + index}- ${content}`),
+              `${match.file}:${match.line}: ${match.content}`,
+              ...(match.after ?? []).map((content, index) => `${match.file}-${match.line + 1 + index}- ${content}`),
+            ];
+          })
+          .join('\n'),
       ),
   },
   [toolName.globSearch]: {
@@ -509,7 +520,7 @@ export function serializeMessage(message: MyUIMessage): string {
  * @param title - Title for the transcript (e.g. the chat name)
  * @returns Markdown transcript string
  */
-export function serializeTranscript(messages: MyUIMessage[], title: string): string {
+export function serializeTranscript(messages: readonly MyUIMessage[], title: string): string {
   const exportDate = formatExportDate(new Date());
   const header = `# ${title}\n\n_Exported on ${exportDate} from ${metaConfig.userAgent}_`;
 

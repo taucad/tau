@@ -97,9 +97,12 @@ describe('GeoSpec evidence to LLM closeout', () => {
           ],
         },
       });
-      // The host source reader's own error is the load failure; native admission adds no wrapper code.
-      expect(output.failures[2]?.diagnostics?.[0]?.code).toBe('TEST_FAILED');
-      expect(output.failures[2]?.diagnostics?.[0]?.message).toContain('ENOENT');
+      const missing = join(root, 'missing.glb');
+      expect(output.failures[2]?.diagnostics?.[0]).toMatchObject({
+        code: 'GEOSPEC_NATIVE_SOURCE_READ_FAILED',
+        message: `The host source reader could not read ${missing}: ENOENT: no such file or directory, open '${missing}'`,
+        details: { source: missing },
+      });
       expect(output.failures[3]?.diagnostics?.[0]?.details).toHaveProperty('diagnostics.0.code', 'GEOMETRY_INVALID');
       expect(output.failures[3]?.diagnostics?.[0]?.details).toHaveProperty('diagnostics.0.severity', 'warning');
       const rpc = rpcSchemasRegistry[rpcName.runGeoSpecTests].resultSchema.parse(

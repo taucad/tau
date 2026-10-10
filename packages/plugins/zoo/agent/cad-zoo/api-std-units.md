@@ -43,12 +43,34 @@ units::toYards(@num: number(Length)): number(yd)
 // std.units.units::toRadians (function)
 units::toRadians(@num: number(Angle)): number(rad)
 //   @num: A number
+// Example (Legacy sketch syntax (deprecated in KCL 2.0)):
+//   exampleSketch = startSketchOn(XZ)
+//     |> startProfile(at = [0, 0])
+//     |> angledLine(
+//       angle = 50deg,
+//       length = 70 * cos(units::toRadians(45deg)),
+//     )
+//     |> yLine(endAbsolute = 0)
+//     |> close()
+//   
+//   example = extrude(exampleSketch, length = 5)
 
 // Category: std.units
 // Converts a number to degrees from its current units
 // std.units.units::toDegrees (function)
 units::toDegrees(@num: number(Angle)): number(deg)
 //   @num: A number
+// Example (Legacy sketch syntax (deprecated in KCL 2.0)):
+//   exampleSketch = startSketchOn(XZ)
+//     |> startProfile(at = [0, 0])
+//     |> angledLine(
+//       angle = 50deg,
+//       length = 70 * cos(units::toDegrees((PI/4): rad)),
+//     )
+//     |> yLine(endAbsolute = 0)
+//     |> close()
+//   
+//   example = extrude(exampleSketch, length = 5)
 
 // Category: std.units
 // Functions for converting numbers to different units

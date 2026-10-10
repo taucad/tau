@@ -248,6 +248,34 @@ Storage_DefaultCallBack: declare class Storage_DefaultCallBack extends Storage_C
 
 Storage_Error: typeof Storage_Error[keyof typeof Storage_Error]
 
+  readonly Storage_VSOk: 'Storage_VSOk'
+
+  readonly Storage_VSOpenError: 'Storage_VSOpenError'
+
+  readonly Storage_VSModeError: 'Storage_VSModeError'
+
+  readonly Storage_VSCloseError: 'Storage_VSCloseError'
+
+  readonly Storage_VSAlreadyOpen: 'Storage_VSAlreadyOpen'
+
+  readonly Storage_VSNotOpen: 'Storage_VSNotOpen'
+
+  readonly Storage_VSSectionNotFound: 'Storage_VSSectionNotFound'
+
+  readonly Storage_VSWriteError: 'Storage_VSWriteError'
+
+  readonly Storage_VSFormatError: 'Storage_VSFormatError'
+
+  readonly Storage_VSUnknownType: 'Storage_VSUnknownType'
+
+  readonly Storage_VSTypeMismatch: 'Storage_VSTypeMismatch'
+
+  readonly Storage_VSInternalError: 'Storage_VSInternalError'
+
+  readonly Storage_VSExtCharParityError: 'Storage_VSExtCharParityError'
+
+  readonly Storage_VSWrongFileDriver: 'Storage_VSWrongFileDriver'
+
 Storage_HeaderData: declare class Storage_HeaderData extends Standard_Transient
 
   // Storage_HeaderData.constructor (constructor)
@@ -365,6 +393,14 @@ Storage_InternalData: declare class Storage_InternalData extends Standard_Transi
   [Symbol.dispose](): void;
 
 Storage_OpenMode: typeof Storage_OpenMode[keyof typeof Storage_OpenMode]
+
+  readonly Storage_VSNone: 'Storage_VSNone'
+
+  readonly Storage_VSRead: 'Storage_VSRead'
+
+  readonly Storage_VSWrite: 'Storage_VSWrite'
+
+  readonly Storage_VSReadWrite: 'Storage_VSReadWrite'
 
 Storage_Root: declare class Storage_Root extends Standard_Transient
 
@@ -537,6 +573,12 @@ Storage_Schema: declare class Storage_Schema extends Standard_Transient
   [Symbol.dispose](): void;
 
 Storage_SolveMode: typeof Storage_SolveMode[keyof typeof Storage_SolveMode]
+
+  readonly Storage_AddSolve: 'Storage_AddSolve'
+
+  readonly Storage_WriteSolve: 'Storage_WriteSolve'
+
+  readonly Storage_ReadSolve: 'Storage_ReadSolve'
 
 Storage_StreamExtCharParityError: declare class Storage_StreamExtCharParityError extends Storage_StreamReadError
 

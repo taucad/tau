@@ -19,12 +19,14 @@ import {
   fetchStripeCheckoutSource,
   fetchStripeInvoiceEvidence,
   isLoopbackBillingStripeClient,
+  isStripeSubscriptionEnding,
   parseStripeCreateLeg,
   parseVerifiedStripeEvent,
   recoverStripeLegSource,
   retrieveStripePaymentEvidence,
   retrieveStripeSetupEvidence,
   retrieveStripeSubscriptionSchedule,
+  stripeCustomerContact,
   updateStripeSubscriptionScheduleOnce,
 } from '#api/billing/billing-stripe.js';
 
@@ -279,6 +281,45 @@ describe('billing Stripe transport', () => {
       ),
     ).rejects.toThrow('metadata');
     expect(fixture.requests).toHaveLength(1);
+  });
+
+  it('dispatches a Customer with its owner contact and refuses any other contact field', async () => {
+    const fixture = await createFixture({
+      '/v1/customers': { id: 'cus_1', object: 'customer', livemode: false, metadata: {} },
+    });
+    const leg = {
+      kind: 'customer',
+      idempotencyKey: 'tau:leg_customer',
+      request: {
+        email: 'owner@example.com',
+        name: 'Ada Owner',
+        metadata: { tau_account_id: 'account_1', tau_customer_binding_id: 'binding_1' },
+      },
+    } as const;
+
+    await expect(dispatchStripeLegOnce(fixture.stripe, parseStripeCreateLeg(leg))).resolves.toMatchObject({
+      kind: 'customer',
+      object: { id: 'cus_1' },
+    });
+
+    expect(() => parseStripeCreateLeg({ ...leg, request: { ...leg.request, phone: '+6421000000' } })).toThrow();
+    // A leg persisted before Customers carried a contact still replays.
+    expect(parseStripeCreateLeg({ ...leg, request: { metadata: leg.request.metadata } })).toMatchObject({
+      kind: 'customer',
+    });
+    expect(fixture.requests).toStrictEqual(['POST /v1/customers']);
+  });
+
+  it('gives a Customer the trimmed owner contact and leaves out what Stripe would refuse', () => {
+    expect(stripeCustomerContact({ email: ' owner@example.com ', name: ' Ada Owner ' })).toStrictEqual({
+      email: 'owner@example.com',
+      name: 'Ada Owner',
+    });
+    expect(stripeCustomerContact({ email: 'owner@example.com', name: '  ' })).toStrictEqual({
+      email: 'owner@example.com',
+    });
+    expect(stripeCustomerContact({ email: `${'a'.repeat(501)}@example.com`, name: 'n'.repeat(257) })).toStrictEqual({});
+    expect(stripeCustomerContact(undefined)).toStrictEqual({});
   });
 
   it('parses persisted create JSON without a type assertion', () => {
@@ -654,5 +695,17 @@ describe('billing Stripe transport', () => {
     };
     expect(parse({ pending_webhooks: 1 })).toBe(parse({ pending_webhooks: 3 }));
     expect(parse({ data: { object: { id: 'pi_1', object: 'payment_intent', amount: 1 } } })).not.toBe(parse({}));
+  });
+});
+
+describe('isStripeSubscriptionEnding', () => {
+  /* The Customer Portal schedules a cancellation on a flexible-mode subscription as `cancel_at` alone, with
+   * `cancel_at_period_end` left false (staging, 2026-10-09, PR-04); classic mode sets both. */
+  it.each([
+    ['a flexible-mode portal cancellation', { cancel_at_period_end: false, cancel_at: 1_794_238_881 }, true],
+    ['a classic period-end cancellation', { cancel_at_period_end: true, cancel_at: 1_794_238_881 }, true],
+    ['a renewing subscription', { cancel_at_period_end: false, cancel_at: null }, false],
+  ])('reads %s', (_name, subscription, ending) => {
+    expect(isStripeSubscriptionEnding(subscription)).toBe(ending);
   });
 });

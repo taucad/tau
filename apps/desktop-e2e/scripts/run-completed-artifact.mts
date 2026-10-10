@@ -5,7 +5,9 @@
  * Purpose: Run packaged desktop smoke tests against disposable Postgres, Redis, and MinIO services.
  * Why: Completed-package proof must not use the shared development database or storage stack.
  * Required env vars: TAU_E2E_DESKTOP_EXECUTABLE (absolute packaged Tau executable path).
- * Optional env vars: PATH, HOME, TMPDIR, DOCKER_HOST (tool discovery only).
+ * Optional env vars: PATH, HOME, TMPDIR, DOCKER_HOST (tool discovery only); TAU_E2E_PROJECTION_IMPORT_ROOT,
+ * TAU_E2E_PROJECTION_ARTIFACT_ROOT, and the explicitly validated projection manual selectors below.
+ * DEBUG=pw:protocol enables redacted test-child protocol diagnostics; other DEBUG values are not forwarded.
  * Usage: pnpm nx run desktop-e2e:test:e2e:desktop:completed-artifact [--args='--test-name-pattern="pattern" [--isolated-cloud-gateway]']
  * Exit codes: 0 when package tests pass; non-zero on preflight, infrastructure, migration, or test failure.
  */
@@ -13,13 +15,72 @@
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
+import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import process from 'node:process';
-import { parseArgs } from 'node:util';
+import { parseArgs, stripVTControlCharacters } from 'node:util';
 import { z } from 'zod';
+
+/** Retain protocol command correlation without scripts, credentials or result values. */
+const redactProtocolLine = (line: string): string => {
+  const plain = stripVTControlCharacters(line);
+  if (!plain.includes('pw:protocol')) {
+    return line;
+  }
+  const direction = plain.includes('SEND ►') ? 'send' : plain.includes('◀ RECV') ? 'receive' : 'unknown';
+  const receipt: Record<string, string | number | boolean> = { protocol: true, direction };
+  try {
+    // Debug adds a timing suffix; JSON itself is a single line, possibly truncated.
+    const message: unknown = JSON.parse(plain.slice(plain.indexOf('{'), plain.lastIndexOf('}') + 1));
+    if (!message || typeof message !== 'object') {
+      throw new Error('Invalid protocol message');
+    }
+    if ('id' in message && typeof message.id === 'number' && Number.isSafeInteger(message.id)) {
+      receipt['id'] = message.id;
+      if (direction === 'receive') {
+        receipt['completion'] = 'error' in message ? 'error' : 'result';
+      }
+    }
+    if (
+      'sessionId' in message &&
+      typeof message.sessionId === 'string' &&
+      /^[A-Za-z0-9_-]{1,128}$/u.test(message.sessionId)
+    ) {
+      receipt['sessionId'] = message.sessionId;
+    }
+    if (
+      'method' in message &&
+      typeof message.method === 'string' &&
+      /^[A-Za-z]+\.[A-Za-z0-9]+$/u.test(message.method)
+    ) {
+      receipt['method'] = message.method;
+    }
+    if (
+      'error' in message &&
+      message.error &&
+      typeof message.error === 'object' &&
+      'code' in message.error &&
+      typeof message.error.code === 'number'
+    ) {
+      receipt['errorCode'] = message.error.code;
+    }
+  } catch {
+    receipt['redactedMalformed'] = true;
+  }
+  return JSON.stringify(receipt);
+};
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const desktopE2ERoot = resolve(import.meta.dirname, '..');
@@ -35,6 +96,78 @@ const main = async (): Promise<void> => {
   const executable = process.env['TAU_E2E_DESKTOP_EXECUTABLE'];
   if (!executable || !isAbsolute(executable) || !existsSync(executable)) {
     throw new Error('TAU_E2E_DESKTOP_EXECUTABLE must name an existing absolute packaged executable.');
+  }
+
+  const projectionInputs = z
+    .object({
+      TAU_E2E_TRACE_SNAPSHOTS: z.enum(['true', 'false']).optional(),
+      TAU_E2E_PROJECTION_CASE_MANIFEST: z.string().min(1).refine(isAbsolute).optional(),
+      TAU_E2E_PROJECTION_CASE_MANIFEST_SHA256: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/u)
+        .optional(),
+      TAU_E2E_PROJECTION_CASE_ID: z
+        .string()
+        .regex(/^projection-tool-(256|65536)-(10|100|1000)-turns$/u)
+        .optional(),
+      TAU_E2E_PROJECTION_IMPORT_ROOT: z.string().min(1).refine(isAbsolute).optional(),
+      TAU_E2E_PROJECTION_ARTIFACT_ROOT: z.string().min(1).refine(isAbsolute).optional(),
+      TAU_E2E_NATIVE_CORE_MANUAL: z.enum(['true', 'false']).optional(),
+      TAU_E2E_RETAINED_MANUAL: z.enum(['true', 'false']).optional(),
+      TAU_E2E_REVISIONS_MANUAL: z.enum(['true', 'false']).optional(),
+      TAU_E2E_REVISIONS_ACCEPTANCE: z.enum(['true', 'false']).optional(),
+      TAU_E2E_METADATA_MANUAL: z.enum(['true', 'false']).optional(),
+      TAU_E2E_OBSERVATION_MANUAL: z
+        .enum(['files', 'directory', 'catalog', 'settings', 'drafts', 'media', 'parameters', 'todo', 'plugins'])
+        .optional(),
+      TAU_E2E_ONE_SHOT_MANUAL: z.enum(['fix', 'linked', 'thumbnail']).optional(),
+    })
+    .parse(process.env);
+  if (
+    projectionInputs.TAU_E2E_TRACE_SNAPSHOTS === 'false' &&
+    Object.entries(projectionInputs).some(([key, value]) => key.endsWith('_MANUAL') && value !== 'false')
+  ) {
+    throw new Error('Manual completed-artifact runs require full tracing snapshots.');
+  }
+  const caseInputs = [
+    projectionInputs.TAU_E2E_PROJECTION_CASE_MANIFEST,
+    projectionInputs.TAU_E2E_PROJECTION_CASE_MANIFEST_SHA256,
+    projectionInputs.TAU_E2E_PROJECTION_CASE_ID,
+  ];
+  if (caseInputs.some((value) => value !== undefined)) {
+    if (
+      caseInputs.some((value) => value === undefined) ||
+      projectionInputs.TAU_E2E_PROJECTION_IMPORT_ROOT === undefined
+    ) {
+      throw new Error('Native matrix selection requires manifest path, SHA, case ID, and import root together.');
+    }
+    const manifest = realpathSync(projectionInputs.TAU_E2E_PROJECTION_CASE_MANIFEST!);
+    if (
+      !statSync(manifest).isFile() ||
+      createHash('sha256').update(readFileSync(manifest)).digest('hex') !==
+        projectionInputs.TAU_E2E_PROJECTION_CASE_MANIFEST_SHA256
+    ) {
+      throw new Error('Native matrix manifest identity mismatch.');
+    }
+    projectionInputs.TAU_E2E_PROJECTION_CASE_MANIFEST = manifest;
+  }
+  if (projectionInputs.TAU_E2E_PROJECTION_IMPORT_ROOT !== undefined) {
+    const input = realpathSync(projectionInputs.TAU_E2E_PROJECTION_IMPORT_ROOT);
+    if (!statSync(input).isDirectory()) {
+      throw new Error('TAU_E2E_PROJECTION_IMPORT_ROOT must be an existing fixture directory.');
+    }
+    projectionInputs.TAU_E2E_PROJECTION_IMPORT_ROOT = input;
+  }
+  if (projectionInputs.TAU_E2E_PROJECTION_ARTIFACT_ROOT !== undefined) {
+    const output = resolve(projectionInputs.TAU_E2E_PROJECTION_ARTIFACT_ROOT);
+    if (
+      ![resolve(workspaceRoot, 'out'), resolve(tmpdir())].some(
+        (root) => output === root || output.startsWith(`${root}/`),
+      )
+    ) {
+      throw new Error('TAU_E2E_PROJECTION_ARTIFACT_ROOT must be inside workspace out or system temp.');
+    }
+    projectionInputs.TAU_E2E_PROJECTION_ARTIFACT_ROOT = output;
   }
 
   const toolEnvironment = Object.fromEntries(
@@ -281,6 +414,7 @@ const main = async (): Promise<void> => {
       OTEL_METRICS_PORT: String(await freePort()),
       TAU_E2E_API_URL: apiUrl,
       TAU_E2E_API_CWD: directory,
+      ...projectionInputs,
       TAU_E2E_COMPLETED_ARTIFACT: 'true',
       TAU_E2E_ACP_PACKAGED: 'true',
       TAU_E2E_COMPOSE_PROJECT: project,
@@ -376,46 +510,108 @@ const main = async (): Promise<void> => {
     if (applied !== expected) {
       throw new Error('Disposable database migration checkpoint does not match the consumed journal.');
     }
+    const selectedSpecs = [
+      'src/desktop-build123d.spec.ts',
+      'src/desktop-assimp.spec.ts',
+      'src/desktop-main-editor-kernels.spec.ts',
+      'src/desktop-converter.spec.ts',
+      'src/desktop-ephemeral-isolation.spec.ts',
+      'src/desktop-image-geospec.spec.ts',
+      'src/desktop-geometry-host.spec.ts',
+      'src/desktop-chat-replay.spec.ts',
+      'src/desktop-chat-in-project.spec.ts',
+      'src/desktop-chat-acp.spec.ts',
+      'src/desktop-measurement-exact.spec.ts',
+      'src/desktop-thumbnail-lifecycle.spec.ts',
+      'src/desktop-native-payload.spec.ts',
+      'src/desktop-community-preview.spec.ts',
+      'src/filesystem-projection-live.spec.ts',
+      'src/filesystem-projection-metadata.spec.ts',
+      'src/filesystem-projection-observation.spec.ts',
+      'src/filesystem-projection-one-shot.spec.ts',
+      'src/filesystem-projection-retained.spec.ts',
+    ];
+    const resultDirectory = join(
+      projectionInputs.TAU_E2E_PROJECTION_ARTIFACT_ROOT ?? join(workspaceRoot, 'out/desktop-e2e/completed-artifact'),
+      project,
+    );
+    mkdirSync(resultDirectory, { recursive: true });
+    const testReport = join(resultDirectory, 'vitest-results.json');
+    const selection = {
+      executable: realpathSync(executable),
+      executableSha256: createHash('sha256').update(readFileSync(executable)).digest('hex'),
+      testNamePattern: values['test-name-pattern'],
+      specs: selectedSpecs.map((path) => ({
+        path,
+        sha256: createHash('sha256')
+          .update(readFileSync(join(desktopE2ERoot, path)))
+          .digest('hex'),
+      })),
+      projectionInputs,
+      testReport,
+    };
+    writeFileSync(join(resultDirectory, 'selection.json'), JSON.stringify(selection, null, 2));
+    console.info('Completed-artifact selection', JSON.stringify(selection));
+    const protocolDiagnostic = process.env['DEBUG'] === 'pw:protocol';
     const vitest = spawn(
       resolve(workspaceRoot, 'node_modules/.bin/vitest'),
       [
         'run',
         '--config',
         'vitest.config.ts',
-        'src/desktop-build123d.spec.ts',
-        'src/desktop-assimp.spec.ts',
-        'src/desktop-main-editor-kernels.spec.ts',
-        'src/desktop-converter.spec.ts',
-        'src/desktop-ephemeral-isolation.spec.ts',
-        'src/desktop-image-geospec.spec.ts',
-        'src/desktop-geometry-host.spec.ts',
-        'src/desktop-chat-replay.spec.ts',
-        'src/desktop-chat-in-project.spec.ts',
-        'src/desktop-chat-acp.spec.ts',
-        'src/desktop-measurement-exact.spec.ts',
-        'src/desktop-thumbnail-lifecycle.spec.ts',
-        'src/desktop-native-payload.spec.ts',
-        'src/desktop-community-preview.spec.ts',
+        '--reporter=default',
+        '--reporter=json',
+        `--outputFile.json=${testReport}`,
+        ...selectedSpecs,
         '-t',
         values['test-name-pattern'],
       ],
       {
         cwd: desktopE2ERoot,
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Test environment contains only run-owned service credentials.
-        env: environment as NodeJS.ProcessEnv,
-        stdio: 'inherit',
+        env: { ...environment, ...(protocolDiagnostic ? { DEBUG: 'pw:protocol' } : {}) },
+        stdio: protocolDiagnostic ? ['inherit', 'pipe', 'pipe'] : 'inherit',
       },
     );
+    if (protocolDiagnostic) {
+      for (const stream of [vitest.stdout, vitest.stderr]) {
+        if (stream) {
+          createInterface({ input: stream }).on('line', (line) => {
+            process.stdout.write(`${redactProtocolLine(line)}\n`);
+          });
+        }
+      }
+    }
     activeChild = vitest;
     const status = await new Promise<number>((resolve, reject) => {
       vitest.once('error', reject);
-      vitest.once('exit', (code, signal) => {
+      vitest.once('close', (code, signal) => {
         resolve(code ?? (signal ? 1 : 0));
       });
     });
     activeChild = undefined;
     if (status !== 0) {
       throw new Error(`Completed-artifact Vitest failed with status ${String(status)}.`);
+    }
+    if (!existsSync(testReport)) {
+      throw new Error('Completed-artifact Vitest did not produce its required case report.');
+    }
+    const result = z
+      .object({
+        numTotalTests: z.number().int().nonnegative(),
+        numPassedTests: z.number().int().nonnegative(),
+        numFailedTests: z.number().int().nonnegative(),
+        numPendingTests: z.number().int().nonnegative(),
+      })
+      .parse(JSON.parse(readFileSync(testReport, 'utf8')));
+    const executedCases = result.numPassedTests + result.numFailedTests;
+    console.info('Completed-artifact selected case counts', JSON.stringify({ ...result, executedCases }));
+    if (executedCases === 0 || result.numPassedTests === 0) {
+      throw new Error(
+        'Completed-artifact selection executed no passing cases; listed or skipped cases do not qualify the package.',
+      );
+    }
+    if (result.numFailedTests > 0) {
+      throw new Error('Completed-artifact case report contains failed cases.');
     }
   } finally {
     await cleanup();

@@ -39,8 +39,8 @@ const published = (schema: z.ZodType, defaults: Record<string, unknown>): Resolv
 const fieldUnit = (label: string): string | undefined =>
   screen
     .getByRole('spinbutton', { name: `Input for ${label}` })
-    .closest<HTMLElement>('[data-slot="slider-input"]')
-    ?.querySelector<HTMLElement>('[data-slot="slider-input-adornment"]')
+    .closest<HTMLElement>('[data-slot="slider-input"], [data-slot="input-group"]')
+    ?.querySelector<HTMLElement>('[data-slot="slider-input-adornment"], [data-slot="input-group-addon"]')
     ?.textContent.trim();
 
 const renderPngForm = async (
@@ -253,11 +253,32 @@ describe('ExportSchemaForm', async () => {
   });
 
   it('should present model lengths in the project display unit', async () => {
-    await renderPngForm({}, published(openrscadExportSchemas.glb, openrscadExportSchemas.glb.parse({})), 'cm');
+    await renderPngForm(
+      {},
+      published(openrscadExportSchemas.glb, openrscadExportSchemas.glb.parse({ tessellation: { minimumSize: 2 } })),
+      'cm',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Group: Tessellation' }));
 
     expect(fieldUnit('Minimum Size')).toBe('cm');
     expect(screen.getByRole('spinbutton', { name: 'Input for Minimum Size' })).toHaveValue('0.2');
+  });
+
+  it('should take an unset model length in the project display unit', async () => {
+    const onChange = await renderPngForm(
+      {},
+      published(openrscadExportSchemas.glb, openrscadExportSchemas.glb.parse({})),
+      'cm',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Group: Tessellation' }));
+    const input = screen.getByRole('spinbutton', { name: 'Input for Minimum Size' });
+
+    expect(input).toHaveValue(null);
+    expect(fieldUnit('Minimum Size')).toBe('cm');
+    fireEvent.change(input, { target: { value: '0.2' } });
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toEqual({ tessellation: { minimumSize: 2 } });
+    });
   });
 
   it('should name the format whose settings could not be prepared', async () => {

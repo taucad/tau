@@ -104,7 +104,7 @@ const agentList = (page: Page): Locator => page.locator('[data-slot="agent-list"
  * Select a chat model by name through the composer's own selector.
  *
  * @param page - The renderer page.
- * @param modelName - The catalog name, e.g. `Haiku 4.5`.
+ * @param modelName - The catalog name, e.g. `Haiku 5.5`.
  * @returns Nothing.
  */
 export const selectChatModel = async (page: Page, modelName: string): Promise<void> => {
@@ -120,7 +120,7 @@ export const selectChatModel = async (page: Page, modelName: string): Promise<vo
   } else {
     await page.getByRole('button', { name: /^Model: .*\. Change$/u }).click();
   }
-  /* The selected row carries its level after the name ("Haiku 4.5High"), so
+  /* The selected row carries its level after the name ("Haiku 5.5High"), so
    * match the name as the option's leading text, not the exact string. */
   const escaped = modelName.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
   await page

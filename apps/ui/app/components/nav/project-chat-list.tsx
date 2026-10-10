@@ -47,21 +47,42 @@ export function ProjectChatList({
   readonly isProjectActive: boolean;
   readonly isExpanded?: boolean;
 }): React.ReactNode {
-  const { chats: allChats, isLoading, error } = useChatRecords(project.id);
+  const { chats: allChats, isLoading, error, retry } = useChatRecords(project.id);
   const { updateChatName, deleteChat } = useChats(project.id, { enabled: false });
   const chats = useMemo(
     () => allChats.filter((chat) => chat.deletedAt === undefined && chat.purgedAt === undefined),
     [allChats],
   );
   const store = useChatSessionStore();
+  // Metadata and ordering do not retire leases; only membership or the owning project/store does.
+  const observations = useMemo(
+    () => ({ projectId: project.id, store, leases: new Map<string, () => void>() }),
+    [project.id, store],
+  );
   useEffect(() => {
-    const releases = chats.map((chat) => store.observe(chat.id, project.id));
+    const releases = observations.leases;
     return () => {
-      for (const release of releases) {
+      for (const release of releases.values()) {
         release();
       }
+      releases.clear();
     };
-  }, [chats, project.id, store]);
+  }, [observations]);
+  useEffect(() => {
+    const releases = observations.leases;
+    const chatIds = new Set(chats.map((chat) => chat.id));
+    for (const [chatId, release] of releases) {
+      if (!chatIds.has(chatId)) {
+        release();
+        releases.delete(chatId);
+      }
+    }
+    for (const chatId of chatIds) {
+      if (!releases.has(chatId)) {
+        releases.set(chatId, observations.store.observe(chatId, observations.projectId));
+      }
+    }
+  }, [chats, observations]);
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -120,9 +141,14 @@ export function ProjectChatList({
             </SidebarMenuSubItem>
           ))
         : null}
-      {error && chats.length === 0 ? (
+      {error ? (
         <SidebarMenuSubItem>
-          <SidebarFailureRow what='chats' />
+          <SidebarFailureRow
+            what='chats'
+            onRetry={() => {
+              void retry();
+            }}
+          />
         </SidebarMenuSubItem>
       ) : null}
       {!isLoading && !error && chats.length === 0 ? (

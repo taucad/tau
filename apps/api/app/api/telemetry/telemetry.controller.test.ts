@@ -4,6 +4,9 @@ import type { MetricsService } from '#telemetry/metrics.js';
 import { TelemetryController } from '#api/telemetry/telemetry.controller.js';
 import { IngestPayloadDto } from '#api/telemetry/telemetry.dto.js';
 import { IngestEntryName, AttributeKey } from '@taucad/telemetry';
+import type { AgentTurnContext, ClientMetricEntry } from '@taucad/telemetry';
+
+type AgentTurnDetail = Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_TURN }>['detail'];
 
 function createMockMetrics() {
   return {
@@ -17,6 +20,15 @@ function createMockMetrics() {
     agentToolCalls: { add: vi.fn() },
     agentTokens: { add: vi.fn() },
     agentErrors: { add: vi.fn() },
+    agentCallsBeforeFirstWrite: { record: vi.fn() },
+    agentTimeToFirstWrite: { record: vi.fn() },
+    agentReferenceLookups: { add: vi.fn() },
+    agentReferenceBytes: { record: vi.fn() },
+    agentSkillActivations: { add: vi.fn() },
+    agentEvaluations: { add: vi.fn() },
+    agentCorrectionsAfterError: { record: vi.fn() },
+    agentGeospecAssertions: { add: vi.fn() },
+    agentGeospecRuns: { add: vi.fn() },
     syncClientAttempts: { add: vi.fn() },
     syncClientLag: { record: vi.fn() },
     syncClientPending: { record: vi.fn() },
@@ -225,6 +237,177 @@ describe('TelemetryController', () => {
         [AttributeKey.AGENT_PLACEMENT]: 'daemon',
         [AttributeKey.AGENT_OUTCOME]: 'started',
       });
+    });
+  });
+
+  describe('agent turn context', () => {
+    const context: AgentTurnContext = {
+      kernelId: 'replicad',
+      skillsActivated: ['cad-replicad', 'geospec-authoring', 'cad-replicad'],
+      callsBeforeFirstModelWrite: 6,
+      timeToFirstModelWrite: 42_000,
+      referenceLookups: [
+        { outcome: 'ok', count: 3 },
+        { outcome: 'zero_match', count: 1 },
+      ],
+      referenceBytesRead: 20_480,
+      evaluations: [
+        { class: 'api_misuse', count: 1 },
+        { class: 'ok', count: 1 },
+      ],
+      correctionsAfterError: 1,
+      geospec: {
+        runs: 2,
+        passed: 4,
+        failed: 0,
+        runStatuses: [
+          { status: 'failed', count: 1 },
+          { status: 'passed', count: 1 },
+        ],
+      },
+    };
+    const tau = { [AttributeKey.AGENT_ID]: 'tau' };
+    const kernel = { ...tau, [AttributeKey.KERNEL_ID]: 'replicad' };
+
+    const ingestTurn = (detail: Partial<AgentTurnDetail>): void => {
+      controller.ingest({
+        entries: [
+          {
+            name: IngestEntryName.AGENT_TURN,
+            duration: 60_000,
+            detail: { agentId: 'tau', placement: 'browser', outcome: 'completed', ...detail },
+          },
+        ],
+      });
+    };
+
+    it('should label the turn counter with the kernel but not its duration', () => {
+      ingestTurn({ context });
+
+      const turn = {
+        ...tau,
+        [AttributeKey.AGENT_PLACEMENT]: 'browser',
+        [AttributeKey.AGENT_OUTCOME]: 'completed',
+      };
+      expect(mockMetrics.agentTurns.add).toHaveBeenCalledExactlyOnceWith(1, {
+        ...turn,
+        [AttributeKey.KERNEL_ID]: 'replicad',
+      });
+      expect(mockMetrics.agentTurnDuration.record).toHaveBeenCalledExactlyOnceWith(60, turn);
+    });
+
+    it('should record calls before the first model write by kernel', () => {
+      ingestTurn({ context });
+
+      expect(mockMetrics.agentCallsBeforeFirstWrite.record).toHaveBeenCalledExactlyOnceWith(6, kernel);
+    });
+
+    it('should record time to the first model write in seconds by kernel', () => {
+      ingestTurn({ context });
+
+      expect(mockMetrics.agentTimeToFirstWrite.record).toHaveBeenCalledExactlyOnceWith(42, kernel);
+    });
+
+    it('should count reference lookups by outcome', () => {
+      ingestTurn({ context });
+
+      expect(mockMetrics.agentReferenceLookups.add.mock.calls).toEqual([
+        [3, { ...kernel, [AttributeKey.AGENT_LOOKUP_OUTCOME]: 'ok' }],
+        [1, { ...kernel, [AttributeKey.AGENT_LOOKUP_OUTCOME]: 'zero_match' }],
+      ]);
+    });
+
+    it('should record reference bytes read by kernel', () => {
+      ingestTurn({ context });
+
+      expect(mockMetrics.agentReferenceBytes.record).toHaveBeenCalledExactlyOnceWith(20_480, kernel);
+    });
+
+    it('should count each activated skill once per turn', () => {
+      ingestTurn({ context });
+
+      expect(mockMetrics.agentSkillActivations.add.mock.calls).toEqual([
+        [1, { ...tau, [AttributeKey.AGENT_SKILL]: 'cad-replicad' }],
+        [1, { ...tau, [AttributeKey.AGENT_SKILL]: 'geospec-authoring' }],
+      ]);
+    });
+
+    it('should count evaluations by class and kernel', () => {
+      ingestTurn({ context });
+
+      expect(mockMetrics.agentEvaluations.add.mock.calls).toEqual([
+        [1, { ...kernel, [AttributeKey.AGENT_EVALUATION_CLASS]: 'api_misuse' }],
+        [1, { ...kernel, [AttributeKey.AGENT_EVALUATION_CLASS]: 'ok' }],
+      ]);
+    });
+
+    it('should record corrections after an error by kernel', () => {
+      ingestTurn({ context });
+
+      expect(mockMetrics.agentCorrectionsAfterError.record).toHaveBeenCalledExactlyOnceWith(1, kernel);
+    });
+
+    it('should count GeoSpec assertions by result, skipping a result with none', () => {
+      ingestTurn({ context });
+
+      expect(mockMetrics.agentGeospecAssertions.add).toHaveBeenCalledExactlyOnceWith(4, {
+        ...tau,
+        [AttributeKey.AGENT_ASSERTION_RESULT]: 'passed',
+      });
+    });
+
+    it('should count GeoSpec runs by run status', () => {
+      ingestTurn({ context });
+
+      expect(mockMetrics.agentGeospecRuns.add.mock.calls).toEqual([
+        [1, { ...tau, [AttributeKey.AGENT_RUN_STATUS]: 'failed' }],
+        [1, { ...tau, [AttributeKey.AGENT_RUN_STATUS]: 'passed' }],
+      ]);
+    });
+
+    it('should label Tau tool calls with the tool name and leave ACP rows unnamed', () => {
+      ingestTurn({
+        toolCalls: [
+          { kind: 'search', tool: 'grep', status: 'completed', count: 2 },
+          { kind: 'execute', status: 'failed', count: 1 },
+        ],
+      });
+
+      expect(mockMetrics.agentToolCalls.add.mock.calls).toEqual([
+        [
+          2,
+          {
+            ...tau,
+            [AttributeKey.AGENT_TOOL_KIND]: 'search',
+            [AttributeKey.AGENT_TOOL_NAME]: 'grep',
+            [AttributeKey.AGENT_TOOL_STATUS]: 'completed',
+          },
+        ],
+        [1, { ...tau, [AttributeKey.AGENT_TOOL_KIND]: 'execute', [AttributeKey.AGENT_TOOL_STATUS]: 'failed' }],
+      ]);
+    });
+
+    it('should record a turn without context exactly as before', () => {
+      ingestTurn({});
+
+      expect(mockMetrics.agentTurns.add).toHaveBeenCalledExactlyOnceWith(1, {
+        ...tau,
+        [AttributeKey.AGENT_PLACEMENT]: 'browser',
+        [AttributeKey.AGENT_OUTCOME]: 'completed',
+      });
+      for (const series of [
+        mockMetrics.agentCallsBeforeFirstWrite.record,
+        mockMetrics.agentTimeToFirstWrite.record,
+        mockMetrics.agentReferenceLookups.add,
+        mockMetrics.agentReferenceBytes.record,
+        mockMetrics.agentSkillActivations.add,
+        mockMetrics.agentEvaluations.add,
+        mockMetrics.agentCorrectionsAfterError.record,
+        mockMetrics.agentGeospecAssertions.add,
+        mockMetrics.agentGeospecRuns.add,
+      ]) {
+        expect(series).not.toHaveBeenCalled();
+      }
     });
   });
 

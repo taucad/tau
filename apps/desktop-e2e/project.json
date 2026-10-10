@@ -202,6 +202,28 @@
         }
       }
     },
+    "test:e2e:desktop:kernel-skills": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Kernel-skill acceptance (kernel-skill-api-context W11): one real Codex turn per kernel through a completed package (`desktop:package-macos`), asserting the kernel and GeoSpec skills are read, the model evaluates and its GeoSpec run passes, and recording calls and reference lookups before the first model write. Spends the operator's Codex quota. The API runs in self-host mode so the Zoo proxy can open; filter kernels with TAU_E2E_KERNEL_SKILLS_ONLY=Replicad,OpenSCAD."
+      },
+      "dependsOn": [{ "projects": ["api"], "target": "build" }],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-kernel-skills.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_API_URL": "http://localhost:4014",
+          "TAU_E2E_ACP_PACKAGED": "true",
+          "TAU_E2E_KERNEL_SKILLS": "true",
+          "TAU_E2E_API_SELF_HOST": "true"
+        }
+      }
+    },
     "test:e2e:desktop:completed-artifact": {
       "executor": "nx:run-commands",
       "cache": false,

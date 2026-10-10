@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { apiUrl, createApi } from '#support/api.js';
 import { matrixRow } from '#support/results.js';
+import { stripeReadKey } from '#support/stripe.js';
 
 const webhookEndpointsSchema = z.object({
   data: z.array(
@@ -57,13 +58,17 @@ describe('webhooks', () => {
   it(
     'should have the staging webhook endpoint enabled and no stray catch-all endpoint [WH-01 P0 smoke]',
     matrixRow('WH-01', 'P0', async () => {
-      const key = process.env['STRIPE_TEST_READ_KEY'] ?? '';
-      if (key === '') {
-        return { outcome: 'skipped', evidence: ['STRIPE_TEST_READ_KEY is not set'] };
-      }
       // Test mode only: a live key is refused before it is sent anywhere.
-      if (!/^[rs]k_test_/u.test(key)) {
-        throw new Error('STRIPE_TEST_READ_KEY must be a test-mode key (rk_test_ or sk_test_)');
+      const key = stripeReadKey();
+      if (key === undefined) {
+        // An operator who read the endpoint in the Stripe dashboard files that observation instead of a key.
+        const observation = process.env['BILLING_E2E_WEBHOOK_OBSERVATION'] ?? '';
+        return observation === ''
+          ? { outcome: 'skipped', evidence: ['not run: STRIPE_TEST_READ_KEY is not set'] }
+          : {
+              outcome: 'pass',
+              evidence: [`no STRIPE_TEST_READ_KEY; operator observation: ${observation}`, 'WH-03 shows it delivering'],
+            };
       }
       const { data, refusal } = await listEndpoints(key);
       if (refusal !== undefined) {

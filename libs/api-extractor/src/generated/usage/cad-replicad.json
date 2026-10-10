@@ -1,0 +1,3090 @@
+{
+  "slug": "cad-replicad",
+  "sources": {
+    "workspaceFiles": 373,
+    "exampleFiles": 116,
+    "transcriptRuns": 47
+  },
+  "symbols": [
+    {
+      "id": "typescript:makeCylinder",
+      "name": "makeCylinder",
+      "score": 164,
+      "workspace": 75,
+      "examples": 64,
+      "lookups": 25
+    },
+    {
+      "id": "typescript:Drawing.sketchOnPlane",
+      "name": "sketchOnPlane",
+      "score": 152,
+      "workspace": 66,
+      "examples": 73,
+      "lookups": 13
+    },
+    {
+      "id": "typescript:DrawingInterface.sketchOnPlane",
+      "name": "sketchOnPlane",
+      "score": 152,
+      "workspace": 66,
+      "examples": 73,
+      "lookups": 13
+    },
+    {
+      "id": "typescript:SketchInterface.extrude",
+      "name": "extrude",
+      "score": 139,
+      "workspace": 67,
+      "examples": 65,
+      "lookups": 7
+    },
+    {
+      "id": "typescript:Shape3D",
+      "name": "Shape3D",
+      "score": 135,
+      "workspace": 70,
+      "examples": 64,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Sketches.extrude",
+      "name": "extrude",
+      "score": 132,
+      "workspace": 64,
+      "examples": 63,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:draw",
+      "name": "draw",
+      "score": 124,
+      "workspace": 60,
+      "examples": 50,
+      "lookups": 14
+    },
+    {
+      "id": "typescript:Shape.translate",
+      "name": "translate",
+      "score": 120,
+      "workspace": 61,
+      "examples": 54,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:Shape3DLike.translate",
+      "name": "translate",
+      "score": 118,
+      "workspace": 61,
+      "examples": 52,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:Shape3DLike.cut",
+      "name": "cut",
+      "score": 116,
+      "workspace": 62,
+      "examples": 54,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:_3DShape.cut",
+      "name": "cut",
+      "score": 116,
+      "workspace": 62,
+      "examples": 54,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSketcher.close",
+      "name": "close",
+      "score": 109,
+      "workspace": 57,
+      "examples": 46,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:DrawingPen.close",
+      "name": "close",
+      "score": 106,
+      "workspace": 55,
+      "examples": 45,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:Drawing.translate",
+      "name": "translate",
+      "score": 105,
+      "workspace": 55,
+      "examples": 45,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:DrawingInterface.translate",
+      "name": "translate",
+      "score": 105,
+      "workspace": 55,
+      "examples": 45,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:GenericSketcher.lineTo",
+      "name": "lineTo",
+      "score": 104,
+      "workspace": 56,
+      "examples": 43,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:BaseSketcher2d.lineTo",
+      "name": "lineTo",
+      "score": 101,
+      "workspace": 53,
+      "examples": 43,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:Shape3DLike.fuse",
+      "name": "fuse",
+      "score": 100,
+      "workspace": 53,
+      "examples": 46,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:_3DShape.fuse",
+      "name": "fuse",
+      "score": 100,
+      "workspace": 53,
+      "examples": 46,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ShapeConfig",
+      "name": "ShapeConfig",
+      "score": 98,
+      "workspace": 56,
+      "examples": 22,
+      "lookups": 20
+    },
+    {
+      "id": "typescript:Drawing.cut",
+      "name": "cut",
+      "score": 97,
+      "workspace": 50,
+      "examples": 44,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:_3DShape.cutAll",
+      "name": "cutAll",
+      "score": 96,
+      "workspace": 50,
+      "examples": 35,
+      "lookups": 11
+    },
+    {
+      "id": "typescript:Drawing.fuse",
+      "name": "fuse",
+      "score": 95,
+      "workspace": 47,
+      "examples": 46,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Shape.rotate",
+      "name": "rotate",
+      "score": 95,
+      "workspace": 52,
+      "examples": 34,
+      "lookups": 9
+    },
+    {
+      "id": "typescript:Shape3DLike.rotate",
+      "name": "rotate",
+      "score": 95,
+      "workspace": 52,
+      "examples": 34,
+      "lookups": 9
+    },
+    {
+      "id": "typescript:makeBox",
+      "name": "makeBox",
+      "score": 80,
+      "workspace": 44,
+      "examples": 16,
+      "lookups": 20
+    },
+    {
+      "id": "typescript:SketchInterface.revolve",
+      "name": "revolve",
+      "score": 79,
+      "workspace": 33,
+      "examples": 29,
+      "lookups": 17
+    },
+    {
+      "id": "typescript:Sketches.revolve",
+      "name": "revolve",
+      "score": 78,
+      "workspace": 33,
+      "examples": 28,
+      "lookups": 17
+    },
+    {
+      "id": "typescript:Drawing.rotate",
+      "name": "rotate",
+      "score": 73,
+      "workspace": 39,
+      "examples": 27,
+      "lookups": 7
+    },
+    {
+      "id": "typescript:DrawingInterface.rotate",
+      "name": "rotate",
+      "score": 73,
+      "workspace": 39,
+      "examples": 27,
+      "lookups": 7
+    },
+    {
+      "id": "typescript:drawCircle",
+      "name": "drawCircle",
+      "score": 73,
+      "workspace": 36,
+      "examples": 29,
+      "lookups": 8
+    },
+    {
+      "id": "typescript:_3DShape.fillet",
+      "name": "fillet",
+      "score": 71,
+      "workspace": 31,
+      "examples": 27,
+      "lookups": 13
+    },
+    {
+      "id": "typescript:Shape.clone",
+      "name": "clone",
+      "score": 69,
+      "workspace": 44,
+      "examples": 24,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:_3DShape.fuseAll",
+      "name": "fuseAll",
+      "score": 68,
+      "workspace": 41,
+      "examples": 14,
+      "lookups": 13
+    },
+    {
+      "id": "typescript:drawRoundedRectangle",
+      "name": "drawRoundedRectangle",
+      "score": 65,
+      "workspace": 31,
+      "examples": 27,
+      "lookups": 7
+    },
+    {
+      "id": "typescript:Drawing.fillet",
+      "name": "fillet",
+      "score": 60,
+      "workspace": 24,
+      "examples": 24,
+      "lookups": 12
+    },
+    {
+      "id": "typescript:_1DShape.length",
+      "name": "length",
+      "score": 57,
+      "workspace": 27,
+      "examples": 30,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.threePointsArcTo",
+      "name": "threePointsArcTo",
+      "score": 56,
+      "workspace": 27,
+      "examples": 20,
+      "lookups": 9
+    },
+    {
+      "id": "typescript:GenericSketcher.threePointsArcTo",
+      "name": "threePointsArcTo",
+      "score": 56,
+      "workspace": 27,
+      "examples": 20,
+      "lookups": 9
+    },
+    {
+      "id": "typescript:Drawing.clone",
+      "name": "clone",
+      "score": 54,
+      "workspace": 33,
+      "examples": 20,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:DrawingInterface.clone",
+      "name": "clone",
+      "score": 54,
+      "workspace": 33,
+      "examples": 20,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:FaceFinder.inPlane",
+      "name": "inPlane",
+      "score": 42,
+      "workspace": 21,
+      "examples": 17,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:Sketch.extrude",
+      "name": "extrude",
+      "score": 42,
+      "workspace": 17,
+      "examples": 18,
+      "lookups": 7
+    },
+    {
+      "id": "typescript:drawPolysides",
+      "name": "drawPolysides",
+      "score": 42,
+      "workspace": 20,
+      "examples": 16,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:ManifoldBox.max",
+      "name": "max",
+      "score": 39,
+      "workspace": 20,
+      "examples": 19,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Drawing",
+      "name": "Drawing",
+      "score": 38,
+      "workspace": 13,
+      "examples": 14,
+      "lookups": 11
+    },
+    {
+      "id": "typescript:Drawing.constructor",
+      "name": "constructor",
+      "score": 38,
+      "workspace": 13,
+      "examples": 14,
+      "lookups": 11
+    },
+    {
+      "id": "typescript:Shape3DLike.intersect",
+      "name": "intersect",
+      "score": 38,
+      "workspace": 22,
+      "examples": 14,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Sketch",
+      "name": "Sketch",
+      "score": 38,
+      "workspace": 11,
+      "examples": 16,
+      "lookups": 11
+    },
+    {
+      "id": "typescript:Sketch.constructor",
+      "name": "constructor",
+      "score": 38,
+      "workspace": 11,
+      "examples": 16,
+      "lookups": 11
+    },
+    {
+      "id": "typescript:_3DShape.intersect",
+      "name": "intersect",
+      "score": 38,
+      "workspace": 22,
+      "examples": 14,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:EdgeFinder.inPlane",
+      "name": "inPlane",
+      "score": 35,
+      "workspace": 16,
+      "examples": 14,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:LinearPhysicalProperties.length",
+      "name": "length",
+      "score": 35,
+      "workspace": 13,
+      "examples": 22,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:_3DShape.chamfer",
+      "name": "chamfer",
+      "score": 34,
+      "workspace": 20,
+      "examples": 7,
+      "lookups": 7
+    },
+    {
+      "id": "typescript:BoundingBox.height",
+      "name": "height",
+      "score": 33,
+      "workspace": 9,
+      "examples": 23,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BoundingBox2d.height",
+      "name": "height",
+      "score": 33,
+      "workspace": 9,
+      "examples": 23,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:makeSphere",
+      "name": "makeSphere",
+      "score": 33,
+      "workspace": 15,
+      "examples": 8,
+      "lookups": 10
+    },
+    {
+      "id": "typescript:Sketch.revolve",
+      "name": "revolve",
+      "score": 32,
+      "workspace": 6,
+      "examples": 10,
+      "lookups": 16
+    },
+    {
+      "id": "typescript:Drawing.intersect",
+      "name": "intersect",
+      "score": 31,
+      "workspace": 18,
+      "examples": 12,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:SketchInterface.loftWith",
+      "name": "loftWith",
+      "score": 31,
+      "workspace": 14,
+      "examples": 5,
+      "lookups": 12
+    },
+    {
+      "id": "typescript:drawPointsInterpolation",
+      "name": "drawPointsInterpolation",
+      "score": 30,
+      "workspace": 12,
+      "examples": 3,
+      "lookups": 15
+    },
+    {
+      "id": "typescript:axis",
+      "name": "axis",
+      "score": 29,
+      "workspace": 15,
+      "examples": 14,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Drawing.chamfer",
+      "name": "chamfer",
+      "score": 27,
+      "workspace": 14,
+      "examples": 7,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:BoundingBox.width",
+      "name": "width",
+      "score": 26,
+      "workspace": 11,
+      "examples": 15,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BoundingBox2d.width",
+      "name": "width",
+      "score": 26,
+      "workspace": 11,
+      "examples": 15,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ManifoldBox.min",
+      "name": "min",
+      "score": 26,
+      "workspace": 11,
+      "examples": 15,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape.translateZ",
+      "name": "translateZ",
+      "score": 25,
+      "workspace": 20,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape3DLike.translateZ",
+      "name": "translateZ",
+      "score": 25,
+      "workspace": 20,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeConfig.shape",
+      "name": "shape",
+      "score": 23,
+      "workspace": 7,
+      "examples": 15,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Sketch.sweepSketch",
+      "name": "sweepSketch",
+      "score": 23,
+      "workspace": 4,
+      "examples": 10,
+      "lookups": 9
+    },
+    {
+      "id": "typescript:assembleWire",
+      "name": "assembleWire",
+      "score": 23,
+      "workspace": 10,
+      "examples": 7,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:makeCompound",
+      "name": "makeCompound",
+      "score": 23,
+      "workspace": 7,
+      "examples": 5,
+      "lookups": 11
+    },
+    {
+      "id": "typescript:FaceFinder.clone",
+      "name": "clone",
+      "score": 22,
+      "workspace": 13,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSketcher.movePointerTo",
+      "name": "movePointerTo",
+      "score": 22,
+      "workspace": 17,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape.mirror",
+      "name": "mirror",
+      "score": 21,
+      "workspace": 10,
+      "examples": 11,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape3DLike.mirror",
+      "name": "mirror",
+      "score": 21,
+      "workspace": 10,
+      "examples": 11,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketch.loftWith",
+      "name": "loftWith",
+      "score": 21,
+      "workspace": 5,
+      "examples": 5,
+      "lookups": 11
+    },
+    {
+      "id": "typescript:BaseSketcher2d.bezierCurveTo",
+      "name": "bezierCurveTo",
+      "score": 20,
+      "workspace": 5,
+      "examples": 2,
+      "lookups": 13
+    },
+    {
+      "id": "typescript:Vector.x",
+      "name": "x",
+      "score": 20,
+      "workspace": 10,
+      "examples": 10,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.movePointerTo",
+      "name": "movePointerTo",
+      "score": 19,
+      "workspace": 14,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CompoundSketch.revolve",
+      "name": "revolve",
+      "score": 19,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 16
+    },
+    {
+      "id": "typescript:Curve2D.reverse",
+      "name": "reverse",
+      "score": 19,
+      "workspace": 13,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:makeBaseBox",
+      "name": "makeBaseBox",
+      "score": 19,
+      "workspace": 13,
+      "examples": 5,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:makeHelix",
+      "name": "makeHelix",
+      "score": 19,
+      "workspace": 8,
+      "examples": 2,
+      "lookups": 9
+    },
+    {
+      "id": "typescript:GenericSketcher.bezierCurveTo",
+      "name": "bezierCurveTo",
+      "score": 18,
+      "workspace": 5,
+      "examples": 2,
+      "lookups": 11
+    },
+    {
+      "id": "typescript:GenericSketcher.done",
+      "name": "done",
+      "score": 18,
+      "workspace": 7,
+      "examples": 9,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:frame",
+      "name": "frame",
+      "score": 18,
+      "workspace": 10,
+      "examples": 8,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Drawing.mirror",
+      "name": "mirror",
+      "score": 17,
+      "workspace": 8,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:DrawingInterface.mirror",
+      "name": "mirror",
+      "score": 17,
+      "workspace": 8,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:DrawingPen.done",
+      "name": "done",
+      "score": 17,
+      "workspace": 6,
+      "examples": 9,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:EdgeFinder.ofCurveType",
+      "name": "ofCurveType",
+      "score": 17,
+      "workspace": 9,
+      "examples": 4,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:InterfaceDeclarations",
+      "name": "InterfaceDeclarations",
+      "score": 17,
+      "workspace": 4,
+      "examples": 13,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Material.name",
+      "name": "name",
+      "score": 17,
+      "workspace": 10,
+      "examples": 5,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:ShapeConfig.name",
+      "name": "name",
+      "score": 17,
+      "workspace": 10,
+      "examples": 5,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Sketch.clone",
+      "name": "clone",
+      "score": 17,
+      "workspace": 6,
+      "examples": 11,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:loft",
+      "name": "loft",
+      "score": 17,
+      "workspace": 5,
+      "examples": 1,
+      "lookups": 11
+    },
+    {
+      "id": "typescript:makeFace",
+      "name": "makeFace",
+      "score": 17,
+      "workspace": 6,
+      "examples": 5,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:GenericSketcher.hLine",
+      "name": "hLine",
+      "score": 16,
+      "workspace": 6,
+      "examples": 10,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Point2D",
+      "name": "Point2D",
+      "score": 16,
+      "workspace": 6,
+      "examples": 10,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketch.wire",
+      "name": "wire",
+      "score": 16,
+      "workspace": 12,
+      "examples": 2,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:scale",
+      "name": "scale",
+      "score": 16,
+      "workspace": 6,
+      "examples": 4,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:BaseSketcher2d.hLine",
+      "name": "hLine",
+      "score": 15,
+      "workspace": 6,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:_3DShape.shell",
+      "name": "shell",
+      "score": 15,
+      "workspace": 3,
+      "examples": 10,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Blueprints.sketchOnPlane",
+      "name": "sketchOnPlane",
+      "score": 14,
+      "workspace": 4,
+      "examples": 2,
+      "lookups": 8
+    },
+    {
+      "id": "typescript:Drawing.scale",
+      "name": "scale",
+      "score": 14,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:TopologyMap.shape",
+      "name": "shape",
+      "score": 14,
+      "workspace": 0,
+      "examples": 13,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Blueprint.sketchOnPlane",
+      "name": "sketchOnPlane",
+      "score": 13,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 8
+    },
+    {
+      "id": "typescript:CompoundBlueprint.sketchOnPlane",
+      "name": "sketchOnPlane",
+      "score": 13,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 8
+    },
+    {
+      "id": "typescript:CompoundSketch.extrude",
+      "name": "extrude",
+      "score": 13,
+      "workspace": 6,
+      "examples": 2,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:EdgeFinder.inDirection",
+      "name": "inDirection",
+      "score": 13,
+      "workspace": 5,
+      "examples": 4,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:GenericSketcher.vLine",
+      "name": "vLine",
+      "score": 13,
+      "workspace": 3,
+      "examples": 10,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape.scale",
+      "name": "scale",
+      "score": 13,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:Shape3DLike.scale",
+      "name": "scale",
+      "score": 13,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:drawRectangle",
+      "name": "drawRectangle",
+      "score": 13,
+      "workspace": 5,
+      "examples": 4,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:makeLine",
+      "name": "makeLine",
+      "score": 13,
+      "workspace": 6,
+      "examples": 2,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:makePlane",
+      "name": "makePlane",
+      "score": 13,
+      "workspace": 6,
+      "examples": 4,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:BaseSketcher2d.vLine",
+      "name": "vLine",
+      "score": 12,
+      "workspace": 3,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Plane",
+      "name": "Plane",
+      "score": 12,
+      "workspace": 1,
+      "examples": 5,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:Plane.constructor",
+      "name": "constructor",
+      "score": 12,
+      "workspace": 1,
+      "examples": 5,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:Vector.rotate",
+      "name": "rotate",
+      "score": 12,
+      "workspace": 6,
+      "examples": 4,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:makePolygon",
+      "name": "makePolygon",
+      "score": 12,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 10
+    },
+    {
+      "id": "typescript:makeThreePointArc",
+      "name": "makeThreePointArc",
+      "score": 12,
+      "workspace": 6,
+      "examples": 3,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:CornerFinder.inBox",
+      "name": "inBox",
+      "score": 11,
+      "workspace": 3,
+      "examples": 5,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:Plane.translate",
+      "name": "translate",
+      "score": 11,
+      "workspace": 4,
+      "examples": 6,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Sketcher",
+      "name": "Sketcher",
+      "score": 11,
+      "workspace": 3,
+      "examples": 5,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:Sketcher.constructor",
+      "name": "constructor",
+      "score": 11,
+      "workspace": 3,
+      "examples": 5,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:Sketcher.lineTo",
+      "name": "lineTo",
+      "score": 11,
+      "workspace": 3,
+      "examples": 4,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:genericSweep",
+      "name": "genericSweep",
+      "score": 11,
+      "workspace": 8,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:rotate",
+      "name": "rotate",
+      "score": 11,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 10
+    },
+    {
+      "id": "typescript:BaseSketcher2d.smoothSplineTo",
+      "name": "smoothSplineTo",
+      "score": 10,
+      "workspace": 1,
+      "examples": 2,
+      "lookups": 7
+    },
+    {
+      "id": "typescript:BoundingBox.depth",
+      "name": "depth",
+      "score": 10,
+      "workspace": 7,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BoundingBox2d.containsPoint",
+      "name": "containsPoint",
+      "score": 10,
+      "workspace": 3,
+      "examples": 7,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Edge",
+      "name": "Edge",
+      "score": 10,
+      "workspace": 5,
+      "examples": 4,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:LoftConfig",
+      "name": "LoftConfig",
+      "score": 10,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 10
+    },
+    {
+      "id": "typescript:Point",
+      "name": "Point",
+      "score": 10,
+      "workspace": 5,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape.translateX",
+      "name": "translateX",
+      "score": 10,
+      "workspace": 9,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape3DLike.translateX",
+      "name": "translateX",
+      "score": 10,
+      "workspace": 9,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketcher.close",
+      "name": "close",
+      "score": 10,
+      "workspace": 2,
+      "examples": 5,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:Vector.y",
+      "name": "y",
+      "score": 10,
+      "workspace": 4,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:group",
+      "name": "group",
+      "score": 10,
+      "workspace": 7,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AnyShape",
+      "name": "AnyShape",
+      "score": 9,
+      "workspace": 5,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CompoundSketch.loftWith",
+      "name": "loftWith",
+      "score": 9,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 8
+    },
+    {
+      "id": "typescript:GenericSketcher.smoothSplineTo",
+      "name": "smoothSplineTo",
+      "score": 9,
+      "workspace": 1,
+      "examples": 2,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:face",
+      "name": "face",
+      "score": 9,
+      "workspace": 6,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:makeSolid",
+      "name": "makeSolid",
+      "score": 9,
+      "workspace": 2,
+      "examples": 3,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:BaseSketcher2d.tangentArcTo",
+      "name": "tangentArcTo",
+      "score": 8,
+      "workspace": 2,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.vLineTo",
+      "name": "vLineTo",
+      "score": 8,
+      "workspace": 5,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Deletable.delete",
+      "name": "delete",
+      "score": 8,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSketcher.line",
+      "name": "line",
+      "score": 8,
+      "workspace": 2,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSketcher.tangentArcTo",
+      "name": "tangentArcTo",
+      "score": 8,
+      "workspace": 2,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSketcher.vLineTo",
+      "name": "vLineTo",
+      "score": 8,
+      "workspace": 5,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketcher.bezierCurveTo",
+      "name": "bezierCurveTo",
+      "score": 8,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 8
+    },
+    {
+      "id": "typescript:TopologyMap.wire",
+      "name": "wire",
+      "score": 8,
+      "workspace": 8,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:WrappingObj.delete",
+      "name": "delete",
+      "score": 8,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.customCorner",
+      "name": "customCorner",
+      "score": 7,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:BaseSketcher2d.line",
+      "name": "line",
+      "score": 7,
+      "workspace": 2,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSweepConfig",
+      "name": "GenericSweepConfig",
+      "score": 7,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 7
+    },
+    {
+      "id": "typescript:Sketcher.movePointerTo",
+      "name": "movePointerTo",
+      "score": 7,
+      "workspace": 3,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:drawEllipse",
+      "name": "drawEllipse",
+      "score": 7,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:makeBSplineApproximation",
+      "name": "makeBSplineApproximation",
+      "score": 7,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:sketchCircle",
+      "name": "sketchCircle",
+      "score": 7,
+      "workspace": 1,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:translate",
+      "name": "translate",
+      "score": 7,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:DatumDeclaration.origin",
+      "name": "origin",
+      "score": 6,
+      "workspace": 2,
+      "examples": 3,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Drawing.toSVGPaths",
+      "name": "toSVGPaths",
+      "score": 6,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:DrawingInterface.toSVGPaths",
+      "name": "toSVGPaths",
+      "score": 6,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:DrawingPen",
+      "name": "DrawingPen",
+      "score": 6,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:DrawingPen.constructor",
+      "name": "constructor",
+      "score": 6,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:EdgeFinder",
+      "name": "EdgeFinder",
+      "score": 6,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:FaceFinder.ofSurfaceType",
+      "name": "ofSurfaceType",
+      "score": 6,
+      "workspace": 4,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Plane.clone",
+      "name": "clone",
+      "score": 6,
+      "workspace": 1,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape.simplify",
+      "name": "simplify",
+      "score": 6,
+      "workspace": 5,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape.translateY",
+      "name": "translateY",
+      "score": 6,
+      "workspace": 6,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape.wires",
+      "name": "wires",
+      "score": 6,
+      "workspace": 4,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape3DLike.translateY",
+      "name": "translateY",
+      "score": 6,
+      "workspace": 6,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeConfig.color",
+      "name": "color",
+      "score": 6,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Sketcher.done",
+      "name": "done",
+      "score": 6,
+      "workspace": 1,
+      "examples": 4,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Sketcher.threePointsArcTo",
+      "name": "threePointsArcTo",
+      "score": 6,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:Vector",
+      "name": "Vector",
+      "score": 6,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Vector.constructor",
+      "name": "constructor",
+      "score": 6,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:setOC",
+      "name": "setOC",
+      "score": 6,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:sketchHelix",
+      "name": "sketchHelix",
+      "score": 6,
+      "workspace": 1,
+      "examples": 2,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:AxisDeclaration.kind",
+      "name": "kind",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.cubicBezierCurveTo",
+      "name": "cubicBezierCurveTo",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.hLineTo",
+      "name": "hLineTo",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Blueprint.toSVGPaths",
+      "name": "toSVGPaths",
+      "score": 5,
+      "workspace": 0,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Blueprints.toSVGPaths",
+      "name": "toSVGPaths",
+      "score": 5,
+      "workspace": 0,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CompoundBlueprint.toSVGPaths",
+      "name": "toSVGPaths",
+      "score": 5,
+      "workspace": 0,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:DatumDeclaration.kind",
+      "name": "kind",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Drawing.offset",
+      "name": "offset",
+      "score": 5,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:EdgeFinder.ofLength",
+      "name": "ofLength",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:FaceFinder",
+      "name": "FaceFinder",
+      "score": 5,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GenericSketcher.cubicBezierCurveTo",
+      "name": "cubicBezierCurveTo",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSketcher.hLineTo",
+      "name": "hLineTo",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Model.shapes",
+      "name": "shapes",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Plane.origin",
+      "name": "origin",
+      "score": 5,
+      "workspace": 1,
+      "examples": 3,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Shape.faces",
+      "name": "faces",
+      "score": 5,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:SketchInterface",
+      "name": "SketchInterface",
+      "score": 5,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Sketcher.smoothSplineTo",
+      "name": "smoothSplineTo",
+      "score": 5,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 5
+    },
+    {
+      "id": "typescript:Sketches.wires",
+      "name": "wires",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Vector.z",
+      "name": "z",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Wire",
+      "name": "Wire",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:measureVolume",
+      "name": "measureVolume",
+      "score": 5,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:sketchPolysides",
+      "name": "sketchPolysides",
+      "score": 5,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:CompoundSketch",
+      "name": "CompoundSketch",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CompoundSketch.constructor",
+      "name": "constructor",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CornerFinder.atDistance",
+      "name": "atDistance",
+      "score": 4,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:DrawingPen.closeWithMirror",
+      "name": "closeWithMirror",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:FaceDeclaration.kind",
+      "name": "kind",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSketcher.closeWithMirror",
+      "name": "closeWithMirror",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GroupDeclaration.kind",
+      "name": "kind",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Image.name",
+      "name": "name",
+      "score": 4,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:InterfaceDeclaration.kind",
+      "name": "kind",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Material",
+      "name": "Material",
+      "score": 4,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Plane.pivot",
+      "name": "pivot",
+      "score": 4,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PlaneName",
+      "name": "PlaneName",
+      "score": 4,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ProjectionCamera.direction",
+      "name": "direction",
+      "score": 4,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketch.wires",
+      "name": "wires",
+      "score": 4,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketcher.tangentArcTo",
+      "name": "tangentArcTo",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketches.faces",
+      "name": "faces",
+      "score": 4,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:basicFaceExtrusion",
+      "name": "basicFaceExtrusion",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:getOC",
+      "name": "getOC",
+      "score": 4,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:makeCircle",
+      "name": "makeCircle",
+      "score": 4,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:makeEllipsoid",
+      "name": "makeEllipsoid",
+      "score": 4,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:sketchRectangle",
+      "name": "sketchRectangle",
+      "score": 4,
+      "workspace": 1,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.tangentArc",
+      "name": "tangentArc",
+      "score": 3,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Blueprint.scale",
+      "name": "scale",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:Blueprints.rotate",
+      "name": "rotate",
+      "score": 3,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Blueprints.scale",
+      "name": "scale",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:BoundingBox",
+      "name": "BoundingBox",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:BoundingBox.constructor",
+      "name": "constructor",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:CompoundBlueprint.scale",
+      "name": "scale",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:Corner.point",
+      "name": "point",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CornerFinder.inList",
+      "name": "inList",
+      "score": 3,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Drawing.boundingBox",
+      "name": "boundingBox",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:DrawingInterface.boundingBox",
+      "name": "boundingBox",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:EdgeFinder.parallelTo",
+      "name": "parallelTo",
+      "score": 3,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Face.center",
+      "name": "center",
+      "score": 3,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:FaceFinder.parallelTo",
+      "name": "parallelTo",
+      "score": 3,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GenericSketcher.tangentArc",
+      "name": "tangentArc",
+      "score": 3,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:MeshShape.scale",
+      "name": "scale",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:Plane.translateZ",
+      "name": "translateZ",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape.asShape3D",
+      "name": "asShape3D",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape.boundingBox",
+      "name": "boundingBox",
+      "score": 3,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Shape.split",
+      "name": "split",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeConfig.material",
+      "name": "material",
+      "score": 3,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ShapeConfig.metalness",
+      "name": "metalness",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeConfig.roughness",
+      "name": "roughness",
+      "score": 3,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Sketch.delete",
+      "name": "delete",
+      "score": 3,
+      "workspace": 1,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketch.faces",
+      "name": "faces",
+      "score": 3,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Transformation.scale",
+      "name": "scale",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:WrappingObj.wrapped",
+      "name": "wrapped",
+      "score": 3,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:_1DShape.pointAt",
+      "name": "pointAt",
+      "score": 3,
+      "workspace": 1,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:_3DShape",
+      "name": "_3DShape",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:cast",
+      "name": "cast",
+      "score": 3,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:datum",
+      "name": "datum",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:drawFaceOutline",
+      "name": "drawFaceOutline",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:drawText",
+      "name": "drawText",
+      "score": 3,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:sketchRoundedRectangle",
+      "name": "sketchRoundedRectangle",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:twistExtrude",
+      "name": "twistExtrude",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:AssemblyExporter",
+      "name": "AssemblyExporter",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:AxisDeclaration",
+      "name": "AxisDeclaration",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AxisDeclaration.select",
+      "name": "select",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:BSplineApproximationConfig",
+      "name": "BSplineApproximationConfig",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:BSplineApproximationConfig.tolerance",
+      "name": "tolerance",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BaseSketcher2d",
+      "name": "BaseSketcher2d",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:BaseSketcher2d.bulgeArcTo",
+      "name": "bulgeArcTo",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Blueprint.rotate",
+      "name": "rotate",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:BlueprintSketcher.close",
+      "name": "close",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Blueprints.translate",
+      "name": "translate",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BoundingBox.center",
+      "name": "center",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BoundingBox2d.bounds",
+      "name": "bounds",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BoundingBox2d.center",
+      "name": "center",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:CompoundBlueprint.rotate",
+      "name": "rotate",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Corner",
+      "name": "Corner",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:DatumDeclaration",
+      "name": "DatumDeclaration",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:EdgeFinder.clone",
+      "name": "clone",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ExtrusionProfile.endFactor",
+      "name": "endFactor",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Face.geomType",
+      "name": "geomType",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:FaceDeclaration",
+      "name": "FaceDeclaration",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:FaceDeclaration.select",
+      "name": "select",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:FaceSketcher.close",
+      "name": "close",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GenericSketcher.bulgeArcTo",
+      "name": "bulgeArcTo",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Image.data",
+      "name": "data",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Material.pbrMetallicRoughness",
+      "name": "pbrMetallicRoughness",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:MeshOptions.tolerance",
+      "name": "tolerance",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:MeshShape.rotate",
+      "name": "rotate",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Model",
+      "name": "Model",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Model.images",
+      "name": "images",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ProjectionCamera.position",
+      "name": "position",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shape",
+      "name": "Shape",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Shape.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Shape3DLike.boundingBox",
+      "name": "boundingBox",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeConfig.alpha",
+      "name": "alpha",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Shell",
+      "name": "Shell",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SimplePoint",
+      "name": "SimplePoint",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketches",
+      "name": "Sketches",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketches.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Transformation.rotate",
+      "name": "rotate",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Vector.equals",
+      "name": "equals",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Vector.toTuple",
+      "name": "toTuple",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:_1DShape.startPoint",
+      "name": "startPoint",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:_3DShape.intersectAll",
+      "name": "intersectAll",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:createAssembly",
+      "name": "createAssembly",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:makeBezierCurve",
+      "name": "makeBezierCurve",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:makeVertex",
+      "name": "makeVertex",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:measureDistanceBetween",
+      "name": "measureDistanceBetween",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:sketchText",
+      "name": "sketchText",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.ellipse",
+      "name": "ellipse",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BaseSketcher2d.firstPoint",
+      "name": "firstPoint",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.hSagittaArc",
+      "name": "hSagittaArc",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.halfEllipse",
+      "name": "halfEllipse",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.quadraticBezierCurveTo",
+      "name": "quadraticBezierCurveTo",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.sagittaArcTo",
+      "name": "sagittaArcTo",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSketcher2d.threePointsArc",
+      "name": "threePointsArc",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Blueprint.lastPoint",
+      "name": "lastPoint",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Blueprint.translate",
+      "name": "translate",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BlueprintSketcher.done",
+      "name": "done",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Blueprints.boundingBox",
+      "name": "boundingBox",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BooleanOperationOptions",
+      "name": "BooleanOperationOptions",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BoundingBox.bounds",
+      "name": "bounds",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ChamferRadius",
+      "name": "ChamferRadius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:CompoundBlueprint.translate",
+      "name": "translate",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:CornerFinder.atPoint",
+      "name": "atPoint",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Curve.pointAt",
+      "name": "pointAt",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Curve2D.lastPoint",
+      "name": "lastPoint",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:DatumDeclaration.zAxis",
+      "name": "zAxis",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Drawing.blueprint",
+      "name": "blueprint",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Drawing.sketchOnFace",
+      "name": "sketchOnFace",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:DrawingInterface",
+      "name": "DrawingInterface",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:DrawingInterface.sketchOnFace",
+      "name": "sketchOnFace",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:DrawingPen.closeWithCustomCorner",
+      "name": "closeWithCustomCorner",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ExtrusionProfile",
+      "name": "ExtrusionProfile",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ExtrusionProfile.profile",
+      "name": "profile",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:FaceSketcher.done",
+      "name": "done",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:FilterFcn.element",
+      "name": "element",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSketcher.ellipse",
+      "name": "ellipse",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GenericSketcher.hSagittaArc",
+      "name": "hSagittaArc",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSketcher.halfEllipse",
+      "name": "halfEllipse",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSketcher.quadraticBezierCurveTo",
+      "name": "quadraticBezierCurveTo",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSketcher.sagittaArcTo",
+      "name": "sagittaArcTo",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GenericSketcher.threePointsArc",
+      "name": "threePointsArc",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GroupDeclaration",
+      "name": "GroupDeclaration",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Image.mimeType",
+      "name": "mimeType",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LoftConfig.ruled",
+      "name": "ruled",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Material.extensions",
+      "name": "extensions",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:MeshShape.intersect",
+      "name": "intersect",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:MeshShape.translate",
+      "name": "translate",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Model.samplers",
+      "name": "samplers",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Model.textures",
+      "name": "textures",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Plane.setOrigin2d",
+      "name": "setOrigin2d",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Plane.translateTo",
+      "name": "translateTo",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Plane.translateY",
+      "name": "translateY",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RadiusConfig",
+      "name": "RadiusConfig",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Resources.images",
+      "name": "images",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeConfig.interfaces",
+      "name": "interfaces",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeConfig.opacity",
+      "name": "opacity",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Sketch.baseFace",
+      "name": "baseFace",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketch.face",
+      "name": "face",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SketchInterface.face",
+      "name": "face",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketcher.hLine",
+      "name": "hLine",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketcher.line",
+      "name": "line",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sketcher.tangentArc",
+      "name": "tangentArc",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Sketcher.vLine",
+      "name": "vLine",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Surface",
+      "name": "Surface",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:TopologyMap.compound",
+      "name": "compound",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Transformation.translate",
+      "name": "translate",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Vector.Length",
+      "name": "Length",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Vector.add",
+      "name": "add",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Vector.sub",
+      "name": "sub",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:_1DShape.endPoint",
+      "name": "endPoint",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:_1DShape.geomType",
+      "name": "geomType",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:_1DShape.isClosed",
+      "name": "isClosed",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:compoundShapes",
+      "name": "compoundShapes",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:drawParametricFunction",
+      "name": "drawParametricFunction",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:drawProjection",
+      "name": "drawProjection",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:drawSingleCircle",
+      "name": "drawSingleCircle",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:importSTEP",
+      "name": "importSTEP",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:localGC",
+      "name": "localGC",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:makeOffset",
+      "name": "makeOffset",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:polysideInnerRadius",
+      "name": "polysideInnerRadius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:revolution",
+      "name": "revolution",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:sketchFaceOffset",
+      "name": "sketchFaceOffset",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:textBlueprints",
+      "name": "textBlueprints",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    }
+  ]
+}

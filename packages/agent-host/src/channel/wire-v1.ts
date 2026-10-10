@@ -2,10 +2,10 @@
  * The version-1 daemon wire, kept for the compatibility window (I32; seam blueprint "Mixed builds"). The v1 peers are
  * an installed desktop daemon older than a newer web page, and older page or desktop builds; the published
  * `@taucad/cli@0.1.0-beta.0` never dials the daemon (its only command is `export`), and host, agent-host and mcp are
- * unpublished. A v2 daemon still serves a v1 client, and a v2 client that meets a v1 daemon (a hello with no `wire`
+ * unpublished. A current daemon explicitly serves a legacy v1 client, and a current client that meets a v1 daemon (a hello with no `wire`
  * field) speaks v1 and replays reads only.
  *
- * Removed once the oldest supported desktop build ships wire 2. From then on a v2 client refuses a hello naming
+ * Removed once the oldest supported desktop build ships the current wire. A current client refuses a hello naming
  * another wire with `WIRE_VERSION_UNSUPPORTED`. Removal checklist:
  * - this file and `launchers/agent-wire-v1-session.ts`;
  * - in `channel/agent-channel-client.ts`: the `v1Tail`, `v1Execute` and `v1Read` helpers, every `wire === 1` branch,
@@ -29,7 +29,13 @@ import {
   userProviderMessageSchema,
 } from '#log/event-schema.js';
 import { agentChannelAdmissionConfigSchema } from '#wire/admission.schema.js';
-import { agentLiveEventSchema, agentWireHelloSchema, agentWireProtocolSchemas } from '#wire/frames.schema.js';
+import {
+  agentLiveEventSchema,
+  sourceLiveEventSchema,
+  agentWireHelloSchema,
+  agentWireProtocolSchemas,
+  agentWireVersion,
+} from '#wire/frames.schema.js';
 import type { AgentWireProtocol } from '#wire/frames.schema.js';
 import type { HostCommand } from '#wire/commands.schema.js';
 import type { AgentLiveEvent, HostRunSnapshot } from '#waist/ports.js';
@@ -155,7 +161,7 @@ export type V1Response =
 export type V1Addressed<Event> = Readonly<{ chatId: string; event: Event }>;
 
 /**
- * The daemon protocol during the window: v2's verbs, `read`, `revision` and per-chat `liveEvents`, beside v1's
+ * The daemon protocol during the window: the current wire's verbs, `read`, `revision` and per-chat `liveEvents`, beside v1's
  * `request`, all-chat `events`, and `liveEvents` with no argument.
  *
  * @internal
@@ -175,6 +181,7 @@ export type AgentWireCompatProtocol = {
     };
     // oxlint-disable-next-line typescript/no-restricted-types -- the v1 wire's own `null` argument.
     readonly events: { args: null; event: V1Addressed<AgentLogEvent> };
+    readonly catchUp: AgentWireProtocol['listens']['catchUp'];
     readonly revisionEvents: AgentWireProtocol['listens']['revisionEvents'];
   };
 };
@@ -195,9 +202,10 @@ export const agentWireCompatSchemas = {
   },
   notifies: {},
   listens: {
+    catchUp: agentWireProtocolSchemas.listens.catchUp,
     liveEvents: {
       args: z.union([z.strictObject({ chatId: text }), z.null()]),
-      event: z.union([agentLiveEventSchema, addressed(agentLiveEventSchema)]),
+      event: z.union([sourceLiveEventSchema, agentLiveEventSchema, addressed(agentLiveEventSchema)]),
     },
     events: { args: z.null(), event: addressed(agentLogEventSchema) },
     revisionEvents: agentWireProtocolSchemas.listens.revisionEvents,
@@ -205,15 +213,15 @@ export const agentWireCompatSchemas = {
 };
 
 /**
- * Which wire an owner's hello names: 2, 1 (no `wire` field: a v1 daemon), or another version.
+ * Which wire an owner's hello names: the current version, 1 (no `wire` field: a v1 daemon), or another version.
  *
  * @param hello - The hello payload as received.
  * @returns The wire the client speaks, or `unsupported`.
  * @internal
  */
-export const helloWire = (hello: unknown): 1 | 2 | 'unsupported' => {
+export const helloWire = (hello: unknown): 1 | typeof agentWireVersion | 'unsupported' => {
   if (agentWireHelloSchema.safeParse(hello).success) {
-    return 2;
+    return agentWireVersion;
   }
   return typeof hello === 'object' && hello !== null && 'wire' in hello ? 'unsupported' : 1;
 };
@@ -221,7 +229,7 @@ export const helloWire = (hello: unknown): 1 | 2 | 'unsupported' => {
 /**
  * One keyed command in v1's vocabulary: the key is dropped, since a v1 owner has no applied set.
  *
- * @param command - The v2 command.
+ * @param command - The current-wire command.
  * @returns The v1 request.
  * @internal
  */

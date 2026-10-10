@@ -1,0 +1,2594 @@
+{
+  "slug": "cad-picovoxel",
+  "sources": {
+    "workspaceFiles": 5,
+    "exampleFiles": 80,
+    "transcriptRuns": 9
+  },
+  "symbols": [
+    {
+      "id": "typescript:Pico",
+      "name": "Pico",
+      "score": 81,
+      "workspace": 5,
+      "examples": 76,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels",
+      "name": "Voxels",
+      "score": 46,
+      "workspace": 2,
+      "examples": 42,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:BaseShape.voxConstruct",
+      "name": "voxConstruct",
+      "score": 29,
+      "workspace": 0,
+      "examples": 29,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:localFrame",
+      "name": "localFrame",
+      "score": 27,
+      "workspace": 0,
+      "examples": 27,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Pico.createVoxels",
+      "name": "createVoxels",
+      "score": 17,
+      "workspace": 5,
+      "examples": 8,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:Vec3",
+      "name": "Vec3",
+      "score": 16,
+      "workspace": 0,
+      "examples": 16,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:localFrame.create",
+      "name": "create",
+      "score": 13,
+      "workspace": 0,
+      "examples": 13,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels.union",
+      "name": "union",
+      "score": 12,
+      "workspace": 2,
+      "examples": 7,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:localFrame.identity",
+      "name": "identity",
+      "score": 12,
+      "workspace": 0,
+      "examples": 12,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseBox.voxConstruct",
+      "name": "voxConstruct",
+      "score": 11,
+      "workspace": 0,
+      "examples": 11,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Spline.points",
+      "name": "points",
+      "score": 10,
+      "workspace": 0,
+      "examples": 10,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SurfaceModulation",
+      "name": "SurfaceModulation",
+      "score": 10,
+      "workspace": 0,
+      "examples": 10,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SurfaceModulation.constructor",
+      "name": "constructor",
+      "score": 10,
+      "workspace": 0,
+      "examples": 10,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vecOps",
+      "name": "vecOps",
+      "score": 10,
+      "workspace": 0,
+      "examples": 10,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseBox",
+      "name": "BaseBox",
+      "score": 9,
+      "workspace": 0,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseBox.constructor",
+      "name": "constructor",
+      "score": 9,
+      "workspace": 0,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BasePipe.voxConstruct",
+      "name": "voxConstruct",
+      "score": 9,
+      "workspace": 0,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Bounds.max",
+      "name": "max",
+      "score": 9,
+      "workspace": 3,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Lattice.toVoxels",
+      "name": "toVoxels",
+      "score": 9,
+      "workspace": 1,
+      "examples": 8,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Pico.createLattice",
+      "name": "createLattice",
+      "score": 9,
+      "workspace": 1,
+      "examples": 8,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:frame",
+      "name": "frame",
+      "score": 9,
+      "workspace": 0,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3",
+      "name": "vec3",
+      "score": 9,
+      "workspace": 0,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3.length",
+      "name": "length",
+      "score": 9,
+      "workspace": 0,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3.scale",
+      "name": "scale",
+      "score": 9,
+      "workspace": 0,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Implicit.expression",
+      "name": "expression",
+      "score": 8,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Voxels.maskedByImplicit",
+      "name": "maskedByImplicit",
+      "score": 8,
+      "workspace": 0,
+      "examples": 8,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels.subtract",
+      "name": "subtract",
+      "score": 8,
+      "workspace": 0,
+      "examples": 7,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:vec3.add",
+      "name": "add",
+      "score": 8,
+      "workspace": 0,
+      "examples": 8,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BasePipe",
+      "name": "BasePipe",
+      "score": 7,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BasePipe.constructor",
+      "name": "constructor",
+      "score": 7,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Bounds.min",
+      "name": "min",
+      "score": 7,
+      "workspace": 2,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Frames",
+      "name": "Frames",
+      "score": 7,
+      "workspace": 0,
+      "examples": 7,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels.intersect",
+      "name": "intersect",
+      "score": 7,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:splineOps",
+      "name": "splineOps",
+      "score": 7,
+      "workspace": 0,
+      "examples": 7,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseCylinder.voxConstruct",
+      "name": "voxConstruct",
+      "score": 6,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Frames.points",
+      "name": "points",
+      "score": 6,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Lattice.addBeam",
+      "name": "addBeam",
+      "score": 6,
+      "workspace": 1,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LineModulation",
+      "name": "LineModulation",
+      "score": 6,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LineModulation.constructor",
+      "name": "constructor",
+      "score": 6,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SdfExpression",
+      "name": "SdfExpression",
+      "score": 6,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:localFrame.translated",
+      "name": "translated",
+      "score": 6,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3.sub",
+      "name": "sub",
+      "score": 6,
+      "workspace": 0,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseCylinder",
+      "name": "BaseCylinder",
+      "score": 5,
+      "workspace": 0,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseCylinder.constructor",
+      "name": "constructor",
+      "score": 5,
+      "workspace": 0,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Frame.lz",
+      "name": "lz",
+      "score": 5,
+      "workspace": 0,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Frames.withTargetX",
+      "name": "withTargetX",
+      "score": 5,
+      "workspace": 0,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitGyroid.expression",
+      "name": "expression",
+      "score": 5,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Voxels.fillet",
+      "name": "fillet",
+      "score": 5,
+      "workspace": 1,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:frame.ptToWorld",
+      "name": "ptToWorld",
+      "score": 5,
+      "workspace": 0,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:uf",
+      "name": "uf",
+      "score": 5,
+      "workspace": 0,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vecOps.radius",
+      "name": "radius",
+      "score": 5,
+      "workspace": 0,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseLens.voxConstruct",
+      "name": "voxConstruct",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BasePipe.setRadius",
+      "name": "setRadius",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseShape.setTransformation",
+      "name": "setTransformation",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSphere.voxConstruct",
+      "name": "voxConstruct",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Frame",
+      "name": "Frame",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LatticePipe.voxConstruct",
+      "name": "voxConstruct",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Mesh.toVoxels",
+      "name": "toVoxels",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SurfaceModulation.fromLineModulation",
+      "name": "fromLineModulation",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vecOps.cylPoint",
+      "name": "cylPoint",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vecOps.rotateAroundAxis",
+      "name": "rotateAroundAxis",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vecOps.rotateAroundZ",
+      "name": "rotateAroundZ",
+      "score": 4,
+      "workspace": 0,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AllocatedCounts.voxels",
+      "name": "voxels",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseCylinder.setRadius",
+      "name": "setRadius",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseLens.outerRadius",
+      "name": "outerRadius",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BasePipe.setLengthSteps",
+      "name": "setLengthSteps",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSphere",
+      "name": "BaseSphere",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSphere.constructor",
+      "name": "constructor",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ControlPointSpline",
+      "name": "ControlPointSpline",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ControlPointSpline.constructor",
+      "name": "constructor",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ControlPointSpline.points",
+      "name": "points",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Cylindrical.phi",
+      "name": "phi",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Frame.pos",
+      "name": "pos",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitGenus.expression",
+      "name": "expression",
+      "score": 3,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:ImplicitGyroid",
+      "name": "ImplicitGyroid",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitGyroid.constructor",
+      "name": "constructor",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitSchwarzDiamond.expression",
+      "name": "expression",
+      "score": 3,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:ImplicitSphere.expression",
+      "name": "expression",
+      "score": 3,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:ImplicitSplitVoidGyroid.expression",
+      "name": "expression",
+      "score": 3,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:ImplicitSuperEllipsoid.expression",
+      "name": "expression",
+      "score": 3,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Lattice",
+      "name": "Lattice",
+      "score": 3,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:LatticeManifoldOptions.length",
+      "name": "length",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:MemoryUsage.voxels",
+      "name": "voxels",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Mesh",
+      "name": "Mesh",
+      "score": 3,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Pico.createMesh",
+      "name": "createMesh",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Pico.dispose",
+      "name": "dispose",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Pico.voxelSize",
+      "name": "voxelSize",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PicovoxelResult",
+      "name": "PicovoxelResult",
+      "score": 3,
+      "workspace": 1,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PipeSegmentOptions.length",
+      "name": "length",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Polar.phi",
+      "name": "phi",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Spherical.phi",
+      "name": "phi",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SurfaceModulation.add",
+      "name": "add",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SurfaceModulation.scale",
+      "name": "scale",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels.dispose",
+      "name": "dispose",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels.toMesh",
+      "name": "toMesh",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:localFrame.createZX",
+      "name": "createZX",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:polar.create",
+      "name": "create",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:splineOps.translated",
+      "name": "translated",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec2.length",
+      "name": "length",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3.cross",
+      "name": "cross",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3.normalized",
+      "name": "normalized",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vecOps.phi",
+      "name": "phi",
+      "score": 3,
+      "workspace": 0,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AddBeamOptions.radius",
+      "name": "radius",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseCylinder.setLengthSteps",
+      "name": "setLengthSteps",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseLens",
+      "name": "BaseLens",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseLens.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseLens.innerRadius",
+      "name": "innerRadius",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseLens.setHeight",
+      "name": "setHeight",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseRevolve",
+      "name": "BaseRevolve",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BaseRevolve.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BaseRevolve.voxConstruct",
+      "name": "voxConstruct",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseRing.voxConstruct",
+      "name": "voxConstruct",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BeamThickness.setBoundingVoxels",
+      "name": "setBoundingVoxels",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BeamThickness.updateCell",
+      "name": "updateCell",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BodyCentreLattice",
+      "name": "BodyCentreLattice",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BodyCentreLattice.addCell",
+      "name": "addCell",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CellArray.unitCells",
+      "name": "unitCells",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CellBasedBeamThickness",
+      "name": "CellBasedBeamThickness",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CellBasedBeamThickness.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CellBasedBeamThickness.setBoundingVoxels",
+      "name": "setBoundingVoxels",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CellBasedBeamThickness.updateCell",
+      "name": "updateCell",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CreatePicoSessionOptions.now",
+      "name": "now",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CreateScalarFieldOptions.from",
+      "name": "from",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CreateVectorFieldOptions.from",
+      "name": "from",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitLidinoid.expression",
+      "name": "expression",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:ImplicitModular.sdf",
+      "name": "sdf",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ImplicitRadialGyroid.sdf",
+      "name": "sdf",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ImplicitRandomizedSchwarzPrimitive.sdf",
+      "name": "sdf",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ImplicitSchwarzPrimitive.expression",
+      "name": "expression",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:ImplicitSplitWallGyroid.expression",
+      "name": "expression",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:Lattice.addSphere",
+      "name": "addSphere",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LatticeManifold",
+      "name": "LatticeManifold",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LatticeManifold.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LatticeManifoldOptions.radius",
+      "name": "radius",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LatticePipe.radius",
+      "name": "radius",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LatticeType.addCell",
+      "name": "addCell",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LineModulation.add",
+      "name": "add",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Metadata.set",
+      "name": "set",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PicoError",
+      "name": "PicoError",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PicoError.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PicovoxelModel",
+      "name": "PicovoxelModel",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PipeSegmentOptions.innerRadius",
+      "name": "innerRadius",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PipeSegmentOptions.outerRadius",
+      "name": "outerRadius",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PolyLine.color",
+      "name": "color",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:ScalarField",
+      "name": "ScalarField",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ScalarField.get",
+      "name": "get",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ScalarField.set",
+      "name": "set",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SurfaceModulation.sub",
+      "name": "sub",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ToSvgOptions.solid",
+      "name": "solid",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VdbFile.add",
+      "name": "add",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VectorField",
+      "name": "VectorField",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VectorField.get",
+      "name": "get",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VectorField.set",
+      "name": "set",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels.metadata",
+      "name": "metadata",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Voxels.projectZSlice",
+      "name": "projectZSlice",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels.properties",
+      "name": "properties",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels.smoothen",
+      "name": "smoothen",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Voxels.trim",
+      "name": "trim",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:createRandom",
+      "name": "createRandom",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:cylindrical.create",
+      "name": "create",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:frame.ptFromWorld",
+      "name": "ptFromWorld",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:frame.world",
+      "name": "world",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:localFrame.createZ",
+      "name": "createZ",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:localFrame.inverted",
+      "name": "inverted",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:meshUtility",
+      "name": "meshUtility",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:meshUtility.applyTransformation",
+      "name": "applyTransformation",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:rad.atan",
+      "name": "atan",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:rad.atan2",
+      "name": "atan2",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:sh",
+      "name": "sh",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:spherical.create",
+      "name": "create",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:splineOps.reparametrizedBySpacing",
+      "name": "reparametrizedBySpacing",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:uf.transFixed",
+      "name": "transFixed",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec2.isFinite",
+      "name": "isFinite",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3.isFinite",
+      "name": "isFinite",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3.neg",
+      "name": "neg",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3.safeNormalized",
+      "name": "safeNormalized",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3.unitZ",
+      "name": "unitZ",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vecOps.setRadius",
+      "name": "setRadius",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AllocatedCounts.metadata",
+      "name": "metadata",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BaseBox.fromBounds",
+      "name": "fromBounds",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseBox.setDepth",
+      "name": "setDepth",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseBox.setWidth",
+      "name": "setWidth",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseCone.cylinder",
+      "name": "cylinder",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BaseCone.voxConstruct",
+      "name": "voxConstruct",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseCylinder.setPolarSteps",
+      "name": "setPolarSteps",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseCylinder.setRadialSteps",
+      "name": "setRadialSteps",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseLens.frame",
+      "name": "frame",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseLens.setPolarSteps",
+      "name": "setPolarSteps",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseLens.setRadialSteps",
+      "name": "setRadialSteps",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseLens.surfacePoint",
+      "name": "surfacePoint",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BasePipe.setPolarSteps",
+      "name": "setPolarSteps",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BasePipe.setRadialSteps",
+      "name": "setRadialSteps",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BasePipe.surfacePoint",
+      "name": "surfacePoint",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BasePipeSegment",
+      "name": "BasePipeSegment",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BasePipeSegment.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseRevolve.frame",
+      "name": "frame",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseRevolve.frames",
+      "name": "frames",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseRing",
+      "name": "BaseRing",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseRing.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseRing.frame",
+      "name": "frame",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseRing.setRadius",
+      "name": "setRadius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseShape.trafo",
+      "name": "trafo",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSphere.frame",
+      "name": "frame",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseSphere.setRadius",
+      "name": "setRadius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ConformalCellArray",
+      "name": "ConformalCellArray",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ConformalCellArray.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ConformalCellArray.unitCells",
+      "name": "unitCells",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ConstantBeamThickness",
+      "name": "ConstantBeamThickness",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ConstantBeamThickness.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CreateVoxelsOptions",
+      "name": "CreateVoxelsOptions",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:CreateVoxelsOptions.shape",
+      "name": "shape",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Frame.lx",
+      "name": "lx",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Frame.ly",
+      "name": "ly",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Frames.frameAt",
+      "name": "frameAt",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Frames.ofType",
+      "name": "ofType",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Frames.spineAt",
+      "name": "spineAt",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:FullWallLogic",
+      "name": "FullWallLogic",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Implicit",
+      "name": "Implicit",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Implicit.sdf",
+      "name": "sdf",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ImplicitGenus",
+      "name": "ImplicitGenus",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitGenus.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitGenus.sdf",
+      "name": "sdf",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ImplicitGyroid.sdf",
+      "name": "sdf",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ImplicitGyroid.thicknessRatio",
+      "name": "thicknessRatio",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitLidinoid.sdf",
+      "name": "sdf",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ImplicitModular",
+      "name": "ImplicitModular",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitModular.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitRadialGyroid",
+      "name": "ImplicitRadialGyroid",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitRadialGyroid.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitRandomizedSchwarzPrimitive",
+      "name": "ImplicitRandomizedSchwarzPrimitive",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitRandomizedSchwarzPrimitive.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitSchwarzDiamond",
+      "name": "ImplicitSchwarzDiamond",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitSchwarzDiamond.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitSchwarzDiamond.sdf",
+      "name": "sdf",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ImplicitSchwarzPrimitive.sdf",
+      "name": "sdf",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ImplicitSphere",
+      "name": "ImplicitSphere",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitSphere.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitSphere.sdf",
+      "name": "sdf",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ImplicitSplitVoidGyroid",
+      "name": "ImplicitSplitVoidGyroid",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitSplitVoidGyroid.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitSplitVoidGyroid.sdf",
+      "name": "sdf",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ImplicitSplitWallGyroid.sdf",
+      "name": "sdf",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ImplicitSuperEllipsoid",
+      "name": "ImplicitSuperEllipsoid",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitSuperEllipsoid.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ImplicitSuperEllipsoid.sdf",
+      "name": "sdf",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Lattice.dispose",
+      "name": "dispose",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LatticePipe",
+      "name": "LatticePipe",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LatticePipe.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LatticePipe.setRadius",
+      "name": "setRadius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LineModulation.fromPoints",
+      "name": "fromPoints",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LineModulation.scale",
+      "name": "scale",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LineModulation.sub",
+      "name": "sub",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Material",
+      "name": "Material",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:MemoryUsage.metadata",
+      "name": "metadata",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Mesh.toStl",
+      "name": "toStl",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Mesh.triangleCount",
+      "name": "triangleCount",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Metadata",
+      "name": "Metadata",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:Metadata.dispose",
+      "name": "dispose",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Metadata.get",
+      "name": "get",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Pico.createScalarField",
+      "name": "createScalarField",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Pico.createVdb",
+      "name": "createVdb",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Pico.createVectorField",
+      "name": "createVectorField",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Pico.handle",
+      "name": "handle",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Pico.openVdb",
+      "name": "openVdb",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PicovoxelPart.shape",
+      "name": "shape",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:RandomDeformationField",
+      "name": "RandomDeformationField",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RandomDeformationField.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RandomSource",
+      "name": "RandomSource",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RawTransitionTpmsPattern",
+      "name": "RawTransitionTpmsPattern",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RegularCellArray",
+      "name": "RegularCellArray",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RegularCellArray.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RegularCellArray.unitCells",
+      "name": "unitCells",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ScalarField.traverse",
+      "name": "traverse",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ScalarFieldSlice.height",
+      "name": "height",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ScaleTrafo",
+      "name": "ScaleTrafo",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ScaleTrafo.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SdfFunction",
+      "name": "SdfFunction",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SdfImage.height",
+      "name": "height",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Spline",
+      "name": "Spline",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SurfaceBaseShape.surfacePoint",
+      "name": "surfacePoint",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TWO_PI",
+      "name": "TWO_PI",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TangentialControlSpline",
+      "name": "TangentialControlSpline",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TangentialControlSpline.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TangentialControlSpline.points",
+      "name": "points",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VdbFieldType",
+      "name": "VdbFieldType",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VdbFile.fields",
+      "name": "fields",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VdbFile.getScalarField",
+      "name": "getScalarField",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VdbFile.getVectorField",
+      "name": "getVectorField",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VdbFile.getVoxels",
+      "name": "getVoxels",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VdbFile.toBytes",
+      "name": "toBytes",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VectorField.traverse",
+      "name": "traverse",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VertexTransformation",
+      "name": "VertexTransformation",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:VoxelSlice.height",
+      "name": "height",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels.bounds",
+      "name": "bounds",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels.handle",
+      "name": "handle",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels.offset",
+      "name": "offset",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Voxels.volume",
+      "name": "volume",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:conformalShowcaseShapes",
+      "name": "conformalShowcaseShapes",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:conformalShowcaseShapes.box01",
+      "name": "box01",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:localFrame.rotated",
+      "name": "rotated",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:rad.acos",
+      "name": "acos",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:rad.add",
+      "name": "add",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:rad.asin",
+      "name": "asin",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:scalar",
+      "name": "scalar",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:sh.latFromLine",
+      "name": "latFromLine",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:sh.latFromTaperedBeam",
+      "name": "latFromTaperedBeam",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:splineOps.nurbsSpline",
+      "name": "nurbsSpline",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:splineOps.ontoFrame",
+      "name": "ontoFrame",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:splineOps.totalLength",
+      "name": "totalLength",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:surfaceNormalFieldExtractor",
+      "name": "surfaceNormalFieldExtractor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:uf.randomBool",
+      "name": "randomBool",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:uf.randomLinear",
+      "name": "randomLinear",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:uf.superShapeRadius",
+      "name": "superShapeRadius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:uf.superShapeRadiusPreset",
+      "name": "superShapeRadiusPreset",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:uf.transSmooth",
+      "name": "transSmooth",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec2.add",
+      "name": "add",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3.dot",
+      "name": "dot",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3.unitX",
+      "name": "unitX",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vec3.zero",
+      "name": "zero",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vecOps.flipForAlignment",
+      "name": "flipForAlignment",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vecOps.planarDir",
+      "name": "planarDir",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vecOps.updateRadius",
+      "name": "updateRadius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:vectorFieldMerge",
+      "name": "vectorFieldMerge",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    }
+  ]
+}

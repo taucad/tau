@@ -21,6 +21,7 @@ import {
   subscription,
 } from '#database/schema.js';
 import { retrieveStripePaymentIntent } from '#api/billing/billing-cash-stripe.js';
+import { isStripeSubscriptionEnding } from '#api/billing/billing-stripe.js';
 
 type Scan = typeof billingCashScan.$inferSelect;
 type Grant = typeof creditTransaction.$inferSelect;
@@ -388,6 +389,7 @@ export class BillingPurchaseReconciliationService {
             localDunningStartedAt: row.subscription.dunningStartedAt?.toISOString() ?? null,
             sourceStatus: source.status,
             sourceCancelAtPeriodEnd: source.cancel_at_period_end,
+            sourceCancelAt: source.cancel_at,
             sourceCustomerId: stripeId(source.customer) ?? null,
             boundCustomerId: row.binding.stripeCustomerId,
           },
@@ -580,7 +582,8 @@ function disagreeSubscription(
   if (source.livemode !== scan.livemode) reasons.push('subscription_livemode_mismatch');
   if (stripeId(source.customer) !== binding.stripeCustomerId) reasons.push('customer_binding_mismatch');
   if (source.status !== local.status) reasons.push('subscription_status_mismatch');
-  if (source.cancel_at_period_end !== (local.cancelAtPeriodEnd ?? false)) reasons.push('cancellation_intent_mismatch');
+  if (isStripeSubscriptionEnding(source) !== (local.cancelAtPeriodEnd ?? false))
+    reasons.push('cancellation_intent_mismatch');
   if (dunningSourceStatuses.has(source.status) !== (local.dunningStartedAt !== null)) {
     reasons.push('dunning_state_mismatch');
   }

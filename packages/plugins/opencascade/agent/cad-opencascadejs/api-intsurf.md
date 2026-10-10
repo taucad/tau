@@ -369,6 +369,12 @@ IntSurf_QuadricTool: declare class IntSurf_QuadricTool
 
 IntSurf_Situation: typeof IntSurf_Situation[keyof typeof IntSurf_Situation]
 
+  readonly IntSurf_Inside: 'IntSurf_Inside'
+
+  readonly IntSurf_Outside: 'IntSurf_Outside'
+
+  readonly IntSurf_Unknown: 'IntSurf_Unknown'
+
 IntSurf_Transition: declare class IntSurf_Transition
 
   // IntSurf_Transition.constructor (constructor)
@@ -400,6 +406,14 @@ IntSurf_Transition: declare class IntSurf_Transition
   [Symbol.dispose](): void;
 
 IntSurf_TypeTrans: typeof IntSurf_TypeTrans[keyof typeof IntSurf_TypeTrans]
+
+  readonly IntSurf_In: 'IntSurf_In'
+
+  readonly IntSurf_Out: 'IntSurf_Out'
+
+  readonly IntSurf_Touch: 'IntSurf_Touch'
+
+  readonly IntSurf_Undecided: 'IntSurf_Undecided'
 
 IntSurf_ListOfPntOn2S: NCollection_List_IntSurf_PntOn2S
 

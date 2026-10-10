@@ -1,6 +1,28 @@
 # manifold-3d — Classes
 
-3 top-level symbols. Signatures are verbatim typescript.
+5 top-level symbols. Signatures are verbatim typescript.
+
+// The abstract class from which other classes inherit
+BaseGLTFNode: export declare abstract class BaseGLTFNode
+
+  name?: string
+
+  translation?: Vec3 | ((t: number) => Vec3)
+
+  // From the reference frame of the model being rotated, rotations are applied in *z-y'-x"* order
+  // Remarks: From the global reference frame, a model will be rotated in *x-y-z* order. That is about the global X axis, then global Y axis, and finally global Z. This matches the behaviour of `Manifold.rotate()`.
+  rotation?: Vec3 | ((t: number) => Vec3)
+
+  scale?: Vec3 | ((t: number) => Vec3)
+
+  // BaseGLTFNode.constructor (constructor)
+  constructor(parent?: BaseGLTFNode);
+
+  readonly parent: BaseGLTFNode | undefined
+
+  // Does this node have any geometry that needs to be converted on export?
+  // BaseGLTFNode.isEmpty (method)
+  isEmpty(): boolean;
 
 // Two-dimensional cross sections guaranteed to be without self-intersections, or overlaps between polygons (from construction onwards)
 CrossSection: export declare class CrossSection
@@ -162,6 +184,42 @@ CrossSection: export declare class CrossSection
   // Frees the WASM memory of this CrossSection, since these cannot be garbage-collected automatically
   // CrossSection.delete (method)
   delete(): void;
+
+// Display a CrossSection in 3D space
+// Remarks: A CrossSection object is two dimensional. Attaching it as a node allows it to be included in the final exported file, complete with transformations. > [!NOTE] > > CrossSections are not -- and can never be -- manifold. That means > some exporters (like `.3mf`) will just skip over them entirely.
+CrossSectionGLTFNode: export declare class CrossSectionGLTFNode extends BaseGLTFNode
+
+  crossSection?: CrossSection
+
+  material?: GLTFMaterial
+
+  // CrossSectionGLTFNode.constructor (constructor)
+  constructor(parent?: BaseGLTFNode);
+
+  // CrossSectionGLTFNode.clone (method)
+  clone(newParent?: BaseGLTFNode): CrossSectionGLTFNode;
+
+  // Does this node have any geometry that needs to be converted on export?
+  // CrossSectionGLTFNode.isEmpty (method)
+  isEmpty(): boolean;
+
+  // Get the runID for this node
+  // Remarks: We don't need these for regular operations, but they do help when converting to meshes for export.
+  readonly runID: number
+
+// Position a manifold model for later export
+GLTFNode: export declare class GLTFNode extends BaseGLTFNode
+
+  manifold?: Manifold
+
+  material?: GLTFMaterial
+
+  // GLTFNode.clone (method)
+  clone(newParent?: BaseGLTFNode): GLTFNode;
+
+  // Does this node have any geometry that needs to be converted on export?
+  // GLTFNode.isEmpty (method)
+  isEmpty(): boolean;
 
 // This library's internal representation of an oriented, 2-manifold, triangle mesh - a simple boundary-representation of a solid object
 // Remarks: In addition to storing geometric data, a Manifold can also store an arbitrary number of vertex properties. These could be anything, e.g. normals, UV coordinates, colors, etc, but this library is completely agnostic. All properties are merely float values indexed by channel number. It is up to the user to associate channel numbers with meaning. Manifold allows vertex properties to be shared for efficient storage, or to have multiple property verts associated with a single geometric vertex, allowing sudden property changes, e.g. at Boolean intersections, without sacrificing manifoldness. Manifolds also keep track of their relationships to their inputs, via OriginalIDs and the faceIDs and transforms accessible through MeshGL. This allows object-level properties to be re-associated with the output after many operations, particularly useful for materials. Since separate object's properties are not mixed, there is no requirement that channels have consistent meaning between different inputs.
@@ -482,81 +540,3 @@ Manifold: export declare class Manifold
   // Frees the WASM memory of this Manifold, since these cannot be garbage-collected automatically
   // Manifold.delete (method)
   delete(): void;
-
-// An alternative to Mesh for output suitable for pushing into graphics libraries directly
-Mesh: export declare class Mesh
-
-  // Mesh.constructor (constructor)
-  constructor(options: MeshOptions);
-
-  // Number of properties per vertex, always >= 3
-  numProp: number
-
-  // Flat, GL-style interleaved list of all vertex properties
-  vertProperties: Float32Array
-
-  // The vertex indices of the three triangle corners in CCW (from the outside) order, for each triangle
-  triVerts: Uint32Array
-
-  // Optional
-  mergeFromVert: Uint32Array
-
-  // Optional
-  mergeToVert: Uint32Array
-
-  // Optional
-  runIndex: Uint32Array
-
-  // Optional
-  runOriginalID: Uint32Array
-
-  // Optional
-  runTransform: Float32Array
-
-  // Optional
-  faceID: Uint32Array
-
-  // Optional
-  halfedgeTangent: Float32Array
-
-  // Tolerance for mesh simplification
-  tolerance: number
-
-  // Number of triangles
-  numTri
-
-  // Number of property vertices
-  numVert
-
-  // Number of triangle runs
-  numRun
-
-  // Updates the mergeFromVert and mergeToVert vectors in order to create a manifold solid
-  // Remarks: There is no guarantee the result will be manifold - this is a best-effort helper function designed primarily to aid in the case where a manifold multi-material MeshGL was produced, but its merge vectors were lost due to a round-trip through a file format. Constructing a Manifold from the result will report a Status if it is not manifold.
-  // Mesh.merge (method)
-  merge(): boolean;
-
-  // Gets the three vertex indices of this triangle in CCW order
-  // Mesh.verts (method)
-  verts(tri: number): SealedUint32Array<3>;
-  //   tri: triangle index
-
-  // Gets the x, y, z position of this vertex
-  // Mesh.position (method)
-  position(vert: number): SealedFloat32Array<3>;
-  //   vert: vertex index
-
-  // Gets any other properties associated with this vertex
-  // Mesh.extras (method)
-  extras(vert: number): Float32Array;
-  //   vert: vertex index
-
-  // Gets the tangent vector starting at verts(tri)[j] pointing to the next Bezier point along the CCW edge
-  // Mesh.tangent (method)
-  tangent(halfedge: number): SealedFloat32Array<4>;
-  //   halfedge: halfedge index
-
-  // Gets the column-major 4x4 matrix transform from the original mesh to these related triangles
-  // Mesh.transform (method)
-  transform(run: number): Mat4;
-  //   run: triangle run index

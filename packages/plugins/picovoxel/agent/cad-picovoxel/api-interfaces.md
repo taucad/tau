@@ -9,14 +9,14 @@ AddBeamOptions: interface AddBeamOptions
   end: Vec3
 
   // Uniform radius
-  radius: number
+  radius?: number
 
-  startRadius: number
+  startRadius?: number
 
-  endRadius: number
+  endRadius?: number
 
   // Hemispherical end caps (default true, as upstream)
-  roundCap: boolean
+  roundCap?: boolean
 
 // An axis-aligned box in millimetres
 Bounds: interface Bounds
@@ -32,44 +32,44 @@ CreatePicoOptions: interface CreatePicoOptions extends CreatePicoRuntimeOptions,
 CreatePicoRuntimeOptions: interface CreatePicoRuntimeOptions
 
   // Emscripten Module overrides forwarded to instantiation
-  wasm: PicoWasmOverrides
+  wasm?: PicoWasmOverrides
 
   // A compiled `WebAssembly.Module` of this entry's wasm (`pico.wasm` for the base entry, `pico-multi.wasm` for `picovoxel/multi`)
-  wasmModule: WebAssembly.Module
+  wasmModule?: WebAssembly.Module
 
 // Options that shape a session
 CreatePicoSessionOptions: interface CreatePicoSessionOptions
 
   // Voxel edge length in millimetres
-  voxelSize: number
+  voxelSize?: number
 
   // Native-memory warning threshold in bytes (default 1 GiB)
-  memoryWarningBytes: number
+  memoryWarningBytes?: number
 
   // The session's lane, a policy claim about every value it produces (see docs/lanes.md)
-  lane: 'exact' | 'fast' | 'auto'
+  lane?: 'exact' | 'fast' | 'auto'
 
   // Session-wide default for the offset family's `fastRenorm` (first-order renormalization — 3.5–3.9× on offsets, output bounded and gated, see `offset()`)
-  fastRenorm: boolean
+  fastRenorm?: boolean
 
   // Routes lattice rendering down the serial C#-identical `Voxels::RenderLattice` loop instead of the parallel tube-complex lane
   // Remarks: Choose `true` for tiny lattices: the tube lane's fixed setup cost (spatial bucketing, the deterministic split tree) is negligible at 10^5 beams and dominant at ~14 — the 14-beam HeatX print web takes 2.9 ms serial and 7.3 ms on the tube lane. The catch: the serial arm mis-renders beams whose end spheres nest (an upstream defect that loses 90.7% of the volume), which the tube lane renders correctly.
-  serialLattice: boolean
+  serialLattice?: boolean
 
-  registry: HandleRegistry
+  registry?: HandleRegistry
 
-  now: () => number
+  now?: () => number
 
 FromStlOptions: interface FromStlOptions
 
   // 'auto' honours the UNITS= header, defaulting to mm
-  unit: StlUnit
+  unit?: StlUnit
 
   // Post-scale applied after unit conversion
-  scale: number
+  scale?: number
 
   // Post-offset in mm, applied last
-  offset: Vec3
+  offset?: Vec3
 
 Lattice: interface Lattice
 
@@ -86,10 +86,10 @@ Lattice: interface Lattice
   // Lattice.toVoxels (method)
   toVoxels(): Voxels;
 
-  memUsage: number
+  readonly memUsage: number
 
   // Raw ABI handle — escape hatch
-  handle: bigint
+  readonly handle: bigint
 
   // Optional
   // Lattice.dispose (method)
@@ -121,14 +121,14 @@ MemoryUsage: interface MemoryUsage
 Mesh: interface Mesh
 
   // Vertex positions, xyz triples in mm
-  vertices: Float32Array
+  readonly vertices: Float32Array
 
   // Triangle corner indices, triples
-  triangles: Uint32Array
+  readonly triangles: Uint32Array
 
-  vertexCount: number
+  readonly vertexCount: number
 
-  triangleCount: number
+  readonly triangleCount: number
 
   // Bounding box
   // Mesh.bounds (method)
@@ -179,10 +179,10 @@ Mesh: interface Mesh
     }): Uint8Array;
 
   // Value provenance, inherited from the producing voxels/mesh chain
-  lane: 'exact' | 'fast'
+  readonly lane: 'exact' | 'fast'
 
   // Raw ABI handle — escape hatch
-  handle: bigint
+  readonly handle: bigint
 
   // Optional
   // Mesh.dispose (method)
@@ -194,7 +194,7 @@ Mesh: interface Mesh
 Metadata: interface Metadata
 
   // Number of entries in the table
-  count: number
+  readonly count: number
 
   // Every entry name, index order
   // Metadata.names (method)
@@ -216,7 +216,7 @@ Metadata: interface Metadata
   remove(name: string): void;
 
   // Raw ABI handle — escape hatch
-  handle: bigint
+  readonly handle: bigint
 
   // Optional
   // Metadata.dispose (method)
@@ -227,16 +227,16 @@ Metadata: interface Metadata
 
 Pico: interface Pico
 
-  voxelSize: number
+  readonly voxelSize: number
 
   // The RESOLVED session lane (never `'auto'`
-  lane: 'exact' | 'fast' | 'open'
+  readonly lane: 'exact' | 'fast' | 'open'
 
-  name: string
+  readonly name: string
 
-  version: string
+  readonly version: string
 
-  buildInfo: string
+  readonly buildInfo: string
 
   // Convert voxel-index coordinates to world millimetres
   // Pico.voxelToMm (method)
@@ -291,16 +291,16 @@ Pico: interface Pico
   meshFromStl(bytes: Uint8Array, options?: FromStlOptions): Mesh;
 
   // PicoGK-side memory usage in bytes, per object type
-  memory: MemoryUsage
+  readonly memory: MemoryUsage
 
   // PicoGK's own per-type allocation counters — the leak oracle
-  allocated: AllocatedCounts
+  readonly allocated: AllocatedCounts
 
   // Escape hatch
-  module: PicoWasmModule
+  readonly module: PicoWasmModule
 
   // Escape hatch
-  handle: bigint
+  readonly handle: bigint
 
   // Deterministic teardown
   // Pico.dispose (method)
@@ -327,16 +327,16 @@ PicoRuntime: interface PicoRuntime
 PicoWasmOverrides: interface PicoWasmOverrides
 
   // Returns the URL of the wasm file (a filesystem path also works in Node)
-  locateFile: (file: string, scriptDirectory: string) => string
+  locateFile?: (file: string, scriptDirectory: string) => string
 
   // The pthread worker script (`picovoxel/multi/worker`), loaded by every worker as a module
-  mainScriptUrlOrBlob: string | Blob
+  mainScriptUrlOrBlob?: string | Blob
 
   // Instantiates the module yourself
-  instantiateWasm: (imports: WebAssembly.Imports, receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void) => unknown
+  instantiateWasm?: (imports: WebAssembly.Imports, receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void) => unknown
 
   // The wasm file's bytes, compiled in place of fetching the file
-  wasmBinary: ArrayBuffer | Uint8Array
+  wasmBinary?: ArrayBuffer | Uint8Array
 
 PolyLine: interface PolyLine
 
@@ -349,12 +349,12 @@ PolyLine: interface PolyLine
   addVertices(positions: readonly Vec3[]): void;
 
   // All vertices, index order
-  vertices: Vec3[]
+  readonly vertices: Vec3[]
 
-  vertexCount: number
+  readonly vertexCount: number
 
   // RGBA, each 0..1, as the line was created
-  color: readonly [number, number, number, number]
+  readonly color: readonly [number, number, number, number]
 
   // PolyLine.bounds (method)
   bounds(): {
@@ -362,10 +362,10 @@ PolyLine: interface PolyLine
       max: Vec3;
     };
 
-  memUsage: number
+  readonly memUsage: number
 
   // Raw ABI handle — escape hatch
-  handle: bigint
+  readonly handle: bigint
 
   // Optional
   // PolyLine.dispose (method)
@@ -426,47 +426,47 @@ ScalarFieldSlice: interface ScalarFieldSlice
 
 ShellOptions: interface ShellOptions
 
-  offset: number
+  offset?: number
 
-  inner: number
+  inner?: number
 
-  outer: number
+  outer?: number
 
-  smoothInner: number
+  smoothInner?: number
 
   // See `offset({ fastRenorm })`
-  fastRenorm: boolean
+  fastRenorm?: boolean
 
 SurfaceNormalFieldOptions: interface SurfaceNormalFieldOptions
 
   // Active values with |sd| above this (voxel units) are skipped (C# `fSurfaceThresholdVx`, default 0.5)
-  surfaceThresholdVx: number
+  surfaceThresholdVx?: number
 
   // Keep only normals within the tolerance of this direction (C# `vecDirectionFilter`)
-  directionFilter: Vec3
+  directionFilter?: Vec3
 
   // Allowed |1 - dot| deviation, 0..1 (C# `fDirectionFilterTolerance`)
-  directionFilterTolerance: number
+  directionFilterTolerance?: number
 
   // Component-wise scale applied to stored normals (C# `vecScaleBy`)
-  scaleBy: Vec3
+  scaleBy?: Vec3
 
 ToStlOptions: interface ToStlOptions
 
-  unit: StlUnit
+  unit?: StlUnit
 
   // Scale applied while still in mm, after offset
-  scale: number
+  scale?: number
 
   // Offset in mm, applied first
-  offset: Vec3
+  offset?: Vec3
 
   // Acknowledges, for this one export, that the geometry has non-exact provenance
-  acceptLane: 'fast'
+  acceptLane?: 'fast'
 
 VdbFile: interface VdbFile
 
-  fieldCount: number
+  readonly fieldCount: number
 
   // Name + type of every field, index order
   // VdbFile.fields (method)
@@ -495,7 +495,7 @@ VdbFile: interface VdbFile
     }): Uint8Array;
 
   // Raw ABI handle — escape hatch
-  handle: bigint
+  readonly handle: bigint
 
   // Optional
   // VdbFile.dispose (method)
@@ -557,7 +557,7 @@ Voxels: interface Voxels
   equals(other: Voxels): boolean;
 
   // THE emptiness oracle
-  isEmpty: boolean
+  readonly isEmpty: boolean
 
   // Pure surface offset
   // Remarks: `fastRenorm` (opt-in) runs the renormalization upstream performs after every half-voxel CFL step with a first-order upwind gradient instead of 5th-order HJ-WENO — 3.5–3.9x on the offset family, since renormalization is 94–97% of the offset wall. It CHANGES THE OUTPUT (measured at ≤2.2% volume, ≤0.36 mm peak narrow-band displacement, level set still clean; the measurements are recorded in the repository's bench/results/webgpu-v2/sk-0.8-ab.json), so it is never the library default — a session may default it on (see `CreatePicoOptions.fastRenorm`), and an explicit per-op value always wins.
@@ -628,7 +628,7 @@ Voxels: interface Voxels
     }): Voxels;
 
   // Volume in mm³ from the raw grid — fast but approximate after booleans (use `properties()`)
-  volume: number
+  readonly volume: number
 
   // Volume (mm³), surface area (mm²) and bounds free of boolean residue, from one native traversal of the mesh → fresh-voxels round-trip (src/pico-props.cpp)
   // Remarks: As in C# `CalculateProperties`, the round trip fills a sealed cavity, or one whose openings are about two voxels wide or narrower, and drops its surface. Cross-check parts with internal voids with `toMesh().measure()`; see https://github.com/taucad/picovoxel/blob/main/docs/memory-and-limits.md#known-limits.
@@ -699,7 +699,7 @@ Voxels: interface Voxels
     };
 
   // Number of Z slices
-  sliceCount: number
+  readonly sliceCount: number
 
   // Real-world origin of slice `index` in mm
   // Voxels.sliceOrigin (method)
@@ -715,15 +715,15 @@ Voxels: interface Voxels
   // Voxels.toScalarField (method)
   toScalarField(): ScalarField;
 
-  metadata: Metadata
+  readonly metadata: Metadata
 
-  memUsage: number
+  readonly memUsage: number
 
   // Value provenance
-  lane: 'exact' | 'fast'
+  readonly lane: 'exact' | 'fast'
 
   // Raw ABI handle — escape hatch
-  handle: bigint
+  readonly handle: bigint
 
   // Optional
   // Voxels.dispose (method)
@@ -789,50 +789,50 @@ UnitCell: interface UnitCell
 // A cylindrical coordinate (C# `Cylindrical`)
 Cylindrical: interface Cylindrical
 
-  r: number
+  readonly r: number
 
-  phi: Rad
+  readonly phi: Rad
 
-  z: number
+  readonly z: number
 
 // A rigid transform stored as explicit axes (C# `PicoGK.Shapes.Frame3d`)
 Frame: interface Frame
 
   // Origin of the frame in world coordinates (C# `vecPos`)
-  pos: Vec3
+  readonly pos: Vec3
 
   // Local X axis in world coordinates (C# `vecLx`)
-  lx: Vec3
+  readonly lx: Vec3
 
   // Local Y axis in world coordinates (C# `vecLy`)
-  ly: Vec3
+  readonly ly: Vec3
 
   // Local Z axis in world coordinates (C# `vecLz`)
-  lz: Vec3
+  readonly lz: Vec3
 
 // A polar coordinate (C# `PicoGK.Numerics.Polar`)
 Polar: interface Polar
 
-  r: number
+  readonly r: number
 
-  phi: Rad
+  readonly phi: Rad
 
 // A spherical coordinate (C# `Spherical`)
 Spherical: interface Spherical
 
-  r: number
+  readonly r: number
 
-  phi: Rad
+  readonly phi: Rad
 
-  theta: Rad
+  readonly theta: Rad
 
 Implicit: interface Implicit
 
   // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // The same field as a tape expression for the parallel fill
-  expression: SdfExpression
+  readonly expression: SdfExpression
 
 // C# `ILatticeBaseShape`
 LatticeBaseShape: interface LatticeBaseShape
@@ -843,18 +843,18 @@ LatticeBaseShape: interface LatticeBaseShape
 LatticeManifoldOptions: interface LatticeManifoldOptions
 
   // Required for the Frame form
-  length: number
+  length?: number
 
-  radius: number
+  radius?: number
 
   // Degrees
-  maxOverhangAngle: number
+  maxOverhangAngle?: number
 
   // Extend the teardrop in -Z as well (C# `bExtendBothSides = false`)
-  extendBothSides: boolean
+  extendBothSides?: boolean
 
   // C# `fMinPrintableRadius = 0.1`
-  minPrintableRadius: number
+  minPrintableRadius?: number
 
 // C# `IMeshBaseShape`
 MeshBaseShape: interface MeshBaseShape
@@ -865,7 +865,7 @@ MeshBaseShape: interface MeshBaseShape
 PipeSegmentOptions: interface PipeSegmentOptions
 
   // Required for the Frame form
-  length: number
+  length?: number
 
   innerRadius: number
 
@@ -899,10 +899,10 @@ SurfaceBaseShape: interface SurfaceBaseShape
 
 TangentOptions: interface TangentOptions
 
-  startTangentStrength: number
+  startTangentStrength?: number
 
-  endTangentStrength: number
+  endTangentStrength?: number
 
-  relativeStartStrength: boolean
+  relativeStartStrength?: boolean
 
-  relativeEndStrength: boolean
+  relativeEndStrength?: boolean

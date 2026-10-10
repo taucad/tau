@@ -436,9 +436,9 @@ describe('live workbench record host', () => {
       failInitialRead: true,
       initialServiceMissing: true,
     });
-    await waitFor(() => {
-      expect(readRecordIssues('p')).toMatchObject([{ kind: 'layout', state: 'reading', message: 'offline' }]);
-    });
+    // A bounded retry is not a problem yet: the header stays empty.
+    await act(async () => undefined);
+    expect(readRecordIssues('p')).toEqual([]);
     act(() => {
       host.readyService();
     });
@@ -529,7 +529,7 @@ describe('live workbench record host', () => {
     expect(host.applied.has(workbenchPaths.layout)).toBe(true);
     await host.failRead();
     expect(host.applied.has(workbenchPaths.layout)).toBe(false);
-    expect(readRecordIssues('p')).toMatchObject([{ kind: 'layout', state: 'reading', message: 'offline' }]);
+    expect(readRecordIssues('p')).toEqual([]);
     const priorApplications = apply.mock.calls.length;
     await host.set(host.bytes!);
     await waitFor(() => {

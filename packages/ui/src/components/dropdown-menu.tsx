@@ -386,10 +386,6 @@ function DropdownMenuToggleGroupItem<T extends string>({
     <div
       data-slot='dropdown-menu-toggle-group-item'
       className={cn('flex items-center justify-between px-3 py-1.5', className)}
-      // Prevent dropdown from closing when interacting with toggle group
-      onPointerDown={(event) => {
-        event.stopPropagation();
-      }}
     >
       <span className={cn(menuItemLayoutClass, menuItemIconClass, 'text-sm')}>
         {children}

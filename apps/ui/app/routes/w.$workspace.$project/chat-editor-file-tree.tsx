@@ -132,7 +132,7 @@ import {
   getFileTreeDownloadErrorMessage,
   getFileTreeDownloadPolicy,
 } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
-import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { previewProjectFileInQuickLook } from '#filesystem/desktop-quick-look.js';
 
 /**
@@ -2057,7 +2057,7 @@ export const ChatEditorFileTree = memo(function ({
                               onUpload={handleUploadClick}
                               onOpenInEditor={handleOpenInEditor}
                               onOpenInViewer={handleOpenInViewer}
-                              onQuickLook={isDesktopTarget ? handleQuickLook : undefined}
+                              onQuickLook={desktopBridge()?.quickLook ? handleQuickLook : undefined}
                               onDownload={handleDownload}
                               onCopyPath={handleCopyPath}
                               onCopyToProject={handleCopyToProject}

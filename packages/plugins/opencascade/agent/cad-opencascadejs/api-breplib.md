@@ -142,7 +142,31 @@ BRepLib_Command: declare class BRepLib_Command
 
 BRepLib_EdgeError: typeof BRepLib_EdgeError[keyof typeof BRepLib_EdgeError]
 
+  readonly BRepLib_EdgeDone: 'BRepLib_EdgeDone'
+
+  readonly BRepLib_PointProjectionFailed: 'BRepLib_PointProjectionFailed'
+
+  readonly BRepLib_ParameterOutOfRange: 'BRepLib_ParameterOutOfRange'
+
+  readonly BRepLib_DifferentPointsOnClosedCurve: 'BRepLib_DifferentPointsOnClosedCurve'
+
+  readonly BRepLib_PointWithInfiniteParameter: 'BRepLib_PointWithInfiniteParameter'
+
+  readonly BRepLib_DifferentsPointAndParameter: 'BRepLib_DifferentsPointAndParameter'
+
+  readonly BRepLib_LineThroughIdenticPoints: 'BRepLib_LineThroughIdenticPoints'
+
 BRepLib_FaceError: typeof BRepLib_FaceError[keyof typeof BRepLib_FaceError]
+
+  readonly BRepLib_FaceDone: 'BRepLib_FaceDone'
+
+  readonly BRepLib_NoFace: 'BRepLib_NoFace'
+
+  readonly BRepLib_NotPlanar: 'BRepLib_NotPlanar'
+
+  readonly BRepLib_CurveProjectionFailed: 'BRepLib_CurveProjectionFailed'
+
+  readonly BRepLib_ParametersOutOfRange: 'BRepLib_ParametersOutOfRange'
 
 BRepLib_FindSurface: declare class BRepLib_FindSurface
 
@@ -597,7 +621,25 @@ BRepLib_PointCloudShape: declare class BRepLib_PointCloudShape
 
 BRepLib_ShapeModification: typeof BRepLib_ShapeModification[keyof typeof BRepLib_ShapeModification]
 
+  readonly BRepLib_Preserved: 'BRepLib_Preserved'
+
+  readonly BRepLib_Deleted: 'BRepLib_Deleted'
+
+  readonly BRepLib_Trimmed: 'BRepLib_Trimmed'
+
+  readonly BRepLib_Merged: 'BRepLib_Merged'
+
+  readonly BRepLib_BoundaryModified: 'BRepLib_BoundaryModified'
+
 BRepLib_ShellError: typeof BRepLib_ShellError[keyof typeof BRepLib_ShellError]
+
+  readonly BRepLib_ShellDone: 'BRepLib_ShellDone'
+
+  readonly BRepLib_EmptyShell: 'BRepLib_EmptyShell'
+
+  readonly BRepLib_DisconnectedShell: 'BRepLib_DisconnectedShell'
+
+  readonly BRepLib_ShellParametersOutOfRange: 'BRepLib_ShellParametersOutOfRange'
 
 BRepLib_ToolTriangulatedShape: declare class BRepLib_ToolTriangulatedShape
 
@@ -659,3 +701,11 @@ BRepLib_ValidateEdge: declare class BRepLib_ValidateEdge
   [Symbol.dispose](): void;
 
 BRepLib_WireError: typeof BRepLib_WireError[keyof typeof BRepLib_WireError]
+
+  readonly BRepLib_WireDone: 'BRepLib_WireDone'
+
+  readonly BRepLib_EmptyWire: 'BRepLib_EmptyWire'
+
+  readonly BRepLib_DisconnectedWire: 'BRepLib_DisconnectedWire'
+
+  readonly BRepLib_NonManifoldWire: 'BRepLib_NonManifoldWire'

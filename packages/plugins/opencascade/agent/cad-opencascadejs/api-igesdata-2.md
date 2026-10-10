@@ -1,6 +1,29 @@
 # libcascade — IGESData (2)
 
-11 top-level symbols. Signatures are verbatim typescript.
+12 top-level symbols. Signatures are verbatim typescript.
+
+IGESData_ReadWriteModule: declare class IGESData_ReadWriteModule extends Interface_ReaderModule
+
+  // IGESData_ReadWriteModule.CaseIGES (method)
+  CaseIGES(typenum: number, formnum: number): number;
+
+  // IGESData_ReadWriteModule.WriteOwnParams (method)
+  WriteOwnParams(CN: number, ent: IGESData_IGESEntity, IW: IGESData_IGESWriter): void;
+
+  // IGESData_ReadWriteModule.get_type_name (method)
+  static get_type_name(): string;
+
+  // IGESData_ReadWriteModule.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // IGESData_ReadWriteModule.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // IGESData_ReadWriteModule.delete (method)
+  delete(): void;
+
+  // IGESData_ReadWriteModule.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 IGESData_SingleParentEntity: declare class IGESData_SingleParentEntity extends IGESData_IGESEntity
 
@@ -91,6 +114,14 @@ IGESData_SpecificModule: declare class IGESData_SpecificModule extends Standard_
   [Symbol.dispose](): void;
 
 IGESData_Status: typeof IGESData_Status[keyof typeof IGESData_Status]
+
+  readonly IGESData_EntityOK: 'IGESData_EntityOK'
+
+  readonly IGESData_EntityError: 'IGESData_EntityError'
+
+  readonly IGESData_ReferenceError: 'IGESData_ReferenceError'
+
+  readonly IGESData_TypeError: 'IGESData_TypeError'
 
 IGESData_ToolLocation: declare class IGESData_ToolLocation extends Standard_Transient
 

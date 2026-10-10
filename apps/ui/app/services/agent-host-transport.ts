@@ -1,5 +1,12 @@
-import type { AgentLiveEvent } from '@taucad/agent-host';
-import type { CommandAnswer, HostCommand, ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
+import type { SourceLiveEvent } from '@taucad/agent-host';
+import type {
+  CatchUpFrame,
+  CatchUpInput,
+  CommandAnswer,
+  HostCommand,
+  ReadAnswer,
+  ReadInput,
+} from '@taucad/agent-host/wire';
 
 /**
  * The wire the agent-host client is driven over: the keyed seam vocabulary (`@taucad/agent-host/wire`).
@@ -33,8 +40,10 @@ export type AgentHostTransport = {
   execute(command: HostCommand, signal?: AbortSignal): Promise<CommandAnswer>;
   /** One long-poll read of a chat's durable rows: a batch, or a refusal the reader resets on. */
   read(input: ReadInput): Promise<ReadAnswer>;
+  /** Capture bounded provisional pages and validate their exact source before publication. */
+  catchUp(input: CatchUpInput): AsyncIterable<CatchUpFrame>;
   /** Ephemeral model deltas for one chat, for as long as `signal` lives. */
-  liveEvents(chatId: string, signal: AbortSignal): AsyncIterable<AgentLiveEvent>;
+  liveEvents(chatId: string, signal: AbortSignal): AsyncIterable<SourceLiveEvent>;
   /**
    * Report the wire's final death — a worker that could not be replaced, a
    * daemon that could not be redialled. Fires at most once. A transport that

@@ -168,10 +168,11 @@ export const refusals = {
   MODEL_NOT_IN_CATALOG: { owner: 'gateway', retry: 'never' },
   ORIGIN_NOT_ALLOWED: { owner: 'gateway', retry: 'never' },
   /**
-   * The provider account behind the key Tau spent against has no credit or is not billable. Distinct from
-   * `INSUFFICIENT_CREDIT`, which is the customer's own Tau balance. `details` carries `providerId`, the provider's own
-   * `providerCode` when it sent one, and `accountOwner`: `operator` on a self-hosted API, whose message is the
-   * provider's own sentence, or `tau` on Cloud, whose message never names the supplier's state.
+   * The provider account behind the key Tau spent against has no credit, is not billable, or (on Cloud) refused the
+   * credential itself, `providerCode: 'credential_rejected'`. Distinct from `INSUFFICIENT_CREDIT`, which is the
+   * customer's own Tau balance. `details` carries `providerId`, the provider's own `providerCode` when it sent one, and
+   * `accountOwner`: `operator` on a self-hosted API, whose message is the provider's own sentence, or `tau` on Cloud,
+   * whose message never names the supplier's state.
    */
   PROVIDER_ACCOUNT_EXHAUSTED: { owner: 'gateway', retry: 'never' },
   PROVIDER_UNAVAILABLE: { owner: 'gateway', retry: 'resume' },
@@ -196,6 +197,16 @@ export const refusals = {
    * and nothing new can be charged to it. Signing in again does not change it; the card points to account support (W11).
    */
   BILLING_ACCOUNT_CLOSED: { owner: 'gateway', retry: 'never' },
+  /**
+   * Tau's operators paused this model route (HTTP 503, `details.routeId`). Resuming re-sends to the same paused route,
+   * so the card offers another model instead; its copy is the page's, never the gateway's sentence.
+   */
+  MODEL_ROUTE_PAUSED: { owner: 'gateway', retry: 'never' },
+  /**
+   * Admission refused spending on this account (HTTP 403): the account is restricted, or a billing case puts its own
+   * balance in question. Neither another model nor signing in changes it; the card points to support.
+   */
+  BILLING_ACCOUNT_RESTRICTED: { owner: 'gateway', retry: 'never' },
 
   // ── transport: the host's gateway client ────────────────────────────────────────────────────
   MODEL_PROVIDER_UNSUPPORTED: { owner: 'transport', retry: 'never' },

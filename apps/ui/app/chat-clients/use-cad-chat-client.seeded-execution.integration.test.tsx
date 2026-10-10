@@ -139,6 +139,8 @@ vi.mock('#hooks/use-file-manager.js', () => ({
  * `use-cad-chat-client.test.tsx`; this scope funds every turn. */
 vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
 vi.mock('#hooks/use-draft-image-error-toast.js', () => ({ useDraftImageErrorToast: () => undefined }));
+/* ChatTurnHost reads the usage-metrics preference through react-query; this scope has no query client. */
+vi.mock('#hooks/use-privacy-preferences.js', () => ({ usePrivacyPreferences: () => ({ preferences: undefined }) }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   readRootedBridgeCapabilities: async () => ({ writable: true, durability: 'exclusive-append' }),
   waitForRootedBridgeOpener: async () => undefined,
@@ -210,7 +212,15 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution | undefined
         // A seed waits for a fresh, caught-up read of its own empty host log.
         subscribe: (...args: Parameters<AgentHostClient['subscribe']>) => {
           queueMicrotask(() =>
-            args[3]?.({ status: 'batch', chatId, cursor: 0, nextCursor: 0, endCursor: 0, events: [] }),
+            args[3]?.({
+              status: 'batch',
+              sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+              chatId,
+              cursor: 0,
+              nextCursor: 0,
+              endCursor: 0,
+              events: [],
+            }),
           );
           return () => undefined;
         },

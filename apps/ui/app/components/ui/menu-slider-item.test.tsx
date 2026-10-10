@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   ContextMenu,
@@ -15,9 +15,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import {
   ContextMenuSliderItem,
   DropdownMenuSliderItem,
+  MenuSliderItem,
   preventMenuSliderEscapeDismissal,
 } from '#components/ui/menu-slider-item.js';
 
@@ -87,6 +89,44 @@ const ContextHarness = ({ onValueChange }: HarnessProperties): React.JSX.Element
   );
 };
 
+type SliderSurface = 'dropdown' | 'context' | 'popover';
+
+const ScrubDismissHarness = ({ surface }: { readonly surface: SliderSurface }): React.JSX.Element => {
+  const [value, setValue] = React.useState(50);
+  const properties = { value, 'aria-label': 'Opacity', onValueChange: setValue };
+
+  return (
+    <>
+      <button type='button'>Outside slider surface</button>
+      {surface === 'dropdown' ? (
+        <DropdownMenu defaultOpen>
+          <DropdownMenuTrigger>Settings</DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuSliderItem {...properties}>Opacity</DropdownMenuSliderItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : surface === 'context' ? (
+        <ContextMenu>
+          <ContextMenuTrigger>Target</ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuSliderItem {...properties}>Opacity</ContextMenuSliderItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      ) : (
+        <Popover defaultOpen>
+          <PopoverTrigger>Settings</PopoverTrigger>
+          <PopoverContent>
+            <button type='button'>Previous action</button>
+            <MenuSliderItem {...properties} dataSlot='plain-slider-item'>
+              Opacity
+            </MenuSliderItem>
+          </PopoverContent>
+        </Popover>
+      )}
+    </>
+  );
+};
+
 /** Opens the dropdown from the keyboard and moves from the item above onto the slider row. */
 const highlightDropdownSliderRow = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
   await user.tab();
@@ -99,6 +139,53 @@ const highlightDropdownSliderRow = async (user: ReturnType<typeof userEvent.setu
 };
 
 describe('MenuSliderItem', () => {
+  it.each<SliderSurface>(['dropdown', 'context', 'popover'])(
+    'should dismiss %s on the first outside press after scrubbing and restoring its value',
+    async (surface) => {
+      const user = userEvent.setup();
+      render(<ScrubDismissHarness surface={surface} />);
+      if (surface === 'context') {
+        fireEvent.contextMenu(screen.getByText('Target'));
+      }
+      const surfaceRole = surface === 'popover' ? 'dialog' : 'menu';
+      await screen.findByRole(surfaceRole);
+      const input = screen.getByRole<HTMLInputElement>('spinbutton', { name: 'Opacity' });
+      const slider = input.closest<HTMLElement>('[data-slot$="slider-item"]')!;
+      Object.defineProperty(slider, 'offsetWidth', { configurable: true, value: 100 });
+
+      fireSliderPointerEvent(slider, 'pointerdown', 0);
+      fireSliderPointerEvent(slider, 'pointermove', 4);
+      expect(input).toHaveValue('54');
+      fireSliderPointerEvent(slider, 'pointermove', 8);
+      expect(input).toHaveValue('58');
+      fireSliderPointerEvent(slider, 'pointerup', 8);
+      expect(screen.getByRole(surfaceRole)).toBeInTheDocument();
+
+      if (surface === 'popover') {
+        act(() => {
+          input.focus();
+          input.select();
+        });
+      } else {
+        act(() => {
+          screen.getByRole('menuitem', { name: 'Opacity, 58' }).focus();
+        });
+        await user.keyboard('{Enter}');
+      }
+      await user.keyboard('50{Enter}');
+      expect(input).toHaveValue('50');
+      expect(screen.getByRole(surfaceRole)).toBeInTheDocument();
+
+      const outside = screen.getByText('Outside slider surface');
+      fireSliderPointerEvent(outside, 'pointerdown', 200);
+      fireSliderPointerEvent(outside, 'pointerup', 200);
+      fireEvent.click(outside);
+      await waitFor(() => {
+        expect(screen.queryByRole(surfaceRole)).not.toBeInTheDocument();
+      });
+    },
+  );
+
   it('supports type, Enter, Arrow keys, and two-stage Escape without dismissing the dropdown early', async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();

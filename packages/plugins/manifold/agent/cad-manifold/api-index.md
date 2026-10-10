@@ -1,183 +1,228 @@
 # manifold-3d API index
 
-manifold-3d 3.4.1 · 166 symbols · extracted by TypeScript 5.9.3.
+manifold-3d 3.4.1 · 208 symbols · extracted by TypeScript 5.9.3.
 
-Every symbol appears here exactly once. The heading above each block names the file with its signature.
+Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 
 ## Functions — `api-functions.md`
 
-getCircularSegments (function) — Determine the result of the {@link setMinCircularAngle}, {@link setMinCircularEdgeLength}, and… [id: typescript:getCircularSegments]
-resetToCircularDefaults (function) — Resets the circular construction parameters to their defaults if {@link… [id: typescript:resetToCircularDefaults]
-setCircularSegments (function) — Sets the default number of circular segments for the {@link… [id: typescript:setCircularSegments]
-setMinCircularAngle (function) — Sets an angle constraint the default number of circular segments… [id: typescript:setMinCircularAngle]
-setMinCircularEdgeLength (function) — Sets a length constraint the default number of circular segments… [id: typescript:setMinCircularEdgeLength]
-triangulate (function) — Triangulates a set of /epsilon-valid polygons [id: typescript:triangulate]
-default (function) [id: typescript:default]
+getAnimationDuration (function) — Get the current duruation of the animation, in seconds
+getAnimationFPS (function) — Get the current animation frame rate
+getAnimationMode (function) — Get the current animation repeat mode
+getCircularSegments (function) — Determine the appropriate number of segments for a given radius
+getGLTFNodes (function) — Get a list of GLTF nodes that have been created…
+getMinCircularAngle (function) — Get the current angle constraint
+getMinCircularEdgeLength (function) — Get the current edge length constraint
+importManifold (function) — Import a model, and convert it to a Manifold object…
+importModel (function) — Import a model, for display only
+isManifoldCAD (function) — Is this module running in manifoldCAD.org or the ManifoldCAD CLI?
+only (function) — Wrap any shape object with this method to display it…
+resetGLTFNodes (function) — Clear the list of cached GLTF nodes
+setMaterial (function) — Return a shallow copy of the input manifold with the…
+setMorphEnd (function) — Apply a morphing animation to the input manifold
+setMorphStart (function) — Apply a morphing animation to the input manifold
+show (function) — Wrap any shape object with this method to display it…
+triangulate (function) — Triangulates a set of /epsilon-valid polygons
 
 ## Types — `api-types.md`
 
-Box (type) [2 members] — A three dimensional box, aligned to the coordinate system [id: typescript:Box]
-  Box.min (property) [id: typescript:Box.min]
-  Box.max (property) [id: typescript:Box.max]
-ErrorStatus (type) [id: typescript:ErrorStatus]
-FillRule (type) [id: typescript:FillRule]
-JoinType (type) [id: typescript:JoinType]
-Mat3 (type) — 3x3 matrix stored in column-major order [id: typescript:Mat3]
-Mat4 (type) — 4x4 matrix stored in column-major order [id: typescript:Mat4]
-Polygons (type) [id: typescript:Polygons]
-Rect (type) [2 members] — A two dimensional rectangle, aligned to the coordinate system [id: typescript:Rect]
-  Rect.min (property) [id: typescript:Rect.min]
-  Rect.max (property) [id: typescript:Rect.max]
-SimplePolygon (type) [id: typescript:SimplePolygon]
-Smoothness (type) [2 members] [id: typescript:Smoothness]
-  Smoothness.halfedge (property) [id: typescript:Smoothness.halfedge]
-  Smoothness.smoothness (property) [id: typescript:Smoothness.smoothness]
-Vec2 (type) — A vector in two dimensional space [id: typescript:Vec2]
-Vec3 (type) — A vector in three dimensional space [id: typescript:Vec3]
+AnimationMode (type)
+Box (type) [2 members] — A three dimensional box, aligned to the coordinate system
+  Box.min (property)
+  Box.max (property)
+ErrorStatus (type)
+FillRule (type)
+GLTFAttribute (type)
+JoinType (type)
+Mat3 (type) — 3x3 matrix stored in column-major order
+Mat4 (type) — 4x4 matrix stored in column-major order
+Polygons (type)
+Rect (type) [2 members] — A two dimensional rectangle, aligned to the coordinate system
+  Rect.min (property)
+  Rect.max (property)
+SimplePolygon (type)
+Smoothness (type) [2 members]
+  Smoothness.halfedge (property)
+  Smoothness.smoothness (property)
+Vec2 (type) — A vector in two dimensional space
+Vec3 (type) — A vector in three dimensional space
 
 ## Classes — `api-classes.md`
 
-CrossSection (class) [30 members] — Two-dimensional cross sections guaranteed to be without self-intersections, or overlaps… [id: typescript:CrossSection]
-  CrossSection.constructor (constructor) [id: typescript:CrossSection.constructor]
-  CrossSection.square (method) — Constructs a square with the given XY dimensions [id: typescript:CrossSection.square]
-  CrossSection.circle (method) — Constructs a circle of a given radius [id: typescript:CrossSection.circle]
-  CrossSection.extrude (method) — Constructs a manifold by extruding the cross-section along Z-axis [id: typescript:CrossSection.extrude]
-  CrossSection.revolve (method) — Constructs a manifold by revolving this cross-section around its Y-axis… [id: typescript:CrossSection.revolve]
-  CrossSection.transform (method) — Transform this CrossSection in space [id: typescript:CrossSection.transform]
-  CrossSection.translate (method) — Move this CrossSection in space [id: typescript:CrossSection.translate]
-  CrossSection.rotate (method) — Applies a (Z-axis) rotation to the CrossSection, in degrees [id: typescript:CrossSection.rotate]
-  CrossSection.scale (method) — Scale this CrossSection in space [id: typescript:CrossSection.scale]
-  CrossSection.mirror (method) — Mirror this CrossSection over the arbitrary axis described by the… [id: typescript:CrossSection.mirror]
-  CrossSection.warp (method) — Move the vertices of this CrossSection (creating a new one)… [id: typescript:CrossSection.warp]
-  CrossSection.offset (method) — Inflate the contours in CrossSection by the specified delta, handling… [id: typescript:CrossSection.offset]
-  CrossSection.simplify (method) — Remove vertices from the contours in this CrossSection that are… [id: typescript:CrossSection.simplify]
-  CrossSection.add (method) — Boolean union [id: typescript:CrossSection.add]
-  CrossSection.subtract (method) — Boolean difference [id: typescript:CrossSection.subtract]
-  CrossSection.intersect (method) — Boolean intersection [id: typescript:CrossSection.intersect]
-  CrossSection.union (method) — Boolean union of the cross-sections a and b Boolean union… [id: typescript:CrossSection.union]
-  CrossSection.difference (method) — Boolean difference of the cross-section b from the cross-section a… [id: typescript:CrossSection.difference]
-  CrossSection.intersection (method) — Boolean intersection of the cross-sections a and b Boolean intersection… [id: typescript:CrossSection.intersection]
-  CrossSection.hull (method) — Compute the convex hull of the contours in this CrossSection [id: typescript:CrossSection.hull]
-  CrossSection.compose (method) — Construct a CrossSection from a vector of other Polygons (batch… [id: typescript:CrossSection.compose]
-  CrossSection.decompose (method) — This operation returns a vector of CrossSections that are topologically… [id: typescript:CrossSection.decompose]
-  CrossSection.ofPolygons (method) — Create a 2d cross-section from a set of contours (complex… [id: typescript:CrossSection.ofPolygons]
-  CrossSection.toPolygons (method) — Return the contours of this CrossSection as a list of… [id: typescript:CrossSection.toPolygons]
-  CrossSection.area (method) — Return the total area covered by complex polygons making up… [id: typescript:CrossSection.area]
-  CrossSection.isEmpty (method) — Does the CrossSection (not) have any contours? [id: typescript:CrossSection.isEmpty]
-  CrossSection.numVert (method) — The number of vertices in the CrossSection [id: typescript:CrossSection.numVert]
-  CrossSection.numContour (method) — The number of contours in the CrossSection [id: typescript:CrossSection.numContour]
-  CrossSection.bounds (method) — Returns the axis-aligned bounding rectangle of all the CrossSection's vertices [id: typescript:CrossSection.bounds]
-  CrossSection.delete (method) — Frees the WASM memory of this CrossSection, since these cannot… [id: typescript:CrossSection.delete]
-Manifold (class) [60 members] — This library's internal representation of an oriented, 2-manifold, triangle mesh… [id: typescript:Manifold]
-  Manifold.constructor (constructor) [id: typescript:Manifold.constructor]
-  Manifold.tetrahedron (method) — Constructs a tetrahedron centered at the origin with one vertex… [id: typescript:Manifold.tetrahedron]
-  Manifold.cube (method) — Constructs a unit cube (edge lengths all one), by default… [id: typescript:Manifold.cube]
-  Manifold.cylinder (method) — A convenience constructor for the common case of extruding a… [id: typescript:Manifold.cylinder]
-  Manifold.sphere (method) — Constructs a geodesic sphere of a given radius [id: typescript:Manifold.sphere]
-  Manifold.extrude (method) — Constructs a manifold from a set of polygons/cross-section by extruding… [id: typescript:Manifold.extrude]
-  Manifold.revolve (method) — Constructs a manifold from a set of polygons/cross-section by revolving… [id: typescript:Manifold.revolve]
-  Manifold.ofMesh (method) — Convert a Mesh into a Manifold, retaining its properties and… [id: typescript:Manifold.ofMesh]
-  Manifold.smooth (method) — Constructs a smooth version of the input mesh by creating… [id: typescript:Manifold.smooth]
-  Manifold.levelSet (method) — Constructs a level-set Mesh from the input Signed-Distance Function (SDF) [id: typescript:Manifold.levelSet]
-  Manifold.transform (method) — Transform this Manifold in space [id: typescript:Manifold.transform]
-  Manifold.translate (method) — Move this Manifold in space [id: typescript:Manifold.translate]
-  Manifold.rotate (method) — Applies an Euler or Tait-Bryan angle rotation to the manifold [id: typescript:Manifold.rotate]
-  Manifold.scale (method) — Scale this Manifold in space [id: typescript:Manifold.scale]
-  Manifold.mirror (method) — Mirror this Manifold over the plane described by the unit… [id: typescript:Manifold.mirror]
-  Manifold.warp (method) — This function does not change the topology, but allows the… [id: typescript:Manifold.warp]
-  Manifold.smoothByNormals (method) — Smooths out the Manifold by filling in the halfedgeTangent vectors [id: typescript:Manifold.smoothByNormals]
-  Manifold.smoothOut (method) — Smooths out the Manifold by filling in the halfedgeTangent vectors [id: typescript:Manifold.smoothOut]
-  Manifold.refine (method) — Increase the density of the mesh by splitting every edge… [id: typescript:Manifold.refine]
-  Manifold.refineToLength (method) — Increase the density of the mesh by splitting each edge… [id: typescript:Manifold.refineToLength]
-  Manifold.refineToTolerance (method) — Increase the density of the mesh by splitting each edge… [id: typescript:Manifold.refineToTolerance]
-  Manifold.setProperties (method) — Create a new copy of this manifold with updated vertex… [id: typescript:Manifold.setProperties]
-  Manifold.calculateCurvature (method) — Curvature is the inverse of the radius of curvature, and… [id: typescript:Manifold.calculateCurvature]
-  Manifold.calculateNormals (method) — Fills in vertex properties for normal vectors, calculated from the… [id: typescript:Manifold.calculateNormals]
-  Manifold.add (method) — Boolean union [id: typescript:Manifold.add]
-  Manifold.subtract (method) — Boolean difference [id: typescript:Manifold.subtract]
-  Manifold.intersect (method) — Boolean intersection [id: typescript:Manifold.intersect]
-  Manifold.union (method) — Boolean union of the manifolds a and b Boolean union… [id: typescript:Manifold.union]
-  Manifold.difference (method) — Boolean difference of the manifold b from the manifold a… [id: typescript:Manifold.difference]
-  Manifold.intersection (method) — Boolean intersection of the manifolds a and b Boolean intersection… [id: typescript:Manifold.intersection]
-  Manifold.split (method) — Split cuts this manifold in two using the cutter manifold [id: typescript:Manifold.split]
-  Manifold.splitByPlane (method) — Convenient version of Split() for a half-space [id: typescript:Manifold.splitByPlane]
-  Manifold.trimByPlane (method) — Removes everything behind the given half-space plane [id: typescript:Manifold.trimByPlane]
-  Manifold.minkowskiSum (method) — Compute the minkowski sum of this manifold with another [id: typescript:Manifold.minkowskiSum]
-  Manifold.minkowskiDifference (method) — Subtract the sweep of the other manifold across this manifold's… [id: typescript:Manifold.minkowskiDifference]
-  Manifold.slice (method) — Returns the cross section of this object parallel to the… [id: typescript:Manifold.slice]
-  Manifold.project (method) — Returns a cross section representing the projected outline of this… [id: typescript:Manifold.project]
-  Manifold.hull (method) — Compute the convex hull of all points in this Manifold [id: typescript:Manifold.hull]
-  Manifold.compose (method) — Constructs a new manifold from a list of other manifolds [id: typescript:Manifold.compose]
-  Manifold.decompose (method) — This operation returns a vector of Manifolds that are topologically… [id: typescript:Manifold.decompose]
-  Manifold.isEmpty (method) — Does the Manifold have any triangles? [id: typescript:Manifold.isEmpty]
-  Manifold.numVert (method) — The number of vertices in the Manifold [id: typescript:Manifold.numVert]
-  Manifold.numTri (method) — The number of triangles in the Manifold [id: typescript:Manifold.numTri]
-  Manifold.numEdge (method) — The number of edges in the Manifold [id: typescript:Manifold.numEdge]
-  Manifold.numProp (method) — The number of properties per vertex in the Manifold [id: typescript:Manifold.numProp]
-  Manifold.numPropVert (method) — The number of property vertices in the Manifold [id: typescript:Manifold.numPropVert]
-  Manifold.boundingBox (method) — Returns the axis-aligned bounding box of all the Manifold's vertices [id: typescript:Manifold.boundingBox]
-  Manifold.tolerance (method) — Returns the tolerance of this Manifold's vertices, which tracks the… [id: typescript:Manifold.tolerance]
-  Manifold.setTolerance (method) — Return a copy of the manifold with the set tolerance… [id: typescript:Manifold.setTolerance]
-  Manifold.simplify (method) — Return a copy of the manifold simplified to the given… [id: typescript:Manifold.simplify]
-  Manifold.genus (method) — The genus is a topological property of the manifold, representing… [id: typescript:Manifold.genus]
-  Manifold.surfaceArea (method) — Returns the surface area of the manifold [id: typescript:Manifold.surfaceArea]
-  Manifold.volume (method) — Returns the volume of the manifold [id: typescript:Manifold.volume]
-  Manifold.minGap (method) — Returns the minimum gap between two manifolds [id: typescript:Manifold.minGap]
-  Manifold.status (method) — Returns the reason for an input Mesh producing an empty… [id: typescript:Manifold.status]
-  Manifold.getMesh (method) — Returns a Mesh that is designed to easily push into… [id: typescript:Manifold.getMesh]
-  Manifold.asOriginal (method) — If you copy a manifold, but you want this new… [id: typescript:Manifold.asOriginal]
-  Manifold.originalID (method) — If this mesh is an original, this returns its ID… [id: typescript:Manifold.originalID]
-  Manifold.reserveIDs (method) — Returns the first of n sequential new unique mesh IDs… [id: typescript:Manifold.reserveIDs]
-  Manifold.delete (method) — Frees the WASM memory of this Manifold, since these cannot… [id: typescript:Manifold.delete]
-Mesh (class) [21 members] — An alternative to Mesh for output suitable for pushing into… [id: typescript:Mesh]
-  Mesh.constructor (constructor) [id: typescript:Mesh.constructor]
-  Mesh.numProp (property) — Number of properties per vertex, always >= 3 [id: typescript:Mesh.numProp]
-  Mesh.vertProperties (property) — Flat, GL-style interleaved list of all vertex properties [id: typescript:Mesh.vertProperties]
-  Mesh.triVerts (property) — The vertex indices of the three triangle corners in CCW… [id: typescript:Mesh.triVerts]
-  Mesh.mergeFromVert (property) — Optional [id: typescript:Mesh.mergeFromVert]
-  Mesh.mergeToVert (property) — Optional [id: typescript:Mesh.mergeToVert]
-  Mesh.runIndex (property) — Optional [id: typescript:Mesh.runIndex]
-  Mesh.runOriginalID (property) — Optional [id: typescript:Mesh.runOriginalID]
-  Mesh.runTransform (property) — Optional [id: typescript:Mesh.runTransform]
-  Mesh.faceID (property) — Optional [id: typescript:Mesh.faceID]
-  Mesh.halfedgeTangent (property) — Optional [id: typescript:Mesh.halfedgeTangent]
-  Mesh.tolerance (property) — Tolerance for mesh simplification [id: typescript:Mesh.tolerance]
-  Mesh.numTri (property) — Number of triangles [id: typescript:Mesh.numTri]
-  Mesh.numVert (property) — Number of property vertices [id: typescript:Mesh.numVert]
-  Mesh.numRun (property) — Number of triangle runs [id: typescript:Mesh.numRun]
-  Mesh.merge (method) — Updates the mergeFromVert and mergeToVert vectors in order to create… [id: typescript:Mesh.merge]
-  Mesh.verts (method) — Gets the three vertex indices of this triangle in CCW… [id: typescript:Mesh.verts]
-  Mesh.position (method) — Gets the x, y, z position of this vertex [id: typescript:Mesh.position]
-  Mesh.extras (method) — Gets any other properties associated with this vertex [id: typescript:Mesh.extras]
-  Mesh.tangent (method) — Gets the tangent vector starting at verts(tri)[j] pointing to the… [id: typescript:Mesh.tangent]
-  Mesh.transform (method) — Gets the column-major 4x4 matrix transform from the original mesh… [id: typescript:Mesh.transform]
+BaseGLTFNode (class) [7 members] — The abstract class from which other classes inherit
+  BaseGLTFNode.name (property)
+  BaseGLTFNode.translation (property)
+  BaseGLTFNode.rotation (property) — From the reference frame of the model being rotated, rotations…
+  BaseGLTFNode.scale (property)
+  BaseGLTFNode.constructor (constructor)
+  BaseGLTFNode.parent (property)
+  BaseGLTFNode.isEmpty (method) — Does this node have any geometry that needs to be…
+CrossSection (class) [30 members] — Two-dimensional cross sections guaranteed to be without self-intersections, or overlaps…
+  CrossSection.constructor (constructor)
+  CrossSection.square (method) — Constructs a square with the given XY dimensions
+  CrossSection.circle (method) — Constructs a circle of a given radius
+  CrossSection.extrude (method) — Constructs a manifold by extruding the cross-section along Z-axis
+  CrossSection.revolve (method) — Constructs a manifold by revolving this cross-section around its Y-axis…
+  CrossSection.transform (method) — Transform this CrossSection in space
+  CrossSection.translate (method) — Move this CrossSection in space
+  CrossSection.rotate (method) — Applies a (Z-axis) rotation to the CrossSection, in degrees
+  CrossSection.scale (method) — Scale this CrossSection in space
+  CrossSection.mirror (method) — Mirror this CrossSection over the arbitrary axis described by the…
+  CrossSection.warp (method) — Move the vertices of this CrossSection (creating a new one)…
+  CrossSection.offset (method) — Inflate the contours in CrossSection by the specified delta, handling…
+  CrossSection.simplify (method) — Remove vertices from the contours in this CrossSection that are…
+  CrossSection.add (method) — Boolean union
+  CrossSection.subtract (method) — Boolean difference
+  CrossSection.intersect (method) — Boolean intersection
+  CrossSection.union (method) — Boolean union of the cross-sections a and b Boolean union…
+  CrossSection.difference (method) — Boolean difference of the cross-section b from the cross-section a…
+  CrossSection.intersection (method) — Boolean intersection of the cross-sections a and b Boolean intersection…
+  CrossSection.hull (method) — Compute the convex hull of the contours in this CrossSection
+  CrossSection.compose (method) — Construct a CrossSection from a vector of other Polygons (batch…
+  CrossSection.decompose (method) — This operation returns a vector of CrossSections that are topologically…
+  CrossSection.ofPolygons (method) — Create a 2d cross-section from a set of contours (complex…
+  CrossSection.toPolygons (method) — Return the contours of this CrossSection as a list of…
+  CrossSection.area (method) — Return the total area covered by complex polygons making up…
+  CrossSection.isEmpty (method) — Does the CrossSection (not) have any contours?
+  CrossSection.numVert (method) — The number of vertices in the CrossSection
+  CrossSection.numContour (method) — The number of contours in the CrossSection
+  CrossSection.bounds (method) — Returns the axis-aligned bounding rectangle of all the CrossSection's vertices
+  CrossSection.delete (method) — Frees the WASM memory of this CrossSection, since these cannot…
+CrossSectionGLTFNode (class) [6 members] — Display a CrossSection in 3D space
+  CrossSectionGLTFNode.crossSection (property)
+  CrossSectionGLTFNode.material (property)
+  CrossSectionGLTFNode.constructor (constructor)
+  CrossSectionGLTFNode.clone (method)
+  CrossSectionGLTFNode.isEmpty (method) — Does this node have any geometry that needs to be…
+  CrossSectionGLTFNode.runID (property) — Get the runID for this node
+GLTFNode (class) [4 members] — Position a manifold model for later export
+  GLTFNode.manifold (property)
+  GLTFNode.material (property)
+  GLTFNode.clone (method)
+  GLTFNode.isEmpty (method) — Does this node have any geometry that needs to be…
+Manifold (class) [60 members] — This library's internal representation of an oriented, 2-manifold, triangle mesh…
+  Manifold.constructor (constructor)
+  Manifold.tetrahedron (method) — Constructs a tetrahedron centered at the origin with one vertex…
+  Manifold.cube (method) — Constructs a unit cube (edge lengths all one), by default…
+  Manifold.cylinder (method) — A convenience constructor for the common case of extruding a…
+  Manifold.sphere (method) — Constructs a geodesic sphere of a given radius
+  Manifold.extrude (method) — Constructs a manifold from a set of polygons/cross-section by extruding…
+  Manifold.revolve (method) — Constructs a manifold from a set of polygons/cross-section by revolving…
+  Manifold.ofMesh (method) — Convert a Mesh into a Manifold, retaining its properties and…
+  Manifold.smooth (method) — Constructs a smooth version of the input mesh by creating…
+  Manifold.levelSet (method) — Constructs a level-set Mesh from the input Signed-Distance Function (SDF)
+  Manifold.transform (method) — Transform this Manifold in space
+  Manifold.translate (method) — Move this Manifold in space
+  Manifold.rotate (method) — Applies an Euler or Tait-Bryan angle rotation to the manifold
+  Manifold.scale (method) — Scale this Manifold in space
+  Manifold.mirror (method) — Mirror this Manifold over the plane described by the unit…
+  Manifold.warp (method) — This function does not change the topology, but allows the…
+  Manifold.smoothByNormals (method) — Smooths out the Manifold by filling in the halfedgeTangent vectors
+  Manifold.smoothOut (method) — Smooths out the Manifold by filling in the halfedgeTangent vectors
+  Manifold.refine (method) — Increase the density of the mesh by splitting every edge…
+  Manifold.refineToLength (method) — Increase the density of the mesh by splitting each edge…
+  Manifold.refineToTolerance (method) — Increase the density of the mesh by splitting each edge…
+  Manifold.setProperties (method) — Create a new copy of this manifold with updated vertex…
+  Manifold.calculateCurvature (method) — Curvature is the inverse of the radius of curvature, and…
+  Manifold.calculateNormals (method) — Fills in vertex properties for normal vectors, calculated from the…
+  Manifold.add (method) — Boolean union
+  Manifold.subtract (method) — Boolean difference
+  Manifold.intersect (method) — Boolean intersection
+  Manifold.union (method) — Boolean union of the manifolds a and b Boolean union…
+  Manifold.difference (method) — Boolean difference of the manifold b from the manifold a…
+  Manifold.intersection (method) — Boolean intersection of the manifolds a and b Boolean intersection…
+  Manifold.split (method) — Split cuts this manifold in two using the cutter manifold
+  Manifold.splitByPlane (method) — Convenient version of Split() for a half-space
+  Manifold.trimByPlane (method) — Removes everything behind the given half-space plane
+  Manifold.minkowskiSum (method) — Compute the minkowski sum of this manifold with another
+  Manifold.minkowskiDifference (method) — Subtract the sweep of the other manifold across this manifold's…
+  Manifold.slice (method) — Returns the cross section of this object parallel to the…
+  Manifold.project (method) — Returns a cross section representing the projected outline of this…
+  Manifold.hull (method) — Compute the convex hull of all points in this Manifold
+  Manifold.compose (method) — Constructs a new manifold from a list of other manifolds
+  Manifold.decompose (method) — This operation returns a vector of Manifolds that are topologically…
+  Manifold.isEmpty (method) — Does the Manifold have any triangles?
+  Manifold.numVert (method) — The number of vertices in the Manifold
+  Manifold.numTri (method) — The number of triangles in the Manifold
+  Manifold.numEdge (method) — The number of edges in the Manifold
+  Manifold.numProp (method) — The number of properties per vertex in the Manifold
+  Manifold.numPropVert (method) — The number of property vertices in the Manifold
+  Manifold.boundingBox (method) — Returns the axis-aligned bounding box of all the Manifold's vertices
+  Manifold.tolerance (method) — Returns the tolerance of this Manifold's vertices, which tracks the…
+  Manifold.setTolerance (method) — Return a copy of the manifold with the set tolerance…
+  Manifold.simplify (method) — Return a copy of the manifold simplified to the given…
+  Manifold.genus (method) — The genus is a topological property of the manifold, representing…
+  Manifold.surfaceArea (method) — Returns the surface area of the manifold
+  Manifold.volume (method) — Returns the volume of the manifold
+  Manifold.minGap (method) — Returns the minimum gap between two manifolds
+  Manifold.status (method) — Returns the reason for an input Mesh producing an empty…
+  Manifold.getMesh (method) — Returns a Mesh that is designed to easily push into…
+  Manifold.asOriginal (method) — If you copy a manifold, but you want this new…
+  Manifold.originalID (method) — If this mesh is an original, this returns its ID…
+  Manifold.reserveIDs (method) — Returns the first of n sequential new unique mesh IDs…
+  Manifold.delete (method) — Frees the WASM memory of this Manifold, since these cannot…
+
+## Classes (2) — `api-classes-2.md`
+
+Mesh (class) [21 members] — An alternative to Mesh for output suitable for pushing into…
+  Mesh.constructor (constructor)
+  Mesh.numProp (property) — Number of properties per vertex, always >= 3
+  Mesh.vertProperties (property) — Flat, GL-style interleaved list of all vertex properties
+  Mesh.triVerts (property) — The vertex indices of the three triangle corners in CCW…
+  Mesh.mergeFromVert (property) — Optional
+  Mesh.mergeToVert (property) — Optional
+  Mesh.runIndex (property) — Optional
+  Mesh.runOriginalID (property) — Optional
+  Mesh.runTransform (property) — Optional
+  Mesh.faceID (property) — Optional
+  Mesh.halfedgeTangent (property) — Optional
+  Mesh.tolerance (property) — Tolerance for mesh simplification
+  Mesh.numTri (property) — Number of triangles
+  Mesh.numVert (property) — Number of property vertices
+  Mesh.numRun (property) — Number of triangle runs
+  Mesh.merge (method) — Updates the mergeFromVert and mergeToVert vectors in order to create…
+  Mesh.verts (method) — Gets the three vertex indices of this triangle in CCW…
+  Mesh.position (method) — Gets the x, y, z position of this vertex
+  Mesh.extras (method) — Gets any other properties associated with this vertex
+  Mesh.tangent (method) — Gets the tangent vector starting at verts(tri)[j] pointing to the…
+  Mesh.transform (method) — Gets the column-major 4x4 matrix transform from the original mesh…
+VisualizationGLTFNode (class) [6 members] — Include an imported model for visualization purposes
+  VisualizationGLTFNode.node (property)
+  VisualizationGLTFNode.document (property)
+  VisualizationGLTFNode.uri (property)
+  VisualizationGLTFNode.constructor (constructor)
+  VisualizationGLTFNode.clone (method)
+  VisualizationGLTFNode.isEmpty (method) — Does this node have any geometry that needs to be…
 
 ## Interfaces — `api-interfaces.md`
 
-ManifoldToplevel (interface) [10 members] [id: typescript:ManifoldToplevel]
-  ManifoldToplevel.CrossSection (property) [id: typescript:ManifoldToplevel.CrossSection]
-  ManifoldToplevel.Manifold (property) [id: typescript:ManifoldToplevel.Manifold]
-  ManifoldToplevel.Mesh (property) [id: typescript:ManifoldToplevel.Mesh]
-  ManifoldToplevel.triangulate (property) [id: typescript:ManifoldToplevel.triangulate]
-  ManifoldToplevel.setMinCircularAngle (property) [id: typescript:ManifoldToplevel.setMinCircularAngle]
-  ManifoldToplevel.setMinCircularEdgeLength (property) [id: typescript:ManifoldToplevel.setMinCircularEdgeLength]
-  ManifoldToplevel.setCircularSegments (property) [id: typescript:ManifoldToplevel.setCircularSegments]
-  ManifoldToplevel.getCircularSegments (property) [id: typescript:ManifoldToplevel.getCircularSegments]
-  ManifoldToplevel.resetToCircularDefaults (property) [id: typescript:ManifoldToplevel.resetToCircularDefaults]
-  ManifoldToplevel.setup (property) [id: typescript:ManifoldToplevel.setup]
-MeshOptions (interface) [11 members] [id: typescript:MeshOptions]
-  MeshOptions.numProp (property) [id: typescript:MeshOptions.numProp]
-  MeshOptions.vertProperties (property) [id: typescript:MeshOptions.vertProperties]
-  MeshOptions.triVerts (property) [id: typescript:MeshOptions.triVerts]
-  MeshOptions.mergeFromVert (property) [id: typescript:MeshOptions.mergeFromVert]
-  MeshOptions.mergeToVert (property) [id: typescript:MeshOptions.mergeToVert]
-  MeshOptions.runIndex (property) [id: typescript:MeshOptions.runIndex]
-  MeshOptions.runOriginalID (property) [id: typescript:MeshOptions.runOriginalID]
-  MeshOptions.runTransform (property) [id: typescript:MeshOptions.runTransform]
-  MeshOptions.faceID (property) [id: typescript:MeshOptions.faceID]
-  MeshOptions.halfedgeTangent (property) [id: typescript:MeshOptions.halfedgeTangent]
-  MeshOptions.tolerance (property) [id: typescript:MeshOptions.tolerance]
-SealedFloat32Array (interface) [1 members] [id: typescript:SealedFloat32Array]
-  SealedFloat32Array.length (property) — The length of the array [id: typescript:SealedFloat32Array.length]
-SealedUint32Array (interface) [1 members] [id: typescript:SealedUint32Array]
-  SealedUint32Array.length (property) — The length of the array [id: typescript:SealedUint32Array.length]
+GLTFMaterial (interface) [10 members] — Define a material using the glTF metallic-roughness physically-based rendering model
+  GLTFMaterial.attributes (property) — Every vertex in a glTF Mesh has a set of…
+  GLTFMaterial.roughness (property) — Roughness of the material
+  GLTFMaterial.metallic (property) — Metallic property of the material
+  GLTFMaterial.baseColorFactor (property) — Base colour of the material
+  GLTFMaterial.alpha (property) — Transparency of the material
+  GLTFMaterial.unlit (property) — Render model as unlit or shadeless, as opposed to physically…
+  GLTFMaterial.name (property) — Material name
+  GLTFMaterial.sourceMaterial (property) — If set, this material is a copy of another material…
+  GLTFMaterial.sourceRunID (property) — If set, this material is a copy of another material…
+  GLTFMaterial.doubleSided (property) — Treat this material as double sided
+ImportOptions (interface) [2 members]
+  ImportOptions.mimetype (property) — Use `mimetype` to determine the format of the imported model,…
+  ImportOptions.tolerance (property) — When an imported model is not manifold, try closing gaps…
+MeshOptions (interface) [11 members]
+  MeshOptions.numProp (property)
+  MeshOptions.vertProperties (property)
+  MeshOptions.triVerts (property)
+  MeshOptions.mergeFromVert (property)
+  MeshOptions.mergeToVert (property)
+  MeshOptions.runIndex (property)
+  MeshOptions.runOriginalID (property)
+  MeshOptions.runTransform (property)
+  MeshOptions.faceID (property)
+  MeshOptions.halfedgeTangent (property)
+  MeshOptions.tolerance (property)
+SealedFloat32Array (interface) [1 members]
+  SealedFloat32Array.length (property) — The length of the array
+SealedUint32Array (interface) [1 members]
+  SealedUint32Array.length (property) — The length of the array

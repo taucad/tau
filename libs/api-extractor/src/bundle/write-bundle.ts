@@ -14,8 +14,10 @@ import { join } from 'node:path';
 import type { ApiCorpus, ApiEntry } from '#model/api-corpus.types.js';
 import type { SkillBundleDeclaration } from '#bundle/bundle.types.js';
 import { apiIndexFile, skillBodyFile } from '#bundle/bundle.types.js';
+import type { CoreApiOptions, UsageRanking } from '#render/render-core.js';
+import { renderCoreApi } from '#render/render-core.js';
 import { renderIndex, renderReferenceMap, renderShard } from '#render/render-reference.js';
-import { renderSkill } from '#render/render-skill.js';
+import { maxSkillBodyLines, renderSkill } from '#render/render-skill.js';
 import { planShards } from '#render/shard-plan.js';
 
 /** Everything one bundle needs that cannot be derived from the corpus. @public */
@@ -41,15 +43,24 @@ export type BundleOptions = {
     readonly prefix: string;
     readonly groupBy: (entry: ApiEntry) => string;
   };
+  /** The Core API section: selection options and the owner's committed usage ranking. */
+  readonly core?: {
+    readonly options: CoreApiOptions;
+    readonly ranking?: UsageRanking;
+  };
 };
 
 /** A written bundle: its declaration, and what it cost. @public */
 export type WrittenBundle = {
   readonly declaration: SkillBundleDeclaration;
   readonly bodyTokens: number;
+  /** Tokens spent on the Core API section, or 0 when the owner has none. */
+  readonly coreTokens: number;
   readonly shardCount: number;
   readonly bytes: number;
 };
+
+const lineCount = (text: string): number => text.trim().split('\n').length;
 
 /**
  * Render and write one corpus-backed bundle into `directory`.
@@ -79,11 +90,29 @@ export const writeCorpusBundle = async (
     indexFile: apiIndexFile,
     totalSymbols: corpus.metadata.totalEntries,
   });
+  const core =
+    options.core === undefined
+      ? undefined
+      : renderCoreApi(
+          [
+            { corpus, groupBy: options.groupBy },
+            ...(options.supplementalApi === undefined
+              ? []
+              : [{ corpus: options.supplementalApi.corpus, groupBy: options.supplementalApi.groupBy }]),
+          ],
+          options.core.ranking,
+          {
+            // The core takes whatever 500 lines leave after the frontmatter, title, doctrine and reference map.
+            budgetLines: maxSkillBodyLines - lineCount(options.doctrine) - lineCount(referenceMap) - 12,
+            ...options.core.options,
+          },
+        );
   const skill = renderSkill({
     slug: options.slug,
     title: options.title,
     description: options.description,
     doctrine: options.doctrine,
+    ...(core === undefined ? {} : { coreApi: core.markdown }),
     referenceMap,
   });
 
@@ -105,7 +134,7 @@ export const writeCorpusBundle = async (
     written.set(
       `${supplemental.prefix}-api-index.md`,
       renderIndex(supplemental.corpus, namedShards, {
-        title: `${supplemental.corpus.metadata.packageName} authoring API index`,
+        title: `${supplemental.corpus.metadata.packageName} ${supplemental.prefix} API index`,
       }),
     );
     for (const shard of namedShards) {
@@ -136,6 +165,7 @@ export const writeCorpusBundle = async (
       body: skill.markdown,
     },
     bodyTokens: skill.bodyTokens,
+    coreTokens: core?.tokens ?? 0,
     shardCount: shards.length + supplementalShardCount,
     bytes,
   };
@@ -154,7 +184,7 @@ export const writeCorpusBundle = async (
  */
 export const writeDoctrineBundle = async (
   directory: string,
-  options: Omit<BundleOptions, 'groupBy' | 'eagerGroups' | 'maxShardTokens'>,
+  options: Omit<BundleOptions, 'groupBy' | 'eagerGroups' | 'maxShardTokens' | 'core'>,
 ): Promise<WrittenBundle> => {
   const skill = renderSkill({
     slug: options.slug,
@@ -179,6 +209,7 @@ export const writeDoctrineBundle = async (
       body: skill.markdown,
     },
     bodyTokens: skill.bodyTokens,
+    coreTokens: 0,
     shardCount: 0,
     bytes: Buffer.byteLength(skill.markdown, 'utf8'),
   };

@@ -113,10 +113,6 @@
         {
           "expr": "sum by (ws_gateway) (ws_connections_active{service_name=~\"$service\"})",
           "legendFormat": "WebSocket {{ws_gateway}}"
-        },
-        {
-          "expr": "sse_connections_active{service_name=~\"$service\"}",
-          "legendFormat": "SSE (Chat)"
         }
       ]
     },

@@ -1,6 +1,74 @@
 # libcascade — Transfer (2)
 
-8 top-level symbols. Signatures are verbatim typescript.
+9 top-level symbols. Signatures are verbatim typescript.
+
+Transfer_TransferIterator: declare class Transfer_TransferIterator
+
+  // Transfer_TransferIterator.constructor (constructor)
+  constructor();
+
+  // Transfer_TransferIterator.AddItem (method)
+  AddItem(atr: Transfer_Binder): void;
+
+  // Transfer_TransferIterator.SelectBinder (method)
+  SelectBinder(atype: Standard_Type, keep: boolean): void;
+
+  // Transfer_TransferIterator.SelectResult (method)
+  SelectResult(atype: Standard_Type, keep: boolean): void;
+
+  // Transfer_TransferIterator.SelectUnique (method)
+  SelectUnique(keep: boolean): void;
+
+  // Transfer_TransferIterator.SelectItem (method)
+  SelectItem(num: number, keep: boolean): void;
+
+  // Transfer_TransferIterator.Number (method)
+  Number(): number;
+
+  // Transfer_TransferIterator.Start (method)
+  Start(): void;
+
+  // Transfer_TransferIterator.More (method)
+  More(): boolean;
+
+  // Transfer_TransferIterator.Next (method)
+  Next(): void;
+
+  // Transfer_TransferIterator.Value (method)
+  Value(): Transfer_Binder;
+
+  // Transfer_TransferIterator.HasResult (method)
+  HasResult(): boolean;
+
+  // Transfer_TransferIterator.HasUniqueResult (method)
+  HasUniqueResult(): boolean;
+
+  // Transfer_TransferIterator.ResultType (method)
+  ResultType(): Standard_Type;
+
+  // Transfer_TransferIterator.HasTransientResult (method)
+  HasTransientResult(): boolean;
+
+  // Transfer_TransferIterator.TransientResult (method)
+  TransientResult(): Standard_Transient;
+
+  // Transfer_TransferIterator.Status (method)
+  Status(): Transfer_StatusExec;
+
+  // Transfer_TransferIterator.HasFails (method)
+  HasFails(): boolean;
+
+  // Transfer_TransferIterator.HasWarnings (method)
+  HasWarnings(): boolean;
+
+  // Transfer_TransferIterator.Check (method)
+  Check(): Interface_Check;
+
+  // Transfer_TransferIterator.delete (method)
+  delete(): void;
+
+  // Transfer_TransferIterator.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 Transfer_TransferOutput: declare class Transfer_TransferOutput
 
@@ -159,6 +227,14 @@ Transfer_TransientProcess: declare class Transfer_TransientProcess extends Trans
   [Symbol.dispose](): void;
 
 Transfer_UndefMode: typeof Transfer_UndefMode[keyof typeof Transfer_UndefMode]
+
+  readonly Transfer_UndefIgnore: 'Transfer_UndefIgnore'
+
+  readonly Transfer_UndefFailure: 'Transfer_UndefFailure'
+
+  readonly Transfer_UndefContent: 'Transfer_UndefContent'
+
+  readonly Transfer_UndefUser: 'Transfer_UndefUser'
 
 Transfer_VoidBinder: declare class Transfer_VoidBinder extends Transfer_Binder
 

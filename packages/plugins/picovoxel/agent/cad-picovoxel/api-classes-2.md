@@ -6,7 +6,7 @@
 LineModulation: declare class LineModulation
 
   // The constant value when built from one (C# public `m_fConstValue`)
-  constValue: number
+  readonly constValue: number
 
   // LineModulation.constructor (constructor)
   constructor(value: number | RatioFunc);
@@ -35,7 +35,7 @@ LineModulation: declare class LineModulation
 MeshBuilder: declare class MeshBuilder
 
   // Number of vertices added so far
-  vertexCount
+  readonly vertexCount: number
 
   // Adds one vertex and returns its index, for {@link MeshBuilder.addIndexedTriangle} (C# `Mesh.nAddVertex`)
   // MeshBuilder.addVertex (method)

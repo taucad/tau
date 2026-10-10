@@ -36,7 +36,9 @@ const chats = [
 let registered: CommandPaletteItem[] = [];
 
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ projects }) }));
-vi.mock('#hooks/use-project-thumbnail.js', () => ({ useProjectThumbnail: () => undefined }));
+vi.mock('#hooks/use-project-thumbnail.js', () => ({
+  useProjectThumbnail: () => ({ url: undefined, status: 'ready', error: undefined, refresh: vi.fn() }),
+}));
 vi.mock('#utils/date.utils.js', () => ({ formatRelativeTime: () => 'just now' }));
 vi.mock('#hooks/use-all-chats.js', () => ({ useAllChats: () => ({ chats }) }));
 vi.mock('#components/layout/command-palette.js', () => ({

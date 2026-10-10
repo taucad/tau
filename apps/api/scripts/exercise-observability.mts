@@ -3,10 +3,10 @@
  * Drive every instrumented part of a LOCAL Tau API so each Grafana dashboard has real data.
  *
  * Covers auth, REST, client telemetry ingest (CAD kernel, editor, WASM, IndexedDB, and synthetic agent
- * turns and client sync attempts that validate the ingest path, not agent execution), Tau Sync (git smart
- * HTTP + LFS into MinIO), publications, Claude Haiku 4.5 through the LLM gateway, billing attempt lookups,
- * and the hosts/kernels WebSockets. Codex/ACP and the billing workers run beside it (see the observability
- * handbook); this script does not start them.
+ * turns with their usage context, and client sync attempts, that validate the ingest path, not agent
+ * execution), Tau Sync (git smart HTTP + LFS into MinIO), publications, Claude Haiku 5.5 through the LLM
+ * gateway, billing attempt lookups, and the hosts/kernels WebSockets. Codex/ACP and the billing workers run
+ * beside it (see the observability handbook); this script does not start them.
  *
  * Local only: refuses a non-loopback API and writes fixtures (a verified harness user, a Pro
  * subscription, promotional credits) to this worktree's dev database via `docker exec tau-postgres`.
@@ -253,6 +253,8 @@ await run('telemetry', async () => {
       await delay(12_000);
     }
     const failed = round % 4 === 3;
+    const tauAgent = round % 2 === 0;
+    const kernelId = (['replicad', 'openscad', 'build123d'] as const)[round % 3];
     const response = await call('POST', '/v1/telemetry/ingest', {
       body: {
         entries: [
@@ -304,8 +306,42 @@ await run('telemetry', async () => {
                 : {
                     outcome: 'completed',
                     timeToFirstUpdate: random(300, 3000),
-                    toolCalls: [{ kind: 'edit', status: 'completed', count: 1 + (round % 3) }],
+                    // Tau's own tools carry their name; an ACP agent's rows carry only the kind.
+                    toolCalls: tauAgent
+                      ? [
+                          { kind: 'edit', tool: 'edit_file', status: 'completed', count: 1 + (round % 3) },
+                          { kind: 'execute', tool: 'evaluate_model', status: 'failed', count: 1 },
+                          { kind: 'other', tool: 'use_skill', status: 'completed', count: 1 },
+                        ]
+                      : [{ kind: 'edit', status: 'completed', count: 1 + (round % 3) }],
                     tokens: { input: 1200, output: 300, cacheRead: 800, cacheWrite: 0 },
+                    // Every series in the "Agent context" row: two lookup outcomes, an api_misuse evaluation,
+                    // a correction and a GeoSpec run with both assertion results. Reference bytes are Tau's only.
+                    context: {
+                      kernelId,
+                      skillsActivated: [`cad-${kernelId}`, 'geospec-authoring'],
+                      callsBeforeFirstModelWrite: 2 + (round % 5),
+                      timeToFirstModelWrite: random(8000, 90_000),
+                      referenceLookups: [
+                        { outcome: 'ok', count: 2 + (round % 3) },
+                        { outcome: round % 2 === 0 ? 'zero_match' : 'not_found', count: 1 },
+                      ],
+                      ...(tauAgent ? { referenceBytesRead: random(2000, 120_000) } : {}),
+                      evaluations: [
+                        { class: 'api_misuse', count: 1 },
+                        { class: 'ok', count: 1 + (round % 2) },
+                      ],
+                      correctionsAfterError: 1 + (round % 3),
+                      geospec: {
+                        runs: 2,
+                        passed: 3 + (round % 3),
+                        failed: 1,
+                        runStatuses: [
+                          { status: 'failed', count: 1 },
+                          { status: 'passed', count: 1 },
+                        ],
+                      },
+                    },
                   }),
             },
           },
@@ -494,7 +530,7 @@ await run('ai', async () => {
         'x-tau-project-id': projectId,
       },
       body: {
-        model: 'anthropic-claude-haiku-4.5',
+        model: 'anthropic-claude-haiku-5.5',
         max_tokens: 200,
         stream: true,
         ...(withTool
@@ -516,7 +552,7 @@ await run('ai', async () => {
   const late = await call('POST', '/v1/llm/anthropic/v1/messages', {
     headers: { 'anthropic-version': '2023-06-01', 'x-tau-attempt-id': voided },
     body: {
-      model: 'anthropic-claude-haiku-4.5',
+      model: 'anthropic-claude-haiku-5.5',
       max_tokens: 10,
       stream: true,
       messages: [{ role: 'user', content: 'hi' }],

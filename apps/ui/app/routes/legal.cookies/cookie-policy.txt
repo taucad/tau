@@ -1,6 +1,6 @@
 # Storage and Cookie Policy
 
-*Effective date: September 14, 2026*
+*Effective date: October 9, 2026*
 
 This notice explains how TauCAD Limited ("Tau", "we", "us", or "our") uses cookies and browser storage when you use Tau. Read it with our [Privacy Policy](/legal/privacy).
 
@@ -32,6 +32,10 @@ Projects and other user-created local product data may use IndexedDB or the Orig
 After you accept, Tau uses PostHog Cloud for product analytics. The approved web configuration can collect page views and navigation, browser/device information, interaction and feature-use events, authenticated account identity and profile fields, error events, and session replay. PostHog uses first-party cookie and local-storage persistence in this accepted state. Tau does not initialize PostHog or send analytics while your choice is unknown, declined, withdrawn, or overridden by Global Privacy Control.
 
 PostHog is a recipient of this analytics data. See the [PostHog Privacy Policy](https://posthog.com/privacy). The web client does not set PostHog’s server-side record-retention period; contact [privacy@tau.new](mailto:privacy@tau.new) for the current configured retention and deletion schedule.
+
+## Usage Metrics Sent to Tau
+
+When you are signed in, the web and desktop apps report operational telemetry and, unless you switch them off, anonymous usage metrics about AI agent turns to Tau's own API. These requests use your existing sign-in session; they set no additional cookies or browser storage and do not use PostHog. They contain counts, durations, outcome classes and error codes only, with no prompts, code, file names or account labels. Operational telemetry is always sent; switch anonymous usage metrics off under **Settings → General → Privacy**, and an active Global Privacy Control signal switches them off on the web. See Section 3.3 of our [Privacy Policy](/legal/privacy) for the full list.
 
 ## Your Choice and Global Privacy Control
 

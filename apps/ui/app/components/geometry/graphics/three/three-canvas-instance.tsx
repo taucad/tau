@@ -1,8 +1,11 @@
-import type { CanvasProps, RootState } from '@react-three/fiber';
+import type { RootState } from '@react-three/fiber';
 import { Canvas, flushSync as flushThreeSync } from '@react-three/fiber';
 import { flushSync } from 'react-dom';
+import type { RefCallback } from 'react';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { WebGPURenderer } from 'three/webgpu';
+import { RenderFpsOverlay } from '#components/geometry/graphics/three/render-fps-overlay.js';
+import { renderLoopObservers } from '#components/geometry/graphics/three/render-loop-observer.js';
 import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js';
 import { createTauR3fGlProp } from '#components/geometry/graphics/three/canvas-three-gl.js';
 import { GraphicsContextLostFallback } from '#components/geometry/graphics/three/graphics-context-lost-fallback.js';
@@ -94,7 +97,15 @@ export function ThreeCanvasInstance({
                   });
                   const state = rootRef.current?.get();
                   if (state && state.size !== previousSize && state.size.width > 0 && state.size.height > 0) {
-                    state.advance(performance.now(), false);
+                    const render = (): void => {
+                      state.advance(performance.now(), false);
+                    };
+                    const observer = renderLoopObservers.get(state.gl.domElement);
+                    if (observer) {
+                      observer.withResizeSubmission(render);
+                    } else {
+                      render();
+                    }
                     // Advance runs outside R3F's demand loop. Retain its normal followup
                     // so controls damping/useFrame invalidations cannot be consumed here.
                     state.invalidate();
@@ -106,7 +117,7 @@ export function ThreeCanvasInstance({
     [],
   );
 
-  const glProperty: CanvasProps['gl'] = useMemo(
+  const glProperty = useMemo(
     () =>
       createTauR3fGlProp(
         graphicsBackend,
@@ -114,6 +125,13 @@ export function ThreeCanvasInstance({
         setRendererError,
       ),
     [cameraRig, graphicsBackend],
+  );
+
+  const bindCanvas = useCallback<RefCallback<HTMLCanvasElement>>(
+    (canvas) => {
+      glProperty.bindCanvas(canvas ?? undefined);
+    },
+    [glProperty],
   );
 
   useLayoutEffect(() => {
@@ -134,29 +152,41 @@ export function ThreeCanvasInstance({
     [cameraRig],
   );
 
-  const onCanvasCreated = useCallback((state: RootState): void => {
-    rootRef.current = state;
-    installTauPointerRays(state);
-    const renderer = state.gl;
+  const onCanvasCreated = useCallback(
+    (state: RootState): void => {
+      if (glProperty.isRetired()) {
+        return;
+      }
+      rootRef.current = state;
+      installTauPointerRays(state);
+      const renderer = state.gl;
 
-    if ('isWebGPURenderer' in renderer && renderer.isWebGPURenderer) {
-      const webGpuRenderer = renderer as unknown as InstanceType<typeof WebGPURenderer>;
-      const previousOnDeviceLost = webGpuRenderer.onDeviceLost;
-      webGpuRenderer.onDeviceLost = (
-        info: Parameters<InstanceType<typeof WebGPURenderer>['onDeviceLost']>[0],
-      ): void => {
-        previousOnDeviceLost.call(webGpuRenderer, info);
-        setIsContextLost(true);
-      };
-    } else {
-      renderer.domElement.addEventListener('webglcontextlost', (event): void => {
-        event.preventDefault();
-        setIsContextLost(true);
-      });
-    }
+      if ('isWebGPURenderer' in renderer && renderer.isWebGPURenderer) {
+        const webGpuRenderer = renderer as unknown as InstanceType<typeof WebGPURenderer>;
+        const previousOnDeviceLost = webGpuRenderer.onDeviceLost;
+        webGpuRenderer.onDeviceLost = (
+          info: Parameters<InstanceType<typeof WebGPURenderer>['onDeviceLost']>[0],
+        ): void => {
+          if (glProperty.isRetired()) {
+            return;
+          }
+          previousOnDeviceLost.call(webGpuRenderer, info);
+          setIsContextLost(true);
+        };
+      } else {
+        renderer.domElement.addEventListener('webglcontextlost', (event): void => {
+          if (glProperty.isRetired()) {
+            return;
+          }
+          event.preventDefault();
+          setIsContextLost(true);
+        });
+      }
 
-    setIsCanvasReady(true);
-  }, []);
+      setIsCanvasReady(true);
+    },
+    [glProperty],
+  );
 
   if (rendererError) {
     // The renderer never existed: hand the failure to the viewer's `WebglErrorBoundary` fallback.
@@ -171,6 +201,7 @@ export function ThreeCanvasInstance({
     <Canvas
       // Spread consumer props before Tau policy props so callers cannot shadow `gl`, `dpr`, `frameloop`, or `onCreated`.
       {...canvasProperties}
+      ref={bindCanvas}
       camera={cameraRig.activeCamera}
       gl={glProperty}
       dpr={dpr}
@@ -203,6 +234,7 @@ export function ThreeCanvasInstance({
           </SceneOverlay>
         </OverlayDepthProvider>
         {isCanvasReady ? <ActorBridge /> : null}
+        <RenderFpsOverlay hasTopRightGizmo={enableGizmo && Boolean(gizmoContainer)} />
       </ThreeGraphicsBackendProvider>
     </Canvas>
   );

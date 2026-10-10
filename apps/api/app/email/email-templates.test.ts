@@ -13,6 +13,8 @@ const actionUrl: Record<EmailTemplate['kind'], string> = {
   'verify-email': 'https://tau.new/auth/verify-email?token=secret&redirectTo=%2F',
   'publication-invite': 'https://tau.new/s/tau~pub_123',
   'payment-failed': 'https://tau.new/?settings=billing',
+  'auto-reload-disabled': 'https://tau.new/?settings=billing',
+  'auto-reload-action-required': 'https://tau.new/?settings=billing',
 };
 
 const templates: EmailTemplate[] = [
@@ -41,6 +43,12 @@ const templates: EmailTemplate[] = [
     amount: 'US$20.00',
     nextAttemptAt: '19 Sep 2026',
     paymentMethodSummary: 'Visa ···· 8252',
+  },
+  { kind: 'auto-reload-disabled', email: 'user@example.com', billingUrl: actionUrl['auto-reload-disabled'] },
+  {
+    kind: 'auto-reload-action-required',
+    email: 'user@example.com',
+    billingUrl: actionUrl['auto-reload-action-required'],
   },
 ];
 
@@ -122,6 +130,33 @@ describe('detail rows', () => {
 
     expect(text).toContain('Amount   US$20.00');
     expect(text).not.toContain('Next attempt');
+  });
+});
+
+describe('automatic reload notices', () => {
+  it('says reload is off, that credits stay, and where to set it up again', async () => {
+    const { text } = await renderEmailTemplate(
+      { kind: 'auto-reload-disabled', email: 'user@example.com', billingUrl: actionUrl['auto-reload-disabled'] },
+      layout,
+    );
+
+    expect(text).toContain("Automatic credit reload for user@example.com couldn't charge your saved card");
+    expect(text).toContain('Your current credits are not affected.');
+    expect(text).toContain('Open billing settings');
+  });
+
+  it('says the card was not charged and how to finish the payment', async () => {
+    const { text } = await renderEmailTemplate(
+      {
+        kind: 'auto-reload-action-required',
+        email: 'user@example.com',
+        billingUrl: actionUrl['auto-reload-action-required'],
+      },
+      layout,
+    );
+
+    expect(text).toContain('Your card was not charged, and no credits were added.');
+    expect(text).toContain('Finish the payment');
   });
 });
 

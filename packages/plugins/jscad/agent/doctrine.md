@@ -32,3 +32,8 @@ export default function main(p = defaultParams): geometries.geom3.Geom3 {
 ```
 
 Check import paths, vector shapes, invalid dimensions, failed booleans, and segment proliferation first.
+
+## Wrong / Correct
+
+- Wrong: `primitives.cylinder(10, 5)`. Correct: every primitive takes one options object: `primitives.cylinder({ height: 10, radius: 5, segments: 48 })`.
+- Wrong: `transforms.translate(shape, [x, y, z])`. Correct: options or vector first, geometry last: `transforms.translate([x, y, z], shape)`, `extrusions.extrudeLinear({ height }, profile)`.

@@ -270,6 +270,14 @@ RWObj_SubMesh: declare class RWObj_SubMesh
 
 RWObj_SubMeshReason: typeof RWObj_SubMeshReason[keyof typeof RWObj_SubMeshReason]
 
+  readonly RWObj_SubMeshReason_NewObject: 'RWObj_SubMeshReason_NewObject'
+
+  readonly RWObj_SubMeshReason_NewGroup: 'RWObj_SubMeshReason_NewGroup'
+
+  readonly RWObj_SubMeshReason_NewMaterial: 'RWObj_SubMeshReason_NewMaterial'
+
+  readonly RWObj_SubMeshReason_NewSmoothGroup: 'RWObj_SubMeshReason_NewSmoothGroup'
+
 RWObj_IShapeReceiver: declare class RWObj_IShapeReceiver
 
   // RWObj_IShapeReceiver.BindNamedShape (method)

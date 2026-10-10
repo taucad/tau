@@ -1,0 +1,114 @@
+{
+  "slug": "cad-manifold",
+  "sources": {
+    "workspaceFiles": 0,
+    "exampleFiles": 1,
+    "transcriptRuns": 2
+  },
+  "symbols": [
+    {
+      "id": "typescript:BaseGLTFNode.scale",
+      "name": "scale",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GLTFNode",
+      "name": "GLTFNode",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GLTFNode.manifold",
+      "name": "manifold",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GLTFNode.material",
+      "name": "material",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Manifold",
+      "name": "Manifold",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Manifold.calculateNormals",
+      "name": "calculateNormals",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Manifold.constructor",
+      "name": "constructor",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Manifold.cube",
+      "name": "cube",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Manifold.difference",
+      "name": "difference",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Manifold.rotate",
+      "name": "rotate",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Manifold.scale",
+      "name": "scale",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Manifold.translate",
+      "name": "translate",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Manifold.union",
+      "name": "union",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    }
+  ]
+}

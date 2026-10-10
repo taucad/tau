@@ -1,14 +1,55 @@
 import { createOpenAI } from '@ai-sdk/openai';
-import { streamText } from 'ai';
+import { createUIMessageStream, createUIMessageStreamResponse, streamText } from 'ai';
 import { Inject, Injectable } from '@nestjs/common';
 import type { ModelMessage } from 'ai';
 import { commitMessageGenerationSystemPrompt, projectNameGenerationSystemPrompt } from '@taucad/chat/prompts';
+import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import type { LlmGatewayErrorType } from '#api/llm/llm-gateway.error.js';
 import type {
   ModelInvocationResult,
   ModelInvocationService,
   ModelInvocationSurface,
 } from '#api/llm/model-invocation.types.js';
 import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
+
+/**
+ * Refusals a helper absorbs instead of surfacing (W6, W11a): an operator-paused route and a restricted account. Both
+ * hold for the helper's one fixed route or for the whole account, so nothing the client can do changes them, and a
+ * name is a courtesy rather than a prerequisite. Every other refusal still reaches the client as before.
+ */
+const absorbedHelperRefusals: ReadonlySet<LlmGatewayErrorType> = new Set<LlmGatewayErrorType>([
+  'MODEL_ROUTE_PAUSED',
+  'BILLING_ACCOUNT_RESTRICTED',
+]);
+
+const isAbsorbedHelperRefusal = (error: unknown): boolean => {
+  if (!(error instanceof LlmGatewayError)) {
+    return false;
+  }
+  const body = error.getResponse();
+  const envelope = typeof body === 'object' && 'error' in body ? body.error : undefined;
+  const type = typeof envelope === 'object' && envelope !== null && 'type' in envelope ? envelope.type : undefined;
+  return typeof type === 'string' && absorbedHelperRefusals.has(type as LlmGatewayErrorType);
+};
+
+/**
+ * A finished UI message with no text: the client reads an empty suggestion and keeps its default name, with no
+ * error to show. Nothing was admitted, so there is no operation and nothing to settle.
+ *
+ * @returns The helper's unnamed result.
+ */
+const unnamedResult = (): ModelInvocationResult => ({
+  state: 'streaming',
+  response: createUIMessageStreamResponse({
+    stream: createUIMessageStream({
+      execute: ({ writer }) => {
+        writer.write({ type: 'start' });
+        writer.write({ type: 'finish' });
+      },
+    }),
+  }),
+  completion: Promise.resolve(),
+});
 
 /**
  * Best-effort receipt attribution for a helper turn: which project it was
@@ -88,6 +129,7 @@ export class ChatService {
       outcome.reject(signal.reason);
     };
     signal.addEventListener('abort', abortBeforeAdmission, { once: true });
+    let absorbed: ModelInvocationResult | undefined;
     const model = createOpenAI({
       // Credentials belong to the billed owner; SDK authorization never leaves this local fetch boundary.
       apiKey: 'billing-owned',
@@ -95,20 +137,31 @@ export class ChatService {
         if (typeof init?.body !== 'string') {
           throw new TypeError('Expected a native Responses JSON request');
         }
-        const result = await this.invocations.invoke({
-          authUserId,
-          surface,
-          attempt: { version: 1, key: attemptKey },
-          providerWire: 'openai-responses',
-          body: JSON.parse(init.body) as unknown,
-          priceHeaders: {},
-          activity: surface === 'project_name' ? 'title' : 'commit',
-          ...(hints.projectHint === undefined ? {} : { projectHint: hints.projectHint }),
-          ...(hints.chatHint === undefined ? {} : { chatHint: hints.chatHint }),
-          directPrompt: { system, messages, maximumOutputTokens: 64 },
-          signal: sdkSignal,
-          onAdmitted,
-        });
+        let result: ModelInvocationResult;
+        try {
+          result = await this.invocations.invoke({
+            authUserId,
+            surface,
+            attempt: { version: 1, key: attemptKey },
+            providerWire: 'openai-responses',
+            body: JSON.parse(init.body) as unknown,
+            priceHeaders: {},
+            activity: surface === 'project_name' ? 'title' : 'commit',
+            ...(hints.projectHint === undefined ? {} : { projectHint: hints.projectHint }),
+            ...(hints.chatHint === undefined ? {} : { chatHint: hints.chatHint }),
+            directPrompt: { system, messages, maximumOutputTokens: 64 },
+            signal: sdkSignal,
+            onAdmitted,
+          });
+        } catch (error) {
+          if (isAbsorbedHelperRefusal(error)) {
+            // Settle with no name before the SDK sees the refusal; stopping it is then only cleanup.
+            absorbed = unnamedResult();
+            outcome.resolve(absorbed);
+            replayAbort.abort(error);
+          }
+          throw error;
+        }
         outcome.resolve(result);
         if (result.state !== 'streaming') {
           const error = new Error('Billable invocation has no new stream');
@@ -151,7 +204,7 @@ export class ChatService {
       const sdkCompletion = consumeSdk();
       const response = streamed.toUIMessageStreamResponse();
       const admitted = await outcome.promise;
-      if (admitted.state !== 'streaming') {
+      if (admitted === absorbed || admitted.state !== 'streaming') {
         await response.body?.cancel();
         return admitted;
       }

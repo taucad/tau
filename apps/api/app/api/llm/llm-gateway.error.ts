@@ -16,12 +16,34 @@ export const isBillingAccountClosed = (error: unknown): boolean => {
   return typeof body === 'object' && 'code' in body && body.code === 'billing_account_closed';
 };
 
+/** A closed-account refusal whose account is open but restricted by an operator, not closing or closed. */
+export const isBillingAccountRestricted = (error: unknown): boolean => {
+  if (!isBillingAccountClosed(error) || !(error instanceof ForbiddenException)) {
+    return false;
+  }
+  const body = error.getResponse();
+  return typeof body === 'object' && 'restricted' in body && body.restricted === true;
+};
+
 export const billingAccountClosedError = (): LlmGatewayError =>
   new LlmGatewayError(
     HttpStatus.FORBIDDEN,
     'BILLING_ACCOUNT_CLOSED',
     'This Tau billing account is closed or restricted, so its model requests cannot be checked or charged.',
   );
+
+/** An operator paused this route; another route still answers, so the client offers a model switch. */
+export const modelRoutePausedError = (routeId: string): LlmGatewayError =>
+  new LlmGatewayError(
+    HttpStatus.SERVICE_UNAVAILABLE,
+    'MODEL_ROUTE_PAUSED',
+    "This model route is paused by Tau's operators.",
+    { routeId },
+  );
+
+/** Admission refused spending on an account whose own balance is in question; no route or retry changes it. */
+export const billingAccountRestrictedError = (): LlmGatewayError =>
+  new LlmGatewayError(HttpStatus.FORBIDDEN, 'BILLING_ACCOUNT_RESTRICTED', 'This Tau billing account is restricted.');
 
 export class LlmGatewayError extends HttpException {
   /**

@@ -307,6 +307,22 @@ Convert_ParabolaToBSplineCurve: declare class Convert_ParabolaToBSplineCurve ext
 
 Convert_ParameterisationType: typeof Convert_ParameterisationType[keyof typeof Convert_ParameterisationType]
 
+  readonly Convert_TgtThetaOver2: 'Convert_TgtThetaOver2'
+
+  readonly Convert_TgtThetaOver2_1: 'Convert_TgtThetaOver2_1'
+
+  readonly Convert_TgtThetaOver2_2: 'Convert_TgtThetaOver2_2'
+
+  readonly Convert_TgtThetaOver2_3: 'Convert_TgtThetaOver2_3'
+
+  readonly Convert_TgtThetaOver2_4: 'Convert_TgtThetaOver2_4'
+
+  readonly Convert_QuasiAngular: 'Convert_QuasiAngular'
+
+  readonly Convert_RationalC1: 'Convert_RationalC1'
+
+  readonly Convert_Polynomial: 'Convert_Polynomial'
+
 Convert_SphereToBSplineSurface: declare class Convert_SphereToBSplineSurface extends Convert_ElementarySurfaceToBSplineSurface
 
   // Convert_SphereToBSplineSurface.constructor (constructor)

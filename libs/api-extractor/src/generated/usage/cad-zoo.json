@@ -1,0 +1,1458 @@
+{
+  "slug": "cad-zoo",
+  "sources": {
+    "workspaceFiles": 721,
+    "exampleFiles": 0,
+    "transcriptRuns": 3
+  },
+  "symbols": [
+    {
+      "id": "kcl:std.sketch.extrude",
+      "name": "extrude",
+      "score": 6,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "kcl:std.types.mm",
+      "name": "mm",
+      "score": 5,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.XY",
+      "name": "XY",
+      "score": 4,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.circle",
+      "name": "circle",
+      "score": 4,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "kcl:std.sketch.rectangle",
+      "name": "rectangle",
+      "score": 4,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "kcl:std.transform.translate",
+      "name": "translate",
+      "score": 4,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "kcl:std.appearance",
+      "name": "appearance",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.line",
+      "name": "line",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.startSketchOn",
+      "name": "startSketchOn",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.appearance",
+      "name": "appearance",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.subtract",
+      "name": "subtract",
+      "score": 3,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "kcl:std.X",
+      "name": "X",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.XZ",
+      "name": "XZ",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.YZ",
+      "name": "YZ",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.Z",
+      "name": "Z",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.array.flatten",
+      "name": "flatten",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.clone",
+      "name": "clone",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.helix",
+      "name": "helix",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.hole",
+      "name": "hole",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "kcl:std.math.atan2",
+      "name": "atan2",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.cos",
+      "name": "cos",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.sin",
+      "name": "sin",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.sqrt",
+      "name": "sqrt",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.offsetPlane",
+      "name": "offsetPlane",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch",
+      "name": "sketch",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.arc",
+      "name": "arc",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.bezierCurve",
+      "name": "bezierCurve",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.close",
+      "name": "close",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.region",
+      "name": "region",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.startProfile",
+      "name": "startProfile",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.sweep",
+      "name": "sweep",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sweep",
+      "name": "sweep",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.transform.hide",
+      "name": "hide",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.transform.rotate",
+      "name": "rotate",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.CCW",
+      "name": "CCW",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.CW",
+      "name": "CW",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.END",
+      "name": "END",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.MERGE",
+      "name": "MERGE",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.NEW",
+      "name": "NEW",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.SOLID",
+      "name": "SOLID",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.START",
+      "name": "START",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.SURFACE",
+      "name": "SURFACE",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.Y",
+      "name": "Y",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.array",
+      "name": "array",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.array.concat",
+      "name": "concat",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.array.count",
+      "name": "count",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.array.map",
+      "name": "map",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.array.pop",
+      "name": "pop",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.array.push",
+      "name": "push",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.array.reduce",
+      "name": "reduce",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.array.slice",
+      "name": "slice",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.assert",
+      "name": "assert",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.assertIs",
+      "name": "assertIs",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.edgeId",
+      "name": "edgeId",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.faceId",
+      "name": "faceId",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.fail",
+      "name": "fail",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.gdt",
+      "name": "gdt",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.gear",
+      "name": "gear",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.E",
+      "name": "E",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.PI",
+      "name": "PI",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.TAU",
+      "name": "TAU",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.abs",
+      "name": "abs",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.acos",
+      "name": "acos",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.asin",
+      "name": "asin",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.atan",
+      "name": "atan",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.ceil",
+      "name": "ceil",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.floor",
+      "name": "floor",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.legAngX",
+      "name": "legAngX",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.legAngY",
+      "name": "legAngY",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.legLen",
+      "name": "legLen",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.ln",
+      "name": "ln",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.log",
+      "name": "log",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.log10",
+      "name": "log10",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.log2",
+      "name": "log2",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.max",
+      "name": "max",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.min",
+      "name": "min",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.polar",
+      "name": "polar",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.pow",
+      "name": "pow",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.rem",
+      "name": "rem",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.round",
+      "name": "round",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.math.tan",
+      "name": "tan",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.runtime.exit",
+      "name": "exit",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.angledLine",
+      "name": "angledLine",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.angledLineThatIntersects",
+      "name": "angledLineThatIntersects",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.circleThreePoint",
+      "name": "circleThreePoint",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.conic",
+      "name": "conic",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.ellipse",
+      "name": "ellipse",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.elliptic",
+      "name": "elliptic",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.ellipticPoint",
+      "name": "ellipticPoint",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.faceOf",
+      "name": "faceOf",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.getBoundedEdge",
+      "name": "getBoundedEdge",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.getCommonEdge",
+      "name": "getCommonEdge",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.getNextAdjacentEdge",
+      "name": "getNextAdjacentEdge",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.getOppositeEdge",
+      "name": "getOppositeEdge",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.getPreviousAdjacentEdge",
+      "name": "getPreviousAdjacentEdge",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.hyperbolic",
+      "name": "hyperbolic",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.hyperbolicPoint",
+      "name": "hyperbolicPoint",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.involuteCircular",
+      "name": "involuteCircular",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.lastSegX",
+      "name": "lastSegX",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.lastSegY",
+      "name": "lastSegY",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.loft",
+      "name": "loft",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.parabolic",
+      "name": "parabolic",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.parabolicPoint",
+      "name": "parabolicPoint",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.patternCircular2d",
+      "name": "patternCircular2d",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.patternLinear2d",
+      "name": "patternLinear2d",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.patternTransform2d",
+      "name": "patternTransform2d",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.planeOf",
+      "name": "planeOf",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.polygon",
+      "name": "polygon",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.profileStart",
+      "name": "profileStart",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.profileStartX",
+      "name": "profileStartX",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.profileStartY",
+      "name": "profileStartY",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.revolve",
+      "name": "revolve",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.segAng",
+      "name": "segAng",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.segEnd",
+      "name": "segEnd",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.segEndX",
+      "name": "segEndX",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.segEndY",
+      "name": "segEndY",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.segLen",
+      "name": "segLen",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.segStart",
+      "name": "segStart",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.segStartX",
+      "name": "segStartX",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.segStartY",
+      "name": "segStartY",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.subtract2d",
+      "name": "subtract2d",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.tangentToEnd",
+      "name": "tangentToEnd",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.tangentialArc",
+      "name": "tangentialArc",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.xLine",
+      "name": "xLine",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.sketch.yLine",
+      "name": "yLine",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid",
+      "name": "solid",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.blend",
+      "name": "blend",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.chamfer",
+      "name": "chamfer",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.deleteFace",
+      "name": "deleteFace",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.fillet",
+      "name": "fillet",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.flipSurface",
+      "name": "flipSurface",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.hollow",
+      "name": "hollow",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.intersect",
+      "name": "intersect",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.isSolid",
+      "name": "isSolid",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.isSurface",
+      "name": "isSurface",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.joinSurfaces",
+      "name": "joinSurfaces",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.patternCircular3d",
+      "name": "patternCircular3d",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.patternLinear3d",
+      "name": "patternLinear3d",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.patternTransform",
+      "name": "patternTransform",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.shell",
+      "name": "shell",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.split",
+      "name": "split",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.solid.union",
+      "name": "union",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.string",
+      "name": "string",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.transform",
+      "name": "transform",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.transform.delete",
+      "name": "delete",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.transform.mirror2d",
+      "name": "mirror2d",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.transform.mirror3d",
+      "name": "mirror3d",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.transform.scale",
+      "name": "scale",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.turns",
+      "name": "turns",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.Axis2d",
+      "name": "Axis2d",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.Axis3d",
+      "name": "Axis3d",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.BoundedEdge",
+      "name": "BoundedEdge",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.Edge",
+      "name": "Edge",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.Face",
+      "name": "Face",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.GdtAnnotation",
+      "name": "GdtAnnotation",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.Helix",
+      "name": "Helix",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.ImportedGeometry",
+      "name": "ImportedGeometry",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.Plane",
+      "name": "Plane",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.Point2d",
+      "name": "Point2d",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.Point3d",
+      "name": "Point3d",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.Segment",
+      "name": "Segment",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.Sketch",
+      "name": "Sketch",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.Solid",
+      "name": "Solid",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.TagDecl",
+      "name": "TagDecl",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.TaggedEdge",
+      "name": "TaggedEdge",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.TaggedFace",
+      "name": "TaggedFace",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.any",
+      "name": "any",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.bool",
+      "name": "bool",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.cm",
+      "name": "cm",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.deg",
+      "name": "deg",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.fn",
+      "name": "fn",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.ft",
+      "name": "ft",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.in",
+      "name": "in",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.m",
+      "name": "m",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.none",
+      "name": "none",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.number",
+      "name": "number",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.rad",
+      "name": "rad",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.string",
+      "name": "string",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.types.yd",
+      "name": "yd",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.units",
+      "name": "units",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "kcl:std.vector",
+      "name": "vector",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    }
+  ]
+}

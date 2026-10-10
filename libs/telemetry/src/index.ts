@@ -25,8 +25,14 @@ export {
   knownAgentIds,
   agentPlacements,
   agentToolKinds,
+  tauToolNames,
+  kernelIds,
+  builtInSkillSlugs,
+  lookupOutcomes,
+  evaluationClasses,
+  geospecRunStatuses,
 } from '#ingest.js';
-export type { ClientMetricEntry, IngestPayload } from '#ingest.js';
+export type { AgentTurnContext, ClientMetricEntry, IngestPayload } from '#ingest.js';
 export { toPrometheusName, PrometheusNames, prometheusNameOf } from '#prometheus.js';
 export type { TelemetryBackend } from '#reporter.js';
 export { createReporter } from '#reporter.js';

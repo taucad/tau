@@ -19,14 +19,17 @@
  */
 
 import { toFileStat } from '@taucad/types/constants';
-import type { RuntimeFileSystemBase, RuntimeWatchEvent, RuntimeWatchRequest } from '#types/runtime-kernel.types.js';
-import type { RuntimeFileSystemHandle } from '#transport/_internal/runtime-filesystem-handle.js';
+import type { RuntimeWatchEvent, RuntimeWatchRequest } from '#types/runtime-kernel.types.js';
+import type {
+  InlineRuntimeFileSystemBase,
+  RuntimeFileSystemHandle,
+} from '#transport/_internal/runtime-filesystem-handle.js';
 import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
-import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import { drainNodeFsProviderWatchClosures, NodeFsProvider } from '@taucad/filesystem/backend/node';
 
 /**
  * Internal: produce the discriminated `inline`-arm handle backing
@@ -53,7 +56,7 @@ export function _fromNodeFsHandle(basePath: string): RuntimeFileSystemHandle {
  */
 function buildNodeFsBase(
   basePath: string,
-): RuntimeFileSystemBase & Required<Pick<WorkerFileSystemProxy, 'watchReady'>> {
+): InlineRuntimeFileSystemBase & Required<Pick<WorkerFileSystemProxy, 'watchReady'>> {
   const absoluteBase = path.resolve(basePath);
   const realBasePromise = fs.realpath(absoluteBase);
 
@@ -258,16 +261,24 @@ function buildNodeFsBase(
     };
   };
 
+  const dispose = (): void => {
+    // The fs module has no per-instance lifecycle, but an abnormal shutdown
+    // must not leak a watcher this adapter opened.
+    for (const unsubscribe of openSubscriptions) {
+      unsubscribe();
+    }
+    observation.dispose();
+  };
+
   return {
     id: 'runtime:node-fs',
     capabilities: { persistent: true, writable: true, quotaBased: false },
-    dispose() {
-      // The fs module has no per-instance lifecycle, but an abnormal shutdown
-      // must not leak a watcher this adapter opened.
-      for (const unsubscribe of openSubscriptions) {
-        unsubscribe();
-      }
-      observation.dispose();
+    dispose,
+    async disposeAsync() {
+      dispose();
+      // Native subscribe/unsubscribe settle on this isolate's event loop; a
+      // worker terminated before they do aborts the process inside the addon.
+      await drainNodeFsProviderWatchClosures(observation);
     },
     ...(nativeWatchAvailable ? { watch } : {}),
     watchReady,

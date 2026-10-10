@@ -1070,11 +1070,14 @@ main > .band:first-child::before {
   display: grid;
   gap: 1rem;
 }
+/* The capture carries its own macOS window frame and shadow; the negative margins align the window, not the
+   transparent shadow, with the column (window 3456 × 2160 inside a 3680 × 2384 image, inset 112 / 76 / 148 px).
+   Re-measure these if scripts/src/readme-hero-capture.ts re-shoots docs/assets/tau-desktop-*.webp at another size,
+   and keep the 1.065 (3680 / 3456) factor in the figure's sizes attribute in templates.mjs in step. */
 .workspace img {
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-md);
+  width: calc(100% * 3680 / 3456);
+  max-width: none;
+  margin: calc(-100% * 76 / 3456) calc(-100% * 112 / 3456) calc(-100% * 148 / 3456);
 }
 .workspace figcaption {
   display: flex;
@@ -1857,9 +1860,6 @@ main > .band:first-child::before {
   .case-image,
   .case-detail-image {
     background: oklch(0.94 0 none);
-  }
-  .workspace img {
-    color-scheme: light;
   }
   .plan.featured {
     background: color-mix(in oklch, var(--muted) 60%, transparent);

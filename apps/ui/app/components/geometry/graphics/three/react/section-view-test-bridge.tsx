@@ -1,5 +1,7 @@
 import React, { useEffect } from 'react';
 import * as THREE from 'three';
+import { renderLoopObservers } from '#components/geometry/graphics/three/render-loop-observer.js';
+import type { RenderLoopCapture } from '#components/geometry/graphics/three/render-loop-observer.js';
 import { createRenderFrameTimer } from '#components/geometry/graphics/three/render-frame-timing.js';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { RendererInstance } from '#components/geometry/graphics/three/renderer.js';
@@ -152,6 +154,8 @@ export type SectionViewTestRenderedModelComponentState = Readonly<{
   meshCount: number;
   visibleMeshCount: number;
   materialOpacities: readonly number[];
+  surfaceMaterialOpacities: readonly number[];
+  edgeMaterialOpacities: readonly number[];
 }>;
 
 export type SectionViewTestCapCompleteness =
@@ -219,6 +223,8 @@ export type SectionViewTestBridgeApi = Readonly<{
       pixelRatio: number;
     }>
   >;
+  startRenderLoopCapture(): void;
+  finishRenderLoopCapture(): RenderLoopCapture;
   getViewportCanvas(): HTMLCanvasElement;
   /** The durable record this view persists, for revisit-equals-reload assertions (Law 4). */
   getViewSettings(): GraphicsViewSettings | undefined;
@@ -279,13 +285,16 @@ function isActuallyVisible(object: THREE.Object3D): boolean {
   return true;
 }
 
-function getRenderedModelComponentState(
+/** Report visible component surfaces and fat edges separately without changing aggregate visibility. */
+export function getSectionViewTestRenderedModelComponentState(
   scene: THREE.Object3D,
   componentId: string,
 ): SectionViewTestRenderedModelComponentState {
   let meshCount = 0;
   let visibleMeshCount = 0;
   const materialOpacities: number[] = [];
+  const surfaceMaterialOpacities: number[] = [];
+  const edgeMaterialOpacities: number[] = [];
   scene.traverse((object) => {
     if (!(object instanceof THREE.Mesh) || getModelComponentIdInHierarchy(object) !== componentId) {
       return;
@@ -293,10 +302,22 @@ function getRenderedModelComponentState(
     meshCount++;
     if (isActuallyVisible(object)) {
       visibleMeshCount++;
-      materialOpacities.push(...getObjectMaterials(object).map((material) => material.opacity));
+      const opacities = getObjectMaterials(object).map((material) => material.opacity);
+      materialOpacities.push(...opacities);
+      if (object.type === 'LineSegments2') {
+        edgeMaterialOpacities.push(...opacities);
+      } else if (!hasSceneTag(object, sceneTag.gltfSurfacePresentation)) {
+        surfaceMaterialOpacities.push(...opacities);
+      }
     }
   });
-  return { meshCount, visibleMeshCount, materialOpacities };
+  return {
+    meshCount,
+    visibleMeshCount,
+    materialOpacities,
+    surfaceMaterialOpacities,
+    edgeMaterialOpacities,
+  };
 }
 
 export const getSectionViewTestControlState = ({
@@ -688,6 +709,20 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           pixelRatio: renderer.getPixelRatio(),
         };
       },
+      startRenderLoopCapture() {
+        const observer = renderLoopObservers.get(get().gl.domElement);
+        if (!observer) {
+          throw new Error('Render-loop observer is not mounted');
+        }
+        observer.startCapture(performance.now());
+      },
+      finishRenderLoopCapture() {
+        const observer = renderLoopObservers.get(get().gl.domElement);
+        if (!observer) {
+          throw new Error('Render-loop observer is not mounted');
+        }
+        return observer.finishCapture(performance.now());
+      },
       getViewportCanvas() {
         return get().gl.domElement;
       },
@@ -781,7 +816,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         };
       },
       getRenderedModelComponentState(componentId) {
-        return getRenderedModelComponentState(scene, componentId);
+        return getSectionViewTestRenderedModelComponentState(scene, componentId);
       },
       projectModelComponent(componentId) {
         const { camera, gl } = get();

@@ -72,7 +72,7 @@ describe('createNodeClient', () => {
     client.terminate();
   });
 
-  it('releases the admitted native subscription on termination for a path-backed client', async () => {
+  it('closes the admitted native subscription before shutdown resolves for a path-backed client', async () => {
     const projectDirectory = await mkdtemp(join(tmpdir(), 'taucad-node-client-'));
     await writeFile(join(projectDirectory, 'main.mock'), 'fixture');
     const nativeSubscribe = parcelWatcher.subscribe.bind(parcelWatcher);
@@ -98,13 +98,77 @@ describe('createNodeClient', () => {
       expect(active.size).toBeGreaterThan(0);
 
       document.close();
-      client.terminate();
-      await vi.waitFor(() => {
-        expect(active.size).toBe(0);
-      });
+      // A worker thread may exit right after shutdown; native unsubscribe work
+      // still settling then aborts the process inside the addon.
+      await client.shutdown();
+      expect(active.size).toBe(0);
     } finally {
       document?.close();
       client?.terminate();
+      subscribe.mockRestore();
+      await rm(projectDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps shutdown pending while a native admission is in flight for a path-backed client', async () => {
+    const projectDirectory = await mkdtemp(join(tmpdir(), 'taucad-node-client-'));
+    await writeFile(join(projectDirectory, 'main.mock'), 'fixture');
+    const admission = Promise.withResolvers<Awaited<ReturnType<typeof parcelWatcher.subscribe>>>();
+    const stopped = Promise.withResolvers<void>();
+    const nativeStop = vi.fn(async () => stopped.promise);
+    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockReturnValue(admission.promise);
+    /** Whether `promise` settles before the event loop turns; its rejection propagates. */
+    const settled = async (promise: Promise<void>): Promise<boolean> => {
+      const settles = async (): Promise<boolean> => {
+        await promise;
+        return true;
+      };
+      const turns = new Promise<boolean>((resolve) => {
+        setImmediate(() => {
+          resolve(false);
+        });
+      });
+      return Promise.race([settles(), turns]);
+    };
+    /** Shutdown may interrupt the evaluation; only its settlement matters here. */
+    const settleEvaluation = async (evaluation: Promise<unknown>): Promise<void> => {
+      try {
+        await evaluation;
+      } catch {
+        /* Rejected by shutdown. */
+      }
+    };
+    let client: Awaited<ReturnType<typeof createClient>> | undefined;
+    let document: ReturnType<Awaited<ReturnType<typeof createClient>>['open']> | undefined;
+    try {
+      client = await createClient(projectDirectory);
+      document = client.open({ source: { path: 'main.mock' }, watch: true });
+      const outcome = settleEvaluation(document.evaluation());
+      await vi.waitFor(() => {
+        expect(subscribe).toHaveBeenCalledOnce();
+      });
+
+      // The GeoSpec pool terminates its worker thread as soon as shutdown settles,
+      // so shutdown must outlast the native subscribe still in flight and the stop
+      // its late admission triggers.
+      const shutdown = client.shutdown();
+      await expect(settled(shutdown)).resolves.toBe(false);
+      expect(nativeStop).not.toHaveBeenCalled();
+
+      admission.resolve({ unsubscribe: nativeStop });
+      await vi.waitFor(() => {
+        expect(nativeStop).toHaveBeenCalledOnce();
+      });
+      await expect(settled(shutdown)).resolves.toBe(false);
+
+      stopped.resolve();
+      await expect(shutdown).resolves.toBeUndefined();
+      await outcome;
+    } finally {
+      admission.resolve({ unsubscribe: nativeStop });
+      stopped.resolve();
+      document?.close();
+      await client?.shutdown();
       subscribe.mockRestore();
       await rm(projectDirectory, { recursive: true, force: true });
     }

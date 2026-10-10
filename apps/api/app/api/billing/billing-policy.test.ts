@@ -203,7 +203,7 @@ describe('commercial policy', () => {
     }
   });
 
-  it('should require distinct spend and risk budgets on a qualified route', () => {
+  it('should qualify a route without supplier budget pins and still accept a document that carries them', () => {
     const meterContractId = 'policy-distinct-budget-meter-v1';
     qualifiedMeterContracts.set(meterContractId, new Set(['output:']));
     const policy = {
@@ -228,19 +228,19 @@ describe('commercial policy', () => {
           meterContractId,
           rateIds: ['output-rate'],
           enabled: true,
-          spendBudgetId: 'shared-budget',
-          riskBudgetId: 'shared-budget',
         },
       ],
     };
 
-    expect(commercialPolicySchema.safeParse(policy).success).toBe(false);
-    expect(
-      commercialPolicySchema.safeParse({
-        ...policy,
-        routes: [{ ...policy.routes[0]!, riskBudgetId: 'risk-budget' }],
-      }).success,
-    ).toBe(true);
+    expect(commercialPolicySchema.safeParse(policy).success).toBe(true);
+    // Stored documents are immutable and hashed as written; their retired pins round-trip unread.
+    const stored = {
+      ...policy,
+      routes: [{ ...policy.routes[0]!, spendBudgetId: 'shared-budget', riskBudgetId: 'shared-budget' }],
+    };
+    const parsed = parseCommercialPolicyDocument(stored);
+    expect(parsed.policy.routes[0]).toMatchObject({ spendBudgetId: 'shared-budget', riskBudgetId: 'shared-budget' });
+    expect(parseCommercialPolicyDocument(parsed.canonicalContent).contentHash).toBe(parsed.contentHash);
   });
 
   it('should allow a promotion ceiling or budget below its nominal grant', () => {
@@ -511,7 +511,6 @@ describe('commercial policy', () => {
           },
         ],
       },
-      { ...policy, routes: [{ ...route, riskBudgetId: 'spend-budget' }] },
       { ...policy, routes: [{ ...route, meterContractId: 'other-meter-v1' }] },
       {
         ...policy,

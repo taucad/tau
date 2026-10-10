@@ -130,7 +130,36 @@ const createParameterCommit = (
     },
     commit: async (field) => {
       calls.push(field);
-      return refuse?.();
+      const requestId = `test:${calls.length}`;
+      const pending =
+        field.draft === undefined
+          ? undefined
+          : ({
+              ...field.draft,
+              final: { status: 'pending', requestId, base: field.base },
+            } as const);
+      if (pending !== undefined) {
+        drafts.set(field.pointer, pending);
+        notify();
+      }
+      const outcome = refuse?.();
+      if (pending !== undefined && drafts.get(field.pointer) === pending) {
+        if (outcome !== undefined && outcome.status !== 'committed' && outcome.status !== 'cancelled-before-apply') {
+          drafts.set(field.pointer, {
+            ...pending,
+            final: {
+              status: 'refused',
+              requestId,
+              base: pending.final.base,
+              message: 'message' in outcome ? outcome.message : 'The parameter could not be saved.',
+            },
+          });
+        } else {
+          drafts.delete(field.pointer);
+        }
+        notify();
+      }
+      return outcome;
     },
     setValue: vi.fn(async () => undefined),
   };
@@ -842,7 +871,11 @@ describe('ParametersNumber', () => {
 
       expect(await screen.findByText('The field changed since this edit began.')).toBeVisible();
       expect(field).toHaveValue('10');
-      expect(parameterCommit.draft('/width')).toEqual({ text: '12', valid: true });
+      expect(parameterCommit.draft('/width')).toMatchObject({
+        text: '12',
+        valid: true,
+        final: { status: 'refused', message: 'The field changed since this edit began.' },
+      });
     });
 
     it('stays silent when a newer edit displaced this one before it was applied', async () => {
@@ -1020,6 +1053,7 @@ describe('ParametersNumber', () => {
           pointer: '/width',
           value: 21,
           pressure: 'final',
+          draft: { text: '2.1 cm', valid: true },
           base: {
             pointer: '/width',
             value: 10,

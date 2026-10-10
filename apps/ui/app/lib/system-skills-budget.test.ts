@@ -18,7 +18,17 @@ const workbenchBodyTokens = 2400;
  */
 const packageSkills = systemSkillsCatalog.filter(({ slug }) => slug !== 'create-skill' && slug !== 'create-model');
 
-const assertSkillBudget = (skillName: string, skillMarkdown: string, maxBodyTokens = 800): void => {
+/** Doctrine plus the generated Core API section and reference map (`maxSkillBodyTokens` in api-extractor). */
+const kernelSkillBodyTokens = 6000;
+/** A skill without a generated Core API section is doctrine alone and keeps the original ceiling. */
+const doctrineSkillBodyTokens = 800;
+const maxBodyLines = 500;
+
+const assertSkillBudget = (
+  skillName: string,
+  skillMarkdown: string,
+  maxBodyTokens = skillMarkdown.includes('\n## Core API\n') ? kernelSkillBodyTokens : doctrineSkillBodyTokens,
+): void => {
   const description = /^description:\s*(.+)$/m.exec(skillMarkdown)?.[1]?.trim();
   if (!description) {
     throw new Error(`${skillName} has invalid frontmatter`);
@@ -32,6 +42,9 @@ const assertSkillBudget = (skillName: string, skillMarkdown: string, maxBodyToke
   }
   if (body.length > bodyLimit) {
     throw new Error(`${skillName} body exceeds ${bodyLimit / 4} estimated tokens`);
+  }
+  if (body.split('\n').length > maxBodyLines) {
+    throw new Error(`${skillName} body exceeds ${maxBodyLines} lines`);
   }
 };
 
@@ -97,13 +110,31 @@ describe('progressive-disclosure system skill budgets', () => {
   });
 
   it('should reject a deliberately oversized fixture body', () => {
-    const maxBodyCharacters = 800 * 4;
-    const fixture = `---\nname: oversized-fixture\ndescription: Budget guard fixture.\n---\n\n${'x'.repeat(
-      maxBodyCharacters + 1,
+    const maxBodyCharacters = kernelSkillBodyTokens * 4;
+    const fixture = `---\nname: oversized-fixture\ndescription: Budget guard fixture.\n---\n\n## Core API\n${'x'.repeat(
+      maxBodyCharacters,
     )}`;
 
     expect(() => {
       assertSkillBudget('oversized-fixture', fixture);
-    }).toThrow('body exceeds 800 estimated tokens');
+    }).toThrow(`body exceeds ${kernelSkillBodyTokens} estimated tokens`);
+  });
+
+  it('should hold a skill without a Core API section to the doctrine ceiling', () => {
+    const fixture = `---\nname: doctrine-fixture\ndescription: Budget guard fixture.\n---\n\n${'x'.repeat(
+      doctrineSkillBodyTokens * 4 + 1,
+    )}`;
+
+    expect(() => {
+      assertSkillBudget('doctrine-fixture', fixture);
+    }).toThrow(`body exceeds ${doctrineSkillBodyTokens} estimated tokens`);
+  });
+
+  it('should reject a fixture body over the policy line ceiling', () => {
+    const fixture = `---\nname: long-fixture\ndescription: Budget guard fixture.\n---\n\n${'x\n'.repeat(maxBodyLines + 1)}`;
+
+    expect(() => {
+      assertSkillBudget('long-fixture', fixture);
+    }).toThrow(`body exceeds ${maxBodyLines} lines`);
   });
 });

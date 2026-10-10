@@ -54,63 +54,32 @@ const reconciliation = new BillingJournalReconciliationService(
 
 let policyId = '';
 let activationId = '';
-const spendBudgetId = `journal-spend-${randomUUID()}`;
-const riskBudgetId = `journal-risk-${randomUUID()}`;
 
-/**
- * A pending operation that authorizes and holds `planHeldAtoms` of plan credit (nothing by default).
- *
- * `require_operation_holds` is a deferred constraint trigger, so the operation and its two
- * budget holds must land in one transaction.
- */
+/** A pending operation that authorizes and holds `planHeldAtoms` of plan credit (nothing by default). */
 const seedOperation = async (accountId: string, planHeldAtoms = 0n): Promise<string> => {
   const id = `operation-${randomUUID()}`;
-  await database.transaction(async (transaction) => {
-    await transaction.insert(schema.creditOperation).values({
-      id,
-      accountId,
-      environment,
-      surface: 'chat',
-      attemptKey: id,
-      requestDigest: `sha256:${id}`,
-      requestKeyVersion: 1,
-      category: 'llm',
-      modelId: 'journal-fixture-model',
-      sku: 'journal-fixture-sku',
-      pinnedTariff: [],
-      maximumQuantities: [],
-      activity: 'journal-fixture',
-      policyId,
-      activationId,
-      meterContractId: 'journal-fixture-meter',
-      authorizedAtoms: planHeldAtoms,
-      promoHeldAtoms: 0n,
-      planHeldAtoms,
-      purchasedHeldAtoms: 0n,
-      spendBudgetHoldId: `spend-${id}`,
-      riskBudgetHoldId: `risk-${id}`,
-      dueAt: new Date('2026-01-01T00:00:00.000Z'),
-    });
-    await transaction.insert(schema.billingBudgetHold).values([
-      {
-        id: `spend-${id}`,
-        budgetId: spendBudgetId,
-        operationId: id,
-        initialBound: 0n,
-        remainingHeld: 0n,
-        consumed: 0n,
-        finalityState: 'final',
-      },
-      {
-        id: `risk-${id}`,
-        budgetId: riskBudgetId,
-        operationId: id,
-        initialBound: 0n,
-        remainingHeld: 0n,
-        consumed: 0n,
-        finalityState: 'final',
-      },
-    ]);
+  await database.insert(schema.creditOperation).values({
+    id,
+    accountId,
+    environment,
+    surface: 'chat',
+    attemptKey: id,
+    requestDigest: `sha256:${id}`,
+    requestKeyVersion: 1,
+    category: 'llm',
+    modelId: 'journal-fixture-model',
+    sku: 'journal-fixture-sku',
+    pinnedTariff: [],
+    maximumQuantities: [],
+    activity: 'journal-fixture',
+    policyId,
+    activationId,
+    meterContractId: 'journal-fixture-meter',
+    authorizedAtoms: planHeldAtoms,
+    promoHeldAtoms: 0n,
+    planHeldAtoms,
+    purchasedHeldAtoms: 0n,
+    dueAt: new Date('2026-01-01T00:00:00.000Z'),
   });
   return id;
 };
@@ -226,35 +195,6 @@ const rewindCheckpoint = async (): Promise<void> => {
 };
 
 beforeAll(async () => {
-  const scope = `journal-${randomUUID()}`;
-  await database.insert(schema.billingBudgetFunding).values([
-    { id: `funding-${spendBudgetId}`, environment, kind: 'spend', scope, fundedLifetime: 1_000_000n },
-    { id: `funding-${riskBudgetId}`, environment, kind: 'risk', scope, fundedLifetime: 1_000_000n },
-  ]);
-  await database.insert(schema.billingBudget).values([
-    {
-      id: spendBudgetId,
-      environment,
-      fundingId: `funding-${spendBudgetId}`,
-      kind: 'spend',
-      scope,
-      periodStart: new Date('2020-01-01Z'),
-      periodEnd: new Date('2030-01-01Z'),
-      quantum: 'pico_usd',
-      approvedCap: 1_000_000n,
-    },
-    {
-      id: riskBudgetId,
-      environment,
-      fundingId: `funding-${riskBudgetId}`,
-      kind: 'risk',
-      scope,
-      periodStart: new Date('2020-01-01Z'),
-      periodEnd: new Date('2030-01-01Z'),
-      quantum: 'pico_usd',
-      approvedCap: 1_000_000n,
-    },
-  ]);
   const fixtureActivationId = `journal-activation-${randomUUID()}`;
   await seedBillingFixturePolicy({
     database,
@@ -399,6 +339,46 @@ describe('journal reconciliation foundation', () => {
     const held = await casesOf(unexplained);
     expect(kindsOf(held)).toEqual(['journal_hold_drift']);
     expect(held[0]?.evidence).toMatchObject({ planHoldDriftAtoms: '400', driftAtoms: '400' });
+  });
+
+  it('should report no budget residual for an operation that still carries a legacy supplier hold', async () => {
+    const accountId = await seedAccount({});
+    const operationId = await seedOperation(accountId);
+    // The shape an operation admitted before supplier holds were retired leaves behind.
+    const legacy = `journal-legacy-${randomUUID()}`;
+    await database.insert(schema.billingBudgetFunding).values({
+      id: `${legacy}-funding`,
+      environment,
+      kind: 'spend',
+      scope: legacy,
+      fundedLifetime: 1_000_000n,
+    });
+    await database.insert(schema.billingBudget).values({
+      id: legacy,
+      environment,
+      fundingId: `${legacy}-funding`,
+      kind: 'spend',
+      scope: legacy,
+      periodStart: new Date('2020-01-01Z'),
+      periodEnd: new Date('2030-01-01Z'),
+      quantum: 'pico_usd',
+      approvedCap: 1_000_000n,
+    });
+    await database.insert(schema.billingBudgetHold).values({
+      id: `${legacy}-hold`,
+      budgetId: legacy,
+      operationId,
+      initialBound: 10n,
+      remainingHeld: 10n,
+      consumed: 0n,
+      finalityState: 'final',
+    });
+
+    await rewindCheckpoint();
+    await reconciliation.runSweep({ batchLimit: 100 });
+
+    expect(kindsOf(await casesOf(accountId))).not.toContain('journal_budget_residual');
+    expect(await casesOf(accountId)).toEqual([]);
   });
 
   it('should refuse a duplicate resolution movement and case a resolution on a pending operation', async () => {

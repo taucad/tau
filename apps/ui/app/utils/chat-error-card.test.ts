@@ -24,6 +24,8 @@ describe('cardOf', () => {
     ['RESUME_UNAVAILABLE', 'nothingToResume'],
     ['RUN_ABANDONED', 'pausedTurn'],
     ['EXTERNAL_AGENT_MODEL_UNAVAILABLE', 'switchModel'],
+    ['MODEL_ROUTE_PAUSED', 'switchModel'],
+    ['BILLING_ACCOUNT_RESTRICTED', 'accountRestricted'],
   ] as const)('routes %s to the approved %s card', (code, category) => {
     expect(cardOf(code, errorCategory.generic).category).toBe(category);
   });
@@ -32,5 +34,14 @@ describe('cardOf', () => {
     expect(cardOf('RATE_LIMITED', errorCategory.generic).category).toBe(errorCategory.rateLimit);
     expect(normalizedErrorCategoryOf('PROVIDER_UNAVAILABLE')).toBe(errorCategory.overloaded);
     expect(cardOf('INSUFFICIENT_CREDIT', errorCategory.generic).category).toBe(errorCategory.credits);
+  });
+
+  /* A paused route and a restricted account are the gateway's to name and the page's to word (W6, W11a): neither is
+   * resumable, and neither falls back to its status's card (a 503's outage card, a 403's generic block). */
+  it.each([
+    ['MODEL_ROUTE_PAUSED', errorCategory.overloaded, 'switchModel'],
+    ['BILLING_ACCOUNT_RESTRICTED', errorCategory.generic, 'accountRestricted'],
+  ] as const)('should route %s to its own card that never offers Resume', (code, statusCategory, category) => {
+    expect(cardOf(code, statusCategory)).toEqual({ category, retry: 'never' });
   });
 });

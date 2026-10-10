@@ -118,7 +118,12 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/desktop-native-payload.spec.ts',
       'apps/desktop-e2e/src/desktop-print-dry-run.spec.ts',
       'apps/desktop-e2e/src/desktop-voice.spec.ts',
+      // Native projection scenarios and the launch-helper test stay inside the Electron driver boundary.
+      'apps/desktop-e2e/src/filesystem-projection-observation.spec.ts',
+      'apps/desktop-e2e/src/support/desktop-app.test.ts',
       'apps/desktop-e2e/src/support/desktop-app.ts',
+      'apps/desktop-e2e/src/support/filesystem-projection-delivery.ts',
+      'apps/desktop-e2e/src/support/filesystem-projection-fixture.test.ts',
       'apps/desktop-e2e/src/support/gateway-fixture.ts',
       'apps/desktop-e2e/src/support/revisions-pane.ts',
       'apps/desktop-e2e/src/support/scenario.ts',

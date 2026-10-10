@@ -39,14 +39,27 @@ const message = (chatId: string, runId: string, sequence: number): Row => ({
   },
 });
 
-/** A launcher `read` over fixed chat logs: every row after the cursor at once, then an empty batch. */
+/** A launcher `read` over fixed chat logs: every row after the cursor at once, then an abortable long poll. */
 const readOf =
   (rows: readonly Row[]) =>
-  async ({ chatId, cursor }: ReadInput): Promise<ReadAnswer> => {
+  async ({ chatId, cursor, sourceHealth, signal }: ReadInput): Promise<ReadAnswer> => {
     const events = rows.filter((row) => row.chatId === chatId).map((row) => row.event);
     const batch = events.slice(cursor);
+    signal?.throwIfAborted();
+    if (batch.length === 0 && sourceHealth !== undefined) {
+      await new Promise<void>((resolve) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    }
     return {
       status: 'batch',
+      sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
       chatId,
       cursor,
       nextCursor: cursor + batch.length,
@@ -273,6 +286,7 @@ describe('startRunReporter', () => {
         const batch = events.slice(cursor, cursor + 1);
         const answer: ReadAnswer = {
           status: 'batch',
+          sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
           chatId,
           cursor,
           nextCursor: cursor + batch.length,

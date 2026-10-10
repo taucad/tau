@@ -1,6 +1,6 @@
 # libcascade — BOPAlgo
 
-59 top-level symbols. Signatures are verbatim typescript.
+58 top-level symbols. Signatures are verbatim typescript.
 
 BOPAlgo_AlertAcquiredSelfIntersection: declare class BOPAlgo_AlertAcquiredSelfIntersection extends TopoDS_AlertWithShape
 
@@ -1236,6 +1236,30 @@ BOPAlgo_CheckResult: declare class BOPAlgo_CheckResult
 
 BOPAlgo_CheckStatus: typeof BOPAlgo_CheckStatus[keyof typeof BOPAlgo_CheckStatus]
 
+  readonly BOPAlgo_CheckUnknown: 'BOPAlgo_CheckUnknown'
+
+  readonly BOPAlgo_BadType: 'BOPAlgo_BadType'
+
+  readonly BOPAlgo_SelfIntersect: 'BOPAlgo_SelfIntersect'
+
+  readonly BOPAlgo_TooSmallEdge: 'BOPAlgo_TooSmallEdge'
+
+  readonly BOPAlgo_NonRecoverableFace: 'BOPAlgo_NonRecoverableFace'
+
+  readonly BOPAlgo_IncompatibilityOfVertex: 'BOPAlgo_IncompatibilityOfVertex'
+
+  readonly BOPAlgo_IncompatibilityOfEdge: 'BOPAlgo_IncompatibilityOfEdge'
+
+  readonly BOPAlgo_IncompatibilityOfFace: 'BOPAlgo_IncompatibilityOfFace'
+
+  readonly BOPAlgo_OperationAborted: 'BOPAlgo_OperationAborted'
+
+  readonly BOPAlgo_GeomAbs_C0: 'BOPAlgo_GeomAbs_C0'
+
+  readonly BOPAlgo_InvalidCurveOnSurface: 'BOPAlgo_InvalidCurveOnSurface'
+
+  readonly BOPAlgo_NotValid: 'BOPAlgo_NotValid'
+
 BOPAlgo_CheckerSI: declare class BOPAlgo_CheckerSI extends BOPAlgo_Algo
 
   // BOPAlgo_CheckerSI.constructor (constructor)
@@ -1254,6 +1278,12 @@ BOPAlgo_CheckerSI: declare class BOPAlgo_CheckerSI extends BOPAlgo_Algo
   [Symbol.dispose](): void;
 
 BOPAlgo_GlueEnum: typeof BOPAlgo_GlueEnum[keyof typeof BOPAlgo_GlueEnum]
+
+  readonly BOPAlgo_GlueOff: 'BOPAlgo_GlueOff'
+
+  readonly BOPAlgo_GlueShift: 'BOPAlgo_GlueShift'
+
+  readonly BOPAlgo_GlueFull: 'BOPAlgo_GlueFull'
 
 BOPAlgo_MakeConnected: declare class BOPAlgo_MakeConnected extends BOPAlgo_Options
 
@@ -1440,18 +1470,4 @@ BOPAlgo_MakePeriodic: declare class BOPAlgo_MakePeriodic extends BOPAlgo_Options
   delete(): void;
 
   // BOPAlgo_MakePeriodic.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-BOPAlgo_MakePeriodic_PeriodicityParams: declare class BOPAlgo_MakePeriodic_PeriodicityParams
-
-  // BOPAlgo_MakePeriodic_PeriodicityParams.constructor (constructor)
-  constructor();
-
-  // BOPAlgo_MakePeriodic_PeriodicityParams.Clear (method)
-  Clear(): void;
-
-  // BOPAlgo_MakePeriodic_PeriodicityParams.delete (method)
-  delete(): void;
-
-  // BOPAlgo_MakePeriodic_PeriodicityParams.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

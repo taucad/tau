@@ -103,20 +103,20 @@ ShapeConfig: {
 
   shape: AnyShape
 
-  color: string
+  color?: string
 
-  alpha: number
+  alpha?: number
 
-  name: string
+  name?: string
 
   // PBR metalness factor (0 = dielectric, 1 = metal)
-  metalness: number
+  metalness?: number
 
   // PBR roughness factor — threaded to GLTF only (not STEP
-  roughness: number
+  roughness?: number
 
   // Material density in g/cm3, written as the shape's STEP material
-  density: number
+  density?: number
 
 SimplePoint: [number, number, number]
 

@@ -8,8 +8,8 @@ import { z } from 'zod';
 
 import { commandAnswerSchema } from '#wire/commands.schema.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
-import { agentLiveEventSchema, readAnswerSchema, readRequestSchema } from '#wire/frames.schema.js';
-import type { AgentLiveEvent } from '#waist/ports.js';
+import { sourceLiveEventSchema, readAnswerSchema, readRequestSchema } from '#wire/frames.schema.js';
+import type { SourceLiveEvent } from '#waist/ports.js';
 import type { ReadAnswer, ReadRequest } from '#wire/frames.schema.js';
 
 /** The envelope every build reads. @internal */
@@ -40,7 +40,7 @@ const bodies = {
   ans: z.looseObject({ to: z.string().min(1), corr, answer: commandAnswerSchema }),
   es: z.looseObject({ corr, request: readRequestSchema }),
   en: z.looseObject({ to: z.string().min(1), corr, answer: readAnswerSchema }),
-  live: z.looseObject({ event: agentLiveEventSchema }),
+  live: z.looseObject({ event: sourceLiveEventSchema }),
 } as const;
 
 /** A frame this build understood, or why it did not. @internal */
@@ -51,7 +51,7 @@ export type LeadershipMessage =
   | Readonly<{ kind: 'es'; sender: string; epoch: number; corr: string; request: ReadRequest; foreign: boolean }>
   | Readonly<{ kind: 'en'; sender: string; epoch: number; to: string; corr: string; answer: ReadAnswer }>
   /** A live delta of the holder's run, for this worker's subscribers (SC-R15). */
-  | Readonly<{ kind: 'live'; sender: string; epoch: number; event: AgentLiveEvent }>
+  | Readonly<{ kind: 'live'; sender: string; epoch: number; event: SourceLiveEvent }>
   /** A `cmd` whose body this build cannot read: still answered (I15), with its return address if it has one. */
   | Readonly<{ kind: 'unreadable'; sender: string; epoch: number; corr?: string; commandId?: string }>;
 
@@ -127,7 +127,7 @@ export const parseLeadershipFrame = (
     case 'live': {
       const body = foreign ? undefined : bodies.live.safeParse(envelope.body).data;
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the wire schema is the live event's.
-      return body === undefined ? undefined : { kind: 'live', sender, epoch, event: body.event as AgentLiveEvent };
+      return body === undefined ? undefined : { kind: 'live', sender, epoch, event: body.event as SourceLiveEvent };
     }
     default: {
       return undefined;

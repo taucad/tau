@@ -1068,11 +1068,25 @@ export const connectBambuMachine = async (
             signal: uploadInput.signal,
           }));
         } catch (error) {
-          // The host's transport errors name the failure, never the access code.
+          // The host's transport errors name the failure, never the access code; a refusal keeps the printer's reply.
+          const cause = error instanceof Error && error.cause instanceof Error ? error.cause : undefined;
           await runtime.log({
             level: 'warning',
-            message: `FTPS upload of ${uploadInput.remoteName} failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`,
+            message: `FTPS upload of ${uploadInput.remoteName} failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}${cause ? ` (${cause.message.slice(0, 200)})` : ''}`,
           });
+          if (error instanceof Error && error.message === 'MACHINE_UPLOAD_REFUSED') {
+            // The printer stores uploads on its microSD card; a refused store is the card, not the network.
+            const reply = isRecord(cause) && typeof cause['code'] === 'number' ? `FTP ${cause['code']}` : 'FTP refusal';
+            return {
+              status: 'rejected',
+              code: 'TRANSFER_REFUSED',
+              message:
+                `The printer refused to store the file (${reply}), so nothing was started. Its microSD card may be ` +
+                'full, damaged or locked: free space on it or format it on the printer, then send again.',
+              observedAt: runtime.clock.now(),
+            };
+          }
+          // A transfer that broke off may have reached the printer, so its result is unknown.
           return {
             status: 'unknown',
             reason: 'transfer-result-unavailable',

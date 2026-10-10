@@ -31,14 +31,7 @@ export type EffectivePolicy = {
   selectedAt: Date;
 };
 
-export type QualifiedPolicyRoute = Omit<
-  CommercialPolicy['routes'][number],
-  'enabled' | 'riskBudgetId' | 'spendBudgetId'
-> & {
-  enabled: true;
-  riskBudgetId: string;
-  spendBudgetId: string;
-};
+export type QualifiedPolicyRoute = Omit<CommercialPolicy['routes'][number], 'enabled'> & { enabled: true };
 
 export type EffectivePolicyRoute = EffectivePolicy & {
   route: QualifiedPolicyRoute;

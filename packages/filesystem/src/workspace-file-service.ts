@@ -155,6 +155,10 @@ export class WorkspaceFileService {
   private readonly _policy: PathPolicy | undefined;
   /* Told the live mount prefixes, an index never answers for a path behind a nested mount. */
   private readonly _treeIndexes = new TreeIndexes(() => this._mountTable.prefixes);
+  private readonly _pendingTreeScans = new Map<
+    string,
+    { generation: number; promise: Promise<TreeIndex | undefined> }
+  >();
   private readonly _projectRoutes = new Set<string>();
   private readonly _checkoutRoutes = new Set<string>();
   private _projectConfigurationTail: Promise<void> = Promise.resolve();
@@ -1224,6 +1228,7 @@ export class WorkspaceFileService {
     this._filePool?.clear();
     this._filePool = undefined;
     this._treeIndexes.clear();
+    this._pendingTreeScans.clear();
     this._projectRoutes.clear();
     this._discoveryRoots = [];
     this._mountTable.dispose();
@@ -1627,10 +1632,8 @@ export class WorkspaceFileService {
         return warm;
       }
       const generation = this._treeIndexes.generation(root);
-      const { provider, path } = this._resolveProvider(root);
       // oxlint-disable-next-line no-await-in-loop -- An invalidated cold scan must retry from current storage.
-      const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
-      const published = this._treeIndexes.build(root, stats, generation);
+      const published = await this._scanTreeIndex(root, generation);
       if (published !== undefined) {
         return published;
       }
@@ -1638,6 +1641,31 @@ export class WorkspaceFileService {
     const { provider, path } = this._resolveProvider(root);
     const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
     return this._treeIndexes.buildDetached(stats);
+  }
+
+  private async _scanTreeIndex(root: string, generation: number): Promise<TreeIndex | undefined> {
+    const existing = this._pendingTreeScans.get(root);
+    if (existing?.generation === generation) {
+      return existing.promise;
+    }
+
+    const { provider, path } = this._resolveProvider(root);
+    const pending = {
+      generation,
+      promise: (async () => {
+        const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
+        return this._treeIndexes.build(root, stats, generation);
+      })(),
+    };
+    this._pendingTreeScans.set(root, pending);
+    try {
+      return await pending.promise;
+    } finally {
+      // An obsolete generation may finish after a newer scan has taken ownership.
+      if (this._pendingTreeScans.get(root) === pending) {
+        this._pendingTreeScans.delete(root);
+      }
+    }
   }
 
   private _treeEntriesToNodes(entries: Map<string, TreeEntry>): FileTreeNode[] {

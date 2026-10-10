@@ -52,7 +52,6 @@ export type QualifiedBillableInvocation = {
   sku: string;
   meterContractId: string;
   maximumQuantities: readonly MeterQuantity[];
-  supplierMaximumPicoUsd: bigint;
   replica: { schemaVersion: number; meterContractIds: readonly string[] };
   invocation: InvocationMetadata;
   normalizedRequest: {
@@ -77,28 +76,9 @@ export type BillableInvocationEvidenceCollector = {
   ): TerminalEvidence;
 };
 
-export type SupplierFinalityClassification = {
-  state: 'final' | 'preliminary' | 'unknown';
-  providerRequestId?: string;
-  reconcileBy?: Date;
-  correctionHorizonEndsAt?: Date;
-  supplierEvidence?: {
-    sourceRevision: string;
-    payloadDigest: string;
-    currency: string;
-    numerator: string;
-    denominator: string;
-    completeness: 'partial' | 'complete';
-  };
-};
-
 export type BillableModelProviderAdapter = {
   createEvidenceCollector(qualification: QualifiedBillableInvocation): BillableInvocationEvidenceCollector;
   executeOnce(input: { qualification: QualifiedBillableInvocation; signal: AbortSignal }): Promise<Response>;
-  classifyFinality(input: {
-    qualification: QualifiedBillableInvocation;
-    evidence: TerminalEvidence;
-  }): SupplierFinalityClassification;
   createClientProjection?(qualification: QualifiedBillableInvocation): {
     accept(chunk: Uint8Array<ArrayBuffer>): ReadonlyArray<Uint8Array<ArrayBuffer>>;
     complete(): ReadonlyArray<Uint8Array<ArrayBuffer>>;

@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { createProviderAccountFrameFilter, gatewayErrorFrame } from '#api/llm/provider-account-stream.js';
+import {
+  createProviderAccountFrameFilter,
+  gatewayErrorFrame,
+  providerFailureOf,
+} from '#api/llm/provider-account-stream.js';
 import type { ProviderAccountOwner, ProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
 import type { GatewayProviderId } from '#api/providers/provider-gateway.js';
 
@@ -564,5 +568,60 @@ describe('relay end shapes the filter decides', () => {
       return;
     }
     expect(output).toBe(content + rateLimitedFrame('operator'));
+  });
+});
+
+describe('providerFailureOf', () => {
+  it.each([
+    [
+      'a flat OpenAI Responses error event',
+      { type: 'error', code: 'server_error', message: 'The server had an error.', param: null },
+      { type: 'error', code: 'server_error', message: 'The server had an error.' },
+    ],
+    [
+      'a nested error event',
+      {
+        type: 'error',
+        error: { type: 'insufficient_quota', code: 'credit_balance_exhausted', message: 'No credits.' },
+      },
+      { type: 'insufficient_quota', code: 'credit_balance_exhausted', message: 'No credits.' },
+    ],
+    [
+      'a Responses response.failed',
+      {
+        type: 'response.failed',
+        response: { status: 'failed', error: { code: 'credit_balance_exhausted', message: 'No credits.' } },
+      },
+      { code: 'credit_balance_exhausted', message: 'No credits.' },
+    ],
+    [
+      'an OpenAI-compatible error body',
+      { error: { code: 429, message: 'Resource exhausted.', status: 'RESOURCE_EXHAUSTED' } },
+      { code: '429', message: 'Resource exhausted.' },
+    ],
+    [
+      "Vertex's bare one-element array",
+      [{ error: { code: 429, message: 'Resource exhausted.' } }],
+      { code: '429', message: 'Resource exhausted.' },
+    ],
+  ])('should read %s', (_name, body, failure) => {
+    expect(providerFailureOf(body)).toEqual(failure);
+  });
+
+  it.each([
+    [
+      'a created response whose error is null',
+      { type: 'response.created', response: { status: 'in_progress', error: null } },
+    ],
+    [
+      'a completed response',
+      { type: 'response.completed', response: { status: 'completed', error: null, usage: { total: 1 } } },
+    ],
+    ['a text delta', { type: 'response.output_text.delta', delta: 'error' }],
+    ['a completions chunk', { choices: [{ delta: { content: 'x' }, index: 0 }] }],
+    ['a string', 'data'],
+    ['null', null],
+  ])('should report nothing for %s', (_name, body) => {
+    expect(providerFailureOf(body)).toBeUndefined();
   });
 });

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { act, fireEvent, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkbenchLaneNode, WorkbenchLayout } from '@taucad/workbench';
@@ -77,7 +78,7 @@ describe('ProjectWorkspaceProvider', () => {
     keyboard.useKeybinding.mockImplementation(stubKeybinding);
   });
 
-  it('reveals the Workbench lane for Files before its launcher mounts', () => {
+  it('reveals the Workbench lane and fulfills Files once when its launcher mounts', () => {
     render(
       <ProjectWorkspaceProvider>
         <Probe />
@@ -101,7 +102,12 @@ describe('ProjectWorkspaceProvider', () => {
     act(() => {
       workspace.connectWorkbench(opener);
     });
-    expect(opener).not.toHaveBeenCalled();
+    expect(opener).toHaveBeenCalledExactlyOnceWith('files');
+    const replacement = vi.fn();
+    act(() => {
+      workspace.connectWorkbench(replacement);
+    });
+    expect(replacement).not.toHaveBeenCalled();
   });
 
   it.each([false, true])('opens an archive deep link after editor readiness (mobile=%s)', (isMobile) => {
@@ -150,6 +156,128 @@ describe('ProjectWorkspaceProvider', () => {
       workspace.openPanel('files');
     });
     expect(opener).toHaveBeenCalledExactlyOnceWith('files');
+  });
+
+  it.each(['close', 'panel', 'navigation', 'unmount'] as const)(
+    'cancels an unconnected Files intent after %s',
+    (reason) => {
+      const view = render(
+        <ProjectWorkspaceProvider>
+          <Probe />
+        </ProjectWorkspaceProvider>,
+      );
+      act(() => {
+        workspace.openPanel('files');
+      });
+      const { connectWorkbench } = workspace;
+      switch (reason) {
+        case 'close': {
+          act(() => {
+            workspace.setWorkbenchOpen(false);
+          });
+          break;
+        }
+        case 'panel': {
+          act(() => {
+            workspace.openPanel('parameters');
+          });
+          break;
+        }
+        case 'navigation': {
+          route.key = 'destination';
+          view.rerender(
+            <ProjectWorkspaceProvider>
+              <Probe />
+            </ProjectWorkspaceProvider>,
+          );
+          break;
+        }
+        case 'unmount': {
+          view.unmount();
+          break;
+        }
+      }
+      const opener = vi.fn();
+      act(() => {
+        connectWorkbench(opener);
+      });
+      expect(opener).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses a retired route connector without consuming the replacement Files intent', () => {
+    const view = render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    const retiredConnect = workspace.connectWorkbench;
+    route.key = 'replacement-route';
+    view.rerender(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    const retired = vi.fn();
+    const replacement = vi.fn();
+    act(() => {
+      workspace.openPanel('files');
+      retiredConnect(retired);
+      workspace.connectWorkbench(replacement);
+    });
+    expect(retired).not.toHaveBeenCalled();
+    expect(replacement).toHaveBeenCalledExactlyOnceWith('files');
+    act(() => {
+      retiredConnect(retired);
+      workspace.openPanel('files');
+    });
+    expect(retired).not.toHaveBeenCalled();
+    expect(replacement).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves a Files intent issued by a child effect in the navigation commit', () => {
+    function RequestFiles(): React.JSX.Element {
+      const current = useProjectWorkspace();
+      useEffect(() => {
+        current.openPanel('files');
+      }, [current.openPanel]);
+      return <Probe />;
+    }
+    const view = render(
+      <ProjectWorkspaceProvider>
+        <RequestFiles />
+      </ProjectWorkspaceProvider>,
+    );
+    route.key = 'same-commit-navigation';
+    view.rerender(
+      <ProjectWorkspaceProvider>
+        <RequestFiles />
+      </ProjectWorkspaceProvider>,
+    );
+    const opener = vi.fn();
+    act(() => {
+      workspace.connectWorkbench(opener);
+    });
+    expect(opener).toHaveBeenCalledExactlyOnceWith('files');
+  });
+
+  it('retains the replacement opener after the retired opener cleanup runs', () => {
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    const retired = vi.fn();
+    const replacement = vi.fn();
+    let releaseRetired: (() => void) | undefined;
+    act(() => {
+      releaseRetired = workspace.connectWorkbench(retired);
+      workspace.connectWorkbench(replacement);
+      releaseRetired();
+      workspace.openPanel('files');
+    });
+    expect(retired).not.toHaveBeenCalled();
+    expect(replacement).toHaveBeenCalledExactlyOnceWith('files');
   });
 
   it('should reopen the chat pane on a sidebar chat navigation, including the selected chat', () => {

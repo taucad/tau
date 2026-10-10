@@ -227,6 +227,11 @@ describe('database runtime boundary', () => {
         await expect(billingRuntime`SELECT count(*)::int AS n FROM billing.credit_account`).resolves.toEqual([
           { n: 0 },
         ]);
+        // The worker addresses an account owner by these columns of the auth user, and reads no others.
+        await expect(billingRuntime`SELECT id, name, email FROM public."user" WHERE false`).resolves.toEqual([]);
+        await expect(billingRuntime`SELECT email_verified FROM public."user" WHERE false`).rejects.toMatchObject({
+          code: '42501',
+        });
       } finally {
         await apiRuntime.end();
         await billingRuntime.end();

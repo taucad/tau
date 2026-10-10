@@ -8,7 +8,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { Separator } from '@taucad/ui/components/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { FileLink } from '#components/files/file-link.js';
-import { Loader } from '#components/ui/loader.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { useProject } from '#hooks/use-project.js';
@@ -22,7 +21,7 @@ import { buildUserMessage } from '#utils/chat.utils.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { selectCadEntryIssues, selectCadFailureIssues, selectCadLoadingPhase } from '#machines/cad.machine.js';
+import { selectCadEntryIssues, selectCadFailureIssues } from '#machines/cad.machine.js';
 
 const shiftKey = formatKeyCombination({ key: 'Shift' });
 
@@ -380,15 +379,15 @@ type ViewerIssuesProps = Readonly<{
   /** Shown first in the list, which opens for it: the view cannot show anything until it is resolved. */
   notice?: ViewerNotice;
   /**
-   * Places the two parts in the viewer bar: `segment` (the build status and issue counts, which toggles the list) at
+   * Places the two parts in the viewer bar: `segment` (the failure and issue counts, which toggles the list) at
    * the start of its controls line, and `list` (the open issues) directly above that line.
    */
   children: (parts: Readonly<{ segment: React.ReactNode; list: React.ReactNode }>) => React.ReactNode;
 }>;
 
 /**
- * The viewer's issues, as part of its bar. Closed, a segment says the build is running, that it failed, and how many
- * errors, warnings and notes it left; opening it unfolds the list above the controls, errors first, each with Fix with
+ * The viewer's issues, as part of its bar. Closed, a segment says that the build failed and how many errors, warnings
+ * and notes it left (the running phase is the top pill, `ChatViewerStatus`); opening it unfolds the list above the controls, errors first, each with Fix with
  * AI, and Fix all when there are several. New issues never reopen a closed list; a view notice does.
  */
 export function ViewerIssues({ entryPath, notice, children }: ViewerIssuesProps): React.ReactNode {
@@ -411,7 +410,6 @@ export function ViewerIssues({ entryPath, notice, children }: ViewerIssuesProps)
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
   const selectEntryIssues = useMemo(() => selectCadEntryIssues(entryPath), [entryPath]);
   const entryIssues = useCadSelector(selectEntryIssues, undefined);
-  const loadingPhase = useCadSelector(selectCadLoadingPhase, undefined);
   const errors = isCadActorStale ? undefined : (failureIssues ?? entryIssues);
   const isFailed = !isCadActorStale && failureIssues !== undefined && failureIssues.length > 0;
   const sorted = useMemo(
@@ -500,33 +498,25 @@ export function ViewerIssues({ entryPath, notice, children }: ViewerIssuesProps)
   }
 
   const segment =
-    loadingPhase !== undefined || total > 0 ? (
+    total > 0 ? (
       <>
         <Hairline />
-        {loadingPhase ? (
-          <span role='status' className='flex h-7 items-center gap-1.5 px-2 text-xs text-foreground'>
-            <Loader className='size-3.5 text-primary' />
-            <span className='capitalize'>{loadingPhase}…</span>
-          </span>
-        ) : null}
-        {total > 0 ? (
-          <Button
-            ref={segmentRef}
-            variant='ghost'
-            size='sm'
-            aria-expanded={open}
-            aria-controls={open ? listId : undefined}
-            aria-label={`${isFailed ? 'Build failed. ' : ''}Issues: ${summarize(counts)}`}
-            className='group/issues h-7 gap-1.5 px-2 text-xs has-[>svg]:px-2 aria-expanded:bg-accent/60 dark:aria-expanded:bg-accent/80'
-            onClick={() => {
-              setIsOpen(!open);
-            }}
-            onKeyDown={close}
-          >
-            <IssueGlyphCounts counts={counts} isFailed={isFailed} />
-            <ChevronUp className='size-3 transition-transform group-aria-expanded/issues:rotate-180' />
-          </Button>
-        ) : null}
+        <Button
+          ref={segmentRef}
+          variant='ghost'
+          size='sm'
+          aria-expanded={open}
+          aria-controls={open ? listId : undefined}
+          aria-label={`${isFailed ? 'Build failed. ' : ''}Issues: ${summarize(counts)}`}
+          className='group/issues h-7 gap-1.5 px-2 text-xs has-[>svg]:px-2 aria-expanded:bg-accent/60 dark:aria-expanded:bg-accent/80'
+          onClick={() => {
+            setIsOpen(!open);
+          }}
+          onKeyDown={close}
+        >
+          <IssueGlyphCounts counts={counts} isFailed={isFailed} />
+          <ChevronUp className='size-3 transition-transform group-aria-expanded/issues:rotate-180' />
+        </Button>
       </>
     ) : null;
 

@@ -238,6 +238,7 @@ export const exportTauProjectArtifact = async (
     const document = exportRuntime.open({
       source: { files: sourceFiles, entry: snapshot.data.entryPath },
       parameters: descriptor.parameters ?? {},
+      watch: false,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
     const exported = await (async () => {

@@ -102,7 +102,18 @@ const trackWatchAdmission = (provider: NodeFsProvider, admission: Promise<void>)
   state.admissions.add(tracking.promise);
 };
 
-/** Await physical native watcher closures in the asynchronous Node host lifecycle. @internal */
+/**
+ * Await the native watcher subscriptions and closures a provider started.
+ *
+ * `NodeFsProvider.dispose()` is synchronous, but native subscribe and
+ * unsubscribe settle later on the owning event loop. Await this before that
+ * isolate exits, because a worker terminated mid-settlement aborts the process.
+ *
+ * @param provider - The provider whose watcher work must settle.
+ * @returns Resolves once every pending admission and closure has settled.
+ * @throws AggregateError When more than one native closure failed; a single failure is rethrown as is.
+ * @public
+ */
 export const drainNodeFsProviderWatchClosures = async (provider: NodeFsProvider): Promise<void> => {
   const state = watchClosures.get(provider);
   if (!state) {

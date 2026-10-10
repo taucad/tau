@@ -516,6 +516,22 @@ IntPatch_HInterTool: declare class IntPatch_HInterTool
 
 IntPatch_IType: typeof IntPatch_IType[keyof typeof IntPatch_IType]
 
+  readonly IntPatch_Lin: 'IntPatch_Lin'
+
+  readonly IntPatch_Circle: 'IntPatch_Circle'
+
+  readonly IntPatch_Ellipse: 'IntPatch_Ellipse'
+
+  readonly IntPatch_Parabola: 'IntPatch_Parabola'
+
+  readonly IntPatch_Hyperbola: 'IntPatch_Hyperbola'
+
+  readonly IntPatch_Analytic: 'IntPatch_Analytic'
+
+  readonly IntPatch_Walking: 'IntPatch_Walking'
+
+  readonly IntPatch_Restriction: 'IntPatch_Restriction'
+
 IntPatch_ImpImpIntersection: declare class IntPatch_ImpImpIntersection
 
   // IntPatch_ImpImpIntersection.constructor (constructor)
@@ -559,6 +575,12 @@ IntPatch_ImpImpIntersection: declare class IntPatch_ImpImpIntersection
   [Symbol.dispose](): void;
 
 IntPatch_ImpImpIntersection_IntStatus: typeof IntPatch_ImpImpIntersection_IntStatus[keyof typeof IntPatch_ImpImpIntersection_IntStatus]
+
+  readonly IntStatus_OK: 'IntStatus_OK'
+
+  readonly IntStatus_InfiniteSectionCurve: 'IntStatus_InfiniteSectionCurve'
+
+  readonly IntStatus_Fail: 'IntStatus_Fail'
 
 IntPatch_ImpPrmIntersection: declare class IntPatch_ImpPrmIntersection
 
@@ -1125,3 +1147,15 @@ IntPatch_RstInt: declare class IntPatch_RstInt
   [Symbol.dispose](): void;
 
 IntPatch_SpecPntType: typeof IntPatch_SpecPntType[keyof typeof IntPatch_SpecPntType]
+
+  readonly IntPatch_SPntNone: 'IntPatch_SPntNone'
+
+  readonly IntPatch_SPntSeamU: 'IntPatch_SPntSeamU'
+
+  readonly IntPatch_SPntSeamV: 'IntPatch_SPntSeamV'
+
+  readonly IntPatch_SPntSeamUV: 'IntPatch_SPntSeamUV'
+
+  readonly IntPatch_SPntPoleSeamU: 'IntPatch_SPntPoleSeamU'
+
+  readonly IntPatch_SPntPole: 'IntPatch_SPntPole'

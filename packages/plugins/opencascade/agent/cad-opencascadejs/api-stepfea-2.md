@@ -1,6 +1,36 @@
 # libcascade — StepFEA (2)
 
-40 top-level symbols. Signatures are verbatim typescript.
+41 top-level symbols. Signatures are verbatim typescript.
+
+StepFEA_FeaShellMembraneStiffness: declare class StepFEA_FeaShellMembraneStiffness extends StepFEA_FeaMaterialPropertyRepresentationItem
+
+  // StepFEA_FeaShellMembraneStiffness.constructor (constructor)
+  constructor();
+
+  // StepFEA_FeaShellMembraneStiffness.Init (method)
+  Init(aRepresentationItem_Name: TCollection_HAsciiString, aFeaConstants: StepFEA_SymmetricTensor42d): void;
+  Init(aName: TCollection_HAsciiString): void;
+
+  // StepFEA_FeaShellMembraneStiffness.FeaConstants (method)
+  FeaConstants(): StepFEA_SymmetricTensor42d;
+
+  // StepFEA_FeaShellMembraneStiffness.SetFeaConstants (method)
+  SetFeaConstants(FeaConstants: StepFEA_SymmetricTensor42d): void;
+
+  // StepFEA_FeaShellMembraneStiffness.get_type_name (method)
+  static get_type_name(): string;
+
+  // StepFEA_FeaShellMembraneStiffness.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // StepFEA_FeaShellMembraneStiffness.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // StepFEA_FeaShellMembraneStiffness.delete (method)
+  delete(): void;
+
+  // StepFEA_FeaShellMembraneStiffness.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 StepFEA_FeaShellShearStiffness: declare class StepFEA_FeaShellShearStiffness extends StepFEA_FeaMaterialPropertyRepresentationItem
 
@@ -634,6 +664,8 @@ StepFEA_SymmetricTensor43dMember: declare class StepFEA_SymmetricTensor43dMember
   [Symbol.dispose](): void;
 
 StepFEA_UnspecifiedValue: typeof StepFEA_UnspecifiedValue[keyof typeof StepFEA_UnspecifiedValue]
+
+  readonly StepFEA_Unspecified: 'StepFEA_Unspecified'
 
 StepFEA_Volume3dElementRepresentation: declare class StepFEA_Volume3dElementRepresentation extends StepFEA_ElementRepresentation
 

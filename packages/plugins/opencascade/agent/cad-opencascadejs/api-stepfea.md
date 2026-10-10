@@ -1,6 +1,6 @@
 # libcascade — StepFEA
 
-42 top-level symbols. Signatures are verbatim typescript.
+41 top-level symbols. Signatures are verbatim typescript.
 
 StepFEA_AlignedCurve3dElementCoordinateSystem: declare class StepFEA_AlignedCurve3dElementCoordinateSystem extends StepFEA_FeaRepresentationItem
 
@@ -130,6 +130,12 @@ StepFEA_ConstantSurface3dElementCoordinateSystem: declare class StepFEA_Constant
 
 StepFEA_CoordinateSystemType: typeof StepFEA_CoordinateSystemType[keyof typeof StepFEA_CoordinateSystemType]
 
+  readonly StepFEA_Cartesian: 'StepFEA_Cartesian'
+
+  readonly StepFEA_Cylindrical: 'StepFEA_Cylindrical'
+
+  readonly StepFEA_Spherical: 'StepFEA_Spherical'
+
 StepFEA_Curve3dElementProperty: declare class StepFEA_Curve3dElementProperty extends Standard_Transient
 
   // StepFEA_Curve3dElementProperty.constructor (constructor)
@@ -233,6 +239,8 @@ StepFEA_Curve3dElementRepresentation: declare class StepFEA_Curve3dElementRepres
   [Symbol.dispose](): void;
 
 StepFEA_CurveEdge: typeof StepFEA_CurveEdge[keyof typeof StepFEA_CurveEdge]
+
+  readonly StepFEA_ElementEdge: 'StepFEA_ElementEdge'
 
 StepFEA_CurveElementEndCoordinateSystem: declare class StepFEA_CurveElementEndCoordinateSystem extends StepData_SelectType
 
@@ -659,7 +667,23 @@ StepFEA_ElementRepresentation: declare class StepFEA_ElementRepresentation exten
 
 StepFEA_ElementVolume: typeof StepFEA_ElementVolume[keyof typeof StepFEA_ElementVolume]
 
+  readonly StepFEA_Volume: 'StepFEA_Volume'
+
 StepFEA_EnumeratedDegreeOfFreedom: typeof StepFEA_EnumeratedDegreeOfFreedom[keyof typeof StepFEA_EnumeratedDegreeOfFreedom]
+
+  readonly StepFEA_XTranslation: 'StepFEA_XTranslation'
+
+  readonly StepFEA_YTranslation: 'StepFEA_YTranslation'
+
+  readonly StepFEA_ZTranslation: 'StepFEA_ZTranslation'
+
+  readonly StepFEA_XRotation: 'StepFEA_XRotation'
+
+  readonly StepFEA_YRotation: 'StepFEA_YRotation'
+
+  readonly StepFEA_ZRotation: 'StepFEA_ZRotation'
+
+  readonly StepFEA_Warp: 'StepFEA_Warp'
 
 StepFEA_FeaAreaDensity: declare class StepFEA_FeaAreaDensity extends StepFEA_FeaMaterialPropertyRepresentationItem
 
@@ -1146,34 +1170,4 @@ StepFEA_FeaShellMembraneBendingCouplingStiffness: declare class StepFEA_FeaShell
   delete(): void;
 
   // StepFEA_FeaShellMembraneBendingCouplingStiffness.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-StepFEA_FeaShellMembraneStiffness: declare class StepFEA_FeaShellMembraneStiffness extends StepFEA_FeaMaterialPropertyRepresentationItem
-
-  // StepFEA_FeaShellMembraneStiffness.constructor (constructor)
-  constructor();
-
-  // StepFEA_FeaShellMembraneStiffness.Init (method)
-  Init(aRepresentationItem_Name: TCollection_HAsciiString, aFeaConstants: StepFEA_SymmetricTensor42d): void;
-  Init(aName: TCollection_HAsciiString): void;
-
-  // StepFEA_FeaShellMembraneStiffness.FeaConstants (method)
-  FeaConstants(): StepFEA_SymmetricTensor42d;
-
-  // StepFEA_FeaShellMembraneStiffness.SetFeaConstants (method)
-  SetFeaConstants(FeaConstants: StepFEA_SymmetricTensor42d): void;
-
-  // StepFEA_FeaShellMembraneStiffness.get_type_name (method)
-  static get_type_name(): string;
-
-  // StepFEA_FeaShellMembraneStiffness.get_type_descriptor (method)
-  static get_type_descriptor(): Standard_Type;
-
-  // StepFEA_FeaShellMembraneStiffness.DynamicType (method)
-  DynamicType(): Standard_Type;
-
-  // StepFEA_FeaShellMembraneStiffness.delete (method)
-  delete(): void;
-
-  // StepFEA_FeaShellMembraneStiffness.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

@@ -1,6 +1,6 @@
 # libcascade — XCAFDoc
 
-20 top-level symbols. Signatures are verbatim typescript.
+19 top-level symbols. Signatures are verbatim typescript.
 
 XCAFDoc: declare class XCAFDoc
 
@@ -175,6 +175,18 @@ XCAFDoc_AssemblyGraph: declare class XCAFDoc_AssemblyGraph extends Standard_Tran
   [Symbol.dispose](): void;
 
 XCAFDoc_AssemblyGraph_NodeType: typeof XCAFDoc_AssemblyGraph_NodeType[keyof typeof XCAFDoc_AssemblyGraph_NodeType]
+
+  readonly NodeType_UNDEFINED: 'NodeType_UNDEFINED'
+
+  readonly NodeType_AssemblyRoot: 'NodeType_AssemblyRoot'
+
+  readonly NodeType_Subassembly: 'NodeType_Subassembly'
+
+  readonly NodeType_Occurrence: 'NodeType_Occurrence'
+
+  readonly NodeType_Part: 'NodeType_Part'
+
+  readonly NodeType_Subshape: 'NodeType_Subshape'
 
 XCAFDoc_AssemblyGraph_Iterator: declare class XCAFDoc_AssemblyGraph_Iterator
 
@@ -628,6 +640,12 @@ XCAFDoc_ColorTool: declare class XCAFDoc_ColorTool extends TDataStd_GenericEmpty
 
 XCAFDoc_ColorType: typeof XCAFDoc_ColorType[keyof typeof XCAFDoc_ColorType]
 
+  readonly XCAFDoc_ColorGen: 'XCAFDoc_ColorGen'
+
+  readonly XCAFDoc_ColorSurf: 'XCAFDoc_ColorSurf'
+
+  readonly XCAFDoc_ColorCurv: 'XCAFDoc_ColorCurv'
+
 XCAFDoc_Datum: declare class XCAFDoc_Datum extends TDF_Attribute
 
   // XCAFDoc_Datum.constructor (constructor)
@@ -1047,41 +1065,4 @@ XCAFDoc_DocumentTool: declare class XCAFDoc_DocumentTool extends TDataStd_Generi
   delete(): void;
 
   // XCAFDoc_DocumentTool.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-XCAFDoc_Editor: declare class XCAFDoc_Editor
-
-  // XCAFDoc_Editor.constructor (constructor)
-  constructor();
-
-  // XCAFDoc_Editor.Expand (method)
-  static Expand(theDoc: TDF_Label, theShape: TDF_Label, theRecursively: boolean): boolean;
-  static Expand(theDoc: TDF_Label, theRecursively: boolean): boolean;
-
-  // XCAFDoc_Editor.Extract (method)
-  static Extract(theSrcLabels: NCollection_Sequence_TDF_Label, theDstLabel: TDF_Label, theIsNoVisMat: boolean): boolean;
-  static Extract(theSrcLabel: TDF_Label, theDstLabel: TDF_Label, theIsNoVisMat: boolean): boolean;
-
-  // XCAFDoc_Editor.CloneShapeLabel (method)
-  static CloneShapeLabel(theSrcLabel: TDF_Label, theSrcShapeTool: XCAFDoc_ShapeTool, theDstShapeTool: XCAFDoc_ShapeTool, theMap: NCollection_DataMap_TDF_Label_TDF_Label): TDF_Label;
-
-  // XCAFDoc_Editor.CloneMetaData (method)
-  static CloneMetaData(theSrcLabel: TDF_Label, theDstLabel: TDF_Label, theVisMatMap: NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial, theToCopyColor?: boolean, theToCopyLayer?: boolean, theToCopyMaterial?: boolean, theToCopyVisMaterial?: boolean, theToCopyAttributes?: boolean): void;
-
-  // XCAFDoc_Editor.GetParentShapeLabels (method)
-  static GetParentShapeLabels(theLabel: TDF_Label, theRelatedLabels: NCollection_Map_TDF_Label): void;
-
-  // XCAFDoc_Editor.GetChildShapeLabels (method)
-  static GetChildShapeLabels(theLabel: TDF_Label, theRelatedLabels: NCollection_Map_TDF_Label): void;
-
-  // XCAFDoc_Editor.FilterShapeTree (method)
-  static FilterShapeTree(theShapeTool: XCAFDoc_ShapeTool, theLabelsToKeep: NCollection_Map_TDF_Label): boolean;
-
-  // XCAFDoc_Editor.RescaleGeometry (method)
-  static RescaleGeometry(theLabel: TDF_Label, theScaleFactor: number, theForceIfNotRoot?: boolean): boolean;
-
-  // XCAFDoc_Editor.delete (method)
-  delete(): void;
-
-  // XCAFDoc_Editor.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

@@ -13,7 +13,8 @@ import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { UserButton } from '#components/auth/user/user-button.js';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { legalUrl, metaConfig } from '#constants/meta.constants.js';
+import { metaConfig } from '#constants/meta.constants.js';
+import { legalUrl } from '#lib/legal-url.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { NavBillingItem } from '#cloud/nav-billing.js';
 

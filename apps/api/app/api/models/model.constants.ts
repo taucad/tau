@@ -399,33 +399,33 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         },
       },
     },
-    'claude-haiku-4.5': {
-      id: 'anthropic-claude-haiku-4.5',
+    'claude-haiku-5.5': {
+      id: 'anthropic-claude-haiku-5.5',
       providerKind: 'tau-hosted',
-      name: 'Haiku 4.5',
-      slug: 'claude-haiku-4.5',
+      name: 'Haiku 5.5',
+      slug: 'claude-haiku-5.5',
       recommended: true,
       description: 'Fastest Claude model, ideal for quick design tasks or small changes.',
       provider: {
         id: 'anthropic',
         name: 'Anthropic',
       },
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-haiku-5-5',
       support: {
+        reasoning: lowToHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
         families: ['claude'],
-        contextWindow: 200_000,
-        maxTokens: 64_000,
-        knowledgeCutoff: '2025-07',
+        contextWindow: 200_000, // Provider supports 1M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
         cost: {
-          inputTokens: 1,
-          outputTokens: 5,
-          cacheReadTokens: 0.1,
-          cacheWriteTokens: 1.25,
+          inputTokens: 0.1,
+          outputTokens: 0.5,
+          cacheReadTokens: 0.01,
+          cacheWriteTokens: 0.125,
         },
       },
       configuration: {
@@ -435,9 +435,10 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
         max_tokens: 16_000,
         thinking: {
-          type: 'enabled',
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
-          budget_tokens: 4000,
+          type: 'adaptive',
+        },
+        outputConfig: {
+          effort: 'high',
         },
       },
     },

@@ -878,7 +878,8 @@ export function ProjectLibraryCard({
   onSelect,
 }: ProjectLibraryCardProps): React.JSX.Element {
   const [showPreview, setShowPreview] = useState(false);
-  const thumbnailSource = useProjectThumbnail(project.id);
+  const thumbnail = useProjectThumbnail(project.id);
+  const thumbnailSource = thumbnail.url;
 
   const mainFile = project.assets.main.entryPath;
   const location = projectLocationDescriptor(
@@ -906,6 +907,20 @@ export function ProjectLibraryCard({
           onCheckedChange={() => onSelect?.()}
         />
       </div>
+      {thumbnail.status === 'error' || thumbnail.status === 'closed' ? (
+        <Button
+          type='button'
+          size='sm'
+          variant='outline'
+          className='relative z-20'
+          title={thumbnail.error}
+          onClick={() => {
+            thumbnail.refresh();
+          }}
+        >
+          Retry thumbnail
+        </Button>
+      ) : null}
       <ProjectCardMedia
         thumbnailSource={thumbnailSource}
         isPreviewVisible={showPreview}

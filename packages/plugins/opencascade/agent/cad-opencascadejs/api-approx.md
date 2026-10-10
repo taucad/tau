@@ -317,6 +317,12 @@ Approx_MCurvesToBSpCurve: declare class Approx_MCurvesToBSpCurve
 
 Approx_ParametrizationType: typeof Approx_ParametrizationType[keyof typeof Approx_ParametrizationType]
 
+  readonly Approx_ChordLength: 'Approx_ChordLength'
+
+  readonly Approx_Centripetal: 'Approx_Centripetal'
+
+  readonly Approx_IsoParametric: 'Approx_IsoParametric'
+
 Approx_SameParameter: declare class Approx_SameParameter
 
   // Approx_SameParameter.constructor (constructor)
@@ -349,6 +355,12 @@ Approx_SameParameter: declare class Approx_SameParameter
   [Symbol.dispose](): void;
 
 Approx_Status: typeof Approx_Status[keyof typeof Approx_Status]
+
+  readonly Approx_PointsAdded: 'Approx_PointsAdded'
+
+  readonly Approx_NoPointsAdded: 'Approx_NoPointsAdded'
+
+  readonly Approx_NoApproximation: 'Approx_NoApproximation'
 
 Approx_SweepApproximation: declare class Approx_SweepApproximation
 

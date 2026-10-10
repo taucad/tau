@@ -18,6 +18,7 @@ import { handleResolveSkill } from '#rpc/handlers/handle-resolve-skill.js';
 import { handleReadRevisions } from '#rpc/handlers/handle-read-revisions.js';
 import { handleApplyParameterOperation, handleGetParameters } from '#rpc/handlers/handle-parameters.js';
 import { handleWriteTodos } from '#rpc/handlers/handle-write-todos.js';
+import { handleInstallPackages } from '#rpc/handlers/handle-install-packages.js';
 import { handleAskQuestions } from '#rpc/handlers/handle-ask-questions.js';
 import { handleArrangeWorkbench } from '#rpc/handlers/handle-arrange-workbench.js';
 
@@ -64,6 +65,7 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.writeTodos]: async (args) => handleWriteTodos(args, deps.fileSystem),
     [rpcName.askQuestions]: async (args, context) => handleAskQuestions(args, deps.fileSystem, context?.signal),
     [rpcName.arrangeWorkbench]: async (args) => handleArrangeWorkbench(args, deps.fileSystem, deps.workbench),
+    [rpcName.installPackages]: async (args, context) => handleInstallPackages(args, deps.fileSystem, context?.signal),
   };
 
   const dispatch = async <K extends keyof RpcSchemasRegistry>(

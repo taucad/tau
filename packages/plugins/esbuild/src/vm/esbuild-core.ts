@@ -10,6 +10,7 @@ import type {
   BundlerSourceIntent,
   BundlerSourceResolution,
   BundlerSourceSession,
+  PackageIssue,
 } from '@taucad/bundler-core';
 import type { BuiltinModule } from '@taucad/runtime/bundler';
 
@@ -106,13 +107,6 @@ const scriptLoader = (path: string): Loader => {
   return 'js';
 };
 
-const toEsbuildPath = (resolution: BundlerSourceResolution): string => {
-  if (resolution.kind === 'project' || resolution.kind === 'package') {
-    return resolution.id;
-  }
-  return resolution.id;
-};
-
 const toNamespace = (resolution: BundlerSourceResolution): string => {
   if (resolution.kind === 'builtin') {
     return esbuildNamespace.builtin;
@@ -133,9 +127,11 @@ const importerId = (args: { readonly importer: string; readonly namespace: strin
   return args.importer;
 };
 
+// Package refusals pass their PackageIssue as esbuild `detail`; it reaches the issue as `details`.
 const issueFromMessage = (message: Message, severity: 'error' | 'warning'): VmIssue => ({
   message: message.text,
   code: 'BUNDLER_FAILED',
+  ...(message.detail === undefined ? {} : { details: message.detail as unknown }),
   type: 'compilation',
   severity,
   location:
@@ -146,6 +142,14 @@ const issueFromMessage = (message: Message, severity: 'error' | 'warning'): VmIs
           startLineNumber: message.location.line,
           startColumn: message.location.column,
         },
+});
+
+const packageWarning = (issue: PackageIssue): VmIssue => ({
+  message: issue.message,
+  code: 'BUNDLER_FAILED',
+  type: 'compilation',
+  severity: 'warning',
+  details: issue,
 });
 
 const issuesFromError = (error: unknown): VmIssue[] => {
@@ -207,10 +211,10 @@ const createSourcePlugin = (session: BundlerSourceSession, detect: boolean): Plu
           return { path: resolution.specifier, external: true };
         }
         if (resolution.kind === 'unsupported') {
-          return { errors: [{ text: resolution.message }] };
+          return { errors: [{ text: resolution.message, detail: resolution.issue }] };
         }
         return {
-          path: toEsbuildPath(resolution),
+          path: resolution.id,
           namespace: toNamespace(resolution),
           pluginData: resolution,
           ...(resolution.kind === 'project' && resolution.suffix.length > 0 ? { suffix: resolution.suffix } : {}),
@@ -304,7 +308,10 @@ export class EsbuildBundler {
       const output = result.outputFiles?.find((file) => file.path.endsWith('.js')) ?? result.outputFiles?.[0];
       const sourceMap = result.outputFiles?.find((file) => file.path.endsWith('.js.map'))?.text;
       const observation = session.complete();
-      const issues = result.warnings.map((warning) => issueFromMessage(warning, 'warning'));
+      const issues = [
+        ...result.warnings.map((warning) => issueFromMessage(warning, 'warning')),
+        ...observation.issues.map(packageWarning),
+      ];
       if (output === undefined) {
         issues.push({
           message: 'No output generated',
@@ -326,7 +333,7 @@ export class EsbuildBundler {
       const observation = session.complete();
       return {
         code: '',
-        issues: issuesFromError(error),
+        issues: [...issuesFromError(error), ...observation.issues.map(packageWarning)],
         dependencies: observation.dependencies,
         unresolvedPaths: observation.unresolvedPaths,
         success: false,

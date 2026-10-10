@@ -9,6 +9,7 @@
 
 import type { KernelIssue } from '#types/runtime.types.js';
 import type { KernelServices } from '#types/runtime-kernel-v2.types.js';
+import type { BuiltinModule } from '#types/runtime-bundler-service.types.js';
 import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
@@ -67,14 +68,49 @@ export type KernelModuleShimOptions = {
   exportPrefix?: string;
 };
 
+/** The `name` and `version` of an installed package, as its own `package.json` declares them. @public */
+export type InstalledPackageManifest = {
+  readonly name: string;
+  readonly version: string;
+};
+
 /** Options for registering one built-in kernel module. @public */
 export type RegisterKernelModuleOptions = {
   name: string;
   exports: Record<string, unknown>;
-  version: string;
   globalName?: string;
   exportPrefix?: string;
-};
+} & (
+  | {
+      /**
+       * `name` and `version` of the installed package the module comes from, as that package's own
+       * `package.json` declares them. The module's `version` and npm `package` identity both derive
+       * from it, so they cannot disagree.
+       */
+      package: InstalledPackageManifest;
+      version?: never;
+    }
+  | { version: string; package?: never }
+);
+
+/**
+ * Npm identity of a bare specifier's package: the dependency key is the specifier's package name
+ * (`manifold-3d/manifoldCAD` → `manifold-3d`), and the spec is the installed version, or an
+ * `npm:` alias when the installed package publishes under another name (a fork such as
+ * `@taulabs/replicad` imported as `replicad`).
+ *
+ * @internal
+ */
+export function toBuiltinModulePackage(
+  specifier: string,
+  installed: InstalledPackageManifest,
+): NonNullable<BuiltinModule['package']> {
+  const name = specifier
+    .split('/')
+    .slice(0, specifier.startsWith('@') ? 2 : 1)
+    .join('/');
+  return { name, spec: installed.name === name ? installed.version : `npm:${installed.name}@${installed.version}` };
+}
 
 /** Builds an ESM shim that exposes a registry-backed built-in kernel module. @public */
 export function createKernelModuleShim({
@@ -113,8 +149,10 @@ export function registerKernelModule(
       exports: options.exports,
       exportPrefix: options.exportPrefix,
     }),
-    version: options.version,
     globalName: options.globalName,
+    ...(options.package
+      ? { version: options.package.version, package: toBuiltinModulePackage(options.name, options.package) }
+      : { version: options.version }),
   });
 }
 

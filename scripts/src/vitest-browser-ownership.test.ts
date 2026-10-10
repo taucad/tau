@@ -227,6 +227,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/workers/agent-host.vitest.browser.config.ts',
         'apps/ui/chat-revision-marker.vitest.browser.config.ts',
         'packages/agent-host/vitest.browser.config.ts',
+        'packages/core/bundler/vitest.browser.config.ts',
         'packages/geospec-engine/e2e/vitest.config.ts',
         'packages/plugins/openrscad/e2e/vitest.config.ts',
         'packages/plugins/rolldown/vitest.browser.benchmark.config.ts',

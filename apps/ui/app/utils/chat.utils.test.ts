@@ -422,6 +422,25 @@ describe('serializeMessage', () => {
         '<tool_call name="arrange_workbench">\narrange_workbench(open, lanes)\n</tool_call>\n<tool_result>\n-> .tau/workbench/layout.json\n</tool_result>',
       );
     });
+    it('serializes the requested package edits and what was locked or refused', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-install_packages',
+          toolCallId: 'install-1',
+          state: 'output-available',
+          input: { add: { alea: '^1.0.1', 'simplex-noise': '^9.0.0' }, remove: ['lodash'] },
+          output: {
+            manifestChanged: false,
+            lockChanged: false,
+            packages: [{ name: 'alea', version: '1.0.1', path: 'node_modules/alea' }],
+            issues: [{ code: 'no-matching-version', name: 'simplex-noise', message: 'No published version matches.' }],
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="install_packages">\nadd: alea@^1.0.1\nadd: simplex-noise@^9.0.0\nremove: lodash\n</tool_call>\n<tool_result>\nalea@1.0.1\nno-matching-version: No published version matches.\n</tool_result>',
+      );
+    });
     it('serializes the questions with lettered options and the answers with their source', () => {
       const message = baseMessage([
         {

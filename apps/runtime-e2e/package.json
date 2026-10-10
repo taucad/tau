@@ -14,6 +14,7 @@
     "@taucad/agent-host": "workspace:*",
     "@taucad/agent-tools": "workspace:*",
     "@taucad/api-extractor": "workspace:*",
+    "@taucad/bundler-core": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/filesystem": "workspace:*",

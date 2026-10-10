@@ -96,6 +96,8 @@ const rpcForTool: Readonly<
   /* Waits on the person; one ask at a time keeps their questions in order. */
   [toolName.askQuestions]: { rpc: rpcName.askQuestions, sequential: true },
   [toolName.arrangeWorkbench]: { rpc: rpcName.arrangeWorkbench, needs: 'workbench' },
+  /* Writes package.json, package-lock.json and node_modules in one call. */
+  [toolName.installPackages]: { rpc: rpcName.installPackages, sequential: true },
 };
 
 const geospecAuthoringRecipe =
@@ -111,6 +113,7 @@ const recordRpcNames = new Set<RpcName>([
   rpcName.writeTodos,
   rpcName.askQuestions,
   rpcName.arrangeWorkbench,
+  rpcName.installPackages,
 ]);
 
 /**

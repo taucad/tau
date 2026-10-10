@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   RpcFileSystem,
@@ -92,6 +92,7 @@ const fileTools = [
   'glob_search',
   'update_todos',
   'ask_questions',
+  'install_packages',
 ];
 
 describe('createChatToolRegistry listing', () => {
@@ -191,6 +192,7 @@ describe('createChatToolRegistry listing', () => {
         'evaluate_model',
         'glob_search',
         'grep',
+        'install_packages',
         'list_directory',
         'read_file',
         'screenshot',
@@ -214,7 +216,12 @@ describe('createChatToolRegistry listing', () => {
       .filter((tool) => tool.executionMode === 'sequential')
       .map((tool) => tool.name);
 
-    expect(sequential.toSorted()).toStrictEqual(['apply_parameter_operation', 'ask_questions', 'export_model']);
+    expect(sequential.toSorted()).toStrictEqual([
+      'apply_parameter_operation',
+      'ask_questions',
+      'export_model',
+      'install_packages',
+    ]);
   });
 
   /* Review a1 R15: the read-only history tool is listed exactly where a client
@@ -646,6 +653,72 @@ describe('createChatToolRegistry invocation', () => {
       new Uint8Array([1]),
     );
     expect(agentWrite).not.toHaveBeenCalled();
+  });
+
+  /* Blueprint W5: package.json and package-lock.json are checked writes on the
+   * record view, composed as both hosts compose it. */
+  describe('install_packages', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('should resolve through the record view and report a refusal as an issue without writing', async () => {
+      const checkout = new MemoryProvider();
+      const manifest = '{\n  "name": "noise-vase"\n}\n';
+      await checkout.writeFile('package.json', manifest);
+      const recordView = composeView({ filesystem: checkout }, { consumer: 'user', policy: tauPathPolicy });
+      const mutations = new ResourceQueue();
+      const fileSystemFor = vi.fn(() => emptyFileSystem());
+      const recordFileSystemFor = vi.fn((signal: AbortSignal) =>
+        createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
+      );
+      vi.stubGlobal(
+        'fetch',
+        vi.fn<typeof fetch>(async () =>
+          Response.json({
+            name: 'alea',
+            'dist-tags': { latest: '1.0.1' },
+            versions: {
+              '1.0.1': {
+                name: 'alea',
+                version: '1.0.1',
+                dist: { tarball: 'https://registry.npmjs.org/alea/-/alea-1.0.1.tgz', integrity: 'sha512-AAAA' },
+              },
+            },
+          }),
+        ),
+      );
+
+      const result = await invoke(build({ fileSystemFor, recordFileSystemFor }), 'install_packages', {
+        input: { add: { alea: '^9.0.0' } },
+      });
+
+      expect(result).toMatchObject({
+        isError: false,
+        content: {
+          success: true,
+          manifestChanged: false,
+          lockChanged: false,
+          packages: [],
+          issues: [{ code: 'no-matching-version', name: 'alea' }],
+        },
+      });
+      expect(recordFileSystemFor).toHaveBeenCalledOnce();
+      expect(fileSystemFor).not.toHaveBeenCalled();
+      expect(await checkout.readFile('package.json', 'utf8')).toBe(manifest);
+      expect(await checkout.exists('package-lock.json')).toBe(false);
+    });
+
+    it('refuses an argument list for add before any filesystem is opened', async () => {
+      const fileSystemFor = vi.fn(() => emptyFileSystem());
+
+      const result = await invoke(build({ fileSystemFor }), 'install_packages', {
+        input: { add: ['alea@^1.0.1'] },
+      });
+
+      expect(result).toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+      expect(fileSystemFor).not.toHaveBeenCalled();
+    });
   });
 
   /* The chat task list (design-to-print workbench D8): one tool, one file,

@@ -73,6 +73,7 @@
     }
   },
   "dependencies": {
+    "@taucad/bundler-core": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@taucad/workbench": "workspace:*",

@@ -1,4 +1,7 @@
 import { parsePackage } from 'cdn-resolve';
+import { valid } from 'semver';
+
+import { readPackageResponse } from '#package-response.js';
 
 import { assertRootedPath, sha256Bytes, sha256String } from '@taucad/runtime/kernel';
 
@@ -8,8 +11,10 @@ export type BundlerFileSystem = {
   stat?(path: string): Promise<{ readonly type: 'file' | 'dir' }>;
   readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   readFile(path: string, encoding: 'utf8'): Promise<string>;
-  writeFile(path: string, content: string): Promise<void>;
+  writeFile(path: string, content: string | Uint8Array<ArrayBuffer>): Promise<void>;
   ensureDir(path: string): Promise<void>;
+  /** Remove a file or a whole directory tree. Optional: callers that need it refuse or degrade when absent. */
+  remove?(path: string): Promise<void>;
 };
 
 /** Durable identity for one self-contained CDN package artifact. @public */
@@ -43,7 +48,7 @@ const throwIfAborted = (signal: AbortSignal): void => {
 };
 
 const responseVersion = (response: Response, code: string, requestedVersion: string): string => {
-  if (/^\d+\.\d+\.\d+(?:-[\d.A-Za-z-]+(?:\.[\d.A-Za-z-]+)*)?$/u.test(requestedVersion)) {
+  if (valid(requestedVersion) === requestedVersion) {
     return requestedVersion;
   }
   const evidence = `${response.url}\n${response.headers.get('x-esm-path') ?? ''}\n${code.slice(0, 1024)}`;
@@ -219,19 +224,28 @@ export class PackageArtifactCache {
   }): Promise<PackageArtifactIdentity> {
     const { specifier, requestedVersion, candidate, signal } = input;
     const operationSignal = AbortSignal.any([signal, AbortSignal.timeout(fetchTimeoutMilliseconds)]);
-    const response = await fetch(candidate.url, { signal: operationSignal });
+    let resolvedUrl = candidate.url;
+    let response = await fetch(candidate.url, { signal: operationSignal, credentials: 'omit' });
+    const bundlePath = response.headers.get('x-esm-path');
+    if (response.ok && candidate.provider === 'esm.sh' && bundlePath !== null) {
+      const bundleUrl = new URL(bundlePath, candidate.url);
+      const expectedRoot = `/${parsePackage(specifier).name}@${requestedVersion}/`;
+      if (
+        bundleUrl.origin !== 'https://esm.sh' ||
+        !bundleUrl.pathname.endsWith('.bundle.mjs') ||
+        (valid(requestedVersion) === requestedVersion &&
+          !decodeURIComponent(bundleUrl.pathname).startsWith(expectedRoot))
+      ) {
+        throw new Error('CDN did not return a same-origin bundle for the selected package version.');
+      }
+      resolvedUrl = bundleUrl.href;
+      response = await fetch(bundleUrl, { signal: operationSignal, credentials: 'omit' });
+    }
     if (!response.ok) {
       throw new Error(`HTTP ${response.status} ${response.statusText}`);
     }
-    const declaredBytes = Number(response.headers.get('content-length') ?? 0);
-    if (declaredBytes > maximumResponseBytes) {
-      throw new Error(`Response exceeds ${maximumResponseBytes} bytes.`);
-    }
-    const code = await response.text();
+    const code = await readPackageResponse(response, maximumResponseBytes);
     const bytes = new TextEncoder().encode(code);
-    if (bytes.byteLength > maximumResponseBytes) {
-      throw new Error(`Response exceeds ${maximumResponseBytes} bytes.`);
-    }
     throwIfAborted(signal);
 
     const bytesHash = await sha256Bytes(bytes);
@@ -244,7 +258,7 @@ export class PackageArtifactCache {
       resolutionMetadata: {
         requestedSpecifier: specifier,
         provider: candidate.provider,
-        resolvedUrl: response.url.length === 0 ? candidate.url : response.url,
+        resolvedUrl: response.url.length === 0 ? resolvedUrl : response.url,
       },
     };
     await this.#filesystem.ensureDir(`${artifactRoot}/artifacts`);

@@ -288,6 +288,19 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     input: (input) => `arrange_workbench(${Object.keys(input).join(', ')})`,
     output: (output) => `-> ${output.revisions.map((revision) => revision.path).join(', ')}`,
   },
+  [toolName.installPackages]: {
+    input: (input) =>
+      joinLines(
+        ...Object.entries(input.add ?? {}).map(([name, range]) => `add: ${name}@${String(range)}`),
+        ...(input.remove ?? []).map((name) => `remove: ${String(name)}`),
+        ...(input.upgrade ?? []).map((name) => `upgrade: ${String(name)}`),
+      ),
+    output: (output) =>
+      joinLines(
+        ...output.packages.map((item) => `${item.name}@${item.version}`),
+        ...output.issues.map((issue) => `${issue.code}: ${issue.message}`),
+      ),
+  },
   [toolName.getMachine]: {
     input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
     output: (output) => JSON.stringify(output, null, 2),

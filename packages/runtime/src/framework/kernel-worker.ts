@@ -6150,12 +6150,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const registrations: CapabilitiesManifest['registrations'] = [
-      ...this.manifestKernelPlugins.map<RuntimeCapabilityRegistration>(({ id, extensions, permissions }) => ({
-        kind: 'kernel',
-        id,
-        extensions,
-        ...(permissions === undefined ? {} : { permissions }),
-      })),
+      ...this.manifestKernelPlugins.map<RuntimeCapabilityRegistration>(
+        ({ id, extensions, permissions, builtinDependencies }) => ({
+          kind: 'kernel',
+          id,
+          extensions,
+          ...(permissions === undefined ? {} : { permissions }),
+          ...(builtinDependencies === undefined ? {} : { builtinDependencies }),
+        }),
+      ),
       ...this.middlewarePlugins.map<RuntimeCapabilityRegistration>(({ id, permissions }) => ({
         kind: 'middleware',
         id,

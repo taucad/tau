@@ -17,6 +17,7 @@ import type {
   Voxels,
 } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
+import picovoxelPackage from 'picovoxel/package.json' with { type: 'json' };
 import { createExportFile, kernelIssueCodeValues } from '@taucad/runtime/types';
 import { z } from 'zod';
 import type { KernelIssue, KernelIssueCode } from '@taucad/runtime/types';
@@ -471,7 +472,7 @@ const registerPicovoxelModules = async (
     registerKernelModule(runtime, {
       name: picovoxelBuiltinModuleNames[index]!,
       exports,
-      version: picovoxelBuild.version,
+      package: picovoxelPackage,
       globalName: `picovoxel${index}`,
     });
   }
@@ -984,6 +985,7 @@ export const picovoxelKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: picovoxelDetectPattern,
   builtinModuleNames: [...picovoxelBuiltinModuleNames],
+  builtinPackages: { picovoxel: picovoxelPackage },
   name: 'PicovoxelKernel',
   version: kernelVersion,
   optionsSchema: picovoxelOptionsSchema,

@@ -193,7 +193,18 @@ export function ensureAtaBoot(monaco: typeof Monaco, fileManagerRef: FileManager
     const proxy = await waitForViewClient(fileManagerRef);
     const staticTypes = await loadKernelStaticTypesFromMount(proxy);
     ataInstance = new TypeAcquisitionService();
-    ataInstance.initialize(monaco, { staticTypes });
+    ataInstance.initialize(monaco, {
+      staticTypes,
+      // The open project's files, read at acquisition time: the content service follows the project session.
+      async readProjectFile(path) {
+        const { contentService } = fileManagerRef.getSnapshot().context;
+        try {
+          return contentService ? decoder.decode(await contentService.resolveBytes(path)) : undefined;
+        } catch {
+          return undefined;
+        }
+      },
+    });
     ataInstance.startWatching();
   })();
 

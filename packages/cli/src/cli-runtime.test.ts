@@ -84,6 +84,9 @@ describe('createCliRuntime', () => {
           '@taucad/agent-host',
           // Machine providers, loaded by `tau serve --machines`, not runtime plugins.
           '@taucad/bambu',
+          // Package install support used by `tau install`, not runtime plugins.
+          '@taucad/bundler-core',
+          '@taucad/filesystem',
           '@taucad/host',
           '@taucad/jobs-solvers',
           '@taucad/parameters',

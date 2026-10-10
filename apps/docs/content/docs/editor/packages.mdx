@@ -1,0 +1,83 @@
+---
+title: Packages in a Project
+description: How a Tau project declares, locks, and installs npm packages with package.json and package-lock.json, and how to run it outside Tau.
+docType: reference
+icon: 'lucide:package text-purple'
+wordBudgetOverride: 800
+---
+
+# Packages in a Project
+
+A Tau project is an ordinary npm package. `package.json` declares the packages a model imports, and `package-lock.json` records the exact versions Tau installs. This page covers who writes each file, installing, and each diagnostic.
+
+## The two files
+
+| File                | Written by                                        | Contents                                                                                                                                                                         |
+| ------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `package.json`      | You, or Install when it adds or removes a package | Dependency ranges such as `"d3-shape": "^3"`. A new project also declares its kernel's library, with an npm alias when Tau runs a fork: `"replicad": "npm:@taulabs/replicad@…"`. |
+| `package-lock.json` | Install only                                      | npm's lockfile version 3: every package in the tree, the registry tarball it comes from, and that tarball's `integrity` hash.                                                    |
+
+Install changes only the `dependencies` of `package.json` and keeps every other key as written. A build never writes either file. `node_modules/`, including Tau's `.tau-install-state.json` record, is derived and safe to delete.
+
+## Install
+
+Install resolves `package.json` against the npm registry, writes `package-lock.json`, then downloads each locked tarball into `node_modules/`, checking its integrity first. Locked versions are kept while they satisfy `package.json`; Upgrade resolves afresh. A repeat Install with nothing changed makes no network requests.
+
+Three surfaces run the same installer:
+
+- **Editor**: Install, in the Details pane's Packages section.
+- **Agents**: the `install_packages` tool, with optional `add` (name to range), `remove` (names), and `upgrade` (names to re-resolve).
+- **Terminal**: `tau install`.
+
+```bash
+tau install
+tau install ./my-project --add simplex-noise@^4 --add d3-shape@^3
+tau install --remove alea
+tau install --upgrade d3-shape
+```
+
+`tau install` prints one summary line and exits with code 3 when a package was refused. Install writes `package.json` before the lock; if it stops between the two, builds report `lock-stale` until Install runs again.
+
+A project without `package-lock.json` still builds: bare imports load from a CDN and report `package-not-locked`.
+
+## What Tau never does
+
+- Run package lifecycle scripts such as `postinstall`. The lock records `hasInstallScript` and Install warns.
+- Treat CDN bytes as a package's identity. A locked project never contacts a CDN.
+- Run `npm` or another package manager on your machine.
+- Install native builds restricted by `os` or `cpu`. They stay in the lock for `npm ci`.
+
+## Run the project outside Tau
+
+The lock is npm's own format, so `npm ci` installs the same tree Tau installs, with the same paths and integrity hashes:
+
+```bash
+npm ci --ignore-scripts
+```
+
+To run a model without Tau, add a short Node.js 24 script beside it that initializes the kernel library, imports `main.ts`, and calls its default export with its default parameters. For replicad, pass OpenCascade from `replicad-opencascadejs` to `setOC` first, then measure or export the shape with replicad's own API, such as `measureVolume` or `blobSTL`.
+
+## Diagnostics
+
+A package problem fails only the imports that depend on it; other imports still build.
+
+| Code                              | Meaning                                                                  | Recovery                                                       |
+| --------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| `package-not-locked`              | The project has no `package-lock.json`.                                  | Run Install.                                                   |
+| `package-not-installed`           | The package is locked but missing from `node_modules/`.                  | Run Install, or `npm ci`.                                      |
+| `lock-stale`                      | `package.json` changed after the lock was written.                       | Run Install.                                                   |
+| `lock-invalid`                    | `package-lock.json` is unreadable, or a row lacks its tarball or hash.   | Delete `package-lock.json`, then run Install.                  |
+| `integrity-mismatch`              | The downloaded tarball does not match the lock; nothing was written.     | Retry. If it repeats, upgrade that package.                    |
+| `registry-unavailable`            | The registry or tarball host could not be reached.                       | Retry when online.                                             |
+| `no-matching-version`             | No published version satisfies the range, or the package does not exist. | Change the range in `package.json`.                            |
+| `peer-conflict`                   | Two packages need incompatible versions of a peer dependency.            | Change one of the ranges.                                      |
+| `unsupported-dependency-protocol` | The range uses `git`, `file`, `link`, or `workspace`.                    | Use a registry range or an `npm:` alias.                       |
+| `package-unavailable-in-host`     | A native or optional package Tau cannot install.                         | Import an alternative. `npm ci` still installs it outside Tau. |
+| `install-script-skipped`          | The package has an install script that Tau did not run.                  | Check that the package works without it.                       |
+| `package-version-mismatch`        | The lock pins a kernel library version Tau does not run.                 | Set that version in `package.json`, then Install.              |
+| `manifest-conflict`               | `package.json` is missing or invalid, or changed during Install.         | Fix `package.json`, then run Install again.                    |
+
+## Related
+
+- [Agent Tools](./agent-tools) describes how Tau's agent changes a project.
+- [Configure the Bundler](../runtime/guides/bundler-configuration) explains how imports are resolved and bundled.

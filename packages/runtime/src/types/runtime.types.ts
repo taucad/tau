@@ -344,6 +344,8 @@ type RuntimeKernelRegistration<Kernel> = Kernel extends {
       readonly kind: 'kernel';
       readonly id: Id;
       readonly extensions: Extensions;
+      /** The kernel's {@link KernelPlugin.builtinDependencies}. */
+      readonly builtinDependencies?: Readonly<Record<string, string>>;
     }
   : never;
 

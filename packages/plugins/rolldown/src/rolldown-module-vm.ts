@@ -8,6 +8,7 @@ import type {
   BundlerSourceHost,
   BundlerSourceResolution,
   BundlerSourceSession,
+  PackageIssue,
 } from '@taucad/bundler-core';
 import type { BuiltinModule, BundleResult as RuntimeBundleResult } from '@taucad/runtime/bundler';
 import type { KernelIssue } from '@taucad/runtime/types';
@@ -164,6 +165,7 @@ const toIssue = (error: unknown, severity: 'error' | 'warning' = 'error'): Kerne
     readonly message?: string;
     readonly id?: string;
     readonly loc?: { file?: string; line?: number; column?: number };
+    readonly details?: unknown;
   };
   const fileName = value.loc?.file ?? value.id;
   const normalizedFileName = fileName?.startsWith('\0tau-') ? fileName.slice(fileName.indexOf(':') + 1) : fileName;
@@ -172,6 +174,7 @@ const toIssue = (error: unknown, severity: 'error' | 'warning' = 'error'): Kerne
     code: 'BUNDLER_FAILED',
     type: 'compilation',
     severity,
+    ...(value.details === undefined ? {} : { details: value.details }),
     ...(normalizedFileName === undefined
       ? {}
       : {
@@ -183,6 +186,14 @@ const toIssue = (error: unknown, severity: 'error' | 'warning' = 'error'): Kerne
         }),
   };
 };
+
+const packageWarning = (issue: PackageIssue): KernelIssue => ({
+  message: issue.message,
+  code: 'BUNDLER_FAILED',
+  type: 'compilation',
+  severity: 'warning',
+  details: issue,
+});
 
 const issuesFromError = (error: unknown): KernelIssue[] => {
   if (typeof error === 'object' && error !== null && 'errors' in error) {
@@ -221,7 +232,8 @@ const createSourcePlugin = (
       return { id: resolution.specifier, external: true };
     }
     if (resolution.kind === 'unsupported') {
-      throw new Error(resolution.message);
+      // Rolldown keeps extra error properties, so the PackageIssue reaches the KernelIssue as `details`.
+      throw Object.assign(new Error(resolution.message), { details: resolution.issue });
     }
     const id = resolution.kind === 'remote' ? resolution.url : sourceKey(resolution);
     resolutions.set(id, resolution);
@@ -360,7 +372,7 @@ export class RolldownModuleVm {
       return {
         code: chunk.code,
         sourceMap: chunk.map?.toString(),
-        issues,
+        issues: [...issues, ...observation.issues.map(packageWarning)],
         success: true,
         dependencies: observation.dependencies,
         unresolvedPaths: observation.unresolvedPaths,
@@ -369,7 +381,7 @@ export class RolldownModuleVm {
       const observation = session.complete();
       return {
         code: '',
-        issues: [...issues, ...issuesFromError(error)],
+        issues: [...issues, ...issuesFromError(error), ...observation.issues.map(packageWarning)],
         success: false,
         dependencies: observation.dependencies,
         unresolvedPaths: observation.unresolvedPaths,

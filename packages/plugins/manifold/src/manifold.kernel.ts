@@ -40,7 +40,12 @@ import { transformGltfExportBytes, normalizeGltfGeometryNames, createEmptyGlb } 
 // Types
 // =============================================================================
 
-const manifoldModuleVersion = '3.4.1';
+/**
+ * The installed `manifold-3d` manifest's `name` and `version`. The package exports no
+ * `./package.json`, and a built kernel cannot read an unexported manifest, so this pins it;
+ * `manifold-package-identity.test.ts` fails when it differs from the installed package.
+ */
+const manifoldPackage = { name: 'manifold-3d', version: '3.4.1' } as const;
 
 /**
  * Canonical regex for detecting manifold-3d usage in source code.
@@ -81,14 +86,14 @@ async function registerManifoldModules(services: KernelServices): Promise<Record
   registerKernelModule(services, {
     name: 'manifold-3d',
     exports: manifoldRoot,
-    version: manifoldModuleVersion,
+    package: manifoldPackage,
     globalName: 'manifold3d',
   });
 
   registerKernelModule(services, {
     name: 'manifold-3d/manifoldCAD',
     exports: patchedManifoldCad,
-    version: manifoldModuleVersion,
+    package: manifoldPackage,
     globalName: 'manifoldCAD',
   });
 
@@ -219,6 +224,7 @@ export const manifoldKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: manifoldDetectPattern,
   builtinModuleNames: ['manifold-3d', 'manifold-3d/manifoldCAD'],
+  builtinPackages: { 'manifold-3d': manifoldPackage },
   name: 'ManifoldKernel',
   version: '1.0.0',
   optionsSchema: manifoldOptionsSchema,

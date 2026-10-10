@@ -790,6 +790,101 @@ describe('TypeAcquisitionService', () => {
   });
 
   // =========================================================================
+  // Lock-following acquisition
+  // =========================================================================
+
+  describe('projects with a package-lock.json', () => {
+    const typesFetch = (): ReturnType<typeof vi.fn> =>
+      vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: { get: (header: string) => (header === 'X-TypeScript-Types' ? '/lodash.d.ts' : null) },
+        })
+        .mockResolvedValueOnce({ ok: true, text: async () => 'export function debounce(): void;' });
+
+    const lockWith = (entries: Record<string, { version: string; name?: string }>): string =>
+      JSON.stringify({ lockfileVersion: 3, requires: true, packages: { '': {}, ...entries } });
+
+    async function scan(files: Record<string, string>, content = "import lodash from 'lodash';"): Promise<void> {
+      service.initialize(mockMonaco.monaco, {
+        staticTypes: [],
+        readProjectFile: async (path) => files[path],
+      });
+      mockMonaco.monaco._addModel(createMockModel({ content }).model);
+      service.startWatching();
+      await vi.advanceTimersByTimeAsync(50);
+    }
+
+    it('should fetch the locked version instead of latest', async () => {
+      const mockFetch = typesFetch();
+      vi.stubGlobal('fetch', mockFetch);
+
+      await scan({ 'package-lock.json': lockWith({ 'node_modules/lodash': { version: '4.17.20' } }) });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://esm.sh/lodash@4.17.20', expect.anything());
+      expect(mockMonaco.monaco.typescript.typescriptDefaults.addExtraLib).toHaveBeenCalledWith(
+        expect.stringContaining('export function debounce(): void;'),
+        'file:///node_modules/lodash/index.d.ts',
+      );
+    });
+
+    it('should fetch an alias row by its real package name', async () => {
+      const mockFetch = typesFetch();
+      vi.stubGlobal('fetch', mockFetch);
+
+      await scan({
+        'package-lock.json': lockWith({ 'node_modules/lodash': { name: 'lodash-es', version: '4.17.21' } }),
+      });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://esm.sh/lodash-es@4.17.21', expect.anything());
+    });
+
+    it('should prefer the installed declarations of the locked version over the network', async () => {
+      const mockFetch = vi.fn();
+      vi.stubGlobal('fetch', mockFetch);
+
+      await scan({
+        'package-lock.json': lockWith({ 'node_modules/lodash': { version: '4.17.20' } }),
+        'node_modules/lodash/package.json': JSON.stringify({
+          name: 'lodash',
+          version: '4.17.20',
+          types: './types/index.d.ts',
+        }),
+        'node_modules/lodash/types/index.d.ts': 'export function installedOnly(): void;',
+      });
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockMonaco.monaco.typescript.typescriptDefaults.addExtraLib).toHaveBeenCalledWith(
+        expect.stringContaining('export function installedOnly(): void;'),
+        'file:///node_modules/lodash/index.d.ts',
+      );
+    });
+
+    it('should ignore installed declarations of another version', async () => {
+      const mockFetch = typesFetch();
+      vi.stubGlobal('fetch', mockFetch);
+
+      await scan({
+        'package-lock.json': lockWith({ 'node_modules/lodash': { version: '4.17.20' } }),
+        'node_modules/lodash/package.json': JSON.stringify({ version: '4.17.19', types: 'index.d.ts' }),
+        'node_modules/lodash/index.d.ts': 'export function stale(): void;',
+      });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://esm.sh/lodash@4.17.20', expect.anything());
+    });
+
+    it('should fetch latest for a package the lock does not list, or without a lock', async () => {
+      const mockFetch = typesFetch();
+      vi.stubGlobal('fetch', mockFetch);
+
+      await scan({ 'package-lock.json': lockWith({ 'node_modules/three': { version: '0.170.0' } }) });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://esm.sh/lodash', expect.anything());
+    });
+  });
+
+  // =========================================================================
   // Epoch / session safety
   // =========================================================================
 

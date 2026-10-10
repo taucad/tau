@@ -69,7 +69,7 @@ import { attachmentKind, attachmentReferenceOf } from '#utils/attachment.utils.j
 import { buildUserMessage } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { createAttachmentStore, createChatAttachmentStore, isNotFound } from '#db/attachment-store.js';
-import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
+import { getMainFile, getEmptyCode, getKernelDependencies } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultProjectName } from '#constants/project-names.js';
 import type { AppUiPreferences, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
@@ -1504,6 +1504,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           projectName: projectName ?? defaultProjectName,
           mainFileName,
           emptyCodeContent: encodeTextFile(emptyCode),
+          dependencies: await getKernelDependencies(options.kernel),
         });
         projectData = result.projectData;
         files = result.files;

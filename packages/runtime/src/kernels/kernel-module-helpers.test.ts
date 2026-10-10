@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   KERNEL_MODULES_KEY,
   isRecordObject,
@@ -11,7 +11,10 @@ import {
   convertRawIssuesToKernelIssues,
   enrichIssueLocation,
   loadBinaryFile,
+  registerKernelModule,
+  toBuiltinModulePackage,
 } from '#kernels/kernel-module-helpers.js';
+import type { BuiltinModule, KernelBundler } from '#types/runtime-bundler-service.types.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 
 describe('isRecordObject', () => {
@@ -78,6 +81,59 @@ describe('createKernelModuleShim', () => {
 
     expect(code).toContain('const __kernel_export_0 = __mod["class"];');
     expect(code).toContain('export { __kernel_export_0 as class };');
+  });
+});
+
+describe('toBuiltinModulePackage', () => {
+  it('declares a package installed under its import name by version', () => {
+    expect(toBuiltinModulePackage('manifold-3d', { name: 'manifold-3d', version: '3.4.1' })).toEqual({
+      name: 'manifold-3d',
+      spec: '3.4.1',
+    });
+  });
+
+  it('declares a package installed under another name as an npm alias', () => {
+    expect(toBuiltinModulePackage('replicad', { name: '@taulabs/replicad', version: '1.1.0-taulabs.0' })).toEqual({
+      name: 'replicad',
+      spec: 'npm:@taulabs/replicad@1.1.0-taulabs.0',
+    });
+  });
+
+  it('keys a subpath module by the package that owns it', () => {
+    expect(toBuiltinModulePackage('manifold-3d/manifoldCAD', { name: 'manifold-3d', version: '3.4.1' })).toEqual({
+      name: 'manifold-3d',
+      spec: '3.4.1',
+    });
+    expect(toBuiltinModulePackage('@jscad/modeling/booleans', { name: '@jscad/modeling', version: '2.13.0' })).toEqual({
+      name: '@jscad/modeling',
+      spec: '2.13.0',
+    });
+  });
+});
+
+describe('registerKernelModule', () => {
+  const register = (options: Parameters<typeof registerKernelModule>[1]): BuiltinModule => {
+    const registerModule = vi.fn<KernelBundler['registerModule']>();
+    registerKernelModule({ bundler: { bundle: vi.fn(), resolveDependencies: vi.fn(), registerModule } }, options);
+    return registerModule.mock.calls[0]![1];
+  };
+
+  it('derives the version and npm identity from the installed manifest', () => {
+    const entry = register({
+      name: 'replicad',
+      exports: {},
+      package: { name: '@taulabs/replicad', version: '1.1.0-taulabs.0' },
+    });
+
+    expect(entry.version).toBe('1.1.0-taulabs.0');
+    expect(entry.package).toEqual({ name: 'replicad', spec: 'npm:@taulabs/replicad@1.1.0-taulabs.0' });
+  });
+
+  it('registers a module with no npm package by version alone', () => {
+    const entry = register({ name: 'tau-only', exports: {}, version: '1.0.0' });
+
+    expect(entry.version).toBe('1.0.0');
+    expect(entry).not.toHaveProperty('package');
   });
 });
 

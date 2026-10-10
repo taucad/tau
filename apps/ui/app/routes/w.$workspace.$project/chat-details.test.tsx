@@ -89,6 +89,10 @@ vi.mock('#routes/w.$workspace.$project/chat-details-usage.js', () => ({
   },
 }));
 
+vi.mock('#routes/w.$workspace.$project/packages-panel.js', () => ({
+  PackagesPanel: () => <section aria-label='Packages' />,
+}));
+
 const { DetailsPanelBody } = await import('#routes/w.$workspace.$project/chat-details.js');
 
 describe('DetailsPanelBody', () => {
@@ -101,11 +105,12 @@ describe('DetailsPanelBody', () => {
     expect(chatUsage).toHaveBeenCalledWith({ enabled: false });
   });
 
-  it('groups project, storage, and usage information into named sections', () => {
+  it('groups project, storage, packages, and usage information into named sections', () => {
     render(<DetailsPanelBody />);
 
     expect(screen.getByRole('region', { name: 'Project' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Storage' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Packages' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Chat usage' })).toBeInTheDocument();
     expect(screen.getByLabelText('Name')).toHaveValue('Desk lamp');
     expect(screen.getByLabelText('Description')).toHaveValue('A compact task light');

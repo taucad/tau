@@ -342,7 +342,7 @@ describe('KernelRuntimeWorker initialization', () => {
     }
   });
 
-  it('surfaces plugin permissions in capability registrations', async () => {
+  it('surfaces plugin permissions and kernel builtin dependencies in capability registrations', async () => {
     const permissions = {
       network: ['https://plugins.example.test'],
       filesystemWrite: true,
@@ -351,6 +351,7 @@ describe('KernelRuntimeWorker initialization', () => {
     const kernel = defineKernel({
       id: 'metadata-kernel',
       extensions: ['meta'],
+      builtinPackages: { replicad: { name: '@taulabs/replicad', version: '1.1.0-taulabs.0' } },
       ...metadata,
       name: 'Metadata kernel',
       version: '1.0.0',
@@ -438,6 +439,7 @@ describe('KernelRuntimeWorker initialization', () => {
         kind: 'kernel',
         id: 'metadata-kernel',
         extensions: ['meta'],
+        builtinDependencies: { replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.0' },
         ...metadata,
       },
       { kind: 'middleware', id: 'metadata-middleware', ...metadata },

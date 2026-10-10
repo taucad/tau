@@ -122,3 +122,22 @@ describe('PackageArtifactCache', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
+
+it('should refuse an esm.sh bundle for a different version before using the fallback provider', async () => {
+  const fetchMock = vi.fn<typeof fetch>(async (input) => {
+    const url = input instanceof Request ? input.url : input.toString();
+    if (url.startsWith('https://esm.sh/')) {
+      return new Response('wrong version', { headers: { 'x-esm-path': '/example@9.0.0/es2022/example.bundle.mjs' } });
+    }
+    return new Response('export const version = "1.0.0";');
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const cache = new PackageArtifactCache(createTestFileSystem());
+  try {
+    const artifact = await cache.ensure('example@1.0.0', new AbortController().signal);
+    expect(artifact).toMatchObject({ exactVersion: '1.0.0', resolutionMetadata: { provider: 'jsdelivr' } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    cache.dispose();
+  }
+});

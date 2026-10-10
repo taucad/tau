@@ -10,20 +10,38 @@ const CURRENT_NUMERIC_PROFILE: &str =
     include_str!("fixtures/current-profile-v6/numeric-profile.txt").trim_ascii_end();
 const MATERIAL: &str = include_str!("../../conformance/material-v6.json");
 const MATERIAL_SHA256: &str = "45b98aa9bdc83b0846e74837e5891f4d9c7c7a51b6488db2ae23e8ccbe833975";
+const MATERIAL_SUCCESSOR: &str = include_str!("../../conformance/material-v6-02.json");
+const MATERIAL_SUCCESSOR_SHA256: &str =
+    "613a98156d7cfad0b28e6b6caba654fc443b9c2ecba64aa0e9a8a6738df9b13d";
 
 #[test]
 fn material_v6_portable_controls_bind_independent_inputs_and_full_cold_warm_results() {
-    assert_eq!(sha256_hex(MATERIAL), MATERIAL_SHA256);
-    let corpus: Value = serde_json::from_str(MATERIAL).unwrap();
+    assert_material_corpus(MATERIAL, MATERIAL_SHA256, "material-v6-01", 20, 46);
+}
+
+#[test]
+fn material_v6_02_portable_controls_bind_independent_inputs_and_full_cold_warm_results() {
+    assert_material_corpus(
+        MATERIAL_SUCCESSOR,
+        MATERIAL_SUCCESSOR_SHA256,
+        "material-v6-02",
+        22,
+        51,
+    );
+}
+
+fn assert_material_corpus(text: &str, sha256: &str, id: &str, admissions: usize, rows: usize) {
+    assert_eq!(sha256_hex(text), sha256);
+    let corpus: Value = serde_json::from_str(text).unwrap();
     assert_eq!(
         corpus["authority"]["numericProfile"],
         CURRENT_NUMERIC_PROFILE
     );
-    assert_eq!(corpus["authority"]["id"], "material-v6-01");
+    assert_eq!(corpus["authority"]["id"], id);
     let meshes = corpus["meshes"].as_array().unwrap();
     let records = corpus["records"].as_array().unwrap();
-    assert_eq!(meshes.len(), 20);
-    assert_eq!(records.len(), 46);
+    assert_eq!(meshes.len(), admissions);
+    assert_eq!(records.len(), rows);
     for record in records {
         let id = string(record, "id");
         let mut engine = Engine::new();

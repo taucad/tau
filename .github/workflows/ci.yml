@@ -176,11 +176,15 @@ jobs:
         name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      # Restore-only: a lockfile change would otherwise save the 1.1 GB macOS store after
+      # the job (148-155 s on runs 37869646536 and 37878016418), delaying the jobs that wait
+      # on this one. `pnpm-store-darwin` saves it from `main` once they are done.
       - &setup-nx-darwin
         name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
           node-version: '24.10.0'
+          save-pnpm-store: 'false'
 
       - &prepare-geospec
         name: Prepare GeoSpec engine products
@@ -267,6 +271,21 @@ jobs:
         run: pnpm nx run-many -t test --projects tag:host:darwin-arm64 --exclude tag:scope:api,tag:ci:quarantined --skip-nx-cache
 
       - *retain-geospec-preparation
+
+  # Saves the macOS pnpm store that the Darwin jobs above only restore, after them so
+  # the save delays nothing. actions/cache saves only from a successful job, and nothing
+  # needs this one. On a cache hit, the save is skipped.
+  pnpm-store-darwin:
+    name: Save the macOS pnpm store
+    needs: [geospec-producer, geospec-darwin]
+    if: ${{ !cancelled() && github.event_name == 'push' }}
+    runs-on: macos-15
+    steps:
+      - *checkout-darwin
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
   # typecheck, build and its checks, and three test shards. One runner running every

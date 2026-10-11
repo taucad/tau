@@ -19,7 +19,7 @@ describe('shared design story clock', () => {
       }
     }
     expect(boundaries).toHaveLength(50);
-    expect(boundaries.slice(0, 5)).toEqual(['check', 'refine', 'assemble', 'print', 'create']);
+    expect(boundaries.slice(0, 5)).toEqual(['assemble', 'refine', 'check', 'print', 'create']);
     expect(storyFrame(actor.getSnapshot().context.elapsed)).toEqual(storyFrame(0));
     actor.stop();
   });

@@ -1,55 +1,50 @@
+import { geospecRun } from '@taucad/planetary-gearbox';
+
+const { passed, failed, inconclusive } = geospecRun.summary;
+
 /** Milliseconds; the return from print to create is the fifth boundary. */
 export const storyDuration = 28_000;
 /** Milliseconds. Geometry and UI transitions share the design motion ceiling. */
 export const storyTransitionDuration = 500;
-export const storyColors = {
-  teal: '#14b8a6',
-  blue: '#5B8FD9',
-  housing: '#9ca9b6',
-  ring: '#526575',
-  carrier: '#bdcbd5',
-  bolt: '#61717f',
-  printer: '#758da0',
-  bed: '#9fb8c2',
-};
+/** The homepage gearbox story in five beats, on Tau's authored 34-part example. */
 export const storySteps = [
   {
     id: 'create',
     label: 'Create',
-    prompt: 'Create a planetary gearbox.',
-    detail: '14 parts. One parametric design.',
+    prompt: 'Create a planetary gearbox with a 4:1 reduction.',
+    detail: '34 parts · One parametric Replicad design',
     start: 0,
     end: 5000,
   },
   {
-    id: 'check',
-    label: 'Check',
-    prompt: 'Make sure it fits my printer bed.',
-    detail: 'GeoSpec · 252 mm / 236 mm usable · Doesn’t fit',
+    id: 'assemble',
+    label: 'Assemble',
+    prompt: 'Assemble it and turn the input.',
+    detail: 'Fixed ring · Sun 360° → Carrier 90° · 4:1',
     start: 5000,
-    end: 10_000,
+    end: 11_000,
   },
   {
     id: 'refine',
     label: 'Refine',
-    prompt: 'Reduce module. Keep the 4:1 ratio.',
-    detail: 'Module 3.5 → 3.0 mm · GeoSpec · 220 mm · Fits',
-    start: 10_000,
-    end: 15_000,
+    prompt: 'Make the gears 18 mm wide.',
+    detail: 'faceWidth 14 → 18 mm · Axial envelope 68 → 72 mm',
+    start: 11_000,
+    end: 16_000,
   },
   {
-    id: 'assemble',
-    label: 'Assemble',
-    prompt: 'Assemble and check the clearances.',
-    detail: 'Fixed ring · Three planets · 4:1 reduction',
-    start: 15_000,
+    id: 'check',
+    label: 'Check',
+    prompt: 'Check it with GeoSpec.',
+    detail: `Recorded GeoSpec run · ${passed} passed · ${failed} failed · ${inconclusive} inconclusive`,
+    start: 16_000,
     end: 21_000,
   },
   {
     id: 'print',
     label: 'Print',
-    prompt: 'Prepare the housing for print.',
-    detail: 'Print workflow preview · Housing only',
+    prompt: 'Prepare the ring gear for print.',
+    detail: 'Print workflow preview · Ring gear only · No job is sent',
     start: 21_000,
     end: 28_000,
   },

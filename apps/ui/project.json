@@ -42,14 +42,6 @@
         "command": "node apps/ui/scripts/render-calibration/check-server.mts"
       }
     },
-    "bake-design-story": {
-      "executor": "nx:run-commands",
-      "cache": false,
-      "options": {
-        "cwd": "{projectRoot}",
-        "command": "node --import @oxc-node/core/register scripts/bake-design-story.mts"
-      }
-    },
     "build": {
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],

@@ -1,6 +1,6 @@
 {
   "name": "@taucad/build123d",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Native Build123d kernel for Tau",
   "type": "module",
   "sideEffects": false,

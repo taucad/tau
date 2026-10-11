@@ -8,6 +8,7 @@ import { GraphicsProvider } from '#hooks/use-graphics.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { ThreeCanvasInstance } from '#components/geometry/graphics/three/three-canvas-instance.js';
 
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- Theme stub for a synthetic rendering fixture.
 vi.mock('#hooks/use-color.js', () => ({ useColor: () => ({ serialized: { hex: '#16aaa4' } }) }));
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
 vi.mock('#hooks/use-theme.js', () => ({
@@ -50,7 +51,7 @@ it.each(['webgl', 'webgpu'] as const)('should smooth shader edges in the final %
       copy.height = gl.domElement.height;
       const context = copy.getContext('2d')!;
       context.drawImage(gl.domElement, 0, 0);
-      const data = context.getImageData(0, 0, copy.width, copy.height).data;
+      const { data } = context.getImageData(0, 0, copy.width, copy.height);
       smoothed = 0;
       dark = 0;
       bright = 0;

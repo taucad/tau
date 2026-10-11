@@ -233,7 +233,9 @@ vi.mock('postprocessing', () => {
   return {
     EffectComposer,
     EffectPass,
-    FXAAEffect: class {},
+    FXAAEffect: class {
+      public dispose = vi.fn();
+    },
     Pass,
     RenderPass,
     ToneMappingEffect,

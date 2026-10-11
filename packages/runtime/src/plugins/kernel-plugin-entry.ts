@@ -61,13 +61,10 @@ export { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.
 export {
   convertRawIssuesToKernelIssues,
   createKernelParameterDeclaration,
-  createKernelModuleRegistryExpression,
   createKernelModuleShim,
   enrichIssueLocation,
   extractDefaultParameters,
-  getModuleRegistry,
   isRecordObject,
-  KERNEL_MODULES_KEY,
   loadBinaryFile,
   registerKernelModule,
   toVmEntryPath,

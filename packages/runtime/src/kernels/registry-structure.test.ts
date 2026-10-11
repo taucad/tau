@@ -14,16 +14,6 @@ const sources = async (directory: string): Promise<string[]> => {
     .map((entry) => path.posix.join(directory, entry.split(path.sep).join('/')));
 };
 
-/**
- * Kernel sources still reading the realm-global registry until their plugins migrate to the
- * worker-scoped helper (WP-A3–A5). Empty this list once they have; it never grows.
- */
-const pendingMigration = new Set([
-  'plugins/jscad/src/jscad.kernel.ts',
-  'plugins/opencascade/src/opencascade.kernel.ts',
-  'plugins/replicad/src/replicad.kernel.ts',
-]);
-
 const spelling = async (files: readonly string[], pattern: RegExp): Promise<string[]> => {
   const contents = await Promise.all(files.map(async (file) => readFile(path.join(packagesRoot, file), 'utf8')));
   return files.filter((_file, index) => pattern.test(contents[index]!));
@@ -48,5 +38,5 @@ it('should keep the built-in module registry key inside the runtime helper', asy
     ...(await spelling(runtimeSources, /__KERNEL_MODULES__/)),
   ];
 
-  expect(offenders.filter((file) => !pendingMigration.has(file))).toEqual([]);
+  expect(offenders).toEqual([]);
 });

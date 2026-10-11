@@ -17,9 +17,8 @@ import { projectJsonSchemaToParameterDeclaration } from '@taucad/parameters';
 import type { ParameterDeclaration } from '@taucad/parameters';
 import type { JSONSchema7 } from '@taucad/json-schema';
 
-/** @public */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- protocol global key mirrors its host name
-export const KERNEL_MODULES_KEY = '__KERNEL_MODULES__';
+const KERNEL_MODULES_KEY = '__KERNEL_MODULES__';
 
 /**
  * Common shape for runtime module exports returned by `runtime.execute()`.
@@ -42,11 +41,12 @@ export function isRecordObject(value: unknown): value is Record<string, unknown>
 }
 
 /**
- * Get or create the global kernel module registry.
+ * Get or create the realm's kernel module registry.
  *
- * The registry holds built-in module exports so that bundled user code
- * can import kernel-provided modules (e.g. `replicad`, `@jscad/modeling`).
- * @public
+ * The registry holds built-in module exports, keyed by kernel worker scope, so that bundled user code
+ * can import kernel-provided modules (e.g. `replicad`, `@jscad/modeling`). Only
+ * {@link registerKernelModule} and its shims read or write it.
+ * @internal
  */
 export function getModuleRegistry(): Map<string, Record<string, unknown>> {
   let registry = (globalThis as Record<string, unknown>)[KERNEL_MODULES_KEY] as
@@ -99,8 +99,8 @@ export function createKernelModuleShim({
   return `const __mod = ${moduleExpression};\n${namedExports}\nexport default __mod;\n`;
 }
 
-/** Builds the JavaScript expression used by shims to read a module from the global registry. @public */
-export function createKernelModuleRegistryExpression(name: string): string {
+/** Builds the JavaScript expression shims use to read one registry entry. */
+function createKernelModuleRegistryExpression(name: string): string {
   return `globalThis.${KERNEL_MODULES_KEY}.get(${JSON.stringify(name)})`;
 }
 
@@ -121,11 +121,7 @@ export function registerKernelModule(
   }
   const { registryScope } = runtime.bundler;
   const key = registryScope === undefined ? options.name : `${registryScope}:${options.name}`;
-  const registry = getModuleRegistry();
-  registry.set(key, exports);
-  // Transitional: unscoped readers (replicad's and jscad's `main` argument, jscad subpath shims)
-  // still read the realm-global name until WP-A3–A5 migrate them; delete with `getModuleRegistry`.
-  registry.set(options.name, exports);
+  getModuleRegistry().set(key, exports);
 
   const registryExpression = createKernelModuleRegistryExpression(key);
   runtime.bundler.registerModule(options.name, {

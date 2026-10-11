@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  KERNEL_MODULES_KEY,
   isRecordObject,
   getModuleRegistry,
   createKernelModuleShim,
@@ -62,7 +61,7 @@ describe('getModuleRegistry', () => {
 
   it('should store the registry on globalThis', () => {
     const registry = getModuleRegistry();
-    expect((globalThis as Record<string, unknown>)[KERNEL_MODULES_KEY]).toBe(registry);
+    expect((globalThis as Record<string, unknown>)['__KERNEL_MODULES__']).toBe(registry);
   });
 });
 

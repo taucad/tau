@@ -22,6 +22,8 @@ const getRepository = vi.hoisted(() =>
     throw Object.assign(new Error('Not Found - https://docs.github.com/rest/repos/repos'), { status: 404 });
   }),
 );
+const listFiles = vi.hoisted(() => vi.fn(async (): Promise<Array<{ path: string; size: number }>> => []));
+const workerRequests = vi.hoisted((): ImportWorkerRequest[] => []);
 const listBranches = vi.hoisted(() =>
   vi.fn(async () => ({ branches: [] as Array<{ name: string; sha: string; updatedAt: number }>, hasMore: false })),
 );
@@ -54,7 +56,7 @@ class TooLargeArchiveWorker {
           new MessageEvent('message', {
             data: {
               type: 'error',
-              message: 'The repository download is larger than the 8 MB import limit.',
+              message: 'The repository download is larger than the 256 MB import limit.',
               phase: 'download',
               reason: 'tooLarge',
             } satisfies ImportWorkerResponse,
@@ -66,6 +68,21 @@ class TooLargeArchiveWorker {
 
   public terminate(): void {
     this.#listener = undefined;
+  }
+}
+
+/** Stands in for the import worker and records what it was asked to download. */
+class RecordingWorker {
+  public addEventListener(): void {
+    // The recorded request is what the test reads; no response is needed.
+  }
+
+  public postMessage(request: ImportWorkerRequest): void {
+    workerRequests.push(request);
+  }
+
+  public terminate(): void {
+    // Nothing to stop.
   }
 }
 
@@ -85,7 +102,7 @@ vi.mock('#lib/github-api.js', () => ({
   getGitHubClient: () => ({
     getRepository,
     listBranches,
-    listFiles: vi.fn(async () => []),
+    listFiles,
     getArchiveUrl: () => 'https://api.tau.test/v1/repositories/archive',
     getAuthHeaders: () => ({}),
   }),
@@ -296,13 +313,40 @@ describe('ImportRoute GitHub card', () => {
     expect(await screen.findByRole('alert', { name: 'Repository too large' })).toBeInTheDocument();
     expect(
       screen.getByText(
-        'This repository exceeds the size limit for GitHub imports. Choose a smaller branch, or download the repository and import the files you need from your computer.',
+        'This repository exceeds the size limit for GitHub imports. Import one of its folders, choose a smaller branch, or download the repository and import the files you need from your computer.',
       ),
     ).toBeVisible();
     expect(screen.queryByText(/Check the source/u)).not.toBeInTheDocument();
     expect(
-      screen.getByText('Import failed (download): The repository download is larger than the 8 MB import limit.'),
+      screen.getByText('Import failed (download): The repository download is larger than the 256 MB import limit.'),
     ).toBeInTheDocument();
+  });
+
+  it('should import the folder named in the address', async () => {
+    vi.stubGlobal('Worker', RecordingWorker);
+    workerRequests.length = 0;
+    const user = userEvent.setup();
+    getRepository.mockResolvedValueOnce(repositoryMetadata);
+    listFiles.mockResolvedValueOnce([
+      { path: 'README.md', size: 10 },
+      { path: 'public/kcl-samples/gear/main.kcl', size: 20 },
+      { path: 'rust/kcl-lib/tests/ops.snap', size: 30 },
+    ]);
+    await renderImport('/import/github.com/KittyCAD/modeling-app?path=public/kcl-samples');
+    const start = await screen.findByRole('button', { name: 'Start import' });
+    await waitFor(
+      () => {
+        expect(start).toBeEnabled();
+      },
+      { timeout: 3000 },
+    );
+
+    expect(screen.getByRole('button', { name: 'Folder public/kcl-samples' })).toBeVisible();
+    await user.click(start);
+
+    await waitFor(() => {
+      expect(workerRequests).toEqual([expect.objectContaining({ type: 'startDownload', root: 'public/kcl-samples' })]);
+    });
   });
 
   it('should review a URL only on submission and restore its draft and focus after cancellation', async () => {

@@ -55,7 +55,10 @@ function createTestActor(options?: {
   owner?: string;
   repo?: string;
   ref?: string;
+  path?: string;
   mainFile?: string;
+  onWorkerInput?: (input: { root: string }) => void;
+  onCreateInput?: (input: { path: string; mainFile: string }) => void;
   downloadThrows?: boolean;
   downloadTooLarge?: boolean;
   metadataFailure?: Error;
@@ -83,12 +86,13 @@ function createTestActor(options?: {
       getFilesActor: fromSafeAsync(async () => {
         return { type: 'filesRetrieved', files: stubFiles };
       }),
-      importWorkerActor: createCallbackLogic(({ sendBack }) => {
+      importWorkerActor: createCallbackLogic(({ sendBack, input }) => {
+        options?.onWorkerInput?.(input as { root: string });
         if (options?.downloadTooLarge) {
           queueMicrotask(() => {
             sendBack({
               type: 'workerError',
-              message: 'The repository download is larger than the 8 MB import limit.',
+              message: 'The repository download is larger than the 256 MB import limit.',
               phase: 'download',
               reason: 'tooLarge',
             });
@@ -109,7 +113,8 @@ function createTestActor(options?: {
         // Noop cleanup
         return () => undefined;
       }),
-      createProjectActor: fromSafeAsync(async () => {
+      createProjectActor: fromSafeAsync(async ({ input }: { input: { path: string; mainFile: string } }) => {
+        options?.onCreateInput?.(input);
         return { type: 'projectCreated', projectId: 'proj_123' };
       }),
     },
@@ -123,6 +128,7 @@ function createTestActor(options?: {
       owner: options?.owner,
       repo: options?.repo,
       ref: options?.ref,
+      path: options?.path,
       mainFile: options?.mainFile,
     },
   });
@@ -355,7 +361,7 @@ describe('importGitHubMachine', () => {
 
       expect(snapshot.context.error).toMatchObject({
         failure: 'tooLarge',
-        message: 'Import failed (download): The repository download is larger than the 8 MB import limit.',
+        message: 'Import failed (download): The repository download is larger than the 256 MB import limit.',
       });
       actor.stop();
     });
@@ -444,6 +450,99 @@ describe('importGitHubMachine', () => {
       actor.send({ type: 'selectMainFile', file: 'custom.ts' });
       expect(actor.getSnapshot().context.selectedMainFile).toBe('custom.ts');
       actor.stop();
+    });
+  });
+  describe('repository folder', () => {
+    it('imports the folder from its input and records it on the project', async () => {
+      const workerInputs: Array<{ root: string }> = [];
+      const createInputs: Array<{ path: string; mainFile: string }> = [];
+      const actor = createTestActor({
+        owner: 'KittyCAD',
+        repo: 'modeling-app',
+        path: '/public/kcl-samples/',
+        onWorkerInput: (input) => workerInputs.push(input),
+        onCreateInput: (input) => createInputs.push(input),
+      });
+      actor.start();
+      await waitFor(actor, (s) => s.value === 'enteringDetails' && s.context.repoMetadata !== undefined, {
+        timeout: 5000,
+      });
+      expect(actor.getSnapshot().context.path).toBe('public/kcl-samples');
+
+      actor.send({ type: 'startImport' });
+      await waitFor(actor, (s) => s.value === 'selectingMainFile', { timeout: 5000 });
+      actor.send({ type: 'confirmImport' });
+      await waitFor(actor, (s) => s.value === 'success', { timeout: 5000 });
+
+      expect(workerInputs).toEqual([expect.objectContaining({ root: 'public/kcl-samples' })]);
+      expect(createInputs).toEqual([expect.objectContaining({ path: 'public/kcl-samples', mainFile: 'main.ts' })]);
+    });
+
+    it('puts a chosen folder in the import URL and starts the main-file choice over', async () => {
+      const actor = createTestActor({ owner: 'KittyCAD', repo: 'modeling-app', mainFile: 'main.ts' });
+      const urls: string[] = [];
+      actor.on('urlReplaced', (event) => urls.push(event.url));
+      actor.start();
+      await waitFor(actor, (s) => s.value === 'enteringDetails' && s.context.repoMetadata !== undefined, {
+        timeout: 5000,
+      });
+
+      actor.send({ type: 'selectFolder', path: 'public/kcl-samples/' });
+
+      expect(actor.getSnapshot().context).toMatchObject({ path: 'public/kcl-samples', selectedMainFile: undefined });
+      expect(urls.at(-1)).toBe('/import/github.com/KittyCAD/modeling-app?path=public%2Fkcl-samples');
+
+      actor.send({ type: 'selectFolder', path: '' });
+      expect(urls.at(-1)).toBe('/import/github.com/KittyCAD/modeling-app');
+    });
+
+    it('takes the ref and folder from a pasted GitHub folder URL', () => {
+      const actor = createTestActor();
+      actor.start();
+
+      actor.send({
+        type: 'updateRepoUrl',
+        url: 'https://github.com/KittyCAD/modeling-app/tree/next/public/kcl-samples',
+      });
+
+      expect(actor.getSnapshot().context).toMatchObject({
+        owner: 'KittyCAD',
+        repo: 'modeling-app',
+        ref: 'next',
+        selectedBranch: 'next',
+        path: 'public/kcl-samples',
+      });
+    });
+
+    it('re-checks the repository when navigation changes only the folder', async () => {
+      const actor = createTestActor({ owner: 'KittyCAD', repo: 'modeling-app' });
+      actor.start();
+      await waitFor(actor, (s) => s.value === 'enteringDetails' && s.context.repoMetadata !== undefined, {
+        timeout: 5000,
+      });
+
+      actor.send({
+        type: 'syncLocation',
+        owner: 'KittyCAD',
+        repo: 'modeling-app',
+        ref: 'main',
+        path: 'public/kcl-samples',
+        mainFile: '',
+      });
+
+      expect(actor.getSnapshot().context.path).toBe('public/kcl-samples');
+    });
+
+    it('keeps a requested ref after the repository metadata arrives', async () => {
+      const actor = createTestActor({ owner: 'KittyCAD', repo: 'modeling-app', ref: 'next' });
+      actor.start();
+      const snapshot = await waitFor(
+        actor,
+        (s) => s.value === 'enteringDetails' && s.context.repoMetadata !== undefined,
+        { timeout: 5000 },
+      );
+
+      expect(snapshot.context).toMatchObject({ ref: 'next', selectedBranch: 'next' });
     });
   });
 });

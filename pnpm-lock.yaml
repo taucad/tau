@@ -3358,6 +3358,9 @@ importers:
       '@taucad/tscircuit':
         specifier: workspace:*
         version: link:../plugins/tscircuit
+      '@taucad/zoo':
+        specifier: workspace:*
+        version: link:../plugins/zoo
       citty:
         specifier: 'catalog:'
         version: 0.2.2
@@ -3676,6 +3679,9 @@ importers:
       '@taucad/workbench':
         specifier: workspace:*
         version: link:../workbench
+      '@taucad/zoo':
+        specifier: workspace:*
+        version: link:../plugins/zoo
       basic-ftp:
         specifier: 'catalog:'
         version: 6.2.1

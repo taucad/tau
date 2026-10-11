@@ -43,20 +43,17 @@ function Toaster({ theme = 'system', className, toastOptions, icons, ...properti
         classNames: {
           toast: cn(
             popoverSurfaceVariants(),
-            'group toast flex max-h-[calc(100dvh-4rem)] w-full touch-pan-y! flex-wrap items-start gap-2 overflow-y-auto p-3 text-sm transition-[transform,opacity]! duration-200! focus-visible:focus-outline focus-visible:shadow-none! has-[[data-close-button]]:pe-10 @max-[18rem]/toaster:has-[[data-close-button]]:pe-3',
+            'group toast flex max-h-[calc(100dvh-4rem)] w-full touch-pan-y! flex-wrap items-start gap-2 overflow-y-auto p-3 text-sm transition-[transform,opacity]! duration-200! focus-visible:focus-outline focus-visible:shadow-none! has-[[data-close-button]]:pe-10 has-[[data-icon]]:ps-9 @max-[18rem]/toaster:has-[[data-close-button]]:pe-3 @max-[18rem]/toaster:has-[[data-icon]]:ps-3',
           ),
           title: 'font-medium leading-5',
           description: 'text-muted-foreground! font-normal leading-5',
           content:
-            'min-w-0 flex-1 basis-40 wrap-anywhere group-has-[[data-cancel]]:basis-full group-has-[[data-icon]]:ps-6 @max-[18rem]/toaster:basis-full @max-[18rem]/toaster:group-has-[[data-close-button]]:pt-8 @max-[18rem]/toaster:group-has-[[data-icon]]:ps-0 @max-[18rem]/toaster:group-has-[[data-icon]]:pt-8',
+            'min-w-0 flex-1 basis-40 wrap-anywhere group-has-[[data-cancel]]:basis-full @max-[18rem]/toaster:basis-full @max-[18rem]/toaster:group-has-[[data-close-button]]:pt-8 @max-[18rem]/toaster:group-has-[[data-icon]]:pt-8',
           icon: 'absolute start-3 top-3 flex size-5 items-center justify-center',
-          actionButton: cn(
-            buttonVariants({ size: 'sm' }),
-            'ms-auto h-auto min-h-8 max-w-full wrap-anywhere whitespace-normal group-has-[[data-cancel]]:ms-0',
-          ),
+          actionButton: cn(buttonVariants({ size: 'sm' }), 'h-auto min-h-8 max-w-full wrap-anywhere whitespace-normal'),
           cancelButton: cn(
             buttonVariants({ variant: 'outline', size: 'sm' }),
-            'ms-auto h-auto min-h-8 max-w-full wrap-anywhere whitespace-normal',
+            'h-auto min-h-8 max-w-full wrap-anywhere whitespace-normal',
           ),
           closeButton: cn(
             buttonVariants({ variant: 'ghost', size: 'icon-xs' }),

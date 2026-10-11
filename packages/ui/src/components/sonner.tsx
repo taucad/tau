@@ -25,7 +25,9 @@ function Toaster({ theme = 'system', className, toastOptions, icons, ...properti
   return (
     <Sonner
       theme={theme}
-      className={cn('toaster group font-sans!', className)}
+      closeButton
+      duration={7000}
+      className={cn('toaster group @container/toaster font-sans!', className)}
       icons={{
         success: <Check aria-hidden className='size-4' />,
         info: <Info aria-hidden className='size-4 text-information' />,
@@ -41,19 +43,20 @@ function Toaster({ theme = 'system', className, toastOptions, icons, ...properti
         classNames: {
           toast: cn(
             popoverSurfaceVariants(),
-            'group toast flex w-full flex-wrap items-center gap-2 p-3 text-sm transition-[transform,opacity]! duration-200! focus-visible:focus-outline focus-visible:shadow-none! has-[[data-close-button]]:pe-10',
+            'group toast flex max-h-[calc(100dvh-4rem)] w-full touch-pan-y! flex-wrap items-start gap-2 overflow-y-auto p-3 text-sm transition-[transform,opacity]! duration-200! focus-visible:focus-outline focus-visible:shadow-none! has-[[data-close-button]]:pe-10 @max-[18rem]/toaster:has-[[data-close-button]]:pe-3',
           ),
           title: 'font-medium leading-5',
           description: 'text-muted-foreground! font-normal leading-5',
-          content: 'w-full min-w-0 group-has-[[data-icon]]:ps-6',
+          content:
+            'min-w-0 flex-1 basis-40 wrap-anywhere group-has-[[data-cancel]]:basis-full group-has-[[data-icon]]:ps-6 @max-[18rem]/toaster:basis-full @max-[18rem]/toaster:group-has-[[data-close-button]]:pt-8 @max-[18rem]/toaster:group-has-[[data-icon]]:ps-0 @max-[18rem]/toaster:group-has-[[data-icon]]:pt-8',
           icon: 'absolute start-3 top-3 flex size-5 items-center justify-center',
           actionButton: cn(
             buttonVariants({ size: 'sm' }),
-            'ms-auto h-auto min-h-8 max-w-full whitespace-normal group-has-[[data-cancel]]:ms-0',
+            'ms-auto h-auto min-h-8 max-w-full wrap-anywhere whitespace-normal group-has-[[data-cancel]]:ms-0',
           ),
           cancelButton: cn(
             buttonVariants({ variant: 'outline', size: 'sm' }),
-            'ms-auto h-auto min-h-8 max-w-full whitespace-normal',
+            'ms-auto h-auto min-h-8 max-w-full wrap-anywhere whitespace-normal',
           ),
           closeButton: cn(
             buttonVariants({ variant: 'ghost', size: 'icon-xs' }),

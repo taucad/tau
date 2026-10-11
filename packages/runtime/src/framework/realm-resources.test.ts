@@ -249,7 +249,12 @@ describe('services.realm', () => {
       issues: [
         {
           code: 'KERNEL_REALM_CONFLICT',
-          details: { group: 'realm-resources-test', heldKey: 'single', requestedKey: 'multi' },
+          details: {
+            group: 'realm-resources-test',
+            heldKey: 'single',
+            requestedKey: 'multi',
+            producer: 'realm-kernel',
+          },
         },
       ],
     });

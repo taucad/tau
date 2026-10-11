@@ -12,8 +12,7 @@
 #   - production (tau.new): `release-build.yml` calls this workflow in a `ui@x.y.z`
 #     release's own run, and `deploy-production.yml` dispatches it at the tag
 #     for a rollback or redeploy. Either way it uses the artifact of the `ci.yml`
-#     push run on `main` for the tag's commit, and waits for a release manager
-#     on the `production` environment.
+#     push run on `main` for the tag's commit.
 #
 # Both Netlify sites run with `deploy_mode = "ci"` in tau-cloud, so Netlify's Git
 # integration no longer builds them. Each environment holds a `NETLIFY_AUTH_TOKEN`
@@ -69,8 +68,7 @@ jobs:
     steps:
       # Production deploys run at a release tag: called by release-build.yml in
       # the release's own run, or dispatched by deploy-production.yml for a
-      # rollback or redeploy. Either way the `production` environment waits for
-      # a release manager. A person dispatching this workflow directly is
+      # rollback or redeploy. A person dispatching this workflow directly is
       # refused. (In a called workflow, `github.workflow_ref` names the caller.)
       - name: Require a production deploy from a release
         if: inputs.environment == 'production' && contains(github.workflow_ref, '/.github/workflows/deploy-ui.yml@')

@@ -15,8 +15,9 @@ describe('bearer authentication logging', () => {
       LOG_SERVICE: logServiceProvider.fly,
     });
     const loggerParameters = await useLoggerFactory(configService);
-    const { pinoHttp: options } = loggerParameters;
-    if (!options || Array.isArray(options) || 'write' in options) {
+    // Fly pairs the options with its stdout destination; this test supplies its own.
+    const options = Array.isArray(loggerParameters.pinoHttp) ? loggerParameters.pinoHttp[0] : loggerParameters.pinoHttp;
+    if (!options || 'write' in options) {
       throw new Error('Logger factory did not return pino-http options.');
     }
 

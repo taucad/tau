@@ -395,11 +395,12 @@ export const serveCommand = defineCommand({
     process.once('SIGINT', onSignal);
     process.once('SIGTERM', onSignal);
     /* The relay is this daemon's Tau API, so its Zoo proxy is too unless TAU_WEBSOCKET_URL says otherwise. */
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names
+    /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
     const zooProxyUrl = cliZooProxyUrl({
       TAU_WEBSOCKET_URL: process.env['TAU_WEBSOCKET_URL'],
       TAU_API_URL: args.relay,
     });
+    /* eslint-enable @typescript-eslint/naming-convention -- End environment variable names. */
     const daemon = startHostDaemon({
       relayUrl: new URL(args.relay),
       runtimeHost: {

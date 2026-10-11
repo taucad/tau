@@ -24,19 +24,14 @@ For multiple files, import helpers through explicit ESM paths such as `./lib/wid
 ## Canonical pattern
 
 ```ts
-import { GLTFNode, Manifold } from 'manifold-3d/manifoldCAD';
+import { Manifold } from 'manifold-3d/manifoldCAD';
 
 export const defaultParams = { width: 80, depth: 40, height: 20, holeRadius: 6 };
 
-export default function main(p = defaultParams): GLTFNode {
+export default function main(p = defaultParams): Manifold {
   const body = Manifold.cube([p.width, p.depth, p.height], true);
   const hole = Manifold.cylinder(p.height + 2, p.holeRadius, -1, 64, true);
-  const solid = body.subtract(Manifold.union([hole.translate([-20, 0, 0]), hole.translate([20, 0, 0])]));
-  // Flat normals, named on the material, so screenshots shade the mesh.
-  const node = new GLTFNode();
-  node.manifold = solid.calculateNormals(0, 60);
-  node.material = { attributes: ['NORMAL'] };
-  return node;
+  return body.subtract(Manifold.union([hole.translate([-20, 0, 0]), hole.translate([20, 0, 0])]));
 }
 ```
 
@@ -46,7 +41,7 @@ Check missing imports, undefined returns, invalid boolean inputs, and non-positi
 
 - Wrong: `Manifold.cylinder(radius, height)`. Correct: height first: `Manifold.cylinder(height, radiusLow, radiusHigh, segments, center)`; pass `-1` for `radiusHigh` to match `radiusLow`.
 - Wrong: chaining `a.add(b).add(c)…` over many parts. Correct: `Manifold.union([a, b, c])` once.
-- Wrong: returning a boolean result as it is. Correct: finish with `.calculateNormals(0, 60)` in a `GLTFNode` whose material names `['NORMAL']`, as above. Otherwise screenshots fail with "TRIANGLES primitive missing NORMAL".
+- Wrong: `.asOriginal()` or hand-computed normals on a boolean result so it renders or passes GeoSpec. Correct: return it as it is; the kernel adds normals at a 30° crease. Author `calculateNormals(0, angle)` in a `GLTFNode` whose material names `['NORMAL']` only to choose another crease.
 
 ## Core API
 

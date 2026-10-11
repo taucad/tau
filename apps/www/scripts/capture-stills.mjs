@@ -7,6 +7,7 @@ import { createServer } from 'node:http';
 import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { join, resolve, extname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { loadEsbuild, loadPlaywright, loadSharp, serial } from '#tools/tooling.js';
 
 const app = resolve(import.meta.dirname, '..');
@@ -47,7 +48,13 @@ const server = createServer(async (request, response) => {
       );
       return;
     }
-    const file = path === '/entry.js' ? join(work, 'entry.js') : join(app, 'public', path.replace('/_www/assets/', ''));
+    const asset = path.replace('/_www/assets/', '');
+    const file =
+      path === '/entry.js'
+        ? join(work, 'entry.js')
+        : asset.startsWith('planetary')
+          ? fileURLToPath(import.meta.resolve(`@taucad/planetary-gearbox/assets/${asset}`))
+          : join(app, 'public', asset);
     response.setHeader('Content-Type', types[extname(file)] ?? 'application/octet-stream');
     response.end(await readFile(file));
   } catch {

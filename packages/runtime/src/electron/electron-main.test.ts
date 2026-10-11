@@ -1078,6 +1078,66 @@ describe('Electron main runtime helpers', () => {
     expect(onError.mock.calls.at(-1)?.[0].message).toContain('ELECTRON_RUN_AS_NODE');
   });
 
+  it('delivers the latest control frame of each type after the boot frame, and never to a spare', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    liveUtilities.length = 0;
+    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
+
+    handle.prewarm();
+    handle.post({ type: 'credential', token: 'first' });
+    handle.post({ type: 'credential', token: 'second' });
+    handle.post({ type: 'locale', value: 'en' });
+    const spare = liveUtilities[0];
+    expect(spare?.postMessage).not.toHaveBeenCalled();
+
+    handle.connect({ purpose: 'main-process-client' });
+
+    /* The boot frame stays first: the utility takes its first parent message as the boot frame. */
+    expect(spare?.postMessage.mock.calls.map(([frame]): unknown => frame)).toEqual([
+      expect.objectContaining({ taucadRuntime: true }),
+      { type: 'credential', token: 'second' },
+      { type: 'locale', value: 'en' },
+    ]);
+    const freshSpare = liveUtilities[1];
+    expect(freshSpare?.postMessage).not.toHaveBeenCalled();
+
+    /* A later frame reaches every adopted utility at once, and still skips the spare. */
+    handle.post({ type: 'credential', token: 'third' });
+    expect(spare?.postMessage).toHaveBeenLastCalledWith({ type: 'credential', token: 'third' });
+    expect(freshSpare?.postMessage).not.toHaveBeenCalled();
+    handle.dispose();
+    liveUtilities.length = 0;
+  });
+
+  it('replays control frames onto a utility forked after a crash and stops at its exit', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
+    handle.post({ type: 'credential', token: 'kept' });
+
+    handle.connect({ purpose: 'main-process-client' });
+    const crashed = liveUtilities.at(-1);
+    await exitLastUtility(9);
+    handle.post({ type: 'credential', token: 'after-crash' });
+    expect(crashed?.postMessage).not.toHaveBeenCalledWith({ type: 'credential', token: 'after-crash' });
+
+    handle.connect({ purpose: 'main-process-client' });
+    expect(liveUtilities.at(-1)?.postMessage).toHaveBeenLastCalledWith({ type: 'credential', token: 'after-crash' });
+    handle.dispose();
+  });
+
+  it('refuses a control frame without a string type, and any frame after dispose', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
+
+    expect(() => {
+      handle.post({ token: 'x' } as unknown as { type: string });
+    }).toThrow(/string `type`/u);
+    handle.dispose();
+    expect(() => {
+      handle.post({ type: 'credential' });
+    }).toThrow(/broker is disposed/u);
+  });
+
   it('survives a destroyed frame on utility exit', async () => {
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
     const onError = vi.fn();

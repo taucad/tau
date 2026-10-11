@@ -26,7 +26,7 @@ import {
   visionFrame,
 } from '#routes/vision/vision-story.js';
 import { useVisionPlayback } from '#routes/vision/use-vision-playback.js';
-import posterUrl from '#routes/vision/vision-poster.webp?url';
+import posterUrl from '#components/geometry/gearbox/gearbox-poster.webp?url';
 
 const sourceUrl =
   'https://github.com/taucad/tau/tree/199c8079d5ee42f8c5771fc2cb02bf2791cc3bdf/libs/tau-examples/src/kernels/replicad/planetary-gear-system';

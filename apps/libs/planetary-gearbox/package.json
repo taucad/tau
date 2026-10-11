@@ -1,0 +1,43 @@
+{
+  "name": "@taucad/planetary-gearbox",
+  "version": "0.0.1",
+  "description": "The authored 34-part planetary gearbox showcase: frozen tessellation, manifest validation, kinematics and assembly order",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/planetary-gearbox"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/planetary-gearbox#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "three",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./assets/*": "./assets/*",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#assets/*": "./assets/*",
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "three": "catalog:"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}

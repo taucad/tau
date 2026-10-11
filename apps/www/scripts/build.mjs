@@ -49,6 +49,15 @@ for (const required of [
 await rm(output, { recursive: true, force: true });
 await mkdir(join(output, '_www/assets'), { recursive: true });
 await cp(publicDirectory, join(output, '_www/assets'), { recursive: true });
+// The frozen gearbox tessellation is owned by @taucad/planetary-gearbox and served beside the site assets.
+await Promise.all(
+  ['planetary.json', 'planetary.bin.gz', 'planetary-face18.json', 'planetary-face18.bin.gz'].map(async (name) =>
+    cp(
+      fileURLToPath(import.meta.resolve(`@taucad/planetary-gearbox/assets/${name}`)),
+      join(output, '_www/assets', name),
+    ),
+  ),
+);
 /** @type {(content: string) => string} */
 const hash = (content) => createHash('sha256').update(content).digest('hex').slice(0, 12);
 const baseTokens = await readFile(resolve(root, '../../packages/ui/src/styles/tokens.css'), 'utf8');

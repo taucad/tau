@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { appOrigin, docsOrigin } from '#www/environment.js';
 import {
   discordUrl,
@@ -16,13 +15,10 @@ import {
 } from '#www/content.js';
 import { heroDrafting } from '#www/hero-view.js';
 import { wordmark } from '#www/wordmark.js';
+import { geospecRun as evidence } from '@taucad/planetary-gearbox';
 /** @typedef {{path: string, title: string, description: string, error?: boolean, body: () => string}} Page */
-/** @typedef {{commit: string, startedAt: string, durationMs: number, summary: {selected: number, passed: number, failed: number, inconclusive: number}, tests: Array<{name: string, status: string, codes: string[]}>}} Evidence */
 
 const brand = `<a class="wordmark" href="/" aria-label="Tau home"><svg viewBox="${wordmark.viewBox}" aria-hidden="true"><path class="wordmark-symbol" fill-rule="evenodd" d="${wordmark.symbol}"/><path fill-rule="evenodd" d="${wordmark.letters}"/></svg></a>`;
-const evidence = /** @type {Evidence} */ (
-  JSON.parse(readFileSync(new URL('../content/evidence/planetary-geospec-run.json', import.meta.url), 'utf8'))
-);
 
 /**
  * @param value - Text to escape for an HTML context.

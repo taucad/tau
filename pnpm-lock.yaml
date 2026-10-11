@@ -2211,6 +2211,16 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
+  apps/libs/planetary-gearbox:
+    dependencies:
+      three:
+        specifier: 'catalog:'
+        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+    devDependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.3.0)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
+
   apps/libs/share:
     dependencies:
       '@taucad/types':
@@ -2564,6 +2574,9 @@ importers:
       '@taucad/picovoxel':
         specifier: workspace:*
         version: link:../../packages/plugins/picovoxel
+      '@taucad/planetary-gearbox':
+        specifier: workspace:*
+        version: link:../libs/planetary-gearbox
       '@taucad/react':
         specifier: workspace:*
         version: link:../../packages/react
@@ -2733,6 +2746,9 @@ importers:
 
   apps/www:
     dependencies:
+      '@taucad/planetary-gearbox':
+        specifier: workspace:*
+        version: link:../libs/planetary-gearbox
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../libs/utils

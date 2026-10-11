@@ -24,11 +24,11 @@ Nothing places a hole individually: one recursion emits them all, and the same r
 | Colour law | `(1 - pos) / 2` per channel, `pos` normalised to `-1 … 1` |
 | Camera     | Perspective, fitted to the published mark — see Render    |
 
-## Two Things the Kernel Needed
+## Colour and Normals
 
-**Normals must be asked for.** Manifold meshes carry none, and the GLTF exporter will not invent them, so `calculateNormals(0, 60)` writes them into the first three properties — 60° keeps every face of a box-cut solid flat. The material then has to name them (`attributes: ['NORMAL']`), or the exporter writes properties it cannot label and the mesh reads as `TRIANGLES primitive missing NORMAL`.
+`main.ts` colours the sponge as the sample does: `setProperties(3, …)` writes the colour law into three vertex properties, and a white material declares them `COLOR_0`. The same `positionColor` export drives the vector render, so the thumbnail and the icon share one source.
 
-**Vertex colour does not survive.** The sample colours the sponge through `setProperties(3, …)` and declares the result `COLOR_0`. Tau's image transcoder rejects that outright — `unsupported vertex attribute Colors(0)` — so the solid is returned uncoloured for rendering and the colour law is exported from `main.ts` instead, for the vector render to evaluate. One source either way, but it does mean the thumbnail is monochrome while the icon is not.
+The model computes no normals. Manifold meshes carry none until asked, so the kernel appends them after the colour channels with `calculateNormals` at a 30° crease angle, which keeps every face of a box-cut solid flat, and labels them `NORMAL`. A model that authors its own normals and names them keeps them.
 
 ## Render
 

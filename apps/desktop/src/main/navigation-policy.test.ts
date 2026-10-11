@@ -93,6 +93,11 @@ describe('contentSecurityPolicy', () => {
     );
   });
 
+  it('loads images from the app and GitHub avatars only', () => {
+    /* Import and GitHub connections show the repository owner's picture from GitHub's avatar host. */
+    expect(directive('img-src')).toBe("img-src 'self' data: blob: https://avatars.githubusercontent.com");
+  });
+
   it('admits no remote script origin, while allowing what the SPA measurably needs', () => {
     /* React Router's built index.html carries five inline scripts; without
      * 'unsafe-inline' the app does not boot. What the directive still buys is

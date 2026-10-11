@@ -141,7 +141,8 @@ export const contentSecurityPolicy = (connectOrigins: readonly string[]): string
     "default-src 'none'",
     "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    /* GitHub's avatar host: the repository owner's picture on Import and GitHub connections. */
+    "img-src 'self' data: blob: https://avatars.githubusercontent.com",
     "font-src 'self' data:",
     "media-src 'self' blob:",
     /* GitHub's public API: the Import page's unauthenticated public reads (repository metadata and tree), as on the web. */

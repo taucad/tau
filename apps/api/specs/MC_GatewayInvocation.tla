@@ -10,7 +10,7 @@ Knobs(fence, defer) ==
     /\ Keys = {"a", "b"} /\ Workers = 2 /\ Crashes = TRUE
     /\ MaxTime = 3 /\ Due = 1 /\ Grace = 1 /\ MaxRecovery = 2 /\ LostReplyRetries = 1
     /\ VoidOnLookup = TRUE /\ LookupFailed = TRUE /\ Reconcile = TRUE /\ AutoProceed = TRUE
-    /\ KeepCompleted = TRUE /\ RefundHolds = TRUE
+    /\ KeepCompleted = TRUE /\ RefundHolds = TRUE /\ ServiceStops = TRUE
     /\ FenceGen = fence /\ DeferGrace = defer /\ CountRetries = TRUE
 
 ConstInit == Knobs(TRUE, TRUE)

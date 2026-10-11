@@ -33,6 +33,9 @@
 (*                  Resume proceeds the same way                           *)
 (*   KeepCompleted  a completed reply is kept (W0.20); FALSE is RV5-F1's   *)
 (*                  overflow retry, which discards it and sends again      *)
+(*   ServiceStops   the API process may stop mid-step (ApiServiceStop);    *)
+(*                  off in the configurations that predate it, which it    *)
+(*                  would triple                                           *)
 (***************************************************************************)
 EXTENDS Integers, FiniteSets
 
@@ -65,6 +68,8 @@ CONSTANTS
     KeepCompleted,
     \* @type: Bool;
     RefundHolds,
+    \* @type: Bool;
+    ServiceStops,
     \* mutation knobs: TRUE is the code as written
     \* @type: Bool;
     FenceGen,
@@ -439,6 +444,7 @@ ApiClientCancel(k) ==
 \* out and recovery resolves the row as before. The signal is process-wide; one action per key
 \* over-approximates it.
 ApiServiceStop(k) ==
+    /\ ServiceStops
     /\ \/ req[k] = "streaming"
        \/ req[k] = "finishing" /\ fin[k] = "unknown"
     /\ LET e == IF req[k] = "streaming" /\ conn[k] = "noticed" THEN "abort" ELSE "unknown" IN

@@ -110,6 +110,11 @@
       "expect": "pass",
       "ref": "W11 target safety, MaxTime 2 (~2 s)"
     },
+    "GatewayInvocation.target-service-stop.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "API graceful-shutdown R10: target-safety with the API able to stop mid-step"
+    },
     "GatewayInvocation.target-three-attempts.cfg": {
       "tier": "nightly",
       "expect": "pass",

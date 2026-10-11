@@ -18,7 +18,6 @@ any
 // Category: std.types
 // The uninhabited type of computations that never complete normally
 // Remarks: `never` has no values and is a subtype of every type. Use it as the return type of a function that always stops evaluation by raising an error. A function declared to return `never` produces a type error if it returns a value or reaches the end of its body.
-// EXPERIMENTAL
 never
 
 // Category: std.types

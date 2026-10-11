@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // Append this file verbatim to `rust/kcl-lib/src/docs/gen_std_tests.rs`
-// (verified against kcl-lib 0.2.184, modeling-app 9b0ecedff5). It only uses
+// (verified against kcl-lib 0.2.191, modeling-app 9497880fde). It only uses
 // items that module already imports or defines: `json!`, `DocData`, `FnData`,
 // `TyData`, `ConstData`, `ModData`, `ExampleProperties`, `mod_name_std` and
 // `docs_for_type`.
@@ -27,6 +27,12 @@ fn build_examples_json(examples: &[(String, ExampleProperties)]) -> Vec<serde_js
 }
 
 fn build_function_json(function: &FnData, kcl_std: &ModData) -> serde_json::Value {
+    // Present the stable KCL 3.0 signature rather than removed compatibility arguments.
+    let mut function = function.clone();
+    function.args.retain(|arg| {
+        arg.added_in.as_ref().is_none_or(|version| crate::execution::annotations::version_ge("3.0", version))
+            && arg.removed_in.as_ref().is_none_or(|version| !crate::execution::annotations::version_ge("3.0", version))
+    });
     let args = function
         .args
         .iter()

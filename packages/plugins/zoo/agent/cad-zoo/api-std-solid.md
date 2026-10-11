@@ -4,7 +4,7 @@
 
 // Category: std.solid
 // Blend a transitional edge along a tagged path, smoothing the sharp edge
-// Remarks: Fillet is similar in function and use to a chamfer, except a chamfer will cut a sharp transition along an edge while fillet will smoothly blend the transition.
+// Remarks: Fillet is similar in function and use to a chamfer, except a chamfer will cut a sharp transition along an edge while fillet will smoothly blend the transition. ### Face references In `edges`, `sideFaces` and `endFaces` contain face tags or face UUIDs, not raw sketch segments. For a side face created by extruding `profile.line1`, use `profileRegion.tags.line1` or `body.sketch.tags.line1`, where `profileRegion` is the extruded region and `body` is the resulting solid. For extrusion caps, declare `tagStart = $startCap` or `tagEnd = $endCap`, then refer to `startCap` or `endCap`. Use `$` only when declaring the tag. See [Face API Edge References](/docs/kcl-lang/edge-references) for selection examples.
 // std.solid.fillet (function)
 fillet(
   @solid: Solid,
@@ -13,48 +13,67 @@ fillet(
   edges?: [any],
   tolerance?: number(Length),
   tag?: TagDecl,
-  legacyMethod?: bool,
-  version?: number(_),
+  tangentChain?: bool,
 ): Solid
 //   @solid: The solid whose edges should be filletted
 //   radius: The radius of the fillet
 //   tags: The paths you want to fillet (legacy API)
-//   edges: Experimental face API
+//   edges: Preferred for KCL 3
 //   tolerance: Defines the smallest distance below which two entities are considered coincident, intersecting, coplanar, or similar
 //   tag: Create a new tag which refers to this fillet
-//   legacyMethod: You probably shouldn't set this or care about this, it's for opting back into an older version of an engine algorithm
-//   version: What version of the fillet algorithm to use
+//   tangentChain: If true, also fillet edges that are tangent to the selected edges
 // Example:
-//   blockProfile = sketch(on = XY) {
-//     edge1 = line(start = [var 0mm, var 0mm], end = [var 6mm, var 0mm])
-//     edge2 = line(start = [var 6mm, var 0mm], end = [var 6mm, var 4mm])
-//     edge3 = line(start = [var 6mm, var 4mm], end = [var 0mm, var 4mm])
-//     edge4 = line(start = [var 0mm, var 4mm], end = [var 0mm, var 0mm])
-//     coincident([edge1.end, edge2.start])
-//     coincident([edge2.end, edge3.start])
-//     coincident([edge3.end, edge4.start])
-//     coincident([edge4.end, edge1.start])
-//     horizontal(edge1)
-//     vertical(edge2)
-//     horizontal(edge3)
-//     vertical(edge4)
+//   @settings(kclVersion = 3.0)
+//   
+//   width = 20
+//   length = 10
+//   thickness = 1
+//   cornerFilletRadius = 4
+//   
+//   plateSketch = sketch(on = XY) {
+//     line1 = line(start = [var -10mm, var -5mm], end = [var 10mm, var -5mm])
+//     line2 = line(start = [var 10mm, var -5mm], end = [var 10mm, var 5mm])
+//     line3 = line(start = [var 10mm, var 5mm], end = [var -10mm, var 5mm])
+//     line4 = line(start = [var -10mm, var 5mm], end = [var -10mm, var -5mm])
 //   }
 //   
-//   block = extrude(region(segments = [blockProfile.edge1, blockProfile.edge2]), length = 3, tagEnd = $top)
+//   plateRegion = region(segments = [plateSketch.line4, plateSketch.line1])
+//   plate = extrude(plateRegion, length = thickness)
 //   
-//   tabProfile = startSketchOn(block, face = top)
-//     |> startProfile(at = [1mm, 1mm])
-//     |> line(end = [4mm, 0mm], tag = $tabEdge)
-//     |> line(end = [0mm, 1mm])
-//     |> line(end = [-4mm, 0mm])
-//     |> close()
-//   
-//   blockWithTab = extrude(tabProfile, length = 1mm)
-//   filletedBlock = fillet(blockWithTab, radius = 0.5mm, tags = [getNextAdjacentEdge(tabEdge)])
+//   cornerFillet = fillet(
+//     plate,
+//     edges = [
+//       {
+//         sideFaces = [
+//           plateRegion.tags.line1,
+//           plateRegion.tags.line2
+//         ]
+//       },
+//       {
+//         sideFaces = [
+//           plateRegion.tags.line2,
+//           plateRegion.tags.line3
+//         ]
+//       },
+//       {
+//         sideFaces = [
+//           plateRegion.tags.line3,
+//           plateRegion.tags.line4
+//         ]
+//       },
+//       {
+//         sideFaces = [
+//           plateRegion.tags.line4,
+//           plateRegion.tags.line1
+//         ]
+//       }
+//     ],
+//     radius = cornerFilletRadius,
+//   )
 
 // Category: std.solid
 // Cut a straight transitional edge along a tagged path
-// Remarks: Chamfer is similar in function and use to a fillet, except a fillet will blend the transition along an edge, rather than cut a sharp, straight transitional edge.
+// Remarks: Chamfer is similar in function and use to a fillet, except a fillet will blend the transition along an edge, rather than cut a sharp, straight transitional edge. ### Face references In `edges`, `sideFaces` and `endFaces` contain face tags or face UUIDs, not raw sketch segments. For a side face created by extruding `profile.line1`, use `profileRegion.tags.line1` or `body.sketch.tags.line1`, where `profileRegion` is the extruded region and `body` is the resulting solid. For extrusion caps, declare `tagStart = $startCap` or `tagEnd = $endCap`, then refer to `startCap` or `endCap`. Use `$` only when declaring the tag. See [Face API Edge References](/docs/kcl-lang/edge-references) for selection examples.
 // std.solid.chamfer (function)
 chamfer(
   @solid: Solid,
@@ -64,45 +83,65 @@ chamfer(
   secondLength?: number(Length),
   angle?: number(Angle),
   tag?: TagDecl,
-  legacyMethod?: bool,
-  version?: number(_),
+  tangentChain?: bool,
 ): Solid
 //   @solid: The solid whose edges should be chamfered
 //   length: Chamfering cuts away two faces to create a third face
 //   tags: The paths you want to chamfer (legacy API)
-//   edges: Experimental face API
+//   edges: Preferred for KCL 3
 //   secondLength: Chamfering cuts away two faces to create a third face
 //   angle: Chamfering cuts away two faces to create a third face
 //   tag: Create a new tag which refers to this chamfer
-//   legacyMethod: You probably shouldn't set this or care about this, it's for opting back into an older version of an engine algorithm
-//   version: What version of the fillet algorithm to use
+//   tangentChain: If true, also chamfer edges that are tangent to the selected edges
 // Example:
-//   baseProfile = sketch(on = XY) {
-//     edge1 = line(start = [var 0mm, var 0mm], end = [var 6mm, var 0mm])
-//     edge2 = line(start = [var 6mm, var 0mm], end = [var 6mm, var 4mm])
-//     edge3 = line(start = [var 6mm, var 4mm], end = [var 0mm, var 4mm])
-//     edge4 = line(start = [var 0mm, var 4mm], end = [var 0mm, var 0mm])
-//     coincident([edge1.end, edge2.start])
-//     coincident([edge2.end, edge3.start])
-//     coincident([edge3.end, edge4.start])
-//     coincident([edge4.end, edge1.start])
-//     horizontal(edge1)
-//     vertical(edge2)
-//     horizontal(edge3)
-//     vertical(edge4)
+//   // Chamfer a mounting plate.
+//   @settings(kclVersion = 3.0)
+//   
+//   width = 20
+//   length = 10
+//   thickness = 1
+//   chamferLength = 2
+//   
+//   plateSketch = sketch(on = XY) {
+//     line1 = line(start = [var -10mm, var -5mm], end = [var 10mm, var -5mm])
+//     line2 = line(start = [var 10mm, var -5mm], end = [var 10mm, var 5mm])
+//     line3 = line(start = [var 10mm, var 5mm], end = [var -10mm, var 5mm])
+//     line4 = line(start = [var -10mm, var 5mm], end = [var -10mm, var -5mm])
 //   }
 //   
-//   block = extrude(region(segments = [baseProfile.edge1, baseProfile.edge2]), length = 3mm, tagEnd = $top)
+//   plateRegion = region(segments = [plateSketch.line4, plateSketch.line1])
+//   plate = extrude(plateRegion, length = thickness, tagEnd = $capEnd001)
 //   
-//   tabProfile = startSketchOn(block, face = top)
-//     |> startProfile(at = [1mm, 1mm])
-//     |> line(end = [4mm, 0mm], tag = $tabEdge)
-//     |> line(end = [0mm, 1mm])
-//     |> line(end = [-4mm, 0mm])
-//     |> close()
-//   
-//   blockWithTab = extrude(tabProfile, length = 1mm)
-//   chamfered = chamfer(blockWithTab, length = 0.5mm, tags = [getNextAdjacentEdge(tabEdge)])
+//   cornerChamfer = chamfer(
+//     plate,
+//     edges = [
+//       {
+//         sideFaces = [
+//           plateRegion.tags.line1,
+//           plateRegion.tags.line2
+//         ]
+//       },
+//       {
+//         sideFaces = [
+//           plateRegion.tags.line2,
+//           plateRegion.tags.line3
+//         ]
+//       },
+//       {
+//         sideFaces = [
+//           plateRegion.tags.line3,
+//           plateRegion.tags.line4
+//         ]
+//       },
+//       {
+//         sideFaces = [
+//           plateRegion.tags.line4,
+//           plateRegion.tags.line1
+//         ]
+//       }
+//     ],
+//     length = chamferLength,
+//   )
 
 // Category: std.solid
 // Remove volume from a 3-dimensional shape such that a wall of the provided thickness remains, taking volume starting at the provided face, leaving it open in that direction
@@ -271,11 +310,9 @@ patternCircular3d(
 union(
   @solids: [Solid; 2+],
   tolerance?: number(Length),
-  legacyMethod?: bool,
 ): [Solid; 1+]
 //   @solids: The solids to union
 //   tolerance: Defines the smallest distance below which two entities are considered coincident, intersecting, coplanar, or similar
-//   legacyMethod: You probably shouldn't set this or care about this, it's for opting back into an older version of an engine algorithm
 // Example (Legacy sketch syntax (deprecated in KCL 2.0)):
 //   // Union two cubes using the stdlib functions.
 //   
@@ -302,11 +339,9 @@ union(
 intersect(
   @solids: [Solid; 2+],
   tolerance?: number(Length),
-  legacyMethod?: bool,
 ): [Solid; 1+]
 //   @solids: The solids to intersect
 //   tolerance: Defines the smallest distance below which two entities are considered coincident, intersecting, coplanar, or similar
-//   legacyMethod: You probably shouldn't set this or care about this, it's for opting back into an older version of an engine algorithm
 // Example (Legacy sketch syntax (deprecated in KCL 2.0)):
 //   // Intersect two cubes using the stdlib functions.
 //   
@@ -334,14 +369,12 @@ subtract(
   @solids: [Solid; 1+],
   tools: [Solid],
   tolerance?: number(Length),
-  legacyMethod?: bool,
 ): [Solid]
 //   @solids: The solids to use as the base to subtract from
 //   tools: The solids to subtract
 //   tolerance: Defines the smallest distance below which two entities are considered coincident, intersecting, coplanar, or similar
-//   legacyMethod: You probably shouldn't set this or care about this, it's for opting back into an older version of an engine algorithm
 // Example:
-//   @settings(defaultLengthUnit = mm, kclVersion = 2.0)
+//   @settings(defaultLengthUnit = mm, kclVersion = 3.0)
 //   
 //   baseSketch = sketch(on = XY) {
 //     bottom = line(start = [var -10mm, var -10mm], end = [var 10mm, var -10mm])
@@ -389,7 +422,7 @@ appearance(
 //   roughness: Roughness of the new material, a percentage like 95.7
 //   opacity: Opacity
 // Example:
-//   @settings(defaultLengthUnit = mm, kclVersion = 2.0)
+//   @settings(defaultLengthUnit = mm, kclVersion = 3.0)
 //   
 //   sweepPath = sketch(on = XZ) {
 //     line1 = line(start = [var 0.05mm, var 0.05mm], end = [var 0.05mm, var 7.05mm])
@@ -448,13 +481,11 @@ split(
   merge?: bool,
   keepTools?: bool,
   tools?: [Solid],
-  legacyMethod?: bool,
 ): [Solid; 1+]
 //   @targets: The bodies to split
 //   merge: Whether to merge the bodies into one after
 //   keepTools: If false, the tool bodies will be removed from the scene
 //   tools: The tools to split the target bodies along
-//   legacyMethod: You probably shouldn't set this or care about this, it's for opting back into an older version of an engine algorithm
 // Example (Legacy sketch syntax (deprecated in KCL 2.0)):
 //   sideLen = 4
 //   
@@ -601,7 +632,7 @@ deleteFace(
 
 // Category: std.solid
 // Blend two surfaces together
-// Remarks: Or blend the full edges directly with tagged edges (no `getBoundedEdge`): Experimental face API: edge specifier objects are supported for testing, but are not ready for generated or user-facing KCL yet; prefer tagged edges or bounded edges until point-and-click and migration support ships. Sketch block tags work too:
+// Remarks: Or blend the full edges directly with tagged edges (no `getBoundedEdge`): Edge specifier objects are also supported. Sketch block tags work too:
 // std.solid.blend (function)
 blend(@edges: [BoundedEdge | TaggedEdge | any; 2]): Solid
 //   @edges: The two edges that will be blended

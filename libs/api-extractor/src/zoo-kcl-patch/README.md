@@ -1,15 +1,15 @@
 # Zoo KCL JSON Export Patch
 
-[gen_std_tests.patch.rs](./gen_std_tests.patch.rs) adds a `test_export_stdlib_json` test to the Zoo Modeling App's `rust/kcl-lib/src/docs/gen_std_tests.rs`. It writes the KCL standard library (functions, types, constants, modules, `deprecated_since` and doc-comment examples with their sketch syntax) as JSON for Tau's api-extractor. It walks `walk_stdlib()`, so the `std::solver` sketch-block module is included.
+[gen_std_tests.patch.rs](./gen_std_tests.patch.rs) adds a `test_export_stdlib_json` test to the Zoo Modeling App's `rust/kcl-lib/src/docs/gen_std_tests.rs`. It writes the KCL standard library (functions, types, constants, modules, `deprecated_since` and doc-comment examples with their sketch syntax) as JSON for Tau's api-extractor. It filters function arguments to the stable KCL 3.0 surface, omitting removed arguments and future additions. It walks `walk_stdlib()`, so the `std::solver` sketch-block module is included.
 
-The vendored export must match the kcl-lib version Tau's runtime runs. Upstream bumps `kcl-wasm-lib` `0.1.N` and `kcl-lib` `0.2.N` together, so `@taucad/kcl-wasm-lib@0.1.184` (pnpm catalog) needs the `kcl-lib` `0.2.184` export; `src/languages/kcl/extract.test.ts` enforces this.
+The vendored export must match the kcl-lib version Tau's runtime runs. Upstream bumps `kcl-wasm-lib` `0.1.N` and `kcl-lib` `0.2.N` together, so `@taucad/kcl-wasm-lib@0.1.191` (pnpm catalog) needs the `kcl-lib` `0.2.191` export; `src/languages/kcl/extract.test.ts` enforces this.
 
 ## Regenerate
 
-Use the upstream commit the runtime was built from (the `rebuild-kcl-wasm-lib` skill records it; `0.1.184` = `9b0ecedff5`). A separate worktree keeps `repos/zoo-modeling-app` on its checked-out commit:
+Use the upstream commit the runtime was built from (the `rebuild-kcl-wasm-lib` skill records it; `0.1.191` = `9497880fde`). A separate worktree keeps `repos/zoo-modeling-app` on its checked-out commit:
 
 ```bash
-git -C repos/zoo-modeling-app worktree add --detach "$SCRATCH/zoo" 9b0ecedff5
+git -C repos/zoo-modeling-app worktree add --detach "$SCRATCH/zoo" 9497880fde
 cat libs/api-extractor/src/zoo-kcl-patch/gen_std_tests.patch.rs \
   >> "$SCRATCH/zoo/rust/kcl-lib/src/docs/gen_std_tests.rs"
 cd "$SCRATCH/zoo/rust"

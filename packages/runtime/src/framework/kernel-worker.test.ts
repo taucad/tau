@@ -1458,7 +1458,7 @@ public static class Params
           // @ts-expect-error -- exercise the owning watch handoff without invoking a kernel on unreadable source.
           const reconciliation = worker.reconcileWatchSet(new Map([['main.cs', 50]]));
           if (kind === 'missing') {
-            await expect(reconciliation).resolves.toBe(true);
+            await reconciliation;
             expect(watch).toHaveBeenCalledOnce();
             expect(worker.getWatchedPaths()).toEqual(new Set(['main.cs']));
             // @ts-expect-error -- inspect the existing revision ledger's absence sentinel, not a new cache owner.
@@ -1474,48 +1474,73 @@ public static class Params
       },
     );
 
-    it.each(['cleanup', 'supersession'] as const)(
-      'should refuse a pending unknown-path baseline after %s',
-      async (kind) => {
-        const reading = Promise.withResolvers<void>();
-        const releaseRead = Promise.withResolvers<void>();
-        const filesystem = createMockFileSystem();
-        filesystem.mocks.readFile.mockImplementation(async () => {
-          reading.resolve();
-          await releaseRead.promise;
-          return new Uint8Array([1, 2, 3]);
+    it('should refuse a pending unknown-path baseline after cleanup', async () => {
+      const reading = Promise.withResolvers<void>();
+      const releaseRead = Promise.withResolvers<void>();
+      const filesystem = createMockFileSystem();
+      filesystem.mocks.readFile.mockImplementation(async () => {
+        reading.resolve();
+        await releaseRead.promise;
+        return new Uint8Array([1, 2, 3]);
+      });
+      const watch = vi.fn(() => vi.fn());
+      const inlineFileSystem = Object.assign(filesystem, { watch });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+      try {
+        // @ts-expect-error -- hold the existing watch handoff before any subscription is installed.
+        const reconciliation = worker.reconcileWatchSet(new Map([['main.cs', 50]]));
+        await reading.promise;
+        const cleanup = worker.cleanup();
+        releaseRead.resolve();
+        await reconciliation;
+        await cleanup;
+        expect(watch).not.toHaveBeenCalled();
+        expect(worker.getWatchedPaths()).toEqual(new Set());
+        // @ts-expect-error -- stale bytes must not enter the existing revision ledger after the admission fence.
+        expect(worker.fileHashCache.has('main.cs')).toBe(false);
+      } finally {
+        releaseRead.resolve();
+        await worker.cleanup();
+      }
+    });
+
+    it('should keep a pending unknown-path baseline when an unrelated document is admitted', async () => {
+      const reading = Promise.withResolvers<void>();
+      const releaseRead = Promise.withResolvers<void>();
+      const entryBytes = new Uint8Array([1, 2, 3]);
+      const filesystem = createMockFileSystem();
+      filesystem.mocks.readFile.mockImplementation(async () => {
+        reading.resolve();
+        await releaseRead.promise;
+        return entryBytes;
+      });
+      const watch = vi.fn(() => vi.fn());
+      const inlineFileSystem = Object.assign(filesystem, { watch });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+      try {
+        // @ts-expect-error -- hold the existing watch handoff before any subscription is installed.
+        const reconciliation = worker.reconcileWatchSet(new Map([['main.cs', 50]]));
+        await reading.promise;
+        worker.handleOpenDocument({
+          documentId: 'unrelated',
+          intent: 0,
+          file: createGeometryFile('unrelated.ts'),
+          parameters: {},
+          watch: false,
         });
-        const watch = vi.fn(() => vi.fn());
-        const inlineFileSystem = Object.assign(filesystem, { watch });
-        const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
-        await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
-        try {
-          // @ts-expect-error -- hold the existing watch handoff before any subscription is installed.
-          const reconciliation = worker.reconcileWatchSet(new Map([['main.cs', 50]]));
-          await reading.promise;
-          const cleanup = kind === 'cleanup' ? worker.cleanup() : undefined;
-          if (kind === 'supersession') {
-            worker.handleOpenDocument({
-              documentId: 'successor',
-              intent: 0,
-              file: createGeometryFile('successor.ts'),
-              parameters: {},
-              watch: false,
-            });
-          }
-          releaseRead.resolve();
-          await expect(reconciliation).resolves.toBe(false);
-          await cleanup;
-          expect(watch).not.toHaveBeenCalled();
-          expect(worker.getWatchedPaths()).toEqual(new Set());
-          // @ts-expect-error -- stale bytes must not enter the existing revision ledger after the admission fence.
-          expect(worker.fileHashCache.has('main.cs')).toBe(false);
-        } finally {
-          releaseRead.resolve();
-          await worker.cleanup();
-        }
-      },
-    );
+        releaseRead.resolve();
+        await reconciliation;
+        expect(watch).toHaveBeenCalledOnce();
+        expect(worker.getWatchedPaths()).toEqual(new Set(['main.cs']));
+        // @ts-expect-error -- the baseline is the observed revision of the ledger, whoever else was admitted.
+        expect(worker.fileHashCache.get('main.cs')).toBe(await worker.hashContent(entryBytes));
+      } finally {
+        releaseRead.resolve();
+        await worker.cleanup();
+      }
+    });
 
     it('stops replacement validation when cleanup closes admission during an identical replay', async () => {
       const entryBytes = new Uint8Array([1, 2, 3]);
@@ -1551,7 +1576,7 @@ public static class Params
       await validationStarted.promise;
       const cleanup = worker.cleanup();
 
-      await expect(reconciliation).resolves.toBe(false);
+      await reconciliation;
       await cleanup;
       expect(unsubscribe).toHaveBeenCalledOnce();
       expect(worker.getWatchedPaths()).toEqual(new Set());
@@ -1561,17 +1586,16 @@ public static class Params
       {
         event: { type: 'change', path: 'dep.ts' } satisfies WatchEvent,
         nextBytes: new Uint8Array([1, 2, 3]),
-        commits: true,
       },
       {
         event: { type: 'change', path: 'dep.ts' } satisfies WatchEvent,
         nextBytes: new Uint8Array([4, 5, 6]),
-        commits: false,
       },
-      { event: { type: 'reset' } satisfies WatchEvent, nextBytes: new Uint8Array([1, 2, 3]), commits: false },
+      { event: { type: 'reset' } satisfies WatchEvent, nextBytes: new Uint8Array([1, 2, 3]) },
+      { event: { type: 'reset' } satisfies WatchEvent, nextBytes: new Uint8Array([4, 5, 6]) },
     ])(
-      'revalidates an arming event delivered during hashing before commit ($event.type)',
-      async ({ event, nextBytes, commits }) => {
+      'should record the revalidated revision and commit the candidate when $event.type arrives during hashing',
+      async ({ event, nextBytes }) => {
         const entryBytes = new Uint8Array([1, 2, 3]);
         let currentBytes = entryBytes;
         const filesystem = createMockFileSystem();
@@ -1621,12 +1645,12 @@ public static class Params
         deliverWatchEvent(event);
         releaseHash.resolve();
 
-        await expect(reconciliation).resolves.toBe(commits);
-        expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(event.type === 'reset' ? 1 : 2);
-        expect(worker.getWatchedPaths()).toEqual(commits ? new Set(['dep.ts']) : new Set());
-        if (!commits) {
-          expect(unsubscribe).toHaveBeenCalledOnce();
-        }
+        await reconciliation;
+        expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(2);
+        expect(worker.getWatchedPaths()).toEqual(new Set(['dep.ts']));
+        expect(unsubscribe).not.toHaveBeenCalled();
+        // @ts-expect-error -- the ledger holds the revision validation observed, so the watch echo deduplicates.
+        expect(worker.fileHashCache.get('dep.ts')).toBe(await originalHashContent(nextBytes));
         await worker.cleanup();
       },
     );

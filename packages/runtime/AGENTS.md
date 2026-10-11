@@ -16,6 +16,7 @@
 - Derive manifest and result data from one canonical schema or source, and do not add compatibility shims for consumers that do not exist.
 - Keep asyncness visible: value-less async methods return `Promise<void>`; avoid promise-consuming IIFEs, settled-value `Promise.resolve` wrappers, and unused `void` expressions. Give module-scope callbacks names when they carry domain meaning.
 - Runtime SSR asset discovery is package-root scoped, bounded before literal stripping, and never scans or rewrites application TypeScript.
+- Several clients can share one JavaScript realm: hold module-scope library backends through `services.realm`, register built-ins with the worker-scoped `registerKernelModule`, and never read or write `globalThis` registry state from a plugin or bundler.
 - Keep the runtime ESM-only. Put environment-selected module identifiers in named `taucad:` constants rather than scattering string literals.
 
 Validate with `pnpm nx lint runtime`, `pnpm nx test runtime --watch=false`, `pnpm nx typecheck runtime`, `pnpm nx build runtime`, and `pnpm nx run runtime:audit-public-surface` when exports change.

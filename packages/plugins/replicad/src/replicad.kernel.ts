@@ -21,7 +21,6 @@ import {
   asBuffer,
   jsonSchemaFromJson,
   defineKernel,
-  getModuleRegistry,
   isRecordObject,
   extractDefaultParameters,
   registerKernelModule,
@@ -45,6 +44,7 @@ import type {
   RuntimeLogger,
   KernelLibraryTraceHandle,
   KernelLibraryTraceMode,
+  RealmHold,
 } from '@taucad/runtime/kernel';
 
 import { replicadOptionsSchema, replicadRenderSchema, replicadExportSchemas } from '#replicad.schemas.js';
@@ -273,6 +273,8 @@ async function identifyImplementationAssets(
 
 type ReplicadContext = {
   openCascade: OpenCascadeInstance;
+  /** This kernel's share of the realm's one OpenCASCADE instance. */
+  occt: RealmHold<OpenCascadeInstance>;
   replicadLibrary: ReplicadLibrary;
   tessellationInstancing: boolean;
   replicadInitialised: boolean;
@@ -409,11 +411,6 @@ function extractDefaultName(module: unknown): string | undefined {
   return typeof module['defaultName'] === 'string' ? module['defaultName'] : undefined;
 }
 
-function getReplicadFirstArgument(): unknown {
-  const registry = getModuleRegistry();
-  return registry.get('replicad');
-}
-
 // =============================================================================
 // Options schema
 // =============================================================================
@@ -530,48 +527,60 @@ export const replicadKernel = defineKernel({
     const wasmSpan = tracer.startSpan('replicad.wasm-init');
     const resolved = await resolveWasm(wasm, logger, tracer);
     const compiledModule = resolved.wasmUrl ? runtime.getCompiledWasmModule(resolved.wasmUrl) : undefined;
-    let openCascade = await initOcct(resolved.wasmUrl, resolved.bindingsFactory, {
-      tracer,
-      ...(compiledModule ? { compiledModule } : {}),
-      print: (text) => {
-        logger.trace('OCJS stdout', { data: { text } });
-      },
-      printErr: (text) => {
-        logger.warn('OCJS stderr', { data: { text } });
+    // This kernel's wrapper over the realm's instance: per-kernel tracing, or exceptions only (I4).
+    let kernelOpenCascade: { instance: OpenCascadeInstance; summary?: OcTracingSummary } | undefined;
+    const wrapForKernel = (raw: OpenCascadeInstance) => {
+      if (kernelOpenCascade === undefined && (ocTracing === 'summary' || ocTracing === 'per-call')) {
+        const traced = wrapOcWithTracing(raw, tracer, { mode: ocTracing });
+        kernelOpenCascade = { instance: traced.tracedInstance, summary: traced.summary };
+      }
+      kernelOpenCascade ??= { instance: wrapOcForExceptions(raw) };
+      return kernelOpenCascade;
+    };
+
+    // `replicad` binds OpenCASCADE at module scope, so every kernel in this realm shares one instance (I2).
+    const occt = await runtime.realm.hold<OpenCascadeInstance>({
+      group: 'replicad-occt',
+      key: `${resolved.variant}:${resolved.wasmUrl ?? ''}`,
+      async create() {
+        const raw = await initOcct(resolved.wasmUrl, resolved.bindingsFactory, {
+          tracer,
+          ...(compiledModule ? { compiledModule } : {}),
+          print: (text) => {
+            logger.trace('OCJS stdout', { data: { text } });
+          },
+          printErr: (text) => {
+            logger.warn('OCJS stderr', { data: { text } });
+          },
+        });
+
+        if (resolved.variant === 'multi') {
+          /* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
+          const pool = raw.OSD_ThreadPool.DefaultPool(-1);
+          try {
+            if (pool.IsInUse()) {
+              throw new Error('Cannot configure Replicad OCCT thread pool while it is in use');
+            }
+            // ponytail: cap OCCT threads to reduce parallel working sets; revisit after native batch memory is reduced.
+            pool.Init(Math.min(pool.NbThreads(), 4));
+          } finally {
+            pool.delete();
+          }
+          /* oxlint-enable new-cap */
+          activateOccParallelism(raw, logger);
+        } else {
+          logger.log(`Replicad OCCT initialised: variant=${resolved.variant} (single-threaded)`);
+        }
+
+        // The creating kernel binds the library once (Q5): library-internal OC calls trace to it, which is
+        // exact with one realm per client; every other kernel's wrapper sees only its kernel-direct calls.
+        // ponytail: no unbind on last release — `replicad` keeps the stale instance until the next create rebinds it.
+        replicadLibrary.setOC(wrapForKernel(raw).instance);
+        return raw;
       },
     });
 
-    if (resolved.variant === 'multi') {
-      /* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
-      const pool = openCascade.OSD_ThreadPool.DefaultPool(-1);
-      try {
-        if (pool.IsInUse()) {
-          throw new Error('Cannot configure Replicad OCCT thread pool while it is in use');
-        }
-        // ponytail: cap OCCT threads to reduce parallel working sets; revisit after native batch memory is reduced.
-        pool.Init(Math.min(pool.NbThreads(), 4));
-      } finally {
-        pool.delete();
-      }
-      /* oxlint-enable new-cap */
-      activateOccParallelism(openCascade, logger);
-    } else {
-      logger.log(`Replicad OCCT initialised: variant=${resolved.variant} (single-threaded)`);
-    }
-
-    let tracingSummary: OcTracingSummary | undefined;
-
-    if (ocTracing === 'summary' || ocTracing === 'per-call') {
-      const traced = wrapOcWithTracing(openCascade, tracer, {
-        mode: ocTracing,
-      });
-      openCascade = traced.tracedInstance;
-      tracingSummary = traced.summary;
-    } else {
-      openCascade = wrapOcForExceptions(openCascade);
-    }
-
-    replicadLibrary.setOC(openCascade);
+    const { instance: openCascade, summary: tracingSummary } = wrapForKernel(occt.value);
     wasmSpan.end();
 
     try {
@@ -651,6 +660,7 @@ export const replicadKernel = defineKernel({
 
     return {
       openCascade,
+      occt,
       replicadLibrary,
       tessellationInstancing,
       replicadInitialised: true,
@@ -742,7 +752,7 @@ export const replicadKernel = defineKernel({
                     bundleSourceMap,
                     entryUrl,
                   }),
-                  firstArg: getReplicadFirstArgument(),
+                  firstArg: context.libraryTrace.tracedLibrary,
                 }),
             });
           } finally {
@@ -1137,6 +1147,10 @@ export const replicadKernel = defineKernel({
         ...entry.metadata,
       })),
     };
+  },
+
+  async onDispose(context) {
+    context.occt.release();
   },
 });
 

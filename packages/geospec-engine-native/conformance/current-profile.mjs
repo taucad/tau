@@ -15,8 +15,14 @@ const successorSha256 = '5dfd1c400ff18b91804cf5514dfc862f47a975bea00877fbd4f2d5f
 const materialSuccessorSha256 = 'c36f2296878e3daa57cc0cdfe8c86dac3b77ed80d6ddbd60de68b31a64bba5f7';
 // Each separately authored material authority: v6-01 history and its v6-02 successor.
 const materialCorpora = new Map([
-  ['45b98aa9bdc83b0846e74837e5891f4d9c7c7a51b6488db2ae23e8ccbe833975', { id: 'material-v6-01', meshes: 20, records: 46 }],
-  ['613a98156d7cfad0b28e6b6caba654fc443b9c2ecba64aa0e9a8a6738df9b13d', { id: 'material-v6-02', meshes: 22, records: 51 }],
+  [
+    '45b98aa9bdc83b0846e74837e5891f4d9c7c7a51b6488db2ae23e8ccbe833975',
+    { id: 'material-v6-01', meshes: 20, records: 46 },
+  ],
+  [
+    '613a98156d7cfad0b28e6b6caba654fc443b9c2ecba64aa0e9a8a6738df9b13d',
+    { id: 'material-v6-02', meshes: 22, records: 51 },
+  ],
 ]);
 const oldNumericProfileField = '"numericProfile":"geospec-st-logical-requests-v3"';
 const stringAxisIds = new Set([
@@ -269,10 +275,7 @@ export const loadMaterialCorpus = async (bytes) => {
       corpus.authority.numericProfile === 'geospec-demand-v6',
     'material authority',
   );
-  requireMatch(
-    corpus.meshes.length === pinned?.meshes && corpus.records.length === pinned.records,
-    'material counts',
-  );
+  requireMatch(corpus.meshes.length === pinned?.meshes && corpus.records.length === pinned.records, 'material counts');
   const ids = new Set(corpus.meshes.map((mesh) => mesh.id));
   requireMatch(ids.size === corpus.meshes.length, 'material admission IDs');
   requireMatch(new Set(corpus.records.map((row) => row.id)).size === corpus.records.length, 'material record IDs');

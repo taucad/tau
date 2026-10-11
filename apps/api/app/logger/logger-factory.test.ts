@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- fixtures mirror environment variable names. */
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import process from 'node:process';
 import type { ConfigService } from '@nestjs/config';
 import type { PinoLoggerOptions } from 'fastify/types/logger.js';
 import { pinoHttp } from 'pino-http';
@@ -139,5 +140,18 @@ describe('Fastify logger service selection', () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe('log destination', () => {
+  it('should give request logs and logs outside a request the one synchronous stdout on Fly', async () => {
+    const config = mock<ConfigService<Environment, true>>();
+    config.get.mockImplementation(
+      (key: keyof Environment) => ({ NODE_ENV: 'production', LOG_LEVEL: 'info', LOG_SERVICE: 'fly' })[key as string],
+    );
+
+    const { pinoHttp } = await useLoggerFactory(config);
+
+    expect(pinoHttp).toEqual([expect.objectContaining({ messageKey: 'message' }), process.stdout]);
   });
 });

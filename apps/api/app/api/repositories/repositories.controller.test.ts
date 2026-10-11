@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { Reflector } from '@nestjs/core';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -16,10 +17,13 @@ describe('RepositoriesController', () => {
     const query = { provider: 'github', owner: 'taucad', repo: 'tau', ref: 'main' };
     const raw = { aborted: false, once: vi.fn(), off: vi.fn() };
     const request = { raw } as unknown as FastifyRequest;
+    const replyRaw = { once: vi.fn() };
+    const send = vi.fn();
     const reply = {
+      raw: replyRaw,
       status: vi.fn(),
       header: vi.fn(),
-      send: vi.fn(),
+      send,
     } as unknown as FastifyReply;
 
     await controller.getArchive(query, '203.0.113.7', request, reply);
@@ -27,8 +31,15 @@ describe('RepositoriesController', () => {
     expect(getArchive).toHaveBeenCalledWith(query, '203.0.113.7', expect.any(AbortSignal));
     expect(reply.status).toHaveBeenCalledWith(200);
     expect(reply.header).toHaveBeenCalledWith('content-type', 'application/zip');
-    expect(reply.send).toHaveBeenCalledWith(Buffer.from([1, 2]));
+    const [body] = send.mock.calls[0] as [Readable];
+    expect(body).toBeInstanceOf(Readable);
+    expect(Buffer.concat(await body.toArray())).toStrictEqual(Buffer.from([1, 2]));
     expect(raw.once).toHaveBeenCalledWith('aborted', expect.any(Function));
+    /* The body may still be streaming when `getArchive` returns; the abort link is released on close. */
+    expect(raw.off).not.toHaveBeenCalled();
+    const [[event, onClose]] = replyRaw.once.mock.calls as [[string, () => void]];
+    expect(event).toBe('close');
+    onClose();
     expect(raw.off).toHaveBeenCalledWith('aborted', expect.any(Function));
     expect(new Reflector().get(isPublicAuth, RepositoriesController.prototype.getArchive)).toBe(true);
   });

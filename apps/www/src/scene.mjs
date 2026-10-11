@@ -1,6 +1,5 @@
 import { heroCamera } from '#www/hero-view.js';
-import { parseStoryManifest, parseVariantManifest } from '#www/story-geometry.js';
-import { partPose } from '#www/story-kinematics.js';
+import { createPartGeometries, loadAssembly as loadGearbox, partPose } from '@taucad/planetary-gearbox';
 import { ease, storyFrame, storyPart } from '#www/story-timeline.js';
 import * as THREE from 'three';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
@@ -9,37 +8,20 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 /** @typedef {import('#www/story-timeline.js').FrameState} FrameState */
 /** @typedef {{kind: 'hero', sunAngle: number, narrow: boolean} | {kind: 'story', progress: number, narrow: boolean}} View */
 
-/** @type {(response: Response) => Promise<ArrayBuffer>} */
-const decodeGeometry = async (response) => {
-  const bytes = await response.arrayBuffer();
-  const magic = new Uint8Array(bytes, 0, Math.min(2, bytes.byteLength));
-  // Hosts may already have removed Content-Encoding; never decompress twice.
-  return magic[0] === 31 && magic[1] === 139
-    ? new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
-    : bytes;
+/** Where the build publishes the shared gearbox assets. */
+const assetUrls = {
+  manifest: '/_www/assets/planetary.json',
+  geometry: '/_www/assets/planetary.bin.gz',
+  variant: '/_www/assets/planetary-face18.json',
+  offsets: '/_www/assets/planetary-face18.bin.gz',
 };
 
 /**
  * Fetch and validate the frozen 34-part tessellation and its authored faceWidth variant.
  * @param signal - Aborts the downloads on page exit.
- * @type {(signal: AbortSignal) => Promise<{manifest: import('#www/story-geometry.js').StoryManifest, binary: ArrayBuffer, variant: import('#www/story-geometry.js').VariantManifest, offsets: ArrayBuffer}>}
+ * @type {(signal: AbortSignal) => Promise<import('@taucad/planetary-gearbox').GearboxAssembly>}
  */
-export const loadAssembly = async (signal) => {
-  const urls = ['planetary.json', 'planetary.bin.gz', 'planetary-face18.json', 'planetary-face18.bin.gz'];
-  const responses = await Promise.all(urls.map(async (url) => fetch(`/_www/assets/${url}`, { signal })));
-  if (responses.some((response) => !response.ok)) {
-    throw new Error('Geometry unavailable');
-  }
-  const [manifestJson, binary, variantJson, offsets] = await Promise.all([
-    /** @type {Promise<unknown>} */ (responses[0].json()),
-    decodeGeometry(responses[1]),
-    /** @type {Promise<unknown>} */ (responses[2].json()),
-    decodeGeometry(responses[3]),
-  ]);
-  const manifest = parseStoryManifest(manifestJson, binary.byteLength);
-  const variant = parseVariantManifest(variantJson, manifest, offsets.byteLength);
-  return { manifest, binary, variant, offsets };
-};
+export const loadAssembly = async (signal) => loadGearbox(assetUrls, signal);
 
 /** @type {(hex: string, intensity: number) => THREE.Color} */
 const radiance = (hex, intensity) => new THREE.Color(hex).multiplyScalar(intensity);
@@ -192,7 +174,7 @@ void main() {
  * @param assembly - Validated geometry from {@link loadAssembly}.
  * @type {(assembly: Awaited<ReturnType<typeof loadAssembly>>) => {canvas: HTMLCanvasElement, attach: (host: HTMLElement) => void, draw: (view: View) => void, dispose: () => void, compile: () => Promise<void>}}
  */
-export const createScene = ({ manifest, binary, variant, offsets }) => {
+export const createScene = (assembly) => {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'default' });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   // Khronos PBR Neutral keeps the authored colours true; ACES greyed and darkened them.
@@ -327,30 +309,8 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
     contactMaterial.opacity = weight;
     renderer.shadowMap.needsUpdate = floor.visible;
   };
-  const parts = manifest.meshes.map((part, index) => {
-    const geometry = own(new THREE.BufferGeometry());
-    geometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(new Float32Array(binary, part.position.offset, part.position.length).slice(), 3),
-    );
-    geometry.setAttribute(
-      'normal',
-      new THREE.BufferAttribute(new Float32Array(binary, part.normal.offset, part.normal.length), 3),
-    );
-    geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(binary, part.index.offset, part.index.length), 1));
-    const range = variant.meshes[index]?.dz;
-    if (range) {
-      const dz = new Float32Array(offsets, range.offset, range.length);
-      const morph = new Float32Array(range.length * 3);
-      for (const [i, value] of dz.entries()) {
-        morph[i * 3 + 2] = value;
-      }
-      geometry.morphAttributes.position = [new THREE.BufferAttribute(morph, 3)];
-      geometry.morphTargetsRelative = true;
-    }
-    // Geometry is authored in place; planets and their bushings rotate about their own axes.
-    const home = partPose(part.name, 0);
-    geometry.translate(-home.x, -home.y, 0);
+  const parts = createPartGeometries(assembly).map((part, index) => {
+    const geometry = own(part.geometry);
     const material = own(
       new THREE.MeshStandardMaterial({
         color: part.color,
@@ -360,7 +320,7 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
       }),
     );
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.morphTargetInfluences = range ? [0] : [];
+    mesh.morphTargetInfluences = part.hasVariant ? [0] : [];
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     const positions = geometry.getAttribute('position');

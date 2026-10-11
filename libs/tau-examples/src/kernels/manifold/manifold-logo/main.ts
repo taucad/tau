@@ -112,11 +112,8 @@ export const mengerSponge = (n: number): ManifoldType => {
  * pastel. The published mark is saturated, corner to corner, so it is the
  * normalised reading that matches it.
  *
- * The sample applies this through `setProperties(3, …)` and declares the
- * result `COLOR_0` on a GLTF material. Tau's image transcoder does not read
- * vertex-colour attributes — it rejects the mesh outright — so the solid is
- * returned uncoloured for rendering and the law is exported instead, for the
- * vector render to evaluate. One source either way.
+ * `main` applies it the way the sample does, through `setProperties(3, …)`
+ * declared as `COLOR_0`, and the vector render evaluates the same export.
  */
 export const positionColor = (
   position: readonly [number, number, number],
@@ -127,15 +124,22 @@ export const positionColor = (
 ];
 
 export default function main(p: Params = defaultParams): GLTFNode {
-  // Manifold meshes carry no normals and the GLTF exporter will not invent
-  // them, so they are computed into the first three properties. A sharp angle
-  // of 60° keeps every face of the fractal flat, which is what a box-cut
-  // solid should look like. The material has to name them, or the exporter
-  // writes properties it cannot label and the mesh reads as malformed.
-  const sponge = mengerSponge(p.depth).scale(p.size).calculateNormals(0, 60);
   const node = new GLTFNode();
-  node.manifold = sponge;
-  node.material = { attributes: ['NORMAL'] };
+  // The unit cube spans -0.5 to 0.5, so positions are doubled onto the law's -1 to 1.
+  node.manifold = mengerSponge(p.depth)
+    .setProperties(3, (color, position) => {
+      const [red, green, blue] = positionColor([
+        position[0] * 2,
+        position[1] * 2,
+        position[2] * 2,
+      ]);
+      color[0] = red;
+      color[1] = green;
+      color[2] = blue;
+    })
+    .scale(p.size);
+  // White, so the vertex colour is the colour; the kernel adds the normals.
+  node.material = { baseColorFactor: [1, 1, 1], attributes: ['COLOR_0'] };
 
   return node;
 }

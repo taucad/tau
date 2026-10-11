@@ -1,5 +1,7 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and metadata requires runtime class imports */
 import { Controller, Get, Ip, Query, Req, Res } from '@nestjs/common';
+import { Readable } from 'node:stream';
+import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { PublicAuth } from '#auth/decorators/auth.decorator.js';
 import { ArchiveQueryDto, BranchesQueryDto } from '#api/repositories/repositories.dto.js';
@@ -30,16 +32,17 @@ export class RepositoriesController {
       request.raw.once('aborted', abort);
     }
 
-    try {
-      const response = await this.repositoriesService.getArchive(query, ip, requestAbort.signal);
-      void reply.status(response.status);
-      for (const [name, value] of response.headers) {
-        void reply.header(name, value);
-      }
-      void reply.send(Buffer.from(await response.arrayBuffer()));
-    } finally {
+    /* An import body is still streaming after `send` returns, so the abort link lives until the reply closes. */
+    reply.raw.once('close', () => {
       request.raw.off('aborted', abort);
+    });
+
+    const response = await this.repositoriesService.getArchive(query, ip, requestAbort.signal);
+    void reply.status(response.status);
+    for (const [name, value] of response.headers) {
+      void reply.header(name, value);
     }
+    void reply.send(response.body === null ? undefined : Readable.fromWeb(response.body as WebReadableStream));
   }
 
   @Get('branches')

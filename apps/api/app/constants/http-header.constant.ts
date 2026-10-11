@@ -61,6 +61,12 @@ export const httpHeader = {
    * `clientAssertableActivity` in `llm-gateway.headers.ts`.
    */
   xTauActivity: 'x-tau-activity',
+  /**
+   * The Zoo-scoped token a desktop kernel utility or `tau serve` child presents
+   * on the `/v1/kernels/zoo` upgrade instead of the session
+   * (`#api/kernels/zoo-token.service.ts`). A live credential: logs redact it.
+   */
+  tauZooToken: 'tau-zoo-token',
 } as const;
 
 /**

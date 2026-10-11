@@ -29,6 +29,8 @@ export type RuntimeChildHandle = {
   readonly runtimeVersion: string;
   readonly authorizationToken: string;
   readonly closed: Promise<{ readonly exitCode?: number; readonly signal?: NodeJS.Signals }>;
+  /** Send a control frame (for example a Zoo-scoped token) to the ready child; dropped once it has exited. */
+  post<Frame extends { readonly type: string }>(frame: Frame): void;
   close(): Promise<void>;
 };
 
@@ -188,6 +190,11 @@ export const startRuntimeChild = async (options: {
     runtimeVersion: message.runtimeVersion,
     authorizationToken,
     closed,
+    post(frame): void {
+      if (child.connected) {
+        child.send(frame);
+      }
+    },
     async close(): Promise<void> {
       await killChild(child);
     },

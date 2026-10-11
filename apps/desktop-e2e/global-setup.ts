@@ -151,6 +151,11 @@ export const setup = async (): Promise<() => void> => {
    * runs that never touch the gateway but need self-host-only capability — the
    * Zoo proxy refuses Tau-funded dispatch in cloud mode (`kernels.service.ts`). */
   const selfHostApi = process.env['TAU_E2E_API_SELF_HOST'] === 'true';
+  if (selfHostApi) {
+    /* Pinned, not omitted: `--env-file-if-exists=.env` would otherwise let a
+     * developer's `TAU_CLOUD_ENABLED=true` put the gateway back in cloud mode. */
+    environment['TAU_CLOUD_ENABLED'] = 'false';
+  }
   if (!selfHostApi && (!desktopE2ECompletedArtifact || process.env['TAU_E2E_COMPLETED_CLOUD_GATEWAY'] === 'true')) {
     environment['TAU_CLOUD_ENABLED'] = 'true';
     environment['BILLING_ENVIRONMENT'] = 'development';

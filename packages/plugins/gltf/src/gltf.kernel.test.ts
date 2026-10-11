@@ -1,6 +1,6 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- defineKernel intentionally erases private backend context */
 import { readFileSync } from 'node:fs';
-import { NodeIO } from '@gltf-transform/core';
+import { Document, NodeIO } from '@gltf-transform/core';
 import { beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { createMockKernelRuntime, expectKernelProjectionOrder, validateGlbData } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
@@ -73,6 +73,49 @@ describe('gltfKernel', () => {
     expect(ordered.first).toEqual(artifact.content);
     const { json } = await new NodeIO().binaryToJSON(artifact.content as Uint8Array<ArrayBuffer>);
     expect(json.extensionsUsed?.includes(dracoExtensionName)).not.toBe(true);
+  });
+
+  it('gives triangles without normals flat normals and leaves authored normals indexed', async () => {
+    const document = new Document();
+    const buffer = document.createBuffer();
+    const accessor = (type: 'VEC3' | 'SCALAR', array: Float32Array<ArrayBuffer> | Uint16Array<ArrayBuffer>) =>
+      document.createAccessor().setType(type).setArray(array).setBuffer(buffer);
+    // A unit square as two indexed triangles in the XY plane, facing +Z.
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
+    const bare = document
+      .createPrimitive()
+      .setAttribute('POSITION', accessor('VEC3', positions))
+      .setIndices(accessor('SCALAR', new Uint16Array([0, 1, 2, 0, 2, 3])));
+    const authored = document
+      .createPrimitive()
+      .setAttribute(
+        'POSITION',
+        accessor(
+          'VEC3',
+          positions.map((value, index) => (index % 3 === 2 ? 1 : value)),
+        ),
+      )
+      .setAttribute('NORMAL', accessor('VEC3', new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1])))
+      .setIndices(accessor('SCALAR', new Uint16Array([0, 1, 2, 0, 2, 3])));
+    const scene = document.createScene();
+    for (const primitive of [bare, authored]) {
+      scene.addChild(document.createNode().setMesh(document.createMesh().addPrimitive(primitive)));
+    }
+    stage({ 'bare.glb': await new NodeIO().writeBinary(document) });
+
+    const result = await definition.evaluate({ entryPath: 'bare.glb', parameters: {}, options: {} }, runtime, context);
+    const artifact = await definition.render!({ handle: result.handle, view: 'model', options: {} }, runtime, context);
+    const imported = await new NodeIO().readBinary(artifact.content as Uint8Array<ArrayBuffer>);
+    const [flat, kept] = imported
+      .getRoot()
+      .listMeshes()
+      .map((mesh) => mesh.listPrimitives()[0]!);
+
+    expect(flat!.getIndices()).toBeNull();
+    expect(flat!.getAttribute('POSITION')!.getCount()).toBe(6);
+    expect([...flat!.getAttribute('NORMAL')!.getArray()!]).toEqual(Array.from({ length: 6 }, () => [0, 0, 1]).flat());
+    expect(kept!.getIndices()!.getCount()).toBe(6);
+    expect(kept!.getAttribute('POSITION')!.getCount()).toBe(4);
   });
 
   it.each([

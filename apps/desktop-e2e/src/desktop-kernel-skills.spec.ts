@@ -96,8 +96,7 @@ const kernelCases = [
   {
     kernel: 'Zoo (KCL)',
     skill: 'cad-zoo',
-    // The desktop runtime that serves agent tools has no Zoo kernel yet, so `main.kcl` cannot evaluate.
-    blockedBy: 'desktop runtime has no Zoo kernel',
+    // Needs the API in self-host mode with `ZOO_API_KEY`: Tau Cloud refuses Zoo dispatch (1013).
     model: 'main.kcl',
     prompt: `Design a 40 × 20 mm plate with 3 mm rounded corners, 5 mm thick, with two 6 mm holes 24 mm apart. ${verify}`,
   },
@@ -109,10 +108,8 @@ const kernelCases = [
   },
 ] as const;
 
-/** Every case by default, except blocked ones, which run only when named in TAU_E2E_KERNEL_SKILLS_ONLY. */
-const selected = kernelCases.filter((control) =>
-  only === undefined ? !('blockedBy' in control) : only.includes(control.kernel.toLowerCase()),
-);
+/** Every case by default, or only those named in TAU_E2E_KERNEL_SKILLS_ONLY. */
+const selected = kernelCases.filter((control) => only === undefined || only.includes(control.kernel.toLowerCase()));
 const unknownKernels = (only ?? []).filter(
   (name) => !kernelCases.some((control) => control.kernel.toLowerCase() === name),
 );

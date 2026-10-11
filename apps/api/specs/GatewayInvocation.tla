@@ -447,6 +447,8 @@ ApiServiceStop(k) ==
     /\ ServiceStops
     /\ \/ req[k] = "streaming"
        \/ req[k] = "finishing" /\ fin[k] = "unknown"
+    \* A finishing request's outcome was fixed when ApiObserve's deadline cut recorded "unknown";
+    \* finish() is handed that observation, so a client that leaves afterwards changes nothing it writes.
     /\ LET e == IF req[k] = "streaming" /\ conn[k] = "noticed" THEN "abort" ELSE "unknown" IN
          /\ sup' = IF sup[k] = "generating" THEN [sup EXCEPT ![k] = "cut"] ELSE sup
          /\ fin' = [fin EXCEPT ![k] = e]

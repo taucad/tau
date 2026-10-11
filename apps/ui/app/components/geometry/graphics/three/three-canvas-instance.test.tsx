@@ -250,9 +250,8 @@ describe('ThreeCanvasInstance', () => {
         <ThreeCanvasInstance enableGizmo graphicsBackend={graphicsBackend} onRetry={() => undefined} />,
       );
       await waitFor(() => {
-        expect(screen.getByTestId('actor-bridge')).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: 'View cube' })).toBeInTheDocument();
       });
-      expect(screen.getByRole('img', { name: 'View cube' })).toBeInTheDocument();
       expect(screen.queryByLabelText('Render-loop submission FPS')).not.toBeInTheDocument();
 
       enabledFeatures.add('tauDebug');

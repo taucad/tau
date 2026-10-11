@@ -1184,7 +1184,17 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     this.logger.trace(`Initializing kernel: ${kernel.entry.id}`);
 
-    kernel.ctx = await kernel.definition.initialize(kernel.options, runtime);
+    try {
+      kernel.ctx = await kernel.definition.initialize(kernel.options, runtime);
+    } catch (error) {
+      // A typed refusal (e.g. KERNEL_REALM_CONFLICT) reaches the client as is; name the refusing kernel.
+      if (error instanceof Error && 'issues' in error && Array.isArray(error.issues) && error.issues.length > 0) {
+        const issue = error.issues[0] as KernelIssue;
+        const details = typeof issue.details === 'object' && issue.details !== null ? issue.details : {};
+        error.issues[0] = { ...issue, details: { producer: kernel.entry.id, ...details } };
+      }
+      throw error;
+    }
     kernel.initialized = true;
   }
 

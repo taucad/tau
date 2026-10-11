@@ -67,6 +67,8 @@ const getWebSocket = (): typeof WebSocket => {
 export class ZooWebSocketTransport {
   private websocket: WebSocket | undefined;
   private isConnected = false;
+  /** Whether the socket ever opened; undici already reads `CLOSED` when a refused connection reports its error. */
+  private opened = false;
   private readonly pendingEngineMessages: Array<{ raw: Uint8Array<ArrayBuffer>; decoded: WebSocketResponse }> = [];
   private readonly baseUrl: string;
   private readonly closeErrors: Record<string, string> | undefined;
@@ -144,6 +146,9 @@ export class ZooWebSocketTransport {
           authTimeoutId = setTimeout(() => {
             if (!resolved) {
               resolved = true;
+              this.initializationContext = undefined;
+              // An open socket nobody will use keeps a Node host's event loop alive.
+              this.detachWebSocket();
               reject(new KclAuthError('Authentication timeout', 408));
             }
           }, authTimeout);
@@ -243,6 +248,7 @@ export class ZooWebSocketTransport {
   }
 
   private readonly onWebSocketOpen = (_event: Event): void => {
+    this.opened = true;
     if (this.token) {
       this.sendRaw({
         type: 'headers',
@@ -280,7 +286,16 @@ export class ZooWebSocketTransport {
   };
 
   private createConnectionError(code: number, reason: string): KclError {
+    // 4401/4403 are a proxy's HTTP-style refusals (401/403): the credential or entitlement, never the network.
+    const authStatus = code === 4401 || code === 4403 ? code - 4000 : undefined;
     const customMessage = this.closeErrors?.[code];
+    if (authStatus !== undefined) {
+      return new KclAuthError(
+        customMessage ?? (reason || 'The Zoo proxy refused the connection credentials.'),
+        authStatus,
+      );
+    }
+
     if (customMessage) {
       return new KclConnectionError(customMessage);
     }
@@ -316,7 +331,7 @@ export class ZooWebSocketTransport {
 
       if (event.target instanceof WebSocket) {
         const { readyState } = event.target;
-        if (readyState === 0) {
+        if (readyState === 0 || !this.opened) {
           initContext.reject(KclConnectionError.apiUnavailable('Unable to connect to the Zoo CAD API.'));
         } else {
           const readyStateText = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][readyState] ?? 'UNKNOWN';

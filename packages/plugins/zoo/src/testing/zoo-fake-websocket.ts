@@ -114,6 +114,18 @@ export class ZooFakeWebSocket {
     this.dispatch('message', event);
   }
 
+  /**
+   * Refuse the connection the way undici does: `readyState` is already `CLOSED`
+   * when `error` fires, and `close` (1006, no frame) follows it.
+   */
+  public testFailBeforeOpen(): void {
+    this.readyState = readyStateClosed;
+    const error = new Event('error');
+    Object.defineProperty(error, 'target', { value: this });
+    this.dispatch('error', error);
+    this.dispatch('close', new ZooFakeCloseEvent(1006, ''));
+  }
+
   private dispatch(type: string, event: Event): void {
     this.eventTopics.get(type)?.emit(event);
   }

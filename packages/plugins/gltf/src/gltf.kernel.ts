@@ -9,6 +9,7 @@ import {
 import { createExportFile } from '@taucad/runtime/types';
 import { createImportFileInventory, normalizeGltfGeometryNames, transformGltfExportBytes } from '@taucad/geometry-core';
 import { createFileResolverIo } from '#file-resolver-io.utils.js';
+import { addFlatNormals } from '#flat-normals.js';
 
 import { dracoExtensionName, loadDracoDecoder, usesDracoCompression } from '#draco-backend.js';
 
@@ -69,6 +70,7 @@ export const gltfKernel = defineKernel({
     const document = await io.readJSON(jsonDocument);
     document.disposeExtension(dracoExtensionName);
     await document.transform(unpartition());
+    addFlatNormals(document);
     const glb = await io.writeBinary(document);
     const normalized = await normalizeGltfGeometryNames(glb, {
       format: 'glb',

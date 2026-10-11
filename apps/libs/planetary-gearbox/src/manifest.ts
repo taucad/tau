@@ -1,29 +1,63 @@
-/** @typedef {{offset: number, length: number}} BufferRange */
-/** @typedef {{name: string, color: string, metalness: number, roughness: number, position: BufferRange, normal: BufferRange, index: BufferRange}} StoryMesh */
-/** @typedef {{source: string, sha256: string, parts: number, teeth: {sun: number, planet: number, ring: number}, meshes: StoryMesh[]}} StoryManifest */
+/**
+ * A 32-bit element range in a decoded geometry buffer.
+ * @public
+ */
+export type BufferRange = { readonly offset: number; readonly length: number };
 
 /**
- * @param value - Untrusted object.
- * @returns Whether object properties can be inspected safely.
- * @type {(value: unknown) => value is Record<string, unknown>}
+ * One authored part of the frozen tessellation.
+ * @public
  */
-const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+export type AssemblyMesh = {
+  readonly name: string;
+  readonly color: string;
+  readonly metalness: number;
+  readonly roughness: number;
+  readonly position: BufferRange;
+  readonly normal: BufferRange;
+  readonly index: BufferRange;
+};
 
 /**
- * @param value - Manifest buffer range.
- * @param byteLength - Actual decoded geometry bytes.
- * @returns Aligned bounded 32-bit element range.
- * @type {(value: unknown, byteLength: number) => BufferRange}
+ * Validated metadata of the 34-part assembly.
+ * @public
  */
-const parseRange = (value, byteLength) => {
+export type AssemblyManifest = {
+  readonly source: string;
+  readonly sha256: string;
+  readonly parts: number;
+  readonly teeth: { readonly sun: number; readonly planet: number; readonly ring: number };
+  readonly meshes: readonly AssemblyMesh[];
+};
+
+/**
+ * Validated `faceWidth` 14 → 18 variant: one axial offset per base vertex.
+ * @public
+ */
+export type VariantManifest = {
+  readonly source: string;
+  readonly sha256: string;
+  readonly from: { readonly faceWidth: 14 };
+  readonly to: { readonly faceWidth: 18 };
+  readonly axial: { readonly from: number; readonly to: number };
+  readonly meshes: ReadonlyArray<{ readonly name: string; readonly dz: BufferRange }>;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isSafeOffset = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value % 4 === 0;
+
+const isUnitInterval = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+
+const parseRange = (value: unknown, byteLength: number): BufferRange => {
   if (
     !isRecord(value) ||
-    typeof value['offset'] !== 'number' ||
+    !isSafeOffset(value['offset']) ||
     typeof value['length'] !== 'number' ||
-    !Number.isSafeInteger(value['offset']) ||
     !Number.isSafeInteger(value['length']) ||
-    value['offset'] < 0 ||
-    value['offset'] % 4 !== 0 ||
     value['length'] <= 0 ||
     value['length'] % 3 !== 0 ||
     value['offset'] + value['length'] * 4 > byteLength
@@ -34,14 +68,14 @@ const parseRange = (value, byteLength) => {
 };
 
 /**
- * Validate the frozen source metadata before constructing GPU resources.
- * @internal
+ * Validate the frozen tessellation metadata before allocating typed arrays or GPU resources.
  * @param value - JSON response or local manifest.
- * @param byteLength - Actual decoded buffer length.
- * @returns Validated metadata for the 34-part assembly.
- * @type {(value: unknown, byteLength: number) => StoryManifest}
+ * @param byteLength - Actual decoded geometry buffer length.
+ * @returns The validated 34-part manifest.
+ * @throws Error when the manifest is not the authored assembly or a range is out of bounds.
+ * @public
  */
-export const parseStoryManifest = (value, byteLength) => {
+export const parseAssemblyManifest = (value: unknown, byteLength: number): AssemblyManifest => {
   if (
     !isRecord(value) ||
     typeof value['source'] !== 'string' ||
@@ -59,10 +93,8 @@ export const parseStoryManifest = (value, byteLength) => {
   ) {
     throw new Error('Unexpected assembly manifest');
   }
-  /** @type {unknown[]} */
-  const entries = value['meshes'];
-  const names = new Set();
-  const meshes = entries.map((entry) => {
+  const names = new Set<string>();
+  const meshes = (value['meshes'] as unknown[]).map((entry): AssemblyMesh => {
     if (
       !isRecord(entry) ||
       typeof entry['name'] !== 'string' ||
@@ -70,14 +102,8 @@ export const parseStoryManifest = (value, byteLength) => {
       names.has(entry['name']) ||
       typeof entry['color'] !== 'string' ||
       !/^#[a-f\d]{6}$/iu.test(entry['color']) ||
-      typeof entry['metalness'] !== 'number' ||
-      !Number.isFinite(entry['metalness']) ||
-      entry['metalness'] < 0 ||
-      entry['metalness'] > 1 ||
-      typeof entry['roughness'] !== 'number' ||
-      !Number.isFinite(entry['roughness']) ||
-      entry['roughness'] < 0 ||
-      entry['roughness'] > 1
+      !isUnitInterval(entry['metalness']) ||
+      !isUnitInterval(entry['roughness'])
     ) {
       throw new Error('Invalid assembly part');
     }
@@ -101,24 +127,22 @@ export const parseStoryManifest = (value, byteLength) => {
   return {
     source: value['source'],
     sha256: value['sha256'],
-    parts: value['parts'],
-    teeth: { sun: value['teeth']['sun'], planet: value['teeth']['planet'], ring: value['teeth']['ring'] },
+    parts: 34,
+    teeth: { sun: 24, planet: 24, ring: 72 },
     meshes,
   };
 };
 
-/** @typedef {{source: string, sha256: string, from: {faceWidth: number}, to: {faceWidth: number}, axial: {from: number, to: number}, meshes: Array<{name: string, dz: {offset: number, length: number}}>}} VariantManifest */
-
 /**
- * Validate the authored faceWidth variant against the base manifest it offsets.
- * @internal
+ * Validate the authored `faceWidth` variant against the base manifest it offsets.
  * @param value - JSON response or local manifest.
  * @param base - Validated base manifest.
  * @param byteLength - Decoded offset buffer length.
  * @returns One axial offset range per base vertex.
- * @type {(value: unknown, base: StoryManifest, byteLength: number) => VariantManifest}
+ * @throws Error when the variant belongs to another model or a range is out of bounds.
+ * @public
  */
-export const parseVariantManifest = (value, base, byteLength) => {
+export const parseVariantManifest = (value: unknown, base: AssemblyManifest, byteLength: number): VariantManifest => {
   if (
     !isRecord(value) ||
     value['sha256'] !== base.sha256 ||
@@ -135,20 +159,15 @@ export const parseVariantManifest = (value, base, byteLength) => {
   ) {
     throw new Error('Unexpected variant geometry manifest');
   }
-  /** @type {unknown[]} */
-  const entries = value['meshes'];
-  const meshes = entries.map((entry, index) => {
+  const meshes = (value['meshes'] as unknown[]).map((entry, index) => {
     const part = base.meshes[index];
     if (!isRecord(entry) || !part || entry['name'] !== part.name || !isRecord(entry['dz'])) {
       throw new Error('Variant geometry part mismatch');
     }
     const { offset, length } = entry['dz'];
     if (
-      typeof offset !== 'number' ||
+      !isSafeOffset(offset) ||
       typeof length !== 'number' ||
-      !Number.isSafeInteger(offset) ||
-      offset < 0 ||
-      offset % 4 !== 0 ||
       length * 3 !== part.position.length ||
       offset + length * 4 > byteLength
     ) {

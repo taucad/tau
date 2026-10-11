@@ -10,7 +10,7 @@ import type { MachineActors } from '#lib/xstate.lib.js';
 // oxlint-disable-next-line import/extensions -- React Router generates this virtual route-type module.
 import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
-import { importGitHubMachine } from '#machines/import-github.machine.js';
+import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.machine.js';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
 import { PageNotice } from '#components/layout/page-notice.js';
 import { Checkbox } from '@taucad/ui/components/checkbox';
@@ -117,6 +117,27 @@ export function clientLoader({ request, params }: Route.ClientLoaderArgs) {
 }
 
 type ImportMode = 'github' | 'disk';
+
+const failureOf = (error: Error | undefined): ImportGitHubError['failure'] | undefined =>
+  error instanceof ImportGitHubError ? error.failure : undefined;
+
+/** What to do when the repository could not be opened; only a missing repository is an address problem. */
+const repositoryUnavailableAdvice = (error: Error | undefined, canChooseFromAccount: boolean): string => {
+  const fromAccount = canChooseFromAccount ? ', or choose a repository from your GitHub account' : '';
+  switch (failureOf(error)) {
+    case 'rateLimited': {
+      return `GitHub’s limit for public reads was reached. Try again in a few minutes${fromAccount}.`;
+    }
+    case 'failed': {
+      return 'Tau couldn’t read it from GitHub. Try again shortly.';
+    }
+    default: {
+      return canChooseFromAccount
+        ? 'Check the public repository address or choose a repository from your GitHub account.'
+        : 'Check the public repository address.';
+    }
+  }
+};
 
 // oxlint-disable-next-line complexity -- TODO: consider refactoring.
 export default function ImportRoute(): React.JSX.Element {
@@ -682,7 +703,7 @@ export default function ImportRoute(): React.JSX.Element {
               {!isCheckingOrFetching && !repoMetadata ? (
                 <PageNotice
                   title='Couldn’t open this repository'
-                  message='Check the public repository address or choose a repository from your GitHub account.'
+                  message={repositoryUnavailableAdvice(gitHubError, githubConnectionAvailable !== false)}
                   detail={gitHubError?.message ?? "Tau couldn't find a public repository at this address."}
                 >
                   {githubConnectionAvailable === false ? undefined : (
@@ -734,6 +755,12 @@ export default function ImportRoute(): React.JSX.Element {
                               : undefined
                           }
                         />
+                      ) : failureOf(fetchErrors.branches) === 'serverNotConfigured' ? (
+                        <p role='status' className='text-sm'>
+                          This server isn’t set up to list branches, so import will use the{' '}
+                          <span className='font-mono'>{selectedBranch}</span> branch. Its administrator can enable
+                          branch listing with <span className='font-mono'>GITHUB_API_TOKEN</span>.
+                        </p>
                       ) : fetchErrors.branches ? (
                         <p role='status' className='text-sm'>
                           Could not fetch branches. Import will use the{' '}
@@ -1087,6 +1114,13 @@ export default function ImportRoute(): React.JSX.Element {
       return (
         <ImportErrorView
           error={gitHubError}
+          {...(failureOf(gitHubError) === 'tooLarge'
+            ? {
+                title: 'Repository too large',
+                message:
+                  'This repository exceeds the size limit for GitHub imports. Choose a smaller branch, or download the repository and import the files you need from your computer.',
+              }
+            : {})}
           onRetry={() => {
             gitHubActorRef.send({ type: 'retry' });
           }}

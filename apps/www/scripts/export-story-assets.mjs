@@ -8,6 +8,8 @@ if (!tools) {
   throw new Error('Set WWW_RENDER_TOOLS to the isolated tool installation.');
 }
 const app = resolve(import.meta.dirname, '..');
+/** The shared gearbox library owns the frozen assets. */
+const assets = join(app, '../libs/planetary-gearbox/assets');
 const source = join(app, '../../libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts');
 const sha256 = createHash('sha256')
   .update(await readFile(source))
@@ -33,8 +35,8 @@ const meshes=parts.map(({name,shape,color,metalness,roughness})=>{
  }
  return result;
 });
-await writeFile(${JSON.stringify(join(app, 'public/planetary.bin.gz'))},gzipSync(Buffer.concat(buffers),{level:9}));
-await writeFile(${JSON.stringify(join(app, 'public/planetary.json'))},JSON.stringify({source:'libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts',sha256:${JSON.stringify(sha256)},parts:34,teeth:{sun:24,planet:24,ring:72},meshes}));
+await writeFile(${JSON.stringify(join(assets, 'planetary.bin.gz'))},gzipSync(Buffer.concat(buffers),{level:9}));
+await writeFile(${JSON.stringify(join(assets, 'planetary.json'))},JSON.stringify({source:'libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts',sha256:${JSON.stringify(sha256)},parts:34,teeth:{sun:24,planet:24,ring:72},meshes}));
 console.log('Exported',parts.length,'parts;',offset,'uncompressed bytes.');
 `,
 );

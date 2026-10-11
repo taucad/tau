@@ -85,8 +85,17 @@ describe('contentSecurityPolicy', () => {
     expect(policy.startsWith("default-src 'none'; ")).toBe(true);
   });
 
-  it('reaches the API and WebSocket origins and nothing else', () => {
-    expect(directive('connect-src')).toBe("connect-src 'self' data: blob: http://localhost:4000 ws://localhost:4001");
+  it('reaches the API and WebSocket origins, plus GitHub public reads for Import, and nothing else', () => {
+    /* The Import page reads repository metadata and trees from api.github.com without credentials, as the
+     * web app's policy (apps/ui/netlify.toml) already allows; archives still come through the API. */
+    expect(directive('connect-src')).toBe(
+      "connect-src 'self' data: blob: https://api.github.com http://localhost:4000 ws://localhost:4001",
+    );
+  });
+
+  it('loads images from the app and GitHub avatars only', () => {
+    /* Import and GitHub connections show the repository owner's picture from GitHub's avatar host. */
+    expect(directive('img-src')).toBe("img-src 'self' data: blob: https://avatars.githubusercontent.com");
   });
 
   it('admits no remote script origin, while allowing what the SPA measurably needs', () => {

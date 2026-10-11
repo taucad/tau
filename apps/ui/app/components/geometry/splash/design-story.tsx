@@ -1,12 +1,12 @@
 import { Component, lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
-import { Pause, Play, Check, TriangleAlert } from 'lucide-react';
+import { Pause, Play } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { designStoryMachine } from '#components/geometry/splash/design-story.machine.js';
 import { storyFrame } from '#components/geometry/splash/design-story-timeline.js';
 import { storySteps } from '#components/geometry/splash/design-story.constants.js';
-import posterUrl from '#components/geometry/splash/assets/design-story-poster.png?url';
+import posterUrl from '#components/geometry/gearbox/gearbox-poster.webp?url';
 
 const StoryCanvas = lazy(async () => {
   const module = await import('#components/geometry/splash/design-story-canvas.js');
@@ -27,9 +27,9 @@ const serverMotion = () => true;
 function StoryPoster(): React.JSX.Element {
   return (
     <div className='flex size-full flex-col items-center justify-center gap-4 px-4'>
-      <img src={posterUrl} alt='' className='max-h-64 w-full object-contain' width={600} height={352} />
+      <img src={posterUrl} alt='' className='max-h-64 w-full object-contain' width={720} height={720} />
       <p className='max-w-sm text-center text-xs text-muted-foreground'>
-        Create a gearbox. Check the printer-bed fit with GeoSpec. Refine parameters, assemble, then preview printing.
+        Create a gearbox. Assemble it, refine a parameter, check it with GeoSpec, then preview printing.
       </p>
     </div>
   );
@@ -103,9 +103,9 @@ export function DesignStory(): React.JSX.Element {
       className='relative flex size-full min-h-72 flex-col justify-center overflow-hidden bg-muted/40 p-3 sm:p-5'
     >
       <p className='sr-only'>
-        Tau creates a 14-part planetary gearbox, checks its housing against a declared printer envelope with GeoSpec,
-        reduces the module to fit while retaining a 4:1 ratio, assembles the mechanism, and previews printing the
-        housing. The print sequence is an illustration, not a live print job.
+        Tau creates its authored 34-part planetary gearbox, assembles it in order and turns the input at a 4:1
+        reduction, widens the gears from 14 to 18 mm, shows a recorded GeoSpec run of the model, and previews printing
+        the ring gear. The print sequence is an illustration, not a live print job.
       </p>
       <div aria-hidden='true' className='flex min-h-0 flex-1 flex-col'>
         <div className='flex min-h-12 items-center justify-center px-1 text-center text-sm font-medium sm:text-base'>
@@ -125,13 +125,6 @@ export function DesignStory(): React.JSX.Element {
               <StoryPoster />
             )}
           </StoryBoundary>
-          {animated && ready && (beat.id === 'check' || beat.id === 'refine') ? (
-            <div className='pointer-events-none absolute inset-x-8 bottom-1 flex items-center gap-2 text-xs text-muted-foreground'>
-              <span className='h-2 flex-1 border-x border-t border-current' />
-              <span>{beat.id === 'check' ? '252 mm' : '220 mm'} / 236 mm usable</span>
-              <span className='h-2 flex-1 border-x border-t border-current' />
-            </div>
-          ) : undefined}
           {animated && ready && beat.id === 'print' ? (
             <div className='pointer-events-none absolute inset-x-0 bottom-1 flex justify-center gap-2 text-xs text-muted-foreground'>
               {['Prepare', 'Send', 'Print'].map((label, index) => (
@@ -144,8 +137,6 @@ export function DesignStory(): React.JSX.Element {
           ) : undefined}
         </div>
         <div className='flex min-h-12 items-center justify-center gap-2 text-center text-xs text-muted-foreground'>
-          {animated && ready && beat.id === 'check' ? <TriangleAlert className='size-4 shrink-0' /> : undefined}
-          {animated && ready && beat.id === 'refine' ? <Check className='size-4 shrink-0' /> : undefined}
           <span>
             {animated && ready ? beat.detail : 'Parametric design · Geometry checks · Print workflow preview'}
           </span>

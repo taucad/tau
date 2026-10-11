@@ -139,15 +139,21 @@ export class EngineConnection {
       token: this.token,
     });
     const bridge = new ZooEngineBridge(transport);
-    await transport.initialize();
     const session = new ZooEngineSession({
       transport,
       bridge,
       fileSystemManager: this.fileSystemManager,
       wasmModule: this.wasmModule,
     });
-    await session.openContext();
-    await session.primeEngineSessionForExecute();
+    try {
+      await transport.initialize();
+      await session.openContext();
+      await session.primeEngineSessionForExecute();
+    } catch (error) {
+      // An authenticated socket with no session would stay open, and keep a Node host alive, until exit.
+      session.dispose();
+      throw error;
+    }
 
     this.session = session;
   }

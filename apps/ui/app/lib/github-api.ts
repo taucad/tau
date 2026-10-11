@@ -1,4 +1,5 @@
 import { Octokit } from '@octokit/rest';
+import { z } from 'zod';
 import { metaConfig } from '#constants/meta.constants.js';
 import { ENV } from '#environment.config.js';
 
@@ -40,6 +41,41 @@ export class GitHubTreeTruncatedError extends Error {
     this.partialCount = partialCount;
   }
 }
+
+/**
+ * A refused Tau repository route. `message` is the server's own sentence, kept
+ * for diagnostics; `status` and `code` let the import flow choose its advice.
+ */
+export class RepositoryRequestError extends Error {
+  public readonly status: number;
+  public readonly code: string | undefined;
+
+  public constructor({ status, code, message }: { status: number; code: string | undefined; message: string }) {
+    super(message);
+    this.name = 'RepositoryRequestError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+const refusalBodySchema = z.object({ code: z.string().optional(), message: z.string().optional() });
+
+/** Read a non-OK route answer: the API's `{ code, message }` envelope, or its plain text. */
+const readRefusal = async (response: Response): Promise<RepositoryRequestError> => {
+  const text = await response.text();
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = undefined;
+  }
+  const refusal = refusalBodySchema.safeParse(body);
+  return new RepositoryRequestError({
+    status: response.status,
+    code: refusal.success ? refusal.data.code : undefined,
+    message: (refusal.success ? refusal.data.message : undefined) ?? text,
+  });
+};
 
 /**
  * GitHub API client singleton.
@@ -107,7 +143,7 @@ class GitHubApiClient {
    * unauthenticated requests, and the token must stay server-side. The route
    * owns the query, the per-page sort and the default-branch hoist; it reports
    * a non-OK status when the token is missing or rejected, which surfaces here
-   * as a throw the import machine already degrades on.
+   * as a {@link RepositoryRequestError} the import machine degrades on.
    */
   public async listBranches({
     owner,
@@ -131,7 +167,7 @@ class GitHubApiClient {
 
     const response = await fetch(`${ENV.TAU_API_URL}/v1/repositories/branches?${parameters.toString()}`);
     if (!response.ok) {
-      throw new Error(await response.text());
+      throw await readRefusal(response);
     }
 
     const body = (await response.json()) as GithubBranchesResponse;

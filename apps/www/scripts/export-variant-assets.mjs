@@ -12,6 +12,8 @@ if (!tools) {
   throw new Error('Set WWW_RENDER_TOOLS to the isolated tool installation.');
 }
 const app = resolve(import.meta.dirname, '..');
+/** The shared gearbox library owns the frozen assets. */
+const assets = join(app, '../libs/planetary-gearbox/assets');
 const source = join(app, '../../libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts');
 await writeFile(join(tools, 'model.ts'), await readFile(source));
 await writeFile(
@@ -23,9 +25,9 @@ import model, {defaultParams} from './model.ts';
 import {readFile, writeFile} from 'node:fs/promises';
 import {gzipSync, gunzipSync} from 'node:zlib';
 setOC(oc);
-const app=${JSON.stringify(app)};
-const manifest=JSON.parse(await readFile(app+'/public/planetary.json','utf8'));
-const committed=gunzipSync(await readFile(app+'/public/planetary.bin.gz'));
+const assets=${JSON.stringify(assets)};
+const manifest=JSON.parse(await readFile(assets+'/planetary.json','utf8'));
+const committed=gunzipSync(await readFile(assets+'/planetary.bin.gz'));
 const tessellate=(p)=>model(p).map(({name,shape})=>({name,m:shape.mesh({tolerance:0.15,angularTolerance:0.25})}));
 const variantParameters={...defaultParams,faceWidth:18};
 const base=tessellate(defaultParams), wide=tessellate(variantParameters);
@@ -57,8 +59,8 @@ const meshes=manifest.meshes.map((part,i)=>{
  return {name:part.name,dz:range};
 });
 const [lo,hi]=zRange(base),[wlo,whi]=zRange(wide);
-await writeFile(app+'/public/planetary-face18.bin.gz',gzipSync(Buffer.concat(chunks),{level:9}));
-await writeFile(app+'/public/planetary-face18.json',JSON.stringify({source:manifest.source,sha256:manifest.sha256,from:{faceWidth:defaultParams.faceWidth},to:{faceWidth:18},axial:{from:Math.round((hi-lo)*100)/100,to:Math.round((whi-wlo)*100)/100},meshes}));
+await writeFile(assets+'/planetary-face18.bin.gz',gzipSync(Buffer.concat(chunks),{level:9}));
+await writeFile(assets+'/planetary-face18.json',JSON.stringify({source:manifest.source,sha256:manifest.sha256,from:{faceWidth:defaultParams.faceWidth},to:{faceWidth:18},axial:{from:Math.round((hi-lo)*100)/100,to:Math.round((whi-wlo)*100)/100},meshes}));
 console.log('Variant offsets for',meshes.length,'parts;',offset,'bytes; axial',hi-lo,'->',whi-wlo);
 `,
 );

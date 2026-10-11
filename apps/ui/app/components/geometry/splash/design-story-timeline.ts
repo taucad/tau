@@ -20,25 +20,3 @@ export const storyFrame = (
     exit: easeMorph(Math.max(0, 1 - (step.end - time) / storyTransitionDuration)),
   };
 };
-
-export const partLift = (name: string): number => {
-  if (name === 'Housing') {
-    return -25;
-  }
-  if (name === 'Ring') {
-    return 25;
-  }
-  if (name === 'Carrier') {
-    return 5;
-  }
-  if (name === 'Sun') {
-    return 70;
-  }
-  if (name.startsWith('Planet')) {
-    return 45;
-  }
-  if (name === 'Cover') {
-    return 140;
-  }
-  return 165;
-};

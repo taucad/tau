@@ -54,24 +54,78 @@ export type ImportGitHubContext = {
 };
 
 /**
+ * What the person importing can do about a failed step; the page words its advice from this.
+ * - `notFound`: the address names no public repository.
+ * - `rateLimited`: GitHub refused unauthenticated reads for now.
+ * - `serverNotConfigured`: this Tau server lacks the GitHub token the step needs.
+ * - `tooLarge`: the repository exceeds an import limit.
+ * - `failed`: anything else; trying again may help.
+ */
+export type ImportGitHubFailure = 'notFound' | 'rateLimited' | 'serverNotConfigured' | 'tooLarge' | 'failed';
+
+/** A failed import step, classified so the page can give advice that fits the cause. */
+export class ImportGitHubError extends Error {
+  public readonly failure: ImportGitHubFailure;
+
+  public constructor(failure: ImportGitHubFailure, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'ImportGitHubError';
+    this.failure = failure;
+  }
+}
+
+const statusOf = (error: unknown): number | undefined =>
+  typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
+    ? error.status
+    : undefined;
+
+const codeOf = (error: unknown): string | undefined =>
+  typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : undefined;
+
+/**
  * One sentence for a failed public metadata read. Octokit reports the HTTP
  * status on `status`; its message ("Not Found - https://docs…") is not for users.
  *
  * @param error - What the unauthenticated GitHub read threw.
  * @returns An error whose message is written for the person importing.
  */
-function toMetadataFetchError(error: unknown): Error {
-  const status =
-    typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
-      ? error.status
-      : undefined;
+function toMetadataFetchError(error: unknown): ImportGitHubError {
+  const status = statusOf(error);
   if (status === 404) {
-    return new Error("Tau couldn't find a public repository at this address.");
+    return new ImportGitHubError('notFound', "Tau couldn't find a public repository at this address.", {
+      cause: error,
+    });
   }
   if (status === 403 || status === 429) {
-    return new Error("GitHub's rate limit for public reads was reached. Try again in a few minutes.");
+    return new ImportGitHubError(
+      'rateLimited',
+      "GitHub's rate limit for public reads was reached. Try again in a few minutes.",
+      { cause: error },
+    );
   }
-  return new Error("Tau couldn't read this repository from GitHub. Check the address and try again.");
+  return new ImportGitHubError('failed', "Tau couldn't read this repository from GitHub. Try again shortly.", {
+    cause: error,
+  });
+}
+
+/**
+ * Classify a failed branch listing. The Tau route answers `GITHUB_API_TOKEN_UNAVAILABLE`
+ * when its server has no GitHub token; the import can still proceed on the default branch.
+ *
+ * @param error - What the branch route call threw.
+ * @returns The error to keep under `fetchErrors.branches`.
+ */
+function toBranchesFetchError(error: unknown): Error {
+  if (codeOf(error) === 'GITHUB_API_TOKEN_UNAVAILABLE') {
+    return new ImportGitHubError(
+      'serverNotConfigured',
+      error instanceof Error ? error.message : 'GitHub branch listing is not configured on this server.',
+      { cause: error },
+    );
+  }
+  return error instanceof Error ? error : new Error('Failed to fetch branches');
 }
 
 /**
@@ -124,6 +178,7 @@ type ImportGitHubEventInternal =
       type: 'workerError';
       message: string;
       phase: 'download' | 'extract' | 'write';
+      reason?: 'tooLarge';
     };
 
 /**
@@ -280,7 +335,7 @@ type ImportWorkerCallbackEvents =
       filePaths: string[];
       files: Array<{ path: string; content: Uint8Array<ArrayBuffer> }>;
     }
-  | { type: 'workerError'; message: string; phase: 'download' | 'extract' | 'write' };
+  | { type: 'workerError'; message: string; phase: 'download' | 'extract' | 'write'; reason?: 'tooLarge' };
 
 const importWorkerActor = createCallbackLogic<ImportWorkerCallbackEvents, ImportWorkerCallbackInput>(
   ({ sendBack, input }) => {
@@ -308,7 +363,12 @@ const importWorkerActor = createCallbackLogic<ImportWorkerCallbackEvents, Import
           break;
         }
         case 'error': {
-          sendBack({ type: 'workerError', message: message.message, phase: message.phase });
+          sendBack({
+            type: 'workerError',
+            message: message.message,
+            phase: message.phase,
+            ...(message.reason === undefined ? {} : { reason: message.reason }),
+          });
           break;
         }
       }
@@ -722,11 +782,7 @@ export const importGitHubMachine = setup({
                 onError: ({ context, event }) => ({
                   target: 'error',
                   context: {
-                    ...fetchErrorPatch(context, {
-                      key: 'branches',
-                      error: event.error,
-                      fallback: 'Failed to fetch branches',
-                    }),
+                    fetchErrors: { ...context.fetchErrors, branches: toBranchesFetchError(event.error) },
                     branches: [],
                     hasMoreBranches: false,
                   },
@@ -853,7 +909,12 @@ export const importGitHubMachine = setup({
         },
         workerError: {
           target: 'error',
-          context: ({ event }) => ({ error: new Error(`Import failed (${event.phase}): ${event.message}`) }),
+          context: ({ event }) => {
+            const message = `Import failed (${event.phase}): ${event.message}`;
+            return {
+              error: event.reason === 'tooLarge' ? new ImportGitHubError('tooLarge', message) : new Error(message),
+            };
+          },
         },
         cancelDownload: { target: 'enteringDetails', context: { error: undefined, fetchErrors: noFetchErrors } },
       },

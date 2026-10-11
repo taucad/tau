@@ -64,10 +64,10 @@ describe('MarketingLanding', () => {
     expect(screen.getByText('Verify')).toBeInTheDocument();
   });
 
-  it('should explain printer-bed checks with GeoSpec as a subordinate label', () => {
+  it('should explain the GeoSpec check and print preview as subordinate labels', () => {
     const container = renderLanding();
 
-    expect(container.textContent).toContain('Check the printer-bed fit with GeoSpec');
+    expect(container.textContent).toContain('check it with GeoSpec');
     expect(container.textContent).toContain('Print workflow preview');
   });
 

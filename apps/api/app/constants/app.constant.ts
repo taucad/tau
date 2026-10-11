@@ -25,6 +25,7 @@ export const loggingRedactPaths = [
   'req.headers["x-api-key"]',
   'req.headers["x-tau-proxy-authorization"]',
   'req.headers["x-tau-lfs-key"]',
+  'req.headers["tau-zoo-token"]',
   'req.headers.cookie',
   'req.headers["set-cookie"]',
   // A sign-in's response carries the new session token twice; both are live credentials.

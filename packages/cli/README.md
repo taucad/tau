@@ -18,9 +18,15 @@ WebP export is lossless when `quality` is omitted or set to `1`; values below `1
 
 ## Plugins
 
-The CLI ships every first-party plugin except Zoo, which needs credential configuration for a
-headless export. Add Zoo or any third-party plugin with repeatable `--plugin`, resolved from the
-invoking project:
+The CLI ships every first-party plugin. Zoo (KCL) computes geometry through Tau's Zoo proxy, so it
+needs a Tau session: set `TAU_API_TOKEN` (and `TAU_API_URL` or `TAU_WEBSOCKET_URL` for another Tau
+API; the default is `https://api.tau.new`). Without it a KCL export fails with a sign-in diagnostic.
+
+```bash
+TAU_API_TOKEN=<session token> tau export bracket.kcl --ext=glb
+```
+
+Add any third-party plugin with repeatable `--plugin`, resolved from the invoking project:
 
 ```bash
 pnpm add @example/tau-plugin
@@ -74,6 +80,8 @@ tau serve --trust-projects --plugin @example/tau-plugin
 ```
 
 The first launch prints a pairing URL and code. The default relay is `https://api.tau.new`; override it with `--relay` or `TAU_HOST_RELAY_URL`. `--max-sessions` defaults to `1`.
+
+With `TAU_API_TOKEN` set, the daemon trades it for a short-lived Zoo-scoped token and sends only that to its runtime child, so project code never sees the session.
 
 For local Tau development, keep a hot-reloading Host attached to its own terminal pane:
 

@@ -6,17 +6,18 @@ import { Button } from '@taucad/ui/components/button';
 
 type ImportErrorViewProperties = {
   readonly error: Error | undefined;
+  readonly title?: string;
   readonly message?: string;
   readonly onRetry: () => void;
 };
 
 /** Shared error view for import failures. */
-export function ImportErrorView({ error, message, onRetry }: ImportErrorViewProperties): React.JSX.Element {
+export function ImportErrorView({ error, title, message, onRetry }: ImportErrorViewProperties): React.JSX.Element {
   return (
     <PageContent className='space-y-6'>
       <PageHeader title='Import' />
       <PageNotice
-        title='Import interrupted'
+        title={title ?? 'Import interrupted'}
         message={message ?? 'The project could not be imported. Check the source and try again.'}
         detail={error?.message ?? 'No additional error details are available.'}
       >

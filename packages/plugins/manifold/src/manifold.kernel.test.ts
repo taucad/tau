@@ -410,6 +410,154 @@ describe('ManifoldWorker', () => {
     });
   });
 
+  describe('normals', () => {
+    type TrianglePrimitive = {
+      readonly positions: Float32Array;
+      readonly normals: Float32Array | undefined;
+      readonly colors: Float32Array | undefined;
+    };
+
+    const renderTriangles = async (source: string): Promise<TrianglePrimitive[]> => {
+      const result = await createGeometry({ 'model.ts': source }, 'model.ts');
+      assertRenderingSuccess(result);
+      const document = await new NodeIO().readBinary(extractGltfBytes(result));
+      return document
+        .getRoot()
+        .listMeshes()
+        .flatMap((mesh) => mesh.listPrimitives())
+        .filter((primitive) => primitive.getMode() === 4)
+        .map((primitive) => ({
+          positions: primitive.getAttribute('POSITION')!.getArray() as Float32Array,
+          normals: primitive.getAttribute('NORMAL')?.getArray() as Float32Array | undefined,
+          colors: primitive.getAttribute('COLOR_0')?.getArray() as Float32Array | undefined,
+        }));
+    };
+
+    const vectors = (values: Float32Array): Array<[number, number, number]> =>
+      Array.from({ length: values.length / 3 }, (_, index) => [
+        values[index * 3]!,
+        values[index * 3 + 1]!,
+        values[index * 3 + 2]!,
+      ]);
+
+    const expectUnitNormals = (primitives: readonly TrianglePrimitive[]): void => {
+      expect(primitives.length).toBeGreaterThan(0);
+      for (const { positions, normals } of primitives) {
+        expect(normals).toBeDefined();
+        expect(normals!.length).toBe(positions.length);
+        for (const [x, y, z] of vectors(normals!)) {
+          expect(Math.hypot(x, y, z)).toBeCloseTo(1, 4);
+        }
+      }
+    };
+
+    it('supplies normals for a bare manifold, keeping box edges sharp and the manifold extension', async () => {
+      const result = await createGeometry(
+        {
+          'cube.ts': `
+            import { Manifold } from 'manifold-3d/manifoldCAD';
+            export default () => Manifold.cube([10, 10, 10], true);
+          `,
+        },
+        'cube.ts',
+      );
+      assertRenderingSuccess(result);
+      expect(readGlbJson(extractGltfBytes(result)).extensionsUsed).toContain('EXT_mesh_manifold');
+
+      const primitives = await renderTriangles(`
+        import { Manifold } from 'manifold-3d/manifoldCAD';
+        export default () => Manifold.cube([10, 10, 10], true);
+      `);
+      expectUnitNormals(primitives);
+      // 90° edges exceed the smoothing angle, so every normal is a face normal.
+      for (const normal of vectors(primitives[0]!.normals!)) {
+        expect(normal.map((component) => Math.abs(Math.round(component))).reduce((sum, value) => sum + value)).toBe(1);
+      }
+    });
+
+    it('labels normals on setMaterial parts that the node material does not govern', async () => {
+      const primitives = await renderTriangles(`
+        import { Manifold, setMaterial } from 'manifold-3d/manifoldCAD';
+        export default () =>
+          setMaterial(Manifold.cube([40, 40, 10], true), { baseColorFactor: [0, 0, 1] }).add(
+            setMaterial(Manifold.cylinder(30, 8, -1, 32, true), { baseColorFactor: [1, 0, 0] }),
+          );
+      `);
+      expect(primitives).toHaveLength(2);
+      expectUnitNormals(primitives);
+    });
+
+    it('appends normals after authored colour properties', async () => {
+      const primitives = await renderTriangles(`
+        import { GLTFNode, Manifold } from 'manifold-3d/manifoldCAD';
+        export default () => {
+          const node = new GLTFNode();
+          node.manifold = Manifold.cube([10, 10, 10], true).setProperties(3, (color, position) => {
+            color[0] = (position[0] + 5) / 10;
+            color[1] = (position[1] + 5) / 10;
+            color[2] = 0.25;
+          });
+          node.material = { attributes: ['COLOR_0'] };
+          return node;
+        };
+      `);
+      expectUnitNormals(primitives);
+      const [{ positions, colors }] = primitives as [TrianglePrimitive];
+      const expected = vectors(positions);
+      for (const [index, [red, green, blue]] of vectors(colors!).entries()) {
+        const [x, y] = expected[index]!;
+        expect(red).toBeCloseTo((x + 5) / 10, 5);
+        expect(green).toBeCloseTo((y + 5) / 10, 5);
+        expect(blue).toBeCloseTo(0.25, 5);
+      }
+    });
+
+    it('keeps normals the model authored', async () => {
+      // At 60° an octagonal prism's sides are smooth; the kernel's 30° would facet them.
+      const primitives = await renderTriangles(`
+        import { GLTFNode, Manifold } from 'manifold-3d/manifoldCAD';
+        export default () => {
+          const node = new GLTFNode();
+          node.manifold = Manifold.cylinder(10, 5, -1, 8, true).calculateNormals(0, 60);
+          node.material = { attributes: ['NORMAL'] };
+          return node;
+        };
+      `);
+      expectUnitNormals(primitives);
+      const [{ positions, normals }] = primitives as [TrianglePrimitive];
+      const sides = vectors(normals!)
+        .map((normal, index) => ({ normal, position: vectors(positions)[index]! }))
+        .filter(({ normal }) => Math.abs(normal[2]) < 0.5);
+      expect(sides.length).toBeGreaterThan(0);
+      for (const { normal, position } of sides) {
+        const radius = Math.hypot(position[0], position[1]);
+        expect(normal[0]).toBeCloseTo(position[0] / radius, 4);
+        expect(normal[1]).toBeCloseTo(position[1] / radius, 4);
+      }
+    });
+
+    it('gives a cross-section its plane normal', async () => {
+      const primitives = await renderTriangles(`
+        import { CrossSection } from 'manifold-3d/manifoldCAD';
+        export default () => CrossSection.square([10, 10], true).subtract(CrossSection.circle(3, 32));
+      `);
+      expectUnitNormals(primitives);
+      for (const normal of vectors(primitives[0]!.normals!)) {
+        expect(normal).toEqual([0, 0, 1]);
+      }
+    });
+
+    it('exports show() debug views as authored', async () => {
+      // The manifold-3d writer emits the captured debug mesh with the run's labels, which a NORMAL label would overrun.
+      const primitives = await renderTriangles(`
+        import { Manifold, show } from 'manifold-3d/manifoldCAD';
+        export default () => Manifold.cube([20, 20, 5], true).add(show(Manifold.cylinder(10, 3, -1, 16, true)));
+      `);
+      expect(primitives.length).toBeGreaterThan(0);
+      expect(primitives.every(({ normals }) => normals === undefined)).toBe(true);
+    });
+  });
+
   describe('exportGeometry', () => {
     it('should export GLB after successful geometry creation', async () => {
       const client = createClient({

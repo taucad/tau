@@ -1423,17 +1423,17 @@ main > .band:first-child::before {
 .download-grid [data-detected] .kicker::after {
   content: '· Your device';
 }
-.journal-empty {
+.blog-empty {
   display: flex;
   gap: 2rem;
   align-items: center;
   border-top: 1px solid var(--line);
 }
-.journal-mark {
+.blog-mark {
   font: 300 6rem/1 var(--font-sans);
   color: var(--primary);
 }
-.journal-empty h2 {
+.blog-empty h2 {
   font-size: 1.5rem;
 }
 .prose {
@@ -1829,7 +1829,7 @@ main > .band:first-child::before {
   .footer-grid > .cell {
     padding-block: 2rem;
   }
-  .journal-empty {
+  .blog-empty {
     flex-direction: column;
     align-items: flex-start;
   }

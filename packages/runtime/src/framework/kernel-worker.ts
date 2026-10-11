@@ -1488,15 +1488,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         await this.revalidateRetainedFiles();
         if (document.watch) {
           try {
-            if (!(await this.reconcileObservedPaths())) {
-              this.abandonDocumentEvaluation(pendingCommitted);
-              if (this.shouldPublishDocumentEvaluation(document, controller, intent)) {
-                this.scheduleDocumentEvaluation(document, intent, transient);
-              }
-              return;
-            }
+            await this.reconcileObservedPaths();
           } catch (error) {
             initialWatchRefusal = { error };
+          }
+          // The arm routes this document's own moved paths to a successor; nothing else retires it.
+          if (!this.shouldContinueDocumentEvaluation(document, controller, intent, pendingCommitted)) {
+            this.abandonDocumentEvaluation(pendingCommitted);
+            return;
           }
         }
         const dependencyContext: DependencyResolutionContext = {};
@@ -1612,11 +1611,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               dependency.type === 'file' ? [dependency.path] : [],
             ) ?? []),
           ]);
-          if (!(await this.reconcileObservedPaths())) {
+          await this.reconcileObservedPaths();
+          if (!this.shouldContinueDocumentEvaluation(document, controller, intent, pendingCommitted)) {
             this.abandonDocumentEvaluation(pendingCommitted);
-            if (this.shouldPublishDocumentEvaluation(document, controller, intent)) {
-              this.scheduleDocumentEvaluation(document, intent, transient);
-            }
             return;
           }
         }
@@ -1853,10 +1850,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             }
             if (watched.size !== document.watchPaths.size) {
               document.watchPaths = watched;
-              if (!(await this.reconcileObservedPaths())) {
-                this.scheduleDocumentEvaluation(document, document.intent, evaluation.transient);
-                return;
-              }
+              await this.reconcileObservedPaths();
             }
           }
           const projectionHash = await sha256String(
@@ -2222,36 +2216,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * The retained paths whose bytes no longer hash to what was retained for them.
-   *
-   * Absence is an observation like any other: a path retained as `'missing'` diverges by
-   * appearing, and a retained hash diverges by the file vanishing.
-   *
-   * @param paths - Paths to compare against what is retained for them.
-   * @returns The subset that no longer agrees with the filesystem.
-   */
-  private async findDivergentPaths(paths: readonly string[]): Promise<string[]> {
-    const outcomes = await Promise.all(
-      paths.map(async (path) => {
-        const expected = this.fileHashCache.get(path);
-        if (expected === undefined) {
-          return undefined;
-        }
-        try {
-          const bytes = await this.filesystem.readFile(path);
-          return expected !== 'missing' && (await this.hashContent(bytes)) === expected ? undefined : path;
-        } catch (error) {
-          if (!isNotFoundError(error)) {
-            throw error;
-          }
-          return expected === 'missing' ? undefined : path;
-        }
-      }),
-    );
-    return outcomes.filter((path): path is string => path !== undefined);
-  }
-
-  /**
    * Prove the retained closure is current, and invalidate whatever is not (I1/I3).
    *
    * This is the freshness evidence a request-scoped operation answers from, and it is the
@@ -2300,7 +2264,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
      * looked at yet and records its event as a baseline, so dropping the entry here would
      * spend the preview's next change event re-establishing that baseline and lose the edit
      * behind it — this lane revalidates the whole retained closure, including paths it never
-     * re-reads itself. Same reasoning as the refused-arm branch of `reconcileWatchSet`. */
+     * re-reads itself. `reconcileWatchSet` records the revisions it validates the same way. */
     const revisions = new Map<string, ObservedFileRevision>();
     const noteIfMoved = (path: string, revision: ObservedFileRevision): void => {
       if (revision.hash !== this.fileHashCache.get(path)) {
@@ -3151,13 +3115,23 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return new Set(this.watchedPaths);
   }
 
-  private async reconcileWatchSet(desiredPaths: Map<string, number>): Promise<boolean> {
+  /**
+   * Arm the one shared watch over `desiredPaths` and record what it observes.
+   *
+   * The arm observes; it never judges an evaluation. Paths that moved while the candidate
+   * was armed enter the exact-path route, which re-evaluates only the documents that watch
+   * them. Whichever evaluation happened to invoke the arm learns it is stale only through
+   * its own controller, never from another document's admission or file.
+   *
+   * @param desiredPaths - The complete union of watched paths and their debounce.
+   */
+  private async reconcileWatchSet(desiredPaths: Map<string, number>): Promise<void> {
     const desired = new Map(
       [...desiredPaths].filter(([path]) => path !== '.tau/cache' && !path.startsWith('.tau/cache/')),
     );
     const desiredSet = new Set(desired.keys());
     if (setsEqual(this.watchedPaths, desiredSet)) {
-      return true;
+      return;
     }
 
     if (!this.fileSystem?.watch || desired.size === 0) {
@@ -3165,17 +3139,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       this.watchedPaths = desiredSet;
       this.watchUnsubscribe = undefined;
       previous?.();
-      return true;
+      return;
     }
 
     const oldPaths = this.watchedPaths;
     const addedPaths = [...desiredSet].filter((path) => !oldPaths.has(path));
     const unknownPaths = addedPaths.filter((path) => !this.fileHashCache.has(path));
     if (unknownPaths.length > 0) {
-      const evaluationSequence = this.documentEvaluationSequence;
+      /* ponytail: the staged-write and raced fences can only trip against the out-of-lane
+       * reconcile after a failed evaluation; that reconcile arms the same paths, so this one
+       * skips instead of retrying. Serialize that caller into the lane if it ever stops arming them. */
       const stagedWrite = this.stagedWritePublication;
       if (stagedWrite && unknownPaths.some((path) => stagedWrite.paths.has(path))) {
-        return false;
+        return;
       }
       // Establish the entry's revision before a kernel can retain an operation-local mirror.
       // A later watch echo is harmless only if it agrees with these already-observed bytes.
@@ -3184,11 +3160,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       );
       if (
         !this.operationAdmissionOpen ||
-        this.documentEvaluationSequence !== evaluationSequence ||
         this.stagedWritePublication !== stagedWrite ||
         unknownPaths.some((path) => this.fileHashCache.has(path))
       ) {
-        return false;
+        return;
       }
       for (const { path, revision } of baselines) {
         this.fileHashCache.set(path, revision.hash);
@@ -3200,12 +3175,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
     const addedSet = new Set(addedPaths);
-    const armingEvents = { resetObserved: false, addedPathRevision: 0 };
+    let armingRevision = 0;
     const handler = (event: WatchEvent): void => {
-      if (event.type === 'reset') {
-        armingEvents.resetObserved = true;
-      } else if (this.exactWatchEventPaths(event).some((path) => addedSet.has(path))) {
-        armingEvents.addedPathRevision++;
+      if (event.type === 'reset' || this.exactWatchEventPaths(event).some((path) => addedSet.has(path))) {
+        armingRevision++;
       }
       void this.routeWatchEvent(event);
     };
@@ -3232,42 +3205,29 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     try {
       await replacement.ready;
-      let validationRevision: number;
+      let validatedRevision: number;
       do {
-        validationRevision = armingEvents.addedPathRevision;
+        validatedRevision = armingRevision;
+        /* Close the subscribe-versus-read window: a path that moved between its baseline and
+         * this subscription has no event to report it. The handler's own route covers the
+         * paths watched before this arm; an event or reset touching the added paths reruns
+         * this read. */
         // oxlint-disable-next-line no-await-in-loop -- an event during validation requires a fresh coherent snapshot
-        const divergent = await this.findDivergentPaths(addedPaths);
-        /* R2/I3: nothing resolved from a path the arm just contradicted may stay reusable.
-         * Exactly the divergent paths and their dependents go, so whatever did not move is
-         * still there for the render the queued change event is about to drive.
-         *
-         * Their `fileHashCache` entries deliberately stay, holding the revision this worker
-         * last *observed* rather than the one this comparison just read:
-         * `readChangedObservedRevisions` treats a path with no retained hash as never
-         * observed and swallows its event as a baseline read, so deleting the hash here
-         * would drop the very change event that refused this arm. The next reader — that event, or
-         * `revalidateRetainedFiles` — compares against the stale hash, finds the same
-         * divergence, and records the new revision then. */
-        if (divergent.length > 0) {
-          this.commonDependencyCache.clear();
-          this.middlewareDependencyCache.clear();
-          this.parameterResultCache = undefined;
-          for (const path of divergent) {
-            this.fileContentCache.delete(path);
-          }
-          this._invalidateBundleCachesForPaths(divergent);
-        }
-        if (!this.operationAdmissionOpen || armingEvents.resetObserved || divergent.length > 0) {
+        const moved = await this.readChangedObservedRevisions(addedPaths);
+        if (!this.operationAdmissionOpen) {
           replacement.unsubscribe();
-          return false;
+          return;
         }
-      } while (validationRevision !== armingEvents.addedPathRevision);
+        if (moved.size > 0) {
+          // oxlint-disable-next-line no-await-in-loop -- the moved revision is recorded before the next comparison
+          await this.routeExactChangedPaths([...moved.keys()], moved);
+        }
+      } while (validatedRevision !== armingRevision);
 
       const previous = this.watchUnsubscribe;
       this.watchUnsubscribe = replacement.unsubscribe;
       this.watchedPaths = desiredSet;
       previous?.();
-      return true;
     } catch (error) {
       replacement.unsubscribe();
       throw error;
@@ -5786,7 +5746,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * Derive the full set of watched dependencies from all active caches
    * and update the filesystem watch subscription.
    */
-  private async reconcileObservedPaths(): Promise<boolean> {
+  private async reconcileObservedPaths(): Promise<void> {
     const allDeps = new Map<string, number>();
     for (const document of this.documents.values()) {
       if (document.watch && !document.closed) {
@@ -5806,7 +5766,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     for (const path of this.fileHashCache.keys()) {
       allDeps.set(assertRootedPath(path), fileChangeDebounce);
     }
-    return this.reconcileWatchSet(allDeps);
+    await this.reconcileWatchSet(allDeps);
   }
 
   /**

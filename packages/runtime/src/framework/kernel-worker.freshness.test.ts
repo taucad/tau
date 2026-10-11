@@ -309,23 +309,23 @@ describe('request-scoped freshness on a watcherless filesystem', () => {
   });
 });
 
-describe('a refused arm leaves nothing stale reusable (I2, R2)', () => {
-  it('(i) retries a reset during watch installation before publishing', async () => {
+describe('an arm that observes a change leaves nothing stale reusable (I2, R2)', () => {
+  it('(i) revalidates a reset during watch installation and keeps the candidate', async () => {
     const harness = await createHarness({ 'main.ts': 'v1' });
     harness.watch.mockImplementationOnce((_request, handler: (event: WatchEvent) => void) => {
       handler({ type: 'reset' });
       return harness.unsubscribe;
     });
     const first = await evaluationHash(harness.worker, 'main.ts', { watch: true });
-    expect(harness.watch).toHaveBeenCalledTimes(2);
-    expect(harness.unsubscribe).toHaveBeenCalled();
+    expect(harness.watch).toHaveBeenCalledOnce();
+    expect(harness.unsubscribe).not.toHaveBeenCalled();
     harness.files.set('main.ts', 'v2');
     const fresh = await evaluationHash(harness.worker, 'main.ts', { watch: true });
     expect(fresh).not.toBe(first);
     expect(harness.counts.dependencies).toBeGreaterThan(1);
   });
 
-  it('(j) rejects products resolved from bytes changed during watch installation', async () => {
+  it('(j) re-evaluates the owner when bytes change during watch installation', async () => {
     const harness = await createHarness({ 'main.ts': 'v1', 'dep.ts': 'old' }, { dependency: 'dep.ts' });
     harness.watch.mockImplementation((request) => {
       if (request.paths.includes('dep.ts')) {
@@ -338,9 +338,9 @@ describe('a refused arm leaves nothing stale reusable (I2, R2)', () => {
     const description = await harness.worker.describe({ file: createGeometryFile('main.ts') });
     expect(description.success && description.parameters.defaults['label']).toBe('v2');
     expect(harness.counts.dependencies).toBeGreaterThan(1);
-    // The entry is armed before discovery; the discovered closure still refuses then retries once.
-    expect(harness.watch.mock.calls.filter(([request]) => request.paths.includes('dep.ts'))).toHaveLength(2);
-    expect(harness.watch).toHaveBeenCalledTimes(3);
+    // The entry is armed before discovery; the discovered closure is armed once and its moved bytes re-evaluate the owner.
+    expect(harness.watch.mock.calls.filter(([request]) => request.paths.includes('dep.ts'))).toHaveLength(1);
+    expect(harness.watch).toHaveBeenCalledTimes(2);
     expect(await evaluationHash(harness.worker, 'main.ts', { watch: true })).toBe(observed);
   });
 });

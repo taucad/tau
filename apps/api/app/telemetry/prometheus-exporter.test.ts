@@ -7,16 +7,20 @@ import { metrics } from '@opentelemetry/sdk-node';
 /**
  * `otel.test.ts` proves the exporter is built with `withResourceConstantLabels`; this proves the
  * installed exporter honours that option, so a rename upstream fails here instead of silently
- * stripping `service_name` from every Fly-scraped series (OBS-13).
+ * stripping `service_name` and `tau_process` from every Fly-scraped series (OBS-13).
  */
 describe('PrometheusExporter withResourceConstantLabels', () => {
-  it('should put service_name on every series, no other resource attribute and no unit suffix', async () => {
+  it('should put service_name and tau_process on every series, no other resource attribute and no unit suffix', async () => {
     const exporter = new PrometheusExporter({
       preventServerStart: true,
-      withResourceConstantLabels: /^service\.name$/u,
+      withResourceConstantLabels: /^(?:service\.name|tau\.process)$/u,
     });
     const provider = new metrics.MeterProvider({
-      resource: resourceFromAttributes({ 'service.name': 'tau-api', 'deployment.environment': 'test' }),
+      resource: resourceFromAttributes({
+        'service.name': 'tau-api',
+        'tau.process': 'app',
+        'deployment.environment': 'test',
+      }),
       readers: [exporter],
     });
     const meter = provider.getMeter('test');
@@ -37,6 +41,7 @@ describe('PrometheusExporter withResourceConstantLabels', () => {
 
     const series = body.split('\n').find((line) => line.startsWith('kernel_executions_total{'));
     expect(series).toContain('service_name="tau-api"');
+    expect(series).toContain('tau_process="app"');
     expect(series).not.toContain('deployment_environment');
     // The registry name helper and every histogram panel assume the exporter adds no unit suffix.
     expect(body).toContain('tau_storage_operation_duration_bucket{');

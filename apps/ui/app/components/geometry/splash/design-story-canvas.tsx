@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { assemblyStep, assemblySteps, explodeLift, partPose, printedPart } from '@taucad/planetary-gearbox';
+import { agentLane, assemblyStep, assemblySteps, explodeLift, partPose, printedPart } from '@taucad/planetary-gearbox';
 import type { DesignStoryActor } from '#components/geometry/splash/design-story.machine.js';
 import type { StoryBeat } from '#components/geometry/splash/design-story.constants.js';
 import { storyFrame } from '#components/geometry/splash/design-story-timeline.js';
@@ -24,6 +24,9 @@ import { PreviewLights } from '#components/geometry/splash/preview-lights.js';
 import { generateScatterPoints } from '#components/geometry/splash/scatter-points.js';
 
 const pointCount = 3000;
+/** Millimetres between the three agent lanes, as on the homepage story. */
+const laneSpacing = 120;
+const { smoothstep, lerp, clamp } = THREE.MathUtils;
 type StoryProperties = { readonly actor: DesignStoryActor; readonly isPlaying: boolean; readonly onReady: () => void };
 
 /** Share the fixed point budget by vertex count, so the toothed gears read densest; the ring takes the remainder. */
@@ -37,33 +40,86 @@ const samplePoints = (parts: readonly GearboxPart[]): Float32Array[] => {
 };
 
 /**
- * Mechanism state for a beat. Create holds the exploded stack; assemble seats it in order, then
- * turns the input once; refine widens the gears; check turns slowly; print grows the ring gear.
+ * Scene state for one beat, all 0..1 unless noted. The chapters follow the homepage story: the
+ * prompt holds a scatter of points; parts gather into three agent lanes; geometry turns each
+ * cloud into a solid and brings the parts over the build point; assembly seats them in order and
+ * turns the input; parameter widens the gears; evidence turns the finished gearbox slowly; print
+ * grows the ring gear on the plate, then dissolves it for the loop.
  */
-const beatPose = (
-  id: StoryBeat,
-  age: number,
-): { seating: number; sunAngle: number; variant: number; layer: number } => {
+type BeatPose = {
+  /** Spread of the parts into agent lanes. */
+  lanes: number;
+  /** Point morph from scatter (0) to the parts' surfaces (1). */
+  progress: number;
+  /** Point cloud opacity. */
+  cloud: number;
+  /** Solid opacity before per-part staggering; `solidStagger` spreads the fade-in across parts. */
+  solid: number;
+  solidStagger: number;
+  /** Assembly progress across all steps. */
+  seating: number;
+  /** Radians. */
+  sunAngle: number;
+  /** `faceWidth` 14 → 18 morph influence. */
+  variant: number;
+  /** How far the scene has moved onto the print bed. */
+  print: number;
+  /** Printed height of the ring gear. */
+  layer: number;
+  /** Dissolve at the end of the loop. */
+  exit: number;
+};
+
+const beatPose = (id: StoryBeat, age: number, exit: number): BeatPose => {
+  const rest = {
+    lanes: 0,
+    progress: 1,
+    cloud: 0,
+    solid: 1,
+    solidStagger: 0,
+    seating: 1,
+    sunAngle: 0,
+    variant: 1,
+    print: 0,
+    layer: 1,
+    exit: 0,
+  };
   switch (id) {
-    case 'create': {
-      return { seating: 0, sunAngle: 0, variant: 0, layer: 1 };
+    case 'prompt': {
+      return { ...rest, lanes: 1, progress: 0, cloud: 1, solid: 0, seating: 0, variant: 0 };
     }
-    case 'assemble': {
+    case 'parts': {
+      return { ...rest, lanes: 1, progress: smoothstep(age, 200, 2000), cloud: 1, solid: 0, seating: 0, variant: 0 };
+    }
+    case 'geometry': {
       return {
-        seating: (age - 500) / 3000,
-        sunAngle: THREE.MathUtils.smoothstep(age, 3800, 5400) * 2 * Math.PI,
+        ...rest,
+        lanes: 1 - smoothstep(age, 3600, 5000),
+        cloud: 1 - smoothstep(age, 800, 3800),
+        solid: smoothstep(age, 300, 1200),
+        solidStagger: 2400,
+        seating: 0,
         variant: 0,
-        layer: 1,
       };
     }
-    case 'refine': {
-      return { seating: 1, sunAngle: 0, variant: THREE.MathUtils.smoothstep(age, 1000, 2500), layer: 1 };
+    case 'assembly': {
+      return { ...rest, seating: (age - 400) / 3800, sunAngle: smoothstep(age, 4800, 6800) * 2 * Math.PI, variant: 0 };
     }
-    case 'check': {
-      return { seating: 1, sunAngle: (age * Math.PI) / 10_000, variant: 1, layer: 1 };
+    case 'parameter': {
+      return { ...rest, variant: smoothstep(age, 800, 2300) };
+    }
+    case 'evidence': {
+      return { ...rest, sunAngle: (age * Math.PI) / 11_000 };
     }
     case 'print': {
-      return { seating: 1, sunAngle: 0, variant: 1, layer: THREE.MathUtils.clamp((age - 900) / 4500, 0.025, 1) };
+      return {
+        ...rest,
+        print: smoothstep(age, 0, 1200),
+        layer: clamp((age - 1400) / 4200, 0.025, 1),
+        progress: 1 - exit,
+        cloud: exit,
+        exit,
+      };
     }
   }
 };
@@ -154,36 +210,38 @@ function StoryScene({
     hasPlayingFrame.current = isPlaying;
     const frame = storyFrame(actor.getSnapshot().context.elapsed);
     const { id } = frame.step;
-    const { age } = frame;
+    const pose = beatPose(id, frame.age, id === 'print' ? frame.exit : 0);
     const isPrint = id === 'print';
-    const morph = Math.min(frame.entrance, 1 - frame.exit);
-    const meshOpacity = THREE.MathUtils.smoothstep(morph, 0.55, 1);
-    const { seating, sunAngle, variant, layer } = beatPose(id, age);
-    const exploded = 1 - THREE.MathUtils.smoothstep(seating, 0.4, 1);
-    scene.root.scale.setScalar(isPrint ? 0.018 : 0.024);
-    scene.root.position.set(0, isPrint ? -2 : -0.5 - exploded * 2, 0);
+    const exploded = 1 - smoothstep(pose.seating, 0.4, 1);
+    // Lanes need the whole width; the print bed needs the whole height.
+    scene.root.scale.setScalar(lerp(lerp(0.024, 0.017, pose.lanes), 0.018, pose.print));
+    scene.root.position.set(0, lerp(-0.5 - exploded * 2 + pose.lanes, -2, pose.print), 0);
     scene.root.updateMatrixWorld(true);
-    scene.printer.group.visible = isPrint;
+    scene.printer.group.visible = pose.print > 0;
     scene.printer.nozzle.position.set(
-      Math.sin(age / 250) * 85,
-      Math.cos(age / 590) * 70,
-      printedPart.base + printedPart.height * layer + 14,
+      Math.sin(frame.age / 250) * 85,
+      Math.cos(frame.age / 590) * 70,
+      printedPart.base + printedPart.height * pose.layer + 14,
     );
     let cursor = 0;
     for (const [index, part] of parts.entries()) {
       const { name } = part;
-      const pose = partPose(name, sunAngle);
-      const seat = THREE.MathUtils.clamp(seating * assemblySteps - assemblyStep(name), 0, 1);
-      part.visible = !isPrint || part === scene.ring;
+      const home = partPose(name, pose.sunAngle);
+      const seat = clamp(pose.seating * assemblySteps - assemblyStep(name), 0, 1);
+      const isRing = part === scene.ring;
+      part.visible = !isPrint || isRing;
       part.position.set(
-        pose.x,
-        pose.y,
+        home.x + agentLane(name) * laneSpacing * pose.lanes,
+        home.y + ((index % 3) - 1) * 10 * pose.lanes,
         isPrint ? 0 : explodeLift(name) * (1 - THREE.MathUtils.smootherstep(seat, 0, 1)),
       );
-      part.rotation.z = pose.rotation;
-      part.scale.z = isPrint ? layer : 1;
-      part.morphTargetInfluences![0] = variant;
-      part.material.opacity = meshOpacity;
+      part.rotation.z = home.rotation;
+      part.scale.z = isPrint ? pose.layer : 1;
+      part.morphTargetInfluences![0] = pose.variant;
+      // Solids crystallise one part at a time, in assembly order, while the points fade.
+      const stagger = (assemblyStep(name) / assemblySteps) * pose.solidStagger;
+      part.material.opacity =
+        (pose.solidStagger > 0 ? smoothstep(frame.age - stagger, 300, 1200) : pose.solid) * (1 - pose.exit);
       part.updateMatrixWorld(true);
       if (isPrint) {
         continue;
@@ -203,16 +261,15 @@ function StoryScene({
       }
     }
     scene.geometry.getAttribute('aTargetPosition').needsUpdate = true;
-    const opacity = 1 - meshOpacity;
-    // Zero shader time makes the exact scatter pose identical on both sides of every boundary.
+    // Zero shader time keeps the scatter pose identical on both sides of the loop seam.
     if (scene.node) {
-      scene.node.handles.uProgress.value = morph;
+      scene.node.handles.uProgress.value = pose.progress;
       scene.node.handles.uTime.value = 0;
-      scene.node.handles.uOpacity.value = opacity;
+      scene.node.handles.uOpacity.value = pose.cloud;
     } else if (scene.material instanceof THREE.ShaderMaterial) {
-      updateMorphProgress(scene.material, morph);
+      updateMorphProgress(scene.material, pose.progress);
       updateMorphTime(scene.material, 0);
-      updateMorphOpacity(scene.material, opacity);
+      updateMorphOpacity(scene.material, pose.cloud);
       updateMorphViewport(scene.material, size.width, size.height);
     }
     if (isPlaying) {

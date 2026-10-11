@@ -4,13 +4,12 @@
 # (`<project>@<version>`) with the tau-release-bot token when its release pull
 # request is merged, and that `published` event starts this workflow at the tag.
 # Merging the release pull request is therefore the whole release act: this run
-# builds it and takes it to production, pausing only for a release manager's
-# approval (docs/research/monorepo-app-release-practice.md):
+# builds it and takes it to production with no further step
+# (docs/research/monorepo-app-release-practice.md, R8):
 #
 #   - `ui@*` and `api@*`: lint, typecheck, test and build that application (and
 #     its dependency closure) at the tagged commit, then deploy it to
-#     production. The deploy jobs wait on the `production` environment, which a
-#     release manager approves in this run: `api@*` deploys the Fly API
+#     production in the `production` environment: `api@*` deploys the Fly API
 #     (`deploy.yml`), `ui@*` publishes tau.new and docs.tau.new (`deploy-ui.yml`
 #     and `deploy-docs.yml`). Staging needs nothing here: every push to `main`,
 #     the release merge included, already deployed it from `ci.yml`.
@@ -37,9 +36,9 @@
 # Command Center contract: the release pull request's merge commit is the tag's
 # commit, so this workflow's run for that `head_sha` (event `release`, title the
 # tag) carries the release. Its production deploy jobs are `production-api`,
-# `production-ui` and `production-docs`; they wait as pending deployments of the
-# `production` environment (the desktop's macOS job waits on `desktop`), and
-# the environment's deployment status for the tag is the outcome.
+# `production-ui` and `production-docs`, which start once `Verify <tag>` passes
+# (the desktop's macOS job waits on `desktop`), and the `production`
+# environment's deployment status for the tag is the outcome.
 #
 # Nothing here publishes an npm package.
 #
@@ -610,40 +609,11 @@ jobs:
           fi
           gh release upload "$FEED_TAG" desktop-update-*.json --clobber
 
-  # Production waits for a release manager in this run. The `production`
-  # environment's required reviewers are that wait (tau-cloud
-  # `stacks/repo/tau`), so a release never deploys while the environment has
-  # none: this job fails instead and the deploys do not start.
-  production-gate:
+  production-api:
     needs: [resolve, verify-app]
     if: >-
-      github.event_name == 'release' &&
-      (needs.resolve.outputs.project == 'ui' || needs.resolve.outputs.project == 'api') &&
+      github.event_name == 'release' && needs.resolve.outputs.project == 'api' &&
       github.ref == format('refs/tags/{0}', needs.resolve.outputs.tag)
-    name: Require approval for production
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - name: Require a reviewer on the production environment
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          reviewers=$(gh api "repos/$GH_REPO/environments/production" \
-            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length')
-          if [ "${reviewers:-0}" -eq 0 ]; then
-            echo "::error::The production environment requires no reviewer, so this release will not deploy itself. Apply tau-cloud's stacks/repo/tau, then deploy it with Deploy release to production."
-            exit 1
-          fi
-          echo "Production waits for one of $reviewers required reviewer(s)."
-
-  production-api:
-    needs: [resolve, production-gate]
-    if: needs.resolve.outputs.project == 'api'
     name: Production API
     permissions:
       contents: read
@@ -655,8 +625,10 @@ jobs:
     secrets: inherit
 
   production-ui:
-    needs: [resolve, production-gate]
-    if: needs.resolve.outputs.project == 'ui'
+    needs: [resolve, verify-app]
+    if: >-
+      github.event_name == 'release' && needs.resolve.outputs.project == 'ui' &&
+      github.ref == format('refs/tags/{0}', needs.resolve.outputs.tag)
     name: Production UI
     permissions:
       contents: read
@@ -667,11 +639,11 @@ jobs:
       transport: main-run
     secrets: inherit
 
-  # Waits on the same `production` environment as the UI, so one approval in
-  # this run releases both.
   production-docs:
-    needs: [resolve, production-gate]
-    if: needs.resolve.outputs.project == 'ui'
+    needs: [resolve, verify-app]
+    if: >-
+      github.event_name == 'release' && needs.resolve.outputs.project == 'ui' &&
+      github.ref == format('refs/tags/{0}', needs.resolve.outputs.tag)
     name: Production docs
     permissions:
       contents: read

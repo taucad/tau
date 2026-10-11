@@ -2,21 +2,33 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { ShareError } from '@taucad/share/provider';
 import type { ImportWorkerRequest, ImportWorkerResponse } from '#workers/import.worker.js';
 
-const extractRepositoryArchiveFiles = vi.hoisted(() => vi.fn());
-vi.mock('@taucad/share/repository-archive', () => ({ extractRepositoryArchiveFiles }));
+const extractRepositoryImportFiles = vi.hoisted(() => vi.fn());
+vi.mock('@taucad/share/repository-archive', () => ({
+  extractRepositoryImportFiles,
+  repositoryImportLimits: { maxArchiveBytes: 256 * 1024 * 1024 },
+}));
 
 /* The worker module listens on its global scope; jsdom's window stands in for it. */
 await import('#workers/import.worker.js');
 
-const startDownload = async (response: Response): Promise<ImportWorkerResponse> => {
+const startDownload = async (
+  response: Response,
+  root?: string,
+): Promise<{ message: ImportWorkerResponse; options: unknown }> => {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
   const posted = vi.spyOn(globalThis, 'postMessage').mockImplementation(() => undefined);
-  const request: ImportWorkerRequest = { type: 'startDownload', url: 'https://api.tau.test/v1/repositories/archive' };
+  const request: ImportWorkerRequest = {
+    type: 'startDownload',
+    url: 'https://api.tau.test/v1/repositories/archive',
+    ...(root === undefined ? {} : { root }),
+  };
   globalThis.dispatchEvent(new MessageEvent('message', { data: request }));
   await vi.waitFor(() => {
-    expect(posted).toHaveBeenCalled();
+    const last = posted.mock.calls.at(-1)?.[0] as ImportWorkerResponse | undefined;
+    expect(last?.type === 'error' || last?.type === 'extractComplete').toBe(true);
   });
-  return posted.mock.calls.at(-1)![0] as ImportWorkerResponse;
+  const [message, options] = posted.mock.calls.at(-1)! as unknown as [ImportWorkerResponse, unknown];
+  return { message, options };
 };
 
 describe('import worker download failures', () => {
@@ -25,7 +37,7 @@ describe('import worker download failures', () => {
   });
 
   it('should report a 413 from the archive route as too large', async () => {
-    const message = await startDownload(
+    const { message } = await startDownload(
       new Response('The repository response exceeds the portable-share limit.', {
         status: 413,
         statusText: 'Payload Too Large',
@@ -34,26 +46,67 @@ describe('import worker download failures', () => {
 
     expect(message).toStrictEqual({
       type: 'error',
-      message: 'The repository download is larger than the 8 MB import limit.',
+      message: 'The repository download is larger than the 256 MB import limit.',
       phase: 'download',
       reason: 'tooLarge',
     });
   });
 
   it('should report an announced length over the limit as too large', async () => {
-    const message = await startDownload(
-      new Response('zip', { status: 200, headers: { 'content-length': String(9 * 1024 * 1024) } }),
+    const { message } = await startDownload(
+      new Response('zip', { status: 200, headers: { 'content-length': String(256 * 1024 * 1024 + 1) } }),
     );
 
     expect(message).toMatchObject({ type: 'error', reason: 'tooLarge' });
   });
 
+  it('should report a streamed archive past the limit as too large', async () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
+      pull(controller) {
+        sent += 1;
+        controller.enqueue(chunk);
+        if (sent === 257) {
+          controller.close();
+        }
+      },
+    });
+
+    const { message } = await startDownload(new Response(body, { status: 200 }));
+
+    expect(message).toMatchObject({ type: 'error', reason: 'tooLarge' });
+    expect(extractRepositoryImportFiles).not.toHaveBeenCalled();
+  });
+
+  it('should import a download larger than a portable share from the requested folder', async () => {
+    const content = new Uint8Array([7, 8, 9]);
+    extractRepositoryImportFiles.mockResolvedValueOnce([{ path: 'gear/main.kcl', content }]);
+
+    const { message, options } = await startDownload(
+      new Response(new Uint8Array(9 * 1024 * 1024), {
+        status: 200,
+        headers: { 'content-length': String(9 * 1024 * 1024) },
+      }),
+      'public/kcl-samples',
+    );
+
+    expect(extractRepositoryImportFiles).toHaveBeenCalledWith(expect.any(Uint8Array), { root: 'public/kcl-samples' });
+    expect(message).toStrictEqual({
+      type: 'extractComplete',
+      filePaths: ['gear/main.kcl'],
+      files: [{ path: 'gear/main.kcl', content }],
+    });
+    /* Transferred, not cloned: the main thread takes the buffers the worker extracted. */
+    expect(options).toStrictEqual({ transfer: [content.buffer] });
+  });
+
   it('should report a repository over the extracted-file limits as too large', async () => {
-    extractRepositoryArchiveFiles.mockRejectedValueOnce(
+    extractRepositoryImportFiles.mockRejectedValueOnce(
       new ShareError('SHARE_ARTIFACT_LIMIT', 'The repository project contains too many files.'),
     );
 
-    const message = await startDownload(new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+    const { message } = await startDownload(new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
 
     expect(message).toStrictEqual({
       type: 'error',
@@ -64,7 +117,7 @@ describe('import worker download failures', () => {
   });
 
   it('should leave other download failures without a reason', async () => {
-    const message = await startDownload(new Response('Bad Gateway', { status: 502, statusText: 'Bad Gateway' }));
+    const { message } = await startDownload(new Response('Bad Gateway', { status: 502, statusText: 'Bad Gateway' }));
 
     expect(message).toStrictEqual({ type: 'error', message: 'Download failed: 502 Bad Gateway', phase: 'download' });
   });

@@ -3,7 +3,7 @@ title: 'glTF Construction Policy'
 description: 'Rules for constructing glTF/GLB binaries in the runtime, governing the direct writer, buffer layout, material encoding, and kernel integration patterns'
 status: active
 created: '2026-03-24'
-updated: '2026-10-11'
+updated: '2026-10-12'
 related:
   - docs/policy/geometry-naming-policy.md
   - docs/policy/rendering-pipeline-policy.md
@@ -261,7 +261,7 @@ The kernel-specific mapping file (not the GLB writer) is responsible for:
 
 The GLB writer accepts only pre-processed, ready-to-serialize data.
 
-Every `TRIANGLES` primitive a kernel emits carries `NORMAL`. The headless renderer requires it, and only the kernel knows the crease angle that keeps hard edges sharp and curved faces smooth. This holds when a third-party library owns the Document: the Manifold kernel calls `calculateNormals` before `GLTFNodesToGLTFDoc` and labels the new channels on every run material, because computing normals on the written Document would split vertices that `EXT_mesh_manifold` shares.
+Every `TRIANGLES` primitive a kernel emits carries `NORMAL`. The headless renderer requires it, and only the kernel knows the crease angle that keeps hard edges sharp and curved faces smooth. This holds when a third-party library owns the Document: the Manifold kernel calls `calculateNormals` before `GLTFNodesToGLTFDoc` and labels the new channels on every run material, because computing normals on the written Document would split vertices that `EXT_mesh_manifold` shares. Renderer fallbacks do not replace this: glTF defines a primitive without `NORMAL` as flat-shaded, so a consumer can only ever recover flat normals, never the kernel's creases. Import kernels follow the same rule for foreign files: the glTF kernel gives flat normals to primitives that lack them, leaving authored ones indexed, and the Assimp kernel runs libassimp's `generateNormals` step.
 
 ### 6.2 Naming Responsibilities
 

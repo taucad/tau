@@ -3,6 +3,7 @@ import JSZip from 'jszip';
 import type { ConfigService } from '@nestjs/config';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openShareArchive, shareArtifactLimits } from '@taucad/share/artifact';
+import { repositoryImportLimits } from '@taucad/share/repository-archive';
 import { formatRepositoryTarget } from '@taucad/share/repository-target';
 import { projectManifestSchemaUrl } from '@taucad/types';
 import type { Environment } from '#config/environment.config.js';
@@ -333,5 +334,200 @@ describe('repository archive gateway', () => {
     ).rejects.toMatchObject({ status: 429 });
     expect(evalRedis).toHaveBeenCalledWith(expect.any(String), 1, expect.stringContaining('203.0.113.7'), '3600');
     expect(upstream).not.toHaveBeenCalled();
+  });
+});
+
+describe('repository import streaming', () => {
+  const importPath = '/v1/repositories/archive?provider=github&owner=KittyCAD&repo=modeling-app&ref=main';
+  const mebibyte = 1024 * 1024;
+
+  /** A pull that is still waiting for the provider when the test looks. */
+  const neverSettles = async (): Promise<void> =>
+    new Promise<void>(() => {
+      // Deliberately never resolves.
+    });
+
+  /** GitHub answers the commit lookup, then hands over `archive` for the zipball. */
+  const stubGithub = (archive: (signal: AbortSignal) => Response): void => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof globalThis.fetch>(async (input, init) =>
+        inputUrl(input).pathname.includes('/commits/') ? Response.json({ sha: commit }) : archive(init!.signal!),
+      ),
+    );
+  };
+
+  /** An upstream body that a real `fetch` would fail when its request is aborted. */
+  const abortableBody = (
+    signal: AbortSignal,
+    source: UnderlyingDefaultSource<Uint8Array<ArrayBuffer>>,
+  ): ReadableStream<Uint8Array<ArrayBuffer>> =>
+    new ReadableStream<Uint8Array<ArrayBuffer>>(
+      {
+        ...source,
+        start(controller) {
+          signal.addEventListener('abort', () => {
+            controller.error(signal.reason);
+          });
+        },
+      },
+      { highWaterMark: 0 },
+    );
+
+  const zipResponse = (
+    body: ReadableStream<Uint8Array<ArrayBuffer>> | Uint8Array<ArrayBuffer>,
+    length?: number,
+  ): Response =>
+    new Response(body, {
+      headers: {
+        'Content-Type': 'application/zip',
+        ...(length === undefined ? {} : { 'Content-Length': String(length) }),
+      },
+    });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('passes a repository larger than a portable share through unchanged', async () => {
+    const archive = Buffer.alloc(9 * mebibyte, 'tau-import');
+    stubGithub(() => zipResponse(new Uint8Array(archive), archive.byteLength));
+
+    const response = await callArchive(importPath);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-length')).toBe(String(archive.byteLength));
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const body = Buffer.from(await response.arrayBuffer());
+    expect(body.byteLength).toBe(archive.byteLength);
+    expect(body.equals(archive)).toBe(true);
+  });
+
+  it('refuses a declared archive past the import limit without reading it', async () => {
+    const pull = vi.fn();
+    stubGithub((signal) => zipResponse(abortableBody(signal, { pull }), repositoryImportLimits.maxArchiveBytes + 1));
+
+    const response = await callArchive(importPath);
+
+    expect(response.status).toBe(413);
+    expect(await response.text()).toBe('The repository archive exceeds the import size limit.');
+    expect(pull).not.toHaveBeenCalled();
+  });
+
+  it('ends a streamed archive after the chunk that crosses the import limit and cancels the upstream', async () => {
+    const chunk = new Uint8Array(mebibyte);
+    let sent = 0;
+    const cancel = vi.fn();
+    stubGithub((signal) =>
+      zipResponse(
+        abortableBody(signal, {
+          pull(controller) {
+            sent += chunk.byteLength;
+            controller.enqueue(chunk);
+          },
+          cancel,
+        }),
+      ),
+    );
+
+    const response = await callArchive(importPath);
+    let received = 0;
+    for await (const value of response.body!) {
+      received += value.byteLength;
+    }
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-length')).toBeNull();
+    expect(received).toBe(repositoryImportLimits.maxArchiveBytes + mebibyte);
+    expect(sent).toBe(received);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('answers before the archive has arrived and cancels the upstream when the caller goes away', async () => {
+    const cancel = vi.fn();
+    stubGithub((signal) =>
+      zipResponse(
+        abortableBody(signal, {
+          async pull(controller) {
+            controller.enqueue(new Uint8Array([0x50, 0x4b]));
+            await neverSettles();
+          },
+          cancel,
+        }),
+      ),
+    );
+
+    const response = await callArchive(importPath);
+    const reader = response.body!.getReader();
+
+    expect(await reader.read()).toStrictEqual({ done: false, value: new Uint8Array([0x50, 0x4b]) });
+    await reader.cancel();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('fails a stalled archive after the idle timeout but lets a steady one run past the response timeout', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    stubGithub((signal) =>
+      zipResponse(
+        abortableBody(signal, {
+          async pull(controller) {
+            controller.enqueue(new Uint8Array([1]));
+            await neverSettles();
+          },
+        }),
+      ),
+    );
+    const stalledResponse = await callArchive(importPath);
+    const stalled = stalledResponse.body!.getReader();
+    await stalled.read();
+    const failure = stalled.read();
+    const settled = expect(failure).rejects.toMatchObject({ name: 'TimeoutError' });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await settled;
+
+    let pulls = 0;
+    stubGithub((signal) =>
+      zipResponse(
+        abortableBody(signal, {
+          async pull(controller) {
+            pulls += 1;
+            if (pulls > 5) {
+              controller.close();
+              return;
+            }
+            await new Promise((resolve) => {
+              setTimeout(resolve, 10_000);
+            });
+            controller.enqueue(new Uint8Array([pulls]));
+          },
+        }),
+      ),
+    );
+    const steadyResponse = await callArchive(importPath);
+    const collected = steadyResponse.body!.getReader();
+    const values: number[] = [];
+    const drained = (async () => {
+      // oxlint-disable-next-line no-await-in-loop -- a stream is read one chunk after the other.
+      for (let next = await collected.read(); !next.done; next = await collected.read()) {
+        values.push(...next.value);
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await drained;
+    expect(values).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('keeps share requests on the portable-share limit', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => zipResponse(new Uint8Array([1]), shareArtifactLimits.maxArchiveBytes + 1)),
+    );
+    const target = formatRepositoryTarget('gitlab', { v: 1, projectId: 7, commit, root: '' });
+
+    const response = await callArchive(
+      `/v1/repositories/archive?${new URLSearchParams({ provider: 'gitlab', target })}`,
+    );
+
+    expect(response.status).toBe(413);
   });
 });

@@ -85,7 +85,7 @@ describe('assimpKernel', () => {
       expect(sidecar).toBeInstanceOf(Uint8Array);
       expect(sidecar).toEqual(encode('cached material μ'));
       expect(options.signal).toBe(localRuntime.signal);
-      expect(options.postProcess).toEqual([...defaultPostProcess, 'embedTextures']);
+      expect(options.postProcess).toEqual([...defaultPostProcess, 'generateNormals', 'embedTextures']);
       return { files: [{ name: 'converted.glb', bytes: convertedGlb }] };
     });
 

@@ -2361,6 +2361,9 @@ importers:
       '@taucad/api-extractor':
         specifier: workspace:*
         version: link:../../libs/api-extractor
+      '@taucad/assimp':
+        specifier: workspace:*
+        version: link:../../packages/plugins/assimp
       '@taucad/chat':
         specifier: workspace:*
         version: link:../../libs/chat
@@ -2379,9 +2382,15 @@ importers:
       '@taucad/geospec-engine-native':
         specifier: workspace:*
         version: link:../../packages/geospec-engine-native
+      '@taucad/gltf':
+        specifier: workspace:*
+        version: link:../../packages/plugins/gltf
       '@taucad/host':
         specifier: workspace:*
         version: link:../../packages/host
+      '@taucad/image':
+        specifier: workspace:*
+        version: link:../../packages/plugins/image
       '@taucad/kinematics':
         specifier: workspace:*
         version: link:../../packages/kinematics

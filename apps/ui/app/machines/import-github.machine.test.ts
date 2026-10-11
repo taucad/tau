@@ -57,7 +57,9 @@ function createTestActor(options?: {
   ref?: string;
   mainFile?: string;
   downloadThrows?: boolean;
+  downloadTooLarge?: boolean;
   metadataFailure?: Error;
+  branchesFailure?: Error;
 }) {
   const machine = importGitHubMachine.provide({
     actors: {
@@ -68,6 +70,9 @@ function createTestActor(options?: {
         return { type: 'metadataRetrieved', metadata: stubMetadata };
       }),
       getBranchesActor: fromSafeAsync(async () => {
+        if (options?.branchesFailure !== undefined) {
+          throw options.branchesFailure;
+        }
         return {
           type: 'branchesRetrieved',
           branches: stubBranches,
@@ -79,7 +84,16 @@ function createTestActor(options?: {
         return { type: 'filesRetrieved', files: stubFiles };
       }),
       importWorkerActor: createCallbackLogic(({ sendBack }) => {
-        if (options?.downloadThrows) {
+        if (options?.downloadTooLarge) {
+          queueMicrotask(() => {
+            sendBack({
+              type: 'workerError',
+              message: 'The repository download is larger than the 8 MB import limit.',
+              phase: 'download',
+              reason: 'tooLarge',
+            });
+          });
+        } else if (options?.downloadThrows) {
           queueMicrotask(() => {
             sendBack({ type: 'workerError', message: 'download failed', phase: 'download' });
           });
@@ -209,18 +223,69 @@ describe('importGitHubMachine', () => {
 
   describe('metadata failures', () => {
     it.each([
-      [404, /couldn't find a public repository at this address/u],
-      [403, /rate limit for public reads/u],
-      [500, /couldn't read this repository from GitHub/u],
-    ])('should explain a %i from GitHub without its raw message', async (status, message) => {
-      const failure = Object.assign(new Error('Not Found - https://docs.github.com/rest/repos/repos'), { status });
-      const actor = createTestActor({ owner: 'octo', repo: 'private', metadataFailure: failure });
+      [404, /couldn't find a public repository at this address/u, 'notFound'],
+      [403, /rate limit for public reads/u, 'rateLimited'],
+      [429, /rate limit for public reads/u, 'rateLimited'],
+      [500, /couldn't read this repository from GitHub/u, 'failed'],
+    ])('should explain a %i from GitHub without its raw message', async (status, message, failure) => {
+      const refusal = Object.assign(new Error('Not Found - https://docs.github.com/rest/repos/repos'), { status });
+      const actor = createTestActor({ owner: 'octo', repo: 'private', metadataFailure: refusal });
       actor.start();
 
       const snapshot = await waitFor(actor, (state) => state.context.error !== undefined);
 
       expect(snapshot.context.error?.message).toMatch(message);
       expect(snapshot.context.error?.message).not.toContain('docs.github.com');
+      expect(snapshot.context.error).toMatchObject({ failure });
+      actor.stop();
+    });
+
+    it('should not ask to check the address when GitHub fails for another reason', async () => {
+      const refusal = Object.assign(new Error('Server Error'), { status: 502 });
+      const actor = createTestActor({ owner: 'octo', repo: 'part', metadataFailure: refusal });
+      actor.start();
+
+      const snapshot = await waitFor(actor, (state) => state.context.error !== undefined);
+
+      expect(snapshot.context.error?.message).not.toMatch(/address/u);
+      actor.stop();
+    });
+  });
+
+  describe('branch failures', () => {
+    it('should mark a branch list this server is not configured to provide', async () => {
+      const refusal = Object.assign(new Error('GitHub branch listing is not configured on this server.'), {
+        status: 503,
+        code: 'GITHUB_API_TOKEN_UNAVAILABLE',
+      });
+      const actor = createTestActor({ owner: 'octo', repo: 'part', branchesFailure: refusal });
+      actor.start();
+
+      const snapshot = await waitFor(
+        actor,
+        (state) => state.value === 'enteringDetails' && state.context.fetchErrors.branches !== undefined,
+      );
+
+      expect(snapshot.context.fetchErrors.branches).toMatchObject({
+        failure: 'serverNotConfigured',
+        message: 'GitHub branch listing is not configured on this server.',
+      });
+      expect(snapshot.context.repoMetadata).toBeDefined();
+      expect(snapshot.context.error).toBeUndefined();
+      actor.stop();
+    });
+
+    it('should keep other branch failures generic', async () => {
+      const refusal = Object.assign(new Error('Repository not found.'), { status: 404, code: undefined });
+      const actor = createTestActor({ owner: 'octo', repo: 'part', branchesFailure: refusal });
+      actor.start();
+
+      const snapshot = await waitFor(
+        actor,
+        (state) => state.value === 'enteringDetails' && state.context.fetchErrors.branches !== undefined,
+      );
+
+      expect(snapshot.context.fetchErrors.branches).not.toMatchObject({ failure: 'serverNotConfigured' });
       actor.stop();
     });
   });
@@ -276,6 +341,22 @@ describe('importGitHubMachine', () => {
       actor.send({ type: 'startImport' });
       await waitFor(actor, (s) => s.value === 'error', { timeout: 5000 });
       expect(actor.getSnapshot().context.error?.message).toContain('download failed');
+      actor.stop();
+    });
+
+    it('should mark an archive over the import limit as too large', async () => {
+      const actor = createTestActor({ owner: 'test', repo: 'repo', downloadTooLarge: true });
+      actor.start();
+      await waitFor(actor, (s) => s.value === 'enteringDetails' && s.context.repoMetadata !== undefined, {
+        timeout: 5000,
+      });
+      actor.send({ type: 'startImport' });
+      const snapshot = await waitFor(actor, (s) => s.value === 'error', { timeout: 5000 });
+
+      expect(snapshot.context.error).toMatchObject({
+        failure: 'tooLarge',
+        message: 'Import failed (download): The repository download is larger than the 8 MB import limit.',
+      });
       actor.stop();
     });
 

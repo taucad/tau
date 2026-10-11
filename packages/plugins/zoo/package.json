@@ -41,6 +41,7 @@
     },
     "./agent/*": "./agent/*",
     "./engine-connection": "./src/engine-connection.ts",
+    "./proxy": "./src/proxy.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -60,6 +61,11 @@
         "types": "./dist/engine-connection.d.mts",
         "import": "./dist/engine-connection.mjs",
         "default": "./dist/engine-connection.mjs"
+      },
+      "./proxy": {
+        "types": "./dist/proxy.d.mts",
+        "import": "./dist/proxy.mjs",
+        "default": "./dist/proxy.mjs"
       },
       "./package.json": "./package.json"
     },

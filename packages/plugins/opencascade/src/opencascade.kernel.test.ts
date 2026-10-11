@@ -524,7 +524,7 @@ export default function main() {
       let snapshotNumber = 0;
       const context = {
         oc: cascade,
-        occt: { value: cascade, release() {} },
+        occt: { value: cascade, release: vi.fn() },
         isParallelMeshing: false,
         tracingSummary: undefined,
         nextSnapshotPath: (index: number) => `/tmp/tau_opencascade_test_snapshot_${++snapshotNumber}_${index}.brep`,

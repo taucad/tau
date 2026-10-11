@@ -79,6 +79,7 @@ it.each(['webgl', 'webgpu'] as const)('should smooth shader edges in the final %
           seed={{
             camera: {
               cameraView: {
+                frameId: 'tau:root',
                 target: [0, 0, 0],
                 direction: [0, 0, 1],
                 up: [0, 1, 0],

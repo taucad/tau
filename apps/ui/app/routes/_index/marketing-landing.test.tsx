@@ -64,11 +64,12 @@ describe('MarketingLanding', () => {
     expect(screen.getByText('Verify')).toBeInTheDocument();
   });
 
-  it('should explain the GeoSpec check and print preview as subordinate labels', () => {
+  it('should tell the homepage design story as subordinate labels', () => {
     const container = renderLanding();
 
-    expect(container.textContent).toContain('check it with GeoSpec');
-    expect(container.textContent).toContain('Print workflow preview');
+    expect(container.textContent).toContain('Design. Verify. Print.');
+    expect(container.textContent).toContain('recorded GeoSpec run');
+    expect(container.textContent).toContain('not a live session or print job');
   });
 
   it('should render the pricing section with all three plan cards (T7/U6)', () => {

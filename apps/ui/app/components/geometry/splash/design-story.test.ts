@@ -5,11 +5,11 @@ import { storyFrame } from '#components/geometry/splash/design-story-timeline.js
 import { storyDuration, storySteps } from '#components/geometry/splash/design-story.constants.js';
 
 describe('shared design story clock', () => {
-  it('repeats exactly five beats for ten loops without accumulated pose drift', () => {
+  it('repeats exactly seven beats for ten loops without accumulated pose drift', () => {
     const actor = createActor(designStoryMachine, { input: {} }).start();
     actor.send({ type: 'play' });
     const boundaries: string[] = [];
-    let previous = 'create';
+    let previous = 'prompt';
     for (let tick = 0; tick < (10 * storyDuration) / 100; tick++) {
       actor.send({ type: 'advance', delta: 100 });
       const frame = storyFrame(actor.getSnapshot().context.elapsed);
@@ -18,8 +18,16 @@ describe('shared design story clock', () => {
         previous = frame.step.id;
       }
     }
-    expect(boundaries).toHaveLength(50);
-    expect(boundaries.slice(0, 5)).toEqual(['assemble', 'refine', 'check', 'print', 'create']);
+    expect(boundaries).toHaveLength(70);
+    expect(boundaries.slice(0, 7)).toEqual([
+      'parts',
+      'geometry',
+      'assembly',
+      'parameter',
+      'evidence',
+      'print',
+      'prompt',
+    ]);
     expect(storyFrame(actor.getSnapshot().context.elapsed)).toEqual(storyFrame(0));
     actor.stop();
   });
@@ -43,7 +51,7 @@ describe('shared design story clock', () => {
     actor.stop();
   });
 
-  it('returns to the same scatter endpoint on every boundary and keeps readable holds', () => {
+  it('eases every boundary and keeps readable holds', () => {
     for (const step of storySteps) {
       expect(storyFrame(step.start).entrance).toBe(0);
       expect(storyFrame(step.end - 0.001).exit).toBeCloseTo(1, 8);

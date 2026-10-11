@@ -1,6 +1,7 @@
 import process from 'node:process';
 import { Logger } from '@nestjs/common';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { PinoLogger } from 'nestjs-pino';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
 
@@ -97,6 +98,35 @@ export async function closeGracefully(
 }
 
 /**
+ * Writes out every log line the root logger still holds. Its stdout stream
+ * writes asynchronously, and the re-raised signal ends the process at once:
+ * on Fly, whose log reader drains more slowly than a local pipe, the module
+ * teardown and `Shutdown complete` lines were lost (the 2026-10-11 staging
+ * deploy drill).
+ */
+function flushLogs(): void {
+  // Typed as always set, but unset until the logger module starts, and in entrypoints without it.
+  const root: unknown = PinoLogger.root;
+  if (typeof root !== 'object' || root === null) {
+    return;
+  }
+  // ponytail: pino keys its stream by `Symbol('pino.stream')`, created per copy of pino, so it is found by
+  // description on the logger rather than imported from a copy that may not be the one pino-http used.
+  const streamSymbol = Object.getOwnPropertySymbols(root).find((each) => each.description === 'pino.stream');
+  const stream: unknown = streamSymbol ? Reflect.get(root, streamSymbol) : undefined;
+  const flushSync: unknown =
+    typeof stream === 'object' && stream !== null ? Reflect.get(stream, 'flushSync') : undefined;
+  if (typeof flushSync !== 'function') {
+    return;
+  }
+  try {
+    Reflect.apply(flushSync, stream, []);
+  } catch {
+    /* A stream that cannot flush has nowhere left to report it. */
+  }
+}
+
+/**
  * Replaces `app.enableShutdownHooks()`: on SIGTERM (Fly's `kill_signal`) or
  * SIGINT, closes gracefully and then re-raises the signal so the process exits
  * the way it would have without a handler. The re-raise ends the process only
@@ -118,6 +148,7 @@ export function closeGracefullyOnSignal(app: NestFastifyApplication, phases: Shu
     } catch (error) {
       logger.error(error, 'Graceful shutdown failed');
     } finally {
+      flushLogs();
       process.kill(process.pid, signal);
     }
   };

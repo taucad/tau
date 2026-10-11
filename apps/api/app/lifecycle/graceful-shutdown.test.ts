@@ -1,14 +1,21 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase */
 import { readFileSync } from 'node:fs';
 import { connect } from 'node:net';
-import { Controller, Get, Inject, Injectable, Module } from '@nestjs/common';
+import { Controller, Get, Inject, Injectable, Logger, Module } from '@nestjs/common';
 import type { OnModuleDestroy } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { PinoLogger } from 'nestjs-pino';
+import { pinoHttp } from 'pino-http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
-import { closeGracefully, drainingServerOptions, shutdownPhases } from '#lifecycle/graceful-shutdown.js';
+import {
+  closeGracefully,
+  closeGracefullyOnSignal,
+  drainingServerOptions,
+  shutdownPhases,
+} from '#lifecycle/graceful-shutdown.js';
 import { LifecycleModule } from '#lifecycle/lifecycle.module.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
@@ -256,5 +263,54 @@ describe('shutdownPhases', () => {
 
     expect(shutdownPhases.cut).toBeLessThan(shutdownPhases.abandon);
     expect(shutdownPhases.abandon + teardown).toBeLessThanOrEqual(killTimeout);
+  });
+});
+
+/**
+ * The staging deploy drill (2026-10-11) lost every line after the module hooks: pino's stdout stream writes
+ * asynchronously, and the re-raised signal ended the process before Fly's log reader drained it.
+ */
+describe('closeGracefullyOnSignal', () => {
+  it('should write out what the logger still holds before re-raising the signal', async () => {
+    const order: string[] = [];
+    const destination = {
+      write: (): boolean => true,
+      flushSync(): void {
+        order.push('flush');
+      },
+    };
+    const previousRoot = PinoLogger.root;
+    Reflect.set(PinoLogger, 'root', pinoHttp({}, destination).logger);
+    let onSignal: ((signal: NodeJS.Signals) => Promise<void>) | undefined;
+    vi.spyOn(process, 'on').mockImplementation(((
+      event: string,
+      listener: (signal: NodeJS.Signals) => Promise<void>,
+    ) => {
+      // Captured, not registered: emitting a real signal would reach the test runner's own listeners.
+      if (event === 'SIGTERM') {
+        onSignal = listener;
+      }
+      return process;
+    }) as typeof process.on);
+    vi.spyOn(process, 'kill').mockImplementation(() => {
+      order.push('kill');
+      return true;
+    });
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    try {
+      // An application the shutdown cannot use still flushes and re-raises, through the failure path.
+      closeGracefullyOnSignal({
+        get() {
+          throw new Error('closed');
+        },
+      } as unknown as NestFastifyApplication);
+      await onSignal?.('SIGTERM');
+
+      expect(order).toEqual(['flush', 'kill']);
+    } finally {
+      Reflect.set(PinoLogger, 'root', previousRoot);
+      vi.restoreAllMocks();
+    }
   });
 });

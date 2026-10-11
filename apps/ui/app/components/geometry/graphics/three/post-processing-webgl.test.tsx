@@ -233,6 +233,7 @@ vi.mock('postprocessing', () => {
   return {
     EffectComposer,
     EffectPass,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Matches the upstream constructor.
     FXAAEffect: class {
       public dispose = vi.fn();
     },

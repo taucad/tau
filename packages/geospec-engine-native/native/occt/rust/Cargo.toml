@@ -54,6 +54,10 @@ name = "edge_treatments"
 path = "tests/edge_treatments.rs"
 
 [[test]]
+name = "kernel_skill_acceptance"
+path = "tests/kernel_skill_acceptance.rs"
+
+[[test]]
 name = "qualification"
 path = "tests/qualification.rs"
 required-features = ["qualification"]

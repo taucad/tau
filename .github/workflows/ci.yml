@@ -45,6 +45,7 @@ jobs:
       formal: ${{ steps.plan.outputs.formal }}
       geospec-required: ${{ steps.geospec.outputs.geospec-required }}
       geospec-darwin-tests: ${{ steps.geospec.outputs.geospec-darwin-tests }}
+      geospec-darwin-projects: ${{ steps.geospec.outputs.geospec-darwin-projects }}
       geospec-key: ${{ steps.geospec-key.outputs.key }}
       geospec-cached: ${{ steps.geospec-cache.outputs.cache-hit == 'true' }}
     steps:
@@ -270,12 +271,20 @@ jobs:
           pnpm nx run scripts:prepare-geospec-test-consumer
           node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
 
-      # Projects tagged `ci:quarantined` (runtime-e2e) run in the nightly Darwin job in
+      # Runs the affected Darwin host suites the plan job selected from its own affected
+      # base and head, so this job needs no history. The planner leaves out projects
+      # tagged `ci:quarantined` (runtime-e2e), which run in the nightly Darwin job in
       # e2e-nightly.yml instead, until their failing tests pass there:
       # https://github.com/taucad/tau/issues/342
-      - name: Run complete affected Darwin host suites
+      # The cache bypass stays, narrowed to that selection: a `test` hash covers the
+      # source but neither the gitignored engine products nor the host toolchain that
+      # `ci-artifacts.mjs cache-key` digests, so a cached pass could stand for products
+      # this run did not test.
+      - name: Run affected Darwin host suites
         if: needs.plan.outputs.geospec-darwin-tests == 'true'
-        run: pnpm nx run-many -t test --projects tag:host:darwin-arm64 --exclude tag:scope:api,tag:ci:quarantined --skip-nx-cache
+        env:
+          DARWIN_PROJECTS: ${{ needs.plan.outputs.geospec-darwin-projects }}
+        run: pnpm nx run-many -t test --projects "$DARWIN_PROJECTS" --exclude tag:scope:api,tag:ci:quarantined --skip-nx-cache
 
       - *retain-geospec-preparation
 

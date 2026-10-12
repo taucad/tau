@@ -91,6 +91,7 @@ import { createRuntimeFileSystem } from '#filesystem/create-runtime-filesystem.j
 import { createComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import type { ComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import { toJSONSchema, z } from 'zod';
+import { runtimeIssueSchema } from '#types/runtime-wire-common.schemas.js';
 import { createKernelError } from '#kernels/kernel-helpers.js';
 import { fileChangeDebounce } from '#framework/runtime-framework.constants.js';
 import { canonicalJson, sha256Bytes, sha256String } from '@taucad/utils/hash';
@@ -251,23 +252,27 @@ const sourceRevisionForArtifact = (artifact: MaterializedRender, fallback?: Sour
 };
 
 const neverAbortedSignal = new AbortController().signal;
+const carriedKernelIssuesSchema = z.tuple([runtimeIssueSchema], runtimeIssueSchema);
+
 /**
- * The minimum a row must satisfy to survive the runtime protocol's own
- * `kernelIssueSchema`. `code` is deliberately absent: the transport repairs an
- * unknown code, but nothing downstream can invent a `severity`, and a row
- * without one is dropped by the receiving channel rather than reported.
- * `looseObject` keeps `location`, `stack` and `details` intact. `min(1)`
- * because an empty `issues` array explains nothing: the error's own message is
- * strictly more informative than no issue at all.
+ * Read the kernel issues a thrown value carries on `.issues` (a `KernelError`, a `KERNEL_REALM_CONFLICT` refusal).
+ *
+ * Validated against the runtime wire's own issue schema rather than duck-typed: other errors carry an `issues`
+ * array too (`ZodError`, `WireValidationError`), and a row the wire would refuse is dropped by the receiving
+ * channel rather than reported. Non-empty, because an empty `issues` array explains nothing. Structural, so
+ * duplicate runtime copies in one realm agree.
+ *
+ * @param error - The thrown value.
+ * @returns The carried issues, or `undefined` when it carries no valid kernel issue.
+ * @internal
  */
-const kernelIssuesSchema = z
-  .array(
-    z.looseObject({
-      message: z.string(),
-      severity: z.enum(['error', 'warning', 'info']),
-    }),
-  )
-  .min(1);
+export const carriedKernelIssues = (error: unknown): [KernelIssue, ...KernelIssue[]] | undefined => {
+  if (error === null || typeof error !== 'object' || !('issues' in error)) {
+    return undefined;
+  }
+  const parsed = carriedKernelIssuesSchema.safeParse(error.issues);
+  return parsed.success ? parsed.data : undefined;
+};
 
 /** Joined issue messages for a terminal state's `detail`, or nothing to say. */
 const issueDetail = (issues: readonly KernelIssue[]): string | undefined =>
@@ -2170,10 +2175,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @returns Issues that satisfy the runtime protocol.
    */
   private errorToRuntimeIssues(error: unknown): KernelIssue[] {
-    const carried = error !== null && typeof error === 'object' && 'issues' in error ? error.issues : undefined;
-    const parsed = kernelIssuesSchema.safeParse(carried);
-    if (parsed.success) {
-      return parsed.data as KernelIssue[];
+    const carried = carriedKernelIssues(error);
+    if (carried) {
+      return carried;
     }
     return [
       {

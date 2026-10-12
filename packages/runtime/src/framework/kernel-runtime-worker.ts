@@ -43,7 +43,7 @@ import type {
 import type { ExportOffer, ViewOffer } from '#client/runtime-document.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
-import { KernelWorker } from '#framework/kernel-worker.js';
+import { carriedKernelIssues, KernelWorker } from '#framework/kernel-worker.js';
 import type { EvaluationSlot, KernelBinding, NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
 import { isRenderAbortedError } from '#framework/runtime-operation-errors.js';
 import { preserveMethodNames } from '#framework/named.js';
@@ -59,8 +59,7 @@ import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definiti
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
 import { sourcePathMatchesExtensions } from '@taucad/utils/file';
-import { z } from 'zod';
-import { runtimeIssueSchema } from '#types/runtime-wire-common.schemas.js';
+import type { z } from 'zod';
 
 type WorkerKernelDefinition = KernelDefinitionV2<
   string,
@@ -135,25 +134,6 @@ const describeUnhandledExtension = (entryPath: string, kernels: readonly KernelP
   const listed = handled.slice(0, listedExtensionLimit).join(', ');
   const registered = handled.length > listedExtensionLimit ? `${listed}, …` : `${listed || 'none'}.`;
   return `No kernel handles "${extension}". Registered kernels handle: ${registered} Install a plugin that declares this extension and add it to the runtime definition.`;
-};
-
-const carriedKernelIssuesSchema = z.tuple([runtimeIssueSchema], runtimeIssueSchema);
-
-/**
- * Read the typed issues a kernel attached to a thrown `Error` (e.g. `KERNEL_REALM_CONFLICT`).
- *
- * Validated rather than duck-typed: other errors carry an `issues` array too (a `ZodError` does),
- * and their rows are not kernel issues. Structural, so duplicate runtime copies in one realm agree.
- *
- * @param error - The value a kernel threw.
- * @returns The carried issues, or `undefined` when the error carries no valid kernel issue.
- */
-const carriedKernelIssues = (error: unknown): [KernelIssue, ...KernelIssue[]] | undefined => {
-  if (!(error instanceof Error) || !('issues' in error)) {
-    return undefined;
-  }
-  const parsed = carriedKernelIssuesSchema.safeParse(error.issues);
-  return parsed.success ? parsed.data : undefined;
 };
 
 /** Multi-kernel runtime worker that dynamically selects and delegates to loaded kernel definitions. */

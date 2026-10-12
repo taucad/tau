@@ -22,12 +22,13 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
-import { Engine } from '@taucad/geospec-engine-native/node';
+import { Engine, initialize } from '@taucad/geospec-engine-native/wasm';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import type { RuntimeClient } from '@taucad/runtime/client';
 
@@ -302,8 +303,20 @@ const render = async (document: RuntimeDocument): Promise<string> => {
   return outcome.rendering.success ? 'ok' : issuesOf(outcome.rendering.issues);
 };
 
+/* The WASM engine, not the NAPI binding: CI ships the binding only to its Darwin lane, and the Linux lanes that run
+ * this suite carry the WASM product. */
+const loadWasm = async (): Promise<void> => {
+  const bytes = await readFile(createRequire(import.meta.url).resolve('@taucad/geospec-engine-native/wasm-binary'));
+  await initialize(new Uint8Array(bytes));
+};
+let wasmReady: Promise<void> | undefined;
+const initializeWasm = async (): Promise<void> => {
+  wasmReady ??= loadWasm();
+  await wasmReady;
+};
+
 /**
- * The document's STEP export, re-imported through GeoSpec's native STEP reader and held to `size`.
+ * The document's STEP export, re-imported through GeoSpec's STEP reader on the WASM engine and held to `size`.
  * Returns the size on a pass, so the per-step log reads as the measured box.
  */
 const stepSize = async (document: RuntimeDocument, size: readonly [number, number, number]): Promise<string> => {
@@ -327,6 +340,7 @@ const stepSize = async (document: RuntimeDocument, size: readonly [number, numbe
       '',
     ].join('\n'),
   );
+  await initializeWasm();
   const engine = new Engine();
   const runner = createNativeGeoSpecRunner({
     filesystem: createNodeVmFileSystem(root),

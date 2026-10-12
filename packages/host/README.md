@@ -9,7 +9,7 @@ tau serve --trust-projects
 
 On first launch, the CLI prints a short pairing code and a Tau verification URL. Approving the code binds the machine to the signed-in account. The daemon then keeps an outbound authenticated WebSocket open to the Tau API; it does not expose a LAN listener or fixed port.
 
-For every accepted browser session, the parent supervises a CLI-composed runtime child on an authenticated ephemeral loopback socket and frame-splices the relay's `/runtime` and `/fs` routes into it. Project files remain browser-owned and are requested through the existing runtime filesystem bridge.
+For every accepted browser session, the parent supervises its own CLI-composed runtime child on an authenticated ephemeral loopback socket and frame-splices the relay's `/runtime` and `/fs` routes into it. Project files remain browser-owned and are requested through the existing runtime filesystem bridge. The agent's geometry tools get one runtime child per root they work in, so sessions and roots never share a JavaScript realm, and a hung model or a child exit affects only its own.
 
 ## Library API
 

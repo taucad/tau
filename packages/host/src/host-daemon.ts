@@ -138,9 +138,9 @@ export type HostDaemonEvent =
         /* Another Tau app holds the per-user machine store's writer lock, so
          * this host serves without machines rather than exiting. */
         | 'MACHINE_STORE_OWNED_ELSEWHERE'
-        /* Retriable, never fatal: the compute child backs the relay sessions and
+        /* Retriable, never fatal: runtime children back the relay sessions and
          * the geometry tools, and nothing else. The agent channel and its file
-         * tools keep serving while the loop retries the child. */
+         * tools keep serving while the loop retries a child. */
         | 'RUNTIME_CHILD_FAILED'
         /* The turn ran and is durable in its own log; only its revision is
          * missing (V17). Retriable in the sense that the next turn records. */

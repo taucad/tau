@@ -3,9 +3,12 @@
 # Runs on every `main` push that changes them, and by hand. One Grafana Cloud
 # stack reads Fly's managed Prometheus for the whole org, so one sync covers
 # staging and production series. The job uses the `staging` environment, which
-# admits `main` only. tau-cloud `stacks/repo/tau` writes its GRAFANA_URL
-# variable and GRAFANA_API_KEY secret (the `dashboard-sync` service account of
-# `stacks/observability`). Until both exist the job does nothing and passes.
+# admits `main` only, and reads its GRAFANA_URL variable and GRAFANA_API_KEY
+# secret: a token of an Admin service account in the stack, since alert
+# provisioning is Admin-only by default. Both belong in tau-cloud
+# `stacks/repo/tau`, never `gh secret set`. Until both exist the job does
+# nothing and passes. It only creates and updates: a dashboard or rule group
+# removed from infra/grafana must also be deleted in Grafana by hand.
 
 name: Grafana Sync
 
@@ -39,18 +42,7 @@ jobs:
       GRAFANA_URL: ${{ vars.GRAFANA_URL }}
       GRAFANA_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
     steps:
-      - name: Require the Grafana Cloud stack
-        id: stack
-        run: |
-          if [ -z "$GRAFANA_URL" ] || [ -z "$GRAFANA_API_KEY" ]; then
-            echo "::notice::No Grafana Cloud stack configured (GRAFANA_URL or GRAFANA_API_KEY unset in the staging environment); nothing to sync."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout
-        if: steps.stack.outputs.ready == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
@@ -59,5 +51,9 @@ jobs:
             apps/api/scripts
 
       - name: Sync dashboards and alert rule groups
-        if: steps.stack.outputs.ready == 'true'
-        run: bash apps/api/scripts/sync-grafana-dashboards.sh
+        run: |
+          if [ -z "$GRAFANA_URL" ] || [ -z "$GRAFANA_API_KEY" ]; then
+            echo "::notice::No Grafana Cloud stack configured (GRAFANA_URL or GRAFANA_API_KEY unset in the staging environment); nothing to sync."
+            exit 0
+          fi
+          bash apps/api/scripts/sync-grafana-dashboards.sh

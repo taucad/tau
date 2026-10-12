@@ -97,28 +97,16 @@ sync_dashboards() {
   done
 }
 
-delete_alert_rule() {
-  local uid="$1"
-  curl -s -o /dev/null -w "%{http_code}" \
-    -X DELETE "${GRAFANA_URL}/api/v1/provisioning/alert-rules/${uid}" \
-    -H "${AUTH_HEADER}" \
-    -H "X-Disable-Provenance: true"
-}
-
 sync_alert_rule_groups() {
-  local file group_name status response rule_uids uid
+  local file group_name status response
 
   for file in "${ALERTS_DIR}"/*.json; do
     [[ -f "$file" ]] || continue
 
     group_name=$(grep -o '"title"[[:space:]]*:[[:space:]]*"[^"]*"' "$file" | head -1 | sed 's/.*: *"//;s/"$//')
 
-    # Delete existing rules by UID first to clear any provenance conflicts
-    rule_uids=$(grep -o '"uid"[[:space:]]*:[[:space:]]*"[^"]*"' "$file" | sed 's/.*: *"//;s/"$//')
-    for uid in $rule_uids; do
-      delete_alert_rule "$uid" >/dev/null 2>&1 || true
-    done
-
+    # Update in place, so each rule keeps its identity and alert state. Grafana 12 moves a rule that
+    # sits in another group and takes over one created without X-Disable-Provenance.
     response=$(curl -s -w "\n%{http_code}" \
       -X PUT "${GRAFANA_URL}/api/v1/provisioning/folder/${ALERTS_FOLDER_UID}/rule-groups/${group_name}" \
       -H "Content-Type: application/json" \

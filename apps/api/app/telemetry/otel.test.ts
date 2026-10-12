@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- instrumentation names and OTEL attribute names are wire names. */
 import type { IncomingMessage } from 'node:http';
 import type { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 
 const { instrumentationConfigs, exporterConfigs, sdkResources } = vi.hoisted(() => ({
@@ -80,6 +80,10 @@ describe('OTEL incoming request span redaction', () => {
 });
 
 describe('OTEL Prometheus exporter', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('should label every series with service_name but leave other resource attributes off (OBS-13)', async () => {
     await import('#telemetry/otel.js');
     const labels = exporterConfigs[0]?.withResourceConstantLabels;
@@ -96,7 +100,6 @@ describe('OTEL Prometheus exporter', () => {
     vi.resetModules();
     vi.stubEnv('FLY_PROCESS_GROUP', group);
     await import('#telemetry/otel.js');
-    vi.unstubAllEnvs();
 
     expect(sdkResources.at(-1)?.['tau.process']).toBe(expected);
   });

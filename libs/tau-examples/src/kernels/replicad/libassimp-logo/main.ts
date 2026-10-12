@@ -70,11 +70,19 @@ export const tone = (t: number): string => {
   const scaled = clamped * (ramp.length - 1);
   const index = Math.min(ramp.length - 2, Math.floor(scaled));
   const mix = scaled - index;
-  const from = hexToRgb(ramp[index]);
-  const to = hexToRgb(ramp[index + 1]);
-  return rgbToHex(
-    from.map((channel, axis) => channel + (to[axis] - channel) * mix),
-  );
+  const fromStop = ramp[index];
+  const toStop = ramp[index + 1];
+  if (fromStop === undefined || toStop === undefined) {
+    throw new RangeError(`Ramp has no stop pair at ${index}`);
+  }
+  const from = hexToRgb(fromStop);
+  const to = hexToRgb(toStop);
+  const lerp = (a: number, b: number): number => a + (b - a) * mix;
+  return rgbToHex([
+    lerp(from[0], to[0]),
+    lerp(from[1], to[1]),
+    lerp(from[2], to[2]),
+  ]);
 };
 
 const normalize3 = (
@@ -172,7 +180,7 @@ export const createLibassimpLogo = (p = defaultParams): LogoTile[] => {
   );
   const fills = shadeRing(facings, 0.62);
 
-  const tiles = Array.from({ length: blades }, (_, index): LogoTile => {
+  const tiles = fills.map((color, index): LogoTile => {
     const previous = vertex(index);
     const v0 = vertex(index + 1);
     const v1 = vertex(index + 2);
@@ -189,7 +197,7 @@ export const createLibassimpLogo = (p = defaultParams): LogoTile[] => {
       .cut(poly(opening))
       .cut(edgeSlit(v0, d0, slitWidth))
       .cut(edgeSlit(v1, d1, slitWidth));
-    return { name: `blade ${index + 1}`, shape: blade, color: fills[index] };
+    return { name: `blade ${index + 1}`, shape: blade, color };
   });
 
   const core = poly(opening - coreGap / Math.cos(Math.PI / blades));

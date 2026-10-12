@@ -483,8 +483,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         throw error;
       }
 
-      if (error instanceof Error && 'issues' in error && Array.isArray(error.issues)) {
-        return { success: false, issues: error.issues as KernelIssue[] };
+      const carried = carriedKernelIssues(error);
+      if (carried) {
+        return { success: false, issues: carried };
       }
 
       let message: string;
@@ -787,8 +788,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       if (isRenderAbortedError(error)) {
         throw error;
       }
-      if (error instanceof Error && 'issues' in error && Array.isArray(error.issues)) {
-        return { success: false, issues: error.issues as KernelIssue[] };
+      const carried = carriedKernelIssues(error);
+      if (carried) {
+        return { success: false, issues: carried };
       }
       return createKernelError([
         {

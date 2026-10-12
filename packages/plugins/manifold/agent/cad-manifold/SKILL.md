@@ -36,7 +36,6 @@ export default function main(p = defaultParams): Manifold {
 ```
 
 The kernel adds normals, creased at 30°, unless a material already names `NORMAL`; call `calculateNormals` yourself only to choose a different crease angle.
-```
 
 Check missing imports, undefined returns, invalid boolean inputs, and non-positive dimensions first.
 

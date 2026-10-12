@@ -1537,6 +1537,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         version = await ensureRuntimeVersion();
       } catch (error) {
         /* A start that the daemon's own close interrupted is not a failure to report. */
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- close can abort while ensureRuntimeVersion awaits.
         if (!shutdown.signal.aborted) {
           emit({
             type: 'warning',

@@ -380,9 +380,10 @@ export class KclUtilities {
     // Ensure WASM is initialized first
     await this.initializeWasm();
 
-    // Create and initialize engine manager
-    this.engineManager = await this.createEngineManager();
-    await this.engineManager.initialize();
+    // Keep the engine manager only once it initializes; a failed one has already closed its socket
+    const engineManager = await this.createEngineManager();
+    await engineManager.initialize();
+    this.engineManager = engineManager;
 
     this.engineSocketCloseUnsubscribe?.();
     this.engineSocketCloseUnsubscribe = this.engineManager.onSessionClosed(() => {

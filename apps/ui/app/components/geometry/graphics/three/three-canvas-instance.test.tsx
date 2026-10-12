@@ -71,7 +71,9 @@ vi.mock('#components/geometry/graphics/three/renderer.js', () => ({
   },
 }));
 
-vi.mock('#components/geometry/graphics/three/render-fps-overlay.js', () => ({ RenderFpsOverlay: () => undefined }));
+vi.mock('#components/geometry/graphics/three/render-fps-overlay.js', () => ({
+  RenderFpsOverlay: () => <output aria-label='Render-loop submission FPS'>FPS · idle</output>,
+}));
 
 vi.mock('#hooks/use-graphics.js', () => ({
   useCameraRig: () => cameraRig,
@@ -171,7 +173,12 @@ vi.mock('#flags/use-feature.js', () => ({
 }));
 
 vi.mock('#components/geometry/graphics/three/scene.js', () => ({
-  Scene: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
+  Scene: ({ children, enableGizmo }: { readonly children: React.ReactNode; readonly enableGizmo: boolean }) => (
+    <div>
+      {enableGizmo ? <div role='img' aria-label='View cube' /> : null}
+      {children}
+    </div>
+  ),
 }));
 
 vi.mock('#components/geometry/graphics/three/post-processing.js', () => ({
@@ -235,6 +242,35 @@ describe('ThreeCanvasInstance', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
+  it.each(['webgl', 'webgpu'] as const)(
+    'should show %s FPS only while Tau Debug is enabled and retain the view cube',
+    async (graphicsBackend) => {
+      const view = render(
+        <ThreeCanvasInstance enableGizmo graphicsBackend={graphicsBackend} onRetry={() => undefined} />,
+      );
+      await waitFor(() => {
+        expect(screen.getByRole('img', { name: 'View cube' })).toBeInTheDocument();
+      });
+      expect(screen.queryByLabelText('Render-loop submission FPS')).not.toBeInTheDocument();
+
+      enabledFeatures.add('tauDebug');
+      view.rerender(<ThreeCanvasInstance enableGizmo graphicsBackend={graphicsBackend} onRetry={() => undefined} />);
+      expect(screen.getByRole('img', { name: 'View cube' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Render-loop submission FPS')).toBeInTheDocument();
+
+      view.rerender(
+        <ThreeCanvasInstance enableGizmo={false} graphicsBackend={graphicsBackend} onRetry={() => undefined} />,
+      );
+      expect(screen.queryByRole('img', { name: 'View cube' })).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Render-loop submission FPS')).toBeInTheDocument();
+
+      enabledFeatures.delete('tauDebug');
+      view.rerender(<ThreeCanvasInstance enableGizmo graphicsBackend={graphicsBackend} onRetry={() => undefined} />);
+      expect(screen.getByRole('img', { name: 'View cube' })).toBeInTheDocument();
+      expect(screen.queryByLabelText('Render-loop submission FPS')).not.toBeInTheDocument();
+    },
+  );
 
   it('should show the WebGL fallback instead of an unhandled rejection when the renderer cannot be created', async () => {
     rendererFailure.error = new Error('Error creating WebGL context.');

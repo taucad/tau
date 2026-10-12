@@ -17,20 +17,19 @@ For multiple files, import helpers through explicit ESM paths such as `./lib/wid
 ## Canonical pattern
 
 ```ts
-import { GLTFNode, Manifold } from 'manifold-3d/manifoldCAD';
+import { Manifold } from 'manifold-3d/manifoldCAD';
 
 export const defaultParams = { width: 80, depth: 40, height: 20, holeRadius: 6 };
 
-export default function main(p = defaultParams): GLTFNode {
+export default function main(p = defaultParams): Manifold {
   const body = Manifold.cube([p.width, p.depth, p.height], true);
   const hole = Manifold.cylinder(p.height + 2, p.holeRadius, -1, 64, true);
-  const solid = body.subtract(Manifold.union([hole.translate([-20, 0, 0]), hole.translate([20, 0, 0])]));
-  // Flat normals, named on the material, so screenshots shade the mesh.
-  const node = new GLTFNode();
-  node.manifold = solid.calculateNormals(0, 60);
-  node.material = { attributes: ['NORMAL'] };
-  return node;
+  return body.subtract(Manifold.union([hole.translate([-20, 0, 0]), hole.translate([20, 0, 0])]));
 }
+```
+
+The kernel adds normals, creased at 30°, unless a material already names `NORMAL`; call `calculateNormals` yourself only to choose a different crease angle.
+
 ```
 
 Check missing imports, undefined returns, invalid boolean inputs, and non-positive dimensions first.
@@ -39,4 +38,5 @@ Check missing imports, undefined returns, invalid boolean inputs, and non-positi
 
 - Wrong: `Manifold.cylinder(radius, height)`. Correct: height first: `Manifold.cylinder(height, radiusLow, radiusHigh, segments, center)`; pass `-1` for `radiusHigh` to match `radiusLow`.
 - Wrong: chaining `a.add(b).add(c)…` over many parts. Correct: `Manifold.union([a, b, c])` once.
-- Wrong: returning a boolean result as it is. Correct: finish with `.calculateNormals(0, 60)` in a `GLTFNode` whose material names `['NORMAL']`, as above. Otherwise screenshots fail with "TRIANGLES primitive missing NORMAL".
+- Wrong: capturing a model while `show()` or `only()` is active. Correct: remove them first; debug views render in the viewer only, and screenshots and thumbnails of them fail with "TRIANGLES primitive missing NORMAL".
+```

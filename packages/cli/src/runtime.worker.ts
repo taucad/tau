@@ -4,7 +4,7 @@
  *
  * Started by `webSocketHost({ worker })` in the Tau Host runtime child and by a
  * `nodeWorkerTransport` client. It composes the CLI runtime from `workerData`
- * `{ projectRoot, plugin?, config? }`; `nodeWorkerHost` reads the connection's
+ * `{ projectRoot, plugin?, config?, zooProxyUrl? }`; `nodeWorkerHost` reads the connection's
  * own ports from the same `workerData`.
  */
 import { workerData } from 'node:worker_threads';
@@ -19,6 +19,7 @@ const runtimeWorkerDataSchema = z.object({
   projectRoot: z.string().min(1),
   plugin: z.array(z.string()).optional(),
   config: z.string().optional(),
+  zooProxyUrl: z.string().optional(),
 });
 
 const options = runtimeWorkerDataSchema.safeParse(workerData);
@@ -30,5 +31,6 @@ const runtime = await loadCliRuntime({
   projectRoot: options.data.projectRoot,
   plugin: options.data.plugin,
   ...(options.data.config === undefined ? {} : { config: options.data.config }),
+  ...(options.data.zooProxyUrl === undefined ? {} : { zooProxyUrl: options.data.zooProxyUrl }),
 });
 await nodeWorkerHost({ worker: createRuntimeWorker({ runtime }) }).open();

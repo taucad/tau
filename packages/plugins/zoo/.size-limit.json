@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 13.27 kB brotlied on 2026-08-23",
+    "name": "total (ESM JS) — measured 16.87 kB brotlied on 2026-10-11, including the proxy subpath",
     "path": ["dist/**/*.mjs"],
-    "limit": "16 kB"
+    "limit": "18 kB"
   }
 ]

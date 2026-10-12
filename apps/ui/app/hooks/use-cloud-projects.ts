@@ -9,7 +9,7 @@
  * three times under three different cache keys.
  */
 
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Topic } from '@taucad/events';
 import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
@@ -18,7 +18,6 @@ import type { ProjectCreationLocation } from '#types/project-creation-location.t
 import { parseProjectCreationLocation } from '#utils/project-creation-location.utils.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
-import { toast } from '#components/ui/sonner.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
 
@@ -275,7 +274,7 @@ export type TauCloudStep = 'announce' | 'connect' | 'forget' | 'wait';
  *
  * `open` connects for a signed-in account and is forgotten only once Tau Cloud
  * is connected (or another remote was chosen); a failed connect waits for the
- * next open. `default` is first announced — the toast with its opt-out — and a
+ * next open. `default` first exposes the inline backup offer in Revisions, and a
  * connection is made only from `noticed`, after the first revision, for a
  * signed-in, entitled account. Signed out waits: the project backs up once its
  * person signs in. A plan without backup, or a remote chosen by hand, forgets.
@@ -329,34 +328,8 @@ export const turnOffBackupConsequence = (remote: Pick<RemoteFacet, 'kind' | 'pha
     ? 'Stops backing up. The copy already on Tau Cloud stays.'
     : 'Turning it off keeps this project on this device.';
 
-/* The projects whose creation toast is on screen in this document. The pane's
- * line waits for it to close, so one backup offer shows at a time (DESIGN). */
-const announcing = new Set<string>();
-const announcingTopic = new Topic<void>({ name: 'backup-announcing' });
-const subscribeAnnouncing = (listener: () => void): (() => void) => announcingTopic.subscribe(listener);
-const endAnnouncing = (projectId: string): void => {
-  if (announcing.delete(projectId)) {
-    announcingTopic.emit();
-  }
-};
-
 /**
- * Whether this project's creation toast is still on screen, so the pane holds
- * its own backup offer back until the toast closes.
- *
- * @param projectId - The project.
- * @returns `true` while the toast shows.
- * @public
- */
-export const useBackupAnnouncing = (projectId: string): boolean =>
-  useSyncExternalStore(
-    subscribeAnnouncing,
-    () => announcing.has(projectId),
-    () => false,
-  );
-
-/**
- * *Turn off backup*, from the toast or the Revisions pane: one handler, reading
+ * *Turn off backup* in the Revisions pane reads
  * the remote as it is now rather than as it was when the offer was drawn.
  *
  * @param projectId - The project.
@@ -394,40 +367,30 @@ export const useTauCloudEligibility = (): TauCloudEligibility => {
 };
 
 /**
- * Act on a project's intent from inside its session (W11): announce backup by
- * default with its opt-out, connect Tau Cloud through the same verb the
+ * Act on a project's intent from inside its session: expose the inline backup
+ * offer, connect Tau Cloud through the same verb the
  * `cloudOpen` path sends, or forget the intent.
  *
  * Each step first checks the stored intent is still the one it was drawn for,
  * so a second tab that already moved it on (or turned it off) is not repeated.
  *
- * @param input - The project, its intent, its projection, how to read the
- * remote live, and the session's remote verbs.
+ * @param input - The project, its intent, its projection, and the session's connect verb.
  * @public
  */
 export const useTauCloudIntentConnection = ({
   projectId,
   intent,
   status,
-  readRemote,
   commands,
 }: Readonly<{
   projectId: string;
   intent: TauCloudIntent;
   status: RevisionStatusProjection | undefined;
-  readRemote: () => Pick<RemoteFacet, 'kind' | 'phase'> | undefined;
   commands: Readonly<{
     connectRemote: (kind: 'tau') => Promise<void>;
-    disconnectRemote: () => void;
-    cancelRemote: () => void;
   }>;
 }>): void => {
   const step = nextTauCloudStep(intent, useTauCloudEligibility(), status);
-  /* The toast's action outlives this render; it reads the verbs as they are then. */
-  const live = useRef({ readRemote, commands });
-  useEffect(() => {
-    live.current = { readRemote, commands };
-  });
   const { connectRemote } = commands;
   useEffect(() => {
     if (tauCloudIntent.get(projectId) !== intent) {
@@ -440,25 +403,6 @@ export const useTauCloudIntentConnection = ({
       }
       case 'announce': {
         tauCloudIntent.set(projectId, 'noticed');
-        announcing.add(projectId);
-        announcingTopic.emit();
-        toast('Backs up to Tau Cloud automatically after your first save.', {
-          description: turnOffBackupConsequence(live.current.readRemote()),
-          action: {
-            label: 'Turn off backup',
-            onClick: () => {
-              endAnnouncing(projectId);
-              turnOffBackupByDefault(projectId, live.current.readRemote(), live.current.commands);
-            },
-          },
-          /* Closed any way at all, the pane's line takes the offer over. */
-          onDismiss: () => {
-            endAnnouncing(projectId);
-          },
-          onAutoClose: () => {
-            endAnnouncing(projectId);
-          },
-        });
         return;
       }
       case 'connect': {

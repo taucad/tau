@@ -3,7 +3,7 @@
 import { encode as msgpackEncode } from '@msgpack/msgpack';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZooWebSocketTransport } from '#transport/zoo-websocket-transport.js';
-import { KclError } from '#kcl-errors.js';
+import { KclAuthError, KclConnectionError, KclError } from '#kcl-errors.js';
 import {
   zooTestInstallFakeWebSocket,
   zooTestFakeSocketCapture,
@@ -166,6 +166,57 @@ describe('ZooWebSocketTransport', () => {
     );
     expect(error).toBeInstanceOf(KclError);
     expect((error as KclError).msg).toBe(message);
+  });
+
+  it.each<{ code: number; status: number; closeErrors: Record<string, string> | undefined }>([
+    { code: 4401, status: 401, closeErrors: { 4401: 'Sign in to Tau to use the Zoo kernel.' } },
+    { code: 4403, status: 403, closeErrors: { 4403: 'Zoo execution requires Pro.' } },
+    { code: 4401, status: 401, closeErrors: undefined },
+  ])('classifies a $code proxy refusal as an authentication error', async ({ code, status, closeErrors }) => {
+    const transport = new ZooWebSocketTransport({
+      baseUrl: 'ws://fake.example/modeling-commands',
+      ...(closeErrors === undefined ? {} : { closeErrors }),
+    });
+    const init = transport.initialize();
+    await Promise.resolve();
+
+    zooTestFakeSocketCapture.current?.close(code, 'UNAUTHENTICATED');
+
+    const error = await init.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(error).toBeInstanceOf(KclAuthError);
+    expect((error as KclAuthError).statusCode).toBe(status);
+    expect((error as KclAuthError).msg).toBe(closeErrors?.[code] ?? 'UNAUTHENTICATED');
+  });
+
+  it('reports a proxy that cannot be reached as unavailable even though undici already reads CLOSED', async () => {
+    const transport = new ZooWebSocketTransport({ baseUrl: 'ws://fake.example/modeling-commands' });
+    const init = transport.initialize();
+    zooTestFakeSocketCapture.current?.testFailBeforeOpen();
+
+    const error = await init.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(error).toBeInstanceOf(KclConnectionError);
+    expect((error as KclConnectionError).isApiUnavailable).toBe(true);
+    expect((error as KclConnectionError).msg).toContain('Unable to connect to the Zoo CAD API.');
+  });
+
+  it('closes the socket when authentication times out', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = new ZooWebSocketTransport({ baseUrl: 'ws://fake.example/modeling-commands' });
+      const rejected = expect(transport.initialize()).rejects.toBeInstanceOf(KclAuthError);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await rejected;
+      expect(zooTestFakeSocketCapture.current?.readyState).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('clears handlers on dispose', async () => {

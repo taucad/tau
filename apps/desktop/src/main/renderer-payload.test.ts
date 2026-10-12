@@ -380,6 +380,25 @@ describe('Desktop renderer ownership', () => {
     expect(report.violations).toContain('Web-only metadata in desktop HTML: manifest.webmanifest');
   });
 
+  it('should admit the KCL WASM in both the editor and the Zoo kernel host', async () => {
+    const paths = await fixture();
+    const kclSource = require.resolve('@taucad/kcl-wasm-lib/kcl.wasm').replaceAll('\\', '/');
+    const kcl = Uint8Array.from(await readFile(kclSource));
+    await writeFile(join(paths.renderer, 'kcl_wasm_lib_bg-123.wasm'), kcl);
+    await writeFile(join(paths.host, 'kcl_wasm_lib_bg-456.wasm'), kcl);
+    await writeFile(
+      join(paths.renderer, 'tau-module-graph-123.json'),
+      JSON.stringify({
+        chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root-layout.tsx'] }],
+        assets: [{ ...asset('kcl_wasm_lib_bg-123.wasm', kcl), sourcePath: kclSource }],
+      }),
+    );
+
+    const report = await inspectDesktopPayload(paths);
+
+    expect(report.violations).toEqual([]);
+  });
+
   it('should detect disguised retained WASM and FAT64 binaries', async () => {
     const paths = await fixture();
     const wasm = Uint8Array.from(await readFile(clipperSource));

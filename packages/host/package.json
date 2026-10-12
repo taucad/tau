@@ -75,6 +75,7 @@
     "@taucad/slicer": "workspace:*",
     "@taucad/units": "workspace:*",
     "@taucad/workbench": "workspace:*",
+    "@taucad/zoo": "workspace:*",
     "basic-ftp": "catalog:",
     "diff": "^8.0.4",
     "fflate": "catalog:",

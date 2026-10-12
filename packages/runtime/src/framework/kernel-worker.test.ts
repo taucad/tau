@@ -2238,6 +2238,9 @@ public static class Params
         message: 'Syntax error',
         type: 'compilation',
         severity: 'error',
+        location: { fileName: 'main.ts', startLineNumber: 3, startColumn: 7 },
+        stack: 'Error: Syntax error\n    at main.ts:3:7',
+        details: { producer: 'esbuild' },
       };
 
       // @ts-expect-error - exercising the private normalisation seam
@@ -2246,10 +2249,37 @@ public static class Params
       expect(issues).toEqual([issue]);
     });
 
-    it('should fold a thrown issue with an unknown code into the error message', () => {
+    it('should keep each valid row and map an unknown or missing code to UNKNOWN', () => {
+      const worker = createConfiguredWorker();
+      const typed: KernelIssue = {
+        code: 'BUNDLER_FAILED',
+        message: 'Syntax error',
+        severity: 'error',
+        location: { fileName: 'main.ts', startLineNumber: 3, startColumn: 7 },
+      };
+      const error = Object.assign(new Error('mixed failure'), {
+        issues: [
+          typed,
+          { code: 'NOT_A_KERNEL_CODE', message: 'foreign row', severity: 'warning' },
+          { message: 'uncoded row', severity: 'info' },
+          { code: 'invalid_type', message: 'no severity', path: [] },
+        ],
+      });
+
+      // @ts-expect-error - exercising the private normalisation seam
+      const issues: unknown = worker.errorToRuntimeIssues(error);
+
+      expect(issues).toEqual([
+        typed,
+        { code: 'UNKNOWN', message: 'foreign row', severity: 'warning' },
+        { code: 'UNKNOWN', message: 'uncoded row', severity: 'info' },
+      ]);
+    });
+
+    it('should fold an error none of whose rows is an issue into the error message', () => {
       const worker = createConfiguredWorker();
       const error = Object.assign(new Error('foreign failure'), {
-        issues: [{ code: 'NOT_A_KERNEL_CODE', message: 'foreign row', severity: 'error' }],
+        issues: [{ code: 'invalid_type', message: 'foreign row', path: ['wasmUrl'] }],
       });
 
       // @ts-expect-error - exercising the private normalisation seam

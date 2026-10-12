@@ -18,10 +18,21 @@ import type * as Runtime from '@taucad/runtime';
 const toolBody = vi.hoisted(() => ({
   run: async (_runtimeClient: (root: string) => Promise<HostRuntimeClient>): Promise<void> => undefined,
 }));
+const serveLocalHostMcp = vi.hoisted(() =>
+  vi.fn(async (_options: Host.LocalHostMcpOptions) => ({ server: { server: {} }, close: async () => undefined })),
+);
+/* One call per thread the server starts. */
+const createRuntimeClient = vi.hoisted(() =>
+  vi.fn(() => ({
+    lifecycleState: 'connected',
+    describe: async () => ({ kernelId: 'fixture' }),
+    shutdown: async () => undefined,
+  })),
+);
 
 vi.mock('@taucad/host', async (importOriginal) => ({
   ...(await importOriginal<typeof Host>()),
-  serveLocalHostMcp: vi.fn(async () => ({ server: { server: {} }, close: async () => undefined })),
+  serveLocalHostMcp,
 }));
 vi.mock('@taucad/host/agent-tools', () => ({
   createHostToolRegistry: vi.fn((options: HostToolRegistryOptions) => ({
@@ -36,11 +47,7 @@ vi.mock('@taucad/host/agent-tools', () => ({
 }));
 vi.mock('@taucad/runtime', async (importOriginal) => ({
   ...(await importOriginal<typeof Runtime>()),
-  createRuntimeClient: vi.fn(() => ({
-    lifecycleState: 'connected',
-    describe: async () => ({ kernelId: 'fixture' }),
-    shutdown: async () => undefined,
-  })),
+  createRuntimeClient,
 }));
 vi.mock('@taucad/runtime/transport/node', () => ({ nodeWorkerTransport: vi.fn(() => ({})) }));
 vi.mock('@taucad/runtime/filesystem/node', () => ({ fromNodeFs: vi.fn(() => ({})) }));
@@ -53,7 +60,9 @@ const importMcpCommand = async () => {
 describe('mcpCommand', () => {
   const stdoutWrite = process.stdout.write;
   const { log, info, debug } = console;
-  const signalListeners = { SIGINT: process.listeners('SIGINT'), SIGTERM: process.listeners('SIGTERM') };
+  const signalListeners = new Map(
+    (['SIGINT', 'SIGTERM'] as const).map((signal) => [signal, process.listeners(signal)] as const),
+  );
 
   /**
    * Start `tau mcp` in this process and wait for it to serve.
@@ -62,11 +71,11 @@ describe('mcpCommand', () => {
    * @returns The registry and checkouts it serves, and a stop that waits for its exit.
    */
   const serve = async (rawArgs: readonly string[]) => {
-    const [mcpCommand, { serveLocalHostMcp }] = await Promise.all([importMcpCommand(), import('@taucad/host')]);
-    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const mcpCommand = await importMcpCommand();
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as typeof process.exit);
     const running = runCommand(mcpCommand, { rawArgs: [...rawArgs] });
     const [served] = await vi.waitFor(() => {
-      const call = vi.mocked(serveLocalHostMcp).mock.calls.at(-1);
+      const call = serveLocalHostMcp.mock.calls.at(-1);
       if (call === undefined) {
         throw new Error('tau mcp is not serving yet');
       }
@@ -85,8 +94,8 @@ describe('mcpCommand', () => {
   afterEach(() => {
     process.stdout.write = stdoutWrite;
     Object.assign(console, { log, info, debug });
-    for (const [signal, kept] of Object.entries(signalListeners)) {
-      for (const listener of process.listeners(signal as NodeJS.Signals)) {
+    for (const [signal, kept] of signalListeners) {
+      for (const listener of process.listeners(signal)) {
         if (!kept.includes(listener)) {
           process.removeListener(signal, listener);
         }
@@ -105,17 +114,17 @@ describe('mcpCommand', () => {
         `--${option} must be`,
       );
     },
-    5000,
   );
 
   it('should keep a thread while its tool call works between two operations past the idle release', async () => {
-    const { createRuntimeClient } = await import('@taucad/runtime');
     const project = '/fixture/project';
     toolBody.run = async (runtimeClient) => {
-      await (await runtimeClient(project)).describe({ source: { path: 'main.ts' } });
+      const first = await runtimeClient(project);
+      await first.describe({ source: { path: 'main.ts' } });
       /* Main-thread work, as GeoSpec checks run between a test's exports: longer than the one-second release. */
       await sleep(1500);
-      await (await runtimeClient(project)).describe({ source: { path: 'main.ts' } });
+      const second = await runtimeClient(project);
+      await second.describe({ source: { path: 'main.ts' } });
     };
     const server = await serve(['--idle-release', '1']);
 

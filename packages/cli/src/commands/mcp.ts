@@ -16,13 +16,16 @@ const defaultOperationTimeout = 600;
 /** Seconds a project's thread may sit unused before it is released. */
 const defaultIdleRelease = 900;
 
+/** The longest delay a timer keeps, 2^31 - 1 ms, in whole seconds; a longer one fires at once. */
+const longestSeconds = 2_147_483;
+
 const seconds = (name: string, value: string | undefined, fallback: number): number => {
   if (value === undefined) {
     return fallback;
   }
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new TypeError(`--${name} must be a positive whole number of seconds`);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > longestSeconds) {
+    throw new TypeError(`--${name} must be a whole number of seconds from 1 to ${String(longestSeconds)}`);
   }
   return parsed;
 };
@@ -46,8 +49,8 @@ const seconds = (name: string, value: string | undefined, fallback: number): num
  * which Claude Code sets for the servers it launches; the working directory.
  * Each project gets its own runtime thread on its first call: a model that
  * runs past `--operation-timeout` or ends its thread costs only that project
- * its thread, which its next call replaces, and a thread with no call in
- * flight for `--idle-release` is released.
+ * its thread, which its next call replaces, and a thread with no tool call
+ * in flight for `--idle-release` is released.
  *
  * @example <caption>Serve one project to an MCP client</caption>
  * ```text
@@ -95,6 +98,8 @@ export const mcpCommand = defineCommand({
       },
     });
     process.stdout.write = process.stderr.write.bind(process.stderr);
+    /* A worker's stdout is piped into process.stdout; once stderr is full, the pipe waits for stdout's 'drain'. */
+    process.stderr.on('drain', () => process.stdout.emit('drain'));
     console.log = console.error;
     console.info = console.error;
     console.debug = console.error;
@@ -143,17 +148,20 @@ export const mcpCommand = defineCommand({
     );
     const inFlight = new Map<string, number>();
     const idleTimers = new Map<string, NodeJS.Timeout>();
+    const release = async (projectPath: string, incarnation?: number): Promise<void> => {
+      try {
+        await clients.close(projectPath, incarnation);
+      } catch {
+        /* Evicted all the same: a client that fails to close is kept, and server close tries it again. */
+      }
+    };
     const armIdleRelease = (projectPath: string): void => {
       clearTimeout(idleTimers.get(projectPath));
       idleTimers.set(
         projectPath,
-        setTimeout(async () => {
+        setTimeout(() => {
           idleTimers.delete(projectPath);
-          try {
-            await clients.close(projectPath);
-          } catch {
-            /* A client that fails to close is kept, and server close tries it again. */
-          }
+          void release(projectPath);
         }, idleRelease).unref(),
       );
     };
@@ -162,32 +170,21 @@ export const mcpCommand = defineCommand({
         clients.acquire(projectPath),
         import('@taucad/runtime'),
       ]);
+      /* Acquired outside any tool call of this project's (the workbench's default-folder client): release it if unused. */
       if ((inFlight.get(projectPath) ?? 0) === 0) {
         armIdleRelease(projectPath);
       }
-      /* Every call the tools make through this client, and through the documents and views it opens, is counted:
-       * the idle release waits for the project's last call to settle. A call that times out evicts its thread at
-       * once, so the next call starts a fresh one rather than meeting a thread the runtime is about to terminate. */
-      const settle = async (pending: Promise<unknown>): Promise<unknown> => {
-        inFlight.set(projectPath, (inFlight.get(projectPath) ?? 0) + 1);
-        clearTimeout(idleTimers.get(projectPath));
+      /* An operation that times out evicts its thread at once (the eviction is synchronous), so the next call starts
+       * a fresh one rather than meeting a thread the runtime terminates only after its grace. The tools turn the
+       * rejection into a result, so the client's own calls are where it shows. */
+      const evictOnTimeout = async (pending: Promise<unknown>): Promise<unknown> => {
         try {
           return await pending;
         } catch (error) {
           if (isOperationTimeoutError(error)) {
-            try {
-              await clients.close(projectPath, incarnation);
-            } catch {
-              /* Evicted all the same; server close tries the close again. */
-            }
+            void release(projectPath, incarnation);
           }
           throw error;
-        } finally {
-          const left = (inFlight.get(projectPath) ?? 1) - 1;
-          inFlight.set(projectPath, left);
-          if (left === 0) {
-            armIdleRelease(projectPath);
-          }
         }
       };
       // ponytail: a Proxy over every method beats a hand-written wrapper of HostRuntimeClient's generic surface.
@@ -202,7 +199,7 @@ export const mcpCommand = defineCommand({
             return (...parameters: unknown[]): unknown => {
               const result: unknown = Reflect.apply(member, object, parameters);
               if (result instanceof Promise) {
-                return settle(result);
+                return evictOnTimeout(result);
               }
               return typeof result === 'object' && result !== null ? track(result) : result;
             };
@@ -211,12 +208,33 @@ export const mcpCommand = defineCommand({
       return track(value);
     };
     const checkouts = new Map<string, { readonly cwd: string }>();
-    const registry = createHostToolRegistry({
+    const tools = createHostToolRegistry({
       workspaceRoot,
       checkouts,
       runtimeClient: clientFor,
       systemSkillBundles,
     });
+    /* The idle release waits for a project's last tool call to settle, not its last operation: a call may work
+     * between two operations (GeoSpec checks between a test's exports) for longer than the release. The project is
+     * found as the registry finds it. */
+    const registry: typeof tools = {
+      ...tools,
+      invoke: async (invocation) => {
+        const projectPath =
+          (invocation.runId === undefined ? undefined : checkouts.get(invocation.runId)?.cwd) ?? workspaceRoot;
+        inFlight.set(projectPath, (inFlight.get(projectPath) ?? 0) + 1);
+        clearTimeout(idleTimers.get(projectPath));
+        try {
+          return await tools.invoke(invocation);
+        } finally {
+          const left = (inFlight.get(projectPath) ?? 1) - 1;
+          inFlight.set(projectPath, left);
+          if (left === 0) {
+            armIdleRelease(projectPath);
+          }
+        }
+      },
+    };
     const local = await serveLocalHostMcp(
       { workspaceRoot, pinned: args.project !== undefined, registry, checkouts },
       { stdout },

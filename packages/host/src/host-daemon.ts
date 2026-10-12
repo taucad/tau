@@ -1536,11 +1536,14 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         // oxlint-disable-next-line no-await-in-loop -- reconnect attempts are deliberately sequential.
         version = await ensureRuntimeVersion();
       } catch (error) {
-        emit({
-          type: 'warning',
-          code: 'RUNTIME_CHILD_FAILED',
-          message: `Tau Host runtime child could not start; retrying: ${error instanceof Error ? error.message : String(error)}`,
-        });
+        /* A start that the daemon's own close interrupted is not a failure to report. */
+        if (!shutdown.signal.aborted) {
+          emit({
+            type: 'warning',
+            code: 'RUNTIME_CHILD_FAILED',
+            message: `Tau Host runtime child could not start; retrying: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
       }
       try {
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- close can abort while ensureRuntimeVersion awaits.

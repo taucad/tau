@@ -137,7 +137,10 @@ describe('ViewerChatLaneToggle', () => {
 
   it('heads the top-left group only while the chat lane is hidden', () => {
     const { container } = renderWithLanes(<ViewerChatLaneToggle {...headerProperties} />, false);
-    expect(screen.getByRole('button', { name: 'Toggle Chat lane' }).parentElement).toHaveClass('pl-1');
+    const prefix = screen.getByRole('button', { name: 'Toggle Chat lane' }).parentElement;
+    expect(prefix).toHaveClass('pl-1');
+    // The same hairline the top-right cluster sets between the tabs and its own groups.
+    expect(prefix?.lastElementChild).toHaveAttribute('data-orientation', 'vertical');
     container.remove();
 
     const visible = renderWithLanes(<ViewerChatLaneToggle {...headerProperties} />, true);

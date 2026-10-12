@@ -2381,6 +2381,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.telemetryCollector?.dispose();
     this.telemetryCollector = undefined;
     this.tracer.setEntrySink(undefined);
+    // Operations have drained, so no bundle imports a built-in again; drop the scope before any teardown step can throw.
+    releaseKernelModuleScope(this.registryScope);
     await this.computeHost?.dispose();
     this.computeHost = undefined;
 
@@ -2414,7 +2416,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.loadedTranscoders.clear();
 
     await this.onCleanup();
-    releaseKernelModuleScope(this.registryScope);
     this.fileSystem?.dispose();
     this.fileSystem = undefined;
   }

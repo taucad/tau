@@ -39,7 +39,8 @@ const workerDataKernel = defineKernel({
     return { handle: {}, views: ['model'] as const };
   },
   async render() {
-    return { content: new TextEncoder().encode(JSON.stringify({ workerData: workerData ?? undefined })) };
+    const data: unknown = workerData;
+    return { content: new TextEncoder().encode(JSON.stringify({ workerData: data })) };
   },
 });
 

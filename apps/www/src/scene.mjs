@@ -392,8 +392,9 @@ export const createScene = (assembly) => {
     if (!width || !height) {
       return;
     }
-    // Size the drawing buffer directly (three.js responsive guidance), capped near three megapixels.
-    const ratio = Math.min(devicePixelRatio, 1.75, Math.sqrt(3_000_000 / (width * height)));
+    // Sample shading and AO above display resolution; MSAA only samples geometry coverage.
+    // Keep the existing three-megapixel bound and quality governor for large/slow viewports.
+    const ratio = Math.min(devicePixelRatio * 1.5, 3, Math.sqrt(3_000_000 / (width * height)));
     const w = Math.round(width * ratio);
     const h = Math.round(height * ratio);
     renderer.getSize(size);

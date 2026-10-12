@@ -94,18 +94,16 @@ try {
   };
   // Hero: rest pose at the authored inputAngle 0, before any interaction.
   const hero = await shot({ kind: 'hero', sunAngle: 0, narrow: false }, 1200);
-  // Lossless alpha keeps the soft floor shadow free of banding, and costs no more than lossy alpha here.
-  await sharp(hero).webp({ quality: 82, alphaQuality: 100, effort: 6 }).toFile(join(app, 'public/hero-gearbox.webp'));
-  await sharp(hero)
-    .resize(720)
-    .webp({ quality: 80, alphaQuality: 100, effort: 6 })
-    .toFile(join(app, 'public/hero-gearbox-720.webp'));
+  // Downsample the supersampled render once, then preserve thin highlights without lossy WebP ringing.
+  await sharp(hero).resize(1200).webp({ lossless: true, effort: 6 }).toFile(join(app, 'public/hero-gearbox.webp'));
+  await sharp(hero).resize(720).webp({ lossless: true, effort: 6 }).toFile(join(app, 'public/hero-gearbox-720.webp'));
   const progress = [0.6, 1.6, 2.75, 3.75, 4.8, 5.9, 6.5, 7.75, 8.6];
   // One page, one canvas: stills render in order.
   await serial([...progress.entries()], async ([index, p]) => {
     const still = await shot({ kind: 'story', progress: p, narrow: false }, 1000);
     await sharp(still)
-      .webp({ quality: 80, alphaQuality: 100, effort: 6 })
+      .resize(1000)
+      .webp({ lossless: true, effort: 6 })
       .toFile(join(app, `public/story-${index}.webp`));
   });
   console.log('Captured hero and 9 story stills.');

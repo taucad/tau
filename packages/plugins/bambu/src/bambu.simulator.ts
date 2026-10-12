@@ -1,4 +1,3 @@
-import { simulatedCameraJpeg } from '#bambu.simulator-image.js';
 import { bambuSettingsConfiguration } from '#bambu.settings.js';
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { defineMachine } from '@taucad/runtime/machine';
@@ -732,6 +731,7 @@ export const createBambuSimulator = (
       : Object.freeze({
           type: 'supported',
           async capture() {
+            const { simulatedCameraJpeg } = await import('#bambu.simulator-image.js');
             return parseBambuStill(simulatedCameraJpeg, clock.now());
           },
         }),

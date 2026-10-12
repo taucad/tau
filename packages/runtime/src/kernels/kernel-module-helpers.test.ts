@@ -482,4 +482,20 @@ describe('worker-scoped kernel module registry', () => {
     expect(registered()).not.toContain(exportsA);
     expect(registered()).toContain(exportsB);
   });
+
+  it("should remove a worker's registry entries when its cleanup throws", async () => {
+    await seedTestFileSystem({ 'model.fake': 'fake' });
+    const exports = { token: 'A' };
+    const worker = await startRegistryWorker(exports, []);
+    await evaluateDocument(worker, 'a-1');
+    // `onCleanup` is protected; the spy reaches it to simulate a failing kernel teardown.
+    vi.spyOn(worker as unknown as { onCleanup(): Promise<void> }, 'onCleanup').mockRejectedValueOnce(
+      new Error('teardown failed'),
+    );
+
+    await expect(worker.cleanup()).rejects.toThrow('teardown failed');
+    registryWorkers.splice(registryWorkers.indexOf(worker), 1);
+
+    expect([...getModuleRegistry().values()]).not.toContain(exports);
+  });
 });

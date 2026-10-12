@@ -22,6 +22,7 @@ import { createNodeMachineHost } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
 import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
+import type { RuntimeClient } from '@taucad/runtime/client';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
 
 import { startAgentServer } from '#agent-server.js';
@@ -647,10 +648,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * own realm. A client that a wire failure or its child's exit terminated is replaced, with a new child, on its next
    * use; closing a root's client closes its child.
    */
-  const agentRuntimes = keyedResource<
-    string,
-    { readonly child: RuntimeChildHandle; readonly client: ReturnType<typeof createRuntimeClient> }
-  >(
+  const agentRuntimes = keyedResource<string, { readonly child: RuntimeChildHandle; readonly client: RuntimeClient }>(
     async (workspaceRoot) => {
       let child: RuntimeChildHandle;
       try {

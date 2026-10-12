@@ -1,11 +1,9 @@
 /**
- * The CLI runtime in its own thread: one realm per connection or project
+ * The CLI runtime in its own thread: one realm per project
  * (kernel-realm-shared-state blueprint, invariant I8).
  *
- * Started by `webSocketHost({ worker })` in the Tau Host runtime child and by a
- * `nodeWorkerTransport` client. It composes the CLI runtime from `workerData`
- * `{ projectRoot, plugin?, config?, zooProxyUrl? }`; `nodeWorkerHost` reads the connection's
- * own ports from the same `workerData`.
+ * Started by a `nodeWorkerTransport` client. It composes the CLI runtime from
+ * `workerData` `{ projectRoot, plugin?, config?, zooProxyUrl? }`.
  */
 import { workerData } from 'node:worker_threads';
 

@@ -3,7 +3,9 @@
 # `deploy_mode = "ci"` in tau-cloud, so Netlify's Git integration no longer
 # builds them and a branch change there never leaves a site without a deploy.
 #
-#   - staging (docs.taucad.dev): after every green `CI` push run on `main`.
+#   - staging (docs.taucad.dev): `ci.yml` → `deploy-docs-staging` on a push to
+#     `main` that affects docs since its last staging deploy, once the same
+#     checks as the staging UI pass.
 #   - production (docs.tau.new): with the UI, in a `ui@x.y.z` release's
 #     `release-build.yml` run, or dispatched at the tag by
 #     `deploy-production.yml` for a rollback or redeploy.
@@ -31,10 +33,6 @@ on:
         type: string
         default: ''
         description: 'Git tag or commit to deploy; empty deploys the calling commit'
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       environment:
@@ -50,20 +48,19 @@ on:
         default: ''
         description: 'Git tag or commit to deploy, e.g. docs@0.3.0; empty deploys the selected ref'
 
+# `actions: read` lets a staging deploy see whether a newer run already deployed.
 permissions:
   contents: read
+  actions: read
 
 jobs:
   deploy:
-    name: Deploy docs to ${{ inputs.environment || 'staging' }}
-    if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
+    name: Deploy docs to ${{ inputs.environment }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    environment: ${{ inputs.environment || 'staging' }}
+    environment: ${{ inputs.environment }}
     concurrency:
-      group: deploy-docs-${{ inputs.environment || 'staging' }}
+      group: deploy-docs-${{ inputs.environment }}
       cancel-in-progress: false
     env:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
@@ -87,7 +84,7 @@ jobs:
       - name: Resolve the Netlify site
         id: site
         env:
-          ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          ENVIRONMENT: ${{ inputs.environment }}
         run: |
           case "$ENVIRONMENT" in
             staging) site_id=9e046bdc-82d4-4ce5-8cdd-f2fa2fb0f48c; url=https://taucad-docs-staging.netlify.app ;;
@@ -101,12 +98,11 @@ jobs:
           echo "site_id=$site_id" >> "$GITHUB_OUTPUT"
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
-      # A workflow_run event runs on the default branch's head; deploy the exact
-      # commit CI passed instead. A dispatch may name a release tag.
+      # A dispatch or a release may name a tag; otherwise this is the calling commit.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ inputs.tag || github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ inputs.tag || github.sha }}
           persist-credentials: false
 
       - name: Setup Nx Environment
@@ -123,17 +119,38 @@ jobs:
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" api provisionSiteTLSCertificate \
             --data "{\"site_id\": \"$SITE_ID\"}"
 
+      # Each push to `main` runs on its own, so an older run can reach this queue
+      # after a newer one has deployed; it must not put its commit back.
+      - name: Skip a staging deploy a newer commit has superseded
+        id: superseded
+        if: inputs.environment == 'staging'
+        uses: ./.github/actions/staging-deploy-superseded
+        with:
+          job-name: Deploy docs to ${{ inputs.environment }}
+          github-token: ${{ github.token }}
+
       - name: Build and deploy with the Netlify CLI
+        if: steps.superseded.outputs.superseded != 'true'
         working-directory: apps/docs
         env:
           SITE_ID: ${{ steps.site.outputs.site_id }}
-          MESSAGE: ${{ github.workflow }} ${{ inputs.tag || github.event.workflow_run.head_sha || github.sha }}
+          MESSAGE: ${{ github.workflow }} ${{ inputs.tag || github.sha }}
         run: |
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
             --prod --context production \
             --site "$SITE_ID" --message "$MESSAGE"
 
+      # The plan of the next push to `main` diffs docs against this commit. A tag
+      # dispatch publishes some other commit, so it leaves the record alone.
+      - name: Record this staging deploy
+        if: inputs.environment == 'staging' && inputs.tag == '' && steps.superseded.outputs.superseded != 'true'
+        uses: ./.github/actions/staging-deploy-history
+        with:
+          mode: record
+          app: docs
+
       - name: Check the site answers
+        if: steps.superseded.outputs.superseded != 'true'
         env:
           URL: ${{ steps.site.outputs.url }}
         run: curl --fail --silent --show-error --location --retry 5 --retry-delay 10 --output /dev/null "$URL"

@@ -1,7 +1,8 @@
 /**
  * The workspace tag vocabulary. Tags drive the release train (publishable set,
- * bundle eligibility, license partition), so the allowed values live in one
- * place that the `validate-project-tags` gate and the eslint boundary
+ * bundle eligibility, license partition) and the staging deploys
+ * (`deploy:staging`, which `ci.yml`'s plan selects), so the allowed values live
+ * in one place that the `validate-project-tags` gate and the eslint boundary
  * constraints both read.
  *
  * @public
@@ -11,5 +12,6 @@ export const projectTagVocabulary = {
   scope: ['shared', 'api', 'ui', 'example'],
   host: ['darwin-arm64'],
   release: ['app'],
+  deploy: ['staging'],
   layer: ['feature', 'ui', 'data-access', 'util'],
 } as const;

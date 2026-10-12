@@ -4,9 +4,11 @@
 #
 # That site is Git-linked in tau-cloud (`marketing-review.tf`), but its Git
 # builds stopped after the 2026-10-05 Netlify credit outage and it kept serving
-# an older build. This workflow publishes the exact commit a green `CI` push run
-# on `main` passed, so staging marketing tracks `main` either way. The site sets
-# `prevent_non_git_prod_deploys = false`, which allows CLI production deploys.
+# an older build. `ci.yml` → `deploy-www-staging` calls this workflow on a push
+# to `main` that affects `www` since its last staging deploy, once the same
+# checks as the staging UI pass, so staging marketing tracks `main` either way.
+# The site sets `prevent_non_git_prod_deploys = false`, which allows CLI
+# production deploys.
 #
 # The build matches `apps/www/netlify.toml`: launch metadata on, canonical
 # origin https://tau.new.
@@ -16,21 +18,17 @@
 name: Deploy marketing review site to Netlify
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
+  workflow_call:
   workflow_dispatch:
 
+# `actions: read` lets the deploy see whether a newer run already deployed.
 permissions:
   contents: read
+  actions: read
 
 jobs:
   deploy:
     name: Deploy marketing review site
-    if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: staging
@@ -49,12 +47,9 @@ jobs:
             exit 1
           fi
 
-      # A workflow_run event runs on the default branch's head; deploy the exact
-      # commit CI passed instead.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
 
       - name: Setup Nx Environment
@@ -68,7 +63,17 @@ jobs:
             --data "{\"site_id\": \"$SITE_ID\", \"per_page\": 10}" |
             jq -r '.[] | [.created_at, .state, .context, .branch, (.commit_ref // "-"), (.error_message // "-")] | @tsv'
 
+      # Each push to `main` runs on its own, so an older run can reach this queue
+      # after a newer one has deployed; it must not put its commit back.
+      - name: Skip a staging deploy a newer commit has superseded
+        id: superseded
+        uses: ./.github/actions/staging-deploy-superseded
+        with:
+          job-name: Deploy marketing review site
+          github-token: ${{ github.token }}
+
       - name: Build the marketing site
+        if: steps.superseded.outputs.superseded != 'true'
         env:
           WWW_LAUNCH: 'true'
           WWW_ORIGIN: https://tau.new
@@ -77,13 +82,23 @@ jobs:
       # From the repository root the CLI finds every workspace package and stops
       # unless `--filter` names the one being deployed.
       - name: Deploy with the Netlify CLI
+        if: steps.superseded.outputs.superseded != 'true'
         env:
-          MESSAGE: ${{ github.workflow }} ${{ github.event.workflow_run.head_sha || github.sha }}
+          MESSAGE: ${{ github.workflow }} ${{ github.sha }}
         run: |
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
             --prod --no-build --filter @taucad/www \
             --dir "$GITHUB_WORKSPACE/apps/www/dist" \
             --site "$SITE_ID" --message "$MESSAGE"
 
+      # The plan of the next push to `main` diffs `www` against this commit.
+      - name: Record this staging deploy
+        if: steps.superseded.outputs.superseded != 'true'
+        uses: ./.github/actions/staging-deploy-history
+        with:
+          mode: record
+          app: www
+
       - name: Check the site answers
+        if: steps.superseded.outputs.superseded != 'true'
         run: curl --fail --silent --show-error --location --retry 5 --retry-delay 10 --output /dev/null "$URL"

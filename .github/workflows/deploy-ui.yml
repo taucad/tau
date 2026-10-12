@@ -7,8 +7,9 @@
 # reads `apps/ui/netlify.toml` and the site's environment variables as a
 # Netlify Git build did, and publishes the result.
 #
-#   - staging (taucad.dev): `ci.yml` → `deploy-ui-staging` on every push to
-#     `main` that affects the UI, using this run's `geospec-ci-*` artifact.
+#   - staging (taucad.dev): `ci.yml` → `deploy-ui-staging` on a push to `main`
+#     that affects the UI since its last staging deploy, using this run's
+#     GeoSpec products.
 #   - production (tau.new): `release-build.yml` calls this workflow in a `ui@x.y.z`
 #     release's own run, and `deploy-production.yml` dispatches it at the tag
 #     for a rollback or redeploy. Either way it uses the artifact of the `ci.yml`
@@ -211,6 +212,14 @@ jobs:
             echo "::error::Netlify refused the deploy. If it said Forbidden: check the TauCAD team's credits (Netlify > Usage & billing; production deploys pause when they run out), then that netlify_auth_token_$ENVIRONMENT on tau-cloud's tau-repo HCP workspace is a live token with access to this site."
             exit 1
           }
+
+      # The plan of the next push to `main` diffs the UI against this commit.
+      - name: Record this staging deploy
+        if: inputs.environment == 'staging' && steps.superseded.outputs.superseded != 'true'
+        uses: ./.github/actions/staging-deploy-history
+        with:
+          mode: record
+          app: ui
 
       - name: Check the site answers
         if: steps.superseded.outputs.superseded != 'true'

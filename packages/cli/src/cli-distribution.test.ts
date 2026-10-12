@@ -1,13 +1,18 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { Worker as NodeWorker } from 'node:worker_threads';
+import type { WorkerOptions } from 'node:worker_threads';
 import { NodeIO } from '@gltf-transform/core';
 import { getBounds } from '@gltf-transform/functions';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
 
 const execFileAsync = promisify(execFile);
 
@@ -16,6 +21,7 @@ const repoRoot = resolve(here, '../../..');
 const cliBinPath = resolve(repoRoot, 'packages/cli/dist/bin/tau.mjs');
 const hostRuntimeChildPath = resolve(repoRoot, 'packages/cli/dist/bin/host-runtime-child.mjs');
 const computeStoreWorkerPath = resolve(repoRoot, 'packages/cli/dist/bin/compute-store-worker.mjs');
+const runtimeWorkerPath = resolve(repoRoot, 'packages/cli/dist/bin/runtime-worker.mjs');
 const birdhouse = resolve(repoRoot, 'libs/tau-examples/src/kernels/replicad/birdhouse/main.ts');
 const openrscadKitchenSink = resolve(repoRoot, 'libs/tau-examples/src/kernels/openscad/kitchen-sink/main.scad');
 const picovoxelHelloWorld = resolve(repoRoot, 'libs/tau-examples/src/kernels/picovoxel/hello-world/main.ts');
@@ -29,6 +35,17 @@ const picogkNativeEngine =
   (JSON.parse(readFileSync(picogkManifest, 'utf8')) as { resourceFiles: Array<{ path: string }> }).resourceFiles.some(
     ({ path }) => /^picogk\.\d/u.test(path),
   );
+
+/**
+ * The built entry keeps `@taucad/*` external, and in this workspace those
+ * packages export TypeScript source, so the thread needs a TypeScript loader
+ * for its dependencies, as `runCli` gives the built binary one.
+ */
+class TsxWorker extends NodeWorker {
+  public constructor(url: string | URL, options?: WorkerOptions) {
+    super(url, { ...options, execArgv: ['--import', 'tsx'] });
+  }
+}
 
 const gltfMagicBytes = 0x46_54_6c_67;
 const zipLocalFileHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
@@ -145,6 +162,40 @@ describe('tau CLI dist (real binary)', () => {
     expect(childStat.isFile()).toBe(true);
     expect(workerStat.isFile()).toBe(true);
   });
+
+  it('should ship a runtime worker entry that hosts the CLI runtime from workerData', async () => {
+    /* One realm per project (kernel-realm-shared-state blueprint, WP-B3): the
+     * coming `tau mcp` worker client starts this entry once per project. Tau Host
+     * does not use it; it starts one runtime child process per root instead. */
+    const workerStat = await stat(runtimeWorkerPath);
+    expect(workerStat.isFile()).toBe(true);
+    const project = await mkdtemp(join(workspace, 'runtime-worker-'));
+    await writeFile(
+      join(project, 'main.ts'),
+      "import { makeBaseBox } from 'replicad';\nexport default () => makeBaseBox(10, 20, 30);\n",
+    );
+    const client = createRuntimeClient({
+      transport: nodeWorkerTransport({
+        url: pathToFileURL(runtimeWorkerPath),
+        workerData: { projectRoot: project, plugin: [] },
+        fileSystem: fromNodeFs(project),
+        workerCtor: TsxWorker,
+      }),
+    });
+    const document = client.open({ source: { path: 'main.ts' }, watch: false });
+    try {
+      const outcome = await document.view().rendering();
+
+      expect(outcome.superseded).toBe(false);
+      if (outcome.superseded) {
+        throw new Error('The only render in this test must not be superseded.');
+      }
+      expect(outcome.rendering.success, JSON.stringify(outcome.rendering.issues)).toBe(true);
+    } finally {
+      document.close();
+      await client.shutdown();
+    }
+  }, 120_000);
 
   it('should require explicit trust before starting the Tau Host daemon', async () => {
     const result = await runCli(['serve']);

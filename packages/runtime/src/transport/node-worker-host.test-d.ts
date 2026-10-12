@@ -8,6 +8,8 @@
  * @vitest-environment node
  */
 
+import { Worker as NodeWorker } from 'node:worker_threads';
+import type { WorkerOptions } from 'node:worker_threads';
 import { assertType, describe, it } from 'vitest';
 import type { RuntimeTransportHost } from '#transport/runtime-transport.types.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
@@ -34,5 +36,27 @@ describe('nodeWorkerHost — type conformance (R2)', () => {
     nodeWorkerTransport({ url: new URL('runtime.worker.ts', import.meta.url) });
     // @ts-expect-error The consuming application owns Node worker entry resolution.
     nodeWorkerTransport({});
+  });
+
+  it('accepts structured-cloneable workerData and rejects a function', () => {
+    const url = new URL('runtime.worker.ts', import.meta.url);
+    nodeWorkerTransport({ url, workerData: { projectRoot: '/projects/a', plugin: ['@taucad/replicad'], depth: 2 } });
+    nodeWorkerTransport({ url, workerData: 'project-a' });
+    // @ts-expect-error A function cannot cross the structured-clone boundary into the worker.
+    nodeWorkerTransport({ url, workerData: () => 1 });
+    // @ts-expect-error A nested function cannot cross the structured-clone boundary either.
+    nodeWorkerTransport({ url, workerData: { onReady: () => undefined } });
+  });
+
+  it('types the workerCtor seam as a Worker constructor that receives the worker options', () => {
+    const url = new URL('runtime.worker.ts', import.meta.url);
+    class TsxWorker extends NodeWorker {
+      public constructor(workerUrl: string | URL, options?: WorkerOptions) {
+        super(workerUrl, { ...options, execArgv: ['--import', 'tsx'] });
+      }
+    }
+    nodeWorkerTransport({ url, workerCtor: TsxWorker, workerData: { projectRoot: '/projects/a' } });
+    // @ts-expect-error The seam is a constructor, not a factory function.
+    nodeWorkerTransport({ url, workerCtor: () => new NodeWorker(url) });
   });
 });

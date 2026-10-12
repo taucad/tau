@@ -138,9 +138,9 @@ export type HostDaemonEvent =
         /* Another Tau app holds the per-user machine store's writer lock, so
          * this host serves without machines rather than exiting. */
         | 'MACHINE_STORE_OWNED_ELSEWHERE'
-        /* Retriable, never fatal: the compute child backs the relay sessions and
+        /* Retriable, never fatal: runtime children back the relay sessions and
          * the geometry tools, and nothing else. The agent channel and its file
-         * tools keep serving while the loop retries the child. */
+         * tools keep serving while the loop retries a child. */
         | 'RUNTIME_CHILD_FAILED'
         /* The turn ran and is durable in its own log; only its revision is
          * missing (V17). Retriable in the sense that the next turn records. */
@@ -482,9 +482,11 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   const shutdown = new AbortController();
   const sessions = new Map<string, ActiveSession>();
   let controlSocket: WebSocket | undefined;
-  let runtimeChild: RuntimeChildHandle | undefined;
-  let runtimeChildStart: Promise<RuntimeChildHandle> | undefined;
-  let childObserver: Promise<void> | undefined;
+  /* One sandboxed runtime child per agent root and per relay session (operator ruling Q8): roots and sessions never
+   * share a realm, and a child that exits or hangs costs only its own. */
+  const runtimeChildren = new Set<RuntimeChildHandle>();
+  /* What the control `ready` frame advertises: the runtime version of the last child that started. */
+  let runtimeVersion: string | undefined;
   let jobWorker: HostJobWorkerHandle | undefined;
   let jobWorkerObserver: Promise<void> | undefined;
   let isClosing = false;
@@ -569,57 +571,72 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     return composeView({ filesystem: checkout }, { consumer: 'agent', policy: tauPathPolicy });
   };
 
-  const ensureRuntimeChild = async (): Promise<RuntimeChildHandle> => {
-    if (runtimeChild) {
-      return runtimeChild;
-    }
-    const pending = runtimeChildStart ?? startRuntimeChild(options.runtimeHost);
-    runtimeChildStart = pending;
+  /**
+   * Stop a child; one that refuses is gone or killed by its supervisor, and its exit is observed through `closed`.
+   *
+   * @param child - The child to stop.
+   */
+  const closeChild = async (child: RuntimeChildHandle): Promise<void> => {
     try {
-      const child = await pending;
-      // oxlint-disable-next-line typescript/no-unnecessary-condition -- a concurrent waiter can assign the shared child while this await is suspended.
-      if (!runtimeChild) {
-        runtimeChild = child;
-        zooCredential?.attach(child);
-        childObserver = (async () => {
-          await child.closed;
-          if (runtimeChild === child) {
-            runtimeChild = undefined;
-            /* The geometry tools' client is bound to *this* child's loopback port.
-             * Leaving it memoized outlives its child: the next child listens on a
-             * new port while every tool keeps dialling the dead one, so a render
-             * fails with a transport error that names nothing instead of the
-             * supervisor's real reason. */
-            // async-iife: bootstrap -- `stopAgent` awaits these closes through `agentRuntimes.closeAll`.
-            void (async (): Promise<void> => {
-              try {
-                await agentRuntimes.closeAll();
-              } catch (error) {
-                agentRuntimeCloseFailures.push(error);
-              }
-            })();
-            closeSessions('CHILD_EXIT');
-          }
-        })();
-      }
-      return child;
-    } finally {
-      if (runtimeChildStart === pending) {
-        runtimeChildStart = undefined;
-      }
+      await child.close();
+    } catch {
+      /* A child that refuses to close is already gone or was killed; its exit settles `closed`. */
     }
   };
 
   /**
-   * The geometry tools' runtime client, one per root a turn works in: the child process is shared, but a candidate
-   * turn works in its own checkout (V19), so each root needs its own client over the files that turn writes. A client
-   * a wire failure terminated is replaced on its next use.
+   * Start a runtime child for one agent root or relay session. Its owner closes it; daemon release closes any left.
+   *
+   * @returns A ready child that has the latest Zoo credential and keeps receiving it until it exits.
    */
-  const agentRuntimes = keyedResource<string, ReturnType<typeof createRuntimeClient>>(
+  const startChild = async (): Promise<RuntimeChildHandle> => {
+    const child = await startRuntimeChild(options.runtimeHost);
+    runtimeVersion = child.runtimeVersion;
+    runtimeChildren.add(child);
+    const detach = zooCredential?.attach(child);
+    // async-iife: bootstrap -- bookkeeping for the child's own exit; nothing awaits it.
+    void (async (): Promise<void> => {
+      await child.closed;
+      runtimeChildren.delete(child);
+      detach?.();
+    })();
+    /* A child that became ready after the daemon released its children would outlive it. */
+    if (shutdown.signal.aborted || closeResult !== undefined) {
+      await closeChild(child);
+      throw new Error('Tau Host is stopping.');
+    }
+    return child;
+  };
+
+  /**
+   * The runtime version the control `ready` frame carries. A child is started to learn it once, so a child that
+   * cannot start still keeps the daemon off the relay with a retriable warning.
+   *
+   * @returns The runtime children's version.
+   */
+  const ensureRuntimeVersion = async (): Promise<string> => {
+    if (runtimeVersion !== undefined) {
+      return runtimeVersion;
+    }
+    const probe = await startChild();
+    await closeChild(probe);
+    return probe.runtimeVersion;
+  };
+
+  /**
+   * The geometry tools' runtime client, one per root a turn works in, each over its own runtime child: a candidate
+   * turn works in its own checkout (V19), so each root needs its own client over the files that turn writes, and its
+   * own realm. A client that a wire failure or its child's exit terminated is replaced, with a new child, on its next
+   * use; closing a root's client closes its child.
+   */
+  const agentRuntimes = keyedResource<
+    string,
+    { readonly child: RuntimeChildHandle; readonly client: ReturnType<typeof createRuntimeClient> }
+  >(
     async (workspaceRoot) => {
       let child: RuntimeChildHandle;
       try {
-        child = await ensureRuntimeChild();
+        child = await startChild();
       } catch (error) {
         /* The geometry tools' typed refusal, not a bare supervisor error: a
          * daemon whose child is down still answers every file tool. The failed
@@ -629,7 +646,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
           { code: 'RUNTIME_UNAVAILABLE' },
         );
       }
-      return createRuntimeClient({
+      const client = createRuntimeClient({
         transport: webSocketTransport({
           url: child.url,
           /* The runtime child executes project code the agent wrote, so it reads
@@ -646,9 +663,29 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
             : {}),
         }),
       });
+      /* The client is bound to this child's port: once the child is gone, its next use gets a new child. */
+      // async-iife: bootstrap -- the child's exit only retires its client.
+      void (async (): Promise<void> => {
+        await child.closed;
+        client.terminate();
+      })();
+      return { child, client };
     },
-    async (client) => client.shutdown(),
-    (client) => client.lifecycleState !== 'terminated',
+    async ({ child, client }) => {
+      try {
+        await client.shutdown();
+      } finally {
+        await closeChild(child);
+      }
+    },
+    ({ child, client }) => {
+      if (client.lifecycleState !== 'terminated') {
+        return true;
+      }
+      /* Evicted without a close: a client the wire terminated must not leave its child running. */
+      void closeChild(child);
+      return false;
+    },
   );
 
   /**
@@ -856,7 +893,10 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       },
       /* Per root, not per host: a candidate turn's kernel must read the tree
        * that turn is writing, which is its checkout and not the project. */
-      runtimeClient: async (root) => agentRuntimes.get(root),
+      runtimeClient: async (root) => {
+        const { client } = await agentRuntimes.get(root);
+        return client;
+      },
       /*
        * Where this project's Tau Cloud repository is (C67, P51).
        *
@@ -1160,12 +1200,13 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     emit({ type: 'session', sessionId: offer.sessionId, state: 'connecting' });
     let child: RuntimeChildHandle;
     try {
-      child = await ensureRuntimeChild();
+      child = await startChild();
     } catch {
       rejectOffer(offer, 'CHILD_UNAVAILABLE');
       return;
     }
     if (child.runtimeVersion !== offer.runtimeVersion) {
+      void closeChild(child);
       rejectOffer(offer, 'VERSION_MISMATCH');
       return;
     }
@@ -1174,6 +1215,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     let fileSystemSplice: FrameSpliceHandle | undefined;
     let agentSplice: FrameSpliceHandle | undefined;
     let expiryTimer: NodeJS.Timeout | undefined;
+    let sessionClosed: Promise<void> | undefined;
     try {
       const publicFileSystem = authorizedSocket(
         assertRelayRoute(offer.fileSystemUrl, options.relayUrl),
@@ -1226,7 +1268,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
           splice.close();
         }
       };
-      const sessionClosed = (async (): Promise<void> => {
+      sessionClosed = (async (): Promise<void> => {
         const closures = splices.map(async (splice) => {
           const result = await splice.closed;
           /* A revoked route is final for the session: its sibling routes would
@@ -1268,6 +1310,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
           state: 'disconnected',
           code: closeCode ?? (results.every((result) => isPeerlessReap(result)) ? 'ROUTE_UNUSED' : 'RELAY_CLOSED'),
         });
+        /* The session's child serves nobody else. */
+        await closeChild(child);
       })();
       const session: ActiveSession = {
         close: closeSession,
@@ -1275,6 +1319,13 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         isDraining: () => isDraining,
       };
       sessions.set(offer.sessionId, session);
+      // async-iife: bootstrap -- a child exit ends only the session it served.
+      void (async (): Promise<void> => {
+        await child.closed;
+        if (!session.isDraining()) {
+          closeSession('CHILD_EXIT');
+        }
+      })();
       /* Bounds the *unclaimed* offer: a splice whose sockets never finish
        * opening must not park them for ever. It is cleared the moment the
        * session is accepted, because from then on the API refreshes the
@@ -1304,6 +1355,11 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       fileSystemSplice?.close();
       agentSplice?.close();
       sessions.delete(offer.sessionId);
+      /* A started session closes its own child once it has reported why it ended; closing it here first would
+       * read as `CHILD_EXIT`. */
+      if (sessionClosed === undefined) {
+        void closeChild(child);
+      }
       rejectOffer(offer, 'CHILD_UNAVAILABLE');
     }
   };
@@ -1328,7 +1384,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     await openSession(parsed.data);
   };
 
-  const runControlConnection = async (credential: HostCredential, child: RuntimeChildHandle): Promise<number> => {
+  const runControlConnection = async (credential: HostCredential, version: string): Promise<number> => {
     /*
      * `close()` closes whatever `controlSocket` holds *at the instant it
      * aborts*, so a connection dialled after that instant is one nothing ever
@@ -1337,7 +1393,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
      * thing that records what a served project changed, never attempted (C74).
      *
      * The loop re-checks the signal only at its top, and both `ensureJobWorker`
-     * and `ensureRuntimeChild` await between that check and this call, so the
+     * and `ensureRuntimeVersion` await between that check and this call, so the
      * abort lands inside that window whenever a caller closes a daemon shortly
      * after `ready`. Everything from here to `controlSocket = socket` is
      * synchronous, so this guard and `close()` cannot interleave.
@@ -1408,7 +1464,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       v: 1,
       type: 'ready',
       deviceId: credential.deviceId,
-      runtimeVersion: child.runtimeVersion,
+      runtimeVersion: version,
       capacity: maxSessions,
       ...(agentCapability ? { capabilities: { agent: agentCapability } } : {}),
     });
@@ -1471,26 +1527,30 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       // oxlint-disable-next-line no-await-in-loop -- the credential-bound job worker must be ready before relay admission.
       await ensureJobWorker(hostCredential);
       /* The control `ready` frame carries `runtimeVersion`, so a control
-       * connection is only attempted with the child up. A child that will not
-       * start is a retriable warning: relay offers are rejected
+       * connection is only attempted once a child has started. A child that will
+       * not start is a retriable warning: relay offers are rejected
        * `CHILD_UNAVAILABLE` and the geometry tools answer `RUNTIME_UNAVAILABLE`,
        * while the agent channel and its file tools keep serving. */
-      let child: RuntimeChildHandle | undefined;
+      let version: string | undefined;
       try {
         // oxlint-disable-next-line no-await-in-loop -- reconnect attempts are deliberately sequential.
-        child = await ensureRuntimeChild();
+        version = await ensureRuntimeVersion();
       } catch (error) {
-        emit({
-          type: 'warning',
-          code: 'RUNTIME_CHILD_FAILED',
-          message: `Tau Host runtime child could not start; retrying: ${error instanceof Error ? error.message : String(error)}`,
-        });
+        /* A start that the daemon's own close interrupted is not a failure to report. */
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- close can abort while ensureRuntimeVersion awaits.
+        if (!shutdown.signal.aborted) {
+          emit({
+            type: 'warning',
+            code: 'RUNTIME_CHILD_FAILED',
+            message: `Tau Host runtime child could not start; retrying: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
       }
       try {
-        // oxlint-disable-next-line typescript/no-unnecessary-condition -- close can abort while ensureRuntimeChild awaits.
-        if (child && !shutdown.signal.aborted) {
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- close can abort while ensureRuntimeVersion awaits.
+        if (version !== undefined && !shutdown.signal.aborted) {
           // oxlint-disable-next-line no-await-in-loop -- one control connection owns the current attempt.
-          const lived = await runControlConnection(hostCredential, child);
+          const lived = await runControlConnection(hostCredential, version);
           if (lived >= stableControlConnection) {
             reconnectAttempt = 0;
           }
@@ -1553,8 +1613,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     await settle(async () => stopJobWorker());
     await settle(async () => jobWorkerObserver);
     zooCredential?.dispose();
-    await settle(async () => runtimeChild?.close());
-    await settle(async () => childObserver);
+    await Promise.all([...runtimeChildren].map(async (child) => closeChild(child)));
     if (failures.length > 0) {
       const aggregate = new AggregateError(failures, 'Tau Host shutdown did not release every accepted resource.');
       ready.reject(aggregate);

@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createZooProxyChildCredential } from '#zoo-proxy-child.js';
 
 const proxyUrl = 'wss://api.example.test/v1/kernels/zoo';
+/** The Zoo token source's default refresh interval, in milliseconds. */
+const refreshInterval = 10 * 60_000;
 
 const minting = (...tokens: string[]) =>
   vi.fn(
@@ -39,6 +41,34 @@ describe('createZooProxyChildCredential', () => {
       url: proxyUrl,
       token: 'zt1.first',
     });
+    credential.dispose();
+  });
+
+  it('sends every refresh to each attached child until it detaches', async () => {
+    const credential = createZooProxyChildCredential({
+      zooProxy: { url: proxyUrl, apiUrl: 'https://api.example.test', sessionToken: 'session-1' },
+      fetch: minting('zt1.first', 'zt1.second', 'zt1.third'),
+      onWarning: vi.fn(),
+    });
+    const first = { post: vi.fn() };
+    const second = { post: vi.fn() };
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const detachFirst = credential.attach(first);
+      credential.attach(second);
+      await credential.start();
+      /* The source refreshes on its own interval. */
+      await vi.advanceTimersByTimeAsync(refreshInterval);
+      detachFirst();
+      await vi.advanceTimersByTimeAsync(refreshInterval);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const tokens = (receiver: { post: ReturnType<typeof vi.fn> }) =>
+      receiver.post.mock.calls.map(([frame]) => (frame as { token?: string }).token);
+    expect(tokens(first)).toEqual(['zt1.first', 'zt1.second']);
+    expect(tokens(second)).toEqual(['zt1.first', 'zt1.second', 'zt1.third']);
     credential.dispose();
   });
 

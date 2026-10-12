@@ -25,7 +25,7 @@ on:
 permissions:
   contents: read
 
-# A cancelled run can stop between deleting a rule and re-creating its group.
+# Queue rather than cancel, so every `main` change is synced in order.
 concurrency:
   group: grafana-sync
   cancel-in-progress: false

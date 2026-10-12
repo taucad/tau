@@ -56,9 +56,9 @@ const handleStart = async (message) => {
           "const { parentPort } = require('node:worker_threads'); try { require('node:fs').readFileSync('/etc/hosts'); parentPort.postMessage(false); } catch (error) { parentPort.postMessage(error.code === 'ERR_ACCESS_DENIED'); }",
           { eval: true },
         );
-        const [workerDenied] = await once(worker, 'message');
+        const answer = await once(worker, 'message');
         await worker.terminate();
-        return workerDenied === true;
+        return answer[0] === true;
       } catch {
         return false;
       }

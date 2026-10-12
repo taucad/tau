@@ -142,6 +142,9 @@ export type HostDaemonEvent =
          * the geometry tools, and nothing else. The agent channel and its file
          * tools keep serving while the loop retries a child. */
         | 'RUNTIME_CHILD_FAILED'
+        /* Retriable, never fatal: the relay could not pair this host yet. The
+         * agent channel keeps serving unpaired while the daemon retries. */
+        | 'PAIRING_FAILED'
         /* The turn ran and is durable in its own log; only its revision is
          * missing (V17). Retriable in the sense that the next turn records. */
         | 'REVISION_NOT_RECORDED'
@@ -1536,7 +1539,26 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       if (options.pair === false) {
         throw new HostAuthenticationError('Tau Host device credential was revoked; a provisioned host does not pair.');
       }
-      return pairDevice(options.relayUrl, shutdown.signal, emit);
+      /* Retriable, never fatal, like the relay below it: pairing is downstream
+       * of the agent channel, so a relay that cannot pair yet must not close a
+       * channel this daemon already reported ready. */
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- pairing attempts are deliberately sequential.
+          return await pairDevice(options.relayUrl, shutdown.signal, emit);
+        } catch (error) {
+          if (shutdown.signal.aborted) {
+            throw error;
+          }
+          emit({
+            type: 'warning',
+            code: 'PAIRING_FAILED',
+            message: `${error instanceof Error ? error.message : String(error)} Retrying pairing with ${options.relayUrl.origin}.`,
+          });
+        }
+        // oxlint-disable-next-line no-await-in-loop -- backoff orders and bounds pairing attempts.
+        await delay(Math.min(1000 * 2 ** attempt, reconnectDelayMaximum), undefined, { signal: shutdown.signal });
+      }
     };
     let hostCredential = (await readHostCredential()) ?? (await pair());
     pairedWith(hostCredential);

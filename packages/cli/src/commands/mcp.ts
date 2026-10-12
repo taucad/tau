@@ -5,12 +5,19 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { keyedResource, serveLocalHostMcp } from '@taucad/host';
 import { createHostToolRegistry } from '@taucad/host/agent-tools';
 import { systemSkillBundles } from '@taucad/skills/resources';
+import type { AnyRuntimeDefinition, RuntimeClient } from '@taucad/runtime';
 import { defineCommand } from 'citty';
 
 import type { RuntimeWorkerData } from '#runtime.worker.js';
 
 /** Milliseconds a stopping server waits for its kernels before it exits anyway. */
 const shutdownGrace = 5000;
+
+/**
+ * One project's client. Its thread composes the CLI runtime from `--plugin` and `--config` at run time, so the
+ * dynamic definition (`RuntimeClient`'s default) is the honest compile-time witness.
+ */
+export type ProjectRuntimeClient = RuntimeClient;
 
 /** Seconds one operation may run before its project's thread is replaced. */
 const defaultOperationTimeout = 600;
@@ -120,13 +127,13 @@ export const mcpCommand = defineCommand({
     /* One realm per project (kernel-realm-shared-state blueprint, I8): each
      * project's kernels run in their own thread, which loads every kernel
      * module there — never in this process, never before `initialize`. */
-    const openClient = async (projectPath: string) => {
+    const openClient = async (projectPath: string): Promise<ProjectRuntimeClient> => {
       const [{ createRuntimeClient }, { nodeWorkerTransport }, { fromNodeFs }] = await Promise.all([
         import('@taucad/runtime'),
         import('@taucad/runtime/transport/node'),
         import('@taucad/runtime/filesystem/node'),
       ]);
-      return createRuntimeClient({
+      return createRuntimeClient<AnyRuntimeDefinition>({
         transport: nodeWorkerTransport({
           url: new URL(
             import.meta.url.endsWith('.ts') ? '../runtime.worker.ts' : './runtime-worker.mjs',
@@ -143,7 +150,7 @@ export const mcpCommand = defineCommand({
       });
     };
     /* A client whose thread exited is terminated, and replaced on its project's next call. */
-    const clients = keyedResource<string, Awaited<ReturnType<typeof openClient>>>(
+    const clients = keyedResource<string, ProjectRuntimeClient>(
       openClient,
       async (client) => client.shutdown(),
       (client) => client.lifecycleState !== 'terminated',
@@ -167,7 +174,7 @@ export const mcpCommand = defineCommand({
         }, idleRelease).unref(),
       );
     };
-    const clientFor = async (projectPath: string): Promise<Awaited<ReturnType<typeof openClient>>> => {
+    const clientFor = async (projectPath: string): Promise<ProjectRuntimeClient> => {
       const [{ value, incarnation }, { isOperationTimeoutError }] = await Promise.all([
         clients.acquire(projectPath),
         import('@taucad/runtime'),

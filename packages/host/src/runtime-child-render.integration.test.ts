@@ -204,6 +204,7 @@ const startSourceDaemon = async (workspaceSource: string) => {
     credential: 'secret-credential-value-that-never-enters-a-url',
   });
   projectHostSpy.mockClear();
+  const childrenBefore = runtimeChildren.length;
   const daemon = startHostDaemon({
     /* Nothing listens: the agent channel and its runtime clients serve without a relay. */
     relayUrl: new URL('http://127.0.0.1:1'),
@@ -219,6 +220,15 @@ const startSourceDaemon = async (workspaceSource: string) => {
     },
   });
   await daemon.ready;
+  /* The run loop starts and closes a version-probe child after `ready`. Let it finish, so a case can name each
+   * root's child by the order its first use started it. */
+  await vi.waitFor(
+    () => {
+      expect(runtimeChildren.length).toBeGreaterThan(childrenBefore);
+    },
+    { timeout: 60_000 },
+  );
+  await runtimeChildren[childrenBefore]?.closed;
   const options = projectHostSpy.mock.calls.at(-1)?.[0];
   if (options === undefined) {
     throw new TypeError('Expected the daemon to open a project host.');

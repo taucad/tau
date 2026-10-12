@@ -30,7 +30,7 @@ Before editing a path, read every `AGENTS.md` from the repository root through t
 
 System, developer and current user instructions take precedence. [DESIGN.md](DESIGN.md) governs user-facing design. Applicable normative policies cannot be weakened by operational AGENTS files or skills. Local AGENTS narrow ancestor operation within their directory, consistently with those policies; skills implement that task contract. Resolve contradictions at the owning source.
 
-Every canonical AGENTS has an adjacent `CLAUDE.md` containing only `@AGENTS.md`. Shared skills live in [.agents/skills](.agents/skills); `.claude/skills` is a discovery alias. Native permissions, trust and tool availability remain host responsibilities.
+Every canonical AGENTS has an adjacent `CLAUDE.md` containing only `@AGENTS.md`. Shared skills live in [.agents/skills](.agents/skills); `.claude/skills` is a discovery alias. Native permissions, trust and tool availability are host responsibilities.
 
 ## Architecture and owners
 
@@ -51,7 +51,7 @@ Project configuration and package exports define Tau's current interfaces.
 - [libs](libs): Shared events/RPC authority, contracts, memory, telemetry, types and tooling
 - [tools](tools), [scripts](scripts), [.github](.github), [infra](infra): Generators/build tooling, maintenance/validation, CI/release and infrastructure
 
-Nothing under `packages/**` or `libs/**` depends on `apps/libs/**`. Query project configuration for names, exports and targets.
+Nothing under `packages/**` or `libs/**` depends on `apps/libs/**`. Query project configuration for names, exports, targets.
 
 ## Required policy routes
 
@@ -78,7 +78,7 @@ Read the owners for each touched concern:
 
 Use relevant shared skills and required helpers for authorized work. Model invocation is on by default; loading grants no publication, external messaging, destructive action or expanded scope.
 
-Use `create-research`, `create-charter`, `superplan`, `work-charter` and `update-agent-memory` for their workflows. Preserve approved plans and one coordinator-owned queue. Worker briefs name task/attempt IDs, exclusive paths, instructions, checks and evidence writers.
+Use `create-research`, `create-charter`, `superplan`, `work-charter`, `create-cloud-project` and `update-agent-memory` for their workflows. Preserve approved plans and one coordinator-owned queue. Worker briefs name task/attempt IDs, exclusive paths, instructions, checks and evidence writers.
 
 ## Repository and evidence boundaries
 

@@ -146,9 +146,9 @@ export default async function main() {
       const path = `round-${round}.ts`;
       // oxlint-disable-next-line no-await-in-loop -- each round races the two clients against each other.
       const [volumeA, volumeB] = await Promise.all([renderAndExport(clientA, path), renderAndExport(clientB, path)]);
-      // GLB is metres; each model is a centred cube plus a disjoint 1 mm cube.
-      expect(volumeA * 1e9, `client A ${path}`).toBeCloseTo((sizes.a + round) ** 3 + 1, 1);
-      expect(volumeB * 1e9, `client B ${path}`).toBeCloseTo((sizes.b + round) ** 3 + 1, 1);
+      // Each model is a centred cube plus a disjoint unit cube.
+      expect(volumeA, `client A ${path}`).toBeCloseTo((sizes.a + round) ** 3 + 1, 1);
+      expect(volumeB, `client B ${path}`).toBeCloseTo((sizes.b + round) ** 3 + 1, 1);
     }
   });
 });

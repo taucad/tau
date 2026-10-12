@@ -7,8 +7,8 @@ description: Guides Zoo KCL modeling in main.kcl with constrained sketch blocks,
 
 ## Workflow
 
-1. Author the assembly in `main.kcl`, beginning with `@settings(defaultLengthUnit = mm, kclVersion = 2.0)`.
-2. Write dimensions with unit suffixes (`10mm`, `90deg`); bare numbers take the default unit.
+1. Author the assembly in `main.kcl`, beginning with `@settings(defaultLengthUnit = mm, kclVersion = 3.0)`.
+2. Write dimensions with unit suffixes (`10mm`, `90deg`); always suffix angles. Imported files must declare the same KCL version as `main.kcl` or inherit it by omitting `kclVersion`.
 3. Draw each profile in a `sketch(on = XY) { … }` block (or `XZ`, `YZ`, `offsetPlane(XY, offset = 5mm)`, `faceOf(…)`): name every segment, then constrain it.
 4. Make a face with `region(segments = [s.first, s.second])` (two consecutive counter-clockwise segments, or one circle); inner loops become holes. Then `extrude`, `revolve`, `sweep` or `loft` it.
 5. Chain operations with `|>`; the piped value fills the `@` argument. Tag faces with `$name` (`tagEnd = $top`); a region's side faces are `region.tags.<segment>`.
@@ -26,7 +26,7 @@ KCL uses an assembly-only layout: keep library modules flat and import them from
 ## Canonical pattern
 
 ```kcl
-@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+@settings(defaultLengthUnit = mm, kclVersion = 3.0)
 
 width = 60mm
 depth = 40mm
@@ -175,14 +175,15 @@ sweep(
   path: Sketch | Helix | [Segment; 1+],
   sectional?: bool,
   tolerance?: number(Length),
-  relativeTo?: string,
   translateProfileToPath?: bool,
   orientProfilePerpendicular?: bool,
   tagStart?: TagDecl,
   tagEnd?: TagDecl,
   bodyType?: string,
-  version?: number(_),
 ): [Solid; 1+]
+
+// Get the shared edge between two faces
+getCommonEdge(faces: [TaggedFace; 2]): Edge
 ```
 
 ### std.types
@@ -325,7 +326,6 @@ subtract(
   @solids: [Solid; 1+],
   tools: [Solid],
   tolerance?: number(Length),
-  legacyMethod?: bool,
 ): [Solid]
 ```
 

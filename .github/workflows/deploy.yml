@@ -132,7 +132,18 @@ jobs:
           secrets: |
             nx_cloud_token=${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
 
+      # Each push to `main` runs on its own, so an older run can reach this queue
+      # after a newer one has deployed; it must not put its commit back.
+      - name: Skip a staging deploy a newer commit has superseded
+        id: superseded
+        if: inputs.environment == 'staging'
+        uses: ./.github/actions/staging-deploy-superseded
+        with:
+          job-name: Deploy ${{ inputs.app }} to ${{ inputs.environment }}
+          github-token: ${{ github.token }}
+
       - name: Deploy prebuilt image to Fly.io
+        if: steps.superseded.outputs.superseded != 'true'
         run: |
           echo "Deploying ${{ steps.targets.outputs.image }} to ${{ inputs.environment }}"
           flyctl deploy \
@@ -147,6 +158,7 @@ jobs:
       # `docs/research/staging-cors-coep-safari-rendering-audit.md` Finding
       # 11. Per user instruction this is post-deploy only — no daily cron.
       - name: Verify CORS reachability
+        if: steps.superseded.outputs.superseded != 'true'
         run: bash scripts/src/smoke-cors.sh
         env:
           API_URL: ${{ steps.targets.outputs.api_url }}

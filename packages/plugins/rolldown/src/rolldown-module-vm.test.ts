@@ -89,6 +89,41 @@ describe('native Rolldown lifecycle', () => {
     }
   });
 
+  it('binds a builtin global name only from its registry expression', async () => {
+    vi.stubGlobal('__rolldownBuiltinScopeA', { token: 'A' });
+    try {
+      const vm = await createRolldownModuleVm({
+        filesystem: fileSystem({
+          'main.ts': 'export const result = { scoped: scopedBuiltin.token, unbound: typeof unboundBuiltin };',
+        }),
+      });
+      vm.registerModule('scoped-builtin', {
+        version: '1.0.0',
+        code: 'export default globalThis.__rolldownBuiltinScopeA;',
+        globalName: 'scopedBuiltin',
+        registryExpression: 'globalThis.__rolldownBuiltinScopeA',
+      });
+      vm.registerModule('unbound-builtin', {
+        version: '1.0.0',
+        code: 'export default {};',
+        globalName: 'unboundBuiltin',
+      });
+
+      const bundled = await vm.bundle('main.ts');
+      expect(bundled.success).toBe(true);
+      // Rolldown may inline the banner binding, so assert what the bundle reads, not how it spells it.
+      expect(bundled.code).not.toContain('unboundBuiltin =');
+      expect(bundled.code).not.toContain('__KERNEL_MODULES__');
+      await expect(vm.execute<{ result: unknown }>(bundled.code)).resolves.toMatchObject({
+        success: true,
+        value: { result: { scoped: 'A', unbound: 'undefined' } },
+      });
+      vm.dispose();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('provides an actionable stable native capability error', () => {
     const error = new NativeRolldownCapabilityError(new Error('missing binding'));
     expect(error).toMatchObject({

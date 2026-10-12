@@ -3,7 +3,7 @@ title: 'Runtime API Policy'
 description: 'Naming and ownership rules for runtime consumer, plugin-author, transport, filesystem, and artifact APIs.'
 status: active
 created: '2026-07-20'
-updated: '2026-09-30'
+updated: '2026-10-12'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/runtime-architecture-policy.md
@@ -397,6 +397,36 @@ export default defineTauPlugin({
   meta: { name: '@taucad/image' },
   contributions: [imageTranscoder],
 });
+```
+
+### 11. Hold Realm-Shared Backends Through `services.realm`
+
+A kernel whose library binds its backend at module scope holds that backend through `services.realm` instead of creating one per `initialize`. Name the `group` after the backend and the `key` after its build, keep the hold in the kernel context, and release it in `onDispose`. Keep per-client state (tracers, compute-reuse scopes) in a per-kernel wrapper over the shared value.
+
+CORRECT:
+
+```typescript
+async initialize(options, services) {
+  const occt = await services.realm.hold({
+    group: 'replicad-occt',
+    key: `${variant}:${wasmUrl ?? ''}`,
+    create: async () => initOcct(wasmUrl, bindingsFactory),
+  });
+  return { occt, openCascade: wrapOcForExceptions(occt.value) };
+},
+async onDispose(context) {
+  context.occt.release();
+},
+```
+
+INCORRECT:
+
+```typescript
+async initialize() {
+  const oc = await initOcct(wasmUrl, bindingsFactory);
+  setOC(oc); // rebinds the library for every client in this realm
+  return { oc };
+},
 ```
 
 ## Anti-Patterns

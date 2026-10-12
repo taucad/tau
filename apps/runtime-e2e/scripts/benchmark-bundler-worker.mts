@@ -31,7 +31,12 @@ type BenchmarkVm = {
   >;
   registerModule(
     name: string,
-    module: { readonly code: string; readonly version: string; readonly globalName?: string },
+    module: {
+      readonly code: string;
+      readonly version: string;
+      readonly globalName?: string;
+      readonly registryExpression?: string;
+    },
   ): void;
   dispose(): void;
 };
@@ -134,10 +139,9 @@ const namedExports = Object.keys(replicad)
     return `const ${local} = __mod[${JSON.stringify(name)}]; export { ${local}${local === name ? '' : ` as ${name}`} };`;
   })
   .join('\n');
-const shim = `const __mod = globalThis.__KERNEL_MODULES__.get("replicad");\n${namedExports}\nexport default __mod;`;
-(globalThis as typeof globalThis & { __KERNEL_MODULES__: Map<string, unknown> }).__KERNEL_MODULES__ = new Map([
-  ['replicad', replicad],
-]);
+const replicadExpression = 'globalThis.__benchmarkReplicad';
+const shim = `const __mod = ${replicadExpression};\n${namedExports}\nexport default __mod;`;
+(globalThis as typeof globalThis & { __benchmarkReplicad: unknown }).__benchmarkReplicad = replicad;
 
 const initialized = await measure(async () => {
   const options = {
@@ -158,7 +162,12 @@ const initialized = await measure(async () => {
   return create({ ...options, sourceMaps: true });
 });
 const vm = initialized.value;
-vm.registerModule('replicad', { code: shim, version: 'benchmark', globalName: 'replicad' });
+vm.registerModule('replicad', {
+  code: shim,
+  version: 'benchmark',
+  globalName: 'replicad',
+  registryExpression: replicadExpression,
+});
 vm.registerModule('@taucad/replicad/annotations', {
   code: [
     "export const face = (select) => ({ kind: 'face', select });",

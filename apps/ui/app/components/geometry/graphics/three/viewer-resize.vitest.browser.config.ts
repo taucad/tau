@@ -31,6 +31,7 @@ export default defineConfig({
   },
   test: {
     include: [
+      'app/components/geometry/graphics/three/post-processing-antialias.browser.test.tsx',
       'app/components/geometry/graphics/three/viewer-resize.browser.test.tsx',
       'app/components/geometry/graphics/three/viewer-resize-continuation.browser.test.tsx',
     ],

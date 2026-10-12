@@ -1,6 +1,6 @@
 {
   "name": "@taucad/skills",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.1",
   "description": "Tau CAD agent skill bundles for replicad, JSCAD, Manifold, OpenCascade, build123d, PicoGK, OpenSCAD, KCL and GeoSpec",
   "type": "module",
   "sideEffects": false,

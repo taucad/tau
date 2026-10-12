@@ -30,6 +30,7 @@
 #include <GProp_GProps.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <Geom2dAdaptor_Curve.hxx>
+#include <Geom2d_BSplineCurve.hxx>
 #include <HeaderSection_FileSchema.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <Interface_Check.hxx>
@@ -2734,6 +2735,23 @@ bool boolean_debug_requested(std::string& message) {
   return true;
 }
 
+// Whether a torus face is a convex exterior blend: FORWARD (the surface
+// normal leaves the tube, so material fills it) and trimmed to the outer half
+// of the tube, V in [-pi/2, pi/2] where the radial distance is at least the
+// major radius. The span bound plus the midpoint keep an inner-half sweep
+// between two equator stations from passing.
+bool exterior_torus_blend(const TopoDS_Face& face) {
+  if (face.Orientation() != TopAbs_FORWARD) return false;
+  const BRepAdaptor_Surface surface(face);
+  const double v0 = surface.FirstVParameter();
+  const double v1 = surface.LastVParameter();
+  if (!std::isfinite(v0) || !std::isfinite(v1) || v1 <= v0) return false;
+  const double pi = std::acos(-1.0);
+  const double slack = 1e-9;
+  return v1 - v0 <= pi + slack && std::cos(v0) >= -slack &&
+         std::cos(v1) >= -slack && std::cos((v0 + v1) / 2.0) > 0.0;
+}
+
 bool build_circular_bores(
     const geospec_occt_document& document, size_t max_candidates,
     size_t retained_candidate_size, size_t retained_inventory_size,
@@ -2801,7 +2819,8 @@ bool build_circular_bores(
     candidate.public_face_ordinal = static_cast<uint32_t>(public_ordinal);
     candidate.private_query_face = view.query_index;
     candidate.disposition = GEOSPEC_OCCT_CIRCULAR_BORE_UNQUALIFIED;
-    if (surface.GetType() != GeomAbs_Cylinder) {
+    if (surface.GetType() != GeomAbs_Cylinder &&
+        surface.GetType() != GeomAbs_Torus) {
       candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_SURFACE;
       output.push_back(candidate);
       continue;
@@ -2864,6 +2883,21 @@ bool build_circular_bores(
     candidate.owning_solid_ordinal = static_cast<uint32_t>(owner_ordinal - 1);
     if (view.query_index == 0) {
       candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_AMBIGUOUS_ASSOCIATION;
+      output.push_back(candidate);
+      continue;
+    }
+    if (surface.GetType() == GeomAbs_Torus) {
+      // A torus is never a constant-radius bore, but it may bound one (an
+      // O-ring's eye, an hourglass bore), so it stays unknown unless it is
+      // a convex exterior blend: material inside the tube (FORWARD) and the
+      // whole trimmed sweep on the outer half of the tube, which is the rim
+      // fillet beside a bolt pattern.
+      if (exterior_torus_blend(view.shape)) {
+        candidate.disposition = GEOSPEC_OCCT_CIRCULAR_BORE_NON_MEMBER;
+        candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_EXTERIOR_BLEND;
+      } else {
+        candidate.reason = GEOSPEC_OCCT_CIRCULAR_BORE_UNSUPPORTED_SURFACE;
+      }
       output.push_back(candidate);
       continue;
     }
@@ -3529,7 +3563,9 @@ EdgeTreatmentDispositionData qualified_edge_treatment(
 }
 
 // Four straight pcurves prove the complete selected rectangle, including both
-// ends or both seam uses. Endpoint agreement alone is not a curved-trim proof.
+// ends or both seam uses; a B-spline pcurve counts as straight only when its
+// whole control polygon lies on the side. Endpoint agreement alone is not a
+// curved-trim proof.
 bool rectangular_edge_treatment_trim(
     const TopoDS_Face& face, const std::vector<EdgeTreatmentUseData>& uses,
     bool rails_on_u, double u_scale, double v_scale,
@@ -3544,8 +3580,16 @@ bool rectangular_edge_treatment_trim(
   unsigned sides = 0;
   for (const EdgeTreatmentUseData& use : uses) {
     BRepAdaptor_Curve2d trim(use.edge, face);
-    if (trim.GetType() != GeomAbs_Line ||
-        !std::isfinite(trim.FirstParameter()) ||
+    // STEP round trips often write a straight seam as a spline pcurve. It is
+    // admitted only when its whole control polygon lies on the matched side:
+    // weights are positive, so by the convex hull the whole trim does too.
+    opencascade::handle<Geom2d_BSplineCurve> spline;
+    if (trim.GetType() == GeomAbs_BSplineCurve) {
+      spline = trim.BSpline();
+    } else if (trim.GetType() != GeomAbs_Line) {
+      return false;
+    }
+    if (!std::isfinite(trim.FirstParameter()) ||
         !std::isfinite(trim.LastParameter()) ||
         trim.FirstParameter() >= trim.LastParameter()) return false;
     gp_Pnt2d a = trim.Value(trim.FirstParameter());
@@ -3576,6 +3620,17 @@ bool rectangular_edge_treatment_trim(
     }
     if (matched < 0 || (sides & (1u << matched))) return false;
     sides |= 1u << matched;
+    for (int pole = 1; !spline.IsNull() && pole <= spline->NbPoles(); ++pole) {
+      const gp_Pnt2d p = spline->Pole(pole);
+      const double off_side =
+          matched < 2
+              ? std::abs(p.X() - u[matched]) * u_scale +
+                    std::max({0.0, v[0] - p.Y(), p.Y() - v[1]}) * v_scale
+              : std::abs(p.Y() - v[matched - 2]) * v_scale +
+                    std::max({0.0, u[0] - p.X(), p.X() - u[1]}) * u_scale;
+      if (!std::isfinite(off_side)) return false;
+      residual = std::max(residual, off_side);
+    }
     const bool rail = use.value.role == GEOSPEC_OCCT_EDGE_TREATMENT_RAIL0 ||
                       use.value.role == GEOSPEC_OCCT_EDGE_TREATMENT_RAIL1;
     if (rail != ((matched < 2) == rails_on_u)) return false;
@@ -3839,8 +3894,47 @@ EdgeTreatmentDispositionData classify_planar_chamfer(
     return unqualified_edge_treatment(
         GEOSPEC_OCCT_EDGE_TREATMENT_OUTSIDE_MATERIAL_BRANCH);
   }
-  // The two straight ends must join matching axial stations of both rails.
-  // Together with the complete four-use wire this excludes tapered/crossed trims.
+  // A chamfer treats the sharp edge between two faces that outlive it: each
+  // support keeps at least as much face beyond its rail as the treatment
+  // removed in front of it. The flat crown between two equal chamfers also
+  // has planar supports meeting in a virtual ridge at equal offsets, so only
+  // the strips' depth separates it from a chamfer of that ridge. Vertices
+  // bound the depth from below, so a curved far edge can only refuse, never
+  // certify. A shallow support leaves the candidate unknown.
+  for (size_t index = 0; index < 2; ++index) {
+    const gp_Vec to_rail(sharp.Location(), rail_points[index]);
+    // The in-plane normal from the sharp line through the rail; its length
+    // is offsets[index] > limit, so it normalizes.
+    gp_Vec across = to_rail - gp_Vec(sharp_direction).Multiplied(
+                                  to_rail.Dot(gp_Vec(sharp_direction)));
+    if (across.SquareMagnitude() <= 0.0) {
+      return unqualified_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+    }
+    across.Normalize();
+    double depth = 0.0;
+    for (TopExp_Explorer vertex(uses[rails[index]].adjacent, TopAbs_VERTEX);
+         vertex.More(); vertex.Next()) {
+      const gp_Vec reach(sharp.Location(),
+                         BRep_Tool::Pnt(TopoDS::Vertex(vertex.Current())));
+      depth = std::max(depth, reach.Dot(across));
+    }
+    const double shortfall = std::max(0.0, 2.0 * offsets[index] - depth);
+    if (!append_residual(*certificate,
+                         GEOSPEC_OCCT_EDGE_TREATMENT_SUPPORT_DEPTH, shortfall,
+                         limit, 1.0)) {
+      return unqualified_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_DEGENERATE_SUPPORT);
+    }
+    if (shortfall > limit) {
+      return unqualified_edge_treatment(
+          GEOSPEC_OCCT_EDGE_TREATMENT_SHALLOW_SUPPORT);
+    }
+  }
+  // The two straight ends lie on the strip and, through the complete
+  // four-use wire, join the rails. They may be square run-outs or mitres
+  // against a neighbouring chamfer: the rails alone fix the metric, and
+  // tapered strips already fail the per-rail station residuals above.
   for (const EdgeTreatmentUseData& end_use : uses) {
     if (end_use.value.role != GEOSPEC_OCCT_EDGE_TREATMENT_END) continue;
     if (BRepAdaptor_Curve(end_use.edge).GetType() != GeomAbs_Line) {
@@ -3848,9 +3942,8 @@ EdgeTreatmentDispositionData classify_planar_chamfer(
     }
     const gp_Pnt a(end_use.value.start[0], end_use.value.start[1], end_use.value.start[2]);
     const gp_Pnt b(end_use.value.end[0], end_use.value.end[1], end_use.value.end[2]);
-    const double residual = std::max({surface_distance(view.shape, a),
-        surface_distance(view.shape, b),
-        std::abs(gp_Vec(a, b).Dot(gp_Vec(sharp_direction)))});
+    const double residual = std::max(surface_distance(view.shape, a),
+                                     surface_distance(view.shape, b));
     if (!append_residual(*certificate, GEOSPEC_OCCT_EDGE_TREATMENT_RAIL_STATION,
                          residual, end_use.maximum_tolerance, 1.0) ||
         residual > end_use.maximum_tolerance) {

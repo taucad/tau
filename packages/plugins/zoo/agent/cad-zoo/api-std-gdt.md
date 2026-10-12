@@ -113,7 +113,7 @@ gdt::straightness(
 //   fontSize: The model-space height to use for annotation text
 //   annotationName: Human-friendly name for this annotation in exports and model metadata
 // Example:
-//   @settings(kclVersion = 2.0)
+//   @settings(kclVersion = 3.0)
 //   
 //   blockSketch = sketch(on = XY) {
 //     edge1 = line(start = [var 0mm, var 0mm], end = [var 10mm, var 0mm])
@@ -160,7 +160,7 @@ gdt::circularity(
 //   fontSize: The model-space height to use for annotation text
 //   annotationName: Human-friendly name for this annotation in exports and model metadata
 // Example:
-//   @settings(kclVersion = 2.0)
+//   @settings(kclVersion = 3.0)
 //   
 //   cylinderSketch = sketch(on = XY) {
 //     perimeter = circle(start = [var 5mm, var 0mm], center = [var 0mm, var 0mm])
@@ -196,7 +196,7 @@ gdt::cylindricity(
 //   fontSize: The model-space height to use for annotation text
 //   annotationName: Human-friendly name for this annotation in exports and model metadata
 // Example:
-//   @settings(kclVersion = 2.0)
+//   @settings(kclVersion = 3.0)
 //   
 //   cylinderSketch = sketch(on = XY) {
 //     perimeter = circle(start = [var 5mm, var 0mm], center = [var 0mm, var 0mm])
@@ -232,7 +232,7 @@ gdt::concentricity(
 //   fontSize: The model-space height to use for annotation text
 //   annotationName: Human-friendly name for this annotation in exports and model metadata
 // Example:
-//   @settings(kclVersion = 2.0)
+//   @settings(kclVersion = 3.0)
 //   
 //   datumSketch = sketch(on = XY) {
 //     diameter = line(start = [var -6mm, var 0mm], end = [var 6mm, var 0mm])
@@ -282,7 +282,7 @@ gdt::symmetry(
 //   fontSize: The model-space height to use for annotation text
 //   annotationName: Human-friendly name for this annotation in exports and model metadata
 // Example:
-//   @settings(kclVersion = 2.0)
+//   @settings(kclVersion = 3.0)
 //   
 //   latchProfile = sketch(on = XZ) {
 //     bottom = line(start = [var -20mm, var -10mm], end = [var 20mm, var -10mm])
@@ -344,7 +344,7 @@ gdt::runout(
 //   fontSize: The model-space height to use for annotation text
 //   annotationName: Human-friendly name for this annotation in exports and model metadata
 // Example:
-//   @settings(kclVersion = 2.0)
+//   @settings(kclVersion = 3.0)
 //   
 //   annotationPlane = offsetPlane(XZ, offset = 24mm)
 //   
@@ -362,10 +362,10 @@ gdt::runout(
 //     tagEnd = $controlledFreeEnd
 //   )
 //   
-//   controlledUpperShoulderEdge = getCommonEdge(faces = [
+//   controlledUpperShoulderEdge = { sideFaces = [
 //     controlledShaft.sketch.tags.upperPerimeter,
 //     controlledShoulder
-//   ])
+//   ] }
 //   
 //   datumSketch = sketch(on = YZ) {
 //     perimeter = circle(start = [var 18mm, var 0mm], center = [var 0mm, var 0mm])
@@ -424,7 +424,7 @@ gdt::angularity(
 //   fontSize: The model-space height to use for annotation text
 //   annotationName: Human-friendly name for this annotation in exports and model metadata
 // Example:
-//   @settings(kclVersion = 2.0)
+//   @settings(kclVersion = 3.0)
 //   
 //   basicAngle = 30deg
 //   thickness = 3.5mm
@@ -515,7 +515,7 @@ gdt::perpendicularity(
 //   }
 //   
 //   block = extrude(region(segments = [blockProfile.edge1, blockProfile.edge2]), length = 4mm, tagEnd = $top)
-//   sideEdge = getCommonEdge(faces = [block.sketch.tags.edge2, top])
+//   sideEdge = { sideFaces = [block.sketch.tags.edge2, top] }
 //   gdt::perpendicularity(edges = [sideEdge], tolerance = 0.05mm, datums = ["A"], framePosition = [12mm, 8mm], framePlane = XZ)
 
 // Category: std.gdt
@@ -561,7 +561,7 @@ gdt::parallelism(
 //   }
 //   
 //   block = extrude(region(segments = [blockProfile.edge1, blockProfile.edge2]), length = 4mm, tagEnd = $top)
-//   sideEdge = getCommonEdge(faces = [block.sketch.tags.edge1, top])
+//   sideEdge = { sideFaces = [block.sketch.tags.edge1, top] }
 //   gdt::parallelism(edges = [sideEdge], tolerance = 0.05mm, datums = ["A"], framePosition = [12mm, 8mm], framePlane = XZ)
 
 // Category: std.gdt
@@ -607,7 +607,7 @@ gdt::position(
 //   }
 //   
 //   block = extrude(region(segments = [blockProfile.edge1, blockProfile.edge2]), length = 4mm, tagEnd = $top)
-//   sideEdge = getCommonEdge(faces = [block.sketch.tags.edge2, top])
+//   sideEdge = { sideFaces = [block.sketch.tags.edge2, top] }
 //   gdt::position(edges = [sideEdge], tolerance = 0.05mm, datums = ["A"], framePosition = [12mm, 8mm], framePlane = XZ)
 
 // Category: std.gdt
@@ -649,7 +649,7 @@ gdt::annotation(
 //   }
 //   
 //   block = extrude(region(segments = [blockProfile.edge1, blockProfile.edge2]), length = 4mm, tagEnd = $top)
-//   sideEdge = getCommonEdge(faces = [block.sketch.tags.edge1, top])
+//   sideEdge = { sideFaces = [block.sketch.tags.edge1, top] }
 //   gdt::annotation(edges = [sideEdge], annotation = "Deburr edge", framePosition = [12mm, 8mm], framePlane = XZ)
 
 // Category: std.gdt
@@ -669,7 +669,7 @@ gdt::note(
 //   fontSize: The model-space height to use for the note text
 //   annotationName: Human-friendly name for this annotation in exports and model metadata
 // Example:
-//   @settings(kclVersion = 2.0)
+//   @settings(kclVersion = 3.0)
 //   
 //   // A note on the default world (XY) plane.
 //   blockProfile = sketch(on = XY) {
@@ -717,7 +717,7 @@ gdt::distance(
 //   fontSize: The model-space height to use for annotation text
 //   annotationName: Human-friendly name for this annotation in exports and model metadata
 // Example:
-//   @settings(kclVersion = 2.0)
+//   @settings(kclVersion = 3.0)
 //   
 //   blockProfile = sketch(on = XY) {
 //     edge1 = line(start = [var 0mm, var 0mm], end = [var 10mm, var 0mm])
@@ -735,7 +735,7 @@ gdt::distance(
 //   }
 //   
 //   block = extrude(region(segments = [blockProfile.edge1, blockProfile.edge2]), length = 4mm, tagEnd = $top)
-//   lengthEdge = getCommonEdge(faces = [block.sketch.tags.edge1, top])
+//   lengthEdge = { sideFaces = [block.sketch.tags.edge1, top] }
 //   gdt::distance(edges = [lengthEdge], tolerance = 0.05mm, framePosition = [12mm, 8mm], framePlane = XZ)
 
 // Category: std.gdt
@@ -813,7 +813,7 @@ gdt::profileLine(
 //   }
 //   
 //   block = extrude(region(segments = [blockProfile.edge1, blockProfile.edge2]), length = 4mm, tagEnd = $top)
-//   profileEdge = getCommonEdge(faces = [block.sketch.tags.edge1, top])
+//   profileEdge = { sideFaces = [block.sketch.tags.edge1, top] }
 //   gdt::profileLine(edges = [profileEdge], tolerance = 0.05mm, framePosition = [12mm, 8mm], framePlane = XZ)
 
 // Category: std.gdt

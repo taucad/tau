@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-10-11'
+updated: '2026-10-12'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -20,6 +20,7 @@ related:
   - docs/research/runtime-rooted-filesystem-residual-migration.md
   - docs/research/language-kernel-selection-architecture.md
   - docs/research/native-language-kernel-process-blueprint.md
+  - docs/research/kernel-realm-shared-state-blueprint.md
 ---
 
 # Runtime Architecture Policy
@@ -298,6 +299,15 @@ Every wire is carried by `@taucad/rpc`'s callback-shaped `Port<T>` (`postMessage
 **Remote wire (shipped):** `webSocketTransport` (client, browser-safe — `@taucad/runtime/transport/websocket`) and `webSocketHost` (Node `ws` server — `@taucad/runtime/transport/websocket-host`) carry the runtime wire to a kernel host in another process or on another machine: `wire: 'remote'`, `copy` delivery, `wire-notify` abort, one kernel worker per connection, msgpack on the wire (`wrapWebSocket` + the codec in `@taucad/rpc`), and an exact-match origin allowlist that default-denies browsers. The consumer's own filesystem is served to the remote kernel over a **second socket** (`/fs`), never multiplexed onto the runtime socket — no multiplexer exists and `sessionKey` never crosses the wire, so two channels on one port would consume each other's frames. Remote hosts are bound to the same build (`docs/policy/runtime-compatibility-policy.md:74`); `TransportProtocolVersionError` is the enforced arm and a cross-version compatibility matrix is the add-when. See `docs/research/runtime-websocket-transport-blueprint.md`.
 
 **Future transports:** HTTP + SSE (serverless endpoints).
+
+## Realms
+
+A realm is one JavaScript global environment: one ESM graph and one `globalThis`. The in-process transport (`createNodeClient`, `createTestRuntimeClient`) and `webSocketHost` in factory mode (`worker: () => KernelWorker`) build every kernel worker in the caller's realm, so several clients can share module-level library state. Web Worker, `nodeWorkerTransport` and Electron utility clients each get their own realm.
+
+- **Realm-shared backends go through `services.realm`.** A library that binds its backend at module scope (replicad's `setOC`) holds one instance per realm with `services.realm.hold({ group, key, create, dispose })` from `initialize` and releases it from `onDispose`. `create` runs once behind a promise guard, holders are refcounted, the last release disposes, and a different `key` for a held `group` fails initialise with `KERNEL_REALM_CONFLICT` (`details.producer` names the refusing kernel) once the held creation has succeeded; a failed creation frees the group. The registry lives on `globalThis`, so duplicate runtime copies in one realm share it. Per-client state (tracers, compute-reuse scopes, OC tracing wrappers) stays in per-kernel wrappers over the shared instance. A library binding installed once at creation (replicad's `setOC`) attributes library-internal calls to the creating kernel; with one realm per client that attribution is exact.
+- **Built-in modules are worker-scoped.** `registerKernelModule` stores exports under the registering worker's scope and emits a shim that reads that entry; bundlers bind a `globalName` only from `BuiltinModule.registryExpression`. Worker cleanup drops its scope. A kernel passes its own registered exports to `main` and never reads the registry; no code outside `kernel-module-helpers.ts` spells the registry key.
+- **Realm-global working state is serialised.** A library whose working state is realm-global and wiped between runs serialises its operations per realm. manifold-3d tracks live objects and glTF nodes in realm-global lists that its cleanup empties, so the Manifold kernel runs `describe`, `evaluate` and `onDispose` one at a time per realm; its handles are GLB bytes, so `render` and `export` run freely.
+- **Long-lived multi-project Node hosts use one realm per client.** A host that serves several projects or connections for a long time (`tau mcp`, the Tau Host runtime child) gives each its own worker thread, so a hung or crashed model can be terminated and replaced without touching the others. One-shot and single-client paths stay in-process and are correct by the rules above.
 
 ## Data Flow: File Edit to Geometry Display
 

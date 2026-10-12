@@ -1184,7 +1184,20 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     this.logger.trace(`Initializing kernel: ${kernel.entry.id}`);
 
-    kernel.ctx = await kernel.definition.initialize(kernel.options, runtime);
+    try {
+      kernel.ctx = await kernel.definition.initialize(kernel.options, runtime);
+    } catch (error) {
+      // A typed refusal (e.g. KERNEL_REALM_CONFLICT) reaches the client as is; name the refusing kernel on a copy,
+      // since one rejected realm creation may reach several kernels.
+      if (error instanceof Error && 'issues' in error && Array.isArray(error.issues) && error.issues.length > 0) {
+        const [issue, ...rest] = error.issues as [KernelIssue, ...KernelIssue[]];
+        const details = typeof issue.details === 'object' && issue.details !== null ? issue.details : {};
+        throw Object.assign(new Error(error.message, { cause: error }), {
+          issues: [{ ...issue, details: { producer: kernel.entry.id, ...details } }, ...rest],
+        });
+      }
+      throw error;
+    }
     kernel.initialized = true;
   }
 
@@ -1373,6 +1386,10 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   }
 
   private createKernelBindingIssue(error: unknown): KernelIssue {
+    // A typed initialisation refusal (e.g. KERNEL_REALM_CONFLICT) keeps its own issue.
+    if (error instanceof Error && 'issues' in error && Array.isArray(error.issues) && error.issues.length > 0) {
+      return error.issues[0] as KernelIssue;
+    }
     let message: string;
     if (error instanceof Error) {
       message = error.message;

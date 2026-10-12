@@ -30,8 +30,6 @@ export default function main(p = defaultParams): Manifold {
 
 The kernel adds normals, creased at 30°, unless a material already names `NORMAL`; call `calculateNormals` yourself only to choose a different crease angle.
 
-```
-
 Check missing imports, undefined returns, invalid boolean inputs, and non-positive dimensions first.
 
 ## Wrong / Correct
@@ -39,4 +37,3 @@ Check missing imports, undefined returns, invalid boolean inputs, and non-positi
 - Wrong: `Manifold.cylinder(radius, height)`. Correct: height first: `Manifold.cylinder(height, radiusLow, radiusHigh, segments, center)`; pass `-1` for `radiusHigh` to match `radiusLow`.
 - Wrong: chaining `a.add(b).add(c)…` over many parts. Correct: `Manifold.union([a, b, c])` once.
 - Wrong: capturing a model while `show()` or `only()` is active. Correct: remove them first; debug views render in the viewer only, and screenshots and thumbnails of them fail with "TRIANGLES primitive missing NORMAL".
-```

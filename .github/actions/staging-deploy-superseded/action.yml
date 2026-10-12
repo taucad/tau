@@ -1,0 +1,55 @@
+name: 'Staging deploy superseded'
+description: >-
+  Reports whether a newer commit on `main` has already deployed this app to staging,
+  so an older `ci.yml` push run does not put its commit back over it. Run it inside
+  the deploy job, which holds the app's staging deploy queue, just before publishing.
+
+# Each push to `main` runs on its own, so an older run can reach its deploy after a
+# newer one. A newer commit on `main` contains this one, so once its run's deploy job
+# for the same app has passed there is nothing left for this commit to ship. A newer
+# job that passed by skipping on this check counts too: something newer than it
+# deployed first.
+
+inputs:
+  job-name:
+    description: 'The deploy job name as the reusable workflow declares it, e.g. `Deploy api to staging`'
+    required: true
+  github-token:
+    description: 'Token with actions: read and contents: read'
+    required: true
+
+outputs:
+  superseded:
+    description: "'true' when a newer commit's run has already deployed this app to staging"
+    value: ${{ steps.check.outputs.superseded }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Look for a newer staging deploy of this app
+      id: check
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        JOB_NAME: ${{ inputs.job-name }}
+      run: |
+        set -euo pipefail
+        # In a called workflow the run is the caller's, so this is the ci.yml push run;
+        # a manual dispatch looks at the runs started since it began.
+        created=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+        runs=$(gh api --paginate -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+          -f branch=main -f event=push -f created=">=$created" -f per_page=100 \
+          --jq ".workflow_runs[] | select(.id != $GITHUB_RUN_ID and .head_sha != \"$GITHUB_SHA\") | \"\(.id) \(.head_sha)\"")
+        while read -r run_id sha; do
+          [ -n "$run_id" ] || continue
+          # `ahead`: that commit descends from this one, so it carries this change.
+          [ "$(gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$sha" --jq .status)" = ahead ] || continue
+          deployed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" \
+            --jq "[.jobs[] | select(.conclusion == \"success\" and (.name == \"$JOB_NAME\" or (.name | endswith(\" / $JOB_NAME\"))))] | length")
+          if [ "$deployed" -gt 0 ]; then
+            echo "::notice::Run $run_id already deployed $sha, which contains $GITHUB_SHA; skipping this older deploy."
+            echo "superseded=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+        done <<< "$runs"
+        echo "superseded=false" >> "$GITHUB_OUTPUT"

@@ -37,6 +37,8 @@ export type {
 } from '#types/runtime-kernel-v2.types.js';
 export type {
   KernelFileSystem,
+  RealmHold,
+  RealmResources,
   RuntimeFileSystemBase,
   RuntimeLogger,
   RuntimeLogOptions,
@@ -59,13 +61,10 @@ export { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.
 export {
   convertRawIssuesToKernelIssues,
   createKernelParameterDeclaration,
-  createKernelModuleRegistryExpression,
   createKernelModuleShim,
   enrichIssueLocation,
   extractDefaultParameters,
-  getModuleRegistry,
   isRecordObject,
-  KERNEL_MODULES_KEY,
   loadBinaryFile,
   registerKernelModule,
   toVmEntryPath,

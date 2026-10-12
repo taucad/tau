@@ -17,8 +17,6 @@ import {
   jsonSchemaFromJson,
   asBuffer,
   defineKernel,
-  KERNEL_MODULES_KEY,
-  getModuleRegistry,
   isRecordObject,
   extractDefaultParameters,
   toVmEntryPath,
@@ -27,8 +25,9 @@ import {
   createKernelSuccess,
   createKernelParameterDeclaration,
   nonemptyExportFiles,
+  registerKernelModule,
 } from '@taucad/runtime/kernel';
-import type { KernelServices, RuntimeLogger } from '@taucad/runtime/kernel';
+import type { RealmHold, RuntimeLogger } from '@taucad/runtime/kernel';
 import {
   detectMultiThreadSupport,
   initOcct,
@@ -100,6 +99,8 @@ export type OpenCascadeOptions = {
 
 type OpenCascadeContext = {
   oc: OpenCascadeInstance;
+  /** This kernel's share of the realm's one libcascade instance. */
+  occt: RealmHold<OpenCascadeInstance>;
   isParallelMeshing: boolean;
   tracingSummary?: OcTracingSummary;
   /** Unique MEMFS scratch path per snapshot write, owned by this kernel instance. */
@@ -199,17 +200,6 @@ async function resolveWasm(
 // =============================================================================
 // Helpers
 // =============================================================================
-
-function registerOcModule(oc: OpenCascadeInstance, runtime: KernelServices): void {
-  const registry = getModuleRegistry();
-  registry.set('libcascade', oc);
-
-  const exportNames = Object.keys(oc).filter((key) => /^[$_a-z][\w$]*$/i.test(key));
-  const namedExports = exportNames.map((key) => `export const ${key} = __mod.${key};`).join('\n');
-  const code = `const __mod = globalThis.${KERNEL_MODULES_KEY}.get('libcascade');\n${namedExports}\nexport default __mod;\n`;
-
-  runtime.bundler.registerModule('libcascade', { code, version: '3.0.0' });
-}
 
 function shapeEntryFromKernelReturnItem(item: unknown): ShapeEntry | undefined {
   if (isOpenCascadeShape(item)) {
@@ -621,42 +611,58 @@ export const opencascadeKernel = defineKernel({
     const span = tracer.startSpan('opencascade.wasm-init');
     const resolved = await resolveWasm(options.wasm, logger);
     const compiledModule = resolved.wasmUrl ? runtime.getCompiledWasmModule(resolved.wasmUrl) : undefined;
-    let oc = await initOcct<OpenCascadeInstance>(resolved.wasmUrl, resolved.bindingsFactory, {
-      tracer,
-      ...(compiledModule ? { compiledModule } : {}),
-      print: (text) => {
-        logger.trace('OCJS stdout', { data: { text } });
-      },
-      printErr: (text) => {
-        logger.warn('OCJS stderr', { data: { text } });
+    // One libcascade instance per realm, shared by every kernel in it (memory parity with replicad, Q6).
+    const occt = await runtime.realm.hold({
+      group: 'libcascade-occt',
+      key: `${resolved.variant}:${resolved.wasmUrl ?? ''}`,
+      async create() {
+        // ponytail: OCCT print/printErr reach the creating kernel's logger only; exact with one realm per client.
+        const instance = await initOcct<OpenCascadeInstance>(resolved.wasmUrl, resolved.bindingsFactory, {
+          tracer,
+          ...(compiledModule ? { compiledModule } : {}),
+          print: (text) => {
+            logger.trace('OCJS stdout', { data: { text } });
+          },
+          printErr: (text) => {
+            logger.warn('OCJS stderr', { data: { text } });
+          },
+        });
+        if (resolved.variant === 'multi') {
+          activateOccParallelism(instance, logger);
+        } else {
+          logger.log(`OpenCascade OCCT initialised: variant=${resolved.variant} (single-threaded)`);
+        }
+        return instance;
       },
     });
     span.end();
 
-    if (resolved.variant === 'multi') {
-      activateOccParallelism(oc, logger);
-    } else {
-      logger.log(`OpenCascade OCCT initialised: variant=${resolved.variant} (single-threaded)`);
+    // `onDispose` never runs for a kernel whose initialisation failed, so release the hold here (I5).
+    try {
+      let oc: OpenCascadeInstance;
+      let tracingSummary: OcTracingSummary | undefined;
+      if (ocTracing === 'summary' || ocTracing === 'per-call') {
+        const traced = wrapOcWithTracing(occt.value, tracer, { mode: ocTracing });
+        oc = traced.tracedInstance;
+        tracingSummary = traced.summary;
+      } else {
+        oc = wrapOcForExceptions(occt.value);
+      }
+
+      registerKernelModule(runtime, { name: 'libcascade', exports: oc, version: '3.0.0' });
+      logger.debug('OpenCascade kernel initialized');
+
+      return {
+        oc,
+        occt,
+        isParallelMeshing: resolved.variant === 'multi',
+        tracingSummary,
+        nextSnapshotPath: createSnapshotPathAllocator(),
+      } satisfies OpenCascadeContext;
+    } catch (error) {
+      occt.release();
+      throw error;
     }
-
-    let tracingSummary: OcTracingSummary | undefined;
-    if (ocTracing === 'summary' || ocTracing === 'per-call') {
-      const traced = wrapOcWithTracing(oc, tracer, { mode: ocTracing });
-      oc = traced.tracedInstance;
-      tracingSummary = traced.summary;
-    } else {
-      oc = wrapOcForExceptions(oc);
-    }
-
-    registerOcModule(oc, runtime);
-    logger.debug('OpenCascade kernel initialized');
-
-    return {
-      oc,
-      isParallelMeshing: resolved.variant === 'multi',
-      tracingSummary,
-      nextSnapshotPath: createSnapshotPathAllocator(),
-    } satisfies OpenCascadeContext;
   },
 
   async resolve({ entryPath }, runtime) {
@@ -902,6 +908,10 @@ export const opencascadeKernel = defineKernel({
   deserializeHandle({ serialized }, _runtime, context) {
     assertSerializedNativeHandle(serialized);
     return retainShapeEntries(serialized.entries.map((entry, index) => deserializeShapeEntry(context, entry, index)));
+  },
+
+  async onDispose(context) {
+    context.occt.release();
   },
 });
 

@@ -729,6 +729,9 @@ pub enum CircularBoreNonMember {
     ExteriorCylinder,
     SealedCavity,
     ObstructedInterior,
+    /// A torus with material inside its tube, trimmed to the outer half: a
+    /// convex rim fillet, never a bore nor a surface that bounds one.
+    ExteriorBlend,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -866,6 +869,7 @@ pub enum EdgeTreatmentReason {
     OutsideMaterialBranch,
     NonTangentSupport,
     UnequalOffsets,
+    ShallowSupport,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -957,6 +961,7 @@ pub enum EdgeTreatmentResidualKind {
     EqualOffsets,
     RailStation,
     MaterialBranch,
+    SupportDepth,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1,12 +1,23 @@
 [
   {
-    "name": "@taucad/bambu (.) static graph, without the lazy host and archive chunks — measured 10.32 kB brotli on 2026-09-27",
-    "path": ["dist/*.mjs", "!dist/bambu.host.mjs", "!dist/bambu.archive.mjs", "!dist/bambu.plate.mjs"],
-    "limit": "11.35 kB"
+    "name": "@taucad/bambu (.) static graph, without the lazy host, archive and simulator image chunks \u2014 measured 11.55 kB brotli on 2026-10-12",
+    "path": [
+      "dist/*.mjs",
+      "!dist/bambu.host.mjs",
+      "!dist/bambu.archive.mjs",
+      "!dist/bambu.plate.mjs",
+      "!dist/bambu.simulator-image.mjs"
+    ],
+    "limit": "12.71 kB"
   },
   {
-    "name": "@taucad/bambu/plate (plate GLBs load on demand) — measured 620 B brotli on 2026-10-03",
+    "name": "@taucad/bambu/plate (plate GLBs load on demand) \u2014 measured 620 B brotli on 2026-10-03",
     "path": "dist/bambu.plate.mjs",
     "limit": "680 B"
+  },
+  {
+    "name": "Simulated camera JPEG, loaded only on capture — measured 3.83 kB brotli on 2026-10-12",
+    "path": "dist/bambu.simulator-image.mjs",
+    "limit": "4.22 kB"
   }
 ]

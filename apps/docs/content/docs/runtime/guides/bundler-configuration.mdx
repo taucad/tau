@@ -57,21 +57,20 @@ Kernels reach the bundler through `runtime.bundler` and `runtime.execute`; the k
 
 ### 4. Register built-in modules (kernel authors)
 
-A custom JS/TS kernel registers its built-in modules from the operation runtime before bundling:
+A custom JS/TS kernel registers its built-in modules before bundling:
 
 ```typescript
-import type { KernelServices } from '@taucad/runtime/types';
+import { registerKernelModule, type KernelServices } from '@taucad/runtime/kernel';
+import * as myLibrary from 'my-library';
 
-export const registerMyLibrary = (runtime: KernelServices): void => {
-  runtime.bundler.registerModule('my-library', {
-    code: 'export const greet = (name) => `hello, ${name}`;',
-    version: '1.0.0',
-    globalName: 'myLibrary',
-  });
+export const registerMyLibrary = (services: KernelServices): void => {
+  registerKernelModule(services, { name: 'my-library', exports: myLibrary, version: '1.0.0', globalName: 'myLibrary' });
 };
 ```
 
-Call it inside `evaluate` (or wherever the module must exist) — the Replicad and JSCAD kernel sources show complete implementations.
+Each kernel worker resolves only its own registrations, even when workers share a realm.
+
+Call it inside `initialize` (or wherever the module must exist) — the Replicad and JSCAD kernel sources show complete implementations.
 
 ### 5. Define a custom bundler
 

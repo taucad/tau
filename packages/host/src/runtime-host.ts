@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 
 import { packageVersion } from '@taucad/runtime/metadata';
 import { webSocketHost } from '@taucad/runtime/transport/websocket-host';
+import type { WebSocketHostOptions } from '@taucad/runtime/transport/websocket-host';
 import { createRuntimeWorker } from '@taucad/runtime/worker';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 
@@ -22,7 +23,11 @@ const tokenMatches = (authorization: string | undefined, expected: string): bool
 /**
  * Serve a CLI-composed runtime on an authenticated ephemeral loopback socket.
  *
- * @param options - Runtime definition and parent-only loopback authorization token.
+ * With `worker`, every connection runs its runtime in its own thread started
+ * from that entry, so connections never share a realm; `runtime` serves every
+ * connection in this realm and suits fixtures.
+ *
+ * @param options - `runtime` or a thread `worker` entry, and the parent-only loopback authorization token.
  * @returns A ready runtime host handle.
  * @public
  *
@@ -37,18 +42,32 @@ const tokenMatches = (authorization: string | undefined, expected: string): bool
  * });
  * await host.close();
  * ```
+ *
+ * @example <caption>Give every connection its own runtime thread</caption>
+ * ```typescript
+ * import { serveHostRuntime } from '@taucad/host/runtime-host';
+ *
+ * // `runtime.worker.js` hosts its runtime with `nodeWorkerHost` and reads `workerData`.
+ * const host = await serveHostRuntime({
+ *   worker: { url: new URL('./runtime.worker.js', import.meta.url), workerData: { projectRoot: process.cwd() } },
+ *   authorizationToken: crypto.randomUUID(),
+ * });
+ * await host.close();
+ * ```
  */
-export const serveHostRuntime = async (options: {
-  readonly runtime: AnyRuntimeDefinition;
-  readonly authorizationToken: string;
-}): Promise<HostRuntimeHandle> => {
+export const serveHostRuntime = async (
+  options: (
+    | { readonly runtime: AnyRuntimeDefinition }
+    | { readonly worker: Extract<WebSocketHostOptions['worker'], { readonly url: unknown }> }
+  ) & { readonly authorizationToken: string },
+): Promise<HostRuntimeHandle> => {
   if (options.authorizationToken.length < 32) {
     throw new TypeError('serveHostRuntime: authorizationToken must contain at least 32 characters');
   }
   const host = webSocketHost({
     host: '127.0.0.1',
     port: 0,
-    worker: () => createRuntimeWorker({ runtime: options.runtime }),
+    worker: 'worker' in options ? options.worker : () => createRuntimeWorker({ runtime: options.runtime }),
     authorize: (request) => tokenMatches(request.headers.authorization, options.authorizationToken),
     allowPrivateComputePairing: true,
   });

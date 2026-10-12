@@ -23,7 +23,7 @@ const realmConflict = (group: string, heldKey: string, requestedKey: string): Er
 /**
  * Create one registry of realm-shared resources.
  *
- * The runtime keeps a single module-level instance ({@link realmResources}), so every kernel worker
+ * The runtime keeps a single realm-global instance ({@link realmResources}), so every kernel worker
  * in a JavaScript realm shares it; tests create isolated ones.
  *
  * @returns Realm resources with promise-guarded, refcounted holds.
@@ -92,5 +92,14 @@ export const createRealmResources = (): RealmResources => {
   return { hold };
 };
 
-/** The realm's one resource registry, shared by every kernel worker the runtime hosts in this realm. @internal */
-export const realmResources: RealmResources = createRealmResources();
+const realmResourcesKey: unique symbol = Symbol.for('@taucad/runtime/realm-resources');
+const realmGlobal = globalThis as { [realmResourcesKey]?: RealmResources };
+realmGlobal[realmResourcesKey] ??= createRealmResources();
+
+/**
+ * The realm's one resource registry, shared by every kernel worker the runtime hosts in this realm.
+ *
+ * It lives on `globalThis` so that duplicate copies of the runtime in one realm share it too.
+ * @internal
+ */
+export const realmResources: RealmResources = realmGlobal[realmResourcesKey];

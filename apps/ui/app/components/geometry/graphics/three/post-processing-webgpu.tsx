@@ -4,6 +4,7 @@ import { NodeMaterial, QuadMesh, UnsignedByteType } from 'three/webgpu';
 import type { WebGPURenderer } from 'three/webgpu';
 import {
   colorToDirection,
+  colorSpaceToWorking,
   directionToColor,
   float,
   mix,
@@ -12,15 +13,18 @@ import {
   output,
   pass,
   renderOutput,
+  rtt,
   sample,
   screenUV,
   select,
   uniform,
   vec3,
   vec4,
+  workingToColorSpace,
 } from 'three/tsl';
+import { fxaa } from 'three/addons/tsl/display/FXAANode.js';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
-import { LinearSRGBColorSpace, Vector3 } from 'three';
+import { LinearSRGBColorSpace, SRGBColorSpace, Vector3 } from 'three';
 import type { Camera, ToneMapping, WebGLRenderTarget } from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
@@ -41,6 +45,7 @@ type PostProcessingPipelineResources = Readonly<{
   outputQuad?: QuadMesh;
   outputQuadWithoutAo: QuadMesh;
   aoNode?: ReturnType<typeof ao>;
+  antialiasInput?: ReturnType<typeof rtt>;
   depthRestore: QuadMesh;
   depthRestoreMaterial: NodeMaterial;
   scenePass: ReturnType<typeof pass>;
@@ -69,7 +74,8 @@ type PostProcessingPipelineResources = Readonly<{
  *   through the actual frame target on first use.
  *
  * **AA strategy.** Anti-aliasing comes from hardware MSAA on the `WebGPURenderer` (`antialias: true`). The
- * scenePass inherits 4-MSAA on both attachments; the normal MRT being multisampled is acceptable since we no
+ * scenePass inherits 4-MSAA on both attachments; final FXAA covers edges introduced by AO.
+ * The normal MRT being multisampled is acceptable since we no
  * longer pay for a second scene rasterisation (see audit D1a). TRAA was removed because the viewport runs
  * `frameloop='demand'`: temporal AA cannot accumulate while the scene is idle, and a single un-converged TRAA
  * frame surfaces as edge graininess.
@@ -131,6 +137,7 @@ const createPipelineResources = ({
 }): PostProcessingPipelineResources => {
   const scenePass = pass(scene, camera);
   let aoNode: ReturnType<typeof ao> | undefined;
+  let antialiasInput: ReturnType<typeof rtt> | undefined;
   let outputQuad: QuadMesh | undefined;
   let outputQuadWithoutAo: QuadMesh | undefined;
   let depthRestoreMaterial: NodeMaterial | undefined;
@@ -203,9 +210,14 @@ const createPipelineResources = ({
       vec4(vec3(afterTone), 1),
     );
     // Tone-map once, on the chosen side of AO; the AO-only diagnostic keeps its linear visibility.
-    outputQuad = createOutputQuad(
-      mix(beauty, vec4(vec3(aoFactor), scenePassColor.a), select<'float'>(displayMode.equal(1), float(1), float(0))),
+    const composite = mix(
+      beauty,
+      vec4(vec3(aoFactor), scenePassColor.a),
+      select<'float'>(displayMode.equal(1), float(1), float(0)),
     );
+    // FXAA samples display RGB; return to linear for the renderer's single output encoding.
+    antialiasInput = rtt(workingToColorSpace(composite, SRGBColorSpace));
+    outputQuad = createOutputQuad(colorSpaceToWorking(fxaa(antialiasInput), SRGBColorSpace));
     /* oxlint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access */
 
     return {
@@ -213,6 +225,7 @@ const createPipelineResources = ({
       outputQuad,
       outputQuadWithoutAo,
       aoNode,
+      antialiasInput,
       depthRestore,
       depthRestoreMaterial,
       scenePass,
@@ -224,6 +237,7 @@ const createPipelineResources = ({
     depthRestoreMaterial?.dispose();
     (outputQuad?.material as NodeMaterial | undefined)?.dispose();
     (outputQuadWithoutAo?.material as NodeMaterial | undefined)?.dispose();
+    antialiasInput?.dispose();
     aoNode?.dispose();
     scenePass.dispose();
     throw error;
@@ -234,6 +248,7 @@ const disposePipelineResources = (resources: readonly PostProcessingPipelineReso
   for (const resource of resources) {
     (resource.outputQuad?.material as NodeMaterial | undefined)?.dispose();
     (resource.outputQuadWithoutAo.material as NodeMaterial).dispose();
+    resource.antialiasInput?.dispose();
     resource.aoNode?.dispose();
     resource.depthRestoreMaterial.dispose();
     resource.scenePass.dispose();

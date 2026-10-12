@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { RefCallback } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { AccountSettings } from '#components/auth/settings/account/account-settings.js';
 import { SecuritySettings } from '#components/auth/settings/security/security-settings.js';
@@ -123,21 +124,33 @@ export function SettingsDialog(): React.JSX.Element {
 }
 
 function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSection }): React.JSX.Element {
-  const { open: openSection, close } = useSettingsDialog();
+  const { open: openSection, close, target: linkedSetting } = useSettingsDialog();
   const [query, setQuery] = useState('');
-  const [destination, setDestination] = useState<{ section: SettingsSection; id?: string }>();
+  const [searchDestination, setDestination] = useState<{ section: SettingsSection; id?: string }>();
   const searchRef = useRef<HTMLInputElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
+  // State, not a ref: the dialog mounts its content after the first effects run, and a
+  // deep link opening the dialog has to wait for it.
+  const [content, setContent] = useState<HTMLDivElement>();
+  const contentRef = useCallback<RefCallback<HTMLDivElement>>((element) => {
+    setContent(element ?? undefined);
+  }, []);
   const results = searchSettings(query);
   const isSearching = query.trim().length > 0;
   const active = settingsSections.find((section) => section.id === activeSection)!;
   const resultCount = results.reduce((total, group) => total + group.entries.length, 0);
 
+  // A deep link from outside the dialog (`?setting=`) reveals its control like a search result does.
+  // Navigating inside the dialog drops the parameter, so a present link is always the latest request.
+  const linkedDestination = useMemo(
+    () => (linkedSetting ? { section: activeSection, id: linkedSetting } : undefined),
+    [activeSection, linkedSetting],
+  );
+  const destination = linkedDestination ?? searchDestination;
+
   useEffect(() => {
     if (!destination || destination.section !== activeSection) {
       return;
     }
-    const content = contentRef.current;
     if (!content) {
       return;
     }
@@ -179,7 +192,7 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
       cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [activeSection, destination]);
+  }, [activeSection, content, destination]);
 
   const navigate = (section: SettingsSection, id?: string): void => {
     openSection(section);
@@ -193,6 +206,12 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
   return (
     <DialogContent
       className='h-[90dvh] max-w-[calc(100%-2rem)] grid-rows-[1fr] gap-0 overflow-hidden p-0 sm:max-w-6xl'
+      onOpenAutoFocus={(event) => {
+        // A deep link owns focus: its reveal moves it to the content, not the dialog's first button.
+        if (linkedDestination) {
+          event.preventDefault();
+        }
+      }}
       onEscapeKeyDown={(event) => {
         if (query) {
           event.preventDefault();

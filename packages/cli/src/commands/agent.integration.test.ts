@@ -85,9 +85,17 @@ const startStubRelay = async (): Promise<URL> => {
  *
  * Releasing arms a fresh gate, so a later turn is held again — which is what
  * lets one daemon carry two runs that are both "still going" on demand.
+ * `firstTurnHeld` settles when the first turn's request is parked here: from
+ * then on that run is inside a model call and reaches no step boundary until
+ * the gate opens.
  */
-const startStubGateway = async (): Promise<{ readonly url: URL; readonly release: () => void }> => {
+const startStubGateway = async (): Promise<{
+  readonly url: URL;
+  readonly release: () => void;
+  readonly firstTurnHeld: Promise<void>;
+}> => {
   let gate = Promise.withResolvers<void>();
+  const firstTurnHeld = Promise.withResolvers<void>();
   const server = createServer((request, response) => {
     response.on('error', () => {
       /* The daemon aborts this request when a run is cancelled; that is the
@@ -98,6 +106,7 @@ const startStubGateway = async (): Promise<{ readonly url: URL; readonly release
       for await (const _chunk of request) {
         /* Discarded: only the body's arrival matters. */
       }
+      firstTurnHeld.resolve();
       await gate.promise;
       response.writeHead(200, { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'stub-operation-agent' });
       response.write(
@@ -116,6 +125,7 @@ const startStubGateway = async (): Promise<{ readonly url: URL; readonly release
       gate.resolve();
       gate = Promise.withResolvers<void>();
     },
+    firstTurnHeld: firstTurnHeld.promise,
   };
 };
 
@@ -284,24 +294,6 @@ const raiseInterrupt = async (input: {
   }
 };
 
-/** Poll a probe until it yields a value, failing after ten seconds. */
-const until = async <T>(probe: () => Promise<T | undefined>): Promise<T> => {
-  const deadline = Date.now() + 10_000;
-  // oxlint-disable-next-line eslint/no-await-in-loop -- polling a file the daemon writes is sequential by nature
-  for (let value = await probe(); ; value = await probe()) {
-    if (value !== undefined) {
-      return value;
-    }
-    if (Date.now() > deadline) {
-      throw new Error('The probed condition did not hold within ten seconds.');
-    }
-    // oxlint-disable-next-line eslint/no-await-in-loop -- see above
-    await new Promise((resolve) => {
-      setTimeout(resolve, 100);
-    });
-  }
-};
-
 const runIdOf = (invocation: Invocation): string => {
   const match = /^run\t(.+)$/mu.exec(invocation.stdout);
   if (!match) {
@@ -315,6 +307,49 @@ const jsonRecords = (stdout: string): ReadonlyArray<Record<string, unknown>> =>
     .split('\n')
     .filter((line) => line !== '')
     .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+/**
+ * Follow a chat as `tau agent tail --jsonl` until one of its records matches, then stop following.
+ *
+ * Each record is printed when the daemon commits it, so this waits on the daemon's own delivery rather than on a
+ * clock; the test's timeout is the only bound.
+ */
+const firstRecord = async (input: {
+  readonly origin: URL;
+  readonly chatId: string;
+  readonly match: (record: Readonly<Record<string, unknown>>) => boolean;
+}): Promise<Readonly<Record<string, unknown>>> => {
+  const child = spawn(process.execPath, ['--import', 'tsx', binPath, 'agent', 'tail', input.chatId, '--jsonl'], {
+    cwd: repoRoot,
+    env: childEnvironment(input.origin),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const found = Promise.withResolvers<Readonly<Record<string, unknown>>>();
+  const stderr: string[] = [];
+  /* A tail that ends first leaves the record unseen; once the record is found this rejection is a no-op. */
+  const exited = new Promise<void>((resolve) => {
+    child.once('exit', () => {
+      found.reject(new Error(`The tail of ${input.chatId} ended before the record arrived: ${stderr.join('')}`));
+      resolve();
+    });
+  });
+  let pending = '';
+  child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+    const lines = `${pending}${Buffer.from(chunk).toString('utf8')}`.split('\n');
+    pending = lines.pop() ?? '';
+    const record = jsonRecords(lines.join('\n')).find((candidate) => input.match(candidate));
+    if (record !== undefined) {
+      found.resolve(record);
+    }
+  });
+  child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(Buffer.from(chunk).toString('utf8')));
+  try {
+    return await found.promise;
+  } finally {
+    child.kill();
+    await exited;
+  }
+};
 
 describe('tau agent (scripted command projections)', () => {
   it.skipIf(process.env['TAU_ACP_LIVE_TESTS'] !== 'true')(
@@ -429,10 +464,13 @@ describe('tau agent (scripted command projections)', () => {
     const tailing = tailInBackground(origin, 'chat-1');
 
     /* RA-R10: a steer is answered once its message row is durable, which is the
-     * run's next step boundary. The held gateway means this run never reaches
-     * one, so the steer is still open when the cancel lands and is refused with
-     * no row: STEER_NOT_DELIVERED if it reached the run first, RUN_NOT_LIVE if
-     * the cancel did. Either way it never hangs and never reports applied. */
+     * run's next step boundary. Admission is not one: the loop delivers steers
+     * queued before its first model call, so this waits until that call is held
+     * at the gateway. From there the run reaches no boundary, so the steer is
+     * still open when the cancel lands and is refused with no row:
+     * STEER_NOT_DELIVERED if it reached the run first, RUN_NOT_LIVE if the
+     * cancel did. Either way it never hangs and never reports applied. */
+    await gateway.firstTurnHeld;
     const steering = tau({ args: ['agent', 'steer', 'chat-1', runId, 'focus on the plate'], origin });
 
     const cancelled = await tau({ args: ['agent', 'cancel', 'chat-1', runId, '--json'], origin });
@@ -448,15 +486,12 @@ describe('tau agent (scripted command projections)', () => {
 
     // --- a followed run that is cancelled underneath it exits 4 --------------
     const following = tau({ args: ['agent', 'run', 'chat-cancel', 'hold this one'], origin });
-    const heldRunId = await until(async () => {
-      try {
-        const log = await readFile(join(workspace, '.tau', 'chats', 'chat-cancel', 'events.jsonl'), 'utf8');
-        const match = /"runId":"([^"]+)"/u.exec(log);
-        return match?.[1];
-      } catch {
-        return undefined;
-      }
+    const admission = await firstRecord({
+      origin,
+      chatId: 'chat-cancel',
+      match: (record) => typeof (record['event'] as { runId?: unknown } | undefined)?.runId === 'string',
     });
+    const heldRunId = (admission['event'] as { runId: string }).runId;
     const cancelledUnderneath = await tau({ args: ['agent', 'cancel', 'chat-cancel', heldRunId], origin });
     expect(cancelledUnderneath.stdout).toContain('operation\tcancel');
     const followed = await following;
@@ -580,10 +615,13 @@ describe('tau agent (scripted command projections)', () => {
     });
     expect(started.code).toBe(0);
     const log = join(workspace, '.tau', 'chats', 'chat-acp', 'events.jsonl');
-    const admitted = await until(async () => {
-      const text = await readFile(log, 'utf8').catch(() => '');
-      return text.includes('"acpSessionId"') ? text : undefined;
+    /* The vendor session is remembered once the agent has opened it; the turn is mid-run from then on. */
+    await firstRecord({
+      origin: first.url,
+      chatId: 'chat-acp',
+      match: (record) => JSON.stringify(record['event']).includes('"acpSessionId"'),
     });
+    const admitted = await readFile(log, 'utf8');
     expect(admitted).toContain('"agentId":"codex"');
     expect(admitted).toContain('"model":"gpt-5.3-codex"');
 

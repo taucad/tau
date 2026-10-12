@@ -233,6 +233,10 @@ vi.mock('postprocessing', () => {
   return {
     EffectComposer,
     EffectPass,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Matches the upstream constructor.
+    FXAAEffect: class {
+      public dispose = vi.fn();
+    },
     Pass,
     RenderPass,
     ToneMappingEffect,
@@ -306,7 +310,7 @@ describe('PostProcessingWebGL shared composer and retained camera AO passes', ()
     expect(mocks.composers).toHaveLength(1);
     expect(mocks.aoPasses.map(({ camera }) => camera)).toEqual([mocks.perspectiveCamera]);
     expect(mocks.composers[0]!.renderedCameras).toEqual([]);
-    expect(mocks.composers[0]!.passes).toHaveLength(5);
+    expect(mocks.composers[0]!.passes).toHaveLength(6);
     expect(mocks.composers[0]!.passes[1]?.['needsDepthTexture']).toBe(true);
     expect(mocks.composers[0]!.passes.at(-1)?.['renderToScreen']).toBe(true);
     expect(mocks.setRenderTarget).not.toHaveBeenCalled();

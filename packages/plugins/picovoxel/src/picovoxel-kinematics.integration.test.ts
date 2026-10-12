@@ -184,6 +184,24 @@ const createClient = (code = source()) =>
     files: { 'main.ts': code },
   });
 
+/**
+ * Hashes a GLB with `asset.generator` removed, so the pin tracks encoder output rather than the release version stamped into it.
+ *
+ * @param bytes - GLB container bytes.
+ * @returns SHA-256 hex digest of the normalised JSON chunk followed by the remaining chunks.
+ */
+function glbDigestWithoutGenerator(bytes: Uint8Array<ArrayBuffer>): string {
+  const jsonLength = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength))) as {
+    asset: { generator?: string };
+  };
+  delete json.asset.generator;
+  return createHash('sha256')
+    .update(JSON.stringify(json))
+    .update(bytes.subarray(20 + jsonLength))
+    .digest('hex');
+}
+
 describe('PicoVoxel mechanisms through real WASM and runtime', { timeout: 120_000 }, () => {
   it('should preserve the baseline exact default GLB and STL byte pins with an authored mechanism', async () => {
     const client = createClient();
@@ -200,8 +218,8 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
       });
       const glb = await document.export('glb');
       assertSuccess(glb);
-      expect(createHash('sha256').update(glb.files[0].bytes).digest('hex')).toBe(
-        '853d1eecb0d48f0cad26b6decff90df1e43de67d45475939e8cc109cee6807b8',
+      expect(glbDigestWithoutGenerator(glb.files[0].bytes)).toBe(
+        '6da21c0de9c8e6c72d61188c789b47978fb79cdfaa8c49ae8a95961eec2d05aa',
       );
       const stl = await document.export('stl');
       assertSuccess(stl);

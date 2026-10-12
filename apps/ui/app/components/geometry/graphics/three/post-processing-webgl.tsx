@@ -6,6 +6,7 @@ import {
   BlendFunction,
   EffectComposer,
   EffectPass,
+  FXAAEffect,
   Pass,
   RenderPass,
   ToneMappingEffect,
@@ -202,12 +203,15 @@ const createComposer = ({
   // Tone mapping consumes color only; retargeting EffectPass would unnecessarily
   // change its camera-dependent shader defines on each projection switch.
   const toneMappingPass = new EffectPass(camera, toneMappingEffect);
+  // MSAA precedes AO; spatial AA also covers the edges introduced by its composite.
+  const antialiasPass = new EffectPass(camera, new FXAAEffect());
   const aoPasses = new Map<ThreeCamera, ManagedN8AoPass>();
   try {
     composer.addPass(renderPass);
     composer.addPass(depthRestore);
     composer.addPass(beforeAoToneMappingPass);
     composer.addPass(toneMappingPass);
+    composer.addPass(antialiasPass);
     return {
       scene,
       state: {},
@@ -221,7 +225,14 @@ const createComposer = ({
       toneMappingPass,
     };
   } catch (error) {
-    for (const pass of [renderPass, depthRestore, beforeAoToneMappingPass, ...aoPasses.values(), toneMappingPass]) {
+    for (const pass of [
+      renderPass,
+      depthRestore,
+      beforeAoToneMappingPass,
+      ...aoPasses.values(),
+      toneMappingPass,
+      antialiasPass,
+    ]) {
       if (!composer.passes.includes(pass)) {
         pass.dispose();
       }

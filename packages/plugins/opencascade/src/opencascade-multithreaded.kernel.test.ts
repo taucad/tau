@@ -1,9 +1,9 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/naming-convention -- OCCT C++ classes/methods use PascalCase; fixture filenames use extensions */
-import { afterAll, describe, it, expect, beforeAll } from 'vitest';
+import { afterAll, describe, it, expect, beforeAll, vi } from 'vitest';
 import { opencascadeKernel } from '#opencascade.kernel.js';
 import { esbuildBundler } from '@taucad/esbuild';
-import { getModuleRegistry } from '@taucad/runtime/kernel';
+import type * as KernelModule from '@taucad/runtime/kernel';
 import { assertRenderingSuccess, createGeometryTestHelpers, createTestRuntimeClient } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 
@@ -28,6 +28,22 @@ import { defineRuntime } from '@taucad/runtime/worker';
 
 const geometryHelpers = createGeometryTestHelpers();
 
+/** The `libcascade` module object the kernel registered most recently (its OpenCascade instance). */
+const registered = vi.hoisted(() => ({ libcascade: undefined as unknown }));
+
+vi.mock('@taucad/runtime/kernel', async (importOriginal) => {
+  const actual = await importOriginal<typeof KernelModule>();
+  return {
+    ...actual,
+    registerKernelModule(...arguments_: Parameters<typeof actual.registerKernelModule>) {
+      if (arguments_[1].name === 'libcascade') {
+        registered.libcascade = arguments_[1].exports;
+      }
+      actual.registerKernelModule(...arguments_);
+    },
+  };
+});
+
 /** Minimal structural view of the OCCT parallelism statics asserted below. */
 type OccParallelProbe = {
   BOPAlgo_Options: { GetParallelMode(): boolean };
@@ -35,7 +51,7 @@ type OccParallelProbe = {
 };
 
 /**
- * Read the OCCT parallelism statics off the in-process module registry. The
+ * Read the OCCT parallelism statics off the module the kernel registered. The
  * kernel registers its (exception-wrapped) OpenCascade instance under
  * `'libcascade'`, and the global parallel mode set during init is observable
  * through it.
@@ -43,7 +59,7 @@ type OccParallelProbe = {
  * @returns the registered instance narrowed to the parallelism statics
  */
 function readParallelProbe(): OccParallelProbe {
-  const oc = getModuleRegistry().get('libcascade') as OccParallelProbe | undefined;
+  const oc = registered.libcascade as OccParallelProbe | undefined;
   expect(oc, 'expected worker to have registered libcascade module').toBeDefined();
   return oc!;
 }

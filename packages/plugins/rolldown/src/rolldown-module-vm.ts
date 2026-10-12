@@ -243,11 +243,9 @@ const createSourcePlugin = (
 });
 
 const banner = (modules: ReadonlyMap<string, BuiltinModule>): string =>
-  `${[...modules.entries()]
-    .filter(([, module]) => module.globalName !== undefined)
-    .map(
-      ([name, module]) => `const ${module.globalName} = globalThis.__KERNEL_MODULES__?.get(${JSON.stringify(name)});`,
-    )
+  `${[...modules.values()]
+    .filter((module) => module.globalName !== undefined && module.registryExpression !== undefined)
+    .map((module) => `const ${module.globalName} = ${module.registryExpression};`)
     .join('\n')}\nconst exports = {};\nconst module = { exports };`;
 
 /** Host-independent Rolldown module VM. @internal */

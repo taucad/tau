@@ -101,6 +101,7 @@ const mocks = vi.hoisted(() => {
   const aoNodes: MockAoNode[] = [];
   const displayUniforms: Array<{ value: number }> = [];
   const postDispose = vi.fn();
+  const antialiasDispose = vi.fn();
   const aoDispose = vi.fn();
 
   const depthNode = { kind: 'depth', sample: vi.fn(() => ({ kind: 'sampled-depth' })) };
@@ -204,6 +205,7 @@ const mocks = vi.hoisted(() => {
     outputQuads,
     prewarm,
     postDispose,
+    antialiasDispose,
     rig,
     scene,
     snapshot,
@@ -252,12 +254,16 @@ vi.mock('#components/geometry/graphics/three/scene-overlay.js', () => ({
   },
 }));
 
+vi.mock('three/addons/tsl/display/FXAANode.js', () => ({ fxaa: (value: unknown) => value }));
 vi.mock('three/addons/tsl/display/GTAONode.js', () => ({ ao: mocks.ao }));
 vi.mock('#components/geometry/graphics/three/gtao-depth-camera.js', () => ({
   createGtaoCameraAdapter: mocks.createGtaoCameraAdapter,
 }));
 
 vi.mock('three/tsl', () => ({
+  colorSpaceToWorking: (value: unknown) => value,
+  workingToColorSpace: (value: unknown) => value,
+  rtt: (value: Record<string, unknown>) => Object.assign(value, { dispose: mocks.antialiasDispose }),
   colorToDirection: vi.fn((value: unknown): unknown => value),
   directionToColor: vi.fn((value: unknown): unknown => value),
   float: vi.fn((value: number) => value),
@@ -358,6 +364,7 @@ describe('PostProcessingWebGPU retained endpoint pipelines', () => {
     mocks.renderOutput.mockClear();
     mocks.rendererState.target = { kind: 'prior-target' };
     mocks.postDispose.mockClear();
+    mocks.antialiasDispose.mockClear();
     mocks.rig.activeCamera = mocks.perspectiveCamera;
     mocks.state.camera = mocks.perspectiveCamera;
     mocks.state.size.height = 1000;
@@ -492,6 +499,7 @@ describe('PostProcessingWebGPU retained endpoint pipelines', () => {
       expect(pass.dispose).toHaveBeenCalledOnce();
     }
     expect(mocks.aoDispose).toHaveBeenCalledTimes(2);
+    expect(mocks.antialiasDispose).toHaveBeenCalledTimes(2);
     expect(mocks.postDispose).toHaveBeenCalledTimes(4);
   });
 

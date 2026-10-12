@@ -1,6 +1,6 @@
 {
   "name": "@taucad/camera",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.1",
   "description": "Renderer-neutral camera state and projection logic",
   "type": "module",
   "sideEffects": false,

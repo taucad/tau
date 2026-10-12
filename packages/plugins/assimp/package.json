@@ -1,6 +1,6 @@
 {
   "name": "@taucad/assimp",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Assimp-backed import and export toolkit for @taucad/runtime",
   "type": "module",
   "sideEffects": false,

@@ -3,6 +3,8 @@ import { createPartGeometries, loadAssembly as loadGearbox, partPose } from '@ta
 import { ease, storyFrame, storyPart } from '#www/story-timeline.js';
 import * as THREE from 'three';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 /** @typedef {import('#www/story-timeline.js').FrameState} FrameState */
@@ -144,6 +146,7 @@ const compositeMaterial = (beauty, occlusion) =>
       tBeauty: { value: beauty },
       tOcclusion: { value: occlusion },
       floorShade: { value: 0.8 },
+      toneMappingExposure: { value: 1 },
     },
     vertexShader: `varying vec2 vUv;
 void main() {
@@ -153,16 +156,19 @@ void main() {
     fragmentShader: `uniform sampler2D tBeauty;
 uniform sampler2D tOcclusion;
 uniform float floorShade;
+#include <tonemapping_pars_fragment>
 varying vec2 vUv;
 void main() {
   vec4 beauty = texture2D(tBeauty, vUv);
   float ao = texture2D(tOcclusion, vUv).r;
   float alpha = beauty.a + (1.0 - beauty.a) * (1.0 - ao) * floorShade;
   gl_FragColor = vec4(beauty.rgb / max(beauty.a, 1e-4) * ao, 1.0);
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
+  gl_FragColor.rgb = NeutralToneMapping(gl_FragColor.rgb);
+  gl_FragColor = sRGBTransferOETF(gl_FragColor);
   gl_FragColor = vec4(gl_FragColor.rgb * beauty.a, alpha);
 }`,
+    // Offscreen output must be encoded explicitly before FXAA.
+    toneMapped: false,
     blending: THREE.NoBlending,
     depthTest: false,
     depthWrite: false,
@@ -222,6 +228,12 @@ export const createScene = (assembly) => {
   const occlusion = new GTAOPass(scene, camera, 1, 1);
   own(occlusion);
   occlusion.output = GTAOPass.OUTPUT.Off;
+  // AO adds edges after MSAA resolves; filter the final display color, including alpha.
+  const display = own(new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false }));
+  const antialias = own(new ShaderPass(FXAAShader));
+  antialias.renderToScreen = true;
+  const antialiasResolution = new THREE.Vector2(1, 1);
+  antialias.uniforms.resolution.value = antialiasResolution;
   const composite = own(compositeMaterial(beauty.texture, occlusion.pdRenderTarget.texture));
   const quad = new FullScreenQuad(composite);
   own(quad);
@@ -275,6 +287,7 @@ export const createScene = (assembly) => {
           // The direct render needs none of the occlusion buffers.
           beauty.dispose();
           occlusion.dispose();
+          display.dispose();
         }
       }
       pacedFrames = 0;
@@ -379,14 +392,17 @@ export const createScene = (assembly) => {
     if (!width || !height) {
       return;
     }
-    // Size the drawing buffer directly (three.js responsive guidance), capped near three megapixels.
-    const ratio = Math.min(devicePixelRatio, 1.75, Math.sqrt(3_000_000 / (width * height)));
+    // Sample shading and AO above display resolution; MSAA only samples geometry coverage.
+    // Keep the existing three-megapixel bound and quality governor for large/slow viewports.
+    const ratio = Math.min(devicePixelRatio * 1.5, 3, Math.sqrt(3_000_000 / (width * height)));
     const w = Math.round(width * ratio);
     const h = Math.round(height * ratio);
     renderer.getSize(size);
     if (size.x !== w || size.y !== h) {
       renderer.setSize(w, h, false);
       beauty.setSize(w, h);
+      display.setSize(w, h);
+      antialiasResolution.set(1 / w, 1 / h);
       // Full resolution: at half, the upsampled occlusion grains the floor and haloes the teeth.
       occlusion.setSize(w, h);
     }
@@ -474,8 +490,9 @@ export const createScene = (assembly) => {
     renderer.setRenderTarget(beauty);
     renderer.render(scene, camera);
     occlusion.render(renderer, beauty, beauty);
-    renderer.setRenderTarget(null);
+    renderer.setRenderTarget(display);
     quad.render(renderer);
+    antialias.render(renderer, beauty, display, 0, false);
   };
   return {
     canvas,

@@ -159,6 +159,23 @@ async function runMain(
   return defaultExport(parameters);
 }
 
+// ponytail: one Manifold operation at a time per realm. manifold-3d keeps realm-global live-object and glTF-node
+// lists that cleanup empties, so two clients' operations must not interleave; per-client worker threads lift this.
+let realmTail: Promise<void> = Promise.resolve();
+
+/** Run `operation` after every earlier Manifold operation in this realm has settled. */
+async function exclusive<Value>(operation: () => Promise<Value>): Promise<Value> {
+  const previous = realmTail;
+  const done = Promise.withResolvers<void>();
+  realmTail = done.promise;
+  try {
+    await previous;
+    return await operation();
+  } finally {
+    done.resolve();
+  }
+}
+
 async function cleanupManifoldRuntime(): Promise<void> {
   const [
     { cleanup: cleanupGarbageCollector },
@@ -420,125 +437,129 @@ export const manifoldKernel = defineKernel({
   },
 
   async describe({ entryPath }, services) {
-    const relativeFilePath = toVmEntryPath(entryPath);
+    return exclusive(async () => {
+      const relativeFilePath = toVmEntryPath(entryPath);
 
-    try {
+      try {
+        const bundleResult = await services.bundler.bundle(entryPath);
+        if (!bundleResult.success) {
+          return createKernelError(enrichIssueLocation(bundleResult.issues, relativeFilePath));
+        }
+
+        const executeResult = await services.execute(bundleResult.code);
+        if (!executeResult.success) {
+          return createKernelError(enrichIssueLocation(executeResult.issues, relativeFilePath));
+        }
+
+        const module = resolveModule(executeResult.value);
+        const defaultParameters = extractDefaultParameters(module);
+        const jsonSchema = await jsonSchemaFromJson(defaultParameters);
+
+        return createKernelSuccess({
+          parameters: createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+            id: 'urn:taucad:manifold:parameters',
+            name: 'ManifoldParameters',
+          }),
+        });
+      } catch (error) {
+        return createKernelError([
+          {
+            message: error instanceof Error ? error.message : 'Failed to extract parameters',
+            code: 'RUNTIME',
+            location: {
+              fileName: relativeFilePath,
+              startLineNumber: 1,
+              startColumn: 1,
+            },
+            type: 'runtime',
+            severity: 'error',
+          },
+        ]);
+      }
+    });
+  },
+
+  async evaluate({ entryPath, parameters }, services, context) {
+    return exclusive(async () => {
+      const relativeFilePath = toVmEntryPath(entryPath);
+
+      await cleanupManifoldRuntime();
+
       const bundleResult = await services.bundler.bundle(entryPath);
       if (!bundleResult.success) {
-        return createKernelError(enrichIssueLocation(bundleResult.issues, relativeFilePath));
+        throw new ManifoldBuildError(enrichIssueLocation(bundleResult.issues, relativeFilePath));
       }
 
       const executeResult = await services.execute(bundleResult.code);
       if (!executeResult.success) {
-        return createKernelError(enrichIssueLocation(executeResult.issues, relativeFilePath));
+        throw new ManifoldBuildError(enrichIssueLocation(executeResult.issues, relativeFilePath));
       }
 
       const module = resolveModule(executeResult.value);
-      const defaultParameters = extractDefaultParameters(module);
-      const jsonSchema = await jsonSchemaFromJson(defaultParameters);
 
-      return createKernelSuccess({
-        parameters: createKernelParameterDeclaration(defaultParameters, jsonSchema, {
-          id: 'urn:taucad:manifold:parameters',
-          name: 'ManifoldParameters',
-        }),
-      });
-    } catch (error) {
-      return createKernelError([
-        {
-          message: error instanceof Error ? error.message : 'Failed to extract parameters',
-          code: 'RUNTIME',
-          location: {
-            fileName: relativeFilePath,
-            startLineNumber: 1,
-            startColumn: 1,
+      let model: unknown;
+      try {
+        model = await runMain(module, parameters, context.manifoldCadModule);
+      } catch (error) {
+        const stackFrames = parseStackTrace(error, {
+          classifyFrame: createFrameClassifier(),
+          sourceMap: bundleResult.sourceMap,
+          resolveSourcePath,
+          lastEntryName: executeResult.entryUrl,
+        });
+        const location = deriveLocationFromFrames(stackFrames, bundleResult.sourceMap, resolveSourcePath);
+        throw new ManifoldBuildError([
+          {
+            message: error instanceof Error ? error.message : String(error),
+            code: 'RUNTIME',
+            type: 'runtime',
+            severity: 'error',
+            stackFrames,
+            location,
           },
-          type: 'runtime',
-          severity: 'error',
-        },
-      ]);
-    }
-  },
+        ]);
+      }
 
-  async evaluate({ entryPath, parameters }, services, context) {
-    const relativeFilePath = toVmEntryPath(entryPath);
+      if (model === undefined || (Array.isArray(model) && model.length === 0)) {
+        await cleanupManifoldRuntime();
+        services.logger.warn('createGeometry returning empty: main-returned-undefined', {
+          data: { filePath: relativeFilePath },
+        });
+        return { handle: { glb: asBuffer(createEmptyGlb()) } };
+      }
 
-    await cleanupManifoldRuntime();
-
-    const bundleResult = await services.bundler.bundle(entryPath);
-    if (!bundleResult.success) {
-      throw new ManifoldBuildError(enrichIssueLocation(bundleResult.issues, relativeFilePath));
-    }
-
-    const executeResult = await services.execute(bundleResult.code);
-    if (!executeResult.success) {
-      throw new ManifoldBuildError(enrichIssueLocation(executeResult.issues, relativeFilePath));
-    }
-
-    const module = resolveModule(executeResult.value);
-
-    let model: unknown;
-    try {
-      model = await runMain(module, parameters, context.manifoldCadModule);
-    } catch (error) {
-      const stackFrames = parseStackTrace(error, {
-        classifyFrame: createFrameClassifier(),
-        sourceMap: bundleResult.sourceMap,
-        resolveSourcePath,
-        lastEntryName: executeResult.entryUrl,
-      });
-      const location = deriveLocationFromFrames(stackFrames, bundleResult.sourceMap, resolveSourcePath);
-      throw new ManifoldBuildError([
-        {
-          message: error instanceof Error ? error.message : String(error),
-          code: 'RUNTIME',
-          type: 'runtime',
-          severity: 'error',
-          stackFrames,
-          location,
-        },
-      ]);
-    }
-
-    if (model === undefined || (Array.isArray(model) && model.length === 0)) {
-      await cleanupManifoldRuntime();
-      services.logger.warn('createGeometry returning empty: main-returned-undefined', {
-        data: { filePath: relativeFilePath },
-      });
-      return { handle: { glb: asBuffer(createEmptyGlb()) } };
-    }
-
-    try {
-      const glb = await normalizeGltfGeometryNames(await createGlbFromManifoldOutput(model), {
-        format: 'glb',
-        rewriteLegacyGeneratedShapeNames: true,
-        materialNamePolicy: 'clear-generated',
-        materialNameSource: 'external-generated',
-        sceneNamePolicy: 'clear-generated',
-        sceneNameSource: 'external-generated',
-      });
-      return { handle: { glb } };
-    } catch (error) {
-      const stackFrames = parseStackTrace(error, {
-        classifyFrame: createFrameClassifier(),
-        sourceMap: bundleResult.sourceMap,
-        resolveSourcePath,
-        lastEntryName: executeResult.entryUrl,
-      });
-      const location = deriveLocationFromFrames(stackFrames, bundleResult.sourceMap, resolveSourcePath);
-      throw new ManifoldBuildError([
-        {
-          message: error instanceof Error ? error.message : String(error),
-          code: 'RUNTIME',
-          type: 'runtime',
-          severity: 'error',
-          stackFrames,
-          location,
-        },
-      ]);
-    } finally {
-      await cleanupManifoldRuntime();
-    }
+      try {
+        const glb = await normalizeGltfGeometryNames(await createGlbFromManifoldOutput(model), {
+          format: 'glb',
+          rewriteLegacyGeneratedShapeNames: true,
+          materialNamePolicy: 'clear-generated',
+          materialNameSource: 'external-generated',
+          sceneNamePolicy: 'clear-generated',
+          sceneNameSource: 'external-generated',
+        });
+        return { handle: { glb } };
+      } catch (error) {
+        const stackFrames = parseStackTrace(error, {
+          classifyFrame: createFrameClassifier(),
+          sourceMap: bundleResult.sourceMap,
+          resolveSourcePath,
+          lastEntryName: executeResult.entryUrl,
+        });
+        const location = deriveLocationFromFrames(stackFrames, bundleResult.sourceMap, resolveSourcePath);
+        throw new ManifoldBuildError([
+          {
+            message: error instanceof Error ? error.message : String(error),
+            code: 'RUNTIME',
+            type: 'runtime',
+            severity: 'error',
+            stackFrames,
+            location,
+          },
+        ]);
+      } finally {
+        await cleanupManifoldRuntime();
+      }
+    });
   },
 
   async render({ handle }) {
@@ -579,7 +600,7 @@ export const manifoldKernel = defineKernel({
   },
 
   async onDispose() {
-    await cleanupManifoldRuntime();
+    await exclusive(cleanupManifoldRuntime);
   },
 
   serializeHandle({ handle }) {

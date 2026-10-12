@@ -21,7 +21,6 @@ import {
   asBuffer,
   jsonSchemaFromJson,
   defineKernel,
-  getModuleRegistry,
   isRecordObject,
   extractDefaultParameters,
   registerKernelModule,
@@ -45,6 +44,7 @@ import type {
   RuntimeLogger,
   KernelLibraryTraceHandle,
   KernelLibraryTraceMode,
+  RealmHold,
 } from '@taucad/runtime/kernel';
 
 import { replicadOptionsSchema, replicadRenderSchema, replicadExportSchemas } from '#replicad.schemas.js';
@@ -273,6 +273,8 @@ async function identifyImplementationAssets(
 
 type ReplicadContext = {
   openCascade: OpenCascadeInstance;
+  /** This kernel's share of the realm's one OpenCASCADE instance. */
+  occt: RealmHold<OpenCascadeInstance>;
   replicadLibrary: ReplicadLibrary;
   tessellationInstancing: boolean;
   replicadInitialised: boolean;
@@ -409,11 +411,6 @@ function extractDefaultName(module: unknown): string | undefined {
   return typeof module['defaultName'] === 'string' ? module['defaultName'] : undefined;
 }
 
-function getReplicadFirstArgument(): unknown {
-  const registry = getModuleRegistry();
-  return registry.get('replicad');
-}
-
 // =============================================================================
 // Options schema
 // =============================================================================
@@ -530,139 +527,159 @@ export const replicadKernel = defineKernel({
     const wasmSpan = tracer.startSpan('replicad.wasm-init');
     const resolved = await resolveWasm(wasm, logger, tracer);
     const compiledModule = resolved.wasmUrl ? runtime.getCompiledWasmModule(resolved.wasmUrl) : undefined;
-    let openCascade = await initOcct(resolved.wasmUrl, resolved.bindingsFactory, {
-      tracer,
-      ...(compiledModule ? { compiledModule } : {}),
-      print: (text) => {
-        logger.trace('OCJS stdout', { data: { text } });
-      },
-      printErr: (text) => {
-        logger.warn('OCJS stderr', { data: { text } });
+    // This kernel's wrapper over the realm's instance: per-kernel tracing, or exceptions only (I4).
+    let kernelOpenCascade: { instance: OpenCascadeInstance; summary?: OcTracingSummary } | undefined;
+    const wrapForKernel = (raw: OpenCascadeInstance) => {
+      if (kernelOpenCascade === undefined && (ocTracing === 'summary' || ocTracing === 'per-call')) {
+        const traced = wrapOcWithTracing(raw, tracer, { mode: ocTracing });
+        kernelOpenCascade = { instance: traced.tracedInstance, summary: traced.summary };
+      }
+      kernelOpenCascade ??= { instance: wrapOcForExceptions(raw) };
+      return kernelOpenCascade;
+    };
+
+    // `replicad` binds OpenCASCADE at module scope, so every kernel in this realm shares one instance (I2).
+    const occt = await runtime.realm.hold<OpenCascadeInstance>({
+      group: 'replicad-occt',
+      key: `${resolved.variant}:${resolved.wasmUrl ?? ''}`,
+      async create() {
+        // ponytail: OCCT print/printErr reach the creating kernel's logger only; exact with one realm per client.
+        const raw = await initOcct(resolved.wasmUrl, resolved.bindingsFactory, {
+          tracer,
+          ...(compiledModule ? { compiledModule } : {}),
+          print: (text) => {
+            logger.trace('OCJS stdout', { data: { text } });
+          },
+          printErr: (text) => {
+            logger.warn('OCJS stderr', { data: { text } });
+          },
+        });
+
+        if (resolved.variant === 'multi') {
+          /* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
+          const pool = raw.OSD_ThreadPool.DefaultPool(-1);
+          try {
+            if (pool.IsInUse()) {
+              throw new Error('Cannot configure Replicad OCCT thread pool while it is in use');
+            }
+            // ponytail: cap OCCT threads to reduce parallel working sets; revisit after native batch memory is reduced.
+            pool.Init(Math.min(pool.NbThreads(), 4));
+          } finally {
+            pool.delete();
+          }
+          /* oxlint-enable new-cap */
+          activateOccParallelism(raw, logger);
+        } else {
+          logger.log(`Replicad OCCT initialised: variant=${resolved.variant} (single-threaded)`);
+        }
+
+        // The creating kernel binds the library once (Q5): library-internal OC calls trace to it, which is
+        // exact with one realm per client; every other kernel's wrapper sees only its kernel-direct calls.
+        // ponytail: no unbind on last release — `replicad` keeps the stale instance until the next create rebinds it.
+        replicadLibrary.setOC(wrapForKernel(raw).instance);
+        return raw;
       },
     });
 
-    if (resolved.variant === 'multi') {
-      /* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
-      const pool = openCascade.OSD_ThreadPool.DefaultPool(-1);
-      try {
-        if (pool.IsInUse()) {
-          throw new Error('Cannot configure Replicad OCCT thread pool while it is in use');
-        }
-        // ponytail: cap OCCT threads to reduce parallel working sets; revisit after native batch memory is reduced.
-        pool.Init(Math.min(pool.NbThreads(), 4));
-      } finally {
-        pool.delete();
-      }
-      /* oxlint-enable new-cap */
-      activateOccParallelism(openCascade, logger);
-    } else {
-      logger.log(`Replicad OCCT initialised: variant=${resolved.variant} (single-threaded)`);
-    }
-
-    let tracingSummary: OcTracingSummary | undefined;
-
-    if (ocTracing === 'summary' || ocTracing === 'per-call') {
-      const traced = wrapOcWithTracing(openCascade, tracer, {
-        mode: ocTracing,
-      });
-      openCascade = traced.tracedInstance;
-      tracingSummary = traced.summary;
-    } else {
-      openCascade = wrapOcForExceptions(openCascade);
-    }
-
-    replicadLibrary.setOC(openCascade);
-    wasmSpan.end();
-
+    // `onDispose` never runs for a kernel whose initialisation failed, so release the hold here (I5).
     try {
-      const fontSpan = tracer.startSpan('replicad.font-load');
-      // The dependency declaration says this is always present, but its registry lookup returns undefined before load.
-      if (Object.is(replicadLibrary.getFont('default'), undefined)) {
-        logger.debug('Loading default font for text rendering');
-        const fontData = await loadBinaryFile(geistRegularUrl);
-        if (!fontData) {
-          throw new Error('Default font file not found');
-        }
-        await replicadLibrary.loadFont(fontData, 'default');
-      }
-      fontSpan.end();
-    } catch (error) {
-      logger.warn('Failed to load default font', { data: error });
-    }
+      const { instance: openCascade, summary: tracingSummary } = wrapForKernel(occt.value);
+      wasmSpan.end();
 
-    // Off constructs nothing: no asset read, no digest, no adapter (D14, I13, A5).
-    const identifiedAssets =
-      computeReuseOption === false
-        ? undefined
-        : await identifyImplementationAssets(
-            resolved.variant,
-            typeof wasm === 'string' ? [] : [wasm.wasmUrl, wasm.wasmBindingsUrl],
-          );
-    const assetsIdentified = identifiedAssets !== undefined;
-    // Explicit off wins; omission keeps the historical asset-derived default (C2).
-    const computeReuseEnabled = computeReuseOption ?? assetsIdentified;
-    const implementationAssets = identifiedAssets ?? [];
-    if (!assetsIdentified && computeReuseOption !== false) {
-      logger.warn('Replicad semantic compute reuse disabled because implementation assets could not be identified.');
-    }
-    const computeProducer = {
-      id: '@taucad/replicad',
-      version: 'replicad@1.1.0-taulabs.0|replicad-opencascadejs@0.23.0-beta.0|adapter@1',
-      implementationAssets,
-    };
-    const computeEnvironment = {
-      wasmVariant: resolved.variant,
-      lengthUnit: 'millimeter',
-    };
-    const computeReuse = computeReuseEnabled
-      ? createReplicadComputeReuse({
-          library: replicadLibrary,
-          enabled: true,
-          producer: computeProducer,
-          environment: computeEnvironment,
-        })
-      : undefined;
-    const libraryTrace = createKernelLibraryTracer({
-      library: computeReuse?.library ?? replicadLibrary,
-      tracer,
-      mode: libraryTracing,
-      policy: replicadLibraryTracePolicy,
-      defaultScope: 'kernel-setup',
-    });
-    registerReplicadModule(runtime, libraryTrace.tracedLibrary);
-
-    const librarySourceMapCache = new Map<string, SourceMapConsumer | undefined>();
-    if (withSourceMapping) {
       try {
-        const sourceMapSpan = tracer.startSpan('replicad.source-map-load');
-        const consumer = await loadReplicadSourceMap();
-        if (consumer) {
-          librarySourceMapCache.set('replicad', consumer);
-          logger.debug('Loaded replicad library source map for error diagnostics');
+        const fontSpan = tracer.startSpan('replicad.font-load');
+        // The dependency declaration says this is always present, but its registry lookup returns undefined before load.
+        if (Object.is(replicadLibrary.getFont('default'), undefined)) {
+          logger.debug('Loading default font for text rendering');
+          const fontData = await loadBinaryFile(geistRegularUrl);
+          if (!fontData) {
+            throw new Error('Default font file not found');
+          }
+          await replicadLibrary.loadFont(fontData, 'default');
         }
-
-        sourceMapSpan.end();
-      } catch {
-        // Source map loading is best-effort — errors are still enriched without it
+        fontSpan.end();
+      } catch (error) {
+        logger.warn('Failed to load default font', { data: error });
       }
+
+      // Off constructs nothing: no asset read, no digest, no adapter (D14, I13, A5).
+      const identifiedAssets =
+        computeReuseOption === false
+          ? undefined
+          : await identifyImplementationAssets(
+              resolved.variant,
+              typeof wasm === 'string' ? [] : [wasm.wasmUrl, wasm.wasmBindingsUrl],
+            );
+      const assetsIdentified = identifiedAssets !== undefined;
+      // Explicit off wins; omission keeps the historical asset-derived default (C2).
+      const computeReuseEnabled = computeReuseOption ?? assetsIdentified;
+      const implementationAssets = identifiedAssets ?? [];
+      if (!assetsIdentified && computeReuseOption !== false) {
+        logger.warn('Replicad semantic compute reuse disabled because implementation assets could not be identified.');
+      }
+      const computeProducer = {
+        id: '@taucad/replicad',
+        version: 'replicad@1.1.0-taulabs.0|replicad-opencascadejs@0.23.0-beta.0|adapter@1',
+        implementationAssets,
+      };
+      const computeEnvironment = {
+        wasmVariant: resolved.variant,
+        lengthUnit: 'millimeter',
+      };
+      const computeReuse = computeReuseEnabled
+        ? createReplicadComputeReuse({
+            library: replicadLibrary,
+            enabled: true,
+            producer: computeProducer,
+            environment: computeEnvironment,
+          })
+        : undefined;
+      const libraryTrace = createKernelLibraryTracer({
+        library: computeReuse?.library ?? replicadLibrary,
+        tracer,
+        mode: libraryTracing,
+        policy: replicadLibraryTracePolicy,
+        defaultScope: 'kernel-setup',
+      });
+      registerReplicadModule(runtime, libraryTrace.tracedLibrary);
+
+      const librarySourceMapCache = new Map<string, SourceMapConsumer | undefined>();
+      if (withSourceMapping) {
+        try {
+          const sourceMapSpan = tracer.startSpan('replicad.source-map-load');
+          const consumer = await loadReplicadSourceMap();
+          if (consumer) {
+            librarySourceMapCache.set('replicad', consumer);
+            logger.debug('Loaded replicad library source map for error diagnostics');
+          }
+
+          sourceMapSpan.end();
+        } catch {
+          // Source map loading is best-effort — errors are still enriched without it
+        }
+      }
+
+      logger.debug('Replicad kernel initialized');
+
+      return {
+        openCascade,
+        occt,
+        replicadLibrary,
+        tessellationInstancing,
+        replicadInitialised: true,
+        librarySourceMapCache,
+        exportNameMap,
+        libraryExportNames,
+        tracingSummary,
+        libraryTrace,
+        computeReuse,
+        computeProducer,
+        computeEnvironment,
+      };
+    } catch (error) {
+      occt.release();
+      throw error;
     }
-
-    logger.debug('Replicad kernel initialized');
-
-    return {
-      openCascade,
-      replicadLibrary,
-      tessellationInstancing,
-      replicadInitialised: true,
-      librarySourceMapCache,
-      exportNameMap,
-      libraryExportNames,
-      tracingSummary,
-      libraryTrace,
-      computeReuse,
-      computeProducer,
-      computeEnvironment,
-    };
   },
 
   async resolve({ entryPath }, runtime) {
@@ -742,7 +759,7 @@ export const replicadKernel = defineKernel({
                     bundleSourceMap,
                     entryUrl,
                   }),
-                  firstArg: getReplicadFirstArgument(),
+                  firstArg: context.libraryTrace.tracedLibrary,
                 }),
             });
           } finally {
@@ -1137,6 +1154,10 @@ export const replicadKernel = defineKernel({
         ...entry.metadata,
       })),
     };
+  },
+
+  async onDispose(context) {
+    context.occt.release();
   },
 });
 

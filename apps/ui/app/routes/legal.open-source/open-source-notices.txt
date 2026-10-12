@@ -19,7 +19,7 @@ components:
 
 - The GeoSpec engine (`@taucad/geospec-engine-native`), built from OCCT upstream
   revision `3d097a0328e71b826377d4814ab05ec3c3d23871`
-- libcascade 3.0.2 ([source](https://github.com/taucad/opencascade.js))
+- libcascade 3.0.3 ([source](https://github.com/taucad/opencascade.js))
 - occt-import-js 0.0.23 ([source](https://github.com/kovacsv/occt-import-js))
 
 You may modify the OCCT portions of Tau for your own use, and reverse engineer them to debug such modifications.
@@ -498,7 +498,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [kysely](https://github.com/kysely-org/kysely) | 0.29.2 | MIT |
 | [libassimp](https://github.com/taucad/libassimp) | 0.3.0 | Apache-2.0 |
 | [libassimp-{platform}](https://github.com/taucad/libassimp) | 0.3.0 | Apache-2.0 |
-| [libcascade](https://github.com/taucad/opencascade.js) | 3.0.2 | LGPL-2.1-only WITH Open-CASCADE-Exception-1.0 |
+| [libcascade](https://github.com/taucad/opencascade.js) | 3.0.3 | LGPL-2.1-only WITH Open-CASCADE-Exception-1.0 |
 | [lie](https://github.com/calvinmetcalf/lie) | 3.3.0 | MIT |
 | [lodash.get](https://github.com/lodash/lodash) | 4.4.2 | MIT |
 | [long](https://github.com/dcodeIO/long.js) | 5.3.2 | Apache-2.0 |

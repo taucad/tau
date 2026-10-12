@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -103,5 +104,28 @@ describe('runtime child control frames', () => {
       { type: 'zoo-proxy-credential', url: 'wss://api.example.test/v1/kernels/zoo' },
     ]);
     await child.close();
+  });
+
+  it('closes twice, without an uncaught error, a child whose channel disconnected before it exited', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-disconnect-'));
+    const modulePath = fileURLToPath(new URL('fixtures/message-echo-child.mjs', import.meta.url));
+    const child = await startRuntimeChild({ modulePath, args: [join(temporaryDirectory, 'messages.jsonl')] });
+    const uncaught: unknown[] = [];
+    const onUncaught = (error: unknown): void => {
+      uncaught.push(error);
+    };
+    process.on('uncaughtException', onUncaught);
+    try {
+      child.post({ type: 'disconnect' });
+      /* The child exits 500 ms after disconnecting; both closes land in between. */
+      await delay(200);
+
+      await Promise.all([child.close(), child.close()]);
+      await delay(0);
+
+      expect(uncaught).toEqual([]);
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
   });
 });

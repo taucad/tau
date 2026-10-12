@@ -136,4 +136,20 @@ describe('runtime child control frames', () => {
       process.off('uncaughtException', onUncaught);
     }
   });
+
+  it('settles closed, temp directory removed, before close resolves', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-close-settles-'));
+    const modulePath = fileURLToPath(new URL('fixtures/message-echo-child.mjs', import.meta.url));
+    const child = await startRuntimeChild({ modulePath, args: [join(temporaryDirectory, 'messages.jsonl')] });
+    let settled = false;
+    const observed = (async (): Promise<void> => {
+      await child.closed;
+      settled = true;
+    })();
+
+    await child.close();
+
+    expect(settled).toBe(true);
+    await observed;
+  });
 });

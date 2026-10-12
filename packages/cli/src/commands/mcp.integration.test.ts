@@ -656,8 +656,11 @@ describe('tau mcp with one thread per project', () => {
       /* The deadline, the termination grace, and the call's own overhead. */
       expect(elapsed).toBeLessThan((operationTimeoutSeconds + 15) * 1000);
 
-      /* The edited model runs in a fresh thread. */
+      /* The edited model runs in a fresh thread. The runtime terminates a timed-out
+       * thread one second after the timeout answers; a call inside that second
+       * still meets the old thread, and an agent's edit takes longer than that. */
       await writeFile(join(alpha, 'loop.ts'), boxModel);
+      await sleep(2000);
       const recovered = await call({ name: 'evaluate_model', arguments: { targetFile: 'loop.ts' } });
       expect(recovered.structuredContent, textOf(recovered)).toMatchObject({ status: 'ready' });
     },

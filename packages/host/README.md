@@ -37,7 +37,7 @@ Control reconnect uses bounded exponential backoff. An interrupted runtime sessi
 
 ## Security status
 
-Remote project code executes as native Node ESM in the runtime child. The child receives no device credential or parent environment and uses Node's permission model to deny host filesystem access, process spawning, addons, WASI, and the inspector; it may start worker threads, one per runtime connection, which inherit the same grants. Node network access remains unrestricted, and Node's permission model is not a malicious-code sandbox.
+Remote project code executes as native Node ESM in the runtime child. The child receives no device credential or parent environment and uses Node's permission model to deny host filesystem access, process spawning, workers, addons, WASI, and the inspector. Node network access remains unrestricted, and Node's permission model is not a malicious-code sandbox.
 
 This package is therefore restricted to explicitly trusted projects. Public/general availability is blocked until an OS/container sandbox contains filesystem, environment, network, native-code, process, and resource-exhaustion attacks on every supported daemon OS.
 

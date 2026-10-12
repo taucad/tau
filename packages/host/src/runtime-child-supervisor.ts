@@ -62,9 +62,8 @@ const developmentLoaderArguments = (modulePath: string): string[] => {
  * Node's permission grants for the child.
  *
  * A **built** `.mjs` child runs under `--permission`, read-scoped to the
- * project and its own directory and write-scoped to the temp directory. It may
- * start worker threads — it runs each connection's runtime in its own — and
- * they inherit the same grants.
+ * project and its own directory and write-scoped to the temp directory. That is
+ * the shipped sandbox and it is unchanged.
  *
  * A **TypeScript** child gets none, and the honest reason is that it cannot
  * have one: the development loader transpiles by *spawning the esbuild service
@@ -87,7 +86,6 @@ const permissionArguments = (modulePath: string): string[] =>
         `--allow-fs-read=${process.cwd()}`,
         `--allow-fs-read=${dirname(modulePath)}`,
         `--allow-fs-write=${tmpdir()}`,
-        '--allow-worker',
       ];
 
 // Node 24 does not gate network access. Node 26 requires the experimental

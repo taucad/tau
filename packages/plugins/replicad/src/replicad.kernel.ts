@@ -580,99 +580,105 @@ export const replicadKernel = defineKernel({
       },
     });
 
-    const { instance: openCascade, summary: tracingSummary } = wrapForKernel(occt.value);
-    wasmSpan.end();
-
+    // `onDispose` never runs for a kernel whose initialisation failed, so release the hold here (I5).
     try {
-      const fontSpan = tracer.startSpan('replicad.font-load');
-      // The dependency declaration says this is always present, but its registry lookup returns undefined before load.
-      if (Object.is(replicadLibrary.getFont('default'), undefined)) {
-        logger.debug('Loading default font for text rendering');
-        const fontData = await loadBinaryFile(geistRegularUrl);
-        if (!fontData) {
-          throw new Error('Default font file not found');
-        }
-        await replicadLibrary.loadFont(fontData, 'default');
-      }
-      fontSpan.end();
-    } catch (error) {
-      logger.warn('Failed to load default font', { data: error });
-    }
+      const { instance: openCascade, summary: tracingSummary } = wrapForKernel(occt.value);
+      wasmSpan.end();
 
-    // Off constructs nothing: no asset read, no digest, no adapter (D14, I13, A5).
-    const identifiedAssets =
-      computeReuseOption === false
-        ? undefined
-        : await identifyImplementationAssets(
-            resolved.variant,
-            typeof wasm === 'string' ? [] : [wasm.wasmUrl, wasm.wasmBindingsUrl],
-          );
-    const assetsIdentified = identifiedAssets !== undefined;
-    // Explicit off wins; omission keeps the historical asset-derived default (C2).
-    const computeReuseEnabled = computeReuseOption ?? assetsIdentified;
-    const implementationAssets = identifiedAssets ?? [];
-    if (!assetsIdentified && computeReuseOption !== false) {
-      logger.warn('Replicad semantic compute reuse disabled because implementation assets could not be identified.');
-    }
-    const computeProducer = {
-      id: '@taucad/replicad',
-      version: 'replicad@1.1.0-taulabs.0|replicad-opencascadejs@0.23.0-beta.0|adapter@1',
-      implementationAssets,
-    };
-    const computeEnvironment = {
-      wasmVariant: resolved.variant,
-      lengthUnit: 'millimeter',
-    };
-    const computeReuse = computeReuseEnabled
-      ? createReplicadComputeReuse({
-          library: replicadLibrary,
-          enabled: true,
-          producer: computeProducer,
-          environment: computeEnvironment,
-        })
-      : undefined;
-    const libraryTrace = createKernelLibraryTracer({
-      library: computeReuse?.library ?? replicadLibrary,
-      tracer,
-      mode: libraryTracing,
-      policy: replicadLibraryTracePolicy,
-      defaultScope: 'kernel-setup',
-    });
-    registerReplicadModule(runtime, libraryTrace.tracedLibrary);
-
-    const librarySourceMapCache = new Map<string, SourceMapConsumer | undefined>();
-    if (withSourceMapping) {
       try {
-        const sourceMapSpan = tracer.startSpan('replicad.source-map-load');
-        const consumer = await loadReplicadSourceMap();
-        if (consumer) {
-          librarySourceMapCache.set('replicad', consumer);
-          logger.debug('Loaded replicad library source map for error diagnostics');
+        const fontSpan = tracer.startSpan('replicad.font-load');
+        // The dependency declaration says this is always present, but its registry lookup returns undefined before load.
+        if (Object.is(replicadLibrary.getFont('default'), undefined)) {
+          logger.debug('Loading default font for text rendering');
+          const fontData = await loadBinaryFile(geistRegularUrl);
+          if (!fontData) {
+            throw new Error('Default font file not found');
+          }
+          await replicadLibrary.loadFont(fontData, 'default');
         }
-
-        sourceMapSpan.end();
-      } catch {
-        // Source map loading is best-effort — errors are still enriched without it
+        fontSpan.end();
+      } catch (error) {
+        logger.warn('Failed to load default font', { data: error });
       }
+
+      // Off constructs nothing: no asset read, no digest, no adapter (D14, I13, A5).
+      const identifiedAssets =
+        computeReuseOption === false
+          ? undefined
+          : await identifyImplementationAssets(
+              resolved.variant,
+              typeof wasm === 'string' ? [] : [wasm.wasmUrl, wasm.wasmBindingsUrl],
+            );
+      const assetsIdentified = identifiedAssets !== undefined;
+      // Explicit off wins; omission keeps the historical asset-derived default (C2).
+      const computeReuseEnabled = computeReuseOption ?? assetsIdentified;
+      const implementationAssets = identifiedAssets ?? [];
+      if (!assetsIdentified && computeReuseOption !== false) {
+        logger.warn('Replicad semantic compute reuse disabled because implementation assets could not be identified.');
+      }
+      const computeProducer = {
+        id: '@taucad/replicad',
+        version: 'replicad@1.1.0-taulabs.0|replicad-opencascadejs@0.23.0-beta.0|adapter@1',
+        implementationAssets,
+      };
+      const computeEnvironment = {
+        wasmVariant: resolved.variant,
+        lengthUnit: 'millimeter',
+      };
+      const computeReuse = computeReuseEnabled
+        ? createReplicadComputeReuse({
+            library: replicadLibrary,
+            enabled: true,
+            producer: computeProducer,
+            environment: computeEnvironment,
+          })
+        : undefined;
+      const libraryTrace = createKernelLibraryTracer({
+        library: computeReuse?.library ?? replicadLibrary,
+        tracer,
+        mode: libraryTracing,
+        policy: replicadLibraryTracePolicy,
+        defaultScope: 'kernel-setup',
+      });
+      registerReplicadModule(runtime, libraryTrace.tracedLibrary);
+
+      const librarySourceMapCache = new Map<string, SourceMapConsumer | undefined>();
+      if (withSourceMapping) {
+        try {
+          const sourceMapSpan = tracer.startSpan('replicad.source-map-load');
+          const consumer = await loadReplicadSourceMap();
+          if (consumer) {
+            librarySourceMapCache.set('replicad', consumer);
+            logger.debug('Loaded replicad library source map for error diagnostics');
+          }
+
+          sourceMapSpan.end();
+        } catch {
+          // Source map loading is best-effort — errors are still enriched without it
+        }
+      }
+
+      logger.debug('Replicad kernel initialized');
+
+      return {
+        openCascade,
+        occt,
+        replicadLibrary,
+        tessellationInstancing,
+        replicadInitialised: true,
+        librarySourceMapCache,
+        exportNameMap,
+        libraryExportNames,
+        tracingSummary,
+        libraryTrace,
+        computeReuse,
+        computeProducer,
+        computeEnvironment,
+      };
+    } catch (error) {
+      occt.release();
+      throw error;
     }
-
-    logger.debug('Replicad kernel initialized');
-
-    return {
-      openCascade,
-      occt,
-      replicadLibrary,
-      tessellationInstancing,
-      replicadInitialised: true,
-      librarySourceMapCache,
-      exportNameMap,
-      libraryExportNames,
-      tracingSummary,
-      libraryTrace,
-      computeReuse,
-      computeProducer,
-      computeEnvironment,
-    };
   },
 
   async resolve({ entryPath }, runtime) {

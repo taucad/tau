@@ -36,6 +36,9 @@ const handleStart = async (message) => {
   );
   const wasi = /** @type {typeof import('node:wasi')} */ (process.getBuiltinModule('wasi'));
   const inspector = /** @type {typeof import('node:inspector')} */ (process.getBuiltinModule('inspector'));
+  const os = /** @type {typeof import('node:os')} */ (process.getBuiltinModule('os'));
+  const path = process.getBuiltinModule('path');
+  const url = /** @type {typeof import('node:url')} */ (process.getBuiltinModule('url'));
   const networkResponse = await fetch(networkUrl);
   const proof = {
     filesystem: await denied(
@@ -70,6 +73,14 @@ const handleStart = async (message) => {
         inspector.close();
       })(),
     ),
+    /* A bundling kernel writes its bundle to `os.tmpdir()` and imports it back. */
+    temporaryDirectoryReadable: await (async () => {
+      const temporaryFile = path.join(os.tmpdir(), 'permission-proof.mjs');
+      await writeFile(temporaryFile, 'export default true;');
+      const module = /** @type {{ default: unknown }} */ (await import(url.pathToFileURL(temporaryFile).href));
+      return module.default === true;
+    })().catch(() => false),
+    temporaryDirectory: os.tmpdir(),
     environmentSecretAbsent: process.env.TAU_HOST_TEST_SECRET === undefined,
     network: networkResponse.ok,
     arbitraryNetworkAllowed: await (async () => {

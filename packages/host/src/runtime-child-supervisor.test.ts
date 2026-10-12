@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,8 @@ const proofSchema = z.object({
   addon: z.literal(true),
   wasi: z.literal(true),
   inspector: z.literal(true),
+  temporaryDirectoryReadable: z.literal(true),
+  temporaryDirectory: z.string(),
   environmentSecretAbsent: z.literal(true),
   network: z.literal(true),
   arbitraryNetworkAllowed: z.literal(true),
@@ -32,7 +34,7 @@ afterEach(async () => {
 });
 
 describe('runtime child permission boundary', () => {
-  it('denies host capabilities, strips secrets, and pins unrestricted network egress', async () => {
+  it('denies host capabilities, strips secrets, reads back its own temp files, and pins unrestricted network egress', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-permissions-'));
     const proofPath = join(temporaryDirectory, 'proof.json');
     const server = createServer((_request, response) => {
@@ -52,7 +54,9 @@ describe('runtime child permission boundary', () => {
       modulePath,
       args: [proofPath, `http://127.0.0.1:${String(address.port)}`],
     });
-    const proof = proofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
+    const { temporaryDirectory: childTemporaryDirectory, ...proof } = proofSchema.parse(
+      JSON.parse(await readFile(proofPath, 'utf8')),
+    );
 
     expect(proof).toEqual({
       filesystem: true,
@@ -61,11 +65,15 @@ describe('runtime child permission boundary', () => {
       addon: true,
       wasi: true,
       inspector: true,
+      temporaryDirectoryReadable: true,
       environmentSecretAbsent: true,
       network: true,
       arbitraryNetworkAllowed: true,
     });
+    expect(childTemporaryDirectory.startsWith(join(tmpdir(), 'tau-runtime-child-'))).toBe(true);
     await child.close();
+    await child.closed;
+    await expect(access(childTemporaryDirectory)).rejects.toThrow(/ENOENT/u);
     await new Promise<void>((resolve, reject) => {
       server.close((error) => {
         if (error) {

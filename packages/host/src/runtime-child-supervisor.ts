@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { fork } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { z } from 'zod';
@@ -62,8 +63,10 @@ const developmentLoaderArguments = (modulePath: string): string[] => {
  * Node's permission grants for the child.
  *
  * A **built** `.mjs` child runs under `--permission`, read-scoped to the
- * project and its own directory and write-scoped to the temp directory. That is
- * the shipped sandbox and it is unchanged.
+ * project, its own directory and its private temp directory, and write-scoped
+ * to the temp directory. The private directory is the child's `os.tmpdir()`:
+ * a bundling kernel runs a model by writing its bundle there and importing it,
+ * and the import reads the file back.
  *
  * A **TypeScript** child gets none, and the honest reason is that it cannot
  * have one: the development loader transpiles by *spawning the esbuild service
@@ -76,15 +79,17 @@ const developmentLoaderArguments = (modulePath: string): string[] => {
  * distributed daemon runs the built child and keeps the real sandbox.
  *
  * @param modulePath - The child module being forked.
+ * @param temporaryDirectory - The child's private temp directory.
  * @returns The child's permission flags, or none for a development child.
  */
-const permissionArguments = (modulePath: string): string[] =>
+const permissionArguments = (modulePath: string, temporaryDirectory: string): string[] =>
   modulePath.endsWith('.ts')
     ? []
     : [
         '--permission',
         `--allow-fs-read=${process.cwd()}`,
         `--allow-fs-read=${dirname(modulePath)}`,
+        `--allow-fs-read=${temporaryDirectory}`,
         `--allow-fs-write=${tmpdir()}`,
       ];
 
@@ -128,17 +133,26 @@ export const startRuntimeChild = async (options: {
   readonly args?: readonly string[];
 }): Promise<RuntimeChildHandle> => {
   const authorizationToken = randomBytes(32).toString('base64url');
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-runtime-child-'));
   const child = fork(options.modulePath, [...(options.args ?? [])], {
     cwd: process.cwd(),
-    env: minimalEnvironment(),
+    env: {
+      ...minimalEnvironment(),
+      // `os.tmpdir()` reads TMPDIR on POSIX and TEMP or TMP on Windows.
+      /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
+      TMPDIR: temporaryDirectory,
+      TEMP: temporaryDirectory,
+      TMP: temporaryDirectory,
+      /* eslint-enable @typescript-eslint/naming-convention -- end of the environment variables */
+    },
     execArgv: [
       ...developmentLoaderArguments(options.modulePath),
-      ...permissionArguments(options.modulePath),
+      ...permissionArguments(options.modulePath, temporaryDirectory),
       ...runtimeNetworkArguments(options.modulePath),
     ],
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
-  const closed = new Promise<{ exitCode?: number; signal?: NodeJS.Signals }>((resolve) => {
+  const exited = new Promise<{ exitCode?: number; signal?: NodeJS.Signals }>((resolve) => {
     child.once('exit', (exitCode, signal) => {
       resolve({
         ...(exitCode === null ? {} : { exitCode }),
@@ -146,6 +160,17 @@ export const startRuntimeChild = async (options: {
       });
     });
   });
+  /* The directory is the child's alone, so it goes with the child; a failed removal leaves only temp files. */
+  const removeTemporaryDirectoryOnExit = async (): Promise<Awaited<typeof exited>> => {
+    const exit = await exited;
+    try {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    } catch {
+      // The OS reclaims the temp directory.
+    }
+    return exit;
+  };
+  const closed = removeTemporaryDirectoryOnExit();
   const ready = Promise.withResolvers<z.infer<typeof readyMessageSchema>>();
   const onMessage = (message: unknown): void => {
     const parsed = readyMessageSchema.safeParse(message);

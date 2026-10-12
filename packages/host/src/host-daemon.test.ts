@@ -2018,6 +2018,7 @@ describe('startHostDaemon runtime child per root and session', () => {
       runtimeChildStart.hook = undefined;
       closing = daemon.close();
     };
+    const before = runtimeChildren.length;
     const daemon = startHostDaemon({
       relayUrl: relay.url,
       runtimeHost: { modulePath: proofChild },
@@ -2030,6 +2031,10 @@ describe('startHostDaemon runtime child per root and session', () => {
     await closing;
 
     expect(events).not.toContainEqual(expect.objectContaining({ type: 'warning', code: 'RUNTIME_CHILD_FAILED' }));
+    /* `close()` resolves only after the interrupted start has finished and its child has exited. */
+    const started = runtimeChildren.slice(before);
+    expect(started).toHaveLength(1);
+    expect(await exitOf(started[0]!.handle, 0)).toBe('closed');
   }, 30_000);
 
   it('closes the child of an offer whose route never opens only after reporting why the session ended', async () => {

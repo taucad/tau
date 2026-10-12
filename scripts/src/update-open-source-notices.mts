@@ -174,7 +174,7 @@ export function generateNotices(input: {
     'OCCT runs in the web and desktop apps as WebAssembly and, in the desktop app, as a native library, through these',
     'components:',
     '',
-    '- The GeoSpec engine (`@taucad/geospec-engine` and `@taucad/geospec-engine-native`), built from OCCT upstream',
+    '- The GeoSpec engine (`@taucad/geospec-engine-native`), built from OCCT upstream',
     '  revision `3d097a0328e71b826377d4814ab05ec3c3d23871`',
     ...occtPackages.map((packageInfo) => `- ${packageInfo.name} ${packageInfo.version}${repositoryLink(packageInfo)}`),
     '',

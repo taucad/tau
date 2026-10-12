@@ -485,6 +485,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   /* One sandboxed runtime child per agent root and per relay session (operator ruling Q8): roots and sessions never
    * share a realm, and a child that exits or hangs costs only its own. */
   const runtimeChildren = new Set<RuntimeChildHandle>();
+  /* Starts still in flight. Release waits for them too: a child that finishes starting after release closed the
+   * others closes itself (see `startChild`), and `close()` must not resolve while it still runs. */
+  const startingChildren = new Set<Promise<unknown>>();
   /* What the control `ready` frame advertises: the runtime version of the last child that started. */
   let runtimeVersion: string | undefined;
   let jobWorker: HostJobWorkerHandle | undefined;
@@ -585,11 +588,11 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   };
 
   /**
-   * Start a runtime child for one agent root or relay session. Its owner closes it; daemon release closes any left.
+   * Start one child and admit it to the daemon's set, or close it when the daemon is already releasing its children.
    *
    * @returns A ready child that has the latest Zoo credential and keeps receiving it until it exits.
    */
-  const startChild = async (): Promise<RuntimeChildHandle> => {
+  const startAdmittedChild = async (): Promise<RuntimeChildHandle> => {
     const child = await startRuntimeChild(options.runtimeHost);
     runtimeVersion = child.runtimeVersion;
     runtimeChildren.add(child);
@@ -606,6 +609,21 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       throw new Error('Tau Host is stopping.');
     }
     return child;
+  };
+
+  /**
+   * Start a runtime child for one agent root or relay session. Its owner closes it; daemon release closes any left.
+   *
+   * @returns A ready child that has the latest Zoo credential and keeps receiving it until it exits.
+   */
+  const startChild = async (): Promise<RuntimeChildHandle> => {
+    const starting = startAdmittedChild();
+    startingChildren.add(starting);
+    try {
+      return await starting;
+    } finally {
+      startingChildren.delete(starting);
+    }
   };
 
   /**
@@ -1614,6 +1632,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     await settle(async () => jobWorkerObserver);
     zooCredential?.dispose();
     await Promise.all([...runtimeChildren].map(async (child) => closeChild(child)));
+    await Promise.allSettled(startingChildren);
     if (failures.length > 0) {
       const aggregate = new AggregateError(failures, 'Tau Host shutdown did not release every accepted resource.');
       ready.reject(aggregate);

@@ -1,11 +1,10 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import '@taucad/geospec-engine/register/node';
+import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
 import { Engine } from '@taucad/geospec-engine-native/node';
 import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
-import { createModelLoader } from 'geospec/model';
-import { createGeoSpecNodeRunner, createNodeVmFileSystem } from 'geospec/runner/node';
+import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import { describe, expect, it } from 'vitest';
 
 describe('Manifold boolean GeoSpec evidence', () => {
@@ -45,12 +44,10 @@ describe('Manifold boolean GeoSpec evidence', () => {
     `,
     );
     const engine = new Engine();
-    const runner = createGeoSpecNodeRunner({
-      projectPath: root,
+    const runner = createNativeGeoSpecRunner({
       filesystem: createNodeVmFileSystem(root),
       nativeAssertions: { engine },
-      modelLoader: createModelLoader({
-        engine,
+      model: {
         projectPath: root,
         runtime: async () => createExampleGeoSpecRuntimeClient(root),
         readSource: async (source) => {
@@ -59,8 +56,7 @@ describe('Manifold boolean GeoSpec evidence', () => {
           }
           return new Uint8Array(await readFile(source));
         },
-      }),
-      cache: false,
+      },
     });
     const client = await createExampleGeoSpecRuntimeClient(root);
     try {

@@ -153,6 +153,14 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
+      # The plan of the next push to `main` diffs the app against this commit.
+      - name: Record this staging deploy
+        if: inputs.environment == 'staging' && steps.superseded.outputs.superseded != 'true'
+        uses: ./.github/actions/staging-deploy-history
+        with:
+          mode: record
+          app: ${{ inputs.app }}
+
       # Post-deploy CORS smoke test (R13). Catches regressions like the
       # 4-month-undetected api.taucad.dev cert/app misalignment described in
       # `docs/research/staging-cors-coep-safari-rendering-audit.md` Finding

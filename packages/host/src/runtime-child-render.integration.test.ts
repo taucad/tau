@@ -19,16 +19,17 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import '@taucad/geospec-engine/register';
-import { analyzeMesh } from 'geospec/mesh';
-import { loadStep } from 'geospec/step';
+import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
+import { Engine, initialize } from '@taucad/geospec-engine-native/wasm';
+import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import type { RuntimeClient } from '@taucad/runtime/client';
 
 import { writeHostCredential } from '#credential-store.js';
@@ -302,18 +303,68 @@ const render = async (document: RuntimeDocument): Promise<string> => {
   return outcome.rendering.success ? 'ok' : issuesOf(outcome.rendering.issues);
 };
 
-/** Sorted bounding-box size of the document's STEP export, re-imported through GeoSpec's own STEP reader. */
-const stepSize = async (document: RuntimeDocument): Promise<string> => {
+/* The WASM engine, not the NAPI binding: CI ships the binding only to its Darwin lane, and the Linux lanes that run
+ * this suite carry the WASM product. */
+const loadWasm = async (): Promise<void> => {
+  const bytes = await readFile(createRequire(import.meta.url).resolve('@taucad/geospec-engine-native/wasm-binary'));
+  await initialize(new Uint8Array(bytes));
+};
+let wasmReady: Promise<void> | undefined;
+const initializeWasm = async (): Promise<void> => {
+  wasmReady ??= loadWasm();
+  await wasmReady;
+};
+
+/**
+ * The document's STEP export, re-imported through GeoSpec's STEP reader on the WASM engine and held to `size`.
+ * Returns the size on a pass, so the per-step log reads as the measured box.
+ */
+const stepSize = async (document: RuntimeDocument, size: readonly [number, number, number]): Promise<string> => {
   const exported = await document.export('step');
   if (!exported.success) {
     return issuesOf(exported.issues);
   }
-  const analysis = await analyzeMesh({ subject: await loadStep({ source: exported.files[0].bytes, mesh: true }) });
-  if (!analysis.success) {
-    return `STEP did not re-import: ${JSON.stringify(analysis).slice(0, 240)}`;
+  const root = await mkdtemp(join(tmpdir(), 'tau-host-step-'));
+  roots.push(root);
+  const stepPath = join(root, 'export.step');
+  await writeFile(stepPath, exported.files[0].bytes);
+  await writeFile(
+    join(root, 'size.geospec.ts'),
+    [
+      "import { it, expectGeo } from 'geospec';",
+      "import { loadModel } from 'geospec/model';",
+      "it('re-imported STEP size', async () => {",
+      `  const model = await loadModel({ source: ${JSON.stringify(stepPath)}, format: 'step' });`,
+      `  expectGeo(model).toHaveBoundingBox({ size: ${JSON.stringify(size)}, tolerance: 1e-3 });`,
+      '});',
+      '',
+    ].join('\n'),
+  );
+  await initializeWasm();
+  const engine = new Engine();
+  const runner = createNativeGeoSpecRunner({
+    filesystem: createNodeVmFileSystem(root),
+    nativeAssertions: { engine },
+    model: {
+      projectPath: root,
+      readSource: async (source) => {
+        if (typeof source !== 'string') {
+          throw new TypeError('Only path sources are read from disk.');
+        }
+        return new Uint8Array(await readFile(source));
+      },
+    },
+  });
+  try {
+    const result = await runner.run({ files: ['size.geospec.ts'] });
+    if (result.passed !== 1) {
+      return `STEP did not re-import at ${size.join('x')}: ${JSON.stringify(result).slice(0, 240)}`;
+    }
+    return size.map((value) => value.toFixed(3)).join('x');
+  } finally {
+    await runner.close();
+    engine.close();
   }
-  const size = [...(analysis.stats.boundingBox?.size ?? [])].sort((left, right) => left - right);
-  return size.map((value) => value.toFixed(3)).join('x');
 };
 
 const exportsGlb = async (document: RuntimeDocument): Promise<string> => {
@@ -335,23 +386,23 @@ describe('daemon runtime child per agent root (from source)', () => {
 
       log['1 render A'] = await step('render A', async () => render(documentA));
       log['2 render B'] = await step('render B', async () => render(documentB));
-      log['3 STEP A after B'] = await step('STEP A after B', async () => stepSize(documentA));
+      log['3 STEP A after B'] = await step('STEP A after B', async () => stepSize(documentA, [10, 20, 30]));
       log['4 GLB A after B'] = await step('GLB A after B', async () => exportsGlb(documentA));
 
       documentA.close();
       documentA = clientA.open({ source: { path: 'main.ts' }, watch: false });
       log['5 re-opened A render'] = await step('re-opened A render', async () => render(documentA));
-      log['6 re-opened A STEP'] = await step('re-opened A STEP', async () => stepSize(documentA));
+      log['6 re-opened A STEP'] = await step('re-opened A STEP', async () => stepSize(documentA, [10, 20, 30]));
 
       documentA.close();
       await writeFile(join(rootA, 'main.ts'), replicadBox(14, 20, 30), 'utf8');
       documentA = clientA.open({ source: { path: 'main.ts' }, watch: false });
       log['7 edited A render'] = await step('edited A render', async () => render(documentA));
-      log['8 edited A STEP'] = await step('edited A STEP', async () => stepSize(documentA));
+      log['8 edited A STEP'] = await step('edited A STEP', async () => stepSize(documentA, [14, 20, 30]));
 
       const [concurrentA, concurrentB] = await Promise.all([
-        step('concurrent STEP A', async () => stepSize(documentA)),
-        step('concurrent STEP B', async () => stepSize(documentB)),
+        step('concurrent STEP A', async () => stepSize(documentA, [14, 20, 30])),
+        step('concurrent STEP B', async () => stepSize(documentB, [12, 24, 36])),
       ]);
       log['9 concurrent STEP A'] = concurrentA;
       log['9 concurrent STEP B'] = concurrentB;
@@ -393,7 +444,11 @@ describe('daemon runtime child per agent root (from source)', () => {
         /* Let the hung root's kernel initialise and enter its loop. */
         await delay(5000);
 
-        log['2 STEP B while H hangs'] = await step('STEP B while H hangs', async () => stepSize(documentB), 30_000);
+        log['2 STEP B while H hangs'] = await step(
+          'STEP B while H hangs',
+          async () => stepSize(documentB, [12, 24, 36]),
+          30_000,
+        );
         log['3 GLB B while H hangs'] = await step('GLB B while H hangs', async () => exportsGlb(documentB), 30_000);
 
         /* The last release of a checkout root closes its runtime, as a finished candidate turn does. */
@@ -405,7 +460,7 @@ describe('daemon runtime child per agent root (from source)', () => {
         const documentH2 = clientH2.open({ source: { path: 'main.ts' }, watch: false });
         log['4 new client for H after release'] = await step(
           'new client for H after release',
-          async () => stepSize(documentH2),
+          async () => stepSize(documentH2, [5, 6, 7]),
           60_000,
         );
       } finally {
@@ -445,12 +500,11 @@ describe('daemon runtime child per agent root (from source)', () => {
           { timeout: 15_000 },
         );
         expect(clientB.lifecycleState).not.toBe('terminated');
-        expect(await stepSize(documentB)).toBe('12.000x24.000x36.000');
+        expect(await stepSize(documentB, [12, 24, 36])).toBe('12.000x24.000x36.000');
         const replacement = await daemon.clientFor(rootA);
         expect(replacement).not.toBe(clientA);
-        expect(await stepSize(replacement.open({ source: { path: 'main.ts' }, watch: false }))).toBe(
-          '10.000x20.000x30.000',
-        );
+        const replacementDocument = replacement.open({ source: { path: 'main.ts' }, watch: false });
+        expect(await stepSize(replacementDocument, [10, 20, 30])).toBe('10.000x20.000x30.000');
       } finally {
         await daemon.close();
       }

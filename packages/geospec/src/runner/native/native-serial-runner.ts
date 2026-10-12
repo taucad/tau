@@ -17,10 +17,7 @@ export type GeoSpecNativeRunnerAssertions = Omit<GeoSpecAssertionClientOptions, 
 };
 
 /** Options for the native serial runner. @public */
-export type GeoSpecNativeRunnerOptions = Omit<
-  GeoSpecRunnerOptions,
-  'modelLoader' | 'nativeAssertions' | 'nativeModelLoader' | 'stepLoader'
-> & {
+export type GeoSpecNativeRunnerOptions = Omit<GeoSpecRunnerOptions, 'nativeAssertions' | 'nativeModelLoader'> & {
   /** Actual protocol-3 engine used by authored assertions. */
   readonly nativeAssertions: GeoSpecNativeRunnerAssertions;
   /** Optional managed loader; the runner releases its subjects after every run. */
@@ -128,7 +125,6 @@ export const createNativeGeoSpecRunner = (options: GeoSpecNativeRunnerOptions): 
     nativeAssertions: { ...options.nativeAssertions, engine: assertionEngine },
     nativeModelLoader: scopedLoader,
     ...(options.builtinModules === undefined ? {} : { builtinModules: options.builtinModules }),
-    ...(options.internalProfile === undefined ? {} : { internalProfile: options.internalProfile }),
   });
   return {
     ...runner,

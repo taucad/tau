@@ -114,6 +114,17 @@ describe('runtime child control frames', () => {
     await child.close();
   });
 
+  it('settles close only after closed, once the child has exited and its private directory is removed', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-close-'));
+    const modulePath = fileURLToPath(new URL('fixtures/message-echo-child.mjs', import.meta.url));
+    const child = await startRuntimeChild({ modulePath, args: [join(temporaryDirectory, 'messages.jsonl')] });
+
+    await child.close();
+
+    /* No timer: an already-settled `closed` wins the race, and one still removing the directory loses it. */
+    expect(await Promise.race([child.closed, Promise.resolve('pending')])).toEqual({ exitCode: 0 });
+  });
+
   it('closes twice, without an uncaught error, a child whose channel disconnected before it exited', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-disconnect-'));
     const modulePath = fileURLToPath(new URL('fixtures/message-echo-child.mjs', import.meta.url));

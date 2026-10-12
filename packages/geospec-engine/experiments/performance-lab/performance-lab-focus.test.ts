@@ -28,7 +28,7 @@ const row = (
   round: 1,
   product,
   family,
-  engine: family === 'legacy' ? 'legacy-wasm' : family === 'native' ? 'native-desktop' : 'combined-wasm',
+  engine: family === 'native' ? 'native-desktop' : 'combined-wasm',
   caseId: 'case',
   hostBefore: host,
   hostAfter: host,
@@ -87,7 +87,7 @@ void describe('performance-lab focus benchmark', () => {
       'engine=gpu',
       'engine=native,addon=lane.node',
       'engine=native,permits=0',
-      'engine=legacy,addon=/lane/a.node',
+      'engine=legacy',
       'engine=wasm,permits=2',
       'engine=wasm,receipt=/lane/geospec_engine_native.mt.json',
       'engine=wasm,receipt=/lane/geospec_engine_native.mt.json,permits=2,binary=/lane/a.wasm',
@@ -96,14 +96,14 @@ void describe('performance-lab focus benchmark', () => {
     }
   });
 
-  void it('should default to the nine focus cases, installed legacy/native/ST WASM and the unchanged guard', () => {
+  void it('should default to the nine focus cases, installed native/ST WASM and the unchanged guard', () => {
     const options = parseFocusArguments(['--output-dir=out/reports/benchmarks/focus']);
     assert.equal(options.caseIds.length, 9);
     assert.ok(options.caseIds.includes('exploratory-many-occurrences-4096-step'));
     assert.ok(options.caseIds.includes('exploratory-planetary-gearbox-step'));
     assert.deepStrictEqual(
       options.products.map(({ family }) => family),
-      ['legacy', 'native', 'wasm'],
+      ['native', 'wasm'],
     );
     assert.deepStrictEqual(
       [options.samples, options.repeats, options.maxLoadPerCpu, options.minFreeMemoryMiB, options.contendedHost],
@@ -168,20 +168,18 @@ void describe('performance-lab focus benchmark', () => {
       row('native-a', 'native', { sha256: 'a'.repeat(64) }),
       row('native-b', 'native', { sha256: 'a'.repeat(64) }),
       row('wasm', 'wasm', { sha256: 'b'.repeat(64) }),
-      row('legacy', 'legacy', { status: 'unsupported' }),
       row('native-c', 'native', { sha256: 'c'.repeat(64), exit: 1 }),
     ]);
     assert.equal(exact.counts.failures, 1);
     assert.equal(exact.counts.sameFamilyMismatches, 0);
     assert.equal(exact.counts.unverifiedExpectations, 6);
-    assert.equal(exact.counts.unsupported, 2);
+    assert.equal(exact.counts.unsupported, 0);
     assert.equal(exact.parity[0]?.crossFamilyStatusAgreement, true);
     assert.deepStrictEqual(
       exact.parity[0].families.map(({ family, observations, exact: same }) => [family, observations, same]),
       [
         ['native', 4, true],
         ['wasm', 2, true],
-        ['legacy', 2, true],
       ],
     );
     const group = exact.groups.find(({ product }) => product === 'native-a');

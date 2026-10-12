@@ -32,6 +32,7 @@ export type RuntimeChildHandle = {
   readonly closed: Promise<{ readonly exitCode?: number; readonly signal?: NodeJS.Signals }>;
   /** Send a control frame (for example a Zoo-scoped token) to the ready child; dropped once it has exited. */
   post<Frame extends { readonly type: string }>(frame: Frame): void;
+  /** Stop the child; settles once `closed` has. */
   close(): Promise<void>;
 };
 
@@ -178,6 +179,11 @@ export const startRuntimeChild = async (options: {
     return exit;
   };
   const closed = removeTemporaryDirectoryOnExit();
+  /* Stopped means exited *and* its directory removed, so a caller that awaits a stop never sees `closed` pending. */
+  const stop = async (): Promise<void> => {
+    await killChild(child);
+    await closed;
+  };
   const ready = Promise.withResolvers<z.infer<typeof readyMessageSchema>>();
   const onMessage = (message: unknown): void => {
     const parsed = readyMessageSchema.safeParse(message);
@@ -207,14 +213,14 @@ export const startRuntimeChild = async (options: {
       throw new Error('Tau Host runtime child did not become ready within 30 seconds.');
     }),
   ]).catch(async (error: unknown) => {
-    await killChild(child);
+    await stop();
     throw error;
   });
   child.off('message', onMessage);
 
   const url = new URL(message.url);
   if (url.protocol !== 'ws:' || (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost')) {
-    await killChild(child);
+    await stop();
     throw new Error('Tau Host runtime child reported a non-loopback WebSocket URL.');
   }
   return {
@@ -228,7 +234,7 @@ export const startRuntimeChild = async (options: {
       }
     },
     async close(): Promise<void> {
-      await killChild(child);
+      await stop();
     },
   };
 };

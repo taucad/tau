@@ -5,11 +5,12 @@ GeoSpec is a CAD geometry testing library with one host-independent authoring AP
 
 This package is the **matcher-API substrate** (Apache-2.0): the authoring DSL,
 the selector language, the diagnostics and evidence schemas, the matcher
-registry, and host integration. It executes no geometry on its own. Tau's
-qualified desktop/browser composition and the
-[`geospec` CLI](../geospec-engine/README.md) supply the compiled binding.
-Authored tests do not import or select an engine. A bare registration import
-does not establish every host binding or a model's lifetime.
+registry, and host integration. It executes no geometry on its own: every claim
+is evaluated by the compiled
+[`@taucad/geospec-engine-native`](../geospec-engine-native/README.md) core that
+the host passes to the runner. Tau's desktop/browser composition and the
+[`geospec` CLI](../geospec-engine/README.md) supply that engine. Authored tests
+do not import or select an engine, and nothing registers one globally.
 
 The following is a `*.geospec.ts` module for the CLI or Tau `test_model`:
 
@@ -67,12 +68,14 @@ qualification, and filtered requirements remain outside the demonstrated scope.
 
 ### Runner configuration
 
-Execution lives in the engine. Install
-[`@taucad/geospec-engine`](../geospec-engine) for its `geospec` CLI or Node pool
-integration. These use the same compiled Node composition. Other embeddings
-must qualify their actual binding, input representation and supported domain;
-shared authoring syntax alone does not establish verdict equivalence. The CLI's
-flags and runner factories are documented in that package's README.
+Install [`@taucad/geospec-engine`](../geospec-engine) for its `geospec` CLI or
+Node worker pool. To embed a serial runner, pass a compiled engine to
+`createNativeGeoSpecRunner` from `geospec/runner/native`; it builds the native
+model loader and releases every admitted subject after each run. These use the
+same compiled composition. Other embeddings must qualify their actual binding,
+input representation and supported domain; shared authoring syntax alone does
+not establish verdict equivalence. The CLI's flags and pool options are
+documented in that package's README.
 
 The filters below are the shared vocabulary of the CLI, the embedded runners
 and the Tau `test_model` tool:
@@ -205,7 +208,7 @@ report unavailable evidence instead of replacing the requirement with a proxy.
 The [canonical API index](agent/geospec-authoring/api-index.md) describes
 ordinary authoring. The separate
 [complete public API index](agent/geospec-authoring/public-api-index.md)
-retains host/framework and low-level inspection contracts. A low-level
+retains host and framework contracts. A low-level
 `GeometrySubject` input is not interchangeable with the opaque subject returned
 by canonical `loadModel`.
 

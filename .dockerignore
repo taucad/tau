@@ -45,8 +45,6 @@ docs
 # -- Build artifacts (produced locally, not needed in fresh Docker build) ------
 **/build
 **/dist
-!packages/geospec-engine/native/opencascade/dist
-!packages/geospec-engine/native/opencascade/dist/**
 **/out-tsc
 **/*.tsbuildinfo
 

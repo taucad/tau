@@ -192,12 +192,13 @@ describe('MetalMorphLoader', () => {
     const { MetalMorphLoader } = await import('#components/geometry/loader/metal-morph-loader.js');
 
     render(<MetalMorphLoader />);
+    // The pause runs in a passive effect after the commit that shows `ready`, so wait for it as well.
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveAttribute('data-state', 'ready');
+      expect(lastController().pause).toHaveBeenCalled();
     });
     const controller = lastController();
     expect(controller.play).not.toHaveBeenCalled();
-    expect(controller.pause).toHaveBeenCalled();
     expect(controller.renderOnce).toHaveBeenCalled();
 
     intersect(true);

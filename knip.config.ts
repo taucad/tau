@@ -337,8 +337,6 @@ const config: KnipConfig = {
       ignore: ['host-tests/tau-project-c2/fixtures/**'],
     },
     'packages/geospec-engine': {
-      // The e2e global setup runs `vite build`/`vite preview` from `e2e/`, which loads this config.
-      entry: ['e2e/vite.config.ts'],
       // Fixture model sources: the runtime CLI evaluates them to regenerate the committed
       // STEP corpus, and each fixture manifest records its script as provenance.
       ignore: ['fixtures/scripts/*/**'],

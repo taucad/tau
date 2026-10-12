@@ -19,12 +19,10 @@ export default defineConfig({
     environment: 'node',
     exclude: [
       ...configDefaults.exclude,
-      'e2e/**',
       'experiments/performance-lab/performance-lab.test.ts',
       'experiments/performance-lab/performance-lab-cli.test.ts',
       'experiments/performance-lab/performance-lab-focus.test.ts',
     ],
-    setupFiles: ['./src/testing/vitest-setup.ts'],
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],

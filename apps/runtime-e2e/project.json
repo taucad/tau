@@ -4,7 +4,7 @@
   "sourceRoot": "apps/runtime-e2e/src",
   "projectType": "application",
   "tags": ["scope:shared", "type:e2e", "host:darwin-arm64", "ci:quarantined"],
-  "implicitDependencies": ["runtime", "tau-examples", "geospec", "geospec-engine", "scripts"],
+  "implicitDependencies": ["runtime", "tau-examples", "geospec", "geospec-engine"],
   "targets": {
     "test:e2e": {
       "executor": "nx:run-commands",

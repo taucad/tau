@@ -82,7 +82,7 @@ import thumbnail75 from './kernels/replicad/ibeam/thumbnail.webp?url';
 import thumbnail76 from './kernels/replicad/jscad-logo/thumbnail.webp?url';
 import thumbnail77 from './kernels/replicad/kestrel-240-quadcopter/thumbnail.webp?url';
 import thumbnail78 from './kernels/replicad/lego/thumbnail.webp?url';
-import thumbnail79 from './kernels/replicad/libassimp-format-prism/thumbnail.webp?url';
+import thumbnail79 from './kernels/replicad/libassimp-logo/thumbnail.webp?url';
 import thumbnail80 from './kernels/replicad/logo/thumbnail.webp?url';
 import thumbnail81 from './kernels/replicad/logo-keychain/thumbnail.webp?url';
 import thumbnail82 from './kernels/replicad/nanoraster-logo/thumbnail.webp?url';
@@ -192,7 +192,7 @@ export const thumbnailAssets = {
   'replicad/jscad-logo': thumbnail76,
   'replicad/kestrel-240-quadcopter': thumbnail77,
   'replicad/lego': thumbnail78,
-  'replicad/libassimp-format-prism': thumbnail79,
+  'replicad/libassimp-logo': thumbnail79,
   'replicad/logo': thumbnail80,
   'replicad/logo-keychain': thumbnail81,
   'replicad/nanoraster-logo': thumbnail82,

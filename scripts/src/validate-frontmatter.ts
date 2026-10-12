@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import matter from 'gray-matter';
 import { z } from 'zod';
 
+import { createBrainIndex } from '#brain-index.js';
 import { readManifest, repoPath } from '#repos/lib.js';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -33,6 +34,10 @@ const skipsMissingReference = (reference: string): boolean =>
     const absolute = resolve(root, reference);
     return absolute === directory || absolute.startsWith(`${directory}${sep}`);
   });
+
+const trackedInBrain = createBrainIndex(join(root, 'repos/tau-brain'));
+const isSparseBrainReference = (reference: string): boolean =>
+  relocatableDirectories.some((d) => reference.startsWith(`${d}/`)) && trackedInBrain(reference.slice('docs/'.length));
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be ISO 8601 date (YYYY-MM-DD)');
 const utcTimestamp = z
@@ -181,7 +186,7 @@ export const validateFile = (filePath: string, schema: z.ZodObject<z.ZodRawShape
     if (Array.isArray(data.related)) {
       for (const reference of data.related) {
         const absReference = resolve(root, reference);
-        if (!existsSync(absReference) && !skipsMissingReference(reference)) {
+        if (!existsSync(absReference) && !skipsMissingReference(reference) && !isSparseBrainReference(reference)) {
           diagnostics.push({
             level: 'ERROR',
             message: `related: "${reference}" does not exist`,
@@ -192,7 +197,11 @@ export const validateFile = (filePath: string, schema: z.ZodObject<z.ZodRawShape
 
     if (data.superseded_by) {
       const absReference = resolve(root, data.superseded_by);
-      if (!existsSync(absReference) && !skipsMissingReference(data.superseded_by)) {
+      if (
+        !existsSync(absReference) &&
+        !skipsMissingReference(data.superseded_by) &&
+        !isSparseBrainReference(data.superseded_by)
+      ) {
         diagnostics.push({
           level: 'ERROR',
           message: `superseded_by: "${data.superseded_by}" does not exist`,

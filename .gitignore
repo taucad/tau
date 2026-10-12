@@ -98,6 +98,7 @@ packages/geospec-engine/provenance.json
 
 # Machine-local dev server config (names gitignored repos/ paths)
 .claude/launch.json
+.claude/worktrees/
 
 # Vite dep-optimizer caches in mocker fixtures
 fixtures/mocker/*/.cache/

@@ -93,7 +93,7 @@ Copy [prompt.template.md](prompt.template.md) to `docs/research/artifacts/<chart
 
 1. Check every relative link in the touched Brain files resolves inside Brain.
 2. `pnpm docs:validate` from the Tau root; `node .agents/skills/create-handbook/generate-source-map.mjs --check` when a handbook page's `sources` changed.
-3. Commit by path, and only ever edits applied to the `origin/main` bytes. Never copy a whole file from a checkout that may be behind `origin/main`: once the executor is live it writes the resumption file too, and a whole-file copy silently discards its state (this happened on 2026-10-12 and had to be restored). When the shared Brain checkout is on another branch, commit from a temporary detached worktree of `origin/main` (`git -C repos/tau-brain worktree add --detach <scratch> origin/main`; always with `-C`, a bare `git worktree add` after a directory change can land in the wrong repository), apply the edits there with anchored replacements that assert their match count, regenerate the source map there, commit, push `HEAD:main`, copy the committed files back and remove the worktree.
+3. Commit by path, and only ever edits applied to the `origin/main` bytes. Never copy a whole file from a checkout that may be behind `origin/main`: once the executor is live it writes the resumption file too, and a whole-file copy silently discards its state (this happened on 2026-10-12 and had to be restored). Commit from this checkout's own Brain mount (`pnpm agent-env brain`, a detached worktree of `origin/main`) with `pnpm agent-env commit -m <message> -- <paths>`, which commits by path, rebases onto `origin/main` and pushes `HEAD:main`, retrying a lost race. Apply the edits there with anchored replacements that assert their match count and regenerate the source map before committing.
 4. Confirm the pushed `main` holds byte-identical copies of the handoff files.
 
 ### 7. Transmit
@@ -101,7 +101,7 @@ Copy [prompt.template.md](prompt.template.md) to `docs/research/artifacts/<chart
 The operator does these; the coordinator tells them in the final message, with the prompt inline:
 
 1. Create the cloud project and connect every repository the resumption file names (the program's repositories, the IaC repository, Tau Brain).
-2. Configure the environment: the Node version the workspace declares, `pnpm install --frozen-lockfile`, and a clone of Brain at `repos/tau-brain` (`GIT_LFS_SKIP_SMUDGE=1 gh repo clone taucad/tau-brain repos/tau-brain`) so `docs/research` and `docs/handbooks` resolve. No operator credential goes into the environment.
+2. Use the `tau-brain` cloud environment (attach Tau Brain as a source with its sparse exclude patterns; setup script `cd /home/user/tau && bash scripts/agent-env.sh setup`), which installs the workspace's Node, pnpm and dependencies and links Brain at `repos/tau-brain` so `docs/research` and `docs/handbooks` resolve. The handbook page `docs/handbooks/cloud/operate/agent-environments.md` holds the fields. No operator credential goes into the environment.
 3. Paste the prompt.
 
 Then `update-agent-memory`: the handoff state, the remaining operator steps and the pings to expect.

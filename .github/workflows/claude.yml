@@ -95,6 +95,10 @@ jobs:
           fetch-depth: 20
           persist-credentials: false
 
+      # The same Node, pnpm and dependencies as CI, so Claude can run lint, tests and typecheck.
+      - name: Setup Nx
+        uses: ./.github/actions/setup-nx
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@833fb0f8c9f6686b33d963a8bae0a94f4936ab2a # v1.0.211
@@ -164,6 +168,10 @@ jobs:
         with:
           fetch-depth: 20
           persist-credentials: false
+
+      # The same Node, pnpm and dependencies as CI, so Claude can run lint, tests and typecheck.
+      - name: Setup Nx
+        uses: ./.github/actions/setup-nx
 
       - name: Run Claude Code
         id: claude

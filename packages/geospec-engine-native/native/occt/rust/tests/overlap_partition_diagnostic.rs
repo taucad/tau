@@ -353,3 +353,33 @@ fn the_broad_phase_refuses_before_it_runs_past_its_budget() {
     let boxes = refusal(1);
     assert_eq!(refusal(boxes), boxes + 1 + 8_386_560 / 4096);
 }
+
+/// Policy §5/§9: a one-component subject has no pair to check, so the
+/// interference proof refuses instead of passing with `checkedPairs: 0`.
+#[test]
+fn one_component_interference_proof_refuses_instead_of_passing_vacuously() {
+    let mut engine = engine();
+    let subject = ingest(&mut engine, include_bytes!("fixtures/ap242-box.step"));
+    let request = serde_json::to_vec(&json!({
+        "method": "submitClaims", "requestId": "interference", "protocolVersion": 3,
+        "registryVersion": 5, "canonicalProfile": "geospec-jcs-v1",
+        "plan": {"subjects": [{"slot": "part", "subjectHash": subject}], "claims": [{
+            "claimId": "interference", "capability": "toHaveNoComponentInterference",
+            "subjectSlots": ["part"], "polarity": "positive", "workUnitBudget": BUDGET,
+            "payload": {"kind": "componentInterference", "expected": {"tolerance": 0.001}}
+        }]}
+    }))
+    .unwrap();
+    let response: Value =
+        serde_json::from_slice(&engine.process_request(&request).unwrap()).unwrap();
+    let claim = &response["result"]["results"][0];
+    assert_eq!(claim["status"], "refused", "{claim}");
+    assert_eq!(
+        claim["diagnostics"][0]["code"],
+        "GEOSPEC_COMPONENT_PARTITION_INCONCLUSIVE"
+    );
+    assert_eq!(
+        claim["diagnostics"][0]["details"],
+        json!({"primitiveCount": 1})
+    );
+}

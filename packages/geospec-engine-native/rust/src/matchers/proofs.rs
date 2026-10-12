@@ -524,14 +524,24 @@ fn evaluate_interference(
         return phase_two_refusal(Capability::ToHaveNoComponentInterference);
     };
     let subject = std::rc::Rc::clone(&context.subjects[0]);
-    if subject.brep.is_none() && subject.mesh_record().is_some() {
-        return evaluate_mesh_interference(prepared, context);
-    }
-    let normalized = normalized_expected(context);
     let identities = match interference::component_labels(&subject) {
         Ok(value) => value,
         Err(error) => return backend_refusal(error),
     };
+    // Fewer than two components would pass with checkedPairs 0 (policy §5, §9).
+    match interference::pair_partition_refusal(&subject, &identities) {
+        Ok(None) => {}
+        Ok(Some(diagnostic)) => {
+            return Evaluation::Refused {
+                diagnostics: vec![diagnostic],
+            }
+        }
+        Err(error) => return backend_refusal(error),
+    }
+    if subject.brep.is_none() && subject.mesh_record().is_some() {
+        return evaluate_mesh_interference(prepared, &identities, context);
+    }
+    let normalized = normalized_expected(context);
     let count = selected.as_ref().map_or_else(
         || {
             identities
@@ -680,6 +690,7 @@ fn evaluate_interference(
 
 fn evaluate_mesh_interference(
     prepared: &Interference,
+    identities: &[interference::ComponentIdentity],
     context: &mut EvaluationContext<'_>,
 ) -> Evaluation {
     use crate::analysis::continuous::exact;
@@ -688,10 +699,6 @@ fn evaluate_mesh_interference(
     if let Err(error) = context.charge_mesh_demand() {
         return error;
     }
-    let identities = match interference::component_labels(&subject) {
-        Ok(value) => value,
-        Err(error) => return backend_refusal(error),
-    };
     let Some(selected) = &prepared.selected_pairs else {
         return phase_two_refusal(Capability::ToHaveNoComponentInterference);
     };

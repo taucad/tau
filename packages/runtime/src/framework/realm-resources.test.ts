@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { createRealmResources } from '#framework/realm-resources.js';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
@@ -332,5 +333,22 @@ describe('services.realm', () => {
     expect(first).toMatchObject({ success: false, issues: [{ details: { producer: 'kernel-a' } }] });
     expect(second).toMatchObject({ success: false, issues: [{ details: { producer: 'kernel-b' } }] });
     expect(shared.issues).toEqual([issue]);
+  });
+
+  it('should report a ZodError thrown by initialize as a well-formed KERNEL_BINDING_FAILED issue', async () => {
+    await seedTestFileSystem({ 'model.realm': 'realm' });
+    const kernel: AnyKernelDefinitionV2 = {
+      ...createHoldingKernel(async () => ({})),
+      initialize: async () => z.object({ wasmUrl: z.string() }).parse({}),
+    };
+
+    const refused = await openDocument(await startWorker(kernel));
+
+    expect(refused).toMatchObject({ success: false });
+    const { issues } = refused as { issues: KernelIssue[] };
+    expect(issues).toEqual([
+      { message: issues[0]?.message, code: 'KERNEL_BINDING_FAILED', type: 'kernel', severity: 'error' },
+    ]);
+    expect(issues[0]?.message).toContain('wasmUrl');
   });
 });

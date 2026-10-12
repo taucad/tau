@@ -68,7 +68,7 @@ Promoted evidence takes the smallest tier that preserves it. `pnpm docs:validate
 | T2   | Bulk a finding depends on: payload corpora, kept build outputs, multi-GB runs | One `tar.zst` in LFS (under 100 MiB) beside an `evidence.json` manifest naming `bundle`, `sha256`, size, listing, producer and run; `pnpm agent-env fetch <dir>/evidence.json` restores it under `out/research/` |
 | T3   | Logs, retries, scratch, generated trees                                       | `out/research/<subject>/<run>/<lane>/`, never Brain                                                                                                                                                              |
 
-The check refuses any file over 100 MiB, a binary over 1 MiB outside LFS, and dependency trees or build products (`node_modules/`, `*.wasm`, `*.node`, lockfile copies) under `research/artifacts/`.
+The check refuses any file over 100 MiB, a binary over 1 MiB outside LFS, and dependency trees or lockfile copies (`node_modules/`, `__pycache__/`, `target/`, `pnpm-lock.yaml`) under `research/artifacts/`.
 
 Keep large artifacts out of the model context. Retain their file, format, provenance and a useful summary; use the repository's established large-file storage when required. Re-creatable dependency trees need not be copied, but preserve the versions, command, source or patch, and expensive results needed to understand and reproduce the experiment.
 

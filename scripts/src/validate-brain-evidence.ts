@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 /**
  * Admission rules for evidence in the optional Tau Brain checkout (cloud software factory
  * blueprint, Component 2 and invariant I2): text documents and compact measurements are tracked,
- * binaries over 1 MiB go to LFS, nothing exceeds 100 MiB, and build products never enter
+ * binaries over 1 MiB go to LFS, nothing exceeds 100 MiB, and dependency trees never enter
  * `research/artifacts/`. Only files present on disk are checked, so a sparse mount checks what an
  * agent can have touched and never downloads a blob to measure it.
  */
@@ -17,10 +17,12 @@ const binaryLimit = mebibyte;
 const fileLimit = 100 * mebibyte;
 const textWarning = 10 * mebibyte;
 
-/** Path patterns that are build products or dependency trees, never evidence. */
+/**
+ * Path patterns that are dependency trees or copies, never evidence. Single built files (a probe's
+ * `.wasm`, a model's runtime) can be cited evidence; over 1 MiB the binary rule routes them to LFS.
+ */
 const buildProducts: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /(^|\/)(node_modules|__pycache__|target\/(debug|release))\//, label: 'dependency or build tree' },
-  { pattern: /\.(node|wasm|dylib|so|dll|whl|tgz|pyc)$/, label: 'build product' },
   { pattern: /(^|\/)pnpm-lock\.yaml$/, label: 'lockfile copy' },
 ];
 

@@ -66,7 +66,11 @@ const rootTokens = baseTokens.slice(
   baseTokens.indexOf(':root {'),
   baseTokens.indexOf('\n}', baseTokens.indexOf(':root {')) + 2,
 );
-const css = rootTokens + '\n' + (await readFile(join(root, 'src/site.css'), 'utf8'));
+const css = [
+  rootTokens,
+  await readFile(join(root, 'src/site.css'), 'utf8'),
+  await readFile(join(root, 'src/principle-diagrams.css'), 'utf8'),
+].join('\n');
 // Esbuild and Three are declared by this app. Isolated tooling supports source-only review.
 const dependencyRoot = process.env.WWW_RENDER_TOOLS;
 const dependencyRequire = createRequire(

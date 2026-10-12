@@ -14,6 +14,7 @@ import {
   visionChapters,
 } from '#www/content.js';
 import { heroDrafting } from '#www/hero-view.js';
+import { diagrams } from '#www/principle-diagrams.js';
 import { wordmark } from '#www/wordmark.js';
 import { geospecRun as evidence } from '@taucad/planetary-gearbox';
 /** @typedef {{path: string, title: string, description: string, error?: boolean, body: () => string}} Page */
@@ -47,20 +48,6 @@ const verifiedDate = new Date(evidence.startedAt).toLocaleDateString('en-NZ', {
   year: 'numeric',
   timeZone: 'UTC',
 });
-
-/** Fine-line diagrams for the three promises; strokes are drawn on view where supported. */
-const diagrams = {
-  design: `<svg viewBox="0 0 240 120" class="diagram" aria-hidden="true"><circle cx="120" cy="60" r="48" class="faint" stroke-dasharray="2 4"/><path d="M76 92 L168 92 L150 34 Z" pathLength="1" class="draw"/><path d="M96 92 A20 20 0 0 0 92 82" class="faint"/><text x="100" y="86">θ</text><path d="M168 92 v-10 h-10" class="faint"/><circle cx="76" cy="92" r="3" class="dot"/><circle cx="168" cy="92" r="3" class="dot"/><circle cx="150" cy="34" r="3" class="dot"/></svg>`,
-  verify: `<svg viewBox="0 0 240 120" class="diagram" aria-hidden="true"><path d="M86 44 L120 26 L154 44 L154 88 L120 106 L86 88 Z M86 44 L120 62 L154 44 M120 62 L120 106" pathLength="1" class="draw"/><path d="M80 40 L114 22" class="faint"/><path d="M78 36 l4 8 M112 18 l4 8" class="faint"/><path d="M168 44 v44 M164 44 h8 M164 88 h8" class="faint"/><text x="176" y="70">68</text><circle cx="120" cy="62" r="3" class="dot"/></svg>`,
-  make: `<svg viewBox="0 0 240 120" class="diagram" aria-hidden="true"><path d="M120 10 v14 M110 24 h20 l-6 10 h-8 Z" class="faint"/>${[
-    0, 1, 2, 3, 4, 5,
-  ]
-    .map(
-      (i) =>
-        `<path d="M${84 + i * 0} ${98 - i * 9} L120 ${84 - i * 9} L156 ${98 - i * 9} L120 ${112 - i * 9} Z" pathLength="1" class="draw layer"/>`,
-    )
-    .join('')}<path d="M176 108 v-56 M172 56 l4 -6 l4 6" class="faint"/><text x="182" y="84">z</text></svg>`,
-};
 
 /**
  * Construction drawing beneath the hero model, registered with the render (hero-view.mjs). Lines

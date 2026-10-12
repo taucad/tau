@@ -40,8 +40,18 @@ export const createRealmResources = (): RealmResources => {
   }): Promise<RealmHold<Value>> => {
     const { group, key } = input;
     let entry = entries.get(group);
-    if (entry && entry.key !== key) {
-      throw realmConflict(group, entry.key, key);
+    while (entry && entry.key !== key) {
+      const other = entry;
+      // A pending creation of another key decides the conflict only once it settles: a failure frees the group.
+      // oxlint-disable-next-line no-await-in-loop -- each settled creation may hand the group to yet another key.
+      const created = await other.value.then(
+        () => true,
+        () => false,
+      );
+      if (created && entries.get(group) === other) {
+        throw realmConflict(group, other.key, key);
+      }
+      entry = entries.get(group);
     }
     if (!entry) {
       entry = { key, value: input.create(), dispose: input.dispose as Entry['dispose'], holders: 0 };

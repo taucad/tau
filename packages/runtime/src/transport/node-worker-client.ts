@@ -56,6 +56,10 @@ export type NodeWorkerLike = {
  * arrays, maps, sets and plain objects of these. Functions, class instances
  * with behaviour and symbols cannot cross the thread boundary.
  *
+ * Declare an object's shape with `type`, not `interface`: an interface has no
+ * implicit index signature, so it is not assignable here even when every
+ * member is cloneable.
+ *
  * @public
  */
 export type NodeWorkerData =

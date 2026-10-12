@@ -138,6 +138,53 @@ describe('createRealmResources', () => {
     });
   });
 
+  it('should let a different key proceed once a pending creation fails', async () => {
+    const realm = createRealmResources();
+    const pending = Promise.withResolvers<string>();
+
+    const settled = Promise.allSettled([
+      realm.hold({ group: 'occt', key: 'single', create: async () => pending.promise }),
+      realm.hold({ group: 'occt', key: 'multi', create: async () => 'multi heap' }),
+    ]);
+    pending.reject(new Error('wasm init failed'));
+    const [first, second] = await settled;
+
+    expect(first).toMatchObject({ status: 'rejected', reason: new Error('wasm init failed') });
+    expect(second).toMatchObject({ status: 'fulfilled', value: { value: 'multi heap' } });
+  });
+
+  it('should refuse a different key once a pending creation succeeds', async () => {
+    const realm = createRealmResources();
+    const pending = Promise.withResolvers<string>();
+    const create = vi.fn(async () => 'multi heap');
+
+    const settled = Promise.allSettled([
+      realm.hold({ group: 'occt', key: 'single', create: async () => pending.promise }),
+      realm.hold({ group: 'occt', key: 'multi', create }),
+    ]);
+    pending.resolve('single heap');
+    const [first, second] = await settled;
+
+    expect(first).toMatchObject({ status: 'fulfilled', value: { value: 'single heap' } });
+    expect(second).toMatchObject({ status: 'rejected', reason: { issues: [{ code: 'KERNEL_REALM_CONFLICT' }] } });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('should share holds between two copies of the runtime module in one realm', async () => {
+    const create = vi.fn(async () => 'heap');
+    const first = await import('#framework/realm-resources.js');
+    vi.resetModules();
+    const second = await import('#framework/realm-resources.js');
+
+    const held = await first.realmResources.hold({ group: 'duplicate-copies', key: 'single', create });
+    const shared = await second.realmResources.hold({ group: 'duplicate-copies', key: 'single', create });
+    held.release();
+    shared.release();
+
+    expect(create).toHaveBeenCalledOnce();
+    expect(shared.value).toBe(held.value);
+  });
+
   it('should keep groups independent', async () => {
     const realm = createRealmResources();
     const replicad = await realm.hold({ group: 'replicad-occt', key: 'single', create: async () => 'replicad' });
@@ -207,9 +254,9 @@ const openDocument = async (worker: KernelRuntimeWorker): Promise<unknown> => {
   return evaluated.mock.calls[0]![0] as unknown;
 };
 
-const startWorker = async (kernel: AnyKernelDefinitionV2): Promise<KernelRuntimeWorker> => {
+const startWorker = async (kernel: AnyKernelDefinitionV2, id = 'realm-kernel'): Promise<KernelRuntimeWorker> => {
   const runtime = defineRuntime({
-    kernels: [attachRuntimePluginDefinition({ id: 'realm-kernel', extensions: ['realm'] }, () => kernel)],
+    kernels: [attachRuntimePluginDefinition({ id, extensions: ['realm'] }, () => kernel)],
   });
   const worker = new KernelRuntimeWorker({ runtime });
   workers.push(worker);
@@ -260,5 +307,30 @@ describe('services.realm', () => {
     });
     expect((refused as { issues: KernelIssue[] }).issues[0]!.message).toContain('"single"');
     expect(create).toHaveBeenCalledOnce();
+  });
+
+  it('should name each refusing kernel without stamping a shared initialise error', async () => {
+    await seedTestFileSystem({ 'model.realm': 'realm' });
+    const issue: KernelIssue = {
+      code: 'KERNEL_BINDING_FAILED',
+      message: 'shared failure',
+      severity: 'error',
+      type: 'kernel',
+    };
+    const shared = Object.assign(new Error('shared failure'), { issues: [issue] });
+    const refusing = (id: string): AnyKernelDefinitionV2 => ({
+      ...createHoldingKernel(async () => ({})),
+      id,
+      initialize: async () => {
+        throw shared;
+      },
+    });
+
+    const first = await openDocument(await startWorker(refusing('kernel-a'), 'kernel-a'));
+    const second = await openDocument(await startWorker(refusing('kernel-b'), 'kernel-b'));
+
+    expect(first).toMatchObject({ success: false, issues: [{ details: { producer: 'kernel-a' } }] });
+    expect(second).toMatchObject({ success: false, issues: [{ details: { producer: 'kernel-b' } }] });
+    expect(shared.issues).toEqual([issue]);
   });
 });

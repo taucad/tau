@@ -95,7 +95,7 @@ jobs:
             *) echo "::error::Unknown environment: $ENVIRONMENT"; exit 1 ;;
           esac
           if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
-            echo "::error::NETLIFY_AUTH_TOKEN is not set on the $ENVIRONMENT environment."
+            echo "::error::NETLIFY_AUTH_TOKEN is not set on the $ENVIRONMENT environment. Set netlify_auth_token_$ENVIRONMENT on tau-cloud's tau-repo HCP workspace and apply it."
             exit 1
           fi
           echo "site_id=$site_id" >> "$GITHUB_OUTPUT"

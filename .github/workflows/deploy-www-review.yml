@@ -45,7 +45,7 @@ jobs:
       - name: Require the Netlify token
         run: |
           if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
-            echo "::error::NETLIFY_AUTH_TOKEN is not set on the staging environment."
+            echo "::error::NETLIFY_AUTH_TOKEN is not set on the staging environment. Set netlify_auth_token_staging on tau-cloud's tau-repo HCP workspace and apply it."
             exit 1
           fi
 

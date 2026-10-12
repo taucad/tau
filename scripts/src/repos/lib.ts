@@ -173,7 +173,7 @@ const parseRepo = (value: unknown, label: string): RepoConfig => {
   if (raw['shallow'] !== undefined && typeof raw['shallow'] !== 'boolean') {
     throw new Error(`${label}.shallow must be a boolean.`);
   }
-  const sparse = raw['sparse'];
+  const { sparse } = raw;
   if (
     sparse !== undefined &&
     (!Array.isArray(sparse) ||

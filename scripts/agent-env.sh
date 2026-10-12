@@ -307,7 +307,12 @@ commit() {
   fi
   local relative=() path
   for path in "${paths[@]}"; do relative+=("${path#docs/}"); done
-  git -C "$BRAIN_DIR" add -A -- "${relative[@]}"
+  for path in "${relative[@]}"; do
+    # A path already removed from disk and index (git rm) has nothing left to add.
+    if [[ -e "$BRAIN_DIR/$path" ]] || git -C "$BRAIN_DIR" ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+      git -C "$BRAIN_DIR" add -A --sparse -- "$path"
+    fi
+  done
   git -C "$BRAIN_DIR" commit -q -m "$message" -- "${relative[@]}" || fail "nothing to commit for ${relative[*]}"
   local attempt
   for attempt in 1 2 3 4 5; do

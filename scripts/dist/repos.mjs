@@ -2523,7 +2523,7 @@ const parseRepo = (value, label) => {
 	const raw = requireRecord(value, label);
 	rejectUnknownKeys(raw, repoKeys, label);
 	if (raw["shallow"] !== void 0 && typeof raw["shallow"] !== "boolean") throw new Error(`${label}.shallow must be a boolean.`);
-	const sparse = raw["sparse"];
+	const { sparse } = raw;
 	if (sparse !== void 0 && (!Array.isArray(sparse) || sparse.length === 0 || sparse.some((pattern) => typeof pattern !== "string" || pattern.length === 0))) throw new Error(`${label}.sparse must be a non-empty array of non-empty strings.`);
 	const fork = optionalString(raw["fork"], `${label}.fork`);
 	const branch = optionalString(raw["branch"], `${label}.branch`);

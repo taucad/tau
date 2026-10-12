@@ -1837,6 +1837,7 @@ fn bore_candidate_json(candidate: &CircularBoreCandidate) -> Json {
                 "reason".into(),
                 Json::string(match reason {
                     CircularBoreNonMember::ExteriorCylinder => "exterior-cylinder",
+                    CircularBoreNonMember::ExteriorBlend => "exterior-blend",
                     CircularBoreNonMember::SealedCavity => "sealed-cavity",
                     CircularBoreNonMember::ObstructedInterior => "obstructed-interior",
                 }),
@@ -2556,6 +2557,7 @@ fn edge_treatment_reason(reason: EdgeTreatmentReason) -> &'static str {
         EdgeTreatmentReason::OutsideMaterialBranch => "outsideMaterialBranch",
         EdgeTreatmentReason::NonTangentSupport => "nonTangentSupport",
         EdgeTreatmentReason::UnequalOffsets => "unequalOffsets",
+        EdgeTreatmentReason::ShallowSupport => "shallowSupport",
     }
 }
 
@@ -2577,6 +2579,7 @@ fn edge_treatment_residual(kind: EdgeTreatmentResidualKind) -> &'static str {
         EdgeTreatmentResidualKind::EqualOffsets => "equalOffsets",
         EdgeTreatmentResidualKind::RailStation => "railStation",
         EdgeTreatmentResidualKind::MaterialBranch => "materialBranch",
+        EdgeTreatmentResidualKind::SupportDepth => "supportDepth",
     }
 }
 

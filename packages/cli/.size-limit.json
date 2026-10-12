@@ -1,6 +1,6 @@
 [
   {
-    "name": "total (ESM JS) — measured 43.48 kB brotli on 2026-10-11, with the built-in Zoo kernel",
+    "name": "total (ESM JS) — measured 44.03 kB brotli on 2026-10-12, with the built-in Zoo kernel and the runtime-worker entry",
     "path": "dist/**/*.mjs",
     "limit": "45 kB"
   }

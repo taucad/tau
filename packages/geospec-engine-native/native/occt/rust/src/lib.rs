@@ -2931,6 +2931,7 @@ fn circular_bore_disposition(
             0 => CircularBoreNonMember::ExteriorCylinder,
             1 => CircularBoreNonMember::SealedCavity,
             2 => CircularBoreNonMember::ObstructedInterior,
+            3 => CircularBoreNonMember::ExteriorBlend,
             _ => {
                 return Err(backend_error(
                     "OCCT returned an unknown circular bore nonmembership reason.",
@@ -3055,6 +3056,7 @@ fn edge_treatment_reason(value: i32) -> Result<EdgeTreatmentReason, BackendError
         9 => EdgeTreatmentReason::OutsideMaterialBranch,
         10 => EdgeTreatmentReason::NonTangentSupport,
         11 => EdgeTreatmentReason::UnequalOffsets,
+        12 => EdgeTreatmentReason::ShallowSupport,
         _ => {
             return Err(backend_error(
                 "OCCT returned an unknown edge-treatment reason.",
@@ -3082,6 +3084,7 @@ fn edge_treatment_residual_kind(value: i32) -> Result<EdgeTreatmentResidualKind,
         4 => EdgeTreatmentResidualKind::EqualOffsets,
         5 => EdgeTreatmentResidualKind::RailStation,
         6 => EdgeTreatmentResidualKind::MaterialBranch,
+        7 => EdgeTreatmentResidualKind::SupportDepth,
         _ => return Err(backend_error("OCCT returned an unknown residual kind.")),
     })
 }

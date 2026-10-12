@@ -3,6 +3,7 @@ import type * as RpcModule from '@taucad/rpc';
 import { createFileSystemBridgePort, createTransferredFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { nodeWorkerClient } from '#transport/node-worker-client.js';
+import type { NodeWorkerLike } from '#transport/node-worker-client.js';
 import type { RuntimeInitializePayload } from '#transport/runtime-transport.types.js';
 import { webWorkerClient } from '#transport/web-worker-client.js';
 import { resolveRuntimeFileSystem, wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
@@ -98,7 +99,7 @@ const createNodeWorkerCtor = () => {
     };
     created.push(worker);
     return worker;
-  };
+  } as unknown as new (url: string | URL) => NodeWorkerLike;
   return { workerCtor, created };
 };
 

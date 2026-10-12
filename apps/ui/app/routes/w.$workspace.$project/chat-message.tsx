@@ -733,7 +733,7 @@ function ChatMessageTimestamp({
           dateTime={date.toISOString()}
           // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- keyboard users reach the absolute-time tooltip through focus
           tabIndex={0}
-          className='mx-1 flex h-7 items-center rounded-md px-1 text-xs outline-none focus-visible:focus-outline'
+          className='mx-1 flex h-6 items-center rounded-md px-1 text-xs outline-none focus-visible:focus-outline'
         >
           {formatRelativeTime(date)}
         </time>
@@ -923,14 +923,17 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
     >
       <div
         className={cn(
-          'flex flex-col space-y-2 min-w-0',
+          'flex flex-col min-w-0',
           'w-full',
           // Vary left margin for user and assistant messages to achieve visual
           // differentiation. Right side is intentionally flush — the parent
           // ChatScroller reserves a fixed scrollbar gutter, so dropping the
           // right margin here lets bubbles use that space when the scrollbar
           // is hidden, and the gutter doubles as the right margin when shown.
-          isUser ? 'mx-2' : 'mx-4',
+          // A request's hover-only row sits 4px under its bubble, so the turn
+          // reads as one exchange rather than two islands; an answer keeps 8px,
+          // which its row's `-mt-2` cancels.
+          isUser ? 'mx-2 space-y-1' : 'mx-4 space-y-2',
         )}
       >
         {/* The bubble and its attached footer (the turn's revision card) read as one surface. */}
@@ -1036,10 +1039,9 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
         >
           <CopyButton
             tooltipContentProperties={{ side: 'bottom' }}
-            size='icon'
+            size='icon-xs'
             getText={() => serializeMessage(displayMessage)}
             tooltip='Copy message'
-            className='size-7'
           />
           {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
           <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />

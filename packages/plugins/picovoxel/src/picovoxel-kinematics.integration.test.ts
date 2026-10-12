@@ -190,7 +190,7 @@ const createClient = (code = source()) =>
  * @param bytes - GLB container bytes.
  * @returns SHA-256 hex digest of the normalised JSON chunk followed by the remaining chunks.
  */
-function glbDigestWithoutGenerator(bytes: Uint8Array): string {
+function glbDigestWithoutGenerator(bytes: Uint8Array<ArrayBuffer>): string {
   const jsonLength = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(12, true);
   const json = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength))) as {
     asset: { generator?: string };

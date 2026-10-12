@@ -37,7 +37,7 @@ runs:
         # In a called workflow the run is the caller's, so this is the ci.yml push run;
         # a manual dispatch looks at the runs started since it began.
         created=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
-        runs=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+        runs=$(gh api --paginate -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
           -f branch=main -f event=push -f created=">=$created" -f per_page=100 \
           --jq ".workflow_runs[] | select(.id != $GITHUB_RUN_ID and .head_sha != \"$GITHUB_SHA\") | \"\(.id) \(.head_sha)\"")
         while read -r run_id sha; do

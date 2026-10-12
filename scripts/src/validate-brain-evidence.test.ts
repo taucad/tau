@@ -56,4 +56,15 @@ describe('checkBrainEvidence', () => {
       'ERROR research/artifacts/s/run/node_modules/x/index.js',
     ]);
   });
+
+  it('judges committed files only with all', () => {
+    const root = brain({ 'research/artifacts/s/run/blob.bin': mebibytes(2, 0) });
+    execFileSync('git', ['-C', root, 'add', '-A']);
+    execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'fixture']);
+
+    expect(checkBrainEvidence(root)).toStrictEqual([]);
+    expect(checkBrainEvidence(root, { all: true }).map(({ path }) => path)).toStrictEqual([
+      'research/artifacts/s/run/blob.bin',
+    ]);
+  });
 });

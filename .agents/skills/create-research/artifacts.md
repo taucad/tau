@@ -59,7 +59,7 @@ Promote only valuable outputs into `docs/research/artifacts/<subject>/`: cited r
 
 Before closeout, replace references to disposable output with promoted evidence or record the command, source identity, result summary and limitation in the report. Keep exact large evidence only when its bytes are the research subject or reproduction is materially expensive; use the repository's established large-file storage. Otherwise preserve a hash, compact excerpt or screenshot and reproduction instructions. Never commit credentials, tokens, dependency trees, build products or duplicate payloads as evidence.
 
-Promoted evidence takes the smallest tier that preserves it. `pnpm docs:validate` runs the admission check (`scripts:validate-brain-evidence`) on every materialised Brain file:
+Promoted evidence takes the smallest tier that preserves it. `pnpm docs:validate` runs the admission check (`scripts:validate-brain-evidence`) on new and changed Brain files, and Brain CI runs it on the whole tree:
 
 | Tier | What                                                                          | Where                                                                                                                                                                                                            |
 | ---- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

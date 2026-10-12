@@ -34,6 +34,9 @@ describe('Contract-B JSON boundary', () => {
 
     expect(new TextDecoder().decode(encoded)).toBe('{"a":{"b":3,"y":2},"z":1}');
     expect(decodeGeoSpecCanonicalJson(encoded)).toStrictEqual({ a: { b: 3, y: 2 }, z: 1 });
+    expect(new TextDecoder().decode(encodeGeoSpecCanonicalJson([{ y: 1, b: [{ z: 2, a: 3 }] }]))).toBe(
+      '[{"b":[{"a":3,"z":2}],"y":1}]',
+    );
   });
 
   it('serializes the two explicit TypeScript bindings and rejects live objects', () => {

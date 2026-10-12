@@ -1,11 +1,9 @@
 {
   "name": "@taucad/geospec-engine",
   "version": "0.1.0-beta.1",
-  "description": "GeoSpec engine: matcher implementations, geometry proofs, evidence ledger, kernel adapters, and the geospec CLI",
+  "description": "GeoSpec CLI and Node worker-pool host for the compiled GeoSpec engine",
   "type": "module",
   "sideEffects": [
-    "./src/register.ts",
-    "./dist/register.mjs",
     "./src/cli/main.ts",
     "./dist/cli/main.mjs",
     "./src/runner/node/native-pool-worker-entry.ts",
@@ -24,8 +22,6 @@
   "files": [
     "dist",
     "LICENSE",
-    "NOTICE",
-    "licenses",
     "README.md",
     "provenance.schema.json",
     "provenance.json"
@@ -44,15 +40,6 @@
     "node": ">=24.0.0"
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./register": "./src/register.ts",
-    "./register/node": "./src/register-node.ts",
-    "./native/opencascade/single": {
-      "types": "./native/opencascade/dist/init.d.ts",
-      "default": "./native/opencascade/dist/init.js"
-    },
-    "./native/opencascade/single/wasm": "./native/opencascade/dist/geospec_opencascade_single.wasm",
-    "./native/opencascade/single/wasm-url": "./src/native/opencascade-wasm.ts",
     "./package.json": "./package.json",
     "./node-filesystem": "./src/runner/node/node-vm-filesystem.ts",
     "./native-pool/node": "./src/runner/node/native-pool-runner.ts"
@@ -60,32 +47,6 @@
   "publishConfig": {
     "access": "public",
     "exports": {
-      ".": {
-        "types": "./dist/index.d.mts",
-        "import": "./dist/index.mjs",
-        "default": "./dist/index.mjs"
-      },
-      "./register": {
-        "types": "./dist/register.d.mts",
-        "import": "./dist/register.mjs",
-        "default": "./dist/register.mjs"
-      },
-      "./register/node": {
-        "types": "./dist/register-node.d.mts",
-        "import": "./dist/register-node.mjs",
-        "default": "./dist/register-node.mjs"
-      },
-      "./native/opencascade/single": {
-        "types": "./dist/native/opencascade/init.d.ts",
-        "import": "./dist/native/opencascade/init.js",
-        "default": "./dist/native/opencascade/init.js"
-      },
-      "./native/opencascade/single/wasm": "./dist/native/opencascade/geospec_opencascade_single.wasm",
-      "./native/opencascade/single/wasm-url": {
-        "types": "./dist/native/opencascade-wasm.d.mts",
-        "import": "./dist/native/opencascade-wasm.mjs",
-        "default": "./dist/native/opencascade-wasm.mjs"
-      },
       "./package.json": "./package.json",
       "./node-filesystem": {
         "types": "./dist/runner/node/node-vm-filesystem.d.mts",
@@ -97,41 +58,23 @@
         "import": "./dist/runner/node/native-pool-runner.mjs",
         "default": "./dist/runner/node/native-pool-runner.mjs"
       }
-    },
-    "imports": {
-      "#model/default-runtime-client.js": {
-        "browser": "./dist/model/default-runtime-client.browser.mjs",
-        "default": "./dist/model/default-runtime-client.node.mjs"
-      }
     }
   },
   "imports": {
-    "#e2e/*.js": "./e2e/*.ts",
     "#experiments/*.js": "./experiments/*.ts",
-    "#cache/node-evidence-store.js": {
-      "browser": "./src/cache/browser-evidence-store.ts",
-      "default": "./src/cache/node-evidence-store.ts"
-    },
-    "#model/default-runtime-client.js": {
-      "browser": "./src/model/default-runtime-client.browser.ts",
-      "default": "./src/model/default-runtime-client.node.ts"
-    },
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
   "dependencies": {
-    "@gltf-transform/core": "catalog:",
     "@taucad/assimp": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/esbuild": "workspace:*",
-    "@taucad/geometry-core": "workspace:*",
     "@taucad/geospec-engine-native": "workspace:*",
     "@taucad/gltf": "workspace:*",
     "@taucad/image": "workspace:*",
     "@taucad/jscad": "workspace:*",
     "@taucad/manifold": "workspace:*",
     "@taucad/middleware": "workspace:*",
-    "@taucad/occt-core": "workspace:*",
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",
     "@taucad/picovoxel": "workspace:*",
@@ -139,15 +82,10 @@
     "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/tscircuit": "workspace:*",
-    "geospec": "workspace:*",
-    "manifold-3d": "catalog:",
-    "zod": "catalog:"
+    "geospec": "workspace:*"
   },
   "devDependencies": {
-    "@libcascade/toolchain": "catalog:",
     "@taucad/picogk": "workspace:*",
-    "@taucad/tau-examples": "workspace:*",
-    "@vitest/browser-playwright": "catalog:",
     "vitest": "catalog:"
   },
   "scripts": {

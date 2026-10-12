@@ -19,15 +19,4 @@ describe('canonical CLI host selection', () => {
       });
     }
   });
-
-  it('should reject cache options before creating a worker or touching geometry', () => {
-    vi.mocked(createGeoSpecNativeNodePoolRunner).mockClear();
-    const host = createNodeGeoSpecCliHost();
-    for (const cache of [{ cache: true }, { cacheDirectory: '/cache' }]) {
-      expect(() =>
-        host.createRunner({ projectPath: '/project', workers: undefined, shardTimeout: undefined, ...cache }),
-      ).toThrow('persistent evidence cache');
-    }
-    expect(createGeoSpecNativeNodePoolRunner).not.toHaveBeenCalled();
-  });
 });

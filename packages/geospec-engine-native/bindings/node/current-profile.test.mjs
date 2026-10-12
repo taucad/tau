@@ -40,6 +40,32 @@ await it('should pin material subject byte admissions separately and reject any 
   await assert.rejects(profileJoin.loadMaterialCorpus(original), /material corpus SHA-256/);
 });
 
+await it('should pin the v6-02 material successor as v6 plus only the EXT_mesh_manifold controls', async () => {
+  const v6 = await readFile(new URL('../../conformance/material-v6.json', import.meta.url));
+  const corpus = await profileJoin.loadMaterialCorpus(
+    await readFile(new URL('../../conformance/material-v6-02.json', import.meta.url)),
+  );
+  assert.equal(corpus.materialSha256, '613a98156d7cfad0b28e6b6caba654fc443b9c2ecba64aa0e9a8a6738df9b13d');
+  assert.equal(corpus.records.length, 51);
+  assert.equal(corpus.meshes.length, 22);
+  const added = new Set(['manifold-runs', 'manifold-undeclared-runs']);
+  const [declared, undeclared] = corpus.meshes.filter((mesh) => added.has(mesh.id));
+  assert.ok(declared?.admission === 'subject' && undeclared?.admission === 'subject');
+  assert.deepEqual(declared.resources, undeclared.resources);
+  assert.notEqual(declared.subjectHash, undeclared.subjectHash);
+  const { materialSha256: _sha256, ...successor } =
+    /** @type {typeof corpus & { authority: Record<string, string> }} */ (corpus);
+  const recovered = {
+    ...successor,
+    authority: { ...successor.authority, id: 'material-v6-01' },
+    meshes: successor.meshes.filter((mesh) => !added.has(mesh.id)),
+    records: successor.records.filter((row) => !row.ingest.some((id) => added.has(id))),
+  };
+  // The frozen v6 bytes are 2-space JSON with single-string arrays kept inline.
+  const text = `${JSON.stringify(recovered, undefined, 2).replaceAll(/\[\n\s+("[^\n"]*")\n\s+]/g, '[$1]')}\n`;
+  assert.equal(text, v6.toString('utf8'));
+});
+
 await it('should bind the material successor with only the approved profile and eight repair suggestions changed', async () => {
   const historical = await joinCurrentCorpus(original, profile, 'full-backend', successor);
   const current = await joinCurrentCorpus(original, profile, 'full-backend', materialSuccessor);

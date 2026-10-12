@@ -8,7 +8,7 @@ Packages are independently publishable `@taucad/*` surfaces. Keep application ca
 - Put domain types and schemas in the package that owns them; consumers depend on that owner rather than making the owner depend on a consumer.
 - Put reusable black-box runtime and plugin-author tests in `@taucad/runtime-testing`; keep owner-internal white-box fixtures private.
 - Runtime work routes to `packages/runtime/AGENTS.md`; plugins and kernels to `packages/plugins/AGENTS.md`; portable agent execution to `packages/agent-host/AGENTS.md`; filesystem authority, mounts, mutations and watches to `packages/filesystem/AGENTS.md`.
-- GeoSpec contracts route to `docs/policy/geospec-policy.md`. Public matchers live in `packages/geospec`; evidence production and native geometry live in `packages/geospec-engine`.
+- GeoSpec contracts route to `docs/policy/geospec-policy.md`. Public matchers live in `packages/geospec`; the compiled engine lives in `packages/geospec-engine-native`; `packages/geospec-engine` ships the `geospec` CLI and the Node worker pool.
 - Add package dependencies with pnpm in the package that consumes them and review the manifest/lockfile diff. Do not use a deleted package as a dependency-placement example.
 
 Inspect `pnpm nx show project <project>` and run every declared lint, test, typecheck, build, package, and public-surface check relevant to the change.

@@ -124,19 +124,19 @@ def load_current_corpus(binding_profile="core-only"):
 
 CORPUS = load_current_corpus("full-backend")
 MESHES = {mesh["id"]: mesh for mesh in CORPUS["meshes"]}
-MATERIAL_PATH = Path(__file__).parents[3] / "conformance" / "material-v6.json"
+MATERIAL_PATH = Path(__file__).parents[3] / "conformance" / "material-v6-02.json"
 MATERIAL_BYTES = MATERIAL_PATH.read_bytes()
-MATERIAL_SHA256 = "45b98aa9bdc83b0846e74837e5891f4d9c7c7a51b6488db2ae23e8ccbe833975"
+MATERIAL_SHA256 = "613a98156d7cfad0b28e6b6caba654fc443b9c2ecba64aa0e9a8a6738df9b13d"
 
 
 def load_material_corpus():
     assert hashlib.sha256(MATERIAL_BYTES).hexdigest() == MATERIAL_SHA256
     corpus = json.loads(MATERIAL_BYTES)
     assert corpus["schemaVersion"] == 1
-    assert corpus["authority"]["id"] == "material-v6-01"
+    assert corpus["authority"]["id"] == "material-v6-02"
     assert corpus["authority"]["numericProfile"] == "geospec-demand-v6"
-    assert len(corpus["records"]) == len({r["id"] for r in corpus["records"]}) == 46
-    assert len(corpus["meshes"]) == len({m["id"] for m in corpus["meshes"]}) == 20
+    assert len(corpus["records"]) == len({r["id"] for r in corpus["records"]}) == 51
+    assert len(corpus["meshes"]) == len({m["id"] for m in corpus["meshes"]}) == 22
     for mesh in corpus["meshes"]:
         assert mesh["admission"] == "subject" and "meshHex" not in mesh
         primary = bytes.fromhex(mesh["primaryHex"])

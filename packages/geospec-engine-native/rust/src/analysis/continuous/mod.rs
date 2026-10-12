@@ -31,7 +31,7 @@ pub(crate) use nominal_analytic::{
     NOMINAL_ANALYTIC_OUTPUT_BYTES, NOMINAL_ANALYTIC_RESERVATION_BYTES, NOMINAL_ANALYTIC_UNITS,
 };
 
-pub(crate) use clearance::{clearance, ClearanceRequest, CLEARANCE_PAIR_UNITS};
+pub(crate) use clearance::{clearance, ClearanceEvidence, ClearanceRequest, CLEARANCE_PAIR_UNITS};
 pub(crate) use cylindrical_band::{
     cylindrical_band_clearance, CylindricalBandClearanceRequest,
     CYLINDRICAL_BAND_ENCODING_RESERVATION_BYTES, CYLINDRICAL_BAND_EVIDENCE_RESERVATION_BYTES,

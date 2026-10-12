@@ -45,6 +45,7 @@ jobs:
       formal: ${{ steps.plan.outputs.formal }}
       geospec-required: ${{ steps.geospec.outputs.geospec-required }}
       geospec-darwin-tests: ${{ steps.geospec.outputs.geospec-darwin-tests }}
+      geospec-darwin-projects: ${{ steps.geospec.outputs.geospec-darwin-projects }}
       geospec-key: ${{ steps.geospec-key.outputs.key }}
       geospec-cached: ${{ steps.geospec-cache.outputs.cache-hit == 'true' }}
     steps:
@@ -270,12 +271,20 @@ jobs:
           pnpm nx run scripts:prepare-geospec-test-consumer
           node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
 
-      # Projects tagged `ci:quarantined` (runtime-e2e) run in the nightly Darwin job in
+      # Runs the affected Darwin host suites the plan job selected from its own affected
+      # base and head, so this job needs no history. The planner leaves out projects
+      # tagged `ci:quarantined` (runtime-e2e), which run in the nightly Darwin job in
       # e2e-nightly.yml instead, until their failing tests pass there:
       # https://github.com/taucad/tau/issues/342
-      - name: Run complete affected Darwin host suites
+      # The cache bypass stays, narrowed to that selection: a `test` hash covers the
+      # source but neither the gitignored engine products nor the host toolchain that
+      # `ci-artifacts.mjs cache-key` digests, so a cached pass could stand for products
+      # this run did not test.
+      - name: Run affected Darwin host suites
         if: needs.plan.outputs.geospec-darwin-tests == 'true'
-        run: pnpm nx run-many -t test --projects tag:host:darwin-arm64 --exclude tag:scope:api,tag:ci:quarantined --skip-nx-cache
+        env:
+          DARWIN_PROJECTS: ${{ needs.plan.outputs.geospec-darwin-projects }}
+        run: pnpm nx run-many -t test --projects "$DARWIN_PROJECTS" --exclude tag:scope:api,tag:ci:quarantined --skip-nx-cache
 
       - *retain-geospec-preparation
 
@@ -1029,13 +1038,18 @@ jobs:
   # Keep `needs.plan.result` before `fromJSON` here and in `deploy-ui-staging`:
   # with no implicit `success()`, a `plan` that failed before its output step
   # leaves `deploy-apps` empty and `fromJSON('')` errors.
+  # Both staging deploys wait for `affected-lane`, not the `affected` gate, because
+  # that gate also waits for the Darwin host suites, which the pull request already
+  # passed before merging and which wait hours for a macOS runner when the pool is
+  # busy (run 38193503592 held #486 off staging that way). The suites still turn
+  # this run red and still gate releases (`geospec-artifact-from-main`).
   deploy-api-staging:
     name: Deploy API (Staging)
-    needs: [workspace, affected, plan, api]
+    needs: [workspace, affected-lane, plan, api]
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
       needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') &&
-      needs.workspace.result == 'success' && needs.affected.result == 'success' &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
       needs.api.result == 'success'
     # `actions: read` lets the deploy see whether a newer run already deployed.
     permissions:
@@ -1049,15 +1063,16 @@ jobs:
 
   # The staging UI: built in Actions with this run's GeoSpec products (Netlify
   # cannot produce them), from the producer's artifact or, when the native source
-  # matched an earlier build, from the products cache, and published by the Netlify CLI. It waits for the same
-  # gates as a merge. `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  # matched an earlier build, from the products cache, and published by the Netlify CLI. It waits for the
+  # Linux lanes and the producer, not the Darwin suites; see `deploy-api-staging`.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
   deploy-ui-staging:
     name: Deploy UI (Staging)
-    needs: [workspace, affected, plan, geospec-producer]
+    needs: [workspace, affected-lane, plan, geospec-producer]
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
       needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'ui') &&
-      needs.workspace.result == 'success' && needs.affected.result == 'success' &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
       (needs.geospec-producer.result == 'success' || needs.plan.outputs.geospec-cached == 'true')
     permissions:
       contents: read

@@ -1,12 +1,11 @@
 # geospec public API index
 
-geospec 0.1.0-beta.1 · 1460 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.1 · 836 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 
 ## Functions — `public-api-functions.md`
 
-createGeoSpec (function) — Create a GeoSpec instance
 describe (function) [1 members] — GeoSpec suite helper used inside VM-executed test modules
   describe.skip (method)
 expectGeo (function) — Start a geometry assertion chain
@@ -14,33 +13,18 @@ it (function) [1 members] — GeoSpec test helper used inside VM-executed test m
   it.skip (method)
 test (function) [1 members] — Alias for {@link it}
   test.skip (method)
-analyzeBrep (function) — Read BRep evidence from a loaded GeoSpec subject
 normalizeGeoSpecExpected (function) — Derive the `expected` value an assertion records from the call…
 assertGeoSpecJsonValue (function) — Reject a non-wire value rather than letting JSON.stringify erase it
 decodeGeoSpecCanonicalJson (function) — Parse and validate canonical bytes without re-canonicalizing them
 encodeGeoSpecCanonicalJson (function) — Encode client-owned canonical claim bytes
 isGeoSpecJsonValue (function) — Runtime JSON-value guard used at every protocol trust boundary
 toGeoSpecProtocolJson (function) — Convert an authoring value to protocol JSON, including the two…
-clearGeoSpecEngine (function) — Remove the registered engine
-describeGeoSpecEngine (function) — Describe the registered engine and its advertised capabilities
-geoSpecEngineUnavailableDiagnostic (function)
-getGeoSpecEngine (function) — The registered engine, if any
-getGeoSpecEngineHostBinding (function) — Look up one engine export
-getGeoSpecEngineProtocol (function) — The registered Contract-B binding, if any
-registerGeoSpecEngine (function) — Register the engine that executes GeoSpec claims
-requireGeoSpecEngineHostBinding (function) — Look up one engine export or fail with the engine-unavailable…
-inspectGeometry (function) — Resolve selectors against a subject and report the matched entities
-analyzeMeshOverlap (function) — Find positive-volume intersections between a subject's components
-analyzeMesh (function) — Return a detached full-statistics snapshot
-loadMesh (function) — Load mesh evidence into a GeoSpec geometry subject
-createModelLoader (function) — Create a {@link loadModel} function with shared defaults
+createModelLoader (function) — Create a {@link loadModel} function over a host-supplied compiled engine
 loadModel (function) — Load a CAD model into GeoSpec evidence
 resolveRuntimeExportIntent (function)
 clearCollectorGlobals (function)
-createCollector (function)
+createCollector (function) — Create the collector used by the embedded GeoSpec runner
 installCollector (function)
-chargeBudget (function)
-checkBudget (function)
 compileGeoSpecTestNamePattern (function) — Compile a Vitest-style test-name pattern once for a GeoSpec run
 filterGeoSpecTests (function) — Filter collected GeoSpec tests by compiled test-name pattern
 matchesGeoSpecTestName (function) — Return true when a collected GeoSpec test matches the supplied…
@@ -50,27 +34,7 @@ runGeoSpecModule (function) — Execute an ESM GeoSpec module using the shared T
 createNativeGeoSpecRunner (function) — Compose compiled assertion and model bindings with the SDK's serial…
 allocateNativePoolGrants (function) — Assign a bounded CPU budget across already-selected worker isolates
 createGeoSpecNativeModelLoader (function) — Create a native model loader that admits actual STEP/GLB bytes…
-createGeoSpecNodeRunner (function) — Create a GeoSpec runner for Node.js and CLI environments
-createGeoSpecNodePoolRunner (function) — Create a worker-pool GeoSpec runner for Node.js
-createNodeVmFileSystem (function) — Create a Node `VmFileSystem` rooted at `root`
-createGeoSpecWebRunner (function) — Create a GeoSpec runner for browser environments
-createGeoSpecWebPoolRunner (function) — Create a worker-pool GeoSpec runner for browser environments
 createNoMatchingGeoSpecTestsIssue (function) — Create a run-level issue when filters select no tests
-startGeoSpecPoolWorkerHost (function) — Start serving shards
-composeFullName (function) — Compose a full selector name from an occurrence path and…
-isValidStoredName (function) — Validate a stored (artifact-side) interface or occurrence name against the…
-parseSelectorPath (function) — Parse a selector-side dotted path into segments
-resolveTolerances (function) — Resolve effective tolerances from optional overrides
-deserializeSelector (function) — Reconstruct a selector from its JSON-safe serialized form
-serializeSelector (function) — Serialize a selector to a JSON-safe value (RegExp as `{…
-buildSelectorIndex (function) — Build the per-subject selector index from an SB1 XDE read…
-resolve (function) — Resolve a geometry selector against a per-subject selector index
-ambiguousDiagnostic (function) — Build a `GEOSPEC_SELECTOR_AMBIGUOUS` diagnostic
-unmatchedDiagnostic (function) — Build a `GEOSPEC_SELECTOR_UNMATCHED` diagnostic
-unsupportedEvidenceDiagnostic (function) — Build a `GEOSPEC_SELECTOR_UNSUPPORTED_EVIDENCE` diagnostic
-createStepLoader (function) — Create a {@link loadStep} function with shared defaults
-loadStep (function) — Load STEP/XDE/BRep evidence into a GeoSpec geometry subject
-parseXdeReadResultJson (function) — Parse the native reader's JSON payload into a structured XDE…
 createGeoSpecAssertionClient (function) — Create a standalone native GeoSpec assertion client
 createGeoSpecMatcherMethods (function) — Create the one registry-derived matcher surface used by every JavaScript…
 evaluateGeoSpecNativeQuery (function) — Submit an ancillary query with positive polarity through the native…
@@ -84,30 +48,11 @@ loadGeoSpecConfig (function) — Load one trusted project config using Node's na
 
 geoSpecMatcherNames (constant) — Every matcher name exposed by {@link expectGeo}, derived from the…
 geoSpecMatcherDescriptors (constant) — The 26-entry matcher registry
-geoSpecEngineProtocolVersion (constant) — Contract-B protocol version spoken by this substrate
-geoSpecMatcherRegistryVersion (constant) — Registry version consumed by the Wave-1 matcher vocabulary
-geoSpecEngineGlobalKey (constant)
-geoSpecEngineUnavailableCode (constant)
-GeoSpecEngineUnavailableError (constant) [3 members] — Registry error constructor, re-exported without changing its identity
-  GeoSpecEngineUnavailableError.captureStackTrace (method) — Creates a `.stack` property on `targetObject`, which when accessed returns…
-  GeoSpecEngineUnavailableError.prepareStackTrace (method)
-  GeoSpecEngineUnavailableError.stackTraceLimit (property) — The `Error.stackTraceLimit` property specifies the number of stack frames collected…
 defaultGeoSpecIgnoredDirectories (constant) — Directories skipped by recursive GeoSpec discovery unless callers provide their…
 defaultGeoSpecInclude (constant) — Default file globs used by GeoSpec test discovery
-storedNamePattern (constant) — Full-name regex for stored interface names per the profile
-defaultSelectorTolerances (constant) [2 members] — Default selector tolerances
-  defaultSelectorTolerances.linearMm (property) — Linear/contact tolerance in millimetres (offset bands, `near`, radii)
-  defaultSelectorTolerances.angularToleranceDegrees (property) — Angular tolerance in degrees for normal/axis/parallelism predicates
-selectorDiagnosticCodes (constant) [3 members] — Diagnostic codes emitted by selector resolution
-  selectorDiagnosticCodes.unmatched (property)
-  selectorDiagnosticCodes.ambiguous (property)
-  selectorDiagnosticCodes.unsupportedEvidence (property)
 
 ## Types — `public-api-types.md`
 
-GeoSpec (type) [2 members] — Stateful GeoSpec API created by {@link createGeoSpec}
-  GeoSpec.loadMesh (method)
-  GeoSpec.analyzeMesh (method)
 GeoSpecSubject (type) [1 members] — A model admitted by one live GeoSpec host scope
   GeoSpecSubject.[subjectBrand] (property)
 GeoSpecUnit (type) — Geometry units accepted at GeoSpec evidence-loading boundaries
@@ -360,33 +305,7 @@ StepEvidence (type) [6 members] — STEP/XDE evidence extracted while loading a 
   StepEvidence.capabilities (property)
   StepEvidence.xde (property) — Structured AP242 XDE read result (occurrences, subshape names, datum placements)
 Vec3 (type) — Numeric 3D vector
-AnalyzeMeshOptions (type) [8 members] — Analyze source bytes or an already retained subject, never both
-  AnalyzeMeshOptions.source (property)
-  AnalyzeMeshOptions.format (property)
-  AnalyzeMeshOptions.path (property)
-  AnalyzeMeshOptions.name (property)
-  AnalyzeMeshOptions.unit (property) — Unit exposed by the returned GeoSpec subject
-  AnalyzeMeshOptions.sourceUnit (property) — Coordinate unit of the supplied mesh data before normalization
-  AnalyzeMeshOptions.parameters (property)
-  AnalyzeMeshOptions.subject (property)
-AnalyzeMeshResult (type) [1 members] — Mesh analysis result
-  AnalyzeMeshResult.success (property)
-LoadMeshOptions (type) [7 members] — Options for loading mesh evidence
-  LoadMeshOptions.source (property)
-  LoadMeshOptions.format (property)
-  LoadMeshOptions.path (property)
-  LoadMeshOptions.name (property)
-  LoadMeshOptions.unit (property) — Unit exposed by the returned GeoSpec subject
-  LoadMeshOptions.sourceUnit (property) — Coordinate unit of the supplied mesh data before normalization
-  LoadMeshOptions.parameters (property)
-LoadMeshResult (type) [1 members] — Result of loading mesh evidence into a GeoSpec geometry subject
-  LoadMeshResult.success (property)
 GeoSpecVec3 (type) — Numeric 3D vector
-AnalyzeBrepOptions (type) [1 members] — Options for BRep evidence analysis
-  AnalyzeBrepOptions.subject (property)
-AnalyzeBrepResult (type) [2 members] — Typed result returned by {@link analyzeBrep}
-  AnalyzeBrepResult.success (property)
-  AnalyzeBrepResult.diagnostics (property)
 GeoSpecMatcherDescriptor (type) [3 members] — One matcher's contract entry
   GeoSpecMatcherDescriptor.kind (property)
   GeoSpecMatcherDescriptor.expected (property)
@@ -394,166 +313,12 @@ GeoSpecMatcherDescriptor (type) [3 members] — One matcher's contract entry
 GeoSpecMatcherExpectedShape (type) — How the substrate derives an assertion's recorded `expected` value from…
 GeoSpecMatcherMode (type) — Whether a matcher settles synchronously (throwing its `GeoSpecAssertionError` inside the…
 GeoSpecMatcherName (type) — Every matcher name exposed by `expectGeo(...)`
-GeoSpecCancelRequest (type) [2 members] — Per-request or per-claim cancellation
-  GeoSpecCancelRequest.requestId (property)
-  GeoSpecCancelRequest.claimId (property)
-GeoSpecCancelResult (type) [2 members] — Idempotent cancellation acknowledgement
-  GeoSpecCancelResult.requestId (property)
-  GeoSpecCancelResult.cancelled (property)
-GeoSpecClaim (type) [5 members] — Canonical JSON payload encoded into one claim byte lane
-  GeoSpecClaim.claimId (property)
-  GeoSpecClaim.capability (property)
-  GeoSpecClaim.subjectIds (property)
-  GeoSpecClaim.payload (property)
-  GeoSpecClaim.workUnitBudget (property)
-GeoSpecClaimId (type) — Opaque claim identifier
-GeoSpecClaimResult (type) [5 members] — One serializable claim result
-  GeoSpecClaimResult.claimId (property)
-  GeoSpecClaimResult.status (property)
-  GeoSpecClaimResult.diagnostics (property)
-  GeoSpecClaimResult.evidence (property)
-  GeoSpecClaimResult.provenance (property)
-GeoSpecDeterminismClass (type) — Determinism class negotiated during initialization (DL6)
-GeoSpecEngineProtocol (type) [6 members] — First TypeScript binding of Contract B
-  GeoSpecEngineProtocol.initialize (method)
-  GeoSpecEngineProtocol.ingestSubject (method)
-  GeoSpecEngineProtocol.submitClaims (method)
-  GeoSpecEngineProtocol.cancel (method)
-  GeoSpecEngineProtocol.releaseSubject (method)
-  GeoSpecEngineProtocol.on (method)
-GeoSpecExecutionOptions (type) [2 members] — Resolved operational controls carried outside canonical claim bytes
-  GeoSpecExecutionOptions.forensic (property)
-  GeoSpecExecutionOptions.matcherWallBackstop (property)
-GeoSpecIngestSubjectRequest (type) [6 members] — Metadata lane for subject ingestion
-  GeoSpecIngestSubjectRequest.requestId (property)
-  GeoSpecIngestSubjectRequest.contentHash (property)
-  GeoSpecIngestSubjectRequest.format (property)
-  GeoSpecIngestSubjectRequest.frame (property)
-  GeoSpecIngestSubjectRequest.provenance (property)
-  GeoSpecIngestSubjectRequest.options (property)
-GeoSpecIngestSubjectResult (type) [2 members] — Subject-ingestion response
-  GeoSpecIngestSubjectResult.requestId (property)
-  GeoSpecIngestSubjectResult.subject (property)
-GeoSpecInitializeRequest (type) [2 members] — Client half of the Contract-B initialization handshake
-  GeoSpecInitializeRequest.protocolVersion (property)
-  GeoSpecInitializeRequest.client (property)
-GeoSpecInitializeResult (type) [5 members] — Engine half of the Contract-B initialization handshake
-  GeoSpecInitializeResult.protocolVersion (property)
-  GeoSpecInitializeResult.engine (property)
-  GeoSpecInitializeResult.determinism (property)
-  GeoSpecInitializeResult.capabilities (property)
-  GeoSpecInitializeResult.provenance (property)
-GeoSpecProtocolCapability (type) [2 members] — One capability honestly advertised by an engine build
-  GeoSpecProtocolCapability.name (property)
-  GeoSpecProtocolCapability.registryVersion (property)
-GeoSpecProtocolEvent (type) [3 members] — Advisory event
-  GeoSpecProtocolEvent.requestId (property)
-  GeoSpecProtocolEvent.kind (property)
-  GeoSpecProtocolEvent.payload (property)
-GeoSpecProtocolProvenance (type) [3 members] — Serializable build provenance returned by initialization
-  GeoSpecProtocolProvenance.engineDigest (property)
-  GeoSpecProtocolProvenance.build (property)
-  GeoSpecProtocolProvenance.license (property)
-GeoSpecReleaseSubjectRequest (type) [2 members] — Idempotent subject-release request
-  GeoSpecReleaseSubjectRequest.requestId (property)
-  GeoSpecReleaseSubjectRequest.subjectId (property)
-GeoSpecReleaseSubjectResult (type) [2 members] — Subject-release acknowledgement
-  GeoSpecReleaseSubjectResult.requestId (property)
-  GeoSpecReleaseSubjectResult.released (property)
-GeoSpecRequestId (type) — Opaque request identifier
-GeoSpecSubjectFrame (type) [3 members] — Canonical frame attached to bytes entering the engine
-  GeoSpecSubjectFrame.coordinateSystem (property)
-  GeoSpecSubjectFrame.sourceUnit (property)
-  GeoSpecSubjectFrame.targetUnit (property)
-GeoSpecSubjectId (type) — Opaque engine-owned subject identifier
-GeoSpecSubjectReference (type) [3 members] — Opaque subject handle returned after ingestion
-  GeoSpecSubjectReference.kind (property)
-  GeoSpecSubjectReference.subjectId (property)
-  GeoSpecSubjectReference.contentHash (property)
-GeoSpecSubmitClaimsRequest (type) [4 members] — A canonical claim batch
-  GeoSpecSubmitClaimsRequest.requestId (property)
-  GeoSpecSubmitClaimsRequest.registryVersion (property)
-  GeoSpecSubmitClaimsRequest.execution (property)
-  GeoSpecSubmitClaimsRequest.claims (property)
-GeoSpecSubmitClaimsResult (type) [2 members] — Claim-batch response
-  GeoSpecSubmitClaimsResult.requestId (property)
-  GeoSpecSubmitClaimsResult.results (property)
-GeoSpecEngineCapability (type) — A capability name an engine build may advertise
-GeoSpecEngineDescriptor (type) [4 members] — Serializable description of the registered engine — the capability discovery…
-  GeoSpecEngineDescriptor.protocolVersion (property)
-  GeoSpecEngineDescriptor.engine (property)
-  GeoSpecEngineDescriptor.version (property)
-  GeoSpecEngineDescriptor.capabilities (property)
-GeoSpecEngineHostBindings (type) [12 members] — Host-only bootstrap operations
-  GeoSpecEngineHostBindings.loadMesh (method)
-  GeoSpecEngineHostBindings.analyzeMesh (method)
-  GeoSpecEngineHostBindings.loadStep (method)
-  GeoSpecEngineHostBindings.loadModel (method)
-  GeoSpecEngineHostBindings.createModelLoader (method)
-  GeoSpecEngineHostBindings.createGeoSpecNodeRunner (method)
-  GeoSpecEngineHostBindings.createGeoSpecNodePoolRunner (method)
-  GeoSpecEngineHostBindings.createGeoSpecWebRunner (method)
-  GeoSpecEngineHostBindings.createGeoSpecWebPoolRunner (method)
-  GeoSpecEngineHostBindings.createNodeVmFileSystem (method)
-  GeoSpecEngineHostBindings.startGeoSpecPoolWorkerHost (method)
-  GeoSpecEngineHostBindings.flushEvidenceStore (method)
-GeoSpecEngineImplementation (type) [5 members] — What an engine registers with the substrate
-  GeoSpecEngineImplementation.protocolVersion (property) — Must equal {@link geoSpecEngineProtocolVersion }
-  GeoSpecEngineImplementation.engine (property) — Engine identity, e.g
-  GeoSpecEngineImplementation.version (property) — Engine build version, recorded in provenance and cache keys
-  GeoSpecEngineImplementation.protocol (property) — Contract-B transport binding used for every geometry claim
-  GeoSpecEngineImplementation.host (property) — Optional in-process host bootstrap
-GeometryInspectionEntity (type) [4 members] — One inspected geometry entity
-  GeometryInspectionEntity.kind (property)
-  GeometryInspectionEntity.name (property)
-  GeometryInspectionEntity.bounds (property)
-  GeometryInspectionEntity.source (property)
-GeometryInspectionSelection (type) [2 members] — Result of one selector inspection
-  GeometryInspectionSelection.selector (property)
-  GeometryInspectionSelection.matches (property)
-InspectGeometryOptions (type) [3 members] — Options for {@link inspectGeometry}
-  InspectGeometryOptions.subject (property)
-  InspectGeometryOptions.selectors (property)
-  InspectGeometryOptions.evidence (property)
-InspectGeometryResult (type) [2 members] — Structured inspection result used by relationship and occurrence matchers
-  InspectGeometryResult.selections (property)
-  InspectGeometryResult.diagnostics (property)
-AnalyzeMeshOverlapOptions (type) [3 members] — Options for component-overlap analysis
-  AnalyzeMeshOverlapOptions.subject (property)
-  AnalyzeMeshOverlapOptions.tolerance (property)
-  AnalyzeMeshOverlapOptions.pairs (property)
-AnalyzeMeshOverlapResult (type) [2 members] — Typed result for component-overlap analysis
-  AnalyzeMeshOverlapResult.success (property)
-  AnalyzeMeshOverlapResult.diagnostics (property)
-MeshComponentOverlap (type) [9 members] — One overlapping component pair found by {@link analyzeMeshOverlap}
-  MeshComponentOverlap.leftComponentId (property)
-  MeshComponentOverlap.rightComponentId (property)
-  MeshComponentOverlap.leftLabel (property)
-  MeshComponentOverlap.rightLabel (property)
-  MeshComponentOverlap.leftColor (property)
-  MeshComponentOverlap.rightColor (property)
-  MeshComponentOverlap.intersectionVolume (property)
-  MeshComponentOverlap.witnessPoint (property)
-  MeshComponentOverlap.penetration (property)
-MeshOverlapEvidence (type) [6 members] — Successful overlap analysis
-  MeshOverlapEvidence.componentSource (property)
-  MeshOverlapEvidence.componentCount (property)
-  MeshOverlapEvidence.selectedPairs (property)
-  MeshOverlapEvidence.checkedPairs (property)
-  MeshOverlapEvidence.tolerance (property)
-  MeshOverlapEvidence.overlaps (property)
-LoadMeshFailure (type) [2 members] — Failed mesh load result
-  LoadMeshFailure.success (property)
-  LoadMeshFailure.diagnostics (property)
-LoadMeshSuccess (type) [2 members] — Successful mesh load result
-  LoadMeshSuccess.success (property)
-  LoadMeshSuccess.subject (property)
 MeshBufferSource (type) [4 members] — In-memory triangle mesh source
   MeshBufferSource.format (property)
   MeshBufferSource.positions (property)
   MeshBufferSource.indices (property)
   MeshBufferSource.name (property)
-MeshSource (type) — Mesh source forms accepted by {@link loadMesh}
+MeshSource (type) — Mesh source forms accepted by {@link import ('./load-model.js').loadModel}
 AabbMeters (type) [2 members] — Axis-aligned bounding box in glTF document units (meters)
   AabbMeters.min (property)
   AabbMeters.max (property)
@@ -569,9 +334,6 @@ BoundingBoxAxisFailure (type) [7 members] — One axis failure for `boundingBox`
   BoundingBoxAxisFailure.tolerance (property)
   BoundingBoxAxisFailure.minExtremum (property)
   BoundingBoxAxisFailure.maxExtremum (property)
-
-## Types (2) — `public-api-types-2.md`
-
 BoundingBoxFailure (type) [1 members] — Structured payload when `boundingBox` fails
   BoundingBoxFailure.axisFailures (property)
 BoundingBoxStats (type) [3 members] — Scene bounding box with per-primitive contributors in the subject's unit…
@@ -723,6 +485,9 @@ LoadModelOptions (type) [6 members] — Options accepted by {@link import ('./lo
   LoadModelOptions.mesh (property) — Whether STEP loading should also produce mesh evidence
   LoadModelOptions.meshLinearTolerance (property) — Linear tolerance used while meshing exact BRep evidence
   LoadModelOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence
+
+## Types (2) — `public-api-types-2.md`
+
 LoadModelSourceOptions (type) [11 members] — Direct geometry-source model load options
   LoadModelSourceOptions.source (property) — Geometry bytes, path, browser file/blob, or in-memory mesh buffer
   LoadModelSourceOptions.resources (property) — Named external resources consumed alongside the direct geometry bytes
@@ -735,28 +500,6 @@ LoadModelSourceOptions (type) [11 members] — Direct geometry-source model load
   LoadModelSourceOptions.mesh (property) — Whether STEP loading should also produce mesh evidence
   LoadModelSourceOptions.meshLinearTolerance (property) — Linear tolerance used while meshing exact BRep evidence
   LoadModelSourceOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence
-RelationshipBroadPhase (type) [3 members] — Labeled broad-phase record
-  RelationshipBroadPhase.method (property)
-  RelationshipBroadPhase.candidate (property)
-  RelationshipBroadPhase.detail (property)
-RelationshipEndpointReport (type) [2 members] — Selector resolution summary attached to relationship diagnostics so every failure…
-  RelationshipEndpointReport.role (property)
-  RelationshipEndpointReport.selection (property)
-RelationshipEvidence (type) [4 members] — Structured result of one relationship proof (L4)
-  RelationshipEvidence.verdict (property)
-  RelationshipEvidence.broadPhase (property)
-  RelationshipEvidence.final (property)
-  RelationshipEvidence.diagnostics (property) — `GEOSPEC_SPATIAL_RELATIONSHIP_MISMATCH` on fail
-RelationshipFinalEvidence (type) [4 members] — Final exact-evidence record for a relationship verdict
-  RelationshipFinalEvidence.method (property)
-  RelationshipFinalEvidence.measured (property) — Measured values in millimetres/degrees (shared unit contract)
-  RelationshipFinalEvidence.expected (property) — Expected values in millimetres/degrees (shared unit contract)
-  RelationshipFinalEvidence.witnesses (property)
-RelationshipWitness (type) [4 members] — One geometric witness backing a relationship verdict
-  RelationshipWitness.kind (property)
-  RelationshipWitness.value (property)
-  RelationshipWitness.topologyRef (property)
-  RelationshipWitness.provenance (property) — Where the witness points came from
 GeoSpecCollector (type) [7 members] — Collects suites, tests, assertions, and async completion state for one…
   GeoSpecCollector.tests (property)
   GeoSpecCollector.describe (method)
@@ -765,14 +508,6 @@ GeoSpecCollector (type) [7 members] — Collects suites, tests, assertions, and 
   GeoSpecCollector.itSkip (method)
   GeoSpecCollector.expectGeo (method)
   GeoSpecCollector.waitForCompletion (method)
-GeoSpecNativeCollector (type) [7 members] — Native collector surface for hosts that explicitly supply a native…
-  GeoSpecNativeCollector.tests (property)
-  GeoSpecNativeCollector.describe (method)
-  GeoSpecNativeCollector.describeSkip (method)
-  GeoSpecNativeCollector.it (method)
-  GeoSpecNativeCollector.itSkip (method)
-  GeoSpecNativeCollector.waitForCompletion (method)
-  GeoSpecNativeCollector.expectGeo (method)
 GeoSpecCollectorOptions (type) [3 members] — Per-module collector configuration
   GeoSpecCollectorOptions.matcherWallBackstop (property)
   GeoSpecCollectorOptions.forensic (property)
@@ -824,7 +559,7 @@ GeoSpecTestCase (type) [7 members] — A collected GeoSpec test case
   GeoSpecTestCase.diagnostics (property) — Structured diagnostics emitted by test execution
   GeoSpecTestCase.durationMs (property) — Wall-clock cost of the test body plus its pending assertions,…
 GeoSpecTestStatus (type) — Test case status after runner collection
-RunGeoSpecModuleOptions (type) [14 members] — Options for executing a GeoSpec ESM test module
+RunGeoSpecModuleOptions (type) [11 members] — Options for executing a GeoSpec ESM test module
   RunGeoSpecModuleOptions.filesystem (property) — Filesystem containing the test module and its project imports
   RunGeoSpecModuleOptions.entryPath (property) — Filesystem-root-relative ESM test entry path
   RunGeoSpecModuleOptions.testNamePattern (property) — JavaScript regular expression matched against full `suite > test` names
@@ -833,10 +568,7 @@ RunGeoSpecModuleOptions (type) [14 members] — Options for executing a GeoSpec 
   RunGeoSpecModuleOptions.forensic (property) — Emit structured forensic events for this run
   RunGeoSpecModuleOptions.nativeAssertions (property) — Host-provided protocol-3 compiled assertion client
   RunGeoSpecModuleOptions.nativeModelLoader (property) — Host-composed identity loader
-  RunGeoSpecModuleOptions.modelLoader (property) — Model loader exposed to VM tests through `geospec/model`
-  RunGeoSpecModuleOptions.stepLoader (property) — STEP loader exposed to VM tests through `geospec/step`
   RunGeoSpecModuleOptions.builtinModules (property) — Additional in-memory modules made available to the VM
-  RunGeoSpecModuleOptions.internalProfile (property) — Internal profile counters used by opt-in benchmark tooling
   RunGeoSpecModuleOptions.bundleCache (property) — Successful bundle cache owned by a serial runner worker
   RunGeoSpecModuleOptions.collectOnly (property) — List-only collection pass (R3 shard splitting)
 GeoSpecNativeRunnerAssertions (type) [5 members] — Native assertion options whose engine can also admit and release…
@@ -845,10 +577,9 @@ GeoSpecNativeRunnerAssertions (type) [5 members] — Native assertion options wh
   GeoSpecNativeRunnerAssertions.subjectSlot (property)
   GeoSpecNativeRunnerAssertions.workUnitLimit (property)
   GeoSpecNativeRunnerAssertions.engine (property)
-GeoSpecNativeRunnerOptions (type) [6 members] — Options for the native serial runner
+GeoSpecNativeRunnerOptions (type) [5 members] — Options for the native serial runner
   GeoSpecNativeRunnerOptions.filesystem (property) — Filesystem containing the project and test modules
   GeoSpecNativeRunnerOptions.builtinModules (property) — Additional in-memory modules made available to the VM
-  GeoSpecNativeRunnerOptions.internalProfile (property) — Internal profile counters used by opt-in benchmark tooling
   GeoSpecNativeRunnerOptions.nativeAssertions (property) — Actual protocol-3 engine used by authored assertions
   GeoSpecNativeRunnerOptions.nativeModelLoader (property) — Optional managed loader
   GeoSpecNativeRunnerOptions.model (property) — Defaults used when the runner constructs its own native loader
@@ -886,47 +617,6 @@ GeoSpecNativeModelResource (type) [2 members] — One named external resource re
 GeoSpecNativeSourceReader (type) — Resolve a non-memory source into ordinary ArrayBuffer-backed bytes
 ManagedGeoSpecNativeModelLoader (type) [1 members] — Reusable native model loader whose admitted subjects can be released…
   ManagedGeoSpecNativeModelLoader.releaseAll (method) — Drain registered admissions, including additions while drainage awaits, then release…
-GeoSpecNodeRunnerOptions (type) [10 members] — Options accepted by {@link createGeoSpecNodeRunner}
-  GeoSpecNodeRunnerOptions.filesystem (property) — Filesystem containing the project and test modules
-  GeoSpecNodeRunnerOptions.modelLoader (property) — Model loader exposed to authored tests through `geospec/model`
-  GeoSpecNodeRunnerOptions.nativeAssertions (property) — Protocol-3 assertion client used by explicitly native runners
-  GeoSpecNodeRunnerOptions.nativeModelLoader (property) — Managed native model loader released after each settled run
-  GeoSpecNodeRunnerOptions.stepLoader (property) — STEP loader exposed to authored tests through `geospec/step`
-  GeoSpecNodeRunnerOptions.builtinModules (property) — Additional in-memory modules made available to the VM
-  GeoSpecNodeRunnerOptions.internalProfile (property) — Internal profile counters used by opt-in benchmark tooling
-  GeoSpecNodeRunnerOptions.projectPath (property) — Absolute project root path
-  GeoSpecNodeRunnerOptions.cache (property) — Enable the authenticated persistent evidence cache
-  GeoSpecNodeRunnerOptions.cacheDirectory (property) — Absolute out-of-tree evidence-cache directory
-GeoSpecNodePoolRunnerOptions (type) [6 members] — Options accepted by {@link createGeoSpecNodePoolRunner}
-  GeoSpecNodePoolRunnerOptions.projectPath (property) — Absolute project root path
-  GeoSpecNodePoolRunnerOptions.workers (property) — Compiled worker count
-  GeoSpecNodePoolRunnerOptions.shardTimeout (property) — Per-shard non-verdict watchdog override, milliseconds (R11)
-  GeoSpecNodePoolRunnerOptions.cache (property) — Persistent reference-engine evidence caching is unsupported
-  GeoSpecNodePoolRunnerOptions.cacheDirectory (property) — Reference-engine cache directories are unsupported and refused when supplied
-  GeoSpecNodePoolRunnerOptions.runtimeFactoryModule (property) — Reference-engine runtime factories are unsupported and refused when supplied
-GeoSpecWebRunnerOptions (type) [7 members] — Options accepted by {@link createGeoSpecWebRunner}
-  GeoSpecWebRunnerOptions.filesystem (property) — Filesystem containing the project and test modules
-  GeoSpecWebRunnerOptions.modelLoader (property) — Model loader exposed to authored tests through `geospec/model`
-  GeoSpecWebRunnerOptions.nativeAssertions (property) — Protocol-3 assertion client used by explicitly native runners
-  GeoSpecWebRunnerOptions.nativeModelLoader (property) — Managed native model loader released after each settled run
-  GeoSpecWebRunnerOptions.stepLoader (property) — STEP loader exposed to authored tests through `geospec/step`
-  GeoSpecWebRunnerOptions.builtinModules (property) — Additional in-memory modules made available to the VM
-  GeoSpecWebRunnerOptions.internalProfile (property) — Internal profile counters used by opt-in benchmark tooling
-GeoSpecWebPoolRunnerOptions (type) [3 members] — Options accepted by {@link createGeoSpecWebPoolRunner}
-  GeoSpecWebPoolRunnerOptions.createWorker (property) — Spawn one pool worker whose script calls `startGeoSpecPoolWorkerHost` with the…
-  GeoSpecWebPoolRunnerOptions.workers (property) — Worker count
-  GeoSpecWebPoolRunnerOptions.shardTimeout (property) — Per-shard non-verdict watchdog override, milliseconds (R11)
-GeoSpecPoolWorkerHostOptions (type) [10 members] — Options accepted by {@link startGeoSpecPoolWorkerHost}
-  GeoSpecPoolWorkerHostOptions.filesystem (property) — Filesystem containing the project and test modules
-  GeoSpecPoolWorkerHostOptions.modelLoader (property) — Model loader exposed to authored tests through `geospec/model`
-  GeoSpecPoolWorkerHostOptions.nativeAssertions (property) — Native assertion client shared with this worker's model admissions
-  GeoSpecPoolWorkerHostOptions.nativeModelLoader (property) — Managed native admissions, released after every shard and collection pass…
-  GeoSpecPoolWorkerHostOptions.stepLoader (property) — STEP loader exposed to authored tests through `geospec/step`
-  GeoSpecPoolWorkerHostOptions.builtinModules (property) — Additional in-memory modules made available to the VM
-  GeoSpecPoolWorkerHostOptions.postMessage (property) — Post a message to the pool host
-  GeoSpecPoolWorkerHostOptions.onHostMessage (property) — Subscribe to pool-host messages
-  GeoSpecPoolWorkerHostOptions.measureMemoryBytes (property) — Sample this worker's resident memory in bytes (R15 telemetry)
-  GeoSpecPoolWorkerHostOptions.onShutdown (property) — Release platform resources on shutdown (after the shared scope disposes)
 GeoSpecPoolHostMessage (type) [1 members]
   GeoSpecPoolHostMessage.type (property)
 GeoSpecPoolShard (type) [3 members] — One schedulable work unit
@@ -953,23 +643,17 @@ GeoSpecRunner (type) [4 members] — Public GeoSpec runner lifecycle surface
   GeoSpecRunner.close (method) — Close the runner and release owned resources
 GeoSpecRunnerEvent (type) [1 members] — Lifecycle event emitted by GeoSpec worker-style runners
   GeoSpecRunnerEvent.type (property)
-
-## Types (3) — `public-api-types-3.md`
-
 GeoSpecRunnerFileResult (type) [5 members] — One GeoSpec test file executed by a worker-style runner
   GeoSpecRunnerFileResult.file (property) — Absolute or project-relative GeoSpec test file path supplied to the…
   GeoSpecRunnerFileResult.result (property) — Low-level module execution result for this file
   GeoSpecRunnerFileResult.durationMs (property) — Wall-clock cost of executing this file, in milliseconds (R1)
   GeoSpecRunnerFileResult.primaryLoadKey (property) — First deterministic model-load cache key observed in this file (R9…
   GeoSpecRunnerFileResult.workerMemoryBytes (property) — Executing worker's isolate-resident memory at file completion, in bytes (R15…
-GeoSpecRunnerOptions (type) [7 members] — Shared options for Node and browser GeoSpec runner factories
+GeoSpecRunnerOptions (type) [4 members] — Shared options for GeoSpec runner factories
   GeoSpecRunnerOptions.filesystem (property) — Filesystem containing the project and test modules
-  GeoSpecRunnerOptions.modelLoader (property) — Model loader exposed to authored tests through `geospec/model`
-  GeoSpecRunnerOptions.nativeAssertions (property) — Protocol-3 assertion client used by explicitly native runners
+  GeoSpecRunnerOptions.nativeAssertions (property) — Protocol-3 assertion client shared by every authored assertion and model…
   GeoSpecRunnerOptions.nativeModelLoader (property) — Managed native model loader released after each settled run
-  GeoSpecRunnerOptions.stepLoader (property) — STEP loader exposed to authored tests through `geospec/step`
   GeoSpecRunnerOptions.builtinModules (property) — Additional in-memory modules made available to the VM
-  GeoSpecRunnerOptions.internalProfile (property) — Internal profile counters used by opt-in benchmark tooling
 GeoSpecRunnerResult (type) [9 members] — Aggregate result returned by GeoSpec worker-style runners
   GeoSpecRunnerResult.success (property) — True when no files or tests failed and at least…
   GeoSpecRunnerResult.passed (property) — Number of non-skipped tests that passed
@@ -987,317 +671,6 @@ GeoSpecRunnerRunOptions (type) [6 members] — Options accepted by a GeoSpec wor
   GeoSpecRunnerRunOptions.matcherWallBackstop (property) — Non-verdict matcher wall backstop
   GeoSpecRunnerRunOptions.forensic (property) — Emit structured forensic measurements for this run
   GeoSpecRunnerRunOptions.bail (property) — Stop after the first failing file (R1)
-SelectorPathSegment (type) [3 members] — One parsed segment of a selector path (`name`, `name[3]`, or…
-  SelectorPathSegment.name (property) — Bare segment name without index
-  SelectorPathSegment.index (property) — 1-based member index when the segment is `name[n]`
-  SelectorPathSegment.wildcard (property) — True when the segment is the selector-side wildcard `name[*]`
-SelectorTolerances (type) [2 members] — Tolerance vocabulary consumed by selector predicates
-  SelectorTolerances.linearMm (property) — Linear/contact tolerance in millimetres (offset bands, `near`, radii)
-  SelectorTolerances.angularToleranceDegrees (property) — Angular tolerance in degrees for normal/axis/parallelism predicates
-AxisQuery (type) [12 members] — Axis query predicates over cylindrical/conical face facts
-  AxisQuery.axis (property) — Axis direction parallelism
-  AxisQuery.radius (property)
-  AxisQuery.near (property)
-  AxisQuery.containsPoint (property)
-  AxisQuery.nearestTo (property)
-  AxisQuery.within (property)
-  AxisQuery.orderBy (property)
-  AxisQuery.along (property)
-  AxisQuery.pick (property)
-  AxisQuery.allOf (property)
-  AxisQuery.anyOf (property)
-  AxisQuery.not (property)
-AxisSelector (type) [4 members] — Axis selector resolved from cylindrical/conical face facts
-  AxisSelector.kind (property)
-  AxisSelector.of (property)
-  AxisSelector.query (property)
-  AxisSelector.expect (property)
-BodyQuery (type) [10 members] — Body query predicates over available source facts
-  BodyQuery.area (property)
-  BodyQuery.near (property)
-  BodyQuery.nearestTo (property)
-  BodyQuery.within (property)
-  BodyQuery.orderBy (property)
-  BodyQuery.along (property)
-  BodyQuery.pick (property)
-  BodyQuery.allOf (property)
-  BodyQuery.anyOf (property)
-  BodyQuery.not (property)
-BodySelector (type) [4 members] — Body selector over source-backed solid evidence
-  BodySelector.kind (property)
-  BodySelector.of (property) — STEP occurrence scope, or the exact retained mesh primitive label…
-  BodySelector.query (property)
-  BodySelector.expect (property)
-CandidateEntity (type) [8 members] — Ranked candidate reported on ambiguous/unmatched resolutions, with the disambiguating facts…
-  CandidateEntity.id (property)
-  CandidateEntity.entityType (property)
-  CandidateEntity.occurrencePath (property)
-  CandidateEntity.facts (property)
-  CandidateEntity.topologyRef (property) — Snapshot topology ref (`'#o1.2.f7'`) for diagnostics and pinning
-  CandidateEntity.rank (property) — 1-based deterministic rank
-  CandidateEntity.excludedBy (property) — Name of the predicate that excluded this near-miss candidate
-  CandidateEntity.distance (property) — Probe distance in millimetres, when a probe ranked this candidate
-Cardinality (type) — Cardinality expectation for a selector resolution (master catalog G7)
-DatumSelector (type) [4 members] — Datum selector
-  DatumSelector.kind (property)
-  DatumSelector.name (property) — Full datum name, or part-relative name when `of` scopes an…
-  DatumSelector.of (property)
-  DatumSelector.expect (property)
-DirectionPredicate (type) [2 members] — Direction predicate with optional angular tolerance in degrees
-  DirectionPredicate.direction (property)
-  DirectionPredicate.angularToleranceDegrees (property)
-FaceQuery (type) [17 members] — Face query predicates (master catalog G1/G2)
-  FaceQuery.surfaceType (property)
-  FaceQuery.normal (property) — Face normal parallelism (planar faces)
-  FaceQuery.axis (property) — Rotation-axis parallelism (cylindrical/conical faces)
-  FaceQuery.radius (property)
-  FaceQuery.area (property)
-  FaceQuery.offset (property) — Plane offset band
-  FaceQuery.near (property) — Centroid coordinate bands, per-axis
-  FaceQuery.containsPoint (property) — Probe
-  FaceQuery.nearestTo (property) — Probe
-  FaceQuery.hitByRay (property) — Probe
-  FaceQuery.within (property) — Restrict candidates to entities resolved by another selector
-  FaceQuery.orderBy (property) — Deterministic ordering
-  FaceQuery.along (property) — Projection direction for `orderBy
-  FaceQuery.pick (property) — Deterministic pick after ordering
-  FaceQuery.allOf (property)
-  FaceQuery.anyOf (property)
-  FaceQuery.not (property)
-FaceSelector (type) [4 members] — Face selector resolved via query/probe predicates
-  FaceSelector.kind (property)
-  FaceSelector.of (property)
-  FaceSelector.query (property)
-  FaceSelector.expect (property)
-GeometryFacts (type) [16 members] — Typed geometric facts carried by a resolved entity — full…
-  GeometryFacts.surfaceType (property)
-  GeometryFacts.normal (property)
-  GeometryFacts.offset (property)
-  GeometryFacts.axisOrigin (property)
-  GeometryFacts.axisDirection (property)
-  GeometryFacts.radius (property)
-  GeometryFacts.area (property)
-  GeometryFacts.centroid (property)
-  GeometryFacts.bounds (property)
-  GeometryFacts.origin (property) — Datum frame origin (subject frame)
-  GeometryFacts.xAxis (property) — Datum frame x axis (subject frame)
-  GeometryFacts.zAxis (property) — Datum frame z axis (subject frame)
-  GeometryFacts.transform (property) — Occurrence placement transform (4x4 row-major, part-local → subject)
-  GeometryFacts.productName (property)
-  GeometryFacts.faceIndex (property)
-  GeometryFacts.memberCount (property) — Group member count
-GeometrySelection (type) [8 members] — Structured result of resolving one selector against a selector index
-  GeometrySelection.selector (property)
-  GeometrySelection.status (property)
-  GeometrySelection.entities (property) — Set-valued result (E4)
-  GeometrySelection.expected (property)
-  GeometrySelection.source (property)
-  GeometrySelection.stability (property)
-  GeometrySelection.candidates (property) — Ranked candidates with facts — ambiguous/unmatched repair data
-  GeometrySelection.diagnostics (property)
-GeometrySelectionSource (type) — Evidence source a selection resolved against
-GeometrySelectionStability (type) — Durability-ladder stability class of a resolution
-GeometrySelectionStatus (type) — Resolution status
-GeometrySelector (type) — The V1 geometry selector union (D4 scope)
-GroupSelector (type) [4 members] — Group selector
-  GroupSelector.kind (property)
-  GroupSelector.name (property) — Full group prefix, or part-relative prefix when `of` scopes an…
-  GroupSelector.of (property)
-  GroupSelector.expect (property)
-InterfaceSelector (type) [4 members] — Interface selector
-  InterfaceSelector.kind (property)
-  InterfaceSelector.name (property) — Full interface name, or part-relative name when `of` scopes an…
-  InterfaceSelector.of (property)
-  InterfaceSelector.expect (property)
-NumericRange (type) — Inclusive numeric band
-OccurrenceSelector (type) [4 members] — Occurrence selector
-  OccurrenceSelector.kind (property)
-  OccurrenceSelector.name (property) — Product or instance name to match
-  OccurrenceSelector.path (property) — Occurrence path (dot-joined instance segments, root omitted) to match
-  OccurrenceSelector.expect (property)
-PlaneQuery (type) [13 members] — Plane query predicates over planar face facts
-  PlaneQuery.normal (property)
-  PlaneQuery.offset (property)
-  PlaneQuery.area (property)
-  PlaneQuery.near (property)
-  PlaneQuery.containsPoint (property)
-  PlaneQuery.nearestTo (property)
-  PlaneQuery.within (property)
-  PlaneQuery.orderBy (property)
-  PlaneQuery.along (property)
-  PlaneQuery.pick (property)
-  PlaneQuery.allOf (property)
-  PlaneQuery.anyOf (property)
-  PlaneQuery.not (property)
-PlaneSelector (type) [4 members] — Plane selector resolved from planar face facts
-  PlaneSelector.kind (property)
-  PlaneSelector.of (property)
-  PlaneSelector.query (property)
-  PlaneSelector.expect (property)
-RayPredicate (type) [2 members] — Ray probe predicate (world-space origin and direction, millimetres)
-  RayPredicate.origin (property)
-  RayPredicate.direction (property)
-ResolvedEntity (type) [5 members] — One resolved geometry entity (index-local, snapshot-scoped identity)
-  ResolvedEntity.id (property)
-  ResolvedEntity.entityType (property)
-  ResolvedEntity.occurrencePath (property)
-  ResolvedEntity.facts (property)
-  ResolvedEntity.topologyRef (property) — Snapshot topology ref (`'#o1.2.f7'`) for diagnostics and pinning
-ResolvedEntityType (type) — Entity kind a resolved entity denotes
-SelectorFaceFacts (type) [10 members] — Per-face analytic facts in the subject frame, matching the verification…
-  SelectorFaceFacts.faceIndex (property)
-  SelectorFaceFacts.surfaceType (property)
-  SelectorFaceFacts.normal (property)
-  SelectorFaceFacts.offset (property)
-  SelectorFaceFacts.axisOrigin (property)
-  SelectorFaceFacts.axisDirection (property)
-  SelectorFaceFacts.radius (property)
-  SelectorFaceFacts.area (property)
-  SelectorFaceFacts.centroid (property)
-  SelectorFaceFacts.bounds (property)
-SelectorSurfaceType (type) — Surface classification carried by selector face facts, matching the verification…
-SerializedRegExp (type) [2 members] — JSON-serialized RegExp representation used by selector serialization
-  SerializedRegExp.pattern (property)
-  SerializedRegExp.flags (property)
-Vec3Record (type) [3 members] — Cartesian coordinate record used by coordinate-band (`near`) predicates
-  Vec3Record.x (property)
-  Vec3Record.y (property)
-  Vec3Record.z (property)
-BuildSelectorIndexOptions (type) [2 members] — Inputs for {@link buildSelectorIndex}
-  BuildSelectorIndexOptions.xde (property)
-  BuildSelectorIndexOptions.faceFactsByOccurrence (property)
-SelectorBodyRow (type) [5 members] — One per-occurrence solid aggregate row backing body selectors
-  SelectorBodyRow.id (property)
-  SelectorBodyRow.occurrencePath (property)
-  SelectorBodyRow.area (property) — Total face area (mm²)
-  SelectorBodyRow.centroid (property) — Area-weighted centroid of the occurrence's faces
-  SelectorBodyRow.bounds (property)
-SelectorDatumRow (type) [7 members] — One materialized datum row (subject frame)
-  SelectorDatumRow.id (property)
-  SelectorDatumRow.fullName (property)
-  SelectorDatumRow.occurrencePath (property)
-  SelectorDatumRow.name (property)
-  SelectorDatumRow.origin (property)
-  SelectorDatumRow.xAxis (property)
-  SelectorDatumRow.zAxis (property)
-SelectorFaceFactsTable (type) — Per-occurrence face facts keyed by occurrence path, matching the verification…
-SelectorFaceRow (type) [5 members] — One BRep face row with subject-frame analytic facts
-  SelectorFaceRow.id (property)
-  SelectorFaceRow.occurrencePath (property)
-  SelectorFaceRow.faceIndex (property)
-  SelectorFaceRow.facts (property)
-  SelectorFaceRow.topologyRef (property) — Snapshot topology ref, e.g
-SelectorGroupRow (type) [6 members] — One reconstructed group row (shared `prefix[i]` family per occurrence)
-  SelectorGroupRow.id (property)
-  SelectorGroupRow.fullName (property)
-  SelectorGroupRow.occurrencePath (property)
-  SelectorGroupRow.name (property) — Part-relative group prefix
-  SelectorGroupRow.members (property) — Members ordered by 1-based index
-  SelectorGroupRow.memberIndices (property) — The members' 1-based indices, ascending
-SelectorIndex (type) [7 members] — The per-subject selector index consumed by the L3 resolution engine
-  SelectorIndex.occurrences (property)
-  SelectorIndex.faces (property)
-  SelectorIndex.bodies (property)
-  SelectorIndex.interfaces (property)
-  SelectorIndex.datums (property)
-  SelectorIndex.groups (property)
-  SelectorIndex.diagnostics (property)
-SelectorInterfaceRow (type) [8 members] — One authored interface record joining a subshape name to its…
-  SelectorInterfaceRow.id (property)
-  SelectorInterfaceRow.fullName (property) — Composed full name
-  SelectorInterfaceRow.occurrencePath (property)
-  SelectorInterfaceRow.name (property) — Part-relative authored name
-  SelectorInterfaceRow.faceIndex (property)
-  SelectorInterfaceRow.entityKinds (property) — Entity kinds derived from the carrier face's geometry (profile rule)
-  SelectorInterfaceRow.dangling (property) — True when the named `faceIndex` no longer exists in the…
-  SelectorInterfaceRow.face (property)
-SelectorOccurrenceRow (type) [7 members] — One placed occurrence row in the selector index
-  SelectorOccurrenceRow.path (property)
-  SelectorOccurrenceRow.productName (property)
-  SelectorOccurrenceRow.instanceName (property)
-  SelectorOccurrenceRow.transform (property) — 4x4 row-major placement transform (part-local frame → subject frame)
-  SelectorOccurrenceRow.shapeIndex (property)
-  SelectorOccurrenceRow.ordinalPath (property) — 1-based ordinal path in the occurrence tree (snapshot refs `#o1.2`)
-  SelectorOccurrenceRow.bounds (property) — Union of the occurrence's face bounds (subject frame), when faces…
-SelectorDiagnosticOptions (type) [6 members] — Payload accepted by the selector diagnostic builders
-  SelectorDiagnosticOptions.selector (property)
-  SelectorDiagnosticOptions.stability (property)
-  SelectorDiagnosticOptions.message (property)
-  SelectorDiagnosticOptions.suggestion (property)
-  SelectorDiagnosticOptions.candidates (property) — Ranked candidates or near-misses with disambiguating facts
-  SelectorDiagnosticOptions.details (property) — Extra structured payload merged into `details`
-GeoSpecStepLoader (type) — A configured STEP loader
-BrepFacetName (type) — The five lazily materialized BRep evidence facets
-CreateStepLoaderOptions (type) [11 members] — Defaults accepted by {@link import ('./load-step.js').createStepLoader}
-  CreateStepLoaderOptions.mesh (property)
-  CreateStepLoaderOptions.path (property)
-  CreateStepLoaderOptions.name (property)
-  CreateStepLoaderOptions.unit (property)
-  CreateStepLoaderOptions.parameters (property)
-  CreateStepLoaderOptions.streaming (property)
-  CreateStepLoaderOptions.meshLinearTolerance (property)
-  CreateStepLoaderOptions.meshAngularToleranceDegrees (property)
-  CreateStepLoaderOptions.maxBytes (property)
-  CreateStepLoaderOptions.signal (property)
-  CreateStepLoaderOptions.onProgress (property)
-LoadStepOptions (type) [12 members] — Options for loading STEP/XDE/BRep evidence
-  LoadStepOptions.source (property)
-  LoadStepOptions.unit (property)
-  LoadStepOptions.streaming (property)
-  LoadStepOptions.mesh (property)
-  LoadStepOptions.meshLinearTolerance (property)
-  LoadStepOptions.meshAngularToleranceDegrees (property)
-  LoadStepOptions.maxBytes (property)
-  LoadStepOptions.signal (property)
-  LoadStepOptions.onProgress (property)
-  LoadStepOptions.parameters (property)
-  LoadStepOptions.path (property)
-  LoadStepOptions.name (property)
-StepLoadProgressEvent (type) [2 members] — Progress event emitted while GeoSpec normalizes a STEP source
-  StepLoadProgressEvent.phase (property)
-  StepLoadProgressEvent.bytesRead (property)
-StepSource (type) — STEP source forms accepted by {@link import ('./load-step.js').loadStep}
-StepStreamingMode (type) — STEP reader strategy used by GeoSpec
-XdeDatumPlacement (type) [5 members] — One native AP242 datum placement row (a coordinate *frame* from…
-  XdeDatumPlacement.occurrencePath (property)
-  XdeDatumPlacement.name (property)
-  XdeDatumPlacement.origin (property)
-  XdeDatumPlacement.xAxis (property)
-  XdeDatumPlacement.zAxis (property)
-XdeDatumSystem (type) [3 members] — One GD&T datum reference frame (`DATUM_SYSTEM`) with its precedence compartments,…
-  XdeDatumSystem.occurrencePath (property)
-  XdeDatumSystem.name (property)
-  XdeDatumSystem.references (property) — Compartments in precedence order
-XdeOccurrence (type) [6 members] — One placed occurrence recovered from an AP242 STEP structure read
-  XdeOccurrence.path (property)
-  XdeOccurrence.productName (property)
-  XdeOccurrence.instanceName (property)
-  XdeOccurrence.transform (property) — 4x4 row-major placement transform (part-local frame -> subject frame)
-  XdeOccurrence.shapeIndex (property) — Index into the native result's retained shape table (proof calls…
-  XdeOccurrence.bounds (property) — Analytic axis-aligned bounds of the placed occurrence in subject space
-XdeReadResult (type) [7 members] — Structured AP242 read result produced by the GeoSpec verification kernel's…
-  XdeReadResult.occurrences (property)
-  XdeReadResult.subshapeNames (property)
-  XdeReadResult.datumPlacements (property)
-  XdeReadResult.semanticDatums (property) — Semantic GD&T datums (the `DATUM` family) — empty for graphical-only…
-  XdeReadResult.datumSystems (property) — GD&T datum reference frames (`DATUM_SYSTEM`)
-  XdeReadResult.supplementalPlanes (property) — Supplemental-geometry `PLANE` items
-  XdeReadResult.freeShapeCount (property) — Free (non-assembly) top-level shapes — the flat-export degenerate case
-XdeSemanticDatum (type) [4 members] — One semantic GD&T datum (`DATUM` + `DATUM_FEATURE` family) recovered from…
-  XdeSemanticDatum.occurrencePath (property)
-  XdeSemanticDatum.label (property) — The GD&T datum identification letter(s)
-  XdeSemanticDatum.featureName (property) — DATUM_FEATURE name when the file authored one
-  XdeSemanticDatum.faceIndexes (property) — Attached faces in the owning product's deterministic face traversal order
-XdeSubshapeName (type) [4 members] — One part-relative authored subshape name, expanded per occurrence of the…
-  XdeSubshapeName.occurrencePath (property)
-  XdeSubshapeName.name (property)
-  XdeSubshapeName.shapeType (property)
-  XdeSubshapeName.faceIndex (property) — Index within the owning product shape's deterministic face traversal order
-XdeSupplementalPlane (type) [4 members] — One supplemental-geometry `PLANE` item (e.g
-  XdeSupplementalPlane.occurrencePath (property)
-  XdeSupplementalPlane.name (property)
-  XdeSupplementalPlane.origin (property)
-  XdeSupplementalPlane.normal (property)
 GeoSpecAssertionClient (type) [2 members] — Runner-independent native assertion client
   GeoSpecAssertionClient.expectGeo (method)
   GeoSpecAssertionClient.query (method)
@@ -1339,12 +712,12 @@ MinimumDistanceQuery (type) [3 members] — Complete AP242 minimum over two subj
 MinimumDistanceResult (type) [1 members] — Geometry refusal and infrastructure interruption never masquerade as facts
   MinimumDistanceResult.status (property)
 GeoSpecNativeQueryOptions (type) [8 members] — Flat native query transport options
-  GeoSpecNativeQueryOptions.subject (property)
   GeoSpecNativeQueryOptions.engine (property)
   GeoSpecNativeQueryOptions.claimId (property)
   GeoSpecNativeQueryOptions.evidenceProfile (property)
   GeoSpecNativeQueryOptions.subjectSlot (property)
   GeoSpecNativeQueryOptions.workUnitLimit (property)
+  GeoSpecNativeQueryOptions.subject (property)
   GeoSpecNativeQueryOptions.capability (property)
   GeoSpecNativeQueryOptions.payload (property)
 GeoSpecQueryCapability (type) — Existing positive-only ancillary operations owned by the native core
@@ -1448,9 +821,6 @@ GeoSpecTauProjectRuntime (type) [3 members] — Runtime surface required to snap
   GeoSpecTauProjectRuntime.open (property)
   GeoSpecTauProjectRuntime.on (method)
   GeoSpecTauProjectRuntime.bestRouteFor (method)
-
-## Types (4) — `public-api-types-4.md`
-
 GeoSpecConfig (type) [10 members] — Trusted project configuration using existing discovery and runner options
   GeoSpecConfig.include (property)
   GeoSpecConfig.exclude (property)

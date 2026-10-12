@@ -1,29 +1,25 @@
 import { describe, expect, it } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { GeoSpecAssertionClientOptions } from '#assertion-client/index.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
+import { loadModel } from '#model/load-model.js';
 import { resolveRuntimeExportIntent } from '#model/export-intent.js';
 import type { GeoSpecRuntimeClient } from '#model/types.js';
 import { createCollector } from '#runner/collector.js';
 import { compileGeoSpecTestNamePattern, matchesGeoSpecTestName } from '#runner/filter.js';
-import { chargeBudget, withMatcherBudget } from '#runner/matcher-budget.js';
 import { countRunnerTests } from '#runner/worker/serial-runner.js';
-import {
-  angleBetweenDegrees,
-  axisAngleBetweenDegrees,
-  normalize,
-  transformDirection,
-  transformPoint,
-} from '#selector/vector-math.js';
-import { interopExpectations } from '#step/interop-nist.manifest.js';
 import type { GeoSpecTestCase } from '#runner/types.js';
 
-describe('interop manifest', () => {
-  it('should declare the pinned NIST PMI expectations', () => {
-    expect(interopExpectations.length).toBeGreaterThan(0);
-    expect(interopExpectations.every((expectation) => expectation.file.length > 0)).toBe(true);
-  });
-});
-
 describe('GeoSpecModelLoadError', () => {
+  it('should refuse a direct loadModel call outside a GeoSpec runner', async () => {
+    const pending = loadModel({ source: new Uint8Array() });
+
+    await expect(pending).rejects.toBeInstanceOf(GeoSpecModelLoadError);
+    await expect(pending).rejects.toMatchObject({
+      diagnostics: [{ code: 'GEOSPEC_MODEL_LOADER_UNAVAILABLE', severity: 'error' }],
+    });
+  });
+
   it('should snapshot structured diagnostics', () => {
     const error = new GeoSpecModelLoadError([
       { code: 'A', severity: 'error', message: 'first' },
@@ -106,54 +102,6 @@ describe('test-name filter', () => {
   });
 });
 
-describe('matcher budget private controls', () => {
-  it('should honour private budgets and restore an outer budget', () => {
-    const outer = withMatcherBudget({
-      matcher: 'outer',
-      workUnitBudget: 2,
-      wallBackstop: 60_000,
-      evaluate: () => {
-        const inner = withMatcherBudget({
-          matcher: 'inner',
-          workUnitBudget: 2,
-          evaluate: () => {
-            chargeBudget(99);
-            return [];
-          },
-        });
-        expect(inner[0]?.code).toBe('MATCHER_TIMEOUT');
-        chargeBudget(1);
-        return [];
-      },
-    });
-
-    expect(outer).toStrictEqual([]);
-  });
-
-  it('should report the non-verdict wall backstop', () => {
-    const diagnostics = withMatcherBudget({
-      matcher: 'stalled',
-      wallBackstop: 0.000001,
-      evaluate: () => {
-        const start = Date.now();
-        while (Date.now() <= start) {
-          // Spin one millisecond so the backstop deadline is genuinely past
-        }
-        chargeBudget(1);
-        return [];
-      },
-    });
-
-    expect(diagnostics[0]?.code).toBe('MATCHER_STALLED');
-  });
-
-  it('should ignore charges outside a matcher', () => {
-    expect(() => {
-      chargeBudget(1_000_000);
-    }).not.toThrow();
-  });
-});
-
 describe('runner aggregates', () => {
   it('should count pass and fail totals, ignoring skips', () => {
     expect(
@@ -168,7 +116,7 @@ describe('runner aggregates', () => {
 
 describe('collector suite errors', () => {
   it('should record a synchronous suite-definition failure', async () => {
-    const collector = createCollector();
+    const collector = createCollector({ nativeAssertions: mock<GeoSpecAssertionClientOptions>() });
     collector.describe('broken', () => {
       throw new Error('sync definition exploded');
     });
@@ -179,7 +127,7 @@ describe('collector suite errors', () => {
   });
 
   it('should stringify a non-Error thrown from a test body', async () => {
-    const collector = createCollector();
+    const collector = createCollector({ nativeAssertions: mock<GeoSpecAssertionClientOptions>() });
     collector.it('throws a string', () => {
       // oxlint-disable-next-line typescript/only-throw-error -- the collector must survive non-Error throws.
       throw 'plain string';
@@ -187,29 +135,6 @@ describe('collector suite errors', () => {
     await collector.waitForCompletion(1000);
 
     expect(collector.tests[0]?.diagnostics[0]?.message).toBe('plain string');
-  });
-});
-
-describe('vector math', () => {
-  it('should reject degenerate directions', () => {
-    expect(normalize([0, 0, 0])).toBeUndefined();
-    expect(angleBetweenDegrees([0, 0, 0], [1, 0, 0])).toBeUndefined();
-    expect(angleBetweenDegrees([1, 0, 0], [0, 0, 0])).toBeUndefined();
-    expect(axisAngleBetweenDegrees([0, 0, 0], [1, 0, 0])).toBeUndefined();
-  });
-
-  it('should measure orientation-insensitive axis angles', () => {
-    expect(angleBetweenDegrees([1, 0, 0], [-1, 0, 0])).toBeCloseTo(180);
-    expect(axisAngleBetweenDegrees([1, 0, 0], [-1, 0, 0])).toBeCloseTo(0);
-    expect(angleBetweenDegrees([1, 0, 0], [1, 0, 0])).toBeCloseTo(0);
-  });
-
-  it('should apply row-major placement transforms', () => {
-    const translate = [1, 0, 0, 5, 0, 1, 0, 6, 0, 0, 1, 7, 0, 0, 0, 1];
-
-    expect(transformPoint(translate, [1, 2, 3])).toStrictEqual([6, 8, 10]);
-    expect(transformDirection(translate, [1, 2, 3])).toStrictEqual([1, 2, 3]);
-    expect(transformPoint([], [1, 2, 3])).toStrictEqual([0, 0, 0]);
   });
 });
 

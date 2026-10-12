@@ -180,7 +180,18 @@ jobs:
 
       # The CLI comes from the workspace lockfile (`scripts` owns it); its build
       # runs `apps/ui/netlify.toml`'s production command with the site's variables.
+      # Each push to `main` runs on its own, so an older run can reach this queue
+      # after a newer one has deployed; it must not put its commit back.
+      - name: Skip a staging deploy a newer commit has superseded
+        id: superseded
+        if: inputs.environment == 'staging'
+        uses: ./.github/actions/staging-deploy-superseded
+        with:
+          job-name: Deploy UI to ${{ inputs.environment }}
+          github-token: ${{ github.token }}
+
       - name: Build and deploy with the Netlify CLI
+        if: steps.superseded.outputs.superseded != 'true'
         working-directory: apps/ui
         env:
           SITE_ID: ${{ steps.site.outputs.site_id }}
@@ -193,6 +204,7 @@ jobs:
             --site "$SITE_ID" --message "$MESSAGE"
 
       - name: Check the site answers
+        if: steps.superseded.outputs.superseded != 'true'
         env:
           URL: ${{ steps.site.outputs.url }}
         run: curl --fail --silent --show-error --location --retry 5 --retry-delay 10 --output /dev/null "$URL"

@@ -72,7 +72,7 @@ import {
   useRevisionClientStatus,
   useRevisionCommands,
 } from '#hooks/use-revision-status.js';
-import type { RevisionClient, RevisionCommands } from '#hooks/use-revision-status.js';
+import type { RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { closeProjectRuntime, selectProjectKernelRefusal } from '#machines/project.machine.js';
@@ -505,7 +505,6 @@ function ProjectSessionBinding({
           projectId={projectId}
           intent={cloudIntent}
           status={status}
-          client={client}
           commands={revisionCommands}
         />
       )}
@@ -518,28 +517,24 @@ function ProjectSessionBinding({
  * backup by default, D20's materialized projects). Mounted only while something
  * is owed, so a project without an intent never asks for the session or the plan.
  *
- * @param props - The project, its intent, its projection, its client (read live
- * by the toast's *Turn off backup*) and the session's remote verbs.
+ * @param props - The project, its intent, its projection, and the session's remote verbs.
  * @returns Nothing; it only acts.
  */
 function TauCloudIntentConnector({
   projectId,
   intent,
   status,
-  client,
   commands,
 }: {
   readonly projectId: string;
   readonly intent: TauCloudIntent;
   readonly status: RevisionStatusProjection | undefined;
-  readonly client: RevisionClient;
   readonly commands: RevisionCommands;
 }): undefined {
   useTauCloudIntentConnection({
     projectId,
     intent,
     status,
-    readRemote: () => client.status()?.remote,
     commands,
   });
   return undefined;

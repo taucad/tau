@@ -15,12 +15,16 @@ env:
   TAU_WEBSOCKET_URL: ws://localhost:4001
   TAU_FRONTEND_URL: http://localhost:3000
 
-# Cancel in-progress runs when a new workflow with the same group name is triggered
-# This can save 10-50% on CI compute costs.
-# For pull requests, include the head ref to allow different PRs to run concurrently
-# while still canceling outdated runs on the same PR
+# A newer push to a pull request cancels its outdated run; different PRs run side by
+# side. Each push to `main` gets a group of its own, so it neither waits for nor
+# cancels another: in one shared group a run held the group until its last job ended,
+# including a Darwin job waiting hours for a macOS runner, and each newer push was
+# cancelled while pending, staging deploy and release commit included (2026-10-11,
+# runs 38179340616 and 38183401821). The staging deploys keep their own queues
+# (`deploy-api-staging`, `deploy-ui-staging`) and skip a commit that a newer deploy
+# has already superseded.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' }}
 
 jobs:
@@ -1033,6 +1037,10 @@ jobs:
       needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') &&
       needs.workspace.result == 'success' && needs.affected.result == 'success' &&
       needs.api.result == 'success'
+    # `actions: read` lets the deploy see whether a newer run already deployed.
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/deploy.yml
     with:
       environment: staging

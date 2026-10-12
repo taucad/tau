@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { ReactNode } from 'react';
-import { act, render, renderHook, waitFor } from '@testing-library/react';
+import { act, render, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
 
@@ -41,7 +41,7 @@ const {
   nextTauCloudStep,
   tauCloudIntent,
   turnOffBackupConsequence,
-  useBackupAnnouncing,
+  turnOffBackupByDefault,
   useTauCloudIntent,
   useTauCloudIntentConnection,
 } = await import('#hooks/use-cloud-projects.js');
@@ -257,14 +257,9 @@ describe('useTauCloudIntentConnection', () => {
   const disconnectRemote = vi.fn();
   const cancelRemote = vi.fn();
   const commands = { connectRemote, disconnectRemote, cancelRemote };
-  const readRemote = (): RemoteFacet => remote('none');
 
   beforeEach(() => {
     localStorage.clear();
-    /* The toasts an earlier row raised close, as a person's would. */
-    for (const [, options] of mockToast.mock.calls) {
-      options.onAutoClose?.();
-    }
     vi.clearAllMocks();
     Object.assign(account, { auth: 'authed', isResolved: true, canSyncFiles: true });
   });
@@ -276,7 +271,7 @@ describe('useTauCloudIntentConnection', () => {
     readonly intent: TauCloudIntent;
     readonly head: string | undefined;
   }): ReactNode {
-    useTauCloudIntentConnection({ projectId, intent, status: status(head), readRemote, commands });
+    useTauCloudIntentConnection({ projectId, intent, status: status(head), commands });
     return null;
   }
 
@@ -296,37 +291,13 @@ describe('useTauCloudIntentConnection', () => {
   };
 
   // ── DESIGN: the opt-out is offered before commitment ─────────────────────
-  it('should announce backup with a Turn off backup action when the project is first seen', async () => {
+  it('should expose the inline offer without a creation toast or an early connection', () => {
     tauCloudIntent.set(projectId, 'default');
-
     renderConnection(undefined);
-
-    await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledOnce();
-    });
-    const [message, options] = mockToast.mock.calls[0] ?? [];
-    expect(message).toBe('Backs up to Tau Cloud automatically after your first save.');
-    /* Nothing is on Tau Cloud yet, so the toast names no copy there. */
-    expect(options?.description).toBe('Turning it off keeps this project on this device.');
-    expect(options?.action.label).toBe('Turn off backup');
     expect(tauCloudIntent.get(projectId)).toBe('noticed');
-  });
-
-  /* DESIGN: one backup offer at a time. The pane's line waits while the toast shows it. */
-  it('should hold the pane offer back only while the creation toast is on screen', async () => {
-    tauCloudIntent.set(projectId, 'default');
-    const announcing = renderHook(() => useBackupAnnouncing(projectId));
-    expect(announcing.result.current).toBe(false);
-
-    renderConnection(undefined);
-    await waitFor(() => {
-      expect(announcing.result.current).toBe(true);
-    });
-
-    act(() => {
-      mockToast.mock.calls[0]?.[1].onAutoClose?.();
-    });
-    expect(announcing.result.current).toBe(false);
+    expect(backupByDefaultNotice('noticed', entitled, remote('none'))).toBe('pending');
+    expect(mockToast).not.toHaveBeenCalled();
+    expect(connectRemote).not.toHaveBeenCalled();
   });
 
   it('should name the copy on Tau Cloud only once there is one', () => {
@@ -343,20 +314,19 @@ describe('useTauCloudIntentConnection', () => {
     tauCloudIntent.set(projectId, 'default');
 
     renderHook(() => {
-      useTauCloudIntentConnection({ projectId, intent: 'default', status: status('rev-1'), readRemote, commands });
+      useTauCloudIntentConnection({ projectId, intent: 'default', status: status('rev-1'), commands });
     });
 
     expect(connectRemote).not.toHaveBeenCalled();
     expect(tauCloudIntent.get(projectId)).toBe('noticed');
   });
 
-  it('should connect nothing after Turn off backup is chosen from the toast', async () => {
+  it('should connect nothing after the inline Turn off backup action', () => {
     tauCloudIntent.set(projectId, 'default');
     const { rerender } = renderConnection(undefined);
-    await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledOnce();
+    act(() => {
+      turnOffBackupByDefault(projectId, remote('none'), commands);
     });
-    mockToast.mock.calls[0]?.[1].action.onClick();
     rerender({ head: 'rev-1' });
 
     expect(tauCloudIntent.get(projectId)).toBeUndefined();
@@ -382,7 +352,7 @@ describe('useTauCloudIntentConnection', () => {
     tauCloudIntent.set(projectId, 'connected');
 
     renderHook(() => {
-      useTauCloudIntentConnection({ projectId, intent: 'noticed', status: status('rev-1'), readRemote, commands });
+      useTauCloudIntentConnection({ projectId, intent: 'noticed', status: status('rev-1'), commands });
     });
 
     expect(connectRemote).not.toHaveBeenCalled();

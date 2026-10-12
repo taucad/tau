@@ -180,16 +180,18 @@ describe('RevisionRestore', () => {
   });
 
   /* W2b: a remote or resolution child's notice is already a person's sentence; it is never a restore. */
-  it('shows a child notice in its own tone, never as a restore', () => {
+  it('should keep remote status quiet while retaining actionable notices', () => {
     render(<RevisionRestore />);
 
     for (const listener of revisionStatusHarness.toasts) {
       listener({ type: 'notice', subject: 'remote', tone: 'info', message: 'Backed up to Tau Cloud.' });
       listener({ type: 'notice', subject: 'resolution', tone: 'error', message: 'That file could not be opened.' });
+      listener({ type: 'notice', subject: 'remote', tone: 'error', message: 'The backup could not finish.' });
     }
 
-    expect(toastInfo).toHaveBeenCalledWith('Backed up to Tau Cloud.');
+    expect(toastInfo).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith('That file could not be opened.');
+    expect(toastError).toHaveBeenCalledWith('The backup could not finish.');
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 

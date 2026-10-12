@@ -348,7 +348,7 @@ describe('ChatMessage column wrapper layout', () => {
     expect(wrapper.className).not.toContain('overflow-y-scroll');
     expect(wrapper.className).toContain('flex');
     expect(wrapper.className).toContain('flex-col');
-    expect(wrapper.className).toContain('space-y-2');
+    expect(wrapper.className).toContain('space-y-1');
     expect(wrapper.className).toContain('w-full');
     expect(wrapper.className).toContain('mx-2');
   });

@@ -55,7 +55,11 @@ vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
 const runtimeChildren = vi.hoisted(
   () => [] as Array<{ readonly handle: RuntimeChildHandle; readonly frames: Array<{ readonly type: string }> }>,
 );
-const runtimeChildStart = vi.hoisted(() => ({ hook: undefined as (() => void) | undefined }));
+const runtimeChildStart = vi.hoisted(() => ({
+  hook: undefined as (() => void) | undefined,
+  /** Holds each started child's `closed` after its exit, as a slow temp-directory removal does. */
+  holdClosed: undefined as Promise<void> | undefined,
+}));
 vi.mock('#runtime-child-supervisor.js', async (importOriginal) => {
   const original = await importOriginal<typeof runtimeChildSupervisor>();
   return {
@@ -67,8 +71,18 @@ vi.mock('#runtime-child-supervisor.js', async (importOriginal) => {
       const handle = await original.startRuntimeChild(options);
       const frames: Array<{ readonly type: string }> = [];
       runtimeChildren.push({ handle, frames });
+      const hold = runtimeChildStart.holdClosed;
       return {
         ...handle,
+        ...(hold
+          ? {
+              closed: (async () => {
+                const result = await handle.closed;
+                await hold;
+                return result;
+              })(),
+            }
+          : {}),
         post: (frame) => {
           frames.push(frame);
           handle.post(frame);
@@ -2173,11 +2187,14 @@ describe('startHostDaemon runtime child per root and session', () => {
       events.filter(
         (event) => event.type === 'session' && event.sessionId === sessionId && event.state === 'disconnected',
       );
+    const cleanupHeld = Promise.withResolvers<void>();
     try {
       await daemon.ready;
       await awaitControlReady(relay);
       const control = await relay.control;
       const before = runtimeChildren.length;
+      /* The crash is attributed on the exit alone: `closed` stays pending past any grace, like a slow cleanup. */
+      runtimeChildStart.holdClosed = cleanupHeld.promise;
 
       control.send(JSON.stringify(agentOffer(relay.url, 'session-1')));
       control.send(JSON.stringify(agentOffer(relay.url, 'session-2')));
@@ -2209,6 +2226,8 @@ describe('startHostDaemon runtime child per root and session', () => {
       });
       expect(await exitOf(started[1]!.handle)).toBe('closed');
     } finally {
+      runtimeChildStart.holdClosed = undefined;
+      cleanupHeld.resolve();
       await daemon.close();
     }
     expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');

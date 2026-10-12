@@ -29,6 +29,9 @@ export type RuntimeChildHandle = {
   readonly url: URL;
   readonly runtimeVersion: string;
   readonly authorizationToken: string;
+  /** Settles when the process exits, before its temp directory is removed: the signal that attributes a crash. */
+  readonly exited: Promise<{ readonly exitCode?: number; readonly signal?: NodeJS.Signals }>;
+  /** Settles once the process has exited and its temp directory is removed. */
   readonly closed: Promise<{ readonly exitCode?: number; readonly signal?: NodeJS.Signals }>;
   /** Send a control frame (for example a Zoo-scoped token) to the ready child; dropped once it has exited. */
   post<Frame extends { readonly type: string }>(frame: Frame): void;
@@ -227,6 +230,7 @@ export const startRuntimeChild = async (options: {
     url,
     runtimeVersion: message.runtimeVersion,
     authorizationToken,
+    exited,
     closed,
     post(frame): void {
       if (child.connected) {

@@ -1305,8 +1305,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         await Promise.race(closures);
         isDraining = true;
         const results = await Promise.all(closures);
+        /* The exit itself, not `closed`: removing the child's temp directory can outlast the grace on a loaded disk. */
         const observedChildExit = async (): Promise<true> => {
-          await child.closed;
+          await child.exited;
           return true;
         };
         const childExited = await Promise.race([
@@ -1340,7 +1341,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       sessions.set(offer.sessionId, session);
       // async-iife: bootstrap -- a child exit ends only the session it served.
       void (async (): Promise<void> => {
-        await child.closed;
+        await child.exited;
         if (!session.isDraining()) {
           closeSession('CHILD_EXIT');
         }

@@ -18,7 +18,9 @@
  * `test_model` and `use_skill` were the two absentees, both for the same
  * reason: their adapters lived in `apps/ui`. They now live in
  * `@taucad/agent-tools`, so this module only has to supply the Node halves —
- * a disk reader for skills, and the engine's Node runner for GeoSpec.
+ * a disk reader for skills, and for GeoSpec the native engine running over
+ * the same runtime client the geometry tools use, so `test_model` is offered
+ * exactly when they are.
  */
 
 import { readFile, realpath, readdir, stat } from 'node:fs/promises';
@@ -68,8 +70,11 @@ import type { ProjectRevisions } from '#revisions.js';
 
 type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
 
-/** Runtime surface accepted by the host's GeoSpec model loader. @public */
-export type HostGeoSpecRuntimeClient = GeoSpecRuntimeClient;
+/**
+ * Runtime surface the host's GeoSpec runner borrows. It never terminates it, so termination is not required.
+ * @public
+ */
+export type HostGeoSpecRuntimeClient = Omit<GeoSpecRuntimeClient, 'terminate'>;
 
 /**
  * The canonical host runner. Per-load source identity belongs to its finalized lineage.
@@ -186,35 +191,16 @@ const runtimeFailure = (
  */
 const geoSpecEngineResolves = (): boolean => {
   try {
-    /* Both are this host's own declared dependencies, so its own module is the
-     * correct base — unlike the kernel plugins next door. */
+    /* The modules the runner imports, all this host's own declared
+     * dependencies, so its own module is the correct base — unlike the kernel
+     * plugins next door. */
     import.meta.resolve('@taucad/geospec-engine-native/node');
-    import.meta.resolve('geospec/runner/node');
+    import.meta.resolve('geospec/runner/native');
+    import.meta.resolve('@taucad/geospec-engine/node-filesystem');
     return true;
   } catch {
     return false;
   }
-};
-
-/**
- * Build the compiled Node runner over the workspace directory.
- * A supplied project runtime is borrowed by the existing serialized native host owner;
- * otherwise the compiled pool owns its runtime and native engine.
- *
- * @param workspaceRoot - Absolute project root the runner executes against.
- * @param runtime - Optional project runtime used to load every model.
- * @returns A runner scoped to one `test_model` call.
- * @public
- */
-export const createHostGeoSpecRunner = async (
-  workspaceRoot: string,
-  runtime?: HostGeoSpecRuntimeClient,
-): Promise<HostGeoSpecRunner> => {
-  if (runtime !== undefined) {
-    return createHostNativeGeoSpecRunner(workspaceRoot, runtime);
-  }
-  const { createGeoSpecNodePoolRunner } = await import('geospec/runner/node');
-  return createGeoSpecNodePoolRunner({ projectPath: workspaceRoot });
 };
 
 /** One serialized native engine retains subjects only within its canonical root. */
@@ -256,7 +242,7 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
 };
 
 /**
- * Create a compiled runner for one tool call using the host's existing runtime.
+ * Create the GeoSpec runner for one `test_model` call over the host's existing runtime.
  *
  * Every call in this process shares one engine and runs after the previous call's runner
  * closes. A call keeps its subjects admitted until the next call settles, which releases
@@ -268,7 +254,7 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
  * @returns The ordinary GeoSpec runner contract over the shared native engine.
  * @public
  */
-export const createHostNativeGeoSpecRunner = async (
+export const createHostGeoSpecRunner = async (
   workspaceRoot: string,
   runtime: HostGeoSpecRuntimeClient,
 ): Promise<HostGeoSpecRunner> => {
@@ -293,7 +279,8 @@ export const createHostNativeGeoSpecRunner = async (
       nativeAssertions: { engine: session.engine, evidenceProfile: 'bounded' },
       model: {
         projectPath: workspaceRoot,
-        runtime,
+        /* The loader terminates only runtimes it creates; a borrowed client is never terminated. */
+        runtime: runtime as GeoSpecRuntimeClient,
         readSource: async (source) => {
           if (typeof source !== 'string') {
             throw new TypeError('Native GeoSpec file sources must be project paths.');
@@ -353,9 +340,10 @@ export type HostToolRegistryOptions = {
     | undefined;
   /**
    * Builds the GeoSpec runner one `test_model` call runs on, in the root the
-   * calling turn works in. Defaults to the engine's Node runner when
-   * `@taucad/geospec-engine` resolves; pass `false` to withhold `test_model`
-   * from an installation that has the engine.
+   * calling turn works in. Defaults to {@link createHostGeoSpecRunner} over
+   * `runtimeClient` when that is supplied and the GeoSpec engine resolves;
+   * otherwise `test_model` is not offered rather than offered-and-failing.
+   * Pass `false` to withhold `test_model` from an installation that has both.
    */
   readonly geospecRunner?: ((workspaceRoot: string) => Promise<HostGeoSpecRunner>) | false | undefined;
   /**
@@ -546,7 +534,9 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       options.geospecRunner === false
         ? undefined
         : (options.geospecRunner ??
-          (geoSpecEngineResolves() ? async () => createHostGeoSpecRunner(workspaceRoot) : undefined));
+          (runtimeClient !== undefined && geoSpecEngineResolves()
+            ? async () => createHostGeoSpecRunner(workspaceRoot, await runtimeClient(workspaceRoot))
+            : undefined));
 
     /**
      * `test_model` in process: discovery walks the real directory, the runner

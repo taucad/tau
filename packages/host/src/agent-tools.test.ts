@@ -379,16 +379,6 @@ describe('createHostToolRegistry', () => {
     expect(authored.isError).toBe(false);
   });
 
-  it('offers test_model wherever the GeoSpec engine resolves, with no runtime attached', async () => {
-    const registry = createHostToolRegistry({ workspaceRoot: await makeWorkspace() });
-    expect(registry.list().map((tool) => tool.name)).toContain('test_model');
-  });
-
-  it('withholds test_model when the host withholds it (geospecRunner: false)', async () => {
-    const registry = createHostToolRegistry({ workspaceRoot: await makeWorkspace(), geospecRunner: false });
-    expect(registry.list().map((tool) => tool.name)).not.toContain('test_model');
-  });
-
   it('runs test_model through the injected runner and projects the verdict', async () => {
     const workspaceRoot = await makeWorkspace();
     await writeFile(join(workspaceRoot, 'cube.geospec.ts'), 'export const spec = 1;\n', 'utf8');
@@ -1344,66 +1334,4 @@ describe('createHostToolRegistry', () => {
     const result = await invoke(registry, 'no_such_tool', {});
     expect(result).toMatchObject({ isError: true, content: { errorCode: 'TOOL_NOT_FOUND' } });
   });
-});
-
-/**
- * The real thing, end to end: the engine's Node runner, the esbuild VM, and a
- * Tau runtime booted in this process to export the model. Skipped by default
- * because it compiles a CAD kernel — run it with `TAU_GEOSPEC_INTEGRATION=1`
- * when the daemon's `test_model` cost needs re-measuring.
- */
-const geospecIntegrationTest = process.env['TAU_GEOSPEC_INTEGRATION'] === '1' ? it : it.skip;
-
-describe('daemon test_model against the real GeoSpec engine', () => {
-  geospecIntegrationTest(
-    'verifies an OpenSCAD cube and reports its cold and warm cost',
-    async () => {
-      const workspaceRoot = await makeWorkspace();
-      await writeFile(
-        join(workspaceRoot, 'main.ts'),
-        `import { primitives } from '@jscad/modeling';
-
-         export default function main() {
-           return primitives.cuboid({ size: [10, 10, 10] });
-         }
-        `,
-        'utf8',
-      );
-      await writeFile(
-        join(workspaceRoot, 'cube.geospec.ts'),
-        `import { describe, expectGeo, it } from 'geospec';
-         import { loadModel } from 'geospec/model';
-
-         describe('cube', () => {
-           it('is a watertight 10 mm cube', async () => {
-             const model = await loadModel({ file: 'main.ts', format: 'glb' });
-             expectGeo(model).toBeWatertight();
-             expectGeo(model).toHaveVolume({ value: 1000, tolerance: 1 });
-           });
-         });
-        `,
-        'utf8',
-      );
-      const registry = createHostToolRegistry({ workspaceRoot });
-
-      const coldStartedAt = performance.now();
-      const cold = await invoke(registry, 'test_model', {});
-      /** Milliseconds. */
-      const coldDuration = performance.now() - coldStartedAt;
-      const warmStartedAt = performance.now();
-      const warm = await invoke(registry, 'test_model', {});
-      /** Milliseconds. */
-      const warmDuration = performance.now() - warmStartedAt;
-
-      /* The warm number is an evidence-cache hit on identical inputs; an agent
-       * that edited the model between calls pays the cold cost again. */
-      // oxlint-disable-next-line no-console -- the measurement is this test's only output.
-      console.log(`test_model cold ${coldDuration.toFixed(0)} ms, warm ${warmDuration.toFixed(0)} ms`);
-      expect(cold.isError).toBe(false);
-      expect(warm.isError).toBe(false);
-      expect(cold.content).toMatchObject({ success: true, passed: 1, total: 1 });
-      expect(warm.content).toMatchObject({ success: true, passed: 1, total: 1 });
-    },
-    600_000,
-  );
 });

@@ -253,14 +253,15 @@ describe('Page application shell', () => {
     expect(controlRegion.children[0]).toBe(within(controlRegion).getByRole('link', { name: 'Home' }));
     expect(controlRegion.children[1]).toBe(within(controlRegion).getByRole('button', { name: 'Toggle Sidebar' }));
     expect(controlRegion.children).toHaveLength(2);
-    // The wordmark clears the first control by the row's own gap, not a wider one.
-    expect(controlRegion).toHaveClass('gap-1', 'pl-2', 'pr-1');
-    expect(controlRegion).not.toHaveClass('gap-2', 'px-2');
+    // The wordmark link's own `px-1` is the 4 px gap to the trigger, matching the gap between
+    // every later control; a row gap on top would double it.
+    expect(controlRegion).toHaveClass('pl-2', 'pr-1');
+    expect(controlRegion).not.toHaveClass('gap-1', 'gap-2', 'px-2');
     expect(
       container
         .querySelector<HTMLElement>('[data-slot=application-shell]')
         ?.style.getPropertyValue('--titlebar-controls-width'),
-    ).toBe('calc(var(--spacing) * 26)');
+    ).toBe(`calc(var(--spacing) * ${2 + 1 + 5 * (2321.24 / 710) + 1 + 7 + 1})`);
   });
 
   it('resizes the sidebar by 16px and clamps to the pane bounds', () => {

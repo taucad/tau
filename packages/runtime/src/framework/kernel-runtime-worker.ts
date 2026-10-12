@@ -59,7 +59,8 @@ import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definiti
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
 import { sourcePathMatchesExtensions } from '@taucad/utils/file';
-import type { z } from 'zod';
+import { z } from 'zod';
+import { runtimeIssueSchema } from '#types/runtime-wire-common.schemas.js';
 
 type WorkerKernelDefinition = KernelDefinitionV2<
   string,
@@ -134,6 +135,25 @@ const describeUnhandledExtension = (entryPath: string, kernels: readonly KernelP
   const listed = handled.slice(0, listedExtensionLimit).join(', ');
   const registered = handled.length > listedExtensionLimit ? `${listed}, …` : `${listed || 'none'}.`;
   return `No kernel handles "${extension}". Registered kernels handle: ${registered} Install a plugin that declares this extension and add it to the runtime definition.`;
+};
+
+const carriedKernelIssuesSchema = z.tuple([runtimeIssueSchema], runtimeIssueSchema);
+
+/**
+ * Read the typed issues a kernel attached to a thrown `Error` (e.g. `KERNEL_REALM_CONFLICT`).
+ *
+ * Validated rather than duck-typed: other errors carry an `issues` array too (a `ZodError` does),
+ * and their rows are not kernel issues. Structural, so duplicate runtime copies in one realm agree.
+ *
+ * @param error - The value a kernel threw.
+ * @returns The carried issues, or `undefined` when the error carries no valid kernel issue.
+ */
+const carriedKernelIssues = (error: unknown): [KernelIssue, ...KernelIssue[]] | undefined => {
+  if (!(error instanceof Error) || !('issues' in error)) {
+    return undefined;
+  }
+  const parsed = carriedKernelIssuesSchema.safeParse(error.issues);
+  return parsed.success ? parsed.data : undefined;
 };
 
 /** Multi-kernel runtime worker that dynamically selects and delegates to loaded kernel definitions. */
@@ -1189,8 +1209,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     } catch (error) {
       // A typed refusal (e.g. KERNEL_REALM_CONFLICT) reaches the client as is; name the refusing kernel on a copy,
       // since one rejected realm creation may reach several kernels.
-      if (error instanceof Error && 'issues' in error && Array.isArray(error.issues) && error.issues.length > 0) {
-        const [issue, ...rest] = error.issues as [KernelIssue, ...KernelIssue[]];
+      const carried = carriedKernelIssues(error);
+      if (error instanceof Error && carried) {
+        const [issue, ...rest] = carried;
         const details = typeof issue.details === 'object' && issue.details !== null ? issue.details : {};
         throw Object.assign(new Error(error.message, { cause: error }), {
           issues: [{ ...issue, details: { producer: kernel.entry.id, ...details } }, ...rest],
@@ -1387,8 +1408,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
   private createKernelBindingIssue(error: unknown): KernelIssue {
     // A typed initialisation refusal (e.g. KERNEL_REALM_CONFLICT) keeps its own issue.
-    if (error instanceof Error && 'issues' in error && Array.isArray(error.issues) && error.issues.length > 0) {
-      return error.issues[0] as KernelIssue;
+    const carried = carriedKernelIssues(error);
+    if (carried) {
+      return carried[0];
     }
     let message: string;
     if (error instanceof Error) {

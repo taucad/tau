@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-09-29'
+updated: '2026-10-13'
 related:
   - docs/research/revisions-always-on-sync-charter.md
   - docs/research/git-storage-substrate-charter.md
@@ -117,7 +117,7 @@ Choose one backend per project per host from control-plane configuration. No lay
 
 Keep commit identity, regular-file mode, refs, log, diff, merge, tags, checkouts, remote operations, and LFS clean/smudge behind the port. Never put clean/smudge in the composed view. Preserve `100644` and `100755` modes in the immutable tree, hashing, capture, merge, restore, and every port; refuse symlinks, gitlinks, and unknown modes before applying them. Require browser and native conformance to produce identical tree and revision identities for identical inputs and to expose the same L2–L4 behavior; the CLI exposes the same verbs headlessly.
 
-Keep each worktree's Git index naming its branch's head tree, for stock Git only. Tau never reads the index and decides dirtiness by capture, so the port refreshes it after every branch move, every `HEAD` switch, and at open when no index exists, and never fails the move because of it. Leave an existing index alone at open: an adopted repository may hold the person's staged work. A person's staging is folded into the next revision.
+Keep each worktree's Git index naming its branch's head tree, for stock Git only. Tau never reads the index and decides dirtiness by capture, so the port refreshes it after every branch move, every `HEAD` switch, and at open when no index exists, and never fails the move because of it. Leave an existing index alone at open: an adopted repository may hold the person's staged work. A person's staging is folded into the next revision. Adopt only a repository whose `.git` is a directory at the project root; refuse a project path whose `.git` is a file (a linked worktree or submodule) before writing anything, because its index, LFS objects and worktree listing belong to another repository.
 
 Keep remote transport to `listRemoteRefs`, `fetch`, and `push`; do not add bundle or import-bundle wires.
 

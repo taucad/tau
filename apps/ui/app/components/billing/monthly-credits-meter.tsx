@@ -65,7 +65,7 @@ export function MonthlyCreditsMeter({ state, addCredits }: MonthlyCreditsMeterPr
               : `${available ?? ''} of ${formatWholeCredits(monthly.scaleCreditAtoms)} monthly credits left`
           }
           value={monthly === undefined ? 0 : Math.round(monthly.fraction * 100)}
-          className={cn('h-1.5', isLow && '[&>[data-slot=progress-indicator]]:bg-warning')}
+          className={cn('h-1.5 bg-muted-foreground/20', isLow && '[&>[data-slot=progress-indicator]]:bg-warning')}
         />
       )}
       {isLow ? addCredits : undefined}

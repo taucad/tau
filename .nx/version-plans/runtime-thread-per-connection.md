@@ -2,4 +2,4 @@
 runtime: minor
 ---
 
-Add `workerData` to `nodeWorkerTransport` (and type its `workerCtor` seam as a `Worker` constructor taking the worker options), and a thread-per-connection mode to `webSocketHost` (`worker: { url, workerData, workerCtor }`): each connection runs its kernel worker in its own thread, which `nodeWorkerHost` entries serve unchanged, and a closed connection terminates its thread.
+Add `workerData` to `nodeWorkerTransport`: it is structured-cloned into the worker entry, so one application-owned entry can compose the runtime each client needs. Its type, `NodeWorkerData`, is exported from `@taucad/runtime/transport/node`, and the `workerCtor` seam is typed as a `Worker` constructor that receives (and must forward) the worker options.

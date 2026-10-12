@@ -89,7 +89,8 @@ export type NodeWorkerClientOptions = {
   /**
    * Override for `node:worker_threads.Worker`, called as
    * `new workerCtor(url, { workerData })` — a tsx-run `.ts` entry, or a fake
-   * worker in a unit test.
+   * worker in a unit test. A custom constructor must forward `options` to
+   * `Worker`, or the entry never receives `workerData`.
    */
   readonly workerCtor?: new (url: string | URL, options?: WorkerOptions) => NodeWorkerLike;
   /**

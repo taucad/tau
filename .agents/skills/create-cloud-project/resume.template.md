@@ -76,7 +76,7 @@ Phases are ordered by dependency and by what unblocks the most. Within a phase, 
 
 1. Read the charter end to end; read this file; read <the lane reports that matter>.
 2. Re-observe § 3 with <exact commands>. Correct § 3 if anything moved and log it.
-3. Verify access: push rights on each repository, Brain cloned at `repos/tau-brain` with push rights (`GIT_LFS_SKIP_SMUDGE=1 gh repo clone taucad/tau-brain repos/tau-brain` if absent).
+3. Verify access: push rights on each repository, Brain mounted at `repos/tau-brain` with push rights (`pnpm agent-env brain` if absent).
 4. Start the `work-charter` queue with the phases below as tasks; one coordinator-owned queue.
 
 ### P1 — <name> (<W# IDs>)

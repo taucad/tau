@@ -67,3 +67,12 @@ const kernelIssueCodeSet: ReadonlySet<string> = new Set(kernelIssueCodeValues);
  */
 export const isKernelIssueCode = (code: unknown): code is KernelIssueCode =>
   typeof code === 'string' && kernelIssueCodeSet.has(code);
+
+/**
+ * Admit an untrusted issue code, mapping an unknown or missing one to `'UNKNOWN'`.
+ *
+ * @param code - Candidate issue-code value.
+ * @returns The code when it is a known {@link KernelIssueCode}, otherwise `'UNKNOWN'`.
+ * @internal
+ */
+export const toKernelIssueCode = (code: unknown): KernelIssueCode => (isKernelIssueCode(code) ? code : 'UNKNOWN');

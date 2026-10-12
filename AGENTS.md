@@ -82,7 +82,7 @@ Use `create-research`, `create-charter`, `superplan`, `work-charter`, `create-cl
 
 ## Repository and evidence boundaries
 
-`docs/{research,reference,handbooks,incidents}` link into optional `repos/tau-brain`. Write through `docs/...`, validate from Tau root, and check Git with `git -C repos/tau-brain status --short -- research/<path>` or `reference/<path>`. Follow the [artifact contract](.agents/skills/create-research/artifacts.md). Workers without Brain return evidence to the permitted parent; ordinary install/build/test/runtime works without Brain.
+`docs/{research,reference,handbooks,incidents}` link into optional `repos/tau-brain`, mounted sparsely per checkout by the `pnpm agent-env` hook. Write through `docs/...`, validate from Tau root and commit with `pnpm agent-env commit`. Follow the [artifact contract](.agents/skills/create-research/artifacts.md). Workers without Brain return evidence to the permitted parent; ordinary install/build/test/runtime works without Brain.
 
 `repos.yaml` is the public source catalog; authorized checkouts may overlay `repos/tau-brain/repos.yaml`. Use the `repos` skill for dependency-source investigation and catalog entries. Checkouts are optional.
 

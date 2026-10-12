@@ -9,7 +9,7 @@ type Entry = {
 };
 
 const realmConflict = (group: string, heldKey: string, requestedKey: string): Error => {
-  const message = `This realm already holds "${heldKey}" for "${group}" and cannot also hold "${requestedKey}". Release every holder of "${heldKey}" first, or host the second build in its own worker.`;
+  const message = `This realm already holds "${heldKey}" for "${group}" and cannot also hold "${requestedKey}".`;
   const issue: KernelIssue = {
     code: 'KERNEL_REALM_CONFLICT',
     message,

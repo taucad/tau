@@ -55,7 +55,11 @@ vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
 const runtimeChildren = vi.hoisted(
   () => [] as Array<{ readonly handle: RuntimeChildHandle; readonly frames: Array<{ readonly type: string }> }>,
 );
-const runtimeChildStart = vi.hoisted(() => ({ hook: undefined as (() => void) | undefined }));
+const runtimeChildStart = vi.hoisted(() => ({
+  hook: undefined as (() => void) | undefined,
+  /** Holds each started child's `closed` after its exit, as a slow temp-directory removal does. */
+  holdClosed: undefined as Promise<void> | undefined,
+}));
 vi.mock('#runtime-child-supervisor.js', async (importOriginal) => {
   const original = await importOriginal<typeof runtimeChildSupervisor>();
   return {
@@ -67,8 +71,18 @@ vi.mock('#runtime-child-supervisor.js', async (importOriginal) => {
       const handle = await original.startRuntimeChild(options);
       const frames: Array<{ readonly type: string }> = [];
       runtimeChildren.push({ handle, frames });
+      const hold = runtimeChildStart.holdClosed;
       return {
         ...handle,
+        ...(hold
+          ? {
+              closed: (async () => {
+                const result = await handle.closed;
+                await hold;
+                return result;
+              })(),
+            }
+          : {}),
         post: (frame) => {
           frames.push(frame);
           handle.post(frame);
@@ -1121,6 +1135,74 @@ describe('startHostDaemon', () => {
     expect(await daemon.closed).toEqual({ cause: 'requested' });
   }, 30_000);
 
+  /* A relay that cannot pair yet (a 404 from an API without the pairing route) once closed the channel the daemon had
+   * already reported ready, and the process lived on with nothing listening. Pairing retries instead. */
+  it('should keep the agent channel listening while a failed pairing retries', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-pairing-retry-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    let pairingRequests = 0;
+    const httpServer = createServer((request, response) => {
+      const { pathname } = new URL(request.url ?? '/', 'http://relay.invalid');
+      if (request.method === 'POST' && pathname === '/v1/agents/pairings') {
+        pairingRequests += 1;
+        if (pairingRequests === 1) {
+          response.writeHead(404).end();
+          return;
+        }
+        response.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            deviceCode: 'device-code-0123456789',
+            userCode: 'WXYZ-9876',
+            verificationUri: 'https://tau.example/pair',
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            pollInterval: 250,
+          }),
+        );
+        return;
+      }
+      if (request.method === 'POST' && pathname === '/v1/agents/pairings/token') {
+        response.writeHead(202).end();
+        return;
+      }
+      response.writeHead(404).end();
+    });
+    resources.push(httpServer);
+    await new Promise<void>((resolve) => {
+      httpServer.listen(0, '127.0.0.1', resolve);
+    });
+    const address = httpServer.address();
+    if (!address || typeof address === 'string') {
+      throw new TypeError('Expected a TCP relay address.');
+    }
+    const events: HostDaemonEvent[] = [];
+    agentServerSpy.mockClear();
+    const daemon = startHostDaemon({
+      relayUrl: new URL(`http://127.0.0.1:${String(address.port)}`),
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), testModel: false },
+      onEvent: (event) => events.push(event),
+    });
+    await daemon.ready;
+    await vi.waitFor(
+      () => {
+        expect(events).toContainEqual(expect.objectContaining({ type: 'pairing', userCode: 'WXYZ-9876' }));
+      },
+      { timeout: 10_000 },
+    );
+
+    expect(events).toContainEqual(expect.objectContaining({ type: 'warning', code: 'PAIRING_FAILED' }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'agent', state: 'stopped' }));
+    const served = agentServerSpy.mock.results.at(-1);
+    if (served?.type !== 'return') {
+      throw new TypeError('Expected the daemon to serve its agent channel.');
+    }
+    await expect(fetch(served.value.url())).resolves.toBeInstanceOf(Response);
+
+    await daemon.close();
+    expect(await daemon.closed).toEqual({ cause: 'requested' });
+  }, 30_000);
+
   /* W6.r1 round 3 (GI-Q6): the account the pairing exchange returned, stored with the credential, is the principal
    * the daemon's credential port and its funded transport name. */
   it('should name the stored account as the principal of its credential and funded transport', async () => {
@@ -1741,9 +1823,17 @@ describe('startHostDaemon', () => {
     await daemon.ready;
     const control = await relay.control;
     control.close(4401, 'device revoked');
+    const pairingRequests = () => relay.requests.filter(({ line }) => line.includes('/v1/agents/pairings'));
+    if (pair !== false) {
+      /* A failed pairing retries rather than ending the daemon, so it is closed once pairing has started. */
+      await vi.waitFor(() => {
+        expect(pairingRequests()).not.toEqual([]);
+      });
+      await daemon.close().catch(() => undefined);
+    }
     const closed = await daemon.closed;
     await daemon.close().catch(() => undefined);
-    return { closed, pairingRequests: relay.requests.filter(({ line }) => line.includes('/v1/agents/pairings')) };
+    return { closed, pairingRequests: pairingRequests() };
   };
 
   it('should exit on a refused credential and never pair when it is a provisioned host', async () => {
@@ -2097,11 +2187,14 @@ describe('startHostDaemon runtime child per root and session', () => {
       events.filter(
         (event) => event.type === 'session' && event.sessionId === sessionId && event.state === 'disconnected',
       );
+    const cleanupHeld = Promise.withResolvers<void>();
     try {
       await daemon.ready;
       await awaitControlReady(relay);
       const control = await relay.control;
       const before = runtimeChildren.length;
+      /* The crash is attributed on the exit alone: `closed` stays pending past any grace, like a slow cleanup. */
+      runtimeChildStart.holdClosed = cleanupHeld.promise;
 
       control.send(JSON.stringify(agentOffer(relay.url, 'session-1')));
       control.send(JSON.stringify(agentOffer(relay.url, 'session-2')));
@@ -2133,6 +2226,8 @@ describe('startHostDaemon runtime child per root and session', () => {
       });
       expect(await exitOf(started[1]!.handle)).toBe('closed');
     } finally {
+      runtimeChildStart.holdClosed = undefined;
+      cleanupHeld.resolve();
       await daemon.close();
     }
     expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');

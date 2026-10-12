@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { createRealmResources } from '#framework/realm-resources.js';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
@@ -118,8 +119,9 @@ describe('createRealmResources', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
       const { message, issues } = error as Error & { issues: KernelIssue[] };
-      expect(message).toContain('"single:a.wasm"');
-      expect(message).toContain('"multi:b.wasm"');
+      expect(message).toBe(
+        'This realm already holds "single:a.wasm" for "replicad-occt" and cannot also hold "multi:b.wasm".',
+      );
       expect(issues).toEqual([
         {
           code: 'KERNEL_REALM_CONFLICT',
@@ -332,5 +334,88 @@ describe('services.realm', () => {
     expect(first).toMatchObject({ success: false, issues: [{ details: { producer: 'kernel-a' } }] });
     expect(second).toMatchObject({ success: false, issues: [{ details: { producer: 'kernel-b' } }] });
     expect(shared.issues).toEqual([issue]);
+  });
+
+  it('should report a ZodError thrown by initialize as a well-formed KERNEL_BINDING_FAILED issue', async () => {
+    await seedTestFileSystem({ 'model.realm': 'realm' });
+    const failure = z.object({ wasmUrl: z.string() }).safeParse({}).error;
+    const kernel: AnyKernelDefinitionV2 = {
+      ...createHoldingKernel(async () => ({})),
+      initialize: async () => {
+        throw failure ?? new Error('The fixture schema accepted its input.');
+      },
+    };
+
+    const refused = await openDocument(await startWorker(kernel));
+
+    expect(refused).toEqual(
+      expect.objectContaining({
+        success: false,
+        issues: [{ message: failure?.message, code: 'KERNEL_BINDING_FAILED', type: 'kernel', severity: 'error' }],
+      }),
+    );
+  });
+
+  it('should keep a realm conflict that arrives beside a foreign row', async () => {
+    await seedTestFileSystem({ 'model.realm': 'realm' });
+    const conflict: KernelIssue = {
+      code: 'KERNEL_REALM_CONFLICT',
+      message: 'This realm already holds "single" for "realm-resources-test" and cannot also hold "multi".',
+      severity: 'error',
+      type: 'kernel',
+      details: { group: 'realm-resources-test', heldKey: 'single', requestedKey: 'multi' },
+    };
+    const foreign = { code: 'invalid_type', message: 'Invalid input', path: ['wasmUrl'] };
+    const kernel: AnyKernelDefinitionV2 = {
+      ...createHoldingKernel(async () => ({})),
+      initialize: async () => {
+        throw Object.assign(new Error(conflict.message), { issues: [conflict, foreign] });
+      },
+    };
+
+    const refused = await openDocument(await startWorker(kernel));
+
+    expect(refused).toEqual(
+      expect.objectContaining({
+        success: false,
+        issues: [
+          {
+            ...conflict,
+            details: {
+              producer: 'realm-kernel',
+              group: 'realm-resources-test',
+              heldKey: 'single',
+              requestedKey: 'multi',
+            },
+          },
+        ],
+      }),
+    );
+  });
+
+  it('should name the refusing kernel when initialize rejects with a non-Error carrying kernel issues', async () => {
+    await seedTestFileSystem({ 'model.realm': 'realm' });
+    const conflict: KernelIssue = {
+      code: 'KERNEL_REALM_CONFLICT',
+      message: 'This realm already holds "single" for "realm-resources-test" and cannot also hold "multi".',
+      severity: 'error',
+      type: 'kernel',
+    };
+    const kernel: AnyKernelDefinitionV2 = {
+      ...createHoldingKernel(async () => ({})),
+      initialize: async () => {
+        // oxlint-disable-next-line typescript/only-throw-error -- a kernel may reject with any value; this one carries issues.
+        throw { issues: [conflict] };
+      },
+    };
+
+    const refused = await openDocument(await startWorker(kernel));
+
+    expect(refused).toEqual(
+      expect.objectContaining({
+        success: false,
+        issues: [{ ...conflict, details: { producer: 'realm-kernel' } }],
+      }),
+    );
   });
 });

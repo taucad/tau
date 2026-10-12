@@ -22,6 +22,7 @@ import { createNodeMachineHost } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
 import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
+import type { RuntimeClient } from '@taucad/runtime/client';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
 
 import { startAgentServer } from '#agent-server.js';
@@ -142,6 +143,9 @@ export type HostDaemonEvent =
          * the geometry tools, and nothing else. The agent channel and its file
          * tools keep serving while the loop retries a child. */
         | 'RUNTIME_CHILD_FAILED'
+        /* Retriable, never fatal: the relay could not pair this host yet. The
+         * agent channel keeps serving unpaired while the daemon retries. */
+        | 'PAIRING_FAILED'
         /* The turn ran and is durable in its own log; only its revision is
          * missing (V17). Retriable in the sense that the next turn records. */
         | 'REVISION_NOT_RECORDED'
@@ -647,10 +651,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * own realm. A client that a wire failure or its child's exit terminated is replaced, with a new child, on its next
    * use; closing a root's client closes its child.
    */
-  const agentRuntimes = keyedResource<
-    string,
-    { readonly child: RuntimeChildHandle; readonly client: ReturnType<typeof createRuntimeClient> }
-  >(
+  const agentRuntimes = keyedResource<string, { readonly child: RuntimeChildHandle; readonly client: RuntimeClient }>(
     async (workspaceRoot) => {
       let child: RuntimeChildHandle;
       try {
@@ -1304,8 +1305,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         await Promise.race(closures);
         isDraining = true;
         const results = await Promise.all(closures);
+        /* The exit itself, not `closed`: removing the child's temp directory can outlast the grace on a loaded disk. */
         const observedChildExit = async (): Promise<true> => {
-          await child.closed;
+          await child.exited;
           return true;
         };
         const childExited = await Promise.race([
@@ -1339,7 +1341,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       sessions.set(offer.sessionId, session);
       // async-iife: bootstrap -- a child exit ends only the session it served.
       void (async (): Promise<void> => {
-        await child.closed;
+        await child.exited;
         if (!session.isDraining()) {
           closeSession('CHILD_EXIT');
         }
@@ -1536,7 +1538,26 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       if (options.pair === false) {
         throw new HostAuthenticationError('Tau Host device credential was revoked; a provisioned host does not pair.');
       }
-      return pairDevice(options.relayUrl, shutdown.signal, emit);
+      /* Retriable, never fatal, like the relay below it: pairing is downstream
+       * of the agent channel, so a relay that cannot pair yet must not close a
+       * channel this daemon already reported ready. */
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- pairing attempts are deliberately sequential.
+          return await pairDevice(options.relayUrl, shutdown.signal, emit);
+        } catch (error) {
+          if (shutdown.signal.aborted) {
+            throw error;
+          }
+          emit({
+            type: 'warning',
+            code: 'PAIRING_FAILED',
+            message: `${error instanceof Error ? error.message : String(error)} Retrying pairing with ${options.relayUrl.origin}.`,
+          });
+        }
+        // oxlint-disable-next-line no-await-in-loop -- backoff orders and bounds pairing attempts.
+        await delay(Math.min(1000 * 2 ** attempt, reconnectDelayMaximum), undefined, { signal: shutdown.signal });
+      }
     };
     let hostCredential = (await readHostCredential()) ?? (await pair());
     pairedWith(hostCredential);

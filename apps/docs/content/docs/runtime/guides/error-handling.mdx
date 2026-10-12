@@ -45,6 +45,8 @@ A successful result may still carry error-severity findings, warnings, or inform
 
 `VIEW_UNKNOWN` means the requested ID was never declared. `VIEW_UNAVAILABLE` means it is declared but not offered by this evaluation. Recovery should preserve the person's saved choice until they select a replacement.
 
+`KERNEL_REALM_CONFLICT` means a kernel needs a different build of a realm-shared backend than the one this JavaScript realm already holds; `details` names the `group`, the `heldKey`, the `requestedKey` and the refusing `producer`. Release every holder of the held build first, or host the second build in its own worker.
+
 ### 3. Handle operational rejection
 
 ```typescript

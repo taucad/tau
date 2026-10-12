@@ -229,6 +229,8 @@ export const startRuntimeChild = async (options: {
     },
     async close(): Promise<void> {
       await killChild(child);
+      /* Closed means gone: the exit and the removal of the child's temp directory both settle first. */
+      await closed;
     },
   };
 };

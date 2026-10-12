@@ -1997,9 +1997,7 @@ describe('startHostDaemon runtime child per root and session', () => {
     } finally {
       await daemon.close();
     }
-    /* Every child exits: `close` does not wait for a start still in flight (the version probe, say), which closes
-     * once it settles, so this waits for the exit rather than sampling it the instant `close` resolves. */
-    expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle)))).not.toContain('open');
+    expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');
   }, 30_000);
 
   it('stays quiet about the runtime child a close interrupts while it starts', async () => {
@@ -2137,8 +2135,6 @@ describe('startHostDaemon runtime child per root and session', () => {
     } finally {
       await daemon.close();
     }
-    /* Every child exits: `close` does not wait for a start still in flight (the version probe, say), which closes
-     * once it settles, so this waits for the exit rather than sampling it the instant `close` resolves. */
-    expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle)))).not.toContain('open');
+    expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');
   }, 30_000);
 });

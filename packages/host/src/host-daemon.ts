@@ -1215,6 +1215,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     let fileSystemSplice: FrameSpliceHandle | undefined;
     let agentSplice: FrameSpliceHandle | undefined;
     let expiryTimer: NodeJS.Timeout | undefined;
+    let sessionClosed: Promise<void> | undefined;
     try {
       const publicFileSystem = authorizedSocket(
         assertRelayRoute(offer.fileSystemUrl, options.relayUrl),
@@ -1267,7 +1268,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
           splice.close();
         }
       };
-      const sessionClosed = (async (): Promise<void> => {
+      sessionClosed = (async (): Promise<void> => {
         const closures = splices.map(async (splice) => {
           const result = await splice.closed;
           /* A revoked route is final for the session: its sibling routes would
@@ -1354,7 +1355,11 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       fileSystemSplice?.close();
       agentSplice?.close();
       sessions.delete(offer.sessionId);
-      void closeChild(child);
+      /* A started session closes its own child once it has reported why it ended; closing it here first would
+       * read as `CHILD_EXIT`. */
+      if (sessionClosed === undefined) {
+        void closeChild(child);
+      }
       rejectOffer(offer, 'CHILD_UNAVAILABLE');
     }
   };

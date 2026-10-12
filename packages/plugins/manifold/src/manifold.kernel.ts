@@ -6,8 +6,10 @@
  * Registers manifold-3d modules as built-ins for user code imports.
  */
 
-import { WebIO } from '@gltf-transform/core';
-import type { BaseGLTFNode } from 'manifold-3d/lib/gltf-node.js';
+import { Primitive, WebIO } from '@gltf-transform/core';
+import type { Document } from '@gltf-transform/core';
+import type { Manifold } from 'manifold-3d';
+import type { BaseGLTFNode, GLTFAttribute, GLTFMaterial } from 'manifold-3d/lib/gltf-node.js';
 
 import { createExportFile } from '@taucad/runtime/types';
 import type { KernelIssue } from '@taucad/runtime/types';
@@ -58,6 +60,20 @@ export const manifoldDetectPattern =
 const isCallable = (value: unknown): value is (...arguments_: readonly unknown[]) => unknown =>
   typeof value === 'function';
 
+// `show()` and `only()` capture meshes that manifold-3d writes with the run's
+// attribute labels, so supplying normals would mislabel them; see addMissingNormals.
+let debugViewRequested = false;
+
+const recordDebugView = (view: unknown): ((manifold: unknown) => unknown) => {
+  if (!isCallable(view)) {
+    throw new TypeError('Manifold debug views must be callable.');
+  }
+  return (manifold) => {
+    debugViewRequested = true;
+    return view(manifold);
+  };
+};
+
 async function registerManifoldModules(services: KernelServices): Promise<Record<string, unknown>> {
   const [manifoldRoot, manifoldCad, gltfNodeModule] = await Promise.all([
     import('manifold-3d'),
@@ -76,6 +92,8 @@ async function registerManifoldModules(services: KernelServices): Promise<Record
     getGLTFNodes: gltfNodeModule.getGLTFNodes,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Manifold naming convention
     resetGLTFNodes: gltfNodeModule.resetGLTFNodes,
+    show: recordDebugView(manifoldCad.show),
+    only: recordDebugView(manifoldCad.only),
   };
 
   registerKernelModule(services, {
@@ -158,6 +176,160 @@ async function cleanupManifoldRuntime(): Promise<void> {
   cleanupSceneBuilder();
   cleanupGltfNodes();
   cleanupLevelOfDetail();
+  debugViewRequested = false;
+}
+
+// =============================================================================
+// Normals
+// =============================================================================
+
+/** Edges whose faces meet at more than this many degrees keep separate normals. */
+const normalSmoothingAngle = 30;
+
+const attributeChannels: Readonly<Record<GLTFAttribute, number>> = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics
+  POSITION: 0,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics
+  NORMAL: 3,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics
+  TANGENT: 4,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics
+  TEXCOORD_0: 2,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics
+  TEXCOORD_1: 2,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics
+  COLOR_0: 3,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics
+  JOINTS_0: 4,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics
+  WEIGHTS_0: 4,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics
+  SKIP_1: 1,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics
+  SKIP_2: 2,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics
+  SKIP_3: 3,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantics
+  SKIP_4: 4,
+};
+
+const skipAttributes = ['SKIP_1', 'SKIP_2', 'SKIP_3', 'SKIP_4'] as const;
+
+/**
+ * Give every manifold node normals and label them on every material that
+ * governs one of its runs.
+ *
+ * manifold-3d writes only the property channels a run's material names, and
+ * Manifold meshes carry no normals until asked, so a bare `Manifold` exports
+ * as `POSITION` alone. `calculateNormals` appends them after any authored
+ * properties and splits vertices along creases itself, which keeps
+ * `EXT_mesh_manifold` intact. Labels are positional and merged per mesh, so
+ * the node material and every `setMaterial` run material receive one list.
+ * Nodes whose labels already name `NORMAL`, or disagree with each other, are
+ * left as authored.
+ */
+async function addMissingNormals(nodes: readonly BaseGLTFNode[]): Promise<void> {
+  const [gltfNodeModule, { getBackupMaterial, getMaterialByID: getMaterialById, setMaterialByID: setMaterialById }] =
+    await Promise.all([import('manifold-3d/lib/gltf-node.js'), import('manifold-3d/lib/material.js')]);
+  const scene = new Set<BaseGLTFNode>();
+  for (const node of nodes) {
+    for (let current: BaseGLTFNode | undefined = node; current; current = current.parent) {
+      scene.add(current);
+    }
+  }
+
+  // Shared sources stay shared, so manifold-3d's per-source node cache behaves as before.
+  const withNormals = new Map<Manifold, Manifold>();
+  const labelledMaterials = new Map<GLTFMaterial, Map<string, GLTFMaterial>>();
+  for (const node of scene) {
+    if (!(node instanceof gltfNodeModule.GLTFNode) || node.manifold === undefined) {
+      continue;
+    }
+    const { manifold } = node;
+    const material = getBackupMaterial(node);
+    const runMaterials = [...new Set(manifold.getMesh().runOriginalID)].flatMap((id) => {
+      const runMaterial = getMaterialById(id);
+      return runMaterial ? [{ id, runMaterial }] : [];
+    });
+    const labelLists = [
+      material.attributes ?? [],
+      ...runMaterials.map(({ runMaterial }) => runMaterial.attributes ?? []),
+    ];
+    let authored: readonly GLTFAttribute[] = [];
+    for (const list of labelLists) {
+      if (list.length > authored.length) {
+        authored = list;
+      }
+    }
+    if (
+      authored.includes('NORMAL') ||
+      !labelLists.every((list) => list.every((attribute, index) => authored[index] === attribute))
+    ) {
+      continue;
+    }
+
+    const propertyCount = manifold.numProp();
+    const labels: GLTFAttribute[] = [...authored];
+    let labelledChannels = 0;
+    for (const attribute of authored) {
+      labelledChannels += attributeChannels[attribute];
+    }
+    for (let unlabelled = propertyCount - labelledChannels; unlabelled > 0; unlabelled -= 4) {
+      labels.push(skipAttributes[Math.min(unlabelled, 4) - 1] ?? 'SKIP_4');
+    }
+    labels.push('NORMAL');
+
+    let normalled = withNormals.get(manifold);
+    if (!normalled) {
+      normalled = manifold.calculateNormals(propertyCount, normalSmoothingAngle);
+      withNormals.set(manifold, normalled);
+    }
+    node.manifold = normalled;
+
+    const variants = labelledMaterials.get(material) ?? new Map<string, GLTFMaterial>();
+    labelledMaterials.set(material, variants);
+    const key = labels.join(',');
+    const nodeMaterial = variants.get(key) ?? { ...material, attributes: labels };
+    variants.set(key, nodeMaterial);
+    node.material = nodeMaterial;
+    for (const { id, runMaterial } of runMaterials) {
+      setMaterialById(id, { ...runMaterial, attributes: labels });
+    }
+  }
+}
+
+/**
+ * Give planar `CrossSection` meshes their normal.
+ *
+ * manifold-3d triangulates a cross-section in the `z = 0` plane with a
+ * double-sided material and writes `POSITION` only. Every manifold solid has
+ * normals by now, so a normal-less triangle primitive lying entirely in that
+ * plane is a cross-section, and `+Z` is exact for it.
+ */
+function addPlanarNormals(document: Document): void {
+  for (const mesh of document.getRoot().listMeshes()) {
+    for (const primitive of mesh.listPrimitives()) {
+      const position = primitive.getAttribute('POSITION');
+      const positions = position?.getArray();
+      if (
+        primitive.getMode() !== Primitive.Mode['TRIANGLES'] ||
+        primitive.getAttribute('NORMAL') !== null ||
+        !position ||
+        !positions ||
+        !positions.every((value, index) => index % 3 !== 2 || value === 0)
+      ) {
+        continue;
+      }
+      const normals = new Float32Array(positions.length);
+      for (let index = 2; index < normals.length; index += 3) {
+        normals[index] = 1;
+      }
+      primitive.setAttribute(
+        'NORMAL',
+        document.createAccessor().setType('VEC3').setArray(normals).setBuffer(position.getBuffer()),
+      );
+    }
+  }
 }
 
 async function createGlbFromManifoldOutput(output: unknown): Promise<Uint8Array<ArrayBuffer>> {
@@ -183,8 +355,12 @@ async function createGlbFromManifoldOutput(output: unknown): Promise<Uint8Array<
     throw new Error('No geometry was returned from the Manifold model.');
   }
 
+  if (!debugViewRequested) {
+    await addMissingNormals(nodes);
+  }
   const { GLTFNodesToGLTFDoc: createGltfDocument } = sceneBuilderImport;
   const document = await createGltfDocument(nodes);
+  addPlanarNormals(document);
   const setupIo: unknown = gltfIoImport.setupIO;
   if (!isCallable(setupIo)) {
     throw new TypeError('Manifold setupIO export must be callable.');
@@ -220,7 +396,7 @@ export const manifoldKernel = defineKernel({
   detectImport: manifoldDetectPattern,
   builtinModuleNames: ['manifold-3d', 'manifold-3d/manifoldCAD'],
   name: 'ManifoldKernel',
-  version: '1.0.0',
+  version: '1.1.0',
   optionsSchema: manifoldOptionsSchema,
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
   exports: {

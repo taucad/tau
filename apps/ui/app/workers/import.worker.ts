@@ -1,11 +1,17 @@
-import { extractRepositoryArchiveFiles } from '@taucad/share/repository-archive';
-import { shareArtifactLimits } from '@taucad/share/artifact';
+import { extractRepositoryImportFiles, repositoryImportLimits } from '@taucad/share/repository-archive';
+import { isShareError } from '@taucad/share/provider';
 
 /**
  * Messages sent TO the import worker.
  */
 export type ImportWorkerRequest =
-  | { type: 'startDownload'; url: string; headers?: Record<string, string> }
+  | {
+      type: 'startDownload';
+      url: string;
+      headers?: Record<string, string>;
+      /** Repository subfolder to import, relative to its root; empty imports the whole repository. */
+      root?: string;
+    }
   | { type: 'cancel' };
 
 /**
@@ -20,31 +26,57 @@ export type ImportWorkerResponse =
       /** Same paths + contents so the main thread can populate `context.files` for the review UI and createProject. */
       files: Array<{ path: string; content: Uint8Array<ArrayBuffer> }>;
     }
-  | { type: 'error'; message: string; phase: 'download' | 'extract' };
+  | {
+      type: 'error';
+      message: string;
+      phase: 'download' | 'extract';
+      /** Set when the repository exceeds an import limit, so retrying the same branch cannot succeed. */
+      reason?: 'tooLarge';
+    };
+
+/** The archive route's 413 and this worker's own size checks share one sentence. */
+class ArchiveTooLargeError extends Error {
+  public constructor() {
+    super(
+      `The repository download is larger than the ${repositoryImportLimits.maxArchiveBytes / 1024 / 1024} MB import limit.`,
+    );
+    this.name = 'ArchiveTooLargeError';
+  }
+}
+
+/* Extraction enforces the file-count and expanded-size limits with `SHARE_ARTIFACT_LIMIT`. */
+const isTooLarge = (error: unknown): boolean =>
+  error instanceof ArchiveTooLargeError || (isShareError(error) && error.code === 'SHARE_ARTIFACT_LIMIT');
 
 let extractedFiles: Map<string, Uint8Array<ArrayBuffer>> | undefined;
 let abortController: AbortController | undefined;
 
-function postResponse(response: ImportWorkerResponse): void {
-  self.postMessage(response);
+function postResponse(response: ImportWorkerResponse, transfer: Transferable[] = []): void {
+  self.postMessage(response, { transfer });
 }
 
-async function handleDownloadAndExtract(url: string, headers?: Record<string, string>): Promise<void> {
+async function handleDownloadAndExtract(
+  url: string,
+  options: { readonly headers?: Record<string, string>; readonly root: string },
+): Promise<void> {
   abortController = new AbortController();
 
   try {
     const response = await fetch(url, {
       signal: abortController.signal,
-      headers,
+      headers: options.headers,
     });
 
+    if (response.status === 413) {
+      throw new ArchiveTooLargeError();
+    }
     if (!response.ok) {
       throw new Error(`Download failed: ${response.status} ${response.statusText}`);
     }
 
     const contentLength = Number(response.headers.get('content-length') ?? 0);
-    if (contentLength > shareArtifactLimits.maxArchiveBytes) {
-      throw new Error('Repository archive exceeds the import limit');
+    if (contentLength > repositoryImportLimits.maxArchiveBytes) {
+      throw new ArchiveTooLargeError();
     }
     const reader = response.body?.getReader();
     if (!reader) {
@@ -73,10 +105,10 @@ async function handleDownloadAndExtract(url: string, headers?: Record<string, st
 
         chunks.push(value);
         receivedLength += value.length;
-        if (receivedLength > shareArtifactLimits.maxArchiveBytes) {
+        if (receivedLength > repositoryImportLimits.maxArchiveBytes) {
           // oxlint-disable-next-line no-await-in-loop -- need to cancel the oversized stream before failing
           await reader.cancel();
-          throw new Error('Repository archive exceeds the import limit');
+          throw new ArchiveTooLargeError();
         }
 
         const now = Date.now();
@@ -97,8 +129,10 @@ async function handleDownloadAndExtract(url: string, headers?: Record<string, st
       zipData.set(chunk, position);
       position += chunk.length;
     }
+    /* The contiguous copy replaces the chunks; release them before expanding the archive. */
+    chunks.length = 0;
 
-    const files = await extractRepositoryArchiveFiles(zipData, { root: '', requireManifest: false });
+    const files = await extractRepositoryImportFiles(zipData, { root: options.root });
     const totalFiles = files.length;
     let processedFiles = 0;
 
@@ -110,21 +144,26 @@ async function handleDownloadAndExtract(url: string, headers?: Record<string, st
       postResponse({ type: 'extractProgress', processed: processedFiles, total: totalFiles });
     }
 
-    postResponse({
-      type: 'extractComplete',
-      filePaths: [...extractedFiles.keys()],
-      files: [...extractedFiles.entries()].map(([path, content]) => ({
-        path,
-        content,
-      })),
-    });
+    /* Transfer rather than clone: a large repository would otherwise exist twice. */
+    postResponse(
+      {
+        type: 'extractComplete',
+        filePaths: [...extractedFiles.keys()],
+        files: [...extractedFiles.entries()].map(([path, content]) => ({
+          path,
+          content,
+        })),
+      },
+      [...extractedFiles.values()].map((content) => content.buffer),
+    );
+    extractedFiles = undefined;
   } catch (error) {
     if (abortController.signal.aborted) {
       return;
     }
 
     const message = error instanceof Error ? error.message : String(error);
-    postResponse({ type: 'error', message, phase: 'download' });
+    postResponse({ type: 'error', message, phase: 'download', ...(isTooLarge(error) ? { reason: 'tooLarge' } : {}) });
   }
 }
 
@@ -133,7 +172,7 @@ globalThis.addEventListener('message', (event: MessageEvent<ImportWorkerRequest>
 
   switch (message.type) {
     case 'startDownload': {
-      void handleDownloadAndExtract(message.url, message.headers);
+      void handleDownloadAndExtract(message.url, { headers: message.headers, root: message.root ?? '' });
       break;
     }
     case 'cancel': {

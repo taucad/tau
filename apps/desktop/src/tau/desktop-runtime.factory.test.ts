@@ -41,4 +41,17 @@ describe('desktop runtime kernels', () => {
       expect(picogkKernel).toBeUndefined();
     }
   });
+
+  it('should route KCL to Zoo through the configured Tau proxy with the sign-in copy', async () => {
+    const { kernels } = await resolveDesktopRuntime();
+    const zooKernel = kernels.find((kernel) => kernel.id === 'zoo');
+
+    expect(zooKernel?.extensions).toEqual(['kcl']);
+    expect(zooKernel?.options).toMatchObject({
+      baseUrl: 'ws://localhost:4001/v1/kernels/zoo',
+      closeErrors: { 4401: 'Sign in to Tau to use the Zoo kernel.' },
+    });
+    // The credential rides the WebSocket upgrade, never kernel options (they feed cache keys and middleware).
+    expect(zooKernel?.options).not.toHaveProperty('token');
+  });
 });

@@ -79,10 +79,13 @@ const sourceManifoldTopology = async (
   ) {
     throw new Error('GLB has no EXT_mesh_manifold topology');
   }
+  // Normals split render vertices along creases; the welded topology references only one of each.
+  const referenced = [...new Set(indexArray)].toSorted((a, b) => a - b);
+  const compact = new Map(referenced.map((vertex, index) => [vertex, index]));
   const matrix = node.getWorldMatrix();
   const positions: number[] = [];
-  for (let index = 0; index < position.getCount(); index += 1) {
-    const [x, y, z] = position.getElement(index, [0, 0, 0]);
+  for (const vertex of referenced) {
+    const [x, y, z] = position.getElement(vertex, [0, 0, 0]);
     positions.push(
       matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12],
       matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13],
@@ -91,7 +94,7 @@ const sourceManifoldTopology = async (
   }
   return {
     positions: roundNumbers(positions),
-    indices: [...indexArray],
+    indices: [...indexArray].map((vertex) => compact.get(vertex)!),
     runs: [...manifold.getRunIndex()],
   };
 };

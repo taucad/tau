@@ -475,8 +475,19 @@ export const inspectDesktopPayload = async (options: {
       )
       .map((file) => file.sha256),
   );
+  /* The KCL WASM is the one engine both sides own: the editor parses KCL in
+   * the renderer, and the Zoo kernel host evaluates it. Any other shared hash
+   * still means a kernel leaked into the renderer. */
+  const kclWasmHash = approvedWasm.get(
+    realpathSync(require.resolve('@taucad/kcl-wasm-lib/kcl.wasm')).replaceAll('\\', '/'),
+  );
   for (const file of inventory.files) {
-    if (file.scope === 'renderer' && file.kind === 'wasm' && hostHashes.has(file.sha256)) {
+    if (
+      file.scope === 'renderer' &&
+      file.kind === 'wasm' &&
+      hostHashes.has(file.sha256) &&
+      file.sha256 !== kclWasmHash
+    ) {
       inventory.violations.push(`Renderer/host WASM overlap: ${file.path} (${file.sha256})`);
     }
     if (file.scope === 'asar') {

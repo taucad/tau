@@ -9,6 +9,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { httpBodyLimit } from '#constants/http-body.constant.js';
 import { KernelsService } from '#api/kernels/kernels.service.js';
+import { ZooTokenService } from '#api/kernels/zoo-token.service.js';
+import { httpHeader } from '#constants/http-header.constant.js';
 import { zooCloseCodes } from '#api/billing/billing.constants.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
@@ -45,6 +47,7 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
     private readonly devWebSocketService: DevWebSocketService,
     @Inject(authInstanceKey) private readonly auth: Auth,
     @Inject(commercialEntitlementsKey) private readonly entitlements: CommercialEntitlementsService,
+    private readonly zooTokens: ZooTokenService,
     @Inject(HttpAdapterHost) private readonly httpAdapterHost: HttpAdapterHost,
     // oxlint-disable-next-line new-cap -- NestJS decorator
     @Optional() private readonly upgradeRouter: UpgradeRouter = new UpgradeRouter(),
@@ -108,7 +111,7 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Session and commercial-entitlement gate. Self-host composition grants the
+   * Session (or Zoo-scoped token) and commercial-entitlement gate. Self-host composition grants the
    * operator-owned capability without creating a billing account.
    */
   private async authorizeZooConnection(request: IncomingMessage): Promise<
@@ -122,8 +125,16 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
       }
   > {
     try {
-      const session = await this.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
-      if (!session) {
+      /* A host that runs project code presents a Zoo-scoped token instead of
+       * the session; one that does not verify is refused, never retried as a
+       * session, so a forged token cannot ride along with a cookie. */
+      const zooToken = request.headers[httpHeader.tauZooToken];
+      const session =
+        typeof zooToken === 'string'
+          ? undefined
+          : await this.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const userId = typeof zooToken === 'string' ? this.zooTokens.verify(zooToken) : session?.user.id;
+      if (userId === undefined) {
         return {
           ok: false,
           code: zooCloseCodes.unauthenticated,
@@ -131,11 +142,11 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
           rejection: 'unauthenticated',
         };
       }
-      const entitlements = await this.entitlements.getEntitlements(session.user.id);
+      const entitlements = await this.entitlements.getEntitlements(userId);
       if (!entitlements.canUseProKernels) {
         return { ok: false, code: zooCloseCodes.proRequired, reason: 'PRO_REQUIRED', rejection: 'forbidden' };
       }
-      return { ok: true, userId: session.user.id };
+      return { ok: true, userId };
     } catch (error) {
       // Fail closed: an auth/entitlement outage must not open an unmetered proxy.
       this.logger.error(`Zoo proxy authorization failed: ${String(error)}`);

@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 
 import { serveHostRuntime } from '@taucad/host/runtime-host';
 import type { HostRuntimeHandle } from '@taucad/host/runtime-host';
+import { installZooProxyCredential, zooProxyCredentialFrameType } from '@taucad/zoo/proxy';
 
 import { loadCliRuntime } from '#runtime-options.js';
 
@@ -10,8 +11,15 @@ const { values } = parseArgs({
   options: {
     plugin: { type: 'string', multiple: true },
     config: { type: 'string' },
+    'zoo-proxy-url': { type: 'string' },
   },
   strict: true,
+});
+
+/* This process runs project code, so it never holds the session: the daemon
+ * sends a Zoo-scoped token, and again whenever it refreshes it. */
+installZooProxyCredential((listener) => {
+  process.on('message', listener);
 });
 
 let host: HostRuntimeHandle | undefined;
@@ -20,6 +28,9 @@ let messageChain = Promise.resolve();
 const handleMessage = async (message: unknown): Promise<void> => {
   if (typeof message !== 'object' || message === null || !('type' in message)) {
     throw new TypeError('Tau Host runtime child received an invalid IPC message.');
+  }
+  if (message.type === zooProxyCredentialFrameType) {
+    return;
   }
   if (message.type === 'close') {
     await host?.close();
@@ -43,6 +54,7 @@ const handleMessage = async (message: unknown): Promise<void> => {
     projectRoot: process.cwd(),
     plugin: values.plugin,
     config: values.config,
+    ...(values['zoo-proxy-url'] ? { zooProxyUrl: values['zoo-proxy-url'] } : {}),
   });
   host = await serveHostRuntime({ runtime, authorizationToken: message.authorizationToken });
   process.send?.({ type: 'ready', url: host.url.href, runtimeVersion: host.runtimeVersion });

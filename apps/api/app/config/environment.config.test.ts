@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
+import { parse } from 'dotenv';
 import { describe, it, expect } from 'vitest';
 import { environmentSchema } from '#config/environment.config.js';
 
@@ -6,14 +7,15 @@ import { environmentSchema } from '#config/environment.config.js';
 
 const validViewCookieSecret = 'test-view-cookie-secret-min-32-chars';
 
-/** Ensures required `TAU_VIEW_COOKIE_SECRET` when tests run without apps/api/.env (CI agents, sandboxes). */
-const withRequiredCookieSecret = (env: NodeJS.ProcessEnv): Record<string, unknown> => {
-  const existing = env.TAU_VIEW_COOKIE_SECRET;
-  return {
-    ...env,
-    TAU_VIEW_COOKIE_SECRET: existing.length > 0 ? existing : validViewCookieSecret,
-  };
-};
+/**
+ * Fresh copy of the committed `.env.test` plus the required cookie secret. Rows start
+ * here rather than `process.env`, which `vitest.config.ts` fills from a developer's
+ * `.env` (live-mode rules then reject its test-mode Stripe keys, for example).
+ */
+const baseEnvironment = (): Record<string, unknown> => ({
+  ...parse(readFileSync(new URL('../../.env.test', import.meta.url))),
+  TAU_VIEW_COOKIE_SECRET: validViewCookieSecret,
+});
 
 describe('environmentSchema', () => {
   /*
@@ -24,7 +26,7 @@ describe('environmentSchema', () => {
    */
   it('should keep free-tier sync closed when TAU_FREE_TIER_SYNC_ENABLED is unset', () => {
     const environment = Object.fromEntries(
-      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'TAU_FREE_TIER_SYNC_ENABLED'),
+      Object.entries(baseEnvironment()).filter(([key]) => key !== 'TAU_FREE_TIER_SYNC_ENABLED'),
     );
     const result = environmentSchema.safeParse(environment);
 
@@ -48,7 +50,7 @@ describe('environmentSchema', () => {
     ['true', true],
   ])('parses TAU_CLOUD_ENABLED=%s strictly', (value, expected) => {
     const environment = Object.fromEntries(
-      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'TAU_CLOUD_ENABLED'),
+      Object.entries(baseEnvironment()).filter(([key]) => key !== 'TAU_CLOUD_ENABLED'),
     );
     const result = environmentSchema.safeParse({
       ...environment,
@@ -80,7 +82,7 @@ describe('environmentSchema', () => {
    */
   it('refuses to boot with a retired TAU_GIT_ROOT', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       TAU_GIT_ROOT: '/data/git',
     });
 
@@ -92,9 +94,7 @@ describe('environmentSchema', () => {
   });
 
   it('boots without TAU_GIT_ROOT, which is now the only accepted state', () => {
-    const environment = Object.fromEntries(
-      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'TAU_GIT_ROOT'),
-    );
+    const environment = Object.fromEntries(Object.entries(baseEnvironment()).filter(([key]) => key !== 'TAU_GIT_ROOT'));
     const result = environmentSchema.safeParse(environment);
 
     expect(result.success, JSON.stringify(result.success ? {} : result.error.issues)).toBe(true);
@@ -102,7 +102,7 @@ describe('environmentSchema', () => {
 
   it('rejects non-canonical TAU_CLOUD_ENABLED values', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       TAU_CLOUD_ENABLED: '1',
     });
 
@@ -114,7 +114,7 @@ describe('environmentSchema', () => {
 
   it('requires the complete financial configuration whenever Tau Cloud is enabled', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'development',
       TAU_CLOUD_ENABLED: 'true',
       BILLING_ENVIRONMENT: undefined,
@@ -131,7 +131,7 @@ describe('environmentSchema', () => {
 
   it('rejects Stripe credentials whose prefixes contradict the declared mode', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       TAU_CLOUD_ENABLED: 'true',
       BILLING_ENVIRONMENT: 'staging',
       BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
@@ -153,7 +153,7 @@ describe('environmentSchema', () => {
 
   it('accepts a test-mode restricted create key while retaining a separate restricted read key', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       TAU_CLOUD_ENABLED: 'true',
       BILLING_ENVIRONMENT: 'staging',
       BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
@@ -173,7 +173,7 @@ describe('environmentSchema', () => {
   describe('Stripe mode and environment', () => {
     const cloud = (overrides: Record<string, string | undefined>) =>
       environmentSchema.safeParse({
-        ...withRequiredCookieSecret(process.env),
+        ...baseEnvironment(),
         TAU_CLOUD_ENABLED: 'true',
         BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
         BILLING_REQUEST_DIGEST_SECRET: 'test-request-digest-secret-min-32-chars',
@@ -252,7 +252,7 @@ describe('environmentSchema', () => {
 
   it('rejects a full test-mode key when Tau Cloud is enabled', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       TAU_CLOUD_ENABLED: 'true',
       BILLING_ENVIRONMENT: 'staging',
       BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
@@ -273,13 +273,13 @@ describe('environmentSchema', () => {
   });
 
   it('should parse merged process env including TAU_S3_* defaults in development', () => {
-    const merged = environmentSchema.safeParse(withRequiredCookieSecret(process.env));
+    const merged = environmentSchema.safeParse(baseEnvironment());
     expect(merged.success).toBe(true);
   });
 
   it('should accept Moonshot credentials while keeping them optional', () => {
     const withoutMoonshot = Object.fromEntries(
-      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'MOONSHOT_API_KEY'),
+      Object.entries(baseEnvironment()).filter(([key]) => key !== 'MOONSHOT_API_KEY'),
     );
     const optionalResult = environmentSchema.safeParse(withoutMoonshot);
     const configuredResult = environmentSchema.safeParse({
@@ -295,7 +295,7 @@ describe('environmentSchema', () => {
   });
 
   it('should accept an optional GitHub API token', () => {
-    const environment = withRequiredCookieSecret(process.env);
+    const environment = baseEnvironment();
     const absent = environmentSchema.safeParse(
       Object.fromEntries(Object.entries(environment).filter(([key]) => key !== 'GITHUB_API_TOKEN')),
     );
@@ -314,9 +314,7 @@ describe('environmentSchema', () => {
   it('should default the database pool budget and per-connection deadlines', () => {
     const result = environmentSchema.safeParse(
       Object.fromEntries(
-        Object.entries(withRequiredCookieSecret(process.env)).filter(
-          ([key]) => key === 'DATABASE_URL' || !key.startsWith('DATABASE_'),
-        ),
+        Object.entries(baseEnvironment()).filter(([key]) => key === 'DATABASE_URL' || !key.startsWith('DATABASE_')),
       ),
     );
 
@@ -344,14 +342,14 @@ describe('environmentSchema', () => {
     ['DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS', '-1'],
     ['DATABASE_RUNTIME_ROLE', 'tau api runtime'],
   ])('should fail closed on an invalid %s value of %s', (key, value) => {
-    const result = environmentSchema.safeParse({ ...withRequiredCookieSecret(process.env), [key]: value });
+    const result = environmentSchema.safeParse({ ...baseEnvironment(), [key]: value });
 
     expect(result.success).toBe(false);
   });
 
   it('should require a de-privileged runtime role in production', () => {
     const base = {
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'production',
       DATABASE_RUNTIME_ROLE: '',
     };
@@ -370,7 +368,7 @@ describe('environmentSchema', () => {
 
   it('should reject localhost TAU_S3_ENDPOINT while in production mode', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'production',
       TAU_S3_ENDPOINT: 'http://localhost:9000',
       TAU_S3_PUBLIC_BASE_URL: 'https://cdn.example.com',
@@ -384,7 +382,7 @@ describe('environmentSchema', () => {
 
   it('should reject development default TAU_S3_ENDPOINT when NODE_ENV is production and endpoint is unset', () => {
     const base: Record<string, unknown> = {
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'production',
     };
     const envWithoutEndpoint = Object.fromEntries(Object.entries(base).filter(([key]) => key !== 'TAU_S3_ENDPOINT'));
@@ -397,7 +395,7 @@ describe('environmentSchema', () => {
 
   it('should default TAU_S3_FORCE_PATH_STYLE=true when omitted', () => {
     const { TAU_S3_FORCE_PATH_STYLE: _omitForcePathStyle, ...envWithoutForcePathStyle } = {
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
     };
     void _omitForcePathStyle;
     const result = environmentSchema.safeParse(envWithoutForcePathStyle);
@@ -409,9 +407,7 @@ describe('environmentSchema', () => {
 
   it('should default local email sender identity to taucad.dev', () => {
     const envWithoutEmailSender = Object.fromEntries(
-      Object.entries(withRequiredCookieSecret(process.env)).filter(
-        ([key]) => key !== 'TAU_EMAIL_FROM' && key !== 'TAU_EMAIL_REPLY_TO',
-      ),
+      Object.entries(baseEnvironment()).filter(([key]) => key !== 'TAU_EMAIL_FROM' && key !== 'TAU_EMAIL_REPLY_TO'),
     );
     const result = environmentSchema.safeParse(envWithoutEmailSender);
 
@@ -425,7 +421,7 @@ describe('environmentSchema', () => {
 
   it('should reject TAU_VIEW_COOKIE_SECRET shorter than 32 characters', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       TAU_VIEW_COOKIE_SECRET: 'short',
     });
 
@@ -437,7 +433,7 @@ describe('environmentSchema', () => {
 
   it('should reject checked-in dev S3 credentials in production mode', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'production',
       TAU_S3_ENDPOINT: 'https://000000000000000000000000.r2.cloudflarestorage.com',
       TAU_S3_PUBLIC_BASE_URL: 'https://cdn.tau.new',
@@ -453,7 +449,7 @@ describe('environmentSchema', () => {
   });
 
   it('should parse TAU_S3_* with non-local URLs in production mode', () => {
-    const { TAU_S3_FORCE_PATH_STYLE: _omitForcePathStyle, ...envBase } = withRequiredCookieSecret(process.env);
+    const { TAU_S3_FORCE_PATH_STYLE: _omitForcePathStyle, ...envBase } = baseEnvironment();
     void _omitForcePathStyle;
     const result = environmentSchema.safeParse({
       ...envBase,
@@ -490,7 +486,7 @@ describe('environmentSchema', () => {
 
   it('should default TAU_S3_PRIVATE_BUCKET to tau-content-private when omitted', () => {
     const envWithoutPrivateBucket = Object.fromEntries(
-      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'TAU_S3_PRIVATE_BUCKET'),
+      Object.entries(baseEnvironment()).filter(([key]) => key !== 'TAU_S3_PRIVATE_BUCKET'),
     );
     const result = environmentSchema.safeParse(envWithoutPrivateBucket);
 
@@ -502,7 +498,7 @@ describe('environmentSchema', () => {
 
   it('should reject a partially configured GitHub repository App in development', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'development',
       GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.partial',
     });
@@ -517,7 +513,7 @@ describe('environmentSchema', () => {
 
   it('should treat the empty GitHub repository App values of a copied .env.example as unconfigured', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'development',
       GITHUB_REPOSITORY_APP_CLIENT_ID: '',
       GITHUB_REPOSITORY_APP_CLIENT_SECRET: '',
@@ -538,7 +534,7 @@ describe('environmentSchema', () => {
 
   it('should treat the empty Vertex AI credentials of a copied .env.example as unset', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'development',
       GOOGLE_VERTEX_AI_CREDENTIALS: '',
     });
@@ -549,7 +545,7 @@ describe('environmentSchema', () => {
 
   it('should leave the App unconfigured when only the callback URL and connection key are set', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'development',
       GITHUB_REPOSITORY_APP_CLIENT_ID: '',
       GITHUB_REPOSITORY_APP_CLIENT_SECRET: '',
@@ -568,7 +564,7 @@ describe('environmentSchema', () => {
 
   it('should require the callback URL and connection key once the App credentials are set', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'development',
       GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.local',
       GITHUB_REPOSITORY_APP_CLIENT_SECRET: 'github-app-secret',
@@ -585,7 +581,7 @@ describe('environmentSchema', () => {
 
   it('should reject an empty GitHub repository App value beside configured ones', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'development',
       GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.local',
       GITHUB_REPOSITORY_APP_CLIENT_SECRET: '',
@@ -605,7 +601,7 @@ describe('environmentSchema', () => {
     const recipe = bytes.toString('base64').replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
     const parse = (key: string) =>
       environmentSchema.safeParse({
-        ...withRequiredCookieSecret(process.env),
+        ...baseEnvironment(),
         NODE_ENV: 'development',
         GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.local',
         GITHUB_REPOSITORY_APP_CLIENT_SECRET: 'github-app-secret',
@@ -626,7 +622,7 @@ describe('environmentSchema', () => {
 
   it('should allow production without the optional GitHub repository App', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'production',
       TAU_S3_ENDPOINT: 'https://000000000000000000000000.r2.cloudflarestorage.com',
       TAU_S3_PUBLIC_BASE_URL: 'https://cdn.tau.new',
@@ -646,7 +642,7 @@ describe('environmentSchema', () => {
 
   it('should reject TAU_S3_PRIVATE_BUCKET equal to TAU_S3_BUCKET in production mode', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'production',
       TAU_S3_ENDPOINT: 'https://000000000000000000000000.r2.cloudflarestorage.com',
       TAU_S3_PUBLIC_BASE_URL: 'https://cdn.tau.new',
@@ -667,7 +663,7 @@ describe('environmentSchema', () => {
     'requires explicit %s in production',
     (key) => {
       const result = environmentSchema.safeParse({
-        ...withRequiredCookieSecret(process.env),
+        ...baseEnvironment(),
         NODE_ENV: 'production',
         TAU_CLOUD_ENABLED: 'true',
         STRIPE_READ_SECRET_KEY: 'rk_test_read',
@@ -685,7 +681,7 @@ describe('environmentSchema', () => {
   /* Ruling P50: the local-address relaxation is a development posture only. */
   it('should reject TAU_GIT_REMOTE_ALLOW_PRIVATE in production mode', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'production',
       TAU_S3_ENDPOINT: 'https://000000000000000000000000.r2.cloudflarestorage.com',
       TAU_S3_PUBLIC_BASE_URL: 'https://cdn.tau.new',
@@ -702,7 +698,7 @@ describe('environmentSchema', () => {
   });
 
   it('should default TAU_GIT_REMOTE_ALLOW_PRIVATE to refusing private addresses', () => {
-    const result = environmentSchema.safeParse(withRequiredCookieSecret(process.env));
+    const result = environmentSchema.safeParse(baseEnvironment());
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.TAU_GIT_REMOTE_ALLOW_PRIVATE).toBe('0');
@@ -711,7 +707,7 @@ describe('environmentSchema', () => {
 
   it('should reject localhost TAU_API_URL in production mode', () => {
     const result = environmentSchema.safeParse({
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       NODE_ENV: 'production',
       TAU_S3_ENDPOINT: 'https://000000000000000000000000.r2.cloudflarestorage.com',
       TAU_S3_PUBLIC_BASE_URL: 'https://cdn.tau.new',
@@ -728,7 +724,7 @@ describe('environmentSchema', () => {
 
   it('should reject a missing TAU_API_URL because it has no default', () => {
     const envWithoutApiUrl = Object.fromEntries(
-      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'TAU_API_URL'),
+      Object.entries(baseEnvironment()).filter(([key]) => key !== 'TAU_API_URL'),
     );
     const result = environmentSchema.safeParse(envWithoutApiUrl);
 
@@ -740,7 +736,7 @@ describe('environmentSchema', () => {
 
   it('should accept TAU_LLM_PROVIDER_UPSTREAM_URL only in the development billing environment', () => {
     const environment = {
-      ...withRequiredCookieSecret(process.env),
+      ...baseEnvironment(),
       TAU_LLM_PROVIDER_UPSTREAM_URL: 'http://127.0.0.1:4015',
     };
     const development = environmentSchema.safeParse({ ...environment, BILLING_ENVIRONMENT: 'development' });

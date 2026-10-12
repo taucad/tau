@@ -78,12 +78,10 @@ vi.mock('#hooks/use-chat-records.js', () => ({
   useChatRecords: () => ({ chats, isLoading: false, error: undefined }),
 }));
 /* Whether the creation toast is still carrying the backup offer. */
-let backupAnnouncing = false;
 /* D19: the backup-by-default line asks about the account; these rows are signed in and entitled. */
 vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useTauCloudEligibility: () => ({ auth: 'authed', isResolved: true, canSyncFiles: true }),
-  useBackupAnnouncing: () => backupAnnouncing,
 }));
 const placeChat = vi.fn(async () => undefined);
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
@@ -1253,7 +1251,6 @@ describe('Revisions pane vocabulary and History', () => {
 describe('Backup by default (D19)', () => {
   beforeEach(() => {
     localStorage.clear();
-    backupAnnouncing = false;
   });
 
   it.each(['default', 'noticed'] as const)(
@@ -1342,19 +1339,9 @@ describe('Backup by default (D19)', () => {
     expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();
   });
 
-  /* DESIGN's one concise offer: the creation toast carries it first, and the line
-     takes it over once the toast closes, still before the first save (W10-L B-2). */
-  it('holds the pending offer back while the creation toast shows it', async () => {
+  it('should show the pending inline offer immediately before the first save', async () => {
     tauCloudIntent.set('p', 'noticed');
-    backupAnnouncing = true;
-
-    const { rerender } = render(<RevisionsPanelBody />, { wrapper });
-
-    await screen.findByRole('region', { name: 'Where you are' });
-    expect(screen.queryByRole('group', { name: 'Backup by default' })).not.toBeInTheDocument();
-
-    backupAnnouncing = false;
-    rerender(<RevisionsPanelBody />);
+    renderPane();
     expect(await screen.findByRole('group', { name: 'Backup by default' })).toHaveTextContent('Turn off backup');
   });
 

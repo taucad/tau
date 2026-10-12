@@ -12,6 +12,7 @@
 
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { serveElectronRuntime } from '@taucad/runtime/electron/utility';
+import { installZooProxyCredential } from '@taucad/zoo/proxy';
 
 import { debugRuntime, runtime } from '#tau/desktop-runtime.definition.js';
 
@@ -21,4 +22,11 @@ const ephemeral = process.env['TAU_RUNTIME_EPHEMERAL'] === '1';
 serveElectronRuntime({
   ...(ephemeral ? { fileSystem: fromMemoryFs() } : {}),
   runtime: process.env['TAU_RUNTIME_DEBUG'] === '1' ? debugRuntime : runtime,
+});
+/* This process runs project code, so it never holds the session: main publishes
+ * a Zoo-scoped token after the boot frame, and again whenever the session changes. */
+installZooProxyCredential((listener) => {
+  process.parentPort.on('message', ({ data }) => {
+    listener(data);
+  });
 });

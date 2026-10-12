@@ -8,11 +8,6 @@
   "assemblyParts": 34,
   "illustrationOnly": true,
   "freshGeospecRun": true,
-  "oldHeroGeometry": {
-    "path": "apps/ui/app/components/geometry/splash/assets/planetary.glb",
-    "bytes": 2806748,
-    "sha256": "68a30867ca9c12e9d6a8f4fe481d86bbd8e212fc01dd6ea1bcb1f8d57ef806da"
-  },
   "renderRecipe": "scripts/capture-stills.mjs",
   "responsiveAndSocialRecipe": "scripts/optimize-assets.mjs",
   "firstPartySourceLicense": "Apache-2.0",
@@ -29,12 +24,12 @@
       "sha256": "0a4c9b305f516f08a4f34b31cf82b329d7eee2d89a4b1c6d31ee582468d60985"
     },
     {
-      "path": "apps/www/public/planetary.bin.gz",
+      "path": "apps/libs/planetary-gearbox/assets/planetary.bin.gz",
       "bytes": 955158,
       "sha256": "847c7e6739255da9cb5955c6cd8377e48098a488f97e672e73c063092d99ae31"
     },
     {
-      "path": "apps/www/public/planetary.json",
+      "path": "apps/libs/planetary-gearbox/assets/planetary.json",
       "bytes": 10087,
       "sha256": "dc4ec724d6ac5f36a88a9a4a0f341b0789116f2711773c7a423576f14607c4e6"
     },
@@ -60,7 +55,7 @@
   "modelUnchangedThrough": "df1966a64f28dac856d514cb4030ef26a707151a",
   "variantRecipe": "scripts/export-variant-assets.mjs",
   "geospecEvidence": {
-    "path": "apps/www/content/evidence/planetary-geospec-run.json",
+    "path": "apps/libs/planetary-gearbox/assets/geospec-run.json",
     "bytes": 2261,
     "sha256": "ceb28fe8e05d231072a4fd7a7afef6f58e21b102ccd021b2adcc887912575e7c"
   },
@@ -123,12 +118,12 @@
   ],
   "variantGeometry": [
     {
-      "path": "apps/www/public/planetary-face18.json",
+      "path": "apps/libs/planetary-gearbox/assets/planetary-face18.json",
       "bytes": 2501,
       "sha256": "63d72fde78ecee506f5bd2214ffa5953fc7d626c09be2764d8c90eee58dfb487"
     },
     {
-      "path": "apps/www/public/planetary-face18.bin.gz",
+      "path": "apps/libs/planetary-gearbox/assets/planetary-face18.bin.gz",
       "bytes": 2225,
       "sha256": "52ee23b6d9cf33bad1b2661291732d062f17bce7fddb93e0010f4f18ce92906a"
     }

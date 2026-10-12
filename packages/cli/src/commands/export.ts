@@ -8,6 +8,7 @@ import type { FileExtension, TelemetryEntry } from '@taucad/runtime/types';
 import { createNodeClient, isSafeRelativePath } from '@taucad/runtime/node';
 import type { PicogkKernelOptions } from '@taucad/picogk';
 import { loadCliRuntime } from '#runtime-options.js';
+import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
 import { buildExportProfile, createPhaseLedger } from '#commands/export-profile.js';
 import type { CliProfilePhase } from '#commands/export-profile.js';
 import { cliError, createOutput, emit, exitCodes, sanitize, writeStdout } from '#output.js';
@@ -172,11 +173,13 @@ export const exportCommand = defineCommand({
         resourceRoot: resolve(picogkResourceRoot),
       });
     }
+    authorizeCliZooProxy(process.env);
     const runtime = await loadCliRuntime({
       projectRoot,
       plugin: args.plugin,
       config: args.config,
       ...(picogk ? { picogk } : {}),
+      zooProxyUrl: cliZooProxyUrl(process.env),
     });
     profileLedger?.checkpoint('cli.load-configured-plugins');
     profileLedger?.checkpoint('cli.create-runtime');

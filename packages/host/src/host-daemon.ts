@@ -56,6 +56,8 @@ import { keyedResource } from '#keyed-resource.js';
 import { createProjectHost } from '#project-host.js';
 import type { ProjectHost } from '#project-host.js';
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
+import { createZooProxyChildCredential } from '#zoo-proxy-child.js';
+import type { HostZooProxyOptions } from '#zoo-proxy-child.js';
 import type { RuntimeChildHandle } from '#runtime-child-supervisor.js';
 
 /** Milliseconds. */
@@ -131,6 +133,8 @@ export type HostDaemonEvent =
          * route keeps serving and the person sees it in the directory. */
         | 'MACHINE_HOST'
         | 'MACHINE_PROVIDER'
+        /* The runtime child's Zoo-scoped token could not be minted; KCL refuses until the next refresh succeeds. */
+        | 'ZOO_TOKEN'
         /* Another Tau app holds the per-user machine store's writer lock, so
          * this host serves without machines rather than exiting. */
         | 'MACHINE_STORE_OWNED_ELSEWHERE'
@@ -223,6 +227,11 @@ export type HostDaemonAgentOptions = {
 export type HostDaemonOptions = {
   readonly relayUrl: URL;
   readonly runtimeHost: { readonly modulePath: string; readonly args?: readonly string[] };
+  /**
+   * The runtime child's Zoo proxy. With a session token, the daemon sends the
+   * child a Zoo-scoped token (never the session) and keeps it current.
+   */
+  readonly zooProxy?: HostZooProxyOptions;
   /** Optional durable-job worker started after device pairing and drained during shutdown. */
   readonly jobWorker?: HostJobWorkerFactory;
   /** Optional agent-host capability (Launcher 1); omit to keep the daemon compute-only. */
@@ -511,6 +520,16 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     }
   };
 
+  const zooCredential =
+    options.zooProxy === undefined
+      ? undefined
+      : createZooProxyChildCredential({
+          zooProxy: options.zooProxy,
+          onWarning: (message) => {
+            emit({ type: 'warning', code: 'ZOO_TOKEN', message });
+          },
+        });
+
   const resolveReady = (): void => {
     if (!isReady) {
       isReady = true;
@@ -561,6 +580,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- a concurrent waiter can assign the shared child while this await is suspended.
       if (!runtimeChild) {
         runtimeChild = child;
+        zooCredential?.attach(child);
         childObserver = (async () => {
           await child.closed;
           if (runtimeChild === child) {
@@ -1423,6 +1443,14 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       code: 'TRUSTED_PROJECTS_ONLY',
       message: 'Remote project code executes on this machine. Connect only projects you trust.',
     });
+    // async-iife: bootstrap -- a failed mint is a warning and retries on the source's interval.
+    void (async (): Promise<void> => {
+      try {
+        await zooCredential?.start();
+      } catch (error) {
+        emit({ type: 'warning', code: 'ZOO_TOKEN', message: error instanceof Error ? error.message : String(error) });
+      }
+    })();
     /* Before pairing: the local agent channel and any served UI are reachable
      * the moment the daemon starts. Until pairing lands the credential state is
      * `unpaired`, so reads and external agents serve and a Tau run is refused
@@ -1524,6 +1552,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     await settle(async () => stopAgent());
     await settle(async () => stopJobWorker());
     await settle(async () => jobWorkerObserver);
+    zooCredential?.dispose();
     await settle(async () => runtimeChild?.close());
     await settle(async () => childObserver);
     if (failures.length > 0) {

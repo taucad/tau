@@ -10,6 +10,7 @@
       "cache": true,
       "inputs": [
         "{projectRoot}/**/*",
+        "^production",
         "{workspaceRoot}/packages/ui/src/styles/tokens.css",
         { "env": "WWW_ORIGIN" },
         { "env": "WWW_LAUNCH" },
@@ -21,6 +22,7 @@
     "test": {
       "executor": "nx:run-commands",
       "cache": true,
+      "inputs": ["default", "^production"],
       "options": { "command": "node --test apps/www/tests/*.test.mjs" }
     },
     "dev": { "executor": "nx:run-commands", "options": { "command": "node apps/www/scripts/serve.mjs" } }

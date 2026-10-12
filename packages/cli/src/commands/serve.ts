@@ -11,6 +11,7 @@ import { systemSkillBundles } from '@taucad/skills/resources';
 import { defineCommand } from 'citty';
 import { consola } from 'consola';
 
+import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
 import { exitCodes } from '#output.js';
 
@@ -50,13 +51,21 @@ const machineProviders = async (): Promise<NonNullable<HostDaemonAgentOptions['m
   return { providers: [bambuMachine(), bambuA1MiniMachine(), bambuSimulatorMachine()] };
 };
 
-const childArguments = (options: { readonly plugin: unknown; readonly config?: string }): string[] => {
+const childArguments = (options: {
+  readonly plugin: unknown;
+  readonly config?: string;
+  readonly zooProxyUrl: string;
+}): string[] => {
   const plugins = Array.isArray(options.plugin)
     ? options.plugin.filter((value): value is string => typeof value === 'string')
     : typeof options.plugin === 'string'
       ? [options.plugin]
       : [];
-  return [...plugins.map((plugin) => `--plugin=${plugin}`), ...(options.config ? [`--config=${options.config}`] : [])];
+  return [
+    ...plugins.map((plugin) => `--plugin=${plugin}`),
+    ...(options.config ? [`--config=${options.config}`] : []),
+    `--zoo-proxy-url=${options.zooProxyUrl}`,
+  ];
 };
 
 /**
@@ -385,12 +394,20 @@ export const serveCommand = defineCommand({
     };
     process.once('SIGINT', onSignal);
     process.once('SIGTERM', onSignal);
+    /* The relay is this daemon's Tau API, so its Zoo proxy is too unless TAU_WEBSOCKET_URL says otherwise. */
+    /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
+    const zooProxyUrl = cliZooProxyUrl({
+      TAU_WEBSOCKET_URL: process.env['TAU_WEBSOCKET_URL'],
+      TAU_API_URL: args.relay,
+    });
+    /* eslint-enable @typescript-eslint/naming-convention -- End environment variable names. */
     const daemon = startHostDaemon({
       relayUrl: new URL(args.relay),
       runtimeHost: {
         modulePath: runtimeChildModulePath(),
-        args: childArguments({ plugin: args.plugin, config: args.config }),
+        args: childArguments({ plugin: args.plugin, config: args.config, zooProxyUrl }),
       },
+      zooProxy: { url: zooProxyUrl, apiUrl: args.relay, sessionToken: process.env['TAU_API_TOKEN'] },
       maxSessions,
       systemSkillBundles,
       pair: args.pair,

@@ -326,7 +326,7 @@ await run('telemetry', async () => {
                         { outcome: 'ok', count: 2 + (round % 3) },
                         { outcome: round % 2 === 0 ? 'zero_match' : 'not_found', count: 1 },
                       ],
-                      ...(tauAgent ? { referenceBytesRead: random(2000, 120_000) } : {}),
+                      ...(tauAgent ? { referenceBytesRead: Math.round(random(2000, 120_000)) } : {}),
                       evaluations: [
                         { class: 'api_misuse', count: 1 },
                         { class: 'ok', count: 1 + (round % 2) },

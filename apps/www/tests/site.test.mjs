@@ -117,8 +117,8 @@ await test('publication rejects unreviewed prose, unsafe slugs, invalid dates an
   assert.throws(() => validateArticles([article, article], now));
 });
 
-await test('a reviewed article builds an escaped detail page and journal entry without publishing fixtures', async () => {
-  const { mkdtemp, cp, mkdir, writeFile, rm } = await import('node:fs/promises');
+await test('a reviewed article builds an escaped detail page and blog entry without publishing fixtures', async () => {
+  const { mkdtemp, cp, mkdir, writeFile, rm, symlink } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const scratch = await mkdtemp(join(tmpdir(), 'tau-www-editorial-test-'));
   try {
@@ -133,7 +133,8 @@ await test('a reviewed article builds an escaped detail page and journal entry w
     await mkdir(join(scratch, 'packages/ui/src/styles'), { recursive: true });
     await cp(join(root, '../../packages/ui/src/styles/tokens.css'), join(scratch, 'packages/ui/src/styles/tokens.css'));
     await mkdir(join(fixture, 'content'));
-    await cp(join(root, 'content/evidence'), join(fixture, 'content/evidence'), { recursive: true });
+    // The build resolves @taucad/planetary-gearbox through the app's installed workspace links.
+    await symlink(join(root, 'node_modules'), join(fixture, 'node_modules'));
     await writeFile(
       join(fixture, 'content/articles.json'),
       JSON.stringify([

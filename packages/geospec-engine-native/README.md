@@ -57,7 +57,10 @@ between different numerical backends or legacy versions.
 
 `mesh-buffer-v1` contains ASCII `GSM1`, little-endian u32 vertex/triangle counts,
 then f64 coordinates and u32 triangle indices. File ingestion additionally admits
-STEP and glTF/GLB with declared coordinate frame and resource identities.
+STEP and glTF/GLB with declared coordinate frame and resource identities. All
+TRIANGLES primitives of a glTF mesh carrying `EXT_mesh_manifold` over its
+declared POSITION accessor form one material partition; separate meshes,
+instancing nodes and undeclared primitives remain separate operands.
 Coordinates, units and transforms must be represented by the ingestion contract;
 a content hash alone does not establish geometry correctness.
 

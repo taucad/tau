@@ -7,6 +7,8 @@ import { createHostToolRegistry } from '@taucad/host/agent-tools';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import { defineCommand } from 'citty';
 
+import type { RuntimeWorkerData } from '#runtime.worker.js';
+
 /** Milliseconds a stopping server waits for its kernels before it exits anyway. */
 const shutdownGrace = 5000;
 
@@ -134,7 +136,7 @@ export const mcpCommand = defineCommand({
             projectRoot: workspaceRoot,
             ...(args.plugin === undefined ? {} : { plugin: [args.plugin].flat() }),
             ...(args.config === undefined ? {} : { config: args.config }),
-          },
+          } satisfies RuntimeWorkerData,
           fileSystem: fromNodeFs(projectPath),
         }),
         operationTimeout,

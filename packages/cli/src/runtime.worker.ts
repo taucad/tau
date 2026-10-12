@@ -20,6 +20,12 @@ const runtimeWorkerDataSchema = z.object({
   zooProxyUrl: z.string().optional(),
 });
 
+/**
+ * What a client hands this entry as `workerData`. Senders check against it with
+ * `satisfies`; the schema stays the only definition.
+ */
+export type RuntimeWorkerData = z.input<typeof runtimeWorkerDataSchema>;
+
 const options = runtimeWorkerDataSchema.safeParse(workerData);
 if (!options.success) {
   throw new TypeError(`Tau runtime worker received invalid workerData: ${z.prettifyError(options.error)}`);

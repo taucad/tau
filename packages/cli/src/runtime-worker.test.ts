@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
+import type { RuntimeWorkerData } from '#runtime.worker.js';
 
 const boxSource = "import { makeBaseBox } from 'replicad';\nexport default () => makeBaseBox(10, 20, 30);\n";
 
@@ -45,7 +46,7 @@ describe('CLI runtime worker entry (source)', () => {
     const client = createRuntimeClient({
       transport: nodeWorkerTransport({
         url: new URL('runtime.worker.ts', import.meta.url),
-        workerData: { projectRoot: projectDirectory, plugin: [] },
+        workerData: { projectRoot: projectDirectory, plugin: [] } satisfies RuntimeWorkerData,
         fileSystem: fromNodeFs(projectDirectory),
         workerCtor: TsxWorker,
       }),

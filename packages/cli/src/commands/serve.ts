@@ -14,6 +14,7 @@ import { consola } from 'consola';
 import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
 import { exitCodes } from '#output.js';
+import type { ComputeStoreWorkerData } from '#compute-store.worker.js';
 
 const runtimeChildModulePath = (): string =>
   fileURLToPath(
@@ -353,7 +354,7 @@ export const serveCommand = defineCommand({
         throw new Error('Durable compute requires an admitted workspace.');
       }
       const worker = new Worker(computeStoreWorkerModulePath(), {
-        workerData: { directory: join(defaultConfigDirectory(), 'compute') },
+        workerData: { directory: join(defaultConfigDirectory(), 'compute') } satisfies ComputeStoreWorkerData,
       });
       worker.once('exit', () => {
         invalidateComputeWorker(worker);

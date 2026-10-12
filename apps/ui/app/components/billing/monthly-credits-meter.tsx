@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import type { ReactNode } from 'react';
 import { creditAtomsPerCredit } from '@taucad/billing';
 import type { MonthlyCredits } from '@taucad/billing';
 import { Progress } from '@taucad/ui/components/progress';
@@ -20,13 +21,23 @@ const formatWholeCredits = (atoms: bigint): string => {
   return whole === 0n && atoms > 0n ? '<1' : whole.toLocaleString();
 };
 
+type MonthlyCreditsMeterProps = {
+  readonly state: MonthlyCreditsMeterState;
+  /**
+   * The way to buy more credits, shown under the bar only while monthly
+   * credits are low or gone. The host supplies it so it can be a menu item.
+   */
+  readonly addCredits?: ReactNode;
+};
+
 /**
  * Monthly credits left, as a labelled bar. Purchased credits are deliberately
  * absent: they never expire and are reported only in Billing.
  */
-export function MonthlyCreditsMeter({ state }: { readonly state: MonthlyCreditsMeterState }): React.JSX.Element {
+export function MonthlyCreditsMeter({ state, addCredits }: MonthlyCreditsMeterProps): React.JSX.Element {
   const labelId = useId();
   const monthly = state.status === 'ready' ? state.monthly : undefined;
+  // Covers "gone" too: no credits left reads as fraction 0.
   const isLow = monthly !== undefined && monthly.fraction < lowFraction;
   const available = monthly === undefined ? undefined : formatWholeCredits(monthly.availableCreditAtoms);
 
@@ -57,6 +68,7 @@ export function MonthlyCreditsMeter({ state }: { readonly state: MonthlyCreditsM
           className={cn('h-1.5', isLow && '[&>[data-slot=progress-indicator]]:bg-warning')}
         />
       )}
+      {isLow ? addCredits : undefined}
     </div>
   );
 }

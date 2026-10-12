@@ -2230,6 +2230,37 @@ public static class Params
     });
   });
 
+  describe('thrown issue normalisation', () => {
+    it('should keep a thrown kernel issue verbatim', () => {
+      const worker = createConfiguredWorker();
+      const issue: KernelIssue = {
+        code: 'BUNDLER_FAILED',
+        message: 'Syntax error',
+        type: 'compilation',
+        severity: 'error',
+      };
+
+      // @ts-expect-error - exercising the private normalisation seam
+      const issues: unknown = worker.errorToRuntimeIssues(Object.assign(new Error('failed'), { issues: [issue] }));
+
+      expect(issues).toEqual([issue]);
+    });
+
+    it('should fold a thrown issue with an unknown code into the error message', () => {
+      const worker = createConfiguredWorker();
+      const error = Object.assign(new Error('foreign failure'), {
+        issues: [{ code: 'NOT_A_KERNEL_CODE', message: 'foreign row', severity: 'error' }],
+      });
+
+      // @ts-expect-error - exercising the private normalisation seam
+      const issues: unknown = worker.errorToRuntimeIssues(error);
+
+      expect(issues).toEqual([
+        { message: 'foreign failure', code: 'RUNTIME', type: 'runtime', severity: 'error', stack: error.stack },
+      ]);
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Bundler cache efficiency
   // ---------------------------------------------------------------------------

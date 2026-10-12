@@ -64,7 +64,7 @@ Copy [resume.template.md](resume.template.md) to `docs/research/artifacts/<chart
 
 - **Self-contained.** Every identifier the executor would otherwise rediscover is inline: repository IDs, workspace IDs, installation IDs, environment names, package names, branch names, PR numbers, run IDs, the files that reference the moved tree, the largest tracked files, test-harness quirks. Relative links stay inside Brain; a Tau path is written as text, never as a link that needs the `docs/` symlink.
 - **Decisions stay in the charter.** The file quotes invariants in spirit and links the charter; it never changes a ruling.
-- **State is current and append-only.** § State at handoff is re-observed by the executor on arrival and kept current; § State log takes one line per event with a UTC timestamp from `date -u`.
+- **State is current and append-only.** § State at handoff is re-observed by the executor on arrival and kept current; § State log takes one line per event with a UTC timestamp from `date -u`. From the moment the prompt is pasted the executor owns § State; the coordinator only appends log lines and never rewrites the file.
 - **The sequence is phases with acceptance.** Order by dependency and by what unblocks the most (land open PRs and the change that shrinks the CI queue first). Each phase names its gates, exact commands, expected output and the charter IDs it closes.
 - **Hard rules are listed, not implied.** Charter invariants, commit and PR conventions, forbidden commands (`gh run rerun --failed`, prettier, stash across owners), secret handling, IaC rules, Brain commit mechanics, where Darwin verification happens.
 - **The worker brief is a template** the executor copies for every lane, naming task and attempt IDs, exclusive paths, instructions to read, checks and the evidence writer.
@@ -93,7 +93,7 @@ Copy [prompt.template.md](prompt.template.md) to `docs/research/artifacts/<chart
 
 1. Check every relative link in the touched Brain files resolves inside Brain.
 2. `pnpm docs:validate` from the Tau root; `node .agents/skills/create-handbook/generate-source-map.mjs --check` when a handbook page's `sources` changed.
-3. Commit by path. When the shared Brain checkout is on another branch, commit from a temporary detached worktree of `origin/main` (`git -C repos/tau-brain worktree add --detach <scratch> origin/main`; always with `-C`, a bare `git worktree add` after a directory change can land in the wrong repository), copy the files in, regenerate the source map there, commit, push `HEAD:main`, copy the committed files back and remove the worktree.
+3. Commit by path, and only ever edits applied to the `origin/main` bytes. Never copy a whole file from a checkout that may be behind `origin/main`: once the executor is live it writes the resumption file too, and a whole-file copy silently discards its state (this happened on 2026-10-12 and had to be restored). When the shared Brain checkout is on another branch, commit from a temporary detached worktree of `origin/main` (`git -C repos/tau-brain worktree add --detach <scratch> origin/main`; always with `-C`, a bare `git worktree add` after a directory change can land in the wrong repository), apply the edits there with anchored replacements that assert their match count, regenerate the source map there, commit, push `HEAD:main`, copy the committed files back and remove the worktree.
 4. Confirm the pushed `main` holds byte-identical copies of the handoff files.
 
 ### 7. Transmit

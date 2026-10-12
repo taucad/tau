@@ -14,17 +14,21 @@ const denied = async (probe) => {
 /**
  * Whether a worker started with `options` is refused, or cannot read a file
  * outside the child's grants.
+ *
+ * @param options - The worker's own options.
+ * @returns Whether it was contained.
  */
 const refusesWorker = async (options) => {
   const { Worker } = /** @type {typeof import('node:worker_threads')} */ (process.getBuiltinModule('worker_threads'));
+  const workerOptions = /** @type {import('node:worker_threads').WorkerOptions} */ (options);
   try {
     const worker = new Worker(
       "const { parentPort } = require('node:worker_threads'); let read = true; try { require('node:fs').readFileSync('/etc/hosts'); } catch { read = false; } parentPort.postMessage(read);",
-      { eval: true, ...options },
+      { eval: true, ...workerOptions },
     );
-    const [read] = await once(worker, 'message');
+    const answer = await once(worker, 'message');
     await worker.terminate();
-    return read !== true;
+    return answer[0] !== true;
   } catch (error) {
     return error instanceof Error && 'code' in error && error.code === 'ERR_ACCESS_DENIED';
   }

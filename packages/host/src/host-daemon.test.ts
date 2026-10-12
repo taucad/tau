@@ -1919,8 +1919,17 @@ describe('startHostDaemon runtime child per root and session', () => {
   const zooProxyUrl = 'wss://zoo.example.test/v1/kernels/zoo';
 
   /** Settles `'closed'` once the child exits, or `'open'` after `milliseconds`. */
-  const exitOf = async (handle: RuntimeChildHandle, milliseconds = 10_000): Promise<'closed' | 'open'> =>
-    Promise.race([handle.closed.then(() => 'closed' as const), delay(milliseconds, 'open' as const)]);
+  const exitOf = async (handle: RuntimeChildHandle, milliseconds = 10_000): Promise<'closed' | 'open'> => {
+    const exited = async (): Promise<'closed'> => {
+      await handle.closed;
+      return 'closed';
+    };
+    const lapsed = async (): Promise<'open'> => {
+      await delay(milliseconds);
+      return 'open';
+    };
+    return Promise.race([exited(), lapsed()]);
+  };
 
   /** Wait until the daemon is past its control `ready`, so no start of its own interleaves with the case's. */
   const awaitControlReady = async (relay: StubRelay): Promise<void> => {
@@ -2024,14 +2033,16 @@ describe('startHostDaemon runtime child per root and session', () => {
       const started = runtimeChildren.slice(before);
       expect(started).toHaveLength(2);
 
-      (await relay.route(routePath('session-1', 'runtime'))).send('crash');
+      const firstRuntimeRoute = await relay.route(routePath('session-1', 'runtime'));
+      firstRuntimeRoute.send('crash');
       await vi.waitFor(() => {
         expect(disconnected('session-1')).toEqual([expect.objectContaining({ code: 'CHILD_EXIT' })]);
       });
       /* A shared child would end session 2 in the same instant; give it time to show. */
       await delay(1000);
       expect(disconnected('session-2')).toEqual([]);
-      expect((await relay.route(routePath('session-2', 'runtime'))).readyState).toBe(WebSocket.OPEN);
+      const secondRuntimeRoute = await relay.route(routePath('session-2', 'runtime'));
+      expect(secondRuntimeRoute.readyState).toBe(WebSocket.OPEN);
 
       control.send(JSON.stringify({ v: 1, type: 'revoke', sessionId: 'session-2' }));
       await vi.waitFor(() => {

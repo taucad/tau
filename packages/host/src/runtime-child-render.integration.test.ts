@@ -372,10 +372,12 @@ describe('daemon runtime child per agent root (from source)', () => {
       try {
         const rootB = daemon.workspaceRoot;
         const hung = await daemon.admitRoot('root-h', hungModel);
-        const documentB = (await daemon.clientFor(rootB)).open({ source: { path: 'main.ts' }, watch: false });
+        const clientB = await daemon.clientFor(rootB);
+        const documentB = clientB.open({ source: { path: 'main.ts' }, watch: false });
         log['1 render B'] = await step('render B', async () => render(documentB));
 
-        const documentH = (await daemon.clientFor(hung.root)).open({ source: { path: 'main.ts' }, watch: false });
+        const clientH = await daemon.clientFor(hung.root);
+        const documentH = clientH.open({ source: { path: 'main.ts' }, watch: false });
         /* Settles only when its client closes: the model loops. `allSettled` observes that rejection. */
         const hungRendering = Promise.allSettled([documentH.view().rendering()]);
         /* Let the hung root's kernel initialise and enter its loop. */
@@ -389,7 +391,8 @@ describe('daemon runtime child per agent root (from source)', () => {
         await Promise.race([hungRendering, delay(15_000)]);
         await writeFile(join(hung.root, 'main.ts'), replicadBox(5, 6, 7), 'utf8');
         daemon.admit(hung.root);
-        const documentH2 = (await daemon.clientFor(hung.root)).open({ source: { path: 'main.ts' }, watch: false });
+        const clientH2 = await daemon.clientFor(hung.root);
+        const documentH2 = clientH2.open({ source: { path: 'main.ts' }, watch: false });
         log['4 new client for H after release'] = await step(
           'new client for H after release',
           async () => stepSize(documentH2),

@@ -157,6 +157,22 @@ describe('validateTags()', () => {
     ]);
   });
 
+  it('should allow no deploy tag or deploy:staging and reject unknown or duplicate deploy tags', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('undeployed', ['scope:ui', 'type:app'], undefined),
+          project('staged', ['scope:ui', 'type:app', 'deploy:staging'], undefined),
+          project('unknown-deploy', ['scope:ui', 'type:app', 'deploy:preview'], undefined),
+          project('two-deploys', ['scope:ui', 'type:app', 'deploy:staging', 'deploy:staging'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/unknown-deploy: unknown tag "deploy:preview" (deploy: must be one of staging)',
+      'fixture/two-deploys: expected exactly one deploy: tag, found deploy:staging, deploy:staging',
+    ]);
+  });
+
   it('rejects a project Nx inferred from a bare package.json that declares no tags', () => {
     expect(validateTags({ projects: [{ ...project('inferred', [], undefined), configured: false }] })).toEqual([
       'fixture/inferred: expected exactly one type: tag, found none; expected exactly one scope: tag, found none',

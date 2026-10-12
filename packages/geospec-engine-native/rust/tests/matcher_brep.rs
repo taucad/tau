@@ -279,6 +279,9 @@ impl BrepSubject for RetainedBrep {
                     SurfaceFacts::Cylinder { .. } => {
                         CircularBoreDisposition::NonMember(CircularBoreNonMember::ExteriorCylinder)
                     }
+                    SurfaceFacts::Torus { .. } if !face.reversed => {
+                        CircularBoreDisposition::NonMember(CircularBoreNonMember::ExteriorBlend)
+                    }
                     _ => CircularBoreDisposition::Unqualified(
                         CircularBoreUnqualified::UnsupportedSurface,
                     ),
@@ -1801,6 +1804,54 @@ fn bore_unknowns_preserve_existential_witness_and_refuse_absence_or_pattern() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn exterior_blend_beside_bores_leaves_the_pattern_inventory_complete() {
+    // A convex rim fillet is a typed non-member, so the pattern stays
+    // provable; the same torus facing the other way bounds an eye and keeps
+    // the inventory partial, which refuses the pattern.
+    for (reversed, status) in [(false, "passed"), (true, "refused")] {
+        let mut retained = RetainedBrep::complete();
+        let face = &mut Rc::make_mut(&mut retained.faces)[2];
+        face.facts.surface = SurfaceFacts::Torus {
+            center: [0.0, 0.0, 9.0],
+            axis: [0.0, 0.0, 1.0],
+            major_radius: 9.0,
+            minor_radius: 1.0,
+        };
+        face.reversed = reversed;
+        let mut subject = retained_subject();
+        subject.brep = Some(Box::new(retained));
+        let subjects = [Rc::new(subject)];
+        let capability = Capability::ToHaveCircularHolePattern;
+        let prepared = prepared(
+            capability,
+            Json::object([
+                ("count", Json::Number(4.0)),
+                ("holeDiameter", Json::Number(2.0)),
+            ]),
+        );
+        let normalized = prepared.normalized_payload();
+        let budget = Budget::new(7);
+        let mut context =
+            EvaluationContext::new(&subjects, capability, "bore", &normalized, &budget, None);
+        let value = crate::result::finish(
+            "bore",
+            capability,
+            crate::result::Polarity::Positive,
+            evaluate(&prepared, &mut context),
+        )
+        .unwrap();
+        assert_eq!(
+            object_field(&value, "status"),
+            Some(&Json::string(status)),
+            "reversed {reversed}"
+        );
+        // One unit, five candidates, one pattern query: the torus stays a
+        // charged candidate either way.
+        assert_eq!(budget.used(), 7, "reversed {reversed}");
     }
 }
 

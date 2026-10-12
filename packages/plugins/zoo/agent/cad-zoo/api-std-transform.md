@@ -37,7 +37,7 @@ mirror3d(
 //   across: The axis (or other geometry) to reflect across
 // Example:
 //   // Simple mirror3d example, showing mirroring across named axes.
-//   @settings(kclVersion = 2.0)
+//   @settings(kclVersion = 3.0)
 //   
 //   sketch001 = sketch(on = XY) {
 //     line3 = line(start = [var -4.59mm, var -5.11mm], end = [var -5mm, var 3.51mm])
@@ -72,7 +72,7 @@ translate(
 //   global: If true, the transform is applied in global space
 //   xyz: If given, interpret this point as 3 distances, along each of [X, Y, Z] and translate by each of them
 // Example:
-//   @settings(defaultLengthUnit = mm, kclVersion = 2.0)
+//   @settings(defaultLengthUnit = mm, kclVersion = 3.0)
 //   
 //   sweepPath = sketch(on = XZ) {
 //     line1 = line(start = [var 0.05mm, var 0.05mm], end = [var 0.05mm, var 7.05mm])
@@ -114,7 +114,7 @@ rotate(
 //   angle: The angle to rotate
 //   global: If true, the transform is applied in global space
 // Example:
-//   @settings(defaultLengthUnit = mm, kclVersion = 2.0)
+//   @settings(defaultLengthUnit = mm, kclVersion = 3.0)
 //   
 //   sweepPath = sketch(on = XZ) {
 //     line1 = line(start = [var 0.05mm, var 0.05mm], end = [var 0.05mm, var 7.05mm])
@@ -154,7 +154,7 @@ scale(
 //   global: If true, the transform is applied in global space
 //   factor: If given, scale the solid by this dimensionless factor
 // Example:
-//   @settings(defaultLengthUnit = mm, kclVersion = 2.0)
+//   @settings(defaultLengthUnit = mm, kclVersion = 3.0)
 //   
 //   sweepPath = sketch(on = XZ) {
 //     line1 = line(start = [var 0.05mm, var 0.05mm], end = [var 0.05mm, var 7.05mm])
@@ -192,13 +192,12 @@ hide(@objects: [Solid; 1+] | [Plane; 1+] | [Sketch; 1+] | [Helix; 1+] | Imported
 
 // Category: std.transform
 // Deletes something from the scene
-// EXPERIMENTAL
 // std.transform.delete (function)
 delete(@objects: [Solid; 1+] | [Sketch; 1+] | [Helix; 1+] | ImportedGeometry | [GdtAnnotation; 1+])
 //   @objects: The object or objects to delete
 // Example:
 //   // Basic example, showing deleting something.
-//   @settings(kclVersion = 2.0, experimentalFeatures = allow)
+//   @settings(kclVersion = 3.0)
 //   
 //   // Make a cylinder
 //   sketch001 = sketch(on = XY) {

@@ -8,7 +8,7 @@ describe('kernel configuration identity', () => {
     expect(zoo).toMatchObject({
       language: 'kcl',
       mainFile: 'main.kcl',
-      emptyCode: '@settings(defaultLengthUnit = mm, kclVersion = 2.0)\n',
+      emptyCode: '@settings(defaultLengthUnit = mm, kclVersion = 3.0)\n',
     });
   });
 

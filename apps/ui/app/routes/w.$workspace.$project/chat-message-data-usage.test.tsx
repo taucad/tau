@@ -207,7 +207,7 @@ describe('ChatMessageDataUsage', () => {
     renderUsage([usagePart()]);
 
     const trigger = screen.getByRole('button', { name: /^Usage: openai-gpt-5\.5, 14 tokens/ });
-    expect(trigger.className).toContain('size-7');
+    expect(trigger.className).toContain('size-6');
     expect(trigger.querySelector('[data-testid="model-icon-openai"]')).not.toBeNull();
   });
 

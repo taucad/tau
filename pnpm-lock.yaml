@@ -244,8 +244,8 @@ catalogs:
       specifier: ^5.101.0
       version: 5.101.0
     '@taucad/kcl-wasm-lib':
-      specifier: 0.1.184
-      version: 0.1.184
+      specifier: 0.1.191
+      version: 0.1.191
     '@taulabs/openrscad-engine':
       specifier: 0.11.0-beta.4
       version: 0.11.0-beta.4
@@ -1063,7 +1063,7 @@ importers:
         version: link:libs/json-schema
       '@taucad/kcl-wasm-lib':
         specifier: 'catalog:'
-        version: 0.1.184
+        version: 0.1.191
       '@tiptap/core':
         specifier: 'catalog:'
         version: 3.27.1(@tiptap/pm@3.27.1)
@@ -4609,7 +4609,7 @@ importers:
         version: link:../../core/geometry
       '@taucad/kcl-wasm-lib':
         specifier: 'catalog:'
-        version: 0.1.184
+        version: 0.1.191
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../../parameters
@@ -14436,8 +14436,8 @@ packages:
   '@tanstack/virtual-core@3.17.1':
     resolution: {integrity: sha512-VZyW2Uiml5tmBZwPGrSD3Sz73OxzljQMCmzYHsUTPEuTsERf5xwa+uWb01xEzkz3ZSYTjj8NEb/mKHvgKxyZdA==}
 
-  '@taucad/kcl-wasm-lib@0.1.184':
-    resolution: {integrity: sha512-NMtYY8ZbiYlk16dr4ZhGDDh7FSJJi9DGVHB+EFxpbxJAE7gke+BIS6NeJz6N0uEKnnwmfsT1MPo9wcVYmHzlNA==}
+  '@taucad/kcl-wasm-lib@0.1.191':
+    resolution: {integrity: sha512-CO6M3oW8j/i2mUYGGUyzIuvL9BfvEUOdc9+joixzO3pRmacq/sn4S3SamfF8h69s465Wd/LtB2/eBVh7+psEcw==}
 
   '@taulabs/langchain-google-common@2.2.0-beta.0':
     resolution: {integrity: sha512-vU/YtcBZUhEXLLzdDWeAHbUvxphKBd5DqRnFqKnM9BKAP2C/mes6m6UevMsK81cNdICQ5hRiWe/VazRyFhLdXQ==}
@@ -37103,7 +37103,7 @@ snapshots:
 
   '@tanstack/virtual-core@3.17.1': {}
 
-  '@taucad/kcl-wasm-lib@0.1.184': {}
+  '@taucad/kcl-wasm-lib@0.1.191': {}
 
   '@taulabs/langchain-google-common@2.2.0-beta.0(@langchain/core@1.2.0(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.213.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@1.30.1(@opentelemetry/api@1.9.1))(openai@6.44.0(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3))':
     dependencies:

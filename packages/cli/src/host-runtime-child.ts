@@ -3,8 +3,6 @@ import { parseArgs } from 'node:util';
 import { serveHostRuntime } from '@taucad/host/runtime-host';
 import type { HostRuntimeHandle } from '@taucad/host/runtime-host';
 
-import { loadCliRuntime } from '#runtime-options.js';
-
 const { values } = parseArgs({
   args: process.argv.slice(2),
   options: {
@@ -39,12 +37,18 @@ const handleMessage = async (message: unknown): Promise<void> => {
   if (host) {
     throw new Error('Tau Host runtime child was started more than once.');
   }
-  const runtime = await loadCliRuntime({
-    projectRoot: process.cwd(),
-    plugin: values.plugin,
-    config: values.config,
+  /* One runtime thread per connection: agent roots and relay sessions never share a realm. */
+  host = await serveHostRuntime({
+    worker: {
+      url: new URL(import.meta.url.endsWith('.ts') ? './runtime.worker.ts' : './runtime-worker.mjs', import.meta.url),
+      workerData: {
+        projectRoot: process.cwd(),
+        ...(values.plugin ? { plugin: values.plugin } : {}),
+        ...(values.config ? { config: values.config } : {}),
+      },
+    },
+    authorizationToken: message.authorizationToken,
   });
-  host = await serveHostRuntime({ runtime, authorizationToken: message.authorizationToken });
   process.send?.({ type: 'ready', url: host.url.href, runtimeVersion: host.runtimeVersion });
 };
 

@@ -12,7 +12,6 @@
  * @public
  */
 
-import { workerData } from 'node:worker_threads';
 import type {
   HostInitializeBindings,
   RuntimeInitializeMemoryHandle,
@@ -23,8 +22,6 @@ import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-doc
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import { createWorkerHostBindings } from '#transport/_internal/worker-host-bindings.js';
-import { runtimeConnectionWorkerDataKey } from '#transport/_internal/runtime-channel-bindings.js';
-import type { RuntimeConnectionWorkerData } from '#transport/_internal/runtime-channel-bindings.js';
 import { acquireNodeParentPort } from '#transport/_internal/node-parent-port.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
@@ -42,26 +39,9 @@ export type NodeWorkerHostOptions = {
 };
 
 /**
- * Read the connection ports a `webSocketHost` thread-mode host put in `workerData`.
- *
- * @returns The ports, or `{}` when this thread serves a `nodeWorkerTransport` client.
- */
-const connectionWorkerData = (): RuntimeConnectionWorkerData => {
-  const connection: unknown =
-    typeof workerData === 'object' && workerData !== null
-      ? (workerData as Record<string, unknown>)[runtimeConnectionWorkerDataKey]
-      : undefined;
-  return typeof connection === 'object' && connection !== null ? (connection as RuntimeConnectionWorkerData) : {};
-};
-
-/**
  * Standalone host factory for the node-worker transport. It lives in its own
  * module so an application-owned worker entry can import the host without
  * pulling the client transport into the worker graph.
- *
- * The same entry serves a `nodeWorkerTransport` client and a `webSocketHost`
- * connection in thread mode: that host hands the connection's filesystem and
- * compute-store ports in through `workerData`, and this host forwards them.
  *
  * @param options - Host options; see {@link NodeWorkerHostOptions}.
  * @returns The {@link RuntimeTransportHost} fat handle for the node-worker wire.
@@ -99,7 +79,6 @@ export const nodeWorkerHost = (
       }
       port = acquireNodeParentPort();
       serverHandle = createDocumentWorkerDispatcher(options.worker, port, {
-        ...connectionWorkerData(),
         bindingsFactory: (handle) => createWorkerHostBindings(handle),
       });
       crashTrapDispose = installWorkerCrashTrap(serverHandle);

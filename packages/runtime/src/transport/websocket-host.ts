@@ -3,8 +3,7 @@
 /**
  * Node-only remote host entry — `@taucad/runtime/transport/websocket-host`.
  *
- * Serves one kernel per connection over a `ws` server — in the host's own
- * realm, or in a worker thread per connection. The client half
+ * Serves one kernel per connection over a `ws` server. The client half
  * lives at `@taucad/runtime/transport/websocket`; this subpath statically
  * imports `ws` and `node:http`, so a browser bundle must never touch it —
  * the same split as `/transport/web` ↔ `/transport/node`.
@@ -22,8 +21,6 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { MessageChannel, Worker as NodeWorker } from 'node:worker_threads';
-import type { Transferable as NodeTransferable, WorkerOptions } from 'node:worker_threads';
 import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 
@@ -38,11 +35,7 @@ import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.t
 import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
 import { createWorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
-import { extractInlineFileSystem, wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
-import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
-import { runtimeConnectionWorkerDataKey } from '#transport/_internal/runtime-channel-bindings.js';
-import type { RuntimeConnectionWorkerData } from '#transport/_internal/runtime-channel-bindings.js';
-import type { NodeWorkerData, NodeWorkerLike } from '#transport/node-worker-client.js';
+import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import {
   createSessionPairing,
@@ -72,47 +65,16 @@ const refuseUpgrade = (socket: Duplex, status: string): void => {
 };
 
 /**
- * Thread-per-connection mode for {@link webSocketHost}: every accepted
- * connection runs its kernel worker in its own `node:worker_threads` thread,
- * so connections never share a realm, and a connection that goes away takes
- * its thread — and any model still running in it — with it.
- *
- * The entry hosts its runtime with `nodeWorkerHost` from
- * `@taucad/runtime/transport/node`, which picks up the connection's
- * filesystem and compute-store ports; the same entry serves
- * `nodeWorkerTransport` clients.
- *
- * Reachable as `WebSocketHostOptions['worker']`; not a separate export.
- */
-type WebSocketHostWorkerThread = {
-  /** Application-owned URL of the ESM worker entry. */
-  readonly url: string | URL;
-  /** Structured-cloned into every connection's thread as `workerData`. */
-  readonly workerData?: Readonly<Record<string, NodeWorkerData>>;
-  /**
-   * Override for `node:worker_threads.Worker`, called as
-   * `new workerCtor(url, { workerData, transferList })` — a tsx-run `.ts`
-   * entry, for instance.
-   */
-  readonly workerCtor?: new (url: string | URL, options?: WorkerOptions) => NodeWorkerLike;
-};
-
-/**
  * Options accepted by {@link webSocketHost}.
  *
  * @public
  */
 export type WebSocketHostOptions = {
   /**
-   * Where each connection's kernel worker runs.
-   *
-   * - A factory runs it in this realm. It is invoked **once per connection**:
-   *   `initialize` is one-shot per worker, so a shared instance would serve
-   *   exactly one client.
-   * - A {@link WebSocketHostWorkerThread} runs it in a worker thread spawned
-   *   per connection and terminated when the connection closes.
+   * Kernel worker factory, invoked **once per connection**. `initialize` is
+   * one-shot per worker, so a shared instance would serve exactly one client.
    */
-  readonly worker: (() => KernelWorker) | WebSocketHostWorkerThread;
+  readonly worker: () => KernelWorker;
   /**
    * Rooted filesystem this host owns and exposes to runtime. Its handle's
    * `create()` runs once **per connection**, so every client gets a fresh
@@ -184,86 +146,6 @@ type PairedFileSystemSocket = {
   readonly port: Port<unknown>;
 };
 
-/** A spawned connection thread, with the events the host listens to. */
-type ConnectionThread = NodeWorkerLike & {
-  on(event: 'error', listener: (error: Error) => void): ConnectionThread;
-  on(event: 'exit', listener: (exitCode: number) => void): ConnectionThread;
-};
-
-/**
- * Run one connection's kernel worker in its own thread: hand it the
- * connection's filesystem (bridged from `fileSystem`) and compute-store ports
- * through `workerData`, and splice its runtime wire to the socket's `port`.
- * The runtime envelope crosses unchanged — the thread speaks the same frames
- * the socket carries.
- *
- * @param thread - The host's thread options.
- * @param port - The connection's runtime socket port.
- * @param fileSystem - The connection's filesystem, already minted for it.
- * @param computeStorePort - The paired `/compute` socket port, if any.
- * @param onExit - Called once if the thread exits or fails on its own.
- * @returns A teardown that disposes the host-side bridges and terminates the thread.
- */
-// oxlint-disable-next-line max-params -- one internal call site; each argument is a distinct connection resource.
-const startConnectionThread = (
-  thread: WebSocketHostWorkerThread,
-  port: Port<unknown>,
-  fileSystem: RuntimeFileSystemBase,
-  computeStorePort: Port<unknown> | undefined,
-  onExit: () => void,
-): (() => Promise<void>) => {
-  const bridge = buildFileSystemBridge(wrapAsRuntimeFileSystem({ kind: 'inline', create: () => fileSystem }));
-  if (!bridge) {
-    throw new Error('webSocketHost: a connection thread needs a filesystem bridge');
-  }
-  const compute = computeStorePort ? new MessageChannel() : undefined;
-  const connection: RuntimeConnectionWorkerData = {
-    fileSystemPort: bridge.port,
-    ...(compute ? { computeStorePort: compute.port2 } : {}),
-  };
-  const transferList = [bridge.port, ...(compute ? [compute.port2] : [])] as unknown as NodeTransferable[];
-  let worker: ConnectionThread;
-  try {
-    worker = Reflect.construct(thread.workerCtor ?? NodeWorker, [
-      thread.url,
-      { workerData: { ...thread.workerData, [runtimeConnectionWorkerDataKey]: connection }, transferList },
-    ]) as ConnectionThread;
-  } catch (error) {
-    compute?.port1.close();
-    bridge.dispose();
-    throw error;
-  }
-  /* Kept for the thread's whole life: an unlistened `'error'` would throw out of the host. */
-  worker.on('error', onExit);
-  worker.on('exit', onExit);
-
-  const toSocket = (message: unknown): void => {
-    port.postMessage(message);
-  };
-  worker.on('message', toSocket);
-  const offSocket = port.onMessage((message) => {
-    worker.postMessage(message);
-  });
-
-  const toComputeSocket = (message: unknown): void => {
-    computeStorePort?.postMessage(message);
-  };
-  compute?.port1.on('message', toComputeSocket);
-  const offComputeSocket = computeStorePort?.onMessage((message) => {
-    compute?.port1.postMessage(message);
-  });
-
-  return async () => {
-    offSocket();
-    offComputeSocket?.();
-    worker.off('message', toSocket);
-    compute?.port1.close();
-    bridge.dispose();
-    // ponytail: no cleanup grace — a graceful client already ran `dispose` before closing, and whatever the thread still holds dies with its isolate.
-    await worker.terminate();
-  };
-};
-
 /**
  * Serve a kernel runtime over WebSockets, one worker per connection.
  *
@@ -282,19 +164,6 @@ const startConnectionThread = (
  *
  * const host = webSocketHost({
  *   worker: () => createRuntimeWorker({ runtime }),
- *   fileSystem: fromNodeFs(process.cwd()),
- * });
- * await host.ready;
- * ```
- *
- * @example <caption>Give every connection its own worker thread</caption>
- * ```typescript
- * import { fromNodeFs } from '@taucad/runtime/filesystem/node';
- * import { webSocketHost } from '@taucad/runtime/transport/websocket-host';
- *
- * // `runtime.worker.js` hosts its runtime with `nodeWorkerHost` and reads `workerData`.
- * const host = webSocketHost({
- *   worker: { url: new URL('./runtime.worker.js', import.meta.url), workerData: { projectRoot: process.cwd() } },
  *   fileSystem: fromNodeFs(process.cwd()),
  * });
  * await host.ready;
@@ -534,40 +403,21 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
         }
       }
 
-      /**
-       * Start this connection's kernel worker, in this realm or in its own thread.
-       *
-       * @returns The worker's teardown.
-       */
-      const startWorker = (): (() => Promise<void>) => {
-        const { worker } = options;
-        if (typeof worker !== 'function') {
-          return startConnectionThread(worker, port, inlineFileSystem, computeStorePort, () => {
-            if (!isDead()) {
-              socket.close(webSocketCloseCode.internalError, 'runtime thread exited');
-            }
-          });
-        }
-        const kernelWorker = worker();
-        const dispatcher = createDocumentWorkerDispatcher(kernelWorker, port, {
-          inlineFileSystem,
-          ...(computeStorePort ? { computeStorePort } : {}),
-        });
-        dispatchers.add(dispatcher);
-        return async () => {
-          dispatchers.delete(dispatcher);
-          try {
-            dispatcher.dispose('web-socket connection closed');
-          } catch {
-            /* Best-effort */
-          }
-          await kernelWorker.cleanup();
-        };
-      };
-      const stopWorker = startWorker();
+      const worker = options.worker();
+      const dispatcher = createDocumentWorkerDispatcher(worker, port, {
+        inlineFileSystem,
+        ...(computeStorePort ? { computeStorePort } : {}),
+      });
+      dispatchers.add(dispatcher);
 
-      /** Drop this connection's worker, filesystem proxy and paired sockets. */
+      /** Drop this connection's dispatcher, filesystem proxy, paired socket and worker. */
       const disposeConnection = async (): Promise<void> => {
+        dispatchers.delete(dispatcher);
+        try {
+          dispatcher.dispose('web-socket connection closed');
+        } catch {
+          /* Best-effort */
+        }
         try {
           fileSystemProxy?.dispose();
         } catch {
@@ -584,7 +434,7 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
           /* Best-effort */
         }
         try {
-          await stopWorker();
+          await worker.cleanup();
         } catch {
           /* Best-effort */
         }

@@ -139,7 +139,7 @@ describe('nodeWorkerTransport — workerData', () => {
   it('should hand the consumer workerData to the worker entry', async () => {
     const client = createRuntimeClient({
       transport: nodeWorkerTransport({
-        url: new URL('websocket-host.thread.fixture.ts', import.meta.url),
+        url: new URL('node-worker-transport.fixture.ts', import.meta.url),
         workerCtor: TsxWorker,
         workerData: { projectRoot: '/projects/a', nested: { depth: 2 } },
         fileSystem: fromMemoryFs({ 'main.fixture': 'workerData' }),

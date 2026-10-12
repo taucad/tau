@@ -1,6 +1,17 @@
 import { describe, expectTypeOf, it } from 'vitest';
+import type { HostRuntimeClient } from '@taucad/host/agent-tools';
+import type { RuntimeClient } from '@taucad/runtime';
+import type { ProjectRuntimeClient } from '#commands/mcp.js';
 import type { ComputeStoreWorkerData } from '#compute-store.worker.js';
 import type { RuntimeWorkerData } from '#runtime.worker.js';
+
+describe('tau mcp project client', () => {
+  it('should hand the host tools the dynamic CLI runtime client each worker serves', () => {
+    /* The dynamic definition, `RuntimeClient`'s default: the thread composes `--plugin` and `--config` at run time. */
+    expectTypeOf<ProjectRuntimeClient>().toEqualTypeOf<RuntimeClient>();
+    expectTypeOf<ProjectRuntimeClient>().toExtend<HostRuntimeClient>();
+  });
+});
 
 describe('worker entry data', () => {
   it('should type what a client hands the runtime worker', () => {

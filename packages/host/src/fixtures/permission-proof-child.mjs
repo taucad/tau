@@ -11,6 +11,25 @@ const denied = async (probe) => {
   }
 };
 
+/**
+ * Whether a worker started with `options` is refused, or cannot read a file
+ * outside the child's grants.
+ */
+const refusesWorker = async (options) => {
+  const { Worker } = /** @type {typeof import('node:worker_threads')} */ (process.getBuiltinModule('worker_threads'));
+  try {
+    const worker = new Worker(
+      "const { parentPort } = require('node:worker_threads'); let read = true; try { require('node:fs').readFileSync('/etc/hosts'); } catch { read = false; } parentPort.postMessage(read);",
+      { eval: true, ...options },
+    );
+    const [read] = await once(worker, 'message');
+    await worker.terminate();
+    return read !== true;
+  } catch (error) {
+    return error instanceof Error && 'code' in error && error.code === 'ERR_ACCESS_DENIED';
+  }
+};
+
 /** Detect Node permission failures without treating network refusal as containment. */
 const isPermissionError = (error) => {
   if (!(error instanceof Error) || !('cause' in error) || typeof error.cause !== 'object' || error.cause === null) {
@@ -49,20 +68,20 @@ const handleStart = async (message) => {
         childProcess.execFileSync(process.execPath, ['--version']);
       })(),
     ),
-    /* The child runs each runtime connection in a worker thread, which keeps the child's grants. */
-    workerFilesystem: await (async () => {
-      try {
-        const worker = new workerThreads.Worker(
-          "const { parentPort } = require('node:worker_threads'); try { require('node:fs').readFileSync('/etc/hosts'); parentPort.postMessage(false); } catch (error) { parentPort.postMessage(error.code === 'ERR_ACCESS_DENIED'); }",
-          { eval: true },
-        );
-        const answer = await once(worker, 'message');
+    worker: await denied(
+      (async () => {
+        const worker = new workerThreads.Worker('0', { eval: true });
         await worker.terminate();
-        return answer[0] === true;
-      } catch {
-        return false;
-      }
-    })(),
+      })(),
+    ),
+    /* A worker carries its own permission flags: Node cannot let the host start
+     * workers and refuse these, so the child may start none (operator ruling Q8). */
+    workerExecArgvEscalation: await refusesWorker({
+      execArgv: ['--permission', '--allow-fs-read=*', '--allow-child-process'],
+    }),
+    workerNodeOptionsEscalation: await refusesWorker({
+      env: { ...process.env, NODE_OPTIONS: '--allow-fs-read=*' },
+    }),
     addon: await denied(
       (async () => {
         process.dlopen({ exports: {} }, new URL('missing.node', import.meta.url).pathname);

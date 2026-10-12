@@ -12,7 +12,9 @@ import { startRuntimeChild } from '#runtime-child-supervisor.js';
 const proofSchema = z.object({
   filesystem: z.literal(true),
   childProcess: z.literal(true),
-  workerFilesystem: z.literal(true),
+  worker: z.literal(true),
+  workerExecArgvEscalation: z.literal(true),
+  workerNodeOptionsEscalation: z.literal(true),
   addon: z.literal(true),
   wasi: z.literal(true),
   inspector: z.literal(true),
@@ -32,7 +34,7 @@ afterEach(async () => {
 });
 
 describe('runtime child permission boundary', () => {
-  it('denies host capabilities to the child and its worker threads, strips secrets, and pins unrestricted network egress', async () => {
+  it('denies host capabilities and every worker, strips secrets, and pins unrestricted network egress', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-permissions-'));
     const proofPath = join(temporaryDirectory, 'proof.json');
     const server = createServer((_request, response) => {
@@ -57,7 +59,9 @@ describe('runtime child permission boundary', () => {
     expect(proof).toEqual({
       filesystem: true,
       childProcess: true,
-      workerFilesystem: true,
+      worker: true,
+      workerExecArgvEscalation: true,
+      workerNodeOptionsEscalation: true,
       addon: true,
       wasi: true,
       inspector: true,

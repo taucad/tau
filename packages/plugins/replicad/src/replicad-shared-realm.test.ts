@@ -379,13 +379,6 @@ const createTracedClient = (files: Record<string, string>): TracedClient => {
   return { client, entries };
 };
 
-/** Telemetry batches are flushed asynchronously after a render settles. */
-const settleTelemetry = async (): Promise<void> => {
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, 500);
-  });
-};
-
 /** Render `path` and return the telemetry the client received for that render. */
 const renderTraced = async ({ client, entries }: TracedClient, path: string): Promise<TelemetryEntry[]> => {
   const start = entries.length;
@@ -395,7 +388,10 @@ const renderTraced = async ({ client, entries }: TracedClient, path: string): Pr
   } finally {
     document.close();
   }
-  await settleTelemetry();
+  // Telemetry batches are flushed asynchronously after a render settles.
+  await vi.waitFor(() => {
+    expect(entries.slice(start).some((entry) => entry.name === 'replicad.run-main')).toBe(true);
+  }, 10_000);
   return entries.slice(start);
 };
 

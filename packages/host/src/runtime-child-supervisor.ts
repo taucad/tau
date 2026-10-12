@@ -99,7 +99,11 @@ const killChild = async (child: ChildProcess): Promise<void> => {
   if (child.exitCode !== null || child.signalCode !== null) {
     return;
   }
-  child.send({ type: 'close' });
+  /* A send on a disconnected channel emits an `'error'` nothing listens for, which would end the daemon; a child
+   * that cannot hear `close` still exits at the signals below. */
+  if (child.connected) {
+    child.send({ type: 'close' });
+  }
   const exited = new Promise<void>((resolve) => {
     child.once('exit', () => {
       resolve();

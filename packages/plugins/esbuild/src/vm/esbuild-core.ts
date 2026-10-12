@@ -3,6 +3,8 @@
 import type { BuildOptions, Loader, Message, OnLoadArgs, OnLoadResult, Plugin } from 'esbuild-wasm';
 import type * as NativeEsbuild from 'esbuild';
 import * as wasmEsbuild from 'esbuild-wasm';
+import type * as NodeFsPromises from 'node:fs/promises';
+import type * as NodeUrl from 'node:url';
 
 import { createBundlerSourceHost } from '@taucad/bundler-core';
 import type {
@@ -49,7 +51,41 @@ let activeEsbuild: typeof wasmEsbuild = wasmEsbuild;
 export const getEsbuild = (): typeof wasmEsbuild => activeEsbuild;
 
 /**
+ * Whether Node's permission model refuses child processes here.
+ *
+ * Native esbuild and esbuild-wasm's Node build both run their service as a
+ * child process; `process.permission` exists only under `--permission`.
+ *
+ * @returns true when `--permission` runs without `--allow-child-process`.
+ */
+const childProcessesRefused = (): boolean =>
+  (process as { permission?: NodeJS.ProcessPermission }).permission?.has('child') === false;
+
+/**
+ * Start esbuild-wasm's browser build on this thread.
+ *
+ * Its in-thread service reads the host's globals through `self`, which Node
+ * does not define, so the realm gains a `self` alias for `globalThis` first —
+ * what a browser worker already has.
+ */
+const initializeInThreadEsbuild = async (): Promise<void> => {
+  const [browserEsbuild, { readFile }, { fileURLToPath }] = await Promise.all([
+    importNodeModule<typeof wasmEsbuild>('esbuild-wasm/esm/browser.js'),
+    importNodeModule<typeof NodeFsPromises>('node:fs/promises'),
+    importNodeModule<typeof NodeUrl>('node:url'),
+  ]);
+  const wasm = new Uint8Array(await readFile(fileURLToPath(import.meta.resolve('esbuild-wasm/esbuild.wasm'))));
+  (globalThis as { self?: typeof globalThis }).self ??= globalThis;
+  await browserEsbuild.initialize({ wasmModule: await WebAssembly.compile(wasm), worker: false });
+  activeEsbuild = browserEsbuild;
+};
+
+/**
  * Initialize native esbuild on Node or esbuild-wasm elsewhere.
+ *
+ * A Node realm that may not start child processes runs esbuild-wasm on its own
+ * thread instead.
+ *
  * @returns Completion after the selected engine is ready.
  * @public
  */
@@ -59,6 +95,11 @@ export const initializeEsbuild = async (): Promise<void> => {
   }
   initializationPromise ??= (async () => {
     try {
+      if (isNode() && childProcessesRefused()) {
+        await initializeInThreadEsbuild();
+        esbuildInitialized = true;
+        return;
+      }
       if (isNode()) {
         activeEsbuild = await importNodeModule<typeof NativeEsbuild>('esbuild');
       }

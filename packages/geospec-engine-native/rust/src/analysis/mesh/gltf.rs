@@ -578,25 +578,19 @@ fn flatten(
             let Some(attribute) = primitive.get(&Semantic::Positions) else {
                 continue;
             };
-            // gltf 1.4.1 underflows reading a zero-count accessor. An empty run
-            // (Manifold can emit one) has no triangles and no partition.
-            if primitive
-                .indices()
-                .map_or(attribute.count(), |indices| indices.count())
-                == 0
+            let (vertex_start, vertex_count) = if let Some(&segment) =
+                position_segments.get(&attribute.index())
             {
-                continue;
-            }
-            if attribute.count() == 0 {
-                return Err(MeshDecodeError::new(
-                    MeshDecodeErrorKind::InvalidResource,
-                    "A primitive index is outside its POSITION accessor.",
-                ));
-            }
-            let (vertex_start, vertex_count) =
-                if let Some(&segment) = position_segments.get(&attribute.index()) {
-                    segment
-                } else {
+                segment
+            } else {
+                let vertex_start = u32::try_from(positions.len()).map_err(|_| {
+                    MeshDecodeError::new(
+                        MeshDecodeErrorKind::LimitExceeded,
+                        "Mesh position count exceeds the retained u32 index profile.",
+                    )
+                })?;
+                // gltf 1.4.1 underflows reading a zero-count accessor.
+                if attribute.count() > 0 {
                     let reader = primitive
                         .reader(|buffer| buffers.get(buffer.index()).map(BufferBytes::as_slice));
                     let source = reader.read_positions().ok_or_else(|| {
@@ -605,29 +599,24 @@ fn flatten(
                             "A POSITION accessor could not be read from its supplied buffer.",
                         )
                     })?;
-                    let vertex_start = u32::try_from(positions.len()).map_err(|_| {
-                        MeshDecodeError::new(
-                            MeshDecodeErrorKind::LimitExceeded,
-                            "Mesh position count exceeds the retained u32 index profile.",
-                        )
-                    })?;
                     positions.extend(source.map(|point| transform(matrix, point, scale)));
-                    let vertex_count = u32::try_from(positions.len() - vertex_start as usize)
-                        .map_err(|_| {
-                            MeshDecodeError::new(
-                                MeshDecodeErrorKind::LimitExceeded,
-                                "A POSITION accessor exceeds the retained u32 count profile.",
-                            )
-                        })?;
-                    vertex_start.checked_add(vertex_count).ok_or_else(|| {
+                }
+                let vertex_count =
+                    u32::try_from(positions.len() - vertex_start as usize).map_err(|_| {
                         MeshDecodeError::new(
                             MeshDecodeErrorKind::LimitExceeded,
-                            "Mesh position count exceeds the retained u32 index profile.",
+                            "A POSITION accessor exceeds the retained u32 count profile.",
                         )
                     })?;
-                    position_segments.insert(attribute.index(), (vertex_start, vertex_count));
-                    (vertex_start, vertex_count)
-                };
+                vertex_start.checked_add(vertex_count).ok_or_else(|| {
+                    MeshDecodeError::new(
+                        MeshDecodeErrorKind::LimitExceeded,
+                        "Mesh position count exceeds the retained u32 index profile.",
+                    )
+                })?;
+                position_segments.insert(attribute.index(), (vertex_start, vertex_count));
+                (vertex_start, vertex_count)
+            };
             let manifold = manifold_position == Some(attribute.index() as u64);
             let primitive_index = match manifold_partition {
                 Some(index) if manifold => index,
@@ -649,6 +638,14 @@ fn flatten(
                     index
                 }
             };
+            // An empty index run (Manifold can emit one) adds no triangles, and
+            // gltf 1.4.1 underflows reading it.
+            if primitive
+                .indices()
+                .is_some_and(|indices| indices.count() == 0)
+            {
+                continue;
+            }
             let reader =
                 primitive.reader(|buffer| buffers.get(buffer.index()).map(BufferBytes::as_slice));
             let segment = (vertex_start, vertex_count, primitive_index);
@@ -878,14 +875,14 @@ mod tests {
         let record = decode(document(declared, extra, part, "0"));
         assert_eq!(record.triangle_primitives, [0, 0, 0, 0, 1, 1, 1, 1]);
         assert_eq!(names(&record), ["part#0", "part#2"]);
-        // An empty run contributes no triangles and no partition.
+        // An empty run adds no triangles; undeclared, it keeps its own row.
         let empty = r#",{"attributes":{"POSITION":0},"indices":5}"#;
         let record = decode(document(declared, empty, part, "0"));
         assert_eq!(record.triangle_primitives, [0, 0, 0, 0]);
         assert_eq!(names(&record), ["part#0"]);
         let record = decode(document("", empty, part, "0"));
         assert_eq!(record.triangle_primitives, [0, 0, 1, 1]);
-        assert_eq!(names(&record), ["part#0", "part#1"]);
+        assert_eq!(names(&record), ["part#0", "part#1", "part#2"]);
         // Each node instancing the manifold mesh is its own partition.
         let nodes = r#"{"name":"a","mesh":0},{"name":"b","mesh":0}"#;
         let record = decode(document(declared, "", nodes, "0,1"));

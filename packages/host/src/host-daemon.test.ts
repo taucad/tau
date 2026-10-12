@@ -33,6 +33,8 @@ import * as agentServer from '#agent-server.js';
 import * as machineHost from '#machine-host.js';
 import * as projectHosts from '#project-host.js';
 import type { HostJobWorkerFactory } from '#job-worker.js';
+import type * as runtimeChildSupervisor from '#runtime-child-supervisor.js';
+import type { RuntimeChildHandle } from '#runtime-child-supervisor.js';
 
 /* Observe the filesystem the daemon binds to its runtime child, without changing
  * it: the captured thunk is the connection that child's bridge opens. */
@@ -44,6 +46,31 @@ vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
     fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => {
       runtimeFileSystemOpens.push(open);
       return original.fromFileSystemBridge(open);
+    },
+  };
+});
+
+/* Observe every runtime child the daemon starts and each frame it posts to one, without changing either. */
+const runtimeChildren = vi.hoisted(
+  () => [] as Array<{ readonly handle: RuntimeChildHandle; readonly frames: Array<{ readonly type: string }> }>,
+);
+vi.mock('#runtime-child-supervisor.js', async (importOriginal) => {
+  const original = await importOriginal<typeof runtimeChildSupervisor>();
+  return {
+    ...original,
+    startRuntimeChild: async (
+      options: Parameters<typeof original.startRuntimeChild>[0],
+    ): Promise<RuntimeChildHandle> => {
+      const handle = await original.startRuntimeChild(options);
+      const frames: Array<{ readonly type: string }> = [];
+      runtimeChildren.push({ handle, frames });
+      return {
+        ...handle,
+        post: (frame) => {
+          frames.push(frame);
+          handle.post(frame);
+        },
+      };
     },
   };
 });
@@ -1879,4 +1906,141 @@ describe('startHostDaemon', () => {
     expect(events).toContainEqual(expect.objectContaining({ type: 'jobs', state: 'stopped' }));
     expect(JSON.stringify(events)).not.toContain(credential);
   }, 15_000);
+});
+
+/*
+ * One sandboxed runtime child per agent root and per relay session (kernel
+ * realm-shared state blueprint, invariant I8; operator ruling Q8). Roots and
+ * sessions never share a realm, and a child that exits or hangs costs only
+ * its own root or session.
+ */
+describe('startHostDaemon runtime child per root and session', () => {
+  const proofChild = fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url));
+  const zooProxyUrl = 'wss://zoo.example.test/v1/kernels/zoo';
+
+  /** Settles `'closed'` once the child exits, or `'open'` after `milliseconds`. */
+  const exitOf = async (handle: RuntimeChildHandle, milliseconds = 10_000): Promise<'closed' | 'open'> =>
+    Promise.race([handle.closed.then(() => 'closed' as const), delay(milliseconds, 'open' as const)]);
+
+  /** Wait until the daemon is past its control `ready`, so no start of its own interleaves with the case's. */
+  const awaitControlReady = async (relay: StubRelay): Promise<void> => {
+    await vi.waitFor(() => {
+      expect(relay.controlFrames).toContainEqual(expect.objectContaining({ type: 'ready' }));
+    });
+  };
+
+  it('starts one child per agent root, once under concurrent first use, each with the Zoo credential, and closes it with its root', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-child-per-root-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    projectHostSpy.mockClear();
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: proofChild },
+      agent: await agentOptionsIn(temporaryDirectory),
+      /* No session token: every child gets the signed-out frame, with no mint to wait for. */
+      zooProxy: { url: zooProxyUrl, apiUrl: 'https://zoo.example.test' },
+    });
+    try {
+      await daemon.ready;
+      await awaitControlReady(relay);
+      const options = projectHostSpy.mock.calls.at(-1)?.[0];
+      if (options === undefined) {
+        throw new TypeError('Expected the daemon to open a project host.');
+      }
+      const rootA = join(temporaryDirectory, 'workspace');
+      const rootB = join(temporaryDirectory, 'checkout-b');
+      await mkdir(rootB);
+      const releaseB = options.fileSystem.admit(rootB);
+      const before = runtimeChildren.length;
+
+      const [clientA, sameClientA] = await Promise.all([options.runtimeClient(rootA), options.runtimeClient(rootA)]);
+      const clientB = requireTerminableRuntimeClient(await options.runtimeClient(rootB));
+
+      expect(sameClientA).toBe(clientA);
+      const started = runtimeChildren.slice(before);
+      expect(started.map(({ handle }) => handle.url.href)).toEqual([expect.any(String), expect.any(String)]);
+      expect(started[0]?.handle.url.href).not.toBe(started[1]?.handle.url.href);
+      await vi.waitFor(() => {
+        expect(started.map(({ frames }) => frames)).toEqual([
+          [{ type: 'zoo-proxy-credential', url: zooProxyUrl }],
+          [{ type: 'zoo-proxy-credential', url: zooProxyUrl }],
+        ]);
+      });
+
+      releaseB();
+      expect(await exitOf(started[1]!.handle)).toBe('closed');
+      expect(clientB.lifecycleState).toBe('terminated');
+      expect(await exitOf(started[0]!.handle, 0)).toBe('open');
+    } finally {
+      await daemon.close();
+    }
+    expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');
+  }, 30_000);
+
+  it('gives each relay session its own child, and a child exit ends only its own session', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-child-per-session-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const events: HostDaemonEvent[] = [];
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: proofChild },
+      maxSessions: 2,
+      onEvent: (event) => events.push(event),
+    });
+    const disconnected = (sessionId: string) =>
+      events.filter(
+        (event) => event.type === 'session' && event.sessionId === sessionId && event.state === 'disconnected',
+      );
+    try {
+      await daemon.ready;
+      await awaitControlReady(relay);
+      const control = await relay.control;
+      const before = runtimeChildren.length;
+
+      control.send(JSON.stringify(agentOffer(relay.url, 'session-1')));
+      control.send(JSON.stringify(agentOffer(relay.url, 'session-2')));
+      await vi.waitFor(() => {
+        expect(relay.controlFrames).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'accept', sessionId: 'session-1' }),
+            expect.objectContaining({ type: 'accept', sessionId: 'session-2' }),
+          ]),
+        );
+      });
+      const started = runtimeChildren.slice(before);
+      expect(started).toHaveLength(2);
+
+      (await relay.route(routePath('session-1', 'runtime'))).send('crash');
+      await vi.waitFor(() => {
+        expect(disconnected('session-1')).toEqual([expect.objectContaining({ code: 'CHILD_EXIT' })]);
+      });
+      /* A shared child would end session 2 in the same instant; give it time to show. */
+      await delay(1000);
+      expect(disconnected('session-2')).toEqual([]);
+      expect((await relay.route(routePath('session-2', 'runtime'))).readyState).toBe(WebSocket.OPEN);
+
+      control.send(JSON.stringify({ v: 1, type: 'revoke', sessionId: 'session-2' }));
+      await vi.waitFor(() => {
+        expect(disconnected('session-2')).toEqual([expect.objectContaining({ code: 'REVOKED' })]);
+      });
+      expect(await exitOf(started[1]!.handle)).toBe('closed');
+    } finally {
+      await daemon.close();
+    }
+    expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');
+  }, 30_000);
 });

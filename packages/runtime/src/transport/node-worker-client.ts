@@ -265,10 +265,11 @@ export const nodeWorkerClient = (
         throw new Error('nodeWorkerTransport: client closed before open()');
       }
       void ensurePools();
-      worker = Reflect.construct(workerCtor, [
+      // oxlint-disable-next-line new-cap -- the constructor is held in a camel-case variable by naming policy.
+      worker = new workerCtor(
         options.url,
         options.workerData === undefined ? undefined : { workerData: options.workerData },
-      ]);
+      );
       const eventWorker = worker as NodeWorkerLike & {
         on(event: 'error', listener: (error: Error) => void): NodeWorkerLike;
         on(event: 'exit', listener: (exitCode: number) => void): NodeWorkerLike;

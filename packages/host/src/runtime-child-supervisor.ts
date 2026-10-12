@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { fork } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -91,6 +91,7 @@ const permissionArguments = (modulePath: string, temporaryDirectory: string): st
         `--allow-fs-read=${dirname(modulePath)}`,
         `--allow-fs-read=${temporaryDirectory}`,
         `--allow-fs-write=${tmpdir()}`,
+        `--allow-fs-write=${temporaryDirectory}`,
       ];
 
 // Node 24 does not gate network access. Node 26 requires the experimental
@@ -137,7 +138,9 @@ export const startRuntimeChild = async (options: {
   readonly args?: readonly string[];
 }): Promise<RuntimeChildHandle> => {
   const authorizationToken = randomBytes(32).toString('base64url');
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-runtime-child-'));
+  /* The real path: importing a module resolves symlinks component by component (macOS's `/var` is a link to
+   * `/private/var`), and the grants cover only this directory, not its symlinked ancestors. */
+  const temporaryDirectory = await realpath(await mkdtemp(join(tmpdir(), 'tau-runtime-child-')));
   const child = fork(options.modulePath, [...(options.args ?? [])], {
     cwd: process.cwd(),
     env: {

@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -75,7 +75,7 @@ describe('runtime child permission boundary', () => {
       network: true,
       arbitraryNetworkAllowed: true,
     });
-    expect(childTemporaryDirectory.startsWith(join(tmpdir(), 'tau-runtime-child-'))).toBe(true);
+    expect(childTemporaryDirectory.startsWith(join(await realpath(tmpdir()), 'tau-runtime-child-'))).toBe(true);
     await child.close();
     await child.closed;
     await expect(access(childTemporaryDirectory)).rejects.toThrow(/ENOENT/u);

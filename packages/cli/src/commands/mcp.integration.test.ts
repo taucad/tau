@@ -50,6 +50,9 @@ export const resolve = async (specifier, context, next) => {
 /** What the noisy model prints from its kernel's thread; never JSON-RPC. */
 const noiseMarker = 'tau-mcp-model-console-noise';
 
+/** What the loud model prints after more output than a pipe holds. */
+const loudTailMarker = 'tau-mcp-model-console-tail';
+
 const files = {
   block: {
     'main.ts': `import { drawRectangle } from 'replicad';
@@ -72,6 +75,14 @@ describe('20 x 10 x 4 mm block', () => {
 
 export default function main() {
   console.log('${noiseMarker}');
+  return drawRectangle(20, 10).sketchOnPlane('XY').extrude(4);
+}
+`,
+    'loud.ts': `import { drawRectangle } from 'replicad';
+
+export default function main() {
+  console.log('x'.repeat(1024 * 1024));
+  console.log('${loudTailMarker}');
   return drawRectangle(20, 10).sketchOnPlane('XY').extrude(4);
 }
 `,
@@ -406,6 +417,19 @@ describe('tau mcp over stdio', () => {
   );
 
   it(
+    "should forward a model's output past a full pipe to stderr",
+    async () => {
+      const result = await call({ name: 'evaluate_model', arguments: { targetFile: 'loud.ts' } });
+
+      expect(result.structuredContent).toMatchObject({ status: 'ready' });
+      /* A megabyte overfills stderr's pipe; what follows reaches stderr only if the forwarding resumes once the
+       * pipe drains. (Once esbuild has started, this process's stderr blocks instead, so this passes without it.) */
+      await expect.poll(() => served.stderr().includes(loudTailMarker), { timeout: 10_000 }).toBe(true);
+    },
+    kernelCallLimit,
+  );
+
+  it(
     'should work in the folder Codex names with a call, and in the default folder otherwise',
     async () => {
       /* As Codex 0.157 sends it: the folder as a `file:` URL under `sandboxCwd`. */
@@ -693,18 +717,23 @@ describe('tau mcp with one thread per project', () => {
     async () => {
       const marker = join(scratch, 'beta-looping');
       await writeFile(join(beta, 'loop.ts'), loopingModel(marker));
-      const looping = client.callTool(
-        { name: 'evaluate_model', arguments: { targetFile: 'loop.ts' }, _meta: betaMeta() },
-        undefined,
-        { timeout: kernelCallLimit },
-      );
+      /* The call never answers: the server stops under it. */
+      const looping = Promise.allSettled([
+        client.callTool(
+          { name: 'evaluate_model', arguments: { targetFile: 'loop.ts' }, _meta: betaMeta() },
+          undefined,
+          {
+            timeout: kernelCallLimit,
+          },
+        ),
+      ]);
       await fileAppears(marker, warmCallLimit);
 
       await client.close();
-      const { code } = await exitWithin(served, 10_000);
+      /* Inside the five-second grace: a thread that ignored termination would hold the exit to the grace. */
+      const { code } = await exitWithin(served, 4000);
       expect(code).toBe(0);
-      /* The call never answered: the server stopped under it. */
-      await expect(looping).rejects.toThrow();
+      await looping;
     },
     kernelCallLimit,
   );

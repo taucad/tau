@@ -9,7 +9,7 @@
 
 import type { KernelIssue } from '#types/runtime.types.js';
 import type { KernelServices } from '#types/runtime-kernel-v2.types.js';
-import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
+import { toKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
 import { assertRootedPath } from '@taucad/utils/path';
@@ -268,7 +268,7 @@ export function convertRawIssuesToKernelIssues(
   return issues.map((issue) => ({
     ...issue,
     message: issue.message,
-    code: isKernelIssueCode(issue.code) ? issue.code : 'UNKNOWN',
+    code: toKernelIssueCode(issue.code),
     type: 'runtime',
     severity: issue.severity === 'warning' ? 'warning' : 'error',
     location: (issue.location as KernelIssue['location']) ?? {

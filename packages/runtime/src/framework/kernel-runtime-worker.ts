@@ -1190,10 +1190,10 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       // A typed refusal (e.g. KERNEL_REALM_CONFLICT) reaches the client as is; name the refusing kernel on a copy,
       // since one rejected realm creation may reach several kernels.
       const carried = carriedKernelIssues(error);
-      if (error instanceof Error && carried) {
+      if (carried) {
         const [issue, ...rest] = carried;
         const details = typeof issue.details === 'object' && issue.details !== null ? issue.details : {};
-        throw Object.assign(new Error(error.message, { cause: error }), {
+        throw Object.assign(new Error(error instanceof Error ? error.message : issue.message, { cause: error }), {
           issues: [{ ...issue, details: { producer: kernel.entry.id, ...details } }, ...rest],
         });
       }

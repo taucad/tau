@@ -92,6 +92,7 @@ import { createComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import type { ComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import { toJSONSchema, z } from 'zod';
 import { runtimeIssueSchema } from '#types/runtime-wire-common.schemas.js';
+import { toKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { createKernelError } from '#kernels/kernel-helpers.js';
 import { fileChangeDebounce } from '#framework/runtime-framework.constants.js';
 import { canonicalJson, sha256Bytes, sha256String } from '@taucad/utils/hash';
@@ -252,18 +253,24 @@ const sourceRevisionForArtifact = (artifact: MaterializedRender, fallback?: Sour
 };
 
 const neverAbortedSignal = new AbortController().signal;
-const carriedKernelIssuesSchema = z.tuple([runtimeIssueSchema], runtimeIssueSchema);
+const carriedKernelIssueSchema = runtimeIssueSchema.extend({
+  code: z.unknown().optional().transform(toKernelIssueCode),
+});
+// A row that is not a kernel issue parses to `undefined`, so it never fails its siblings.
+const carriedKernelIssuesSchema = z.array(z.union([carriedKernelIssueSchema, z.unknown().transform(() => undefined)]));
 
 /**
  * Read the kernel issues a thrown value carries on `.issues` (a `KernelError`, a `KERNEL_REALM_CONFLICT` refusal).
  *
- * Validated against the runtime wire's own issue schema rather than duck-typed: other errors carry an `issues`
- * array too (`ZodError`, `WireValidationError`), and a row the wire would refuse is dropped by the receiving
- * channel rather than reported. Non-empty, because an empty `issues` array explains nothing. Structural, so
- * duplicate runtime copies in one realm agree.
+ * Each row is validated to the runtime wire's issue envelope (a `message` and a `severity`) rather than
+ * duck-typed: other errors carry an `issues` array too (`ZodError`, `WireValidationError`), and a row the wire
+ * would refuse is dropped by the receiving channel rather than reported. Rows are kept one by one, so a foreign
+ * row never discards a valid one; an unknown or missing `code` becomes `'UNKNOWN'`, and a row without a
+ * `message` or `severity` is dropped. Optional fields the envelope does not list (`type`, `location`, `stack`)
+ * pass through unchecked, as on the wire. Structural, so duplicate runtime copies in one realm agree.
  *
  * @param error - The thrown value.
- * @returns The carried issues, or `undefined` when it carries no valid kernel issue.
+ * @returns The carried issues, or `undefined` when no row is a kernel issue.
  * @internal
  */
 export const carriedKernelIssues = (error: unknown): [KernelIssue, ...KernelIssue[]] | undefined => {
@@ -271,7 +278,8 @@ export const carriedKernelIssues = (error: unknown): [KernelIssue, ...KernelIssu
     return undefined;
   }
   const parsed = carriedKernelIssuesSchema.safeParse(error.issues);
-  return parsed.success ? parsed.data : undefined;
+  const [first, ...rest] = parsed.success ? parsed.data.filter((issue) => issue !== undefined) : [];
+  return first ? [first, ...rest] : undefined;
 };
 
 /** Joined issue messages for a terminal state's `detail`, or nothing to say. */

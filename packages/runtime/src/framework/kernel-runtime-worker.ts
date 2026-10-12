@@ -1187,11 +1187,14 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     try {
       kernel.ctx = await kernel.definition.initialize(kernel.options, runtime);
     } catch (error) {
-      // A typed refusal (e.g. KERNEL_REALM_CONFLICT) reaches the client as is; name the refusing kernel.
+      // A typed refusal (e.g. KERNEL_REALM_CONFLICT) reaches the client as is; name the refusing kernel on a copy,
+      // since one rejected realm creation may reach several kernels.
       if (error instanceof Error && 'issues' in error && Array.isArray(error.issues) && error.issues.length > 0) {
-        const issue = error.issues[0] as KernelIssue;
+        const [issue, ...rest] = error.issues as [KernelIssue, ...KernelIssue[]];
         const details = typeof issue.details === 'object' && issue.details !== null ? issue.details : {};
-        error.issues[0] = { ...issue, details: { producer: kernel.entry.id, ...details } };
+        throw Object.assign(new Error(error.message, { cause: error }), {
+          issues: [{ ...issue, details: { producer: kernel.entry.id, ...details } }, ...rest],
+        });
       }
       throw error;
     }

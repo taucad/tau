@@ -74,6 +74,16 @@ LocalAnalysis_CurveContinuity: declare class LocalAnalysis_CurveContinuity
 
 LocalAnalysis_StatusErrorType: typeof LocalAnalysis_StatusErrorType[keyof typeof LocalAnalysis_StatusErrorType]
 
+  readonly LocalAnalysis_NullFirstDerivative: 'LocalAnalysis_NullFirstDerivative'
+
+  readonly LocalAnalysis_NullSecondDerivative: 'LocalAnalysis_NullSecondDerivative'
+
+  readonly LocalAnalysis_TangentNotDefined: 'LocalAnalysis_TangentNotDefined'
+
+  readonly LocalAnalysis_NormalNotDefined: 'LocalAnalysis_NormalNotDefined'
+
+  readonly LocalAnalysis_CurvatureNotDefined: 'LocalAnalysis_CurvatureNotDefined'
+
 LocalAnalysis_SurfaceContinuity: declare class LocalAnalysis_SurfaceContinuity
 
   // LocalAnalysis_SurfaceContinuity.constructor (constructor)

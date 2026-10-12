@@ -373,7 +373,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
       await result.current.actions.sendMessage(user);
     });
     act(() => {
-      result.current.actions.stop();
+      result.current.actions.stop('stop-button');
       result.current.actions.editMessage('missing-edit', 'ignored');
     });
 

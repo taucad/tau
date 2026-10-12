@@ -5,9 +5,9 @@
  * `src/generated/kcl/kcl-stdlib-export.json`, so consumers never need the
  * `repos/zoo-modeling-app` checkout. This module only transforms it.
  *
- * Three things the previous transform dropped are carried here: the
- * `experimental` flag (16 functions and 2 types upstream), the 14 `module`
- * entries, and the unit part of `number(Angle)`-style argument types.
+ * Things the previous transform dropped are carried here: the `experimental`
+ * flag, the `module` entries, the unit part of `number(Angle)`-style argument
+ * types, `deprecated_since`, and the upstream doc-comment examples.
  *
  * @module
  */
@@ -18,6 +18,26 @@ import { createApiCorpus } from '#model/api-corpus.js';
 import type { ApiEntryDraft } from '#model/api-corpus.js';
 import type { ApiCorpus, ApiDocs, ApiLanguageSpecific, ApiParameter } from '#model/api-corpus.types.js';
 
+/**
+ * One doc-comment example. `sketch_syntax` is upstream's `ExampleSketchSyntax`:
+ * `SketchSolve` uses `sketch(on = …) { … }` blocks, `Legacy` the KCL 1.0
+ * `startSketchOn` pipeline deprecated in KCL 2.0.
+ * @internal
+ */
+export type KclExampleExport = {
+  readonly code: string;
+  readonly sketch_syntax: 'SketchSolve' | 'Legacy' | 'SketchSyntaxAgnostic';
+};
+
+/** Fields every documented item of the export shares. @internal */
+export type KclItemExport = {
+  readonly deprecated: boolean;
+  /** The KCL language version the item is deprecated from, e.g. `2.0`. */
+  readonly deprecated_since: string | undefined;
+  readonly experimental: boolean;
+  readonly examples: readonly KclExampleExport[];
+};
+
 /** One argument of a `functions[]` record. @internal */
 export type KclArgumentExport = {
   readonly name: string;
@@ -27,38 +47,32 @@ export type KclArgumentExport = {
 };
 
 /** One `functions[]` record of the upstream export. @internal */
-export type KclFunctionExport = {
+export type KclFunctionExport = KclItemExport & {
   readonly name: string;
   readonly qual_name: string;
   readonly module: string;
   readonly summary: string | undefined;
   readonly description: string | undefined;
-  readonly deprecated: boolean;
-  readonly experimental: boolean;
   readonly fn_signature: string;
   readonly args: readonly KclArgumentExport[];
   readonly return_value?: { readonly type_: string; readonly description: string };
 };
 
 /** One `types[]` record of the upstream export. @internal */
-export type KclTypeExport = {
+export type KclTypeExport = KclItemExport & {
   readonly name: string;
   readonly qual_name: string;
   readonly definition: string | undefined;
   readonly summary: string | undefined;
   readonly description: string | undefined;
-  readonly deprecated: boolean;
-  readonly experimental: boolean;
 };
 
 /** One `constants[]` record of the upstream export. @internal */
-export type KclConstantExport = {
+export type KclConstantExport = KclItemExport & {
   readonly name: string;
   readonly qual_name: string;
   readonly summary: string | undefined;
   readonly description: string | undefined;
-  readonly deprecated: boolean;
-  readonly experimental: boolean;
   readonly type_: string | undefined;
   readonly value: string;
 };
@@ -69,6 +83,7 @@ export type KclModuleExport = {
   readonly qual_name: string;
   readonly summary: string | undefined;
   readonly description: string | undefined;
+  readonly experimental: boolean;
 };
 
 /** The vendored `kcl-stdlib-export.json` document. @internal */
@@ -99,17 +114,47 @@ const trimmed = (value: string | undefined): string | undefined => {
   return text === undefined || text === '' ? undefined : text;
 };
 
-const docsOf = (summary: string | undefined, description: string | undefined): ApiDocs | undefined => {
+type ApiExample = NonNullable<ApiDocs['examples']>[number];
+
+const legacyCaption = 'Legacy sketch syntax (deprecated in KCL 2.0)';
+
+/**
+ * Upstream examples, current syntax only where an entry has both: `Legacy`
+ * examples are kept, captioned, only when nothing else shows the call.
+ */
+const examplesOf = (examples: readonly KclExampleExport[]): ApiExample[] => {
+  const current = examples.filter((example) => example.sketch_syntax !== 'Legacy');
+  return current.length > 0
+    ? current.map((example) => ({ code: example.code }))
+    : examples.map((example) => ({ caption: legacyCaption, code: example.code }));
+};
+
+const docsOf = (
+  summary: string | undefined,
+  description: string | undefined,
+  examples: readonly ApiExample[],
+): ApiDocs | undefined => {
   const summaryText = trimmed(summary);
   const remarks = trimmed(description);
-  if (summaryText === undefined && remarks === undefined) {
+  if (summaryText === undefined && remarks === undefined && examples.length === 0) {
     return undefined;
   }
 
   return {
     ...(summaryText === undefined ? {} : { summary: summaryText }),
     ...(remarks === undefined ? {} : { remarks }),
+    ...(examples.length === 0 ? {} : { examples }),
   };
+};
+
+/** `ApiEntry.deprecated`: the KCL version that deprecates the item, else the bare flag. */
+const deprecationOf = (source: KclItemExport): { readonly deprecated?: string | true } => {
+  const since = trimmed(source.deprecated_since);
+  if (since !== undefined) {
+    return { deprecated: `Deprecated in KCL ${since}.` };
+  }
+
+  return source.deprecated ? { deprecated: true } : {};
 };
 
 /** The bare unit of a `number(Angle)`-style type, e.g. `Angle`, `Length`, `_`. */
@@ -139,7 +184,7 @@ const languageSpecific = (
 
 const functionDraft = (source: KclFunctionExport): ApiEntryDraft => {
   const path = containerPath(source.qual_name);
-  const docs = docsOf(source.summary, source.description);
+  const docs = docsOf(source.summary, source.description, examplesOf(source.examples));
   const positional = positionalNames(source.fn_signature);
   const unitTypes: Record<string, string> = {};
   const parameters: ApiParameter[] = source.args.map((argument) => {
@@ -178,7 +223,7 @@ const functionDraft = (source: KclFunctionExport): ApiEntryDraft => {
       },
     ],
     ...(docs === undefined ? {} : { docs }),
-    ...(source.deprecated ? { deprecated: true } : {}),
+    ...deprecationOf(source),
     ...(specific === undefined ? {} : { languageSpecific: specific }),
   };
 };
@@ -186,7 +231,7 @@ const functionDraft = (source: KclFunctionExport): ApiEntryDraft => {
 const typeDraft = (source: KclTypeExport): ApiEntryDraft => {
   const definition = trimmed(source.definition);
   const path = containerPath(source.qual_name);
-  const docs = docsOf(source.summary, source.description);
+  const docs = docsOf(source.summary, source.description, examplesOf(source.examples));
   const specific = languageSpecific({}, source.experimental);
 
   return {
@@ -195,7 +240,7 @@ const typeDraft = (source: KclTypeExport): ApiEntryDraft => {
     ...(path === undefined ? {} : { path, category: path }),
     ...(definition === undefined ? {} : { type: { text: definition } }),
     ...(docs === undefined ? {} : { docs }),
-    ...(source.deprecated ? { deprecated: true } : {}),
+    ...deprecationOf(source),
     ...(specific === undefined ? {} : { languageSpecific: specific }),
   };
 };
@@ -204,7 +249,12 @@ const constantDraft = (source: KclConstantExport): ApiEntryDraft => {
   const path = containerPath(source.qual_name);
   const typeText = trimmed(source.type_);
   const value = trimmed(source.value);
-  const docs = docsOf(source.summary, source.description);
+  // The model has no constant-value field; the literal is display prose, and
+  // an example block is how the old markdown rendered it.
+  const docs = docsOf(source.summary, source.description, [
+    ...(value === undefined ? [] : [{ caption: 'Value', code: `${source.name} = ${value}` }]),
+    ...examplesOf(source.examples),
+  ]);
   const specific = languageSpecific({}, source.experimental);
 
   return {
@@ -212,24 +262,16 @@ const constantDraft = (source: KclConstantExport): ApiEntryDraft => {
     kind: 'constant',
     ...(path === undefined ? {} : { path, category: path }),
     ...(typeText === undefined ? {} : { type: { text: typeText } }),
-    // The model has no constant-value field; the literal is display prose, and
-    // an example block is how the old markdown rendered it.
-    ...(docs === undefined && value === undefined
-      ? {}
-      : {
-          docs: {
-            ...docs,
-            ...(value === undefined ? {} : { examples: [{ caption: 'Value', code: `${source.name} = ${value}` }] }),
-          },
-        }),
-    ...(source.deprecated ? { deprecated: true } : {}),
+    ...(docs === undefined ? {} : { docs }),
+    ...deprecationOf(source),
     ...(specific === undefined ? {} : { languageSpecific: specific }),
   };
 };
 
 const moduleDraft = (source: KclModuleExport): ApiEntryDraft => {
   const path = containerPath(source.qual_name);
-  const docs = docsOf(source.summary, source.description);
+  const docs = docsOf(source.summary, source.description, []);
+  const specific = languageSpecific({}, source.experimental);
 
   return {
     name: source.name,
@@ -237,6 +279,7 @@ const moduleDraft = (source: KclModuleExport): ApiEntryDraft => {
     ...(path === undefined ? {} : { path }),
     category: path === undefined ? source.name : `${path}.${source.name}`,
     ...(docs === undefined ? {} : { docs }),
+    ...(specific === undefined ? {} : { languageSpecific: specific }),
   };
 };
 

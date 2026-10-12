@@ -143,6 +143,9 @@
 /* Typography is provided by fumadocs-ui/css/preset.css (forked @tailwindcss/typography with fd-* color support) */
 
 :root {
+  /* macOS hiddenInset traffic lights end near 65px; leave one control gap after them.
+     Shared by the application shell and standalone window headers. */
+  --desktop-titlebar-inset: calc(var(--spacing) * 20);
   --chat-streaming-fade-duration: 150ms;
   --chat-streaming-fade-easing: cubic-bezier(0.37, 0.55, 0.86, 0.88);
   --scrollbar-thumb: var(--border);

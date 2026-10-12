@@ -19,8 +19,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChannelClosedError, createChannelServer, wrapMessagePort } from '@taucad/rpc';
 import type { ChannelServer, CloseInfo, MessagePortLike, Port } from '@taucad/rpc';
 
+import type { AgentWireCompatProtocol } from '#channel/wire-v1.js';
 import { createAgentChannelClient } from '#channel/agent-channel-client.js';
 import { serveAgentChannel } from '#launchers/agent-channel.js';
+import type { AgentLiveEvent } from '#waist/ports.js';
 import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
 
@@ -249,7 +251,179 @@ describe('createAgentChannelClient', () => {
     }
   });
 
-  it('should refuse an owner that speaks another wire version, without redialling', async () => {
+  it.each([true, false])('decodes actual wire 3 live events only with writer generation: %s', async (tagged) => {
+    const channel = new MessageChannel();
+    const events = [
+      {
+        type: 'thinking-start',
+        chatId: 'chat-current',
+        runId: 'run-current',
+        messageId: 'assistant-current',
+        contentIndex: 0,
+      },
+      {
+        type: 'thinking-delta',
+        chatId: 'chat-current',
+        runId: 'run-current',
+        messageId: 'assistant-current',
+        contentIndex: 0,
+        delta: 'held reasoning',
+      },
+    ].map((event) => (tagged ? { ...event, sourceGeneration: 'writer-current' } : event));
+    createChannelServer({
+      port: wrapMessagePort<unknown>(channel.port1 as unknown as MessagePortLike),
+      sessionKey: 'tau-agent',
+      hello: { wire: 3, build },
+      impl: {
+        call: async () => {
+          throw new Error('This regression only subscribes.');
+        },
+        listen: () =>
+          new ReadableStream<unknown>({
+            start(controller) {
+              for (const event of events) {
+                controller.enqueue(event);
+              }
+              controller.close();
+            },
+          }),
+      },
+    });
+    const client = createAgentChannelClient({ connect: () => channel.port2 as unknown as MessagePortLike });
+    disposers.push(() => {
+      client.close();
+      channel.port1.close();
+    });
+    const received = async () => {
+      const values = [];
+      for await (const event of client.liveEvents({ chatId: 'chat-current' })) {
+        values.push(event);
+      }
+      return values;
+    };
+    await (tagged ? expect(received()).resolves.toEqual(events) : expect(received()).rejects.toThrow());
+  });
+
+  it.each([true, false])('strictly decodes actual wire 3 catch-up pages and validation: %s', async (tagged) => {
+    const channel = new MessageChannel();
+    const frames = [
+      {
+        type: 'page',
+        answer: {
+          status: 'batch',
+          chatId: 'chat-catch-up',
+          cursor: 0,
+          nextCursor: 1,
+          endCursor: 1,
+          facts: [
+            {
+              classification: 'opaque',
+              row: { version: 1, leaderEpoch: 'wire', sequence: 0, recordedAt: '2026-10-09T00:00:00.000Z', runId: 'r' },
+              eventType: 'future.row',
+              affectsHistory: false,
+            },
+          ],
+          ...(tagged ? { sourceGeneration: 'source-catch-up' } : {}),
+        },
+      },
+      {
+        type: 'validated',
+        position: { cursor: 1, sourceGeneration: 'source-catch-up' },
+        observedEndCursor: 1,
+        health: { historyIntact: true, newerHistory: false, quarantined: false },
+      },
+    ];
+    createChannelServer({
+      port: wrapMessagePort<unknown>(channel.port1 as unknown as MessagePortLike),
+      sessionKey: 'tau-agent',
+      hello: { wire: 3, build },
+      impl: {
+        call: async () => {
+          throw new Error('Catch-up only subscribes.');
+        },
+        listen: () =>
+          new ReadableStream<unknown>({
+            start(controller) {
+              for (const frame of frames) {
+                controller.enqueue(frame);
+              }
+              controller.close();
+            },
+          }),
+      },
+    });
+    const client = createAgentChannelClient({ connect: () => channel.port2 });
+    disposers.push(() => {
+      client.close();
+      channel.port1.close();
+    });
+    const received = async () => {
+      const values = [];
+      for await (const frame of client.catchUp({ chatId: 'chat-catch-up', limit: 1, maxBytes: 1024 })) {
+        values.push(frame);
+      }
+      return values;
+    };
+    await (tagged ? expect(received()).resolves.toEqual(frames) : expect(received()).rejects.toThrow());
+  });
+
+  it('refuses legacy v1 authoritative reads and streams instead of inventing source facts', async () => {
+    const channel = new MessageChannel();
+    let subscriptions = 0;
+    createChannelServer<{
+      calls: Record<string, never>;
+      notifies: Record<string, never>;
+      listens: {
+        liveEvents: {
+          args: AgentWireCompatProtocol['listens']['liveEvents']['args'];
+          event: { chatId: string; event: AgentLiveEvent };
+        };
+      };
+    }>({
+      port: wrapMessagePort<unknown>(channel.port1 as unknown as MessagePortLike),
+      sessionKey: 'tau-agent',
+      impl: {
+        call: async () => {
+          throw new Error('No legacy command is needed for a live subscription.');
+        },
+        listen: () => {
+          subscriptions += 1;
+          return new ReadableStream<{ chatId: string; event: AgentLiveEvent }>({
+            start(controller) {
+              controller.enqueue({
+                chatId: 'chat-legacy',
+                event: {
+                  type: 'text-delta',
+                  chatId: 'chat-legacy',
+                  runId: 'run-legacy',
+                  messageId: 'assistant-legacy',
+                  contentIndex: 0,
+                  delta: 'untagged legacy content',
+                },
+              });
+              controller.close();
+            },
+          });
+        },
+      },
+    });
+    const client = createAgentChannelClient({ connect: () => channel.port2 as unknown as MessagePortLike });
+    disposers.push(() => {
+      client.close();
+      channel.port1.close();
+    });
+    const live = client.liveEvents({ chatId: 'chat-legacy' })[Symbol.asyncIterator]();
+    await expect(live.next()).rejects.toMatchObject({ code: 'WIRE_VERSION_UNSUPPORTED' });
+    await expect(
+      client.catchUp({ chatId: 'chat-legacy', limit: 1, maxBytes: 1024 })[Symbol.asyncIterator]().next(),
+    ).rejects.toMatchObject({ code: 'WIRE_VERSION_UNSUPPORTED' });
+    const legacyRead = client.read({ chatId: 'chat-legacy', cursor: 0, limit: 1, maxBytes: 1024 });
+    await expect(legacyRead).rejects.toMatchObject({ code: 'WIRE_VERSION_UNSUPPORTED' });
+    await expect(legacyRead).rejects.toThrow('Update the agent host');
+    expect(subscriptions).toBe(0);
+  });
+
+  it.each([2, 99])('should refuse an owner that speaks wire %i, without redialling', async (wire) => {
     const channel = new MessageChannel();
     let dials = 0;
     // An owner from after the compatibility window: its hello names a wire this client does not speak (I32).
@@ -264,7 +438,7 @@ describe('createAgentChannelClient', () => {
     createChannelServer({
       port: wrapMessagePort<unknown>(channel.port1 as unknown as MessagePortLike),
       sessionKey: 'tau-agent',
-      hello: { wire: 3, build: 'future' },
+      hello: { wire, build: 'unsupported' },
       impl: newer,
     });
     const client = createAgentChannelClient({

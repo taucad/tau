@@ -34,3 +34,14 @@ def main(params: Params) -> Shape:
 ```
 
 Prefer Build123d features, sketches, joints, and assemblies over primitive-buttings. Diagnose invalid shapes, duplicate labels, coincident booleans, and zero dimensions first.
+
+Both build123d styles work: builder mode (`with BuildPart() as part:` … `part.part`, objects combine by `mode=Mode.ADD`/`Mode.SUBTRACT`) and algebra mode (`Pos(x, y, z) * Box(…) - Cylinder(…)`). Pick one per model.
+
+## Wrong / Correct
+
+- Wrong: `Cylinder(radius=4, height=10, base=(0, 0, 5))`. Correct: primitives take no position: `Pos(0, 0, 5) * Cylinder(4, 10)`, or place them with `Locations` in builder mode.
+- Wrong: assuming an OCP/OCCT call. Correct: use build123d objects and operations; the reference lists build123d's public API only.
+
+## Verify
+
+Test the model with a TypeScript `main.geospec.ts` (activate `geospec-authoring`): `await loadModel({ file: 'main.py' })`, then `expectGeo(model)`.

@@ -6,7 +6,9 @@
 
 import { emptyChatLedger, foldReadAnswer } from '#log/chat-ledger.js';
 import type { ChatLedger } from '#log/chat-ledger.js';
-import { agentWireLimits } from '#wire/frames.schema.js';
+import { sameSourceHealth } from '#log/projection-facts.js';
+import type { ProjectionSourceHealth } from '#log/projection-facts.js';
+import { agentWireLimits } from '#wire/limits.js';
 import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
 
 /** A long-poll read of one chat: a launcher's, a host's or a channel client's. @public */
@@ -14,7 +16,13 @@ export type ChatRead = (input: ReadInput) => Promise<ReadAnswer>;
 
 /** One folded read. `reset` and `stale` carry no rows; `refused` names why the owner would not read. @public */
 export type FoldedRead =
-  | Readonly<{ kind: 'folded'; ledger: ChatLedger; events: readonly unknown[]; endCursor: number }>
+  | Readonly<{
+      kind: 'folded';
+      ledger: ChatLedger;
+      events: readonly unknown[];
+      endCursor: number;
+      sourceHealth: ProjectionSourceHealth;
+    }>
   | Readonly<{ kind: 'reset'; ledger: ChatLedger; endCursor: number }>
   | Readonly<{ kind: 'stale'; ledger: ChatLedger; endCursor: number }>
   | Readonly<{ kind: 'refused'; ledger: ChatLedger; reason: 'owner-fenced' | 'unreadable' }>;
@@ -23,8 +31,7 @@ export type FoldedRead =
  * Read once from the ledger's position and fold the answer. A reset returns the empty ledger, so the next read
  * refolds from row 0.
  *
- * @param input - The long-poll read, the chat, the reader's ledger, and the signal that ends the wait (the read then
- * answers an empty batch).
+ * @param input - The long-poll read, chat, ledger, last authoritative health observation, and cancellation signal.
  * @returns The folded read.
  * @public
  *
@@ -41,16 +48,19 @@ export const readFolded = async ({
   read,
   chatId,
   ledger,
+  sourceHealth,
   signal,
 }: Readonly<{
   read: ChatRead;
   chatId: string;
   ledger: ChatLedger;
+  sourceHealth?: ProjectionSourceHealth | undefined;
   signal?: AbortSignal | undefined;
 }>): Promise<FoldedRead> => {
   const answer = await read({
     chatId,
     ...ledger.position,
+    ...(sourceHealth === undefined ? {} : { sourceHealth }),
     limit: agentWireLimits.batchRows,
     maxBytes: agentWireLimits.batchBytes,
     ...(signal === undefined ? {} : { signal }),
@@ -59,7 +69,16 @@ export const readFolded = async ({
   const endCursor = answer.status === 'batch' ? answer.endCursor : ledger.position.cursor;
   switch (fold.kind) {
     case 'folded': {
-      return { kind: 'folded', ledger: fold.ledger, events: answer.status === 'batch' ? answer.events : [], endCursor };
+      if (answer.status !== 'batch') {
+        return { kind: 'stale', ledger, endCursor };
+      }
+      return {
+        kind: 'folded',
+        ledger: fold.ledger,
+        events: answer.events,
+        endCursor,
+        sourceHealth: answer.sourceHealth,
+      };
     }
     case 'reset': {
       return { kind: 'reset', ledger: emptyChatLedger, endCursor };
@@ -74,8 +93,8 @@ export const readFolded = async ({
 };
 
 /**
- * Follow one chat from row 0, yielding the ledger after each batch that held rows. The follow ends when `until` holds
- * for the ledger once it has caught up with the log's end, when a read answers an empty batch (its signal ended the wait, or its owner closed), when the owner
+ * Follow one chat from row 0, yielding the ledger after each batch that held rows or changed source health. The follow ends when `until` holds
+ * for the ledger once it has caught up with the log's end, when cancellation ends the wait, when the owner
  * closed between reads (`HOST_CLOSED`), or on a refusal, which it returns rather than throws.
  *
  * @param read - The long-poll read.
@@ -104,14 +123,19 @@ export const followChat = async function* (
   'owner-fenced' | 'unreadable' | undefined
 > {
   let ledger = emptyChatLedger;
+  let sourceHealth: ProjectionSourceHealth | undefined;
   for (;;) {
+    if (options.signal.aborted) {
+      return undefined;
+    }
     let step: FoldedRead;
     try {
       // oxlint-disable-next-line no-await-in-loop -- a long poll reads after each batch.
-      step = await readFolded({ read, chatId, ledger, signal: options.signal });
+      step = await readFolded({ read, chatId, ledger, sourceHealth, signal: options.signal });
     } catch (error) {
       // An owner that closed between two reads ends the follow, as one closing during a read does.
-      if (error instanceof Error && 'code' in error && error.code === 'HOST_CLOSED') {
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- The awaited read can reject after an external abort changes this signal.
+      if (options.signal.aborted || (error instanceof Error && 'code' in error && error.code === 'HOST_CLOSED')) {
         return undefined;
       }
       throw error;
@@ -121,10 +145,16 @@ export const followChat = async function* (
     }
     ledger = step.ledger;
     if (step.kind !== 'folded') {
+      if (step.kind === 'reset') {
+        sourceHealth = undefined;
+      }
       continue;
     }
-    if (step.events.length === 0) {
-      return undefined;
+    const healthChanged = !sameSourceHealth(sourceHealth, step.sourceHealth);
+    sourceHealth = step.sourceHealth;
+    if (step.events.length === 0 && !healthChanged) {
+      // A source wake may overtake an acquired empty snapshot; the next read observes that wake's bytes.
+      continue;
     }
     yield { ledger, events: step.events };
     // Checked only once caught up: an early batch of an older run must not end a follow its newer run needs.

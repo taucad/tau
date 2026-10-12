@@ -340,6 +340,16 @@ BRepFeat_MakeRevol: declare class BRepFeat_MakeRevol extends BRepFeat_Form
 
 BRepFeat_PerfSelection: typeof BRepFeat_PerfSelection[keyof typeof BRepFeat_PerfSelection]
 
+  readonly BRepFeat_NoSelection: 'BRepFeat_NoSelection'
+
+  readonly BRepFeat_SelectionFU: 'BRepFeat_SelectionFU'
+
+  readonly BRepFeat_SelectionU: 'BRepFeat_SelectionU'
+
+  readonly BRepFeat_SelectionSh: 'BRepFeat_SelectionSh'
+
+  readonly BRepFeat_SelectionShU: 'BRepFeat_SelectionShU'
+
 BRepFeat_RibSlot: declare class BRepFeat_RibSlot extends BRepBuilderAPI_MakeShape
 
   // BRepFeat_RibSlot.IsDeleted (method)
@@ -426,4 +436,66 @@ BRepFeat_SplitShape: declare class BRepFeat_SplitShape extends BRepBuilderAPI_Ma
 
 BRepFeat_Status: typeof BRepFeat_Status[keyof typeof BRepFeat_Status]
 
+  readonly BRepFeat_NoError: 'BRepFeat_NoError'
+
+  readonly BRepFeat_InvalidPlacement: 'BRepFeat_InvalidPlacement'
+
+  readonly BRepFeat_HoleTooLong: 'BRepFeat_HoleTooLong'
+
 BRepFeat_StatusError: typeof BRepFeat_StatusError[keyof typeof BRepFeat_StatusError]
+
+  readonly BRepFeat_OK: 'BRepFeat_OK'
+
+  readonly BRepFeat_BadDirect: 'BRepFeat_BadDirect'
+
+  readonly BRepFeat_BadIntersect: 'BRepFeat_BadIntersect'
+
+  readonly BRepFeat_EmptyBaryCurve: 'BRepFeat_EmptyBaryCurve'
+
+  readonly BRepFeat_EmptyCutResult: 'BRepFeat_EmptyCutResult'
+
+  readonly BRepFeat_FalseSide: 'BRepFeat_FalseSide'
+
+  readonly BRepFeat_IncDirection: 'BRepFeat_IncDirection'
+
+  readonly BRepFeat_IncSlidFace: 'BRepFeat_IncSlidFace'
+
+  readonly BRepFeat_IncParameter: 'BRepFeat_IncParameter'
+
+  readonly BRepFeat_IncTypes: 'BRepFeat_IncTypes'
+
+  readonly BRepFeat_IntervalOverlap: 'BRepFeat_IntervalOverlap'
+
+  readonly BRepFeat_InvFirstShape: 'BRepFeat_InvFirstShape'
+
+  readonly BRepFeat_InvOption: 'BRepFeat_InvOption'
+
+  readonly BRepFeat_InvShape: 'BRepFeat_InvShape'
+
+  readonly BRepFeat_LocOpeNotDone: 'BRepFeat_LocOpeNotDone'
+
+  readonly BRepFeat_LocOpeInvNotDone: 'BRepFeat_LocOpeInvNotDone'
+
+  readonly BRepFeat_NoExtFace: 'BRepFeat_NoExtFace'
+
+  readonly BRepFeat_NoFaceProf: 'BRepFeat_NoFaceProf'
+
+  readonly BRepFeat_NoGluer: 'BRepFeat_NoGluer'
+
+  readonly BRepFeat_NoIntersectF: 'BRepFeat_NoIntersectF'
+
+  readonly BRepFeat_NoIntersectU: 'BRepFeat_NoIntersectU'
+
+  readonly BRepFeat_NoParts: 'BRepFeat_NoParts'
+
+  readonly BRepFeat_NoProjPt: 'BRepFeat_NoProjPt'
+
+  readonly BRepFeat_NotInitialized: 'BRepFeat_NotInitialized'
+
+  readonly BRepFeat_NotYetImplemented: 'BRepFeat_NotYetImplemented'
+
+  readonly BRepFeat_NullRealTool: 'BRepFeat_NullRealTool'
+
+  readonly BRepFeat_NullToolF: 'BRepFeat_NullToolF'
+
+  readonly BRepFeat_NullToolU: 'BRepFeat_NullToolU'

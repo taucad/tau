@@ -8,6 +8,7 @@ export const loadCliRuntime = async (options: {
   readonly plugin: unknown;
   readonly config?: string;
   readonly picogk?: PicogkKernelOptions;
+  readonly zooProxyUrl?: string;
 }): Promise<AnyRuntimeDefinition> => {
   const pluginSpecifiers = Array.isArray(options.plugin)
     ? options.plugin.filter((value): value is string => typeof value === 'string')
@@ -22,5 +23,6 @@ export const loadCliRuntime = async (options: {
     explicitFactories,
     configuredPlugins,
     ...(options.picogk ? { picogk: options.picogk } : {}),
+    ...(options.zooProxyUrl ? { zooProxyUrl: options.zooProxyUrl } : {}),
   });
 };

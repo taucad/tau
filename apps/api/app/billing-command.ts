@@ -2,8 +2,7 @@ import 'reflect-metadata'; // oxlint-disable-line import/no-unassigned-import --
 import { readFile } from 'node:fs/promises';
 import { setTimeout as wait } from 'node:timers/promises';
 import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
-import { runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
-import { runBillingBudgetCommand } from '#api/billing/billing-budget.command.js';
+import { assertRefundKey, runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
@@ -16,13 +15,17 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { financialEnvironmentSchema } from '@taucad/billing';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import { BillingRecoveryScheduler } from '#api/billing/billing-recovery.scheduler.js';
 import { BillingJournalReconciliationService } from '#api/billing/billing-journal-reconciliation.service.js';
-import {
-  BillingCashReconciliationService,
-  cashBlockingFinancialCaseKinds,
-} from '#api/billing/billing-cash-reconciliation.service.js';
+import { BillingCashReconciliationService } from '#api/billing/billing-cash-reconciliation.service.js';
 import { BillingPurchaseReconciliationService } from '#api/billing/billing-purchase-reconciliation.service.js';
-import { BillingSupplierReconciliationService } from '#api/billing/billing-supplier-reconciliation.service.js';
+import { BillingRoutePauseService, parseRoutePauseArguments } from '#api/billing/billing-route-pause.service.js';
+import {
+  createSupplierLegacyStore,
+  deleteSupplierLegacy,
+  exportSupplierLegacy,
+  parseSupplierLegacyArguments,
+} from '#api/billing/billing-supplier-legacy-export.js';
 import { registerBillableModelMeterContracts } from '#api/billing/billable-model-qualification.js';
 import { runBillingPolicyCommand, runBillingPolicySyncCommand } from '#api/billing/billing-policy.command.js';
 import { installBillingProtections } from '#database/billing-protections.js';
@@ -31,18 +34,26 @@ import * as schema from '#database/schema.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { EmailService } from '#email/email.service.js';
+import {
+  createOperationsGaugeSource,
+  deliverRecoveryNotices,
+  recordOpenCases,
+  recoveryNoticeEmailOrigin,
+  runHourlyOperationsJobs,
+} from '#billing-command.operations.js';
 import type { DatabaseService } from '#database/database.service.js';
 
 /**
- * Recovery notices become email only when this worker knows where the app lives and how to send.
- * Without both the notices stay pending, which is the correct outcome: a link to nowhere is worse
- * than a delayed one, and `deliverRecoveryNotices` keeps retrying every pass.
+ * Recovery notices become email only when this worker knows where the app lives (`TAU_FRONTEND_URL`) and
+ * how to send (`RESEND_API_KEY`). Without both the notices stay pending, which is the correct outcome: a
+ * link to nowhere is worse than a delayed one, a send that silently renders and returns would mark the
+ * notice delivered, and `deliverRecoveryNotices` keeps retrying every pass.
  */
 const createRecoveryNoticeTransport = (
   database: Pick<DatabaseService, 'database'>,
 ): BillingRecoveryNoticeEmailTransport | undefined => {
-  const frontendURL = process.env.TAU_FRONTEND_URL;
-  if (!frontendURL) {
+  const frontendURL = recoveryNoticeEmailOrigin(process.env);
+  if (frontendURL === undefined) {
     return undefined;
   }
   // EmailService reads its configuration through the Nest ConfigService shape; this worker has no
@@ -93,11 +104,17 @@ async function main(): Promise<void> {
     'recover-llm-worker': 'tau_billing_runtime',
     'reconcile-journal': 'tau_billing_runtime',
   };
+  // The login (owner) identity: DDL, the tariff bootstrap, and the operator's route and legacy-row commands.
+  const ownerCommands = new Set([
+    'protect',
+    'migrate',
+    'sync',
+    'pause-route',
+    'resume-route',
+    'export-supplier-legacy',
+  ]);
   const command = args[0] ?? '';
-  const role =
-    command === 'protect' || command === 'migrate' || command === 'provision-budgets' || command === 'sync'
-      ? undefined
-      : (runtimeRoles[command] ?? 'tau_billing_policy_publisher');
+  const role = ownerCommands.has(command) ? undefined : (runtimeRoles[command] ?? 'tau_billing_policy_publisher');
   const client = postgres(databaseUrl, {
     max: 1,
     prepare: false,
@@ -139,6 +156,11 @@ async function main(): Promise<void> {
         }
         // Outside the fixture, the deployment's write key performs mutations only where it collects.
         const writeKey = process.env.STRIPE_SECRET_KEY;
+        // A refund goes out only under the operator-held Refunds-Write key; Stripe refuses the create key.
+        const refundKey = process.env.STRIPE_REFUND_SECRET_KEY;
+        if (refundKey) {
+          assertRefundKey({ refundKey, livemode: mode === 'true', createKey: writeKey, readKey: secretKey });
+        }
         const collection = protectedKey
           ? null
           : resolveBillingCollection({
@@ -157,9 +179,13 @@ async function main(): Promise<void> {
                 protectedStripe: createBillingStripeClient({ secretKey: protectedKey, fixtureUrl }),
                 fixture: { monthlyPriceId, topupProductId },
               }
-            : writeKey && collection
-              ? { protectedStripe: createBillingStripeClient({ secretKey: writeKey, fixtureUrl }), collection }
-              : {}),
+            : {
+                ...(collection ? { collection } : {}),
+                ...(writeKey && collection
+                  ? { protectedStripe: createBillingStripeClient({ secretKey: writeKey, fixtureUrl }) }
+                  : {}),
+                ...(refundKey ? { refundStripe: createBillingStripeClient({ secretKey: refundKey, fixtureUrl }) } : {}),
+              }),
           environment: financialEnvironmentSchema.parse(environment),
           stripeAccountId,
           livemode: mode === 'true',
@@ -196,14 +222,50 @@ async function main(): Promise<void> {
         break;
       }
       case 'sync': {
-        // `sync` seeds development budgets and publishes, so it needs the owner identity and the protections.
+        // `sync` publishes the derived tariff, so it needs the owner identity and the protections.
         await installBillingProtections(client);
         console.log(await syncTariff());
         break;
       }
-      case 'provision-budgets': {
-        const result = await runBillingBudgetCommand(client, args, environment);
-        console.log(JSON.stringify(result));
+      case 'pause-route':
+      case 'resume-route': {
+        // Owner-only: the runtime role can read a pause but never write or lift one.
+        const { command: action, request } = parseRoutePauseArguments(args);
+        const pauses = new BillingRoutePauseService({ database: drizzle(client, { schema }) });
+        const pause = action === 'pause-route' ? await pauses.pauseRoute(request) : await pauses.resumeRoute(request);
+        console.log(
+          JSON.stringify({
+            event: action === 'pause-route' ? 'billing.route_paused' : 'billing.route_resumed',
+            ...pause,
+          }),
+        );
+        break;
+      }
+      case 'export-supplier-legacy': {
+        const options = parseSupplierLegacyArguments(args);
+        const store = createSupplierLegacyStore(client, options.environment);
+        const target = { store, environment: options.environment, outDirectory: options.outDirectory, now: new Date() };
+        if (options.delete) {
+          const deletion = await deleteSupplierLegacy(target);
+          console.log(
+            JSON.stringify({
+              event: 'billing.supplier_legacy_deleted',
+              environment,
+              outDirectory: options.outDirectory,
+              ...deletion,
+            }),
+          );
+          break;
+        }
+        const manifest = await exportSupplierLegacy(target);
+        console.log(
+          JSON.stringify({
+            event: 'billing.supplier_legacy_exported',
+            environment,
+            outDirectory: options.outDirectory,
+            files: manifest.files,
+          }),
+        );
         break;
       }
       case 'recover-payments': {
@@ -346,107 +408,21 @@ async function main(): Promise<void> {
         };
         process.once('SIGINT', stop);
         process.once('SIGTERM', stop);
+        // The same pass the API's in-process scheduler runs, metrics included: this worker is optional scale-out.
+        const recovery = new BillingRecoveryScheduler(ledger, metrics, {
+          environment: billingEnvironment,
+          intervalMilliseconds: pollMilliseconds,
+          limit,
+        });
         let consecutiveFailures = 0;
         try {
           while (!shutdown.signal.aborted) {
-            let failed = 0;
-            let batchThrew = false;
-            let fullBatch = false;
-            for (const pool of ['primary', 'helper'] as const) {
-              const startedAt = Date.now();
-              const attributes = {
-                'deployment.environment': billingEnvironment,
-                'tau.billing.capacity_pool': pool,
-              } as const;
-              metrics.billingFundedOperationRecoveries.add(1, {
-                ...attributes,
-                'tau.billing.recovery.outcome': 'attempted',
-              });
-              try {
-                // oxlint-disable-next-line no-await-in-loop -- the two disjoint capacity pools share one bounded DB connection
-                const result = await ledger.recoverDueLlmOperations({
-                  environment: billingEnvironment,
-                  limit,
-                  pool,
-                });
-                failed += result.failedOperationIds.length;
-                fullBatch ||= result.claimed === limit;
-                if (result.claimed > 0) {
-                  metrics.billingFundedOperationRecoveries.add(result.claimed, {
-                    ...attributes,
-                    'tau.billing.recovery.outcome': 'claimed',
-                  });
-                }
-                if (result.resolved > 0) {
-                  metrics.billingFundedOperationRecoveries.add(result.resolved, {
-                    ...attributes,
-                    'tau.billing.recovery.outcome': 'resolved',
-                  });
-                }
-                if (result.failedOperationIds.length > 0) {
-                  metrics.billingFundedOperationRecoveries.add(result.failedOperationIds.length, {
-                    ...attributes,
-                    'tau.billing.recovery.outcome': 'failed',
-                  });
-                }
-                metrics.billingFundedOperationCurrent.record(result.pending, {
-                  ...attributes,
-                  'tau.billing.pending.state': 'pending',
-                });
-                metrics.billingFundedOperationCurrent.record(result.remainingDue, {
-                  ...attributes,
-                  'tau.billing.pending.state': 'due',
-                });
-                metrics.billingFundedOperationOldestDueAge.record(result.oldestDueAgeMilliseconds ?? 0, attributes);
-                metrics.billingFundedOperationRecoveryProviderExecutions.record(0, attributes);
-                metrics.billingFundedOperationRecoveryBatchDuration.record((Date.now() - startedAt) / 1000, {
-                  ...attributes,
-                  'tau.billing.recovery.batch.outcome': result.failedOperationIds.length === 0 ? 'succeeded' : 'failed',
-                });
-                console.log(
-                  JSON.stringify({
-                    event: 'billing.llm_recovery_batch',
-                    environment,
-                    pool,
-                    claimed: result.claimed,
-                    resolved: result.resolved,
-                    pending: result.pending,
-                    remainingDue: result.remainingDue,
-                    leasedDue: result.leasedDue,
-                    oldestDueAgeMilliseconds: result.oldestDueAgeMilliseconds,
-                    failed: result.failedOperationIds.length,
-                    providerExecutions: 0,
-                    durationMilliseconds: Date.now() - startedAt,
-                  }),
-                );
-              } catch (error) {
-                failed += 1;
-                batchThrew = true;
-                metrics.billingFundedOperationRecoveries.add(1, {
-                  ...attributes,
-                  'tau.billing.recovery.outcome': 'failed',
-                });
-                metrics.billingFundedOperationRecoveryBatchDuration.record((Date.now() - startedAt) / 1000, {
-                  ...attributes,
-                  'tau.billing.recovery.batch.outcome': 'failed',
-                });
-                console.error(
-                  JSON.stringify({
-                    event: 'billing.llm_recovery_batch',
-                    environment,
-                    pool,
-                    outcome: 'failed',
-                    failureKind: error instanceof Error ? error.name : 'UnknownError',
-                    durationMilliseconds: Date.now() - startedAt,
-                  }),
-                );
-              }
+            // oxlint-disable-next-line no-await-in-loop -- the continuous worker runs one pass at a time
+            const { failed, fullBatch, batches } = await recovery.runOnce();
+            for (const batch of batches) {
+              (batch.outcome === 'failed' ? console.error : console.log)(JSON.stringify(batch));
             }
             consecutiveFailures = failed === 0 ? 0 : consecutiveFailures + 1;
-            /* F-10: the per-pass gauges keep exporting their last value, so a stalled worker is only visible here.
-               A pass is `error` only when a batch threw: one operation that keeps failing recovery is counted
-               by `recoveries{failed}`, and must not make a live worker read as stalled. */
-            metrics.billingWorkerPasses.add(1, { 'tau.worker': 'recovery', outcome: batchThrew ? 'error' : 'ok' });
             if (fullBatch && failed === 0) {
               continue;
             }
@@ -557,7 +533,7 @@ async function main(): Promise<void> {
         const journal = new BillingJournalReconciliationService(database, caseMetrics, sourceConfig);
         const cashScans = new BillingCashReconciliationService(database, sourceStripe, sourceConfig);
         const purchaseScans = new BillingPurchaseReconciliationService(database, sourceStripe, sourceConfig);
-        const supplier = new BillingSupplierReconciliationService(database, sourceConfig);
+        const gauges = createOperationsGaugeSource(client, billingEnvironment);
         // Each scheduled job owns its failure: one provider or data fault must not stop the others.
         let passFailed = false;
         const runJob = async (event: string, run: () => Promise<unknown>): Promise<void> => {
@@ -594,7 +570,6 @@ async function main(): Promise<void> {
         let lastSweepAt = Number.NEGATIVE_INFINITY;
         // Independent source reconciliation is hourly; its window is the previous complete UTC day.
         const scanIntervalMilliseconds = 60 * 60_000;
-        const dayMilliseconds = 24 * 60 * 60_000;
         // Due at boot: a worker restarted more often than hourly must still scan. A window whose cash scan
         // already completed costs one row read, so restarts do not repeat provider I/O.
         let lastScanAt = Number.NEGATIVE_INFINITY;
@@ -670,97 +645,23 @@ async function main(): Promise<void> {
             await runJob('billing.renewal_recovery', async () =>
               payments.recoverRenewalOffers({ environment: billingEnvironment, limit }),
             );
-            // Drains the dunning outbox `recordRenewalFailure` fills; a send failure leaves the row
-            // pending with its own backoff rather than failing the pass.
+            // Drains the notice outbox: renewal dunning and automatic-reload notices. A send failure leaves
+            // the row pending with its own backoff rather than failing the pass; its last failure alerts.
             // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
             await runJob('billing.recovery_notices', async () =>
-              payments.deliverRecoveryNotices({ environment: billingEnvironment, limit }),
+              deliverRecoveryNotices({ payments, environment: billingEnvironment, limit }),
             );
             if (Date.now() - lastScanAt >= scanIntervalMilliseconds) {
               lastScanAt = Date.now();
               // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
-              await runJob('billing.supplier_sweep', async () =>
-                supplier.sweepSupplierUsage({ pageSize: 100, unresolvedMaximumAge: dayMilliseconds }),
-              );
-              // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
-              await runJob('billing.source_reconciliation', async () => {
-                const windowEnd = new Date(Math.floor(Date.now() / dayMilliseconds) * dayMilliseconds);
-                const windowStart = new Date(windowEnd.getTime() - dayMilliseconds);
-                // The scan row is idempotent per window, so an hourly retry resumes the same durable cursors.
-                const scanId = await cashScans.createScan({
-                  environment: billingEnvironment,
-                  currency: 'usd',
-                  windowStart,
-                  windowEnd,
-                  lookbackStart: new Date(windowStart.getTime() - dayMilliseconds),
-                });
-                // The purchase comparison is stateless per pass, so it runs even when the cash scan is done or busy.
-                let cash: string;
-                try {
-                  if (await cashScans.isComplete(scanId)) {
-                    cash = 'complete';
-                  } else {
-                    const scanned = await cashScans.runScan({ scanId, maximumPagesPerStream: 20 });
-                    cash = scanned.status;
-                  }
-                } catch (error) {
-                  cash = error instanceof Error ? `failed:${error.message}` : 'failed';
-                }
-                // A paid obligation with no grant (for example a lost success webhook) holds the customer's
-                // money without credit; the per-kind gauge is what the alert watches. It reports the case
-                // table, so it is recorded even when a Stripe scan fails: that is when the alert matters most.
-                const recordOpenCases = async (): Promise<void> => {
-                  const openCases = await client<Array<{ kind: string; open: number }>>`
-                    SELECT kind, count(*)::int AS open FROM billing.billing_financial_case
-                    WHERE environment = ${billingEnvironment} AND state IN ('open', 'attention')
-                    GROUP BY kind`;
-                  for (const kind of new Set([
-                    ...cashBlockingFinancialCaseKinds,
-                    ...openCases.map((row) => row.kind),
-                  ])) {
-                    caseMetrics.billingOpenFinancialCases.record(
-                      openCases.find((row) => row.kind === kind)?.open ?? 0,
-                      {
-                        kind,
-                      },
-                    );
-                  }
-                  const unfulfilled =
-                    openCases.find((row) => row.kind === 'unfulfilled_purchase_obligation')?.open ?? 0;
-                  if (unfulfilled > 0) {
-                    console.error(
-                      JSON.stringify({
-                        event: 'billing.alert',
-                        environment,
-                        kind: 'unfulfilled_purchase_obligation',
-                        open: unfulfilled,
-                      }),
-                    );
-                  }
-                };
-                let purchase: Awaited<ReturnType<typeof purchaseScans.runScan>>;
-                try {
-                  purchase = await purchaseScans.runScan({
-                    scanId,
-                    maximumObligations: 100,
-                    maximumGrants: 100,
-                    maximumSubscriptions: 100,
-                  });
-                } catch (error) {
-                  // The gauge still records when the scan fails, but its own failure must not replace the
-                  // scan's error, which is the diagnosis the operator needs.
-                  await recordOpenCases().catch((gaugeError: unknown) => {
-                    console.error(
-                      JSON.stringify({ event: 'billing.case_gauge_failed', environment, error: String(gaugeError) }),
-                    );
-                  });
-                  throw error;
-                }
-                await recordOpenCases();
-                if (cash !== 'complete' && cash !== 'incomplete') {
-                  throw new Error(`cash scan ${cash}; purchases ${purchase.status}`);
-                }
-                return { scanId, cash, purchases: purchase.status };
+              await runHourlyOperationsJobs({
+                runJob,
+                cashScans,
+                purchaseScans,
+                recordOpenCases: async () =>
+                  recordOpenCases({ source: gauges, metrics: caseMetrics, environment: billingEnvironment }),
+                environment: billingEnvironment,
+                now: lastScanAt,
               });
             }
             // F-10: one count per completed pass is the heartbeat a stalled or thrashing worker stops sending.

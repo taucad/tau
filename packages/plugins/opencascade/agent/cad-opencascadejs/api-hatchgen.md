@@ -44,6 +44,16 @@ HatchGen_Domain: declare class HatchGen_Domain
 
 HatchGen_ErrorStatus: typeof HatchGen_ErrorStatus[keyof typeof HatchGen_ErrorStatus]
 
+  readonly HatchGen_NoProblem: 'HatchGen_NoProblem'
+
+  readonly HatchGen_TrimFailure: 'HatchGen_TrimFailure'
+
+  readonly HatchGen_TransitionFailure: 'HatchGen_TransitionFailure'
+
+  readonly HatchGen_IncoherentParity: 'HatchGen_IncoherentParity'
+
+  readonly HatchGen_IncompatibleStates: 'HatchGen_IncompatibleStates'
+
 HatchGen_IntersectionPoint: declare class HatchGen_IntersectionPoint
 
   // HatchGen_IntersectionPoint.SetIndex (method)
@@ -98,6 +108,14 @@ HatchGen_IntersectionPoint: declare class HatchGen_IntersectionPoint
   [Symbol.dispose](): void;
 
 HatchGen_IntersectionType: typeof HatchGen_IntersectionType[keyof typeof HatchGen_IntersectionType]
+
+  readonly HatchGen_TRUE: 'HatchGen_TRUE'
+
+  readonly HatchGen_TOUCH: 'HatchGen_TOUCH'
+
+  readonly HatchGen_TANGENT: 'HatchGen_TANGENT'
+
+  readonly HatchGen_UNDETERMINED: 'HatchGen_UNDETERMINED'
 
 HatchGen_PointOnElement: declare class HatchGen_PointOnElement extends HatchGen_IntersectionPoint
 

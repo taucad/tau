@@ -15,8 +15,9 @@ receivers:
           scrape_interval: 1s
           static_configs:
             - targets: ['127.0.0.1:8888']
-  # The API and its two billing workers are one service (Fly process groups `app`, `billing-recovery` and
-  # `billing-operations` of the same app), so they share `job`/`service_name` and differ by `instance`.
+  # The API and its billing worker are one service (Fly process groups `app` and `billing-operations` of
+  # the same app), so they share `job`/`service_name` and differ by `instance`. 9465 is the optional
+  # `api:billing-recovery` scale-out target, which no deployment runs; the API recovers holds in-process.
   # Ports follow apps/api/project.json: the API's default 9464, then the workers' OTEL_METRICS_PORT.
   prometheus/tau-api:
     config:

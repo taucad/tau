@@ -143,7 +143,19 @@ IntRes2d_IntersectionSegment: declare class IntRes2d_IntersectionSegment
 
 IntRes2d_Position: typeof IntRes2d_Position[keyof typeof IntRes2d_Position]
 
+  readonly IntRes2d_Head: 'IntRes2d_Head'
+
+  readonly IntRes2d_Middle: 'IntRes2d_Middle'
+
+  readonly IntRes2d_End: 'IntRes2d_End'
+
 IntRes2d_Situation: typeof IntRes2d_Situation[keyof typeof IntRes2d_Situation]
+
+  readonly IntRes2d_Inside: 'IntRes2d_Inside'
+
+  readonly IntRes2d_Outside: 'IntRes2d_Outside'
+
+  readonly IntRes2d_Unknown: 'IntRes2d_Unknown'
 
 IntRes2d_Transition: declare class IntRes2d_Transition
 
@@ -183,5 +195,13 @@ IntRes2d_Transition: declare class IntRes2d_Transition
   [Symbol.dispose](): void;
 
 IntRes2d_TypeTrans: typeof IntRes2d_TypeTrans[keyof typeof IntRes2d_TypeTrans]
+
+  readonly IntRes2d_In: 'IntRes2d_In'
+
+  readonly IntRes2d_Out: 'IntRes2d_Out'
+
+  readonly IntRes2d_Touch: 'IntRes2d_Touch'
+
+  readonly IntRes2d_Undecided: 'IntRes2d_Undecided'
 
 IntRes2d_SequenceOfIntersectionPoint: NCollection_Sequence_IntRes2d_IntersectionPoint

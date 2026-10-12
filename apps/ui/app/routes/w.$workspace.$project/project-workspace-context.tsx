@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { useProject } from '#hooks/use-project.js';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import type { MobilePanelId } from '#constants/editor.constants.js';
@@ -149,9 +149,28 @@ const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelI
 export function ProjectWorkspaceProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const { editorRef, mainEntryPath } = useProject();
   const location = useLocation();
+  const routeKey = location.key;
   const isMobile = useIsMobile();
   const isEditorReady = useSelector(editorRef, (snapshot) => snapshot.matches('ready'));
   const openerRef = useRef<((panelId: WorkbenchPanelId) => void) | undefined>(undefined);
+  const pendingFilesRef = useRef<string | undefined>(undefined);
+  const committedRouteKeyRef = useRef(routeKey);
+  useLayoutEffect(() => {
+    if (committedRouteKeyRef.current !== routeKey) {
+      pendingFilesRef.current = undefined;
+      openerRef.current = undefined;
+      committedRouteKeyRef.current = routeKey;
+    }
+  }, [routeKey]);
+  const providerActiveRef = useRef(true);
+  useLayoutEffect(() => {
+    providerActiveRef.current = true;
+    return () => {
+      providerActiveRef.current = false;
+      pendingFilesRef.current = undefined;
+    };
+  }, []);
+
   const layoutControllerRef = useRef<WorkbenchLayoutController | undefined>(undefined);
   const layoutListenersRef = useRef(new Set<() => void>());
   const layoutController = useMemo<WorkbenchLayoutController>(
@@ -212,7 +231,7 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
       setChatOpen(true);
     }
   }, [isArchiveOpen, isEditorReady, setChatOpen]);
-  const navigationKey = location.key;
+  const navigationKey = routeKey;
   /* Each sidebar click is its own navigation, even onto the selected chat, so the
    * pane opens once per navigation and a pane the user closes afterwards stays closed. */
   const openedForNavigationRef = useRef<string | undefined>(undefined);
@@ -225,6 +244,9 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
 
   const setWorkbenchOpen = useCallback(
     (open: boolean) => {
+      if (!open) {
+        pendingFilesRef.current = undefined;
+      }
       editorRef.send({
         type: 'setPanelState',
         panelState: {
@@ -237,6 +259,7 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
 
   const openPanel = useCallback(
     (panelId: WorkbenchPanelId) => {
+      pendingFilesRef.current = undefined;
       if (isMobile) {
         const mobilePanel = mobilePanelByWorkbenchPanel[panelId];
         if (mobilePanel) {
@@ -247,21 +270,34 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
       setWorkbenchOpen(true);
       if (openerRef.current) {
         openerRef.current(panelId);
-      } else if (panelId !== 'files') {
+      } else if (panelId === 'files') {
+        pendingFilesRef.current = routeKey;
+      } else {
         layoutController.personWorkbenchChanged((node) => addPane(node, panelId));
       }
     },
-    [editorRef, isMobile, layoutController, setWorkbenchOpen],
+    [editorRef, isMobile, layoutController, setWorkbenchOpen, routeKey],
   );
 
-  const connectWorkbench = useCallback((opener: (panelId: WorkbenchPanelId) => void) => {
-    openerRef.current = opener;
-    return () => {
-      if (openerRef.current === opener) {
-        openerRef.current = undefined;
+  const connectWorkbench = useCallback(
+    (opener: (panelId: WorkbenchPanelId) => void) => {
+      if (!providerActiveRef.current || committedRouteKeyRef.current !== routeKey) {
+        return () => undefined;
       }
-    };
-  }, []);
+      openerRef.current = opener;
+      const pendingFiles = pendingFilesRef.current;
+      pendingFilesRef.current = undefined;
+      if (pendingFiles !== undefined && pendingFiles === routeKey) {
+        opener('files');
+      }
+      return () => {
+        if (openerRef.current === opener) {
+          openerRef.current = undefined;
+        }
+      };
+    },
+    [routeKey],
+  );
 
   useKeybinding(
     projectWorkspaceKeyCombinations.files,

@@ -192,6 +192,7 @@ describe('exportTauProjectArtifact', () => {
         entry: 'parts/bracket/src/model.ts',
       },
       parameters: { width: 10 },
+      watch: false,
     });
     expect(fixture.exportDocument.export).toHaveBeenCalledWith('step', { options: { coordinateSystem: 'z-up' } });
     expect(fixture.sourceRuntime.snapshotSource.mock.invocationCallOrder[0]).toBeLessThan(

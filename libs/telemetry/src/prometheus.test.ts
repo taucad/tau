@@ -4,7 +4,7 @@ import { TauMetrics } from '#registry.js';
 
 describe('toPrometheusName', () => {
   it('should convert dots to underscores without a unit suffix, as the exporter does', () => {
-    expect(toPrometheusName('rpc.server.call.duration', 'histogram')).toBe('rpc_server_call_duration');
+    expect(toPrometheusName('ws.message.size', 'histogram')).toBe('ws_message_size');
     expect(toPrometheusName('tau.storage.operation.duration', 'histogram')).toBe('tau_storage_operation_duration');
   });
 
@@ -19,7 +19,7 @@ describe('toPrometheusName', () => {
 
   it('should leave gauges and upDownCounters without _total', () => {
     expect(toPrometheusName('redis.connection.state', 'gauge')).toBe('redis_connection_state');
-    expect(toPrometheusName('rpc.server.active_calls', 'upDownCounter')).toBe('rpc_server_active_calls');
+    expect(toPrometheusName('ws.connections.active', 'upDownCounter')).toBe('ws_connections_active');
   });
 
   it('should collapse repeated underscores from invalid characters', () => {
@@ -44,7 +44,6 @@ describe('PrometheusNames', () => {
   it('should produce expected names for renamed metrics', () => {
     expect(PrometheusNames.wsDisconnections).toBe('ws_disconnections_total');
     expect(PrometheusNames.kernelExecutions).toBe('kernel_executions_total');
-    expect(PrometheusNames.sseEvents).toBe('sse_events_total');
     expect(PrometheusNames.publicationViewsTotal).toBe('publication_views_total');
     expect(PrometheusNames.publicationViewsRejectedTotal).toBe('publication_views_rejections_total');
     expect(PrometheusNames.publicationInviteEmailsTotal).toBe('publication_invite_emails_total');
@@ -54,7 +53,7 @@ describe('PrometheusNames', () => {
 
 describe('prometheusNameOf', () => {
   it('should return the correct Prometheus name for a metric definition', () => {
-    expect(prometheusNameOf(TauMetrics.rpcCallDuration)).toBe('rpc_server_call_duration');
+    expect(prometheusNameOf(TauMetrics.wsMessageSize)).toBe('ws_message_size');
     expect(prometheusNameOf(TauMetrics.kernelExecutions)).toBe('kernel_executions_total');
   });
 });

@@ -37,7 +37,7 @@ const createUsageData = (overrides?: Partial<ContextUsageData>): ContextUsageDat
   totalInputTokens: 108_200,
   contextWindow: 200_000,
   percentUsed: 54.1,
-  modelId: 'anthropic-claude-haiku-4.5',
+  modelId: 'anthropic-claude-haiku-5.5',
   ...overrides,
 });
 

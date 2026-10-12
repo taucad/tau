@@ -205,7 +205,7 @@ vi.mock('@taucad/runtime/electron/main', () => ({
       state.resolveFork = options.resolveFork;
       state.runtimeMaxUtilities = options.maxUtilities;
       state.kernelUtilityEntry = options.utilityEntry;
-      return { connect: vi.fn(), dispose: vi.fn(), prewarm: state.runtimePrewarm };
+      return { connect: vi.fn(), dispose: vi.fn(), post: vi.fn(), prewarm: state.runtimePrewarm };
     },
   ),
 }));

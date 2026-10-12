@@ -11,9 +11,9 @@ PicovoxelPart: Readonly<{
 
   shape: Mesh | Voxels
 
-  name: string
+  name?: string
 
-  material: GlbMaterial
+  material?: GlbMaterial
 
 // A flat model with shared indexed images, textures and samplers
 PicovoxelModel: GlbResources & Readonly<{
@@ -21,18 +21,25 @@ PicovoxelModel: GlbResources & Readonly<{
 }>
 
   // An array of textures
-  textures: ITexture[]
+  textures?: ITexture[]
 
   // An array of samplers
-  samplers: ISampler[]
+  samplers?: ISampler[]
 
-  images: GlbImage[]
+  images?: GlbImage[]
 
   shapes: readonly Part[]
 
 // A PicoVoxel model's single part, flat list, or model with shared image resources
 // Remarks: Raw geometry keeps generated names. Descriptors attach a display name at the output boundary; names are trimmed, blank names fall back to `Shape N`, and duplicates are preserved. Names do not create stable identity, hierarchy or assembly occurrences. Descriptor materials apply to the final geometry and are copied with image bytes when returned. Absent material retains CAD defaults; authored glTF alpha modes and double-sided values are preserved.
 PicovoxelResult: Part | readonly Part[] | PicovoxelModel
+// Example (Name a delivered part):
+//   import type { Pico } from 'picovoxel';
+//   import type { PicovoxelResult } from '@taucad/picovoxel';
+//   
+//   export default function main(pico: Pico): PicovoxelResult {
+//   return { shape: pico.createVoxels({ shape: 'sphere', radius: 10 }), name: 'Housing' };
+//   }
 
 // Standard glTF 2.0 material properties, including the ratified physical material extensions
 Material: Omit<GLTF.IMaterial, 'extensions' | 'extras'> & {
@@ -95,35 +102,35 @@ Material: Omit<GLTF.IMaterial, 'extensions' | 'extras'> & {
 }
 
   // The user-defined name of this object
-  name: string
+  name?: string
 
   // A set of parameter values that are used to define the metallic-roughness material model from Physically-Based Rendering (PBR) methodology
-  pbrMetallicRoughness: IMaterialPbrMetallicRoughness
+  pbrMetallicRoughness?: IMaterialPbrMetallicRoughness
 
   // The normal map texture
-  normalTexture: IMaterialNormalTextureInfo
+  normalTexture?: IMaterialNormalTextureInfo
 
   // The occlusion map texture
-  occlusionTexture: IMaterialOcclusionTextureInfo
+  occlusionTexture?: IMaterialOcclusionTextureInfo
 
   // The emissive map texture
-  emissiveTexture: ITextureInfo
+  emissiveTexture?: ITextureInfo
 
   // The RGB components of the emissive color of the material
-  emissiveFactor: number[]
+  emissiveFactor?: number[]
 
   // The alpha rendering mode of the material
-  alphaMode: MaterialAlphaMode
+  alphaMode?: MaterialAlphaMode
 
   // The alpha cutoff value of the material
-  alphaCutoff: number
+  alphaCutoff?: number
 
   // Specifies whether the material is double sided
-  doubleSided: boolean
+  doubleSided?: boolean
 
-  extras: JSONObject
+  extras?: JSONObject
 
-  extensions: {
+  extensions?: {
           [extension: string]: unknown;
           KHR_materials_anisotropy?: {
               anisotropyStrength?: number;
@@ -186,7 +193,7 @@ Image: {
     data: Uint8Array<ArrayBuffer>;
 }
 
-  name: string
+  name?: string
 
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
 
@@ -198,9 +205,9 @@ Resources: Pick<GLTF.IGLTF, 'textures' | 'samplers'> & {
 }
 
   // An array of textures
-  textures: ITexture[]
+  textures?: ITexture[]
 
   // An array of samplers
-  samplers: ISampler[]
+  samplers?: ISampler[]
 
-  images: GlbImage[]
+  images?: GlbImage[]

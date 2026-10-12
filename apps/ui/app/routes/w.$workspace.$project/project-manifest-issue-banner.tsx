@@ -14,9 +14,22 @@ const maxIssueLines = 4;
  * fixes the file in the editor.
  */
 export function ProjectManifestIssueBanner(): React.JSX.Element | undefined {
-  const { projectRef, editorRef } = useProject();
+  const { projectRef, editorRef, manifestObservationError, retryManifestObservation } = useProject();
   const issue = useSelector(projectRef, (state) => state.context.manifestIssue);
   const isRepairing = useSelector(projectRef, (state) => state.matches({ ready: { storing: 'repairing' } }));
+  if (manifestObservationError) {
+    return (
+      <div
+        role='alert'
+        className='absolute inset-x-2 bottom-2 z-20 mx-auto flex max-w-lg items-center gap-3 rounded-md border border-warning/40 bg-background p-3 shadow-lg'
+      >
+        <div className='min-w-0 flex-1 text-sm'>Project updates unavailable: {manifestObservationError}</div>
+        <Button size='sm' variant='outline' onClick={retryManifestObservation}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
   if (!issue) {
     return undefined;
   }

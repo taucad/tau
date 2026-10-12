@@ -1,6 +1,6 @@
 # libcascade — GeomFill (2)
 
-28 top-level symbols. Signatures are verbatim typescript.
+27 top-level symbols. Signatures are verbatim typescript.
 
 GeomFill_EvolvedSection: declare class GeomFill_EvolvedSection extends GeomFill_SectionLaw
 
@@ -112,6 +112,12 @@ GeomFill_Filling: declare class GeomFill_Filling
   [Symbol.dispose](): void;
 
 GeomFill_FillingStyle: typeof GeomFill_FillingStyle[keyof typeof GeomFill_FillingStyle]
+
+  readonly GeomFill_StretchStyle: 'GeomFill_StretchStyle'
+
+  readonly GeomFill_CoonsStyle: 'GeomFill_CoonsStyle'
+
+  readonly GeomFill_CurvedStyle: 'GeomFill_CurvedStyle'
 
 GeomFill_Fixed: declare class GeomFill_Fixed extends GeomFill_TrihedronLaw
 
@@ -343,9 +349,65 @@ GeomFill_Gordon: declare class GeomFill_Gordon
 
 GeomFill_Gordon_ResultStatus: typeof GeomFill_Gordon_ResultStatus[keyof typeof GeomFill_Gordon_ResultStatus]
 
+  readonly NotStarted: 'NotStarted'
+
+  readonly Done: 'Done'
+
+  readonly InvalidInput: 'InvalidInput'
+
+  readonly ConversionFailed: 'ConversionFailed'
+
+  readonly IntersectionFailed: 'IntersectionFailed'
+
+  readonly OrderingFailed: 'OrderingFailed'
+
+  readonly ReparametrizationFailed: 'ReparametrizationFailed'
+
+  readonly CompatibilityFailed: 'CompatibilityFailed'
+
+  readonly CurveCompatibilityFailed: 'CurveCompatibilityFailed'
+
+  readonly RationalReparametrizationFailed: 'RationalReparametrizationFailed'
+
+  readonly SkinningFailed: 'SkinningFailed'
+
+  readonly ReferenceSurfaceFailed: 'ReferenceSurfaceFailed'
+
+  readonly KnotAlignmentFailed: 'KnotAlignmentFailed'
+
+  readonly RationalDegreeOverflow: 'RationalDegreeOverflow'
+
+  readonly RationalConstructionFailed: 'RationalConstructionFailed'
+
+  readonly PeriodicityFailed: 'PeriodicityFailed'
+
+  readonly ApproximationFailed: 'ApproximationFailed'
+
+  readonly ConstructionFailed: 'ConstructionFailed'
+
 GeomFill_Gordon_ApproximationMode: typeof GeomFill_Gordon_ApproximationMode[keyof typeof GeomFill_Gordon_ApproximationMode]
 
+  readonly ExactOnly: 'ExactOnly'
+
+  readonly AllowApproximateFallback: 'AllowApproximateFallback'
+
 GeomFill_Gordon_BuildStage: typeof GeomFill_Gordon_BuildStage[keyof typeof GeomFill_Gordon_BuildStage]
+
+  readonly NotStarted: 'NotStarted'
+
+  readonly InputConversion: 'InputConversion'
+
+  readonly ContactDiscovery: 'ContactDiscovery'
+
+  readonly NetworkOrdering: 'NetworkOrdering'
+
+  readonly Reparametrization: 'Reparametrization'
+
+  readonly ExactConstruction: 'ExactConstruction'
+
+  readonly Validation: 'Validation'
+
+  readonly Approximation: 'Approximation'
 
 GeomFill_GuideTrihedronAC: declare class GeomFill_GuideTrihedronAC extends GeomFill_TrihedronWithGuide
 
@@ -840,6 +902,28 @@ GeomFill_NetworkSurface: declare class GeomFill_NetworkSurface
 
 GeomFill_NetworkSurface_ResultStatus: typeof GeomFill_NetworkSurface_ResultStatus[keyof typeof GeomFill_NetworkSurface_ResultStatus]
 
+  readonly NotStarted: 'NotStarted'
+
+  readonly Done: 'Done'
+
+  readonly InvalidInput: 'InvalidInput'
+
+  readonly CurveCompatibilityFailed: 'CurveCompatibilityFailed'
+
+  readonly SkinningFailed: 'SkinningFailed'
+
+  readonly ReferenceSurfaceFailed: 'ReferenceSurfaceFailed'
+
+  readonly KnotAlignmentFailed: 'KnotAlignmentFailed'
+
+  readonly RationalDegreeOverflow: 'RationalDegreeOverflow'
+
+  readonly RationalConstructionFailed: 'RationalConstructionFailed'
+
+  readonly ConstructionFailed: 'ConstructionFailed'
+
+  readonly PeriodicityFailed: 'PeriodicityFailed'
+
 GeomFill_Pipe: declare class GeomFill_Pipe
 
   // GeomFill_Pipe.constructor (constructor)
@@ -894,6 +978,14 @@ GeomFill_Pipe: declare class GeomFill_Pipe
   [Symbol.dispose](): void;
 
 GeomFill_PipeError: typeof GeomFill_PipeError[keyof typeof GeomFill_PipeError]
+
+  readonly GeomFill_PipeOk: 'GeomFill_PipeOk'
+
+  readonly GeomFill_PipeNotOk: 'GeomFill_PipeNotOk'
+
+  readonly GeomFill_PlaneNotIntersectGuide: 'GeomFill_PlaneNotIntersectGuide'
+
+  readonly GeomFill_ImpossibleContact: 'GeomFill_ImpossibleContact'
 
 GeomFill_PlanFunc: declare class GeomFill_PlanFunc extends math_FunctionWithDerivative
 
@@ -1007,34 +1099,4 @@ GeomFill_QuasiAngularConvertor: declare class GeomFill_QuasiAngularConvertor
   delete(): void;
 
   // GeomFill_QuasiAngularConvertor.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-GeomFill_SectionGenerator: declare class GeomFill_SectionGenerator extends GeomFill_Profiler
-
-  // GeomFill_SectionGenerator.constructor (constructor)
-  constructor();
-
-  // GeomFill_SectionGenerator.SetParam (method)
-  SetParam(Params: NCollection_HArray1_double): void;
-
-  // GeomFill_SectionGenerator.GetShape (method)
-  GetShape(NbPoles?: number, NbKnots?: number, Degree?: number, NbPoles2d?: number): { NbPoles: number; NbKnots: number; Degree: number; NbPoles2d: number };
-
-  // GeomFill_SectionGenerator.Knots (method)
-  Knots(TKnots: NCollection_Array1_double): void;
-
-  // GeomFill_SectionGenerator.Mults (method)
-  Mults(TMults: NCollection_Array1_int): void;
-
-  // GeomFill_SectionGenerator.Section (method)
-  Section(P: number, Poles: NCollection_Array1_gp_Pnt, DPoles: NCollection_Array1_gp_Vec, Poles2d: NCollection_Array1_gp_Pnt2d, DPoles2d: NCollection_Array1_gp_Vec2d, Weigths: NCollection_Array1_double, DWeigths: NCollection_Array1_double): boolean;
-  Section(P: number, Poles: NCollection_Array1_gp_Pnt, Poles2d: NCollection_Array1_gp_Pnt2d, Weigths: NCollection_Array1_double): void;
-
-  // GeomFill_SectionGenerator.Parameter (method)
-  Parameter(P: number): number;
-
-  // GeomFill_SectionGenerator.delete (method)
-  delete(): void;
-
-  // GeomFill_SectionGenerator.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

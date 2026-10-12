@@ -57,6 +57,12 @@ export const createDaemonAgentHostTransport = (
       const next = await channel();
       return next.read(input);
     },
+    catchUp: async function* catchUp(input) {
+      const next = await channel();
+      for await (const frame of next.catchUp(input)) {
+        yield frame;
+      }
+    },
     liveEvents: async function* liveEvents(chatId, signal) {
       const live = await channel();
       let closes = 0;

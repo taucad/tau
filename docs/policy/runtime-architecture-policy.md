@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-10-02'
+updated: '2026-10-11'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -250,6 +250,8 @@ Agent invocation cancellation travels as local call context through the shared d
 ### Auto-Cancellation (Latest-Wins)
 
 When a newer selected preview arrives while a public render is in-flight, the previous preview is cooperatively superseded via the abort signal slot. The successor may be a public `render`/`updateParameters`/`setOptions` command or an autonomous watched-filesystem rerender. The prior outcome resolves as `{ superseded: true }` — never as a thrown exception — and only the selected preview publishes to the `geometry` event. Autonomous successors have no public Promise of their own, so consumers must not assume a newer `RenderOutcome` carries their geometry. Pull consumers such as the CLI use request-scoped export and do not enter this preview race.
+
+Supersession is per document. A document's evaluation is superseded only by its own command (`update`, `close`), by a change to one of its own watched paths, or by worker termination. Another document's admission, update, close or file change never supersedes or restarts it, and the worker never reschedules an evaluation on its own behalf: `open`, `update` and exact-path routing are the only admissions.
 
 ### Render Timeout Ownership
 
@@ -683,7 +685,7 @@ Every admitted preview has a total lifecycle. `KernelWorker` emits a terminal `i
 
 The current preview generation, not retained cache membership and not the last successful artifact, owns autonomous rerender paths. Opening an entry first installs and acknowledges an entry-only watch. Dependency discovery accumulates a complete candidate containing the entry plus resolved, unresolved, and middleware-declared paths, even when materialization later fails.
 
-Reconciliation opens one complete multi-path replacement subscription while the old request remains live, awaits its acknowledgement, batch rereads and hashes newly added paths, rejects a candidate dirtied or superseded during validation, and atomically swaps only a clean candidate. The old handle is disposed after commitment. This keeps one steady-state bridge stream and closes the subscribe-versus-read window without per-path subscriptions.
+Reconciliation opens one complete multi-path replacement subscription while the old request remains live, awaits its acknowledgement, rereads and hashes newly added paths, and atomically swaps the candidate in. A reconciliation observes; it never judges the evaluation that invoked it. Added paths that moved before the subscription covered them enter the exact-path route, and an event or reset touching them during validation rereads them again before the swap. A candidate is dropped only when admission has closed. The old handle is disposed after commitment. This keeps one steady-state bridge stream and closes the subscribe-versus-read window without per-path subscriptions.
 
 All invalidation work remains serialized, but event truth determines the route. Explicit `fileChanged` notifications, staging writes, concrete watch events, and concrete handoff-validation mismatches enter the exact-path route. Only explicit reset, overflow, stale-root, backend-replacement, or summarized-loss signals enter conservative reset recovery. Exact routing invalidates and schedules only when a changed path intersects the active preview dependency set; unrelated project writes cannot supersede or rerender it. Runtime identity is never lowercased or otherwise folded. Concrete `.tau/cache/**` events are excluded, while `node_modules/**` stays observable because package files can be live bundle inputs; genuine loss signals cannot be excluded by path.
 

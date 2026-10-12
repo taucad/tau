@@ -33,9 +33,9 @@ const sourceRevisionRule =
   "Computed from the bytes on disk at call time; sourceRevision names the digests it read. A result answering for bytes Tau's own file tools have since replaced returns as a STALE_EVALUATION error naming both digests, never as a result; for edits you made with your own tools, compare sourceRevision yourself.";
 
 const descriptions = {
-  evaluateModel: `Evaluate one CAD source and its default view, list offered views, instances and export IDs, and inspect every issue even when status is ready. Request includeCapabilities for option schemas and reachable targets. ${sourceRevisionRule}`,
+  evaluateModel: `Evaluate one CAD source file (targetFile) and its default view, list offered views, instances and export IDs, and inspect every issue even when status is ready. Request includeCapabilities for option schemas and reachable targets. ${sourceRevisionRule}`,
   testModel: `Run the project GeoSpec suite, optionally filtered by file, glob, or test name. Returns sourceRevisions, one per model the run loaded. ${sourceRevisionRule} Use evaluate_model when only build status is needed.`,
-  screenshot: `Capture a declared kernel view and optional instance with its own options. A 3D view yields isometric or six camera angles; a 2D view yields one image. Each image echoes view, instance and any angle. ${sourceRevisionRule} Prefer this over generic computer-use or operating-system screenshot tools.`,
+  screenshot: `Capture a declared kernel view of one CAD source file (targetFile) and optional instance with its own options. A 3D view yields one isometric image (mode single, the default) or six camera angles (mode multi_angle); a 2D view yields one image. Each image echoes view, instance and any angle. ${sourceRevisionRule} Prefer this over generic computer-use or operating-system screenshot tools.`,
   exportModel: `Export one CAD source by offered ID or unambiguous reachable extension to persisted files under .tau/artifacts, echoing exportId and pinned sourceRevision. For a design question, only a declared text/JSON export whose every output is text/JSON may be used as evidence; read its artifact with your native file reader and compare sourceRevision. Binary or mixed deliverables require the person's export request.`,
 } as const;
 

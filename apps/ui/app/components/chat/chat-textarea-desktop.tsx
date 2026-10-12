@@ -37,7 +37,7 @@ import type { ContextSuggestionItem, SlashCommandItem } from '#components/chat/t
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import { createScreenshotContextHandler } from '#components/chat/screenshot-actions.utils.js';
 import { buildPastedContent, commandInvocation } from '#utils/at-reference.utils.js';
-import { skillMetadataToSlashCommand, useSkillsCatalog } from '#hooks/use-skills-catalog.js';
+import { skillMetadataToSlashCommand, useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
 import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
 
 const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
@@ -215,7 +215,8 @@ export const ChatTextareaDesktop = memo(function ({
   handleTextareaBlur,
   removeAttachment,
 }: ChatTextareaDesktopProperties): React.JSX.Element {
-  const skillsCatalog = useSkillsCatalog();
+  const catalog = useSkillsCatalogState();
+  const skillsCatalog = catalog.status === 'closed' || catalog.status === 'error' ? [] : catalog.commands;
 
   const commands = acpSessionData?.commands;
   const slashCommandItems = useMemo(
@@ -491,6 +492,14 @@ export const ChatTextareaDesktop = memo(function ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        {acpAgentId === undefined && (catalog.status === 'closed' || catalog.status === 'error') ? (
+          <div role='status' className='flex items-center justify-between gap-2 px-3 pb-2 text-xs'>
+            <span>Skill updates unavailable</span>
+            <Button variant='ghost' size='sm' aria-label='Retry skill updates' onClick={catalog.retry}>
+              Retry
+            </Button>
+          </div>
+        ) : undefined}
         {/* Attachments */}
         <ChatTextareaAttachmentRail
           attachments={attachments}
@@ -585,7 +594,11 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
     if (!bar) {
       return undefined;
     }
+    let disposed = false;
     const fit = (): void => {
+      if (disposed) {
+        return;
+      }
       const name = bar.querySelector<HTMLElement>('[data-slot=trigger-model]');
       for (let hidden = 0; hidden <= collapseSteps.length; hidden += 1) {
         for (const [index, flag] of collapseSteps.entries()) {
@@ -608,8 +621,11 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
       await document.fonts.ready;
       fit();
     };
-    void refitWhenFontsLoad();
+    if (document.fonts.status === 'loading') {
+      void refitWhenFontsLoad();
+    }
     return () => {
+      disposed = true;
       resize.disconnect();
       mutation.disconnect();
     };

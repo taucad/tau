@@ -45,7 +45,7 @@ import { WebSocket } from 'ws';
 
 import { agentChannelPort, createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import { agentWireLimits } from '@taucad/agent-host/wire';
-import type { ReadAnswer } from '@taucad/agent-host/wire';
+import type { ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
 import type { AgentChannelClient, AgentLogEvent } from '@taucad/agent-host';
 
@@ -614,6 +614,7 @@ const measureTail = async (input: {
   const seen = new Set<string>();
   /* Held on one object so a `tail` inside a helper is visibly what moves them. */
   const progress = { cursor: 0, endCursor: 0, complete: false };
+  let observedSource: Pick<ReadInput, 'sourceGeneration' | 'sourceHealth'> = {};
   const counters = {
     duplicated: 0,
     cursorViolations: 0,
@@ -647,6 +648,7 @@ const measureTail = async (input: {
         progress.complete = true;
       }
     }
+    observedSource = { sourceGeneration: batch.sourceGeneration, sourceHealth: batch.sourceHealth };
     progress.cursor = batch.nextCursor;
     progress.endCursor = batch.endCursor;
   };
@@ -657,6 +659,7 @@ const measureTail = async (input: {
   /** One long-poll read; a settled, drained log has no next row to wait for. */
   const readWindow = (): Parameters<AgentChannelClient['read']>[0] => ({
     chatId,
+    ...observedSource,
     cursor: progress.cursor,
     limit: tailLimit,
     maxBytes: agentWireLimits.batchBytes,

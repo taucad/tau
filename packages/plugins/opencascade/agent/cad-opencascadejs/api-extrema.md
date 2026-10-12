@@ -1,6 +1,6 @@
 # libcascade — Extrema
 
-28 top-level symbols. Signatures are verbatim typescript.
+27 top-level symbols. Signatures are verbatim typescript.
 
 Extrema_Curve2dTool: declare class Extrema_Curve2dTool
 
@@ -191,7 +191,19 @@ Extrema_CurveTool: declare class Extrema_CurveTool
 
 Extrema_ElementType: typeof Extrema_ElementType[keyof typeof Extrema_ElementType]
 
+  readonly Extrema_Node: 'Extrema_Node'
+
+  readonly Extrema_UIsoEdge: 'Extrema_UIsoEdge'
+
+  readonly Extrema_VIsoEdge: 'Extrema_VIsoEdge'
+
+  readonly Extrema_Face: 'Extrema_Face'
+
 Extrema_ExtAlgo: typeof Extrema_ExtAlgo[keyof typeof Extrema_ExtAlgo]
+
+  readonly Extrema_ExtAlgo_Grad: 'Extrema_ExtAlgo_Grad'
+
+  readonly Extrema_ExtAlgo_Tree: 'Extrema_ExtAlgo_Tree'
 
 Extrema_ExtCC: declare class Extrema_ExtCC
 
@@ -483,6 +495,12 @@ Extrema_ExtElSS: declare class Extrema_ExtElSS
   [Symbol.dispose](): void;
 
 Extrema_ExtFlag: typeof Extrema_ExtFlag[keyof typeof Extrema_ExtFlag]
+
+  readonly Extrema_ExtFlag_MIN: 'Extrema_ExtFlag_MIN'
+
+  readonly Extrema_ExtFlag_MAX: 'Extrema_ExtFlag_MAX'
+
+  readonly Extrema_ExtFlag_MINMAX: 'Extrema_ExtFlag_MINMAX'
 
 Extrema_ExtPElC: declare class Extrema_ExtPElC
 
@@ -1051,30 +1069,4 @@ Extrema_GenLocateExtCS: declare class Extrema_GenLocateExtCS
   delete(): void;
 
   // Extrema_GenLocateExtCS.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-Extrema_GenLocateExtPS: declare class Extrema_GenLocateExtPS
-
-  // Extrema_GenLocateExtPS.constructor (constructor)
-  constructor(theS: Adaptor3d_Surface, theTolU?: number, theTolV?: number);
-
-  // Extrema_GenLocateExtPS.Perform (method)
-  Perform(theP: gp_Pnt, theU0: number, theV0: number, isDistanceCriteria?: boolean): void;
-
-  // Extrema_GenLocateExtPS.IsDone (method)
-  IsDone(): boolean;
-
-  // Extrema_GenLocateExtPS.SquareDistance (method)
-  SquareDistance(): number;
-
-  // Extrema_GenLocateExtPS.Point (method)
-  Point(): Extrema_POnSurf;
-
-  // Extrema_GenLocateExtPS.IsMinDist (method)
-  static IsMinDist(theP: gp_Pnt, theS: Adaptor3d_Surface, theU0: number, theV0: number): boolean;
-
-  // Extrema_GenLocateExtPS.delete (method)
-  delete(): void;
-
-  // Extrema_GenLocateExtPS.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

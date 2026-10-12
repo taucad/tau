@@ -1,4 +1,4 @@
-import { copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import '@taucad/geospec-engine/register/node';
@@ -68,6 +68,12 @@ describe('GeoSpec evidence to LLM closeout', () => {
           engine,
           projectPath: root,
           runtime: async () => createExampleGeoSpecRuntimeClient(examplesRoot),
+          readSource: async (source) => {
+            if (typeof source !== 'string') {
+              throw new TypeError('Only path sources are read from disk.');
+            }
+            return new Uint8Array(await readFile(source));
+          },
         }),
         cache,
       });
@@ -96,7 +102,12 @@ describe('GeoSpec evidence to LLM closeout', () => {
             ],
           },
         });
-        expect(output.failures[2]?.diagnostics?.[0]?.code).not.toBe('TEST_FAILED');
+        const missing = join(root, 'missing.glb');
+        expect(output.failures[2]?.diagnostics?.[0]).toMatchObject({
+          code: 'GEOSPEC_NATIVE_SOURCE_READ_FAILED',
+          message: `The host source reader could not read ${missing}: ENOENT: no such file or directory, open '${missing}'`,
+          details: { source: missing },
+        });
         expect(output.failures[3]?.diagnostics?.[0]?.details).toHaveProperty('diagnostics.0.code', 'GEOMETRY_INVALID');
         expect(output.failures[3]?.diagnostics?.[0]?.details).toHaveProperty('diagnostics.0.severity', 'warning');
         expect(output.failures[3]?.diagnostics?.[0]?.details).toHaveProperty(

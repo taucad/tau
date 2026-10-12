@@ -184,7 +184,9 @@ const environmentSchemaBase = z.object({
     .int()
     .min(1000)
     .max(300_000)
-    .default(30_000)
+    // 5 s, the poll of the retired `billing-recovery` worker: this is now the only deployed clock, and the
+    // recovery SLO (oldest due operation under 30 s) cannot hold if a pass can be 30 s away.
+    .default(5000)
     .describe('Milliseconds between in-process funded-operation recovery passes; every API replica polls'),
   BILLING_EXACT_INPUT_COUNT: z
     .enum(['true', 'false'])
@@ -198,6 +200,12 @@ const environmentSchemaBase = z.object({
     .default('')
     .describe('Restricted Stripe create key (rk_test_... in staging, rk_live_... in prod); empty = billing disabled'),
   STRIPE_READ_SECRET_KEY: z.string().default(''),
+  STRIPE_REFUND_SECRET_KEY: z
+    .string()
+    .default('')
+    .describe(
+      'Operator-held Refunds-Write restricted key (rk_test_... in staging, rk_live_... in prod), read only by `billing-command lifecycle` for execute-refund; unset on deployed apps',
+    ),
   STRIPE_ACCOUNT_ID: z.string().default(''),
   STRIPE_LIVEMODE: z
     .enum(['true', 'false'])
@@ -344,6 +352,7 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
     const stripeIdentifiers = [
       ['STRIPE_SECRET_KEY', data.STRIPE_SECRET_KEY, [`rk_${stripeMode}_`]],
       ['STRIPE_READ_SECRET_KEY', data.STRIPE_READ_SECRET_KEY, [`rk_${stripeMode}_`]],
+      ['STRIPE_REFUND_SECRET_KEY', data.STRIPE_REFUND_SECRET_KEY, [`rk_${stripeMode}_`]],
       ['STRIPE_ACCOUNT_ID', data.STRIPE_ACCOUNT_ID, 'acct_'],
       ['STRIPE_WEBHOOK_SECRET', data.STRIPE_WEBHOOK_SECRET, 'whsec_'],
       ['STRIPE_PRICE_ID_PRO_MONTHLY', data.STRIPE_PRICE_ID_PRO_MONTHLY, 'price_'],
@@ -377,6 +386,17 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
         code: 'custom',
         message: 'Stripe create and read keys must be separate restricted credentials',
         path: ['STRIPE_READ_SECRET_KEY'],
+      });
+    }
+    if (
+      data.STRIPE_REFUND_SECRET_KEY &&
+      (data.STRIPE_REFUND_SECRET_KEY === data.STRIPE_SECRET_KEY ||
+        data.STRIPE_REFUND_SECRET_KEY === data.STRIPE_READ_SECRET_KEY)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'The Stripe refund key must be a restricted credential separate from the create and read keys',
+        path: ['STRIPE_REFUND_SECRET_KEY'],
       });
     }
   }

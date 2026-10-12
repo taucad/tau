@@ -62,6 +62,10 @@
     },
     "test:e2e:development": {
       "executor": "nx:run-commands",
+      "metadata": {
+        "description": "global-setup starts `react-router dev` itself rather than through ui:dev, so this target carries ui:dev's copy-assets dependency: without it a clean checkout serves the SPA fallback for the vendored fonts and esbuild.wasm."
+      },
+      "dependsOn": ["^copy-assets"],
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/preview.spec.ts src/geospec-runner.spec.ts src/headless-chat-image-capture.development.spec.ts src/home-hydration.spec.ts src/picovoxel-multi.spec.ts src/project-open-first-paint.spec.ts",

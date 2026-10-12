@@ -4,7 +4,7 @@
   "projectType": "application",
   "sourceRoot": "apps/react-e2e",
   "tags": ["scope:shared", "type:e2e"],
-  "implicitDependencies": ["react", "runtime"],
+  "implicitDependencies": ["react", "runtime", "esbuild", "replicad"],
   "targets": {
     "test": {
       "executor": "nx:noop"
@@ -37,11 +37,13 @@
           "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-non-isolated",
           "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example"
         ]
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:bundlers": {
       "command": "vitest run --config apps/react-e2e/vitest.bundlers.config.ts",
-      "cache": false
+      "cache": false,
+      "dependsOn": ["^copy-assets"]
     },
     "benchmark-bundler-products": {
       "command": "node apps/react-e2e/scripts/benchmark-bundler-products.mts",
@@ -67,7 +69,8 @@
           "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-development",
           "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example-development"
         ]
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:electron:development": {
       "executor": "nx:run-commands",
@@ -78,7 +81,8 @@
           "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-development",
           "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example-development"
         ]
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:nextjs": {
       "executor": "nx:run-commands",
@@ -90,28 +94,32 @@
           "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-non-isolated",
           "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example"
         ]
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:nextjs:isolated": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-isolated"
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:nextjs:non-isolated": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-non-isolated"
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:nextjs:example": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example"
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:react-router": {
       "executor": "nx:run-commands",
@@ -123,28 +131,32 @@
           "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-non-isolated",
           "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-example"
         ]
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:react-router:isolated": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-isolated"
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:react-router:non-isolated": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-non-isolated"
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:react-router:example": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-example"
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:electron": {
       "executor": "nx:run-commands",
@@ -155,21 +167,24 @@
           "vitest run --config apps/react-e2e/vitest.config.ts --project=electron",
           "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example"
         ]
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:electron:legacy": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=electron"
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     },
     "test:e2e:electron-example": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example"
-      }
+      },
+      "dependsOn": ["^copy-assets"]
     }
   }
 }

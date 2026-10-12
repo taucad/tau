@@ -62,7 +62,7 @@ export const serveAgentWorkerChannel = <Protocol extends RpcProtocol>(
   port: MessagePortLike,
   options: AgentWorkerChannelOptions<Protocol> & {
     readonly impl: ChannelServer<Protocol>;
-    /** The worker's hello payload, such as `{ wire: 2, build }` (I32). */
+    /** The worker's hello payload, such as `{ wire: agentWireVersion, build }` (I32). */
     readonly hello?: unknown;
     /** Send `lk` at this interval so the page's liveness bound can tell slow from dead (T9 E3). Milliseconds. */
     readonly keepaliveInterval?: number | undefined;

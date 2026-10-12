@@ -9,7 +9,7 @@ export const navigation = [
   ['Use cases', '/use-cases/'],
   ['Vision', '/vision/'],
   ['Pricing', '/pricing/'],
-  ['Journal', '/blog/'],
+  ['Blog', '/blog/'],
 ];
 
 /** The three promises, each with a line diagram drawn in the site's fine-line language. */
@@ -269,7 +269,7 @@ export const plans = [
       ['No training on your designs'],
       ['Hosted design verification', 'soon'],
     ],
-    cta: ['Choose Pro in Tau', '/settings/billing'],
+    cta: ['Choose Pro in Tau', '/?settings=billing'],
   },
   {
     id: 'enterprise',

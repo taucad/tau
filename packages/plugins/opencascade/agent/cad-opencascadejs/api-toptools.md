@@ -18,6 +18,14 @@ TopTools: declare class TopTools
 
 TopTools_FormatVersion: typeof TopTools_FormatVersion[keyof typeof TopTools_FormatVersion]
 
+  readonly TopTools_FormatVersion_VERSION_1: 'TopTools_FormatVersion_VERSION_1'
+
+  readonly TopTools_FormatVersion_VERSION_2: 'TopTools_FormatVersion_VERSION_2'
+
+  readonly TopTools_FormatVersion_VERSION_3: 'TopTools_FormatVersion_VERSION_3'
+
+  readonly TopTools_FormatVersion_CURRENT: 'TopTools_FormatVersion_CURRENT'
+
 TopTools_LocationSet: declare class TopTools_LocationSet
 
   // TopTools_LocationSet.constructor (constructor)

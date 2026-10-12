@@ -1,5 +1,4 @@
-import { isNotFound } from '#db/attachment-store.js';
-import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
+import { fileContentBytes } from '@taucad/fs-client/file-content-service';
 import { z } from 'zod';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useObservation } from '@taucad/fs-client/react/use-observation';
@@ -30,7 +29,7 @@ import type { Handle } from '#types/matches.types.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
+import { useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
 import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 import { tauStoreSkills } from '#lib/tau-plugin-store-catalog.js';
 import type { SystemSkill } from '#lib/system-skills-catalog.js';
@@ -231,36 +230,22 @@ function StoreSection({
 }
 
 export default function PluginsRoute(): React.JSX.Element {
-  const { readFile, writeFiles, exists, contentService } = useFileManager();
-  const skillsCatalog = useSkillsCatalog();
-  const manifestService = useMemo(
-    () =>
-      contentService
-        ? new ObservationService<InstalledPluginManifest>({
-            resource: manifestPath,
-            watch: (invalidate, reset) =>
-              contentService.watchReady({ paths: [manifestPath] }, (event) => {
-                if (event.type === 'reset') {
-                  reset();
-                } else {
-                  invalidate();
-                }
-              }),
-            read: async () => {
-              try {
-                return parseManifest(await readFile(manifestPath));
-              } catch (error) {
-                if (error instanceof FileNotFoundError || isNotFound(error)) {
-                  return {};
-                }
-                throw error;
-              }
-            },
-            equal: (previous, next) => JSON.stringify(previous) === JSON.stringify(next),
-          })
-        : undefined,
-    [contentService, readFile],
-  );
+  const { writeFiles, exists, contentService } = useFileManager();
+  const catalog = useSkillsCatalogState();
+  const skillsCatalog = catalog.commands;
+  const manifestService = useMemo(() => {
+    if (!contentService) {
+      return undefined;
+    }
+    return new ObservationService<InstalledPluginManifest>({
+      resource: manifestPath,
+      read: async (read) => {
+        const result = await read.observe(contentService.observeContent(manifestPath));
+        return result.kind === 'orphaned' ? {} : parseManifest(fileContentBytes({ path: manifestPath, result }));
+      },
+      equal: (previous, next) => JSON.stringify(previous) === JSON.stringify(next),
+    });
+  }, [contentService]);
   const manifestSnapshot = useObservation(manifestService);
   const manifest = manifestSnapshot.value ?? {};
 
@@ -286,6 +271,9 @@ export default function PluginsRoute(): React.JSX.Element {
 
   const installSkill = useCallback(
     async (slug: string): Promise<void> => {
+      if (catalog.status !== 'ready') {
+        return;
+      }
       if (manifestSnapshot.status !== 'ready') {
         return;
       }
@@ -317,9 +305,9 @@ export default function PluginsRoute(): React.JSX.Element {
         [targetPath]: { content: textEncoder.encode(skill.skillMarkdown) },
         [manifestPath]: { content: textEncoder.encode(JSON.stringify(nextManifest, null, 2) + '\n') },
       });
-      manifestService?.invalidate();
+      manifestService?.refresh();
     },
-    [exists, manifest, manifestService, manifestSnapshot.status, writeFiles],
+    [exists, manifest, manifestService, manifestSnapshot.status, writeFiles, catalog.status],
   );
 
   return (
@@ -354,6 +342,40 @@ export default function PluginsRoute(): React.JSX.Element {
         <p role='alert' className='text-sm text-destructive'>
           {manifestSnapshot.error}
         </p>
+      )}
+      {manifestService &&
+      (manifestSnapshot.status === 'closed' ||
+        manifestSnapshot.status === 'error' ||
+        (manifestSnapshot.value !== undefined && manifestSnapshot.status !== 'ready')) ? (
+        <div role='status' className='flex items-center justify-between gap-2 text-sm'>
+          <span>
+            {manifestSnapshot.status === 'registering' || manifestSnapshot.status === 'pending'
+              ? 'Plugin updates pending'
+              : 'Plugin updates unavailable'}
+          </span>
+          <Button
+            variant='ghost'
+            size='sm'
+            aria-label='Retry plugin updates'
+            onClick={() => {
+              manifestService.refresh();
+            }}
+          >
+            Retry
+          </Button>
+        </div>
+      ) : undefined}
+      {catalog.status === 'ready' ? undefined : (
+        <div role='status' className='flex items-center justify-between gap-2 text-sm'>
+          <span>
+            {catalog.status === 'registering' || catalog.status === 'pending'
+              ? 'Skill updates pending'
+              : 'Skill updates unavailable'}
+          </span>
+          <Button variant='ghost' size='sm' aria-label='Retry skill updates' onClick={catalog.retry}>
+            Retry
+          </Button>
+        </div>
       )}
       <StoreSection title='Featured' items={featuredPlugins} />
       <StoreSection title='System' items={systemSkills} />

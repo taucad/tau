@@ -117,8 +117,8 @@ await test('publication rejects unreviewed prose, unsafe slugs, invalid dates an
   assert.throws(() => validateArticles([article, article], now));
 });
 
-await test('a reviewed article builds an escaped detail page and journal entry without publishing fixtures', async () => {
-  const { mkdtemp, cp, mkdir, writeFile, rm } = await import('node:fs/promises');
+await test('a reviewed article builds an escaped detail page and blog entry without publishing fixtures', async () => {
+  const { mkdtemp, cp, mkdir, writeFile, rm, symlink } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const scratch = await mkdtemp(join(tmpdir(), 'tau-www-editorial-test-'));
   try {
@@ -133,7 +133,8 @@ await test('a reviewed article builds an escaped detail page and journal entry w
     await mkdir(join(scratch, 'packages/ui/src/styles'), { recursive: true });
     await cp(join(root, '../../packages/ui/src/styles/tokens.css'), join(scratch, 'packages/ui/src/styles/tokens.css'));
     await mkdir(join(fixture, 'content'));
-    await cp(join(root, 'content/evidence'), join(fixture, 'content/evidence'), { recursive: true });
+    // The build resolves @taucad/planetary-gearbox through the app's installed workspace links.
+    await symlink(join(root, 'node_modules'), join(fixture, 'node_modules'));
     await writeFile(
       join(fixture, 'content/articles.json'),
       JSON.stringify([
@@ -180,6 +181,42 @@ await test('staging keeps app and docs links on staging and leaves production un
   );
   assert.equal(environmentHref('https://tau.newer.example/', 'taucad.dev'), 'https://tau.newer.example/');
   assert.equal(environmentHref('https://tau.new/projects', 'tau.new'), 'https://tau.new/projects');
+});
+/**
+ * @param html - A rendered page.
+ * @param label - The text the link starts with.
+ * @type {(html: string, label: string) => string | undefined}
+ */
+const linkHref = (html, label) => new RegExp(`<a\\b[^>]*\\bhref="([^"]*)"[^>]*>\\s*${label}\\b`, 'u').exec(html)?.[1];
+await test('should open Pro in the billing settings and keep it and the legal links on the host serving the page', () => {
+  for (const path of ['/', '/pricing/']) {
+    const page = pages.find((candidate) => candidate.path === path);
+    assert.ok(page, `missing ${path}`);
+    const html = renderPage({
+      page,
+      origin: 'https://tau.new',
+      launch: true,
+      asset: { css: '/a.css', js: '/a.js' },
+      analyticsEndpoint: '',
+    });
+    const links = ['Choose Pro in Tau', 'App privacy', 'Terms'].map((label) => linkHref(html, label) ?? `no ${label}`);
+    // The page names production; client.mjs passes every https link through environmentHref on load.
+    assert.deepEqual(links, [
+      'https://tau.new/?settings=billing',
+      'https://tau.new/legal/privacy',
+      'https://tau.new/legal/terms',
+    ]);
+    assert.deepEqual(
+      links.map((href) => environmentHref(href, 'taucad.dev')),
+      ['https://taucad.dev/?settings=billing', 'https://taucad.dev/legal/privacy', 'https://taucad.dev/legal/terms'],
+      path,
+    );
+    assert.deepEqual(
+      links.map((href) => environmentHref(href, 'tau.new')),
+      links,
+      path,
+    );
+  }
 });
 await test('only staging offers the staging desktop builds', () => {
   assert.match(stagingDesktop('taucad.dev')?.href ?? '', /releases\?q=desktop-staging/u);

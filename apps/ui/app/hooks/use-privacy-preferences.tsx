@@ -4,7 +4,15 @@ import { ENV } from '#environment.config.js';
 
 export type PrivacyPreferences = {
   allowsAiTraining: boolean;
+  /** Anonymous, content-free agent usage metrics; operational telemetry is sent regardless. */
+  allowsUsageMetrics: boolean;
 };
+
+/** An older API omits `allowsUsageMetrics`; its column default is on. */
+const withDefaults = (preferences: Partial<PrivacyPreferences>): PrivacyPreferences => ({
+  allowsAiTraining: preferences.allowsAiTraining ?? true,
+  allowsUsageMetrics: preferences.allowsUsageMetrics ?? true,
+});
 
 const queryKey = ['privacy-preferences'] as const;
 
@@ -22,7 +30,7 @@ const getPrivacyPreferences = async (): Promise<PrivacyPreferences> => {
     throw new Error(`Failed to fetch privacy preferences: ${response.status}`);
   }
 
-  return response.json() as Promise<PrivacyPreferences>;
+  return withDefaults((await response.json()) as Partial<PrivacyPreferences>);
 };
 
 const updatePrivacyPreferences = async (updates: Partial<PrivacyPreferences>): Promise<PrivacyPreferences> => {
@@ -39,7 +47,7 @@ const updatePrivacyPreferences = async (updates: Partial<PrivacyPreferences>): P
     throw new Error(`Failed to update privacy preferences: ${response.status}`);
   }
 
-  return response.json() as Promise<PrivacyPreferences>;
+  return withDefaults((await response.json()) as Partial<PrivacyPreferences>);
 };
 
 type UsePrivacyPreferencesReturn = {
@@ -66,6 +74,8 @@ export function usePrivacyPreferences(): UsePrivacyPreferencesReturn {
     queryFn: getPrivacyPreferences,
     retry: 1,
     retryDelay: 1000,
+    /* Read under every chat; the preference only changes through the mutation below, which writes the cache. */
+    staleTime: Infinity,
   });
 
   const mutation = useMutation({

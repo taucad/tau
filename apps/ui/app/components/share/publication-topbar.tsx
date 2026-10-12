@@ -35,6 +35,11 @@ export function PublicationTopbar({
   sourceLabel,
   managementActions,
 }: PublicationTopbarProps): React.JSX.Element {
+  const desktopTarget = isDesktopTarget();
+  // Native window controls consume the space that web action labels use below lg.
+  const actionButtonClassName = desktopTarget ? 'max-lg:size-8 max-lg:px-0' : 'max-md:size-8 max-md:px-0';
+  const actionLabelClassName = desktopTarget ? 'hidden lg:inline' : 'hidden md:inline';
+  const actionIconClassName = cn('size-3.5', desktopTarget ? 'lg:mr-1.5' : 'md:mr-1.5');
   const downloadArchive = useCallback(() => {
     if (!archive) {
       return;
@@ -73,15 +78,16 @@ export function PublicationTopbar({
         // This bar is the top of a window that has no application shell, so it
         // overlaps the desktop drag band (see `Page`). Its controls subtract
         // themselves; the gaps between them stay draggable.
-        isDesktopTarget() && '[&_:is(a,button,input)]:[app-region:no-drag]',
+        desktopTarget &&
+          'pl-(--desktop-titlebar-inset) sm:pl-(--desktop-titlebar-inset) [&_:is(a,button,input)]:[app-region:no-drag]',
         className,
       )}
     >
-      <div className='flex items-center gap-1 sm:gap-2'>
+      <div className='flex shrink-0 items-center gap-1 sm:gap-2'>
         <Tooltip>
           <TooltipTrigger asChild className='flex items-center gap-2 font-medium'>
-            <Link to='/' aria-label='Go home'>
-              <TauWordmark className='h-6 text-primary' />
+            <Link to='/' aria-label='Go home' className={cn(desktopTarget && 'h-7')}>
+              <TauWordmark className={cn('h-6 text-primary', desktopTarget && 'h-5')} />
             </Link>
           </TooltipTrigger>
           <TooltipContent side='right'>Go home</TooltipContent>
@@ -95,28 +101,27 @@ export function PublicationTopbar({
           </Button>
         ) : null}
       </div>
-      <div className='order-last w-full min-w-0 text-center sm:order-none sm:w-auto sm:flex-1'>
+      <div className='order-last flex w-full min-w-0 items-center justify-center gap-2 text-center sm:order-none sm:w-auto sm:flex-1'>
         <p className='truncate text-sm font-medium'>{publication.title}</p>
-        <p className='hidden truncate text-xs text-muted-foreground sm:block'>
+        <p className='hidden max-w-1/2 shrink-0 truncate text-xs text-muted-foreground sm:block'>
           {sourceLabel ?? (publication.visibility === 'private' ? 'Private Tau share' : 'Public Tau share')}
         </p>
       </div>
-      {/* Every action here (Remix and Manage too) shows its label from md: below it the shared page's phone layout
-          adds its Workbench trigger, and with every action present the labelled bar overflowed at 640-667 px. */}
-      <div className='flex items-center gap-1 sm:gap-2'>
+      {/* At phone widths the workbench trigger shares this row; desktop also reserves native window controls. */}
+      <div className='flex shrink-0 items-center gap-1 sm:gap-2'>
         {shareUrl ? (
           <Button
             type='button'
             size='sm'
             variant='ghost'
             aria-label='Copy link'
-            className='max-md:size-8 max-md:px-0'
+            className={actionButtonClassName}
             onClick={() => {
               void copyShareUrl();
             }}
           >
-            <Link2 className='size-3.5 md:mr-1.5' aria-hidden />
-            <span className='hidden md:inline'>Copy link</span>
+            <Link2 className={actionIconClassName} aria-hidden />
+            <span className={actionLabelClassName}>Copy link</span>
           </Button>
         ) : null}
         {managementActions}
@@ -126,16 +131,16 @@ export function PublicationTopbar({
             size='sm'
             variant='ghost'
             aria-label='Download source'
-            className='max-md:size-8 max-md:px-0'
+            className={actionButtonClassName}
             onClick={downloadArchive}
           >
-            <Download className='size-3.5 md:mr-1.5' aria-hidden />
-            <span className='hidden md:inline'>Download source</span>
+            <Download className={actionIconClassName} aria-hidden />
+            <span className={actionLabelClassName}>Download source</span>
           </Button>
         ) : null}
         <ProjectExportAction
-          className='h-8 px-2.5 text-xs max-md:size-8 max-md:px-0'
-          labelClassName='hidden md:inline'
+          className={cn('h-8 px-2.5 text-xs', actionButtonClassName)}
+          labelClassName={actionLabelClassName}
         />
         <ForkAction publication={publication} files={files} parameters={parameters} />
       </div>

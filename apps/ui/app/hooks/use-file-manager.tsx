@@ -44,6 +44,7 @@ import { FileManagerNotReadyError } from '#filesystem/workspace-errors.js';
 import { reprovideAgentHostProjects } from '#services/agent-host-client.js';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import { ENV } from '#environment.config.js';
 
 type FileManagerSnapshot = SnapshotFrom<typeof fileManagerMachine>;
 
@@ -894,7 +895,12 @@ export function FileManagerProvider({
     };
     return new MachineSettingsStore(
       service,
-      (typeId, refresh) => contentService?.subscribe(machineSettingsPath({ typeId }), refresh) ?? (() => undefined),
+      (typeId, onEvent) => {
+        if (!contentService) {
+          throw new Error('Machine settings content service is unavailable.');
+        }
+        return contentService.watchReady({ paths: [machineSettingsPath({ typeId })] }, onEvent);
+      },
       () => connection.proxy?.dispose(),
     );
   }, [bridgeOpener, rootDirectory, openRootedFileSystemBridge, whenServicesReady, contentService]);
@@ -999,7 +1005,7 @@ export function FileManagerProvider({
           const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
           abort.signal.throwIfAborted();
           const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(root, 'working-copy'));
-          const watch = proxy.watchReady({ paths: [path], ...options }, listener);
+          let watch = proxy.watchReady({ paths: [path], ...options }, listener);
           disposeConnection = () => {
             if (!disposedConnection) {
               disposedConnection = true;
@@ -1007,6 +1013,22 @@ export function FileManagerProvider({
               proxy.dispose();
             }
           };
+          if (ENV.TAU_DEBUG) {
+            const fixture = (
+              globalThis as typeof globalThis & {
+                __tauE2eObservationWatch?: {
+                  wrapRecordWatch?(
+                    root: string,
+                    path: string,
+                    watch: ReturnType<FileSystemBridgeRootedProxy['watchReady']>,
+                  ): ReturnType<FileSystemBridgeRootedProxy['watchReady']>;
+                };
+              }
+            ).__tauE2eObservationWatch;
+            if (fixture?.wrapRecordWatch) {
+              watch = fixture.wrapRecordWatch(root, path, watch);
+            }
+          }
           if (abort.signal.aborted) {
             disposeConnection();
             abort.signal.throwIfAborted();
@@ -1279,21 +1301,71 @@ export function FileManagerProvider({
     };
   }, [getReadiedProxy]);
 
-  const workspace = useMemo<WorkspaceFacade>(() => {
-    const configurePersistedRoots = async (): Promise<void> => {
+  const { workspace, activateRootSync } = useMemo(() => {
+    type RootSyncPasses = {
+      closed: boolean;
+      running: boolean;
+      pending: Array<PromiseWithResolvers<void>>;
+    };
+    const syncLifetime: { passes: RootSyncPasses } = { passes: { closed: false, running: false, pending: [] } };
+    const assertOpen = (owner: RootSyncPasses): void => {
+      if (owner.closed) {
+        throw new Error('Workspace root synchronization owner is disposed');
+      }
+    };
+    const configurePersistedRoots = async (owner: RootSyncPasses): Promise<void> => {
+      assertOpen(owner);
       const [proxy, services, configuration] = await Promise.all([
         getReadiedProxy(),
         whenServicesReady(),
         getProjectRootConfigs(),
       ]);
+      assertOpen(owner);
+      if (fileManagerRef.getSnapshot().context.proxy !== proxy) {
+        throw new Error('Workspace root synchronization provider changed');
+      }
       await proxy.configureProjectRoots(configuration);
+      assertOpen(owner);
+      if (fileManagerRef.getSnapshot().context.treeService !== services.treeService) {
+        throw new Error('Workspace root synchronization services changed');
+      }
       if (configuration.roots.some(({ backend }) => backend === 'webaccess')) {
         services.treeService.startPolling();
       } else {
         services.treeService.stopPolling();
       }
     };
-    return {
+    const drain = async (owner: RootSyncPasses): Promise<void> => {
+      owner.running = true;
+      while (owner.pending.length > 0) {
+        // Capture callers before source acquisition; later invocations require a fresh pass.
+        const callers = owner.pending.splice(0);
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- Each trailing pass must freshly acquire sources after its predecessor.
+          await configurePersistedRoots(owner);
+          for (const caller of callers) {
+            caller.resolve();
+          }
+        } catch (error) {
+          for (const caller of callers) {
+            caller.reject(error);
+          }
+        }
+      }
+      owner.running = false;
+    };
+    const syncProjectRoots = async (): Promise<void> => {
+      const { passes } = syncLifetime;
+      assertOpen(passes);
+      const caller = Promise.withResolvers<void>();
+      passes.pending.push(caller);
+      if (!passes.running) {
+        // async-iife: this drain settles every caller, including failed passes.
+        void drain(passes);
+      }
+      await caller.promise;
+    };
+    const workspace: WorkspaceFacade = {
       mount: async (prefix, config) => {
         const proxy = await getReadiedProxy();
         await proxy.mount(prefix, config);
@@ -1322,9 +1394,7 @@ export function FileManagerProvider({
         const proxy = await getReadiedProxy();
         proxy.disposeStorageRoot(storageRootKey);
       },
-      syncProjectRoots: async () => {
-        await configurePersistedRoots();
-      },
+      syncProjectRoots,
       replaceWorkspaceHandle: async (workspaceId, handle) => {
         const snapshot = await waitForWithTimeout({
           fileManagerRef,
@@ -1349,7 +1419,7 @@ export function FileManagerProvider({
         }
         proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
         try {
-          await configurePersistedRoots();
+          await syncProjectRoots();
         } catch (error) {
           console.warn('[FileManager] Workspace disconnected but root refresh failed', error);
         }
@@ -1363,14 +1433,31 @@ export function FileManagerProvider({
         }
         proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
         try {
-          await configurePersistedRoots();
+          await syncProjectRoots();
         } catch (error) {
           console.warn('[FileManager] Workspace handle restored but root refresh failed', error);
         }
         return true;
       },
     };
+    return {
+      workspace,
+      activateRootSync: () => {
+        if (syncLifetime.passes.closed) {
+          syncLifetime.passes = { closed: false, running: false, pending: [] };
+        }
+        const owner = syncLifetime.passes;
+        return () => {
+          owner.closed = true;
+          for (const caller of owner.pending.splice(0)) {
+            caller.reject(new Error('Workspace root synchronization owner is disposed'));
+          }
+        };
+      },
+    };
   }, [getReadiedProxy, fileManagerRef, whenServicesReady, workspaceTelemetry]);
+
+  useLayoutEffect(() => activateRootSync(), [activateRootSync]);
 
   const value = useMemo<FileManagerContextType>(
     () => ({

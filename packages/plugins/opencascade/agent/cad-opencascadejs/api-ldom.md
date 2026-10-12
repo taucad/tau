@@ -351,6 +351,18 @@ LDOM_Node: declare class LDOM_Node
 
 LDOM_Node_NodeType: typeof LDOM_Node_NodeType[keyof typeof LDOM_Node_NodeType]
 
+  readonly UNKNOWN: 'UNKNOWN'
+
+  readonly ELEMENT_NODE: 'ELEMENT_NODE'
+
+  readonly ATTRIBUTE_NODE: 'ATTRIBUTE_NODE'
+
+  readonly TEXT_NODE: 'TEXT_NODE'
+
+  readonly CDATA_SECTION_NODE: 'CDATA_SECTION_NODE'
+
+  readonly COMMENT_NODE: 'COMMENT_NODE'
+
 LDOM_NodeList: declare class LDOM_NodeList
 
   // LDOM_NodeList.constructor (constructor)
@@ -390,6 +402,30 @@ LDOM_OSStream: declare class LDOM_OSStream
   [Symbol.dispose](): void;
 
 LDOM_OSStream_BOMType: typeof LDOM_OSStream_BOMType[keyof typeof LDOM_OSStream_BOMType]
+
+  readonly BOM_UNDEFINED: 'BOM_UNDEFINED'
+
+  readonly BOM_UTF8: 'BOM_UTF8'
+
+  readonly BOM_UTF16BE: 'BOM_UTF16BE'
+
+  readonly BOM_UTF16LE: 'BOM_UTF16LE'
+
+  readonly BOM_UTF32BE: 'BOM_UTF32BE'
+
+  readonly BOM_UTF32LE: 'BOM_UTF32LE'
+
+  readonly BOM_UTF7: 'BOM_UTF7'
+
+  readonly BOM_UTF1: 'BOM_UTF1'
+
+  readonly BOM_UTFEBCDIC: 'BOM_UTFEBCDIC'
+
+  readonly BOM_SCSU: 'BOM_SCSU'
+
+  readonly BOM_BOCU1: 'BOM_BOCU1'
+
+  readonly BOM_GB18030: 'BOM_GB18030'
 
 LDOM_SBuffer: declare class LDOM_SBuffer
 

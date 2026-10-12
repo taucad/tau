@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { GitHubTreeTruncatedError, getGitHubClient } from '#lib/github-api.js';
+import { GitHubTreeTruncatedError, RepositoryRequestError, getGitHubClient } from '#lib/github-api.js';
 
 const originalClientEnvironment = globalThis.window.ENV;
 
@@ -131,12 +131,34 @@ describe('GitHubApiClient', () => {
     });
 
     it('should throw the route error text so the import flow can degrade', async () => {
-      mockFetch({
-        ok: false,
-        text: async () => '401 Unauthorized: GitHub API token is not configured. Branches list unavailable.',
-      });
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('Bad Gateway: Branches list unavailable.', { status: 502 }),
+      );
 
       await expect(client.listBranches({ owner: 'o', repo: 'r' })).rejects.toThrow('Branches list unavailable');
+    });
+
+    it('should carry the refusal status and code so the import flow can explain it', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        Response.json(
+          {
+            error: 'Service Unavailable',
+            code: 'GITHUB_API_TOKEN_UNAVAILABLE',
+            statusCode: 503,
+            message: 'GitHub branch listing is not configured on this server.',
+          },
+          { status: 503 },
+        ),
+      );
+
+      const error: unknown = await client.listBranches({ owner: 'o', repo: 'r' }).catch((error: unknown) => error);
+
+      expect(error).toBeInstanceOf(RepositoryRequestError);
+      expect(error).toMatchObject({
+        status: 503,
+        code: 'GITHUB_API_TOKEN_UNAVAILABLE',
+        message: 'GitHub branch listing is not configured on this server.',
+      });
     });
   });
 

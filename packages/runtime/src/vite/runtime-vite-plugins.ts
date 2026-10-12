@@ -17,6 +17,7 @@
 
 import type { Plugin, PreviewServer, ResolvedConfig, ViteDevServer } from 'vite';
 import { runtimeAssetsPlugin } from '#vite/runtime-ssr-assets.vite-plugin.js';
+import { kernelGlueLoaders } from '#vite/runtime-invariants.js';
 
 /**
  * Version-neutral public shape of a Vite plugin returned by Tau factories.
@@ -192,6 +193,7 @@ export function tauRuntime(options: RuntimePluginOptions = {}): RuntimeVitePlugi
     ...browserNodeBuiltins(),
     name: 'taucad-runtime:invariants',
     config: () => ({
+      optimizeDeps: { exclude: [...kernelGlueLoaders] },
       worker: {
         format: 'es',
         plugins: () => [runtimeAssetsPlugin(), browserNodeBuiltins()],

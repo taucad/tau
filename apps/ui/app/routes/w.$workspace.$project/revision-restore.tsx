@@ -114,7 +114,8 @@ export function RevisionRestore(): React.JSX.Element {
       if (entry.type === 'notice') {
         if (entry.tone === 'error') {
           toast.error(entry.message);
-        } else {
+        } else if (entry.subject !== 'remote') {
+          // Connection status already belongs to Revisions, including automatic first backup.
           toast.info(entry.message);
         }
         return;

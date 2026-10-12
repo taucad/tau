@@ -66,8 +66,8 @@ const settingsCatalog = [
       {
         id: 'privacy',
         label: 'Privacy',
-        description: 'Choose how your data is used to improve AI',
-        keywords: ['training', 'sharing', 'no train'],
+        description: 'Choose how your data and usage metrics are used to improve Tau',
+        keywords: ['training', 'sharing', 'no train', 'telemetry', 'usage', 'metrics', 'anonymous'],
       },
     ],
   },

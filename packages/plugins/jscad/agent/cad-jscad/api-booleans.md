@@ -9,8 +9,8 @@ booleans
   declare function intersect(...geometries: RecursiveArray<Geom3>): Geom3
 
   // booleans.minkowski (function)
-  export function minkowskiSum(geometryA: Geom3, geometryB: Geom3): Geom3
-  export function minkowskiSum(...geometries: Geom3[]): Geom3
+  export function minkowski(geometryA: Geom3, geometryB: Geom3): Geom3
+  export function minkowski(...geometries: Geom3[]): Geom3
 
   // booleans.subtract (function)
   declare function subtract(...geometries: RecursiveArray<Geom2>): Geom2

@@ -141,8 +141,10 @@ describe('MachinesSettings', () => {
     expect(facet.beginBinding).toHaveBeenCalledExactlyOnceWith({ candidate, name: 'Simulated X1C' });
     /* No address, no secret: the simulator's ceremony carries the id alone. */
     expect(state.completeBinding).toHaveBeenCalledExactlyOnceWith({ ceremonyId: 'ceremony-1' });
-    /* The directory is re-read after the ceremony so the new entry shows. */
-    expect(facet.list).toHaveBeenCalledTimes(2);
+    /* The directory is re-read after the ceremony so the new entry shows; the re-read follows the status update. */
+    await waitFor(() => {
+      expect(facet.list).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("should offer the simulator's demo speed from its binding declaration and bind with the chosen speed", async () => {

@@ -69,6 +69,7 @@ function ShellHandoff({ handoff }: { readonly handoff: ShellAuthHandoff }): Reac
 }
 
 export default function AuthPage(): React.JSX.Element {
+  const desktopTarget = isDesktopTarget();
   const { '*': segment } = useParams();
   const shellHandoff = useShellAuthHandoff(`/auth/${segment ?? ''}`);
   /* A session on a sign-in page continues to `redirectTo`: in the desktop window
@@ -89,24 +90,25 @@ export default function AuthPage(): React.JSX.Element {
   return (
     <AuthEmailDraftProvider>
       <div className='grid min-h-svh lg:grid-cols-2'>
-        <div className='flex flex-col gap-4 p-6 md:p-10'>
+        <div className={cn('flex flex-col gap-4 p-6 md:p-10', desktopTarget && 'gap-0 p-0 md:p-0')}>
           <div
             className={cn(
               'flex justify-center gap-2 md:justify-start',
               // Shell-less window: this row overlaps the desktop drag band.
-              isDesktopTarget() && '[&_a]:[app-region:no-drag]',
+              desktopTarget &&
+                'h-9 shrink-0 items-center justify-start pl-(--desktop-titlebar-inset) md:justify-start [&_a]:[app-region:no-drag]',
             )}
           >
             <Tooltip>
               <TooltipTrigger asChild className='flex items-center gap-2 font-medium'>
-                <Link to='/'>
-                  <TauWordmark className='h-7 text-primary' />
+                <Link to='/' aria-label='Go home' className={cn(desktopTarget && 'h-7')}>
+                  <TauWordmark className={cn('h-7 text-primary', desktopTarget && 'h-5')} />
                 </Link>
               </TooltipTrigger>
               <TooltipContent side='right'>Go home</TooltipContent>
             </Tooltip>
           </div>
-          <div className='flex flex-1 items-center justify-center'>
+          <div className={cn('flex flex-1 items-center justify-center', desktopTarget && 'p-6 md:p-10')}>
             {shellHandoff === undefined ? (
               segment === 'verify-email' ? (
                 <VerifyEmail className='w-full max-w-md' />

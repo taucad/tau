@@ -4,12 +4,8 @@ import { useRouteLoaderData } from 'react-router';
 import { Topic } from '@taucad/events';
 import { consentCookieName } from '#constants/cookie.constants.js';
 import type { RootLoaderData } from '#root-layout.js';
-import {
-  isGlobalPrivacyControlEnabled,
-  parseStoredConsent,
-  readConsentStatus,
-  recordRequestGlobalPrivacyControl,
-} from '#lib/cookie-consent.lib.js';
+import { parseStoredConsent, readConsentStatus } from '#lib/cookie-consent.lib.js';
+import { isGlobalPrivacyControlEnabled, recordRequestGlobalPrivacyControl } from '#lib/global-privacy-control.lib.js';
 import type { ConsentStatus } from '#lib/cookie-consent.lib.js';
 
 type StoredConsent = {

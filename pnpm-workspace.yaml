@@ -415,6 +415,7 @@ patchedDependencies:
   n8ao@1.10.2: patches/n8ao@1.10.2.patch
   vaul@1.1.2: patches/vaul@1.1.2.patch
   three@0.184.0: patches/three@0.184.0.patch
+  '@react-three/fiber@9.6.1': patches/@react-three__fiber@9.6.1.patch
 overrides:
   '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
   '@types/express': 'catalog:'

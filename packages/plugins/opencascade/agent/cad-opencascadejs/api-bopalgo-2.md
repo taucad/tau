@@ -1,6 +1,20 @@
 # libcascade — BOPAlgo (2)
 
-14 top-level symbols. Signatures are verbatim typescript.
+15 top-level symbols. Signatures are verbatim typescript.
+
+BOPAlgo_MakePeriodic_PeriodicityParams: declare class BOPAlgo_MakePeriodic_PeriodicityParams
+
+  // BOPAlgo_MakePeriodic_PeriodicityParams.constructor (constructor)
+  constructor();
+
+  // BOPAlgo_MakePeriodic_PeriodicityParams.Clear (method)
+  Clear(): void;
+
+  // BOPAlgo_MakePeriodic_PeriodicityParams.delete (method)
+  delete(): void;
+
+  // BOPAlgo_MakePeriodic_PeriodicityParams.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 BOPAlgo_MakerVolume: declare class BOPAlgo_MakerVolume extends BOPAlgo_Builder
 
@@ -39,6 +53,18 @@ BOPAlgo_MakerVolume: declare class BOPAlgo_MakerVolume extends BOPAlgo_Builder
   [Symbol.dispose](): void;
 
 BOPAlgo_Operation: typeof BOPAlgo_Operation[keyof typeof BOPAlgo_Operation]
+
+  readonly BOPAlgo_COMMON: 'BOPAlgo_COMMON'
+
+  readonly BOPAlgo_FUSE: 'BOPAlgo_FUSE'
+
+  readonly BOPAlgo_CUT: 'BOPAlgo_CUT'
+
+  readonly BOPAlgo_CUT21: 'BOPAlgo_CUT21'
+
+  readonly BOPAlgo_SECTION: 'BOPAlgo_SECTION'
+
+  readonly BOPAlgo_UNKNOWN: 'BOPAlgo_UNKNOWN'
 
 BOPAlgo_Options: declare class BOPAlgo_Options
 

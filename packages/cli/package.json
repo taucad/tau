@@ -91,6 +91,7 @@
     "@taucad/skills": "workspace:*",
     "@taucad/slicer": "workspace:*",
     "@taucad/tscircuit": "workspace:*",
+    "@taucad/zoo": "workspace:*",
     "citty": "catalog:",
     "consola": "catalog:",
     "ink": "catalog:",

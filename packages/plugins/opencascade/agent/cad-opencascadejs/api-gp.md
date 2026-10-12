@@ -1,6 +1,6 @@
 # libcascade — gp
 
-17 top-level symbols. Signatures are verbatim typescript.
+16 top-level symbols. Signatures are verbatim typescript.
 
 gp: declare class gp
 
@@ -1000,6 +1000,18 @@ gp_Dir: declare class gp_Dir
 
 gp_Dir_D: typeof gp_Dir_D[keyof typeof gp_Dir_D]
 
+  readonly X: 'X'
+
+  readonly Y: 'Y'
+
+  readonly Z: 'Z'
+
+  readonly NX: 'NX'
+
+  readonly NY: 'NY'
+
+  readonly NZ: 'NZ'
+
 gp_Dir2d: declare class gp_Dir2d
 
   // gp_Dir2d.constructor (constructor)
@@ -1089,6 +1101,14 @@ gp_Dir2d: declare class gp_Dir2d
   [Symbol.dispose](): void;
 
 gp_Dir2d_D: typeof gp_Dir2d_D[keyof typeof gp_Dir2d_D]
+
+  readonly X: 'X'
+
+  readonly Y: 'Y'
+
+  readonly NX: 'NX'
+
+  readonly NY: 'NY'
 
 gp_Elips: declare class gp_Elips
 
@@ -1316,5 +1336,3 @@ gp_Elips2d: declare class gp_Elips2d
 
   // gp_Elips2d.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
-
-gp_EulerSequence: typeof gp_EulerSequence[keyof typeof gp_EulerSequence]

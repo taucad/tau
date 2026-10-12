@@ -140,14 +140,14 @@ const fakeRuntime = (options?: {
     connected: number;
     terminated: number;
     rendered: number;
-    exports: Array<{ source?: unknown; parameters?: unknown; exportOptions?: unknown }>;
+    exports: Array<{ source?: unknown; parameters?: unknown; watch?: unknown; exportOptions?: unknown }>;
   };
 } => {
   const state: {
     connected: number;
     terminated: number;
     rendered: number;
-    exports: Array<{ source?: unknown; parameters?: unknown; exportOptions?: unknown }>;
+    exports: Array<{ source?: unknown; parameters?: unknown; watch?: unknown; exportOptions?: unknown }>;
   } = { connected: 0, terminated: 0, rendered: 0, exports: [] };
   const client = {
     connect: async () => {
@@ -156,13 +156,14 @@ const fakeRuntime = (options?: {
     terminate: () => {
       state.terminated += 1;
     },
-    open(openRequest: { source?: unknown; parameters?: unknown }) {
+    open(openRequest: { source?: unknown; parameters?: unknown; watch?: unknown }) {
       return {
         close: vi.fn(),
         export: async (format: string, request: { options?: unknown }) => {
           state.exports.push({
             source: openRequest.source,
             parameters: openRequest.parameters,
+            watch: openRequest.watch,
             exportOptions: request.options,
           });
           if (options?.throws !== undefined) {
@@ -591,6 +592,30 @@ describe('loadModel — the runtime branch', () => {
     ]);
   });
 
+  it('should keep the load error when an owned runtime also fails to shut down', async () => {
+    const runtime = Object.assign(fakeRuntime({ fail: true }), {
+      shutdown: async () => {
+        throw new Error('shutdown failed');
+      },
+    });
+    const error = await diagnosticsOf(async () => loadModel({ file: 'main.ts', runtime: async () => runtime }));
+    expect(error.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+      'KERNEL_ERROR',
+      'GEOSPEC_MODEL_EXPORT_FAILED',
+    ]);
+  });
+
+  it('should report a failed shutdown of a loaded owned runtime as a load error', async () => {
+    const runtime = Object.assign(fakeRuntime({ bytes: await glbBytes() }), {
+      shutdown: async () => {
+        throw new Error('shutdown failed');
+      },
+    });
+    const error = await diagnosticsOf(async () => loadModel({ file: 'main.ts', runtime: async () => runtime }));
+    expect(error.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(['GEOSPEC_MODEL_EXPORT_FAILED']);
+    expect(error.diagnostics[0]?.message).toContain('shutdown failed');
+  });
+
   it('should surface an export-intent refusal', async () => {
     // A STEP export routed through a transcoder cannot carry exact BRep.
     const runtime = fakeRuntime({ transcoderId: 'mesher', fidelity: 'mesh' });
@@ -665,7 +690,11 @@ describe('loadModel — the runtime branch', () => {
     const subject = await loadModel({ file: 'main.ts', runtime, parameters: { seed: 3 } });
     expect(runtime.state.rendered).toBe(0);
     expect(runtime.state.exports).toHaveLength(1);
-    expect(runtime.state.exports[0]).toMatchObject({ source: { path: 'main.ts' }, parameters: { seed: 3 } });
+    expect(runtime.state.exports[0]).toMatchObject({
+      source: { path: 'main.ts' },
+      parameters: { seed: 3 },
+      watch: false,
+    });
     expect(subject.mesh.stats.triangleCount).toBe(1);
   });
 
@@ -776,6 +805,17 @@ describe('createModelLoader', () => {
 
     expect(subject.mesh.stats.triangleCount).toBe(1);
     expect(runtime.state.terminated).toBe(0);
+  });
+
+  it('should reject dispose when its shared runtime fails to shut down', async () => {
+    const runtime = Object.assign(fakeRuntime({ bytes: await glbBytes() }), {
+      shutdown: async () => {
+        throw new Error('shutdown failed');
+      },
+    });
+    const loader = createModelLoader({ runtime: async () => runtime });
+    await loader({ file: 'main.ts' });
+    await expect(loader.dispose()).rejects.toThrow('shutdown failed');
   });
 
   it('should dispose cleanly after a shared runtime factory rejects', async () => {

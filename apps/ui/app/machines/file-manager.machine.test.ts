@@ -1,11 +1,30 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createActor } from 'xstate';
 import type * as FsBridge from '@taucad/fs-bridge';
+import type * as EnvironmentConfig from '#environment.config.js';
 import type { ProjectRootConfiguration } from '@taucad/filesystem';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
+
+const diagnosticEnvironment = vi.hoisted(() => ({ enabled: false }));
+vi.mock('#environment.config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof EnvironmentConfig>();
+  return {
+    ...actual,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the environment module export name.
+    ENV: {
+      ...actual.ENV,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the environment configuration key.
+      get TAU_DEBUG() {
+        return diagnosticEnvironment.enabled;
+      },
+    },
+  };
+});
+type AuthorityWatch = ReturnType<FsBridge.FileSystemBridgeRootedProxy['watchReady']>;
+let mockAuthorityWatch: FsBridge.FileSystemBridgeRootedProxy['watchReady'] | undefined;
 
 const workerTestState = vi.hoisted(() => {
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- recursive type cannot be expressed inline
@@ -76,6 +95,8 @@ const mockOpenFileSystemBridge = vi.fn((_worker: Worker, _options?: { root?: str
 const mockWorkspaceReadDirectory = vi.fn<(path: string) => Promise<unknown[]>>();
 const mockWorkspaceStat = vi.fn<(path: string) => Promise<unknown>>();
 const mockViewReaddirWithStats = vi.fn<(path: string) => Promise<unknown[]>>();
+/* What a rooted view's hello reports; `unavailable` is a root registered after worker boot. */
+let mockViewHelloState: 'ready' | 'unavailable' = 'ready';
 
 vi.mock('@taucad/fs-bridge', () => ({
   createFileSystemBridge: () => mockCreateFileSystemBridge(),
@@ -92,6 +113,11 @@ vi.mock('@taucad/fs-bridge', () => ({
     workerTestState.proxyDeaths.push(die);
     return {
       closed,
+      get watchReady() {
+        return mockAuthorityWatch;
+      },
+      ready: Promise.resolve(),
+      hello: { payload: { state: mockViewHelloState } },
       pollExternalChanges: vi.fn(async () => undefined),
       configureProjectRoots: mockConfigureProjectRoots,
       mount: mockMount,
@@ -159,6 +185,8 @@ vi.mock('#filesystem/handle-store.js', () => ({
 describe('fileManagerMachine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAuthorityWatch = undefined;
+    diagnosticEnvironment.enabled = false;
     workerTestState.instances.length = 0;
     workerTestState.rootedProxyDisposals.length = 0;
     workerTestState.proxyDeaths.length = 0;
@@ -173,6 +201,7 @@ describe('fileManagerMachine', () => {
     mockConfigureProjectRoots.mockResolvedValue(undefined);
     mockWorkspaceReadDirectory.mockResolvedValue([]);
     mockViewReaddirWithStats.mockResolvedValue([]);
+    mockViewHelloState = 'ready';
     /* No dependency mount in this harness: the OPFS mount is the worker's. */
     mockWorkspaceStat.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
     mockDesktopBridge = undefined;
@@ -399,6 +428,33 @@ describe('fileManagerMachine', () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.context.contentService).toBeDefined();
     expect(snapshot.context.treeService).toBeDefined();
+
+    actor.stop();
+  });
+
+  it('should reach ready without listing a root registered after worker boot', async () => {
+    mockViewHelloState = 'unavailable';
+    mockViewReaddirWithStats.mockRejectedValue(new Error('The requested filesystem root is unavailable.'));
+    const actor = createActor(fileManagerMachine, {
+      input: { rootDirectory: '/test', shouldInitializeOnStart: true },
+    });
+    actor.start();
+
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
+    expect(mockViewReaddirWithStats).not.toHaveBeenCalledWith('');
+
+    // Once the root is registered, the reload the provider dispatches lists it.
+    mockViewHelloState = 'ready';
+    mockViewReaddirWithStats.mockResolvedValue([]);
+    actor.send({ type: 'reloadWorkspace' });
+    await vi.waitFor(() => {
+      expect(mockViewReaddirWithStats).toHaveBeenCalledWith('');
+    });
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
 
     actor.stop();
   });
@@ -1890,4 +1946,143 @@ describe('fileManagerMachine', () => {
     });
   });
   /* oxlint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+  describe('opt-in acquired view watch diagnostics', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const open = async () => {
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/projects/proj-a', projectId: 'proj-a', shouldInitializeOnStart: true },
+      });
+      actor.start();
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+      const channel = actor.getSnapshot().context.workerChangeChannel;
+      if (channel === undefined) {
+        actor.stop();
+        throw new Error('Missing initialized watch channel');
+      }
+      return { actor, channel };
+    };
+    const authority = () => {
+      const ready = Promise.withResolvers<void>();
+      const closed = Promise.withResolvers<void>();
+      const unsubscribe = vi.fn(() => {
+        closed.resolve();
+      });
+      const watch: AuthorityWatch = { ready: ready.promise, closed: closed.promise, unsubscribe };
+      const acquire = vi.fn<FsBridge.FileSystemBridgeRootedProxy['watchReady']>((request) =>
+        request.paths.includes('main.ts')
+          ? watch
+          : {
+              ready: Promise.resolve(),
+              closed: Promise.withResolvers<void>().promise,
+              unsubscribe: vi.fn(),
+            },
+      );
+      mockAuthorityWatch = acquire;
+      return { ready, closed, unsubscribe, watch, acquire };
+    };
+
+    it.each([false, true])('preserves real watch identity without an enabled opt-in (debug %s)', async (debug) => {
+      diagnosticEnvironment.enabled = debug;
+      const source = authority();
+      const wrapViewWatch = vi.fn((_root: string, _request: unknown, watch: AuthorityWatch) => watch);
+      if (!debug) {
+        vi.stubGlobal('__tauE2eObservationWatch', { wrapViewWatch });
+      }
+      const { actor, channel } = await open();
+      try {
+        const request = { paths: ['main.ts'] };
+        const handler = vi.fn();
+        const watch = channel.watchReady(request, handler);
+        expect(source.acquire).toHaveBeenLastCalledWith(request, handler);
+        expect(watch.ready).toBe(source.watch.ready);
+        expect(watch.closed).toBe(source.watch.closed);
+        expect(wrapViewWatch).not.toHaveBeenCalled();
+        watch.dispose();
+        expect(source.unsubscribe).toHaveBeenCalledOnce();
+      } finally {
+        actor.stop();
+      }
+    });
+
+    it('wraps an actual registration and holds only its acknowledgement while forwarding closure', async () => {
+      diagnosticEnvironment.enabled = true;
+      const source = authority();
+      const held = Promise.withResolvers<void>();
+      const wrapViewWatch = vi.fn((root: string, request: { paths: readonly string[] }, watch: AuthorityWatch) => {
+        if (!request.paths.includes('main.ts')) {
+          return watch;
+        }
+        expect(root).toBe('/projects/proj-a');
+        expect(source.acquire).toHaveBeenCalled();
+        expect(watch).toBe(source.watch);
+        const awaitAcknowledgment = async (): Promise<void> => {
+          await watch.ready;
+          await held.promise;
+        };
+        return { ...watch, ready: awaitAcknowledgment() };
+      });
+      vi.stubGlobal('__tauE2eObservationWatch', { wrapViewWatch });
+      const { actor, channel } = await open();
+      try {
+        const watch = channel.watchReady({ paths: ['main.ts'] }, vi.fn());
+        let ready = false;
+        const observeReadiness = async (): Promise<void> => {
+          await watch.ready;
+          ready = true;
+        };
+        const observedReadiness = observeReadiness();
+        source.ready.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(ready).toBe(false);
+        expect(wrapViewWatch).toHaveBeenCalledWith('/projects/proj-a', { paths: ['main.ts'] }, source.watch);
+        source.closed.resolve();
+        await expect(watch.closed).resolves.toBeUndefined();
+        held.resolve();
+        await observedReadiness;
+        watch.dispose();
+        expect(source.unsubscribe).toHaveBeenCalledOnce();
+      } finally {
+        held.resolve();
+        actor.stop();
+      }
+    });
+
+    it('disposes the acquired watch if the diagnostic wrapper throws and permits a fresh retry', async () => {
+      diagnosticEnvironment.enabled = true;
+      const source = authority();
+      const failure = new Error('diagnostic watch refusal');
+      let reject = true;
+      vi.stubGlobal('__tauE2eObservationWatch', {
+        wrapViewWatch: (_root: string, request: { paths: readonly string[] }, watch: AuthorityWatch) => {
+          if (request.paths.includes('main.ts') && reject) {
+            throw failure;
+          }
+          return watch;
+        },
+      });
+      const { actor, channel } = await open();
+      try {
+        expect(() => channel.watchReady({ paths: ['main.ts'] }, vi.fn())).toThrow(failure);
+        expect(source.unsubscribe).toHaveBeenCalledOnce();
+        reject = false;
+        const replacement = authority();
+        // The proxy's method is captured by the channel; route its next registration to the new actual lease.
+        source.acquire.mockImplementation(() => replacement.watch);
+        const watch = channel.watchReady({ paths: ['main.ts'] }, vi.fn());
+        replacement.ready.resolve();
+        await watch.ready;
+        expect(watch.closed).toBe(replacement.closed.promise);
+        watch.dispose();
+        expect(replacement.unsubscribe).toHaveBeenCalledOnce();
+      } finally {
+        actor.stop();
+      }
+    });
+  });
 });

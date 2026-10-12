@@ -3,7 +3,6 @@ import { HttpStatus } from '@nestjs/common';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { validateAnthropicHeaders } from '#api/llm/llm-gateway.headers.js';
 import { qualifiedMeterContracts } from '#api/billing/billing-policy.js';
-import { maximumMeterCharge } from '#api/billing/billable-model-bound.js';
 import { createBillableModelEvidenceCollector } from '#api/billing/billable-model-evidence.js';
 import {
   billableModelInputBound,
@@ -163,7 +162,17 @@ const routes = [
     64_000,
     rates('3', '.3', '3.75', '15', '5m'),
   ),
-  route('anthropic-claude-haiku-4.5', 'Haiku 4.5', 'anthropic', 200_000, 64_000, rates('1', '.1', '1.25', '5', '5m')),
+  route(
+    'anthropic-claude-haiku-5.5',
+    'Haiku 5.5',
+    'anthropic',
+    1_000_000,
+    128_000,
+    rates('.5', '.05', '.625', '2.5', '5m'),
+    {
+      pricingRevision: '2026-10-10',
+    },
+  ),
   route(
     'openai-gpt-6-astra',
     'GPT-6 Astra',
@@ -267,12 +276,12 @@ const tieredValuations = new Map<string, { minimum: bigint; baseRates: readonly 
   ['openai-gpt-5.6-terra', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '12', '30m') }],
   ['openai-gpt-5.6-luna', { minimum: 272_001n, baseRates: rates('.2', '.02', '.25', '1.2', '30m') }],
   ['openai-gpt-5.5', { minimum: 272_001n, baseRates: rates('5', '.5', undefined, '30') }],
+  ['anthropic-claude-haiku-5.5', { minimum: 100_001n, baseRates: rates('.1', '.01', '.125', '.5', '5m') }],
   ['google-gemini-3.1-pro', { minimum: 200_001n, baseRates: rates('2', '.2', undefined, '12') }],
   ['xai-grok-4.7', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
   ['xai-grok-4.6', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
 ]);
 const jointInputProviders = new Set(['anthropic', 'openai', 'morph', 'xai']);
-const observedValuationProviders = new Set(['anthropic', 'openai', 'morph', 'vertexai', 'xai']);
 
 /* A tiered route funds two meter contracts: its own id carries the base tariff every
  * request that provably cannot reach the threshold is held and charged at, and the
@@ -286,8 +295,8 @@ const contractRouteId = (routeId: string, longContext: boolean): string =>
 /**
  * Every sku one route serves, base tier first.
  *
- * A route-level control — a pause, a supplier-bound breach, a settlement tier —
- * covers the whole route. Keying one on a single sku would leave the route's
+ * A route-level control — an operator pause, a settlement tier — covers the
+ * whole route. Keying one on a single sku would leave the route's
  * other tier serving traffic, which is half a safety control.
  *
  * @param sku - Any sku the route publishes.
@@ -321,30 +330,27 @@ const valuationRates = (entries: readonly Rate[]) =>
  * @param selected - The qualified route.
  * @param routeRates - The route's premium tariff, which is also its only tariff when untiered.
  * @param maximumInput - The pinned input bound in tokens.
- * @returns The pinned tariff, whether it is the premium tier, and the observed valuation.
+ * @returns The pinned tariff, whether it is the premium tier, and the supplier valuation settlement
+ *   prices the reported usage at, which every route with rates carries.
  */
 const pinTariff = (
-  selected: Pick<Route, 'pricingRevision' | 'providerId' | 'routeId'>,
+  selected: Pick<Route, 'pricingRevision' | 'routeId'>,
   routeRates: readonly Rate[],
   maximumInput: bigint,
-): { longContext: boolean; rates: readonly Rate[]; valuation?: SupplierValuation } => {
+): { longContext: boolean; rates: readonly Rate[]; valuation: SupplierValuation } => {
   const tiered = tieredValuations.get(selected.routeId);
   const longContext = tiered !== undefined && maximumInput >= tiered.minimum;
   const rates = longContext ? routeRates : (tiered?.baseRates ?? routeRates);
   return {
     longContext,
     rates,
-    ...(observedValuationProviders.has(selected.providerId)
-      ? {
-          valuation: {
-            version: 'supplier-valuation-v1',
-            sourceRevision: sourceRevision(selected),
-            longContextMinimumInputTokens: longContext ? tiered.minimum.toString() : null,
-            baseRates: valuationRates(longContext ? tiered.baseRates : rates),
-            longContextRates: longContext ? valuationRates(routeRates) : null,
-          } satisfies SupplierValuation,
-        }
-      : {}),
+    valuation: {
+      version: 'supplier-valuation-v1',
+      sourceRevision: sourceRevision(selected),
+      longContextMinimumInputTokens: longContext ? tiered.minimum.toString() : null,
+      baseRates: valuationRates(longContext ? tiered.baseRates : rates),
+      longContextRates: longContext ? valuationRates(routeRates) : null,
+    },
   };
 };
 
@@ -512,15 +518,6 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
     const jointInputMaximum: JointInputMaximum | undefined = jointInputProviders.has(selected.providerId)
       ? { version: 'joint-input-v1', quantity: maximumInput.toString() }
       : undefined;
-    const supplierMaximumPicoUsd = maximumMeterCharge(
-      pinned.rates.map((rateEntry) => ({
-        dimension: rateEntry.dimension,
-        quantity: rateEntry.dimension === 'output' ? maximumOutput : maximumInput,
-        numerator: rateEntry.numeratorPicoUsd,
-        denominator: million,
-      })),
-      jointInputMaximum,
-    );
     const adapter = this.dependencies.adapters.get(selected.routeId);
     const credentialAccount = this.dependencies.credentialAccounts.get(selected.providerId);
     if (!adapter || !credentialAccount) {
@@ -554,7 +551,6 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
       sku: `model:${contractId}`,
       meterContractId,
       maximumQuantities: quantities,
-      supplierMaximumPicoUsd,
       // Streamed SSE costs 110-200 bytes per output token; 256 keeps a legitimate full-length answer
       // under the authorized_exhausted ceiling (W9) while the provider's own max-output cap bounds tokens.
       maximumResponseBytes: Number(maximumOutput) * 256 + 1_048_576,
@@ -573,7 +569,7 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
           numeratorPicoUsd: rateEntry.numeratorPicoUsd.toString(),
           denominatorUnits: million.toString(),
         })),
-        ...(pinned.valuation === undefined ? {} : { supplierValuation: pinned.valuation }),
+        supplierValuation: pinned.valuation,
         ...(jointInputMaximum === undefined ? {} : { jointInputMaximum }),
         executionTimeout: this.dependencies.executionTimeout,
       },

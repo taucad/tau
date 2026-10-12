@@ -14,6 +14,10 @@ import {
 } from 'three';
 import type { WebGLProgramParametersWithUniforms, WebGLRenderer } from 'three';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import {
+  applyModelMaterialAppearance,
+  getOrCaptureModelMaterialAppearance,
+} from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 import { MeshBasicNodeMaterial, MeshMatcapNodeMaterial } from 'three/webgpu';
 import type { Node } from 'three/webgpu';
 import { bool } from 'three/tsl';
@@ -284,18 +288,20 @@ describe('section clip installation', () => {
 
   it('should keep the clip when the surface depth bias composed under it turns off', () => {
     const material = new MeshStandardMaterial();
+    const snapshot = getOrCaptureModelMaterialAppearance(material);
     applyGltfSurfaceDepthBias(material, 'webgl');
     installSectionClip(material, createSectionClip('webgl'));
-    material.transparent = true;
-    material.opacity = 0.5;
-
-    applyGltfSurfaceDepthBias(material, 'webgl');
+    applyModelMaterialAppearance(material, snapshot, 0.5);
     const shader = compile(material, programSources.standard);
 
     expect(shader.fragmentShader).toContain('tauSectionRemoved');
     expect(shader.fragmentShader).not.toContain('tauSurfaceDepthOffset');
     expect(material.customProgramCacheKey()).toContain('|tau-section-clip-v1');
     expect(material.customProgramCacheKey()).not.toContain('tau-gltf-surface-depth-bias');
+    applyModelMaterialAppearance(material, snapshot, 1);
+    const restored = compile(material, programSources.standard);
+    expect(restored.fragmentShader).toContain('tauSectionRemoved');
+    expect(restored.fragmentShader.match(/float tauSurfaceDepthOffset/g)).toHaveLength(1);
   });
 
   it('should set one mask node on converted, node and fat-line materials alike on WebGPU', () => {

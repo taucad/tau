@@ -73,6 +73,25 @@ describe('tauRuntime (Vite plugin)', () => {
     expect(config['worker']).toMatchObject({ format: 'es' });
   });
 
+  it('should serve kernel glue loaders unoptimized beside their glue, keeping consumer exclusions', async () => {
+    const config = await resolveConfig(
+      { configFile: false, plugins: [tauRuntime()], optimizeDeps: { exclude: ['consumer-dependency'] } },
+      'serve',
+      'development',
+    );
+
+    expect(config.optimizeDeps.exclude).toEqual(
+      expect.arrayContaining([
+        'consumer-dependency',
+        'libcascade/init',
+        'libcascade/multi/init',
+        'libcascade/single/init',
+        'replicad-opencascadejs/multi/init',
+        'replicad-opencascadejs/single/init',
+      ]),
+    );
+  });
+
   it('should install fresh Node builtin stubs in Vite worker builds', () => {
     const config = resolvePluginConfig(findInvariants(tauRuntime()));
     const worker = config['worker'] as { plugins?: () => Plugin[] };

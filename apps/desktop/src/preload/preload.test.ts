@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
 import { quitChannels, slicersChannels } from '#shared/desktop-bootstrap.js';
-import { generatedImageIpcChannel } from '#shared/quick-look.js';
+import { generatedImageIpcChannel, isQuickLookEnabled } from '#shared/quick-look.js';
 
 const state = vi.hoisted(() => ({
   exposed: new Map<string, unknown>(),
@@ -120,5 +120,13 @@ describe('desktop preload Bambu Studio bridge', () => {
       [slicersChannels.bambuStudio.catalog, { model: 'X1C' }],
       [slicersChannels.bambuStudio.settings, { printer: 'p', process: 'q', filaments: [] }],
     ]);
+  });
+});
+
+describe('desktop preload Quick Look bridge', () => {
+  it('should expose tau.quickLook only while the Quick Look flag is on', () => {
+    const tau = state.exposed.get('tau') as Readonly<Record<string, unknown>>;
+
+    expect('quickLook' in tau).toBe(isQuickLookEnabled());
   });
 });

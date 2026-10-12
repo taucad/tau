@@ -10,6 +10,7 @@
     "#*": "./src/*"
   },
   "devDependencies": {
+    "@taucad/agent-host": "workspace:*",
     "@taucad/billing": "workspace:*"
   }
 }

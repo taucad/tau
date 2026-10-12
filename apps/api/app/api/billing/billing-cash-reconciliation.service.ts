@@ -47,6 +47,21 @@ const attributedCaseKinds = new Set([
   'gross_fee_net_mismatch',
 ]);
 
+/**
+ * Account-scoped case kinds that stop the named account spending: the ones that put its own balance in
+ * question, because credited cash may be withdrawn (a dispute), is unbacked (an orphan receipt, an invalid
+ * grant cause, an entitlement disagreement) or the journal no longer agrees with it. Money Tau owes the
+ * customer and Tau's own fee accounting never stop spending; they stay operator cases.
+ */
+export const spendBlockingFinancialCaseKinds: readonly string[] = [
+  'dispute_unresolved',
+  'orphan_local_receipt',
+  'invalid_grant_cause',
+  'entitlement_source_disagreement',
+  ...journalBlockingFinancialCaseKinds,
+];
+
+/** Every cash, purchase and journal case kind: what pauses new collection while a case names no account. */
 export const cashBlockingFinancialCaseKinds: readonly string[] = [
   'orphan_local_receipt',
   'missing_local_payment',

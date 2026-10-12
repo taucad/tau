@@ -127,8 +127,11 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
         allow: ({ state, range }) =>
           shouldAllowSlashCommandTrigger({ state, range }) && (char === '/' || hasDollarItems()),
         command: ({ editor, range, props }) => {
-          const item = props as SlashCommandItem;
-          if (!isEnabledSlashCommandItem(item)) {
+          const selected = props as SlashCommandItem;
+          const item = itemsFunction('').find(
+            (candidate) => candidate.id === selected.id && candidate.label === selected.label,
+          );
+          if (item === undefined || !isEnabledSlashCommandItem(item)) {
             return;
           }
 

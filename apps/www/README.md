@@ -12,7 +12,7 @@ Build output is `apps/www/dist`. Every marketing stylesheet, script, image, font
 
 ## Editorial workflow
 
-`content/drafts/` contains outlines only and is never copied to the deployment. `content/articles.json` is empty until a human submits an article. Each published item requires `status: "published"`, `authorship: "human"`, `author`, `reviewedBy`, `date` (YYYY-MM-DD), `slug`, `title`, `description`, and a `paragraphs` array. The author and reviewer must genuinely write/review the text; these fields do not turn generated prose into human authorship. Review the change in a PR. Build validation rejects incomplete publication metadata, unsafe/duplicate slugs and future dates; article text is escaped. The journal index and `/blog/<slug>/` detail page are generated together. Image ideas are pending; no fabricated founder essay is published.
+`content/drafts/` contains outlines only and is never copied to the deployment. `content/articles.json` is empty until a human submits an article. Each published item requires `status: "published"`, `authorship: "human"`, `author`, `reviewedBy`, `date` (YYYY-MM-DD), `slug`, `title`, `description`, and a `paragraphs` array. The author and reviewer must genuinely write/review the text; these fields do not turn generated prose into human authorship. Review the change in a PR. Build validation rejects incomplete publication metadata, unsafe/duplicate slugs and future dates; article text is escaped. The blog index and `/blog/<slug>/` detail page are generated together. Image ideas are pending; no fabricated founder essay is published.
 
 ## Content evidence
 
@@ -20,7 +20,7 @@ Verified baseline: `faecc9ac8f456b7fa5639fc0eb146012e3e499c8` on remote `geospec
 
 - Product: `apps/ui/app/routes/_index/`, `apps/ui/app/routes/vision/vision-story.ts`, and `libs/tau-examples/src/kernels/replicad/planetary-gear-system/`. Distinguish current geometry checks from physical validation and future manufacturing workflows.
 - Prices and customer terms: current `apps/libs/billing/src/tau-plan-catalog.ts`, cross-checked against founder-ratified private commercial authority. No supplier economics are included in public output.
-- Routes: `/projects`, `/projects/new`, `/auth/sign-in`, `/auth/sign-up`, `/settings/billing` (existing settings redirect), `/legal/privacy`, `/legal/terms` verified in the app source.
+- Routes: `/projects`, `/projects/new`, `/auth/sign-in`, `/auth/sign-up`, `/?settings=billing` (the billing settings that `/settings/billing` redirects to), `/legal/privacy`, `/legal/terms` verified in the app source.
 - Downloads: release assets could not be verified; no platform installer or download event is invented.
 - Media: authored Tau example thumbnails and actual workspace screenshot. The live scene and stills derive from the committed 34-part Replicad model; motion does not imply a physical simulation. Verification shows one recorded GeoSpec run of the example spec, with inconclusive results labelled as such. Source license: Tau-authored Apache-2.0; preserve third-party terms.
 
@@ -66,13 +66,13 @@ The site leads with “Design Verify Print.” and one real model: the committed
 - `src/story-timeline.mjs` maps continuous chapter progress to pure per-part state: three agent lanes, formation, an axial assembly in the order an engineer would build it (every part slides in along the gearbox axis from a non-overlapping exploded stack, so nothing passes through anything else), one input revolution, the face-width change, the ring sliced on a print plate, and the device view.
 - `src/client.mjs` keeps still frames in sync with the reading position whenever the live scene is not running. Desktop upgrades the hero after load and idle; touch and narrow screens load on intent or as the story approaches. Reduced motion, Save-Data, no WebGL2 or no `DecompressionStream` never request the 3D bundle.
 
-Kinematics follow the source constraints: fixed ring; sun θ; carrier θ/4; planet absolute rotation −θ/2. The parameter beat is real geometry: `planetary-face18.{json,bin.gz}` holds per-vertex z offsets from the authored `faceWidth` 14 → 18 export, applied as a relative morph target (axial envelope 68 → 72 mm). The verification beat renders `content/evidence/planetary-geospec-run.json`, a recorded run of the example spec (3 passed, 0 failed, 7 inconclusive, with unsupported-evidence codes shown as such). The agent lanes, prompt and device frames are labelled illustration. Printing previews a slice; it sends no job.
+Kinematics follow the source constraints: fixed ring; sun θ; carrier θ/4; planet absolute rotation −θ/2. The model, kinematics, assembly order and recorded GeoSpec run come from `@taucad/planetary-gearbox` (`apps/libs/planetary-gearbox`), which the Tau app's vision page and design story share; the build copies its geometry assets to `/_www/assets/`. The parameter beat is real geometry: `planetary-face18.{json,bin.gz}` holds per-vertex z offsets from the authored `faceWidth` 14 → 18 export, applied as a relative morph target (axial envelope 68 → 72 mm). The verification beat renders the library's `assets/geospec-run.json`, a recorded run of the example spec (3 passed, 0 failed, 7 inconclusive, with unsupported-evidence codes shown as such). The agent lanes, prompt and device frames are labelled illustration. Printing previews a slice; it sends no job.
 
 ## Reproduce assets
 
 Use an isolated tooling directory (outside the app dependency graph) with `type: module`, holding `three@0.184.0`, `replicad@npm:@taulabs/replicad@0.23.4-beta.2`, `replicad-opencascadejs@npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0`, `tsx`, `esbuild`, `playwright` and `sharp@0.34.5`.
 
-1. `WWW_RENDER_TOOLS=/path/to/tools node apps/www/scripts/export-story-assets.mjs` exports the frozen 34-part model to `planetary.{json,bin.gz}`.
+1. `WWW_RENDER_TOOLS=/path/to/tools node apps/www/scripts/export-story-assets.mjs` exports the frozen 34-part model to `apps/libs/planetary-gearbox/assets/planetary.{json,bin.gz}`.
 2. `WWW_RENDER_TOOLS=/path/to/tools node apps/www/scripts/export-variant-assets.mjs` re-executes the source, checks the committed base mesh matches, and writes the `faceWidth` 18 offsets.
 3. `CHROME_CHANNEL=chrome node apps/www/scripts/capture-stills.mjs` renders the hero poster and the nine story stills from the shipped `scene.mjs` on a GPU-backed Chrome, so the fallbacks show exactly what the live renderer draws.
 4. `WWW_RENDER_TOOLS=/path/to/tools node apps/www/scripts/optimize-assets.mjs` regenerates responsive sizes and the social card. `capture-metal-hero.mjs` still reproduces the metal star.
@@ -87,7 +87,7 @@ Start `node apps/www/scripts/serve.mjs`, then run `node apps/www/scripts/browser
 
 ## Claims
 
-Tau Cloud backup and sync are presented as available on Pro (10 GB) and Enterprise (100 GB) from `apps/libs/billing`; Free shows GitHub backup only, because free-tier sync is held off in production. Hosted verification and Enterprise signed evidence/CI keep their “Coming soon” labels. Tau Desktop is “in development” with no download link, because no installer is published. The journal stays empty until a human writes and reviews an article.
+Tau Cloud backup and sync are presented as available on Pro (10 GB) and Enterprise (100 GB) from `apps/libs/billing`; Free shows GitHub backup only, because free-tier sync is held off in production. Hosted verification and Enterprise signed evidence/CI keep their “Coming soon” labels. Tau Desktop is “in development” with no download link, because no installer is published. The blog stays empty until a human writes and reviews an article.
 
 ## Lint
 

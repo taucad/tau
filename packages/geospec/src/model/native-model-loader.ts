@@ -259,7 +259,18 @@ const directBytes = async (
     return new Uint8Array(await source.arrayBuffer());
   }
   if (readSource !== undefined) {
-    return readSource(source);
+    try {
+      return await readSource(source);
+    } catch (error) {
+      throw failure([
+        diagnostic({
+          code: 'GEOSPEC_NATIVE_SOURCE_READ_FAILED',
+          message: `The host source reader could not read ${typeof source === 'string' ? source : 'this source'}: ${error instanceof Error ? error.message : String(error)}`,
+          suggestion: 'Check that the source exists at a project-rooted path and is readable, then retry the load.',
+          ...(typeof source === 'string' ? { details: { source } } : {}),
+        }),
+      ]);
+    }
   }
   throw failure([
     diagnostic({
@@ -728,9 +739,11 @@ export const createGeoSpecNativeModelLoader = (
       throw failure(requested.diagnostics);
     }
     const exportOptions = structuredClone(requested.options);
+    // One export, then close: a file watcher would outlive the worker that tears it down.
     const document = runtime.open({
       source: runtimeSource(options),
       ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
+      watch: false,
     });
     const exported = await (async () => {
       try {
@@ -975,7 +988,12 @@ export const createGeoSpecNativeModelLoader = (
       }
       for (const runtime of ownedRuntimes) {
         try {
-          runtime.terminate();
+          if (runtime.shutdown) {
+            // oxlint-disable-next-line no-await-in-loop -- Each owned runtime must close before release settles.
+            await runtime.shutdown();
+          } else {
+            runtime.terminate();
+          }
         } catch (error) {
           errors.push(error);
         }

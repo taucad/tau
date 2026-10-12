@@ -23,6 +23,7 @@ vi.doMock('#hooks/use-keyboard.js', () => ({
 vi.doMock('#hooks/use-skills-catalog.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useSkillsCatalog: () => [],
+  useSkillsCatalogState: () => ({ commands: [], prompt: [], status: 'ready', retry: () => undefined }),
 }));
 vi.doMock('#hooks/use-cad-agent-config.js', () => ({
   useAgentHostPlacements: () => ({ targets: [], loading: false }),
@@ -36,7 +37,7 @@ vi.doMock('#components/chat/chat-agent-sheet.js', () => ({
   ChatAgentSheet: () => (
     <Button variant='ghost' size='sm' className='h-7 min-w-0 shrink'>
       <span data-slot='trigger-model' className='truncate'>
-        Haiku 4.5
+        Haiku 5.5
       </span>
     </Button>
   ),
@@ -191,3 +192,116 @@ for (const width of [320, 600]) {
     });
   }
 }
+
+describe('composer bar resize geometry', () => {
+  it('refits after an actual loading font completes', async () => {
+    await page.viewport(800, 720);
+    await document.fonts.ready;
+    const font = new FontFace('ComposerLoadingFixture', 'url(/fonts/GeistMono-Variable.woff2?composer-loading)');
+    document.fonts.add(font);
+    const style = document.createElement('style');
+    style.textContent = '[data-slot=trigger-model] { font-family: ComposerLoadingFixture, monospace; }';
+    document.head.append(style);
+    const scrollWidth = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollWidth')?.get;
+    if (!scrollWidth) {
+      throw new Error('The browser native scrollWidth getter is unavailable.');
+    }
+    const fontReads: number[] = [];
+    const measurement = vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockImplementation(function (this: Element) {
+      const width = Number(scrollWidth.call(this));
+      if (
+        this instanceof HTMLElement &&
+        this.dataset['slot'] === 'trigger-model' &&
+        new Error('Composer geometry read').stack?.includes('refitWhenFontsLoad')
+      ) {
+        fontReads.push(width);
+      }
+      return width;
+    });
+    try {
+      const loaded = font.load();
+      expect(document.fonts.status).toBe('loading');
+      const { container } = renderComposer({ enableKernelSelector: true });
+      await loaded;
+      await document.fonts.ready;
+      await Promise.resolve();
+      expect(font.status).toBe('loaded');
+      expect(fontReads.length).toBeGreaterThan(0);
+      const model = container.querySelector<HTMLElement>('[data-slot=trigger-model]')!;
+      expect(model.scrollWidth).toBeLessThanOrEqual(model.clientWidth);
+    } finally {
+      measurement.mockRestore();
+      style.remove();
+      document.fonts.delete(font);
+    }
+  });
+
+  it('does not refit unchanged geometry for fonts already loaded before mounting', async () => {
+    await page.viewport(800, 720);
+    const warm = renderComposer({ enableKernelSelector: true });
+    await document.fonts.ready;
+    warm.unmount();
+    await document.fonts.ready;
+    expect(document.fonts.status).toBe('loaded');
+    const scrollWidth = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollWidth')?.get;
+    if (!scrollWidth) {
+      throw new Error('The browser native scrollWidth getter is unavailable.');
+    }
+    const reads: Array<{ stack: string; width: number; barWidth: number; text: string }> = [];
+    const measurement = vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockImplementation(function (this: Element) {
+      const width = Number(scrollWidth.call(this));
+      if (this instanceof HTMLElement && this.dataset['slot'] === 'trigger-model') {
+        reads.push({
+          stack: new Error('Composer geometry read').stack ?? '',
+          width,
+          barWidth: this.closest('[data-slot=composer-bar]')!.getBoundingClientRect().width,
+          text: this.textContent,
+        });
+      }
+      return width;
+    });
+    try {
+      const { container } = renderComposer({ enableKernelSelector: true });
+      const model = container.querySelector<HTMLElement>('[data-slot=trigger-model]')!;
+      const bar = container.querySelector<HTMLElement>('[data-slot=composer-bar]')!;
+      const initial = { text: model.textContent, width: bar.getBoundingClientRect().width };
+      expect(reads.length).toBeGreaterThan(0);
+      await document.fonts.ready;
+      await Promise.resolve();
+      expect(document.fonts.status).toBe('loaded');
+      expect({ text: model.textContent, width: bar.getBoundingClientRect().width }).toEqual(initial);
+      const fontReads = reads.filter((read) => read.stack.includes('refitWhenFontsLoad'));
+      for (const read of fontReads) {
+        expect({ text: read.text, width: read.barWidth }).toEqual(initial);
+        expect(read.width).toBe(reads[0]!.width);
+      }
+      expect(fontReads).toHaveLength(0);
+    } finally {
+      measurement.mockRestore();
+    }
+  });
+
+  it('restores kernel text when widened and refits changed model text at the same width', async () => {
+    await page.viewport(320, 720);
+    const { container } = renderComposer({ enableKernelSelector: true });
+    const bar = container.querySelector<HTMLElement>('[data-slot=composer-bar]');
+    const model = container.querySelector<HTMLElement>('[data-slot=trigger-model]');
+    if (!bar || !model) {
+      throw new Error('The rendered composer bar is missing.');
+    }
+    // This suite substitutes the model control; these are real CSS/layout assertions,
+    // not acceptance of a product model/level selection gesture.
+    model.textContent = 'A sufficiently long current model name';
+    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(true);
+    await page.viewport(800, 720);
+    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(false);
+    expect(Object.hasOwn(bar.dataset, 'hideMode')).toBe(false);
+    expect(Object.hasOwn(bar.dataset, 'hideLevel')).toBe(false);
+    expect(model.scrollWidth).toBeLessThanOrEqual(model.clientWidth);
+    await page.viewport(320, 720);
+    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(true);
+    model.textContent = 'Short';
+    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(false);
+    expect(model.scrollWidth).toBeLessThanOrEqual(model.clientWidth);
+  });
+});

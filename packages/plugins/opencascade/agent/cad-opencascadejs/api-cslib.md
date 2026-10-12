@@ -39,7 +39,27 @@ CSLib_Class2d: declare class CSLib_Class2d
 
 CSLib_Class2d_Result: typeof CSLib_Class2d_Result[keyof typeof CSLib_Class2d_Result]
 
+  readonly Result_Inside: 'Result_Inside'
+
+  readonly Result_Outside: 'Result_Outside'
+
+  readonly Result_Uncertain: 'Result_Uncertain'
+
 CSLib_DerivativeStatus: typeof CSLib_DerivativeStatus[keyof typeof CSLib_DerivativeStatus]
+
+  readonly CSLib_Done: 'CSLib_Done'
+
+  readonly CSLib_D1uIsNull: 'CSLib_D1uIsNull'
+
+  readonly CSLib_D1vIsNull: 'CSLib_D1vIsNull'
+
+  readonly CSLib_D1IsNull: 'CSLib_D1IsNull'
+
+  readonly CSLib_D1uD1vRatioIsNull: 'CSLib_D1uD1vRatioIsNull'
+
+  readonly CSLib_D1vD1uRatioIsNull: 'CSLib_D1vD1uRatioIsNull'
+
+  readonly CSLib_D1uIsParallelD1v: 'CSLib_D1uIsParallelD1v'
 
 CSLib_NormalPolyDef: declare class CSLib_NormalPolyDef extends math_FunctionWithDerivative
 
@@ -62,3 +82,21 @@ CSLib_NormalPolyDef: declare class CSLib_NormalPolyDef extends math_FunctionWith
   [Symbol.dispose](): void;
 
 CSLib_NormalStatus: typeof CSLib_NormalStatus[keyof typeof CSLib_NormalStatus]
+
+  readonly CSLib_Singular: 'CSLib_Singular'
+
+  readonly CSLib_Defined: 'CSLib_Defined'
+
+  readonly CSLib_InfinityOfSolutions: 'CSLib_InfinityOfSolutions'
+
+  readonly CSLib_D1NuIsNull: 'CSLib_D1NuIsNull'
+
+  readonly CSLib_D1NvIsNull: 'CSLib_D1NvIsNull'
+
+  readonly CSLib_D1NIsNull: 'CSLib_D1NIsNull'
+
+  readonly CSLib_D1NuNvRatioIsNull: 'CSLib_D1NuNvRatioIsNull'
+
+  readonly CSLib_D1NvNuRatioIsNull: 'CSLib_D1NvNuRatioIsNull'
+
+  readonly CSLib_D1NuIsParallelD1Nv: 'CSLib_D1NuIsParallelD1Nv'

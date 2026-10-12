@@ -236,3 +236,35 @@ describe('tolerant reading (CL-R1, CL-A2)', () => {
     expect(classifyLogRow(row)).toMatchObject({ class: 'known', event: row });
   });
 });
+
+describe('generic classifier observable inputs', () => {
+  it.each(['getter', 'proxy'])('preserves the generic union observation order for a %s', (kind) => {
+    let reads = 0;
+    const value = {
+      version: 1,
+      leaderEpoch: 'e',
+      sequence: 0,
+      recordedAt: 'now',
+      runId: 'r',
+      state: 'running',
+    };
+    const readType = () => {
+      reads++;
+      return reads === 2 ? 'future.row' : 'run.lifecycle';
+    };
+    const input =
+      kind === 'getter'
+        ? Object.defineProperty(value, 'type', { enumerable: true, get: readType })
+        : new Proxy(
+            { ...value, type: 'run.lifecycle' },
+            {
+              get(target, key, receiver): unknown {
+                return key === 'type' ? readType() : Reflect.get(target, key, receiver);
+              },
+            },
+          );
+
+    expect(classifyLogRow(input).class).toBe('known');
+    expect(reads).toBeGreaterThan(2);
+  });
+});

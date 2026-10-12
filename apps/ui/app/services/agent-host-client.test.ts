@@ -5,13 +5,15 @@
  * stream with `serveAgentChannel` over a scripted launcher.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import { writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
-import type { AgentLiveEvent, AgentLogEvent, ChannelServerHandle, HostRunSnapshot } from '@taucad/agent-host';
+import type { SourceLiveEvent, AgentLogEvent, ChannelServerHandle, HostRunSnapshot } from '@taucad/agent-host';
 import { serveAgentWorkerChannel } from '@taucad/agent-host/channel-client';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import { agentWireVersion } from '@taucad/agent-host/wire';
-import type { CommandAnswer, HostCommand, ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
+import type { CatchUpFrame, CommandAnswer, HostCommand, ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
 import {
   createBrowserAgentHostClient,
   getBrowserAgentHostCapability,
@@ -112,10 +114,10 @@ class FakeResidentWorker {
   private readonly waiters = new Set<() => void>();
   private readonly liveControllers = new Set<{
     readonly chatId: string;
-    readonly controller: ReadableStreamDefaultController<AgentLiveEvent>;
+    readonly controller: ReadableStreamDefaultController<SourceLiveEvent>;
   }>();
 
-  private readonly pendingLive: AgentLiveEvent[] = [];
+  private readonly pendingLive: SourceLiveEvent[] = [];
   private readonly snapshots = new Map<string, HostRunSnapshot>();
 
   public addEventListener(_type: 'error', listener: ErrorListener): void {
@@ -149,7 +151,7 @@ class FakeResidentWorker {
     }
   }
 
-  public emitLive(event: AgentLiveEvent): void {
+  public emitLive(event: SourceLiveEvent): void {
     const listening = [...this.liveControllers].filter((entry) => entry.chatId === event.chatId);
     if (listening.length === 0) {
       this.pendingLive.push(event);
@@ -252,12 +254,13 @@ class FakeResidentWorker {
 
   /** The scripted host each stream is served from. */
   private launcher(): AgentLauncher {
-    const scripted: Pick<AgentLauncher, 'execute' | 'read' | 'liveEvents'> = {
+    const scripted: Pick<AgentLauncher, 'execute' | 'read' | 'catchUp' | 'liveEvents'> = {
       execute: async (command: HostCommand) => this.command(command),
       read: async (input: ReadInput) => this.read(input),
+      catchUp: writerOwnedCatchUp,
       liveEvents: ({ chatId, signal }) => this.listenLive(chatId, signal),
     };
-    return scripted as AgentLauncher;
+    return mock<AgentLauncher>(scripted);
   }
 
   private append(chatId: string, runId: string, state: HostRunSnapshot['state']): number {
@@ -329,6 +332,8 @@ class FakeResidentWorker {
     return {
       status: 'batch',
       chatId: request.chatId,
+      sourceGeneration: 'fixture-source',
+      sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
       cursor: request.cursor,
       nextCursor: request.cursor + events.length,
       endCursor: rows.length,
@@ -336,8 +341,8 @@ class FakeResidentWorker {
     };
   }
 
-  private listenLive(chatId: string, signal: AbortSignal): AsyncIterable<AgentLiveEvent> {
-    return new ReadableStream<AgentLiveEvent>({
+  private listenLive(chatId: string, signal: AbortSignal): AsyncIterable<SourceLiveEvent> {
+    return new ReadableStream<SourceLiveEvent>({
       start: (controller) => {
         const entry = { chatId, controller };
         this.liveControllers.add(entry);
@@ -355,7 +360,7 @@ class FakeResidentWorker {
         );
       },
       cancel: () => undefined,
-    }) as unknown as AsyncIterable<AgentLiveEvent>;
+    }) as unknown as AsyncIterable<SourceLiveEvent>;
   }
 }
 
@@ -449,24 +454,55 @@ const workerOf =
     worker as unknown as Worker;
 
 describe('createBrowserAgentHostClient', () => {
+  it('forwards the required catch-up stream through the real resident channel and transport', async () => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker));
+    try {
+      const frames: CatchUpFrame[] = [];
+      for await (const frame of client.catchUp({ chatId: 'chat-catch-up', limit: 2, maxBytes: 1024 })) {
+        frames.push(frame);
+      }
+      expect(frames).toEqual([
+        {
+          type: 'refused',
+          answer: {
+            status: 'refused',
+            chatId: 'chat-catch-up',
+            reason: 'writer-owned',
+          },
+        },
+      ]);
+    } finally {
+      await client.close();
+    }
+  });
+
   it('exposes only keyed commands and durable reads, with no page run map', async () => {
     const client = createTestClient(workerOf(new FakeResidentWorker()));
-    expect(Object.keys(client).sort()).toEqual(['close', 'hostCommand', 'read', 'subscribe', 'subscribeLive']);
+    expect(Object.keys(client).sort()).toEqual([
+      'catchUp',
+      'close',
+      'hostCommand',
+      'read',
+      'subscribe',
+      'subscribeLive',
+    ]);
     await client.close();
   });
 
   it('forwards read-only live deltas without sending another host command', async () => {
     const worker = new FakeResidentWorker();
     const client = createTestClient(workerOf(worker));
-    const seen: AgentLiveEvent[] = [];
+    const seen: SourceLiveEvent[] = [];
     const stop = client.subscribeLive('chat-preview', (_chatId, event) => seen.push(event));
-    const delta: AgentLiveEvent = {
+    const delta: SourceLiveEvent = {
       type: 'text-delta',
       chatId: 'chat-preview',
       runId: 'run-preview',
       messageId: 'assistant-1',
       contentIndex: 0,
       delta: 'Partial',
+      sourceGeneration: 'writer-preview',
     };
     worker.emitLive(delta);
     await vi.waitFor(() => {
@@ -727,6 +763,8 @@ describe('createBrowserAgentHostClient', () => {
         chatId: 'chat-identity',
         cursor: 1,
         last,
+        sourceGeneration: 'fixture-source',
+        sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
       });
     });
     unsubscribe();

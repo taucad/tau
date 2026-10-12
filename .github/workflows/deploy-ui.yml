@@ -9,17 +9,18 @@
 #
 #   - staging (taucad.dev): `ci.yml` → `deploy-ui-staging` on every push to
 #     `main` that affects the UI, using this run's `geospec-ci-*` artifact.
-#   - production (tau.new): `deploy-production.yml` dispatches this workflow at
-#     a `ui@x.y.z` tag, using the artifact of the `ci.yml` push run on `main`
-#     for the tag's commit.
+#   - production (tau.new): `release-build.yml` calls this workflow in a `ui@x.y.z`
+#     release's own run, and `deploy-production.yml` dispatches it at the tag
+#     for a rollback or redeploy. Either way it uses the artifact of the `ci.yml`
+#     push run on `main` for the tag's commit.
 #
 # Both Netlify sites run with `deploy_mode = "ci"` in tau-cloud, so Netlify's Git
 # integration no longer builds them. Each environment holds a `NETLIFY_AUTH_TOKEN`
 # secret, set by hand by the account owner; the site IDs below are not secrets.
 #
 # Manual redeploy of staging: `gh workflow run deploy-ui.yml -f
-# environment=staging` from `main`. Production redeploys go through
-# `deploy-production.yml` with the release tag.
+# environment=staging` from `main`. Production rollbacks and redeploys go
+# through `deploy-production.yml` with the release tag.
 
 name: Deploy UI to Netlify
 
@@ -65,17 +66,19 @@ jobs:
     env:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
     steps:
-      # Production deploys start only from deploy-production.yml, whose run a
-      # release manager approves; it dispatches this workflow at the release tag.
-      - name: Require a production deploy started by Deploy release to production
-        if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production'
+      # Production deploys run at a release tag: called by release-build.yml in
+      # the release's own run, or dispatched by deploy-production.yml for a
+      # rollback or redeploy. A person dispatching this workflow directly is
+      # refused. (In a called workflow, `github.workflow_ref` names the caller.)
+      - name: Require a production deploy from a release
+        if: inputs.environment == 'production' && contains(github.workflow_ref, '/.github/workflows/deploy-ui.yml@')
         env:
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           if [ "$TRIGGERING_ACTOR" != 'github-actions[bot]' ] || ! [[ "$REF" =~ ^refs/tags/ui@[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Deploy to production with Deploy release to production (deploy-production.yml); it dispatches this workflow at the release tag."
+            echo "::error::Production deploys come from a release: merge its release pull request, or roll back with Deploy release to production (deploy-production.yml)."
             exit 1
           fi
 
@@ -108,7 +111,7 @@ jobs:
         if: inputs.transport == 'this-run'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          name: geospec-ci-${{ github.sha }}
           path: .
 
       - name: Verify this run's GeoSpec artifact against the checkout
@@ -177,7 +180,18 @@ jobs:
 
       # The CLI comes from the workspace lockfile (`scripts` owns it); its build
       # runs `apps/ui/netlify.toml`'s production command with the site's variables.
+      # Each push to `main` runs on its own, so an older run can reach this queue
+      # after a newer one has deployed; it must not put its commit back.
+      - name: Skip a staging deploy a newer commit has superseded
+        id: superseded
+        if: inputs.environment == 'staging'
+        uses: ./.github/actions/staging-deploy-superseded
+        with:
+          job-name: Deploy UI to ${{ inputs.environment }}
+          github-token: ${{ github.token }}
+
       - name: Build and deploy with the Netlify CLI
+        if: steps.superseded.outputs.superseded != 'true'
         working-directory: apps/ui
         env:
           SITE_ID: ${{ steps.site.outputs.site_id }}
@@ -190,6 +204,7 @@ jobs:
             --site "$SITE_ID" --message "$MESSAGE"
 
       - name: Check the site answers
+        if: steps.superseded.outputs.superseded != 'true'
         env:
           URL: ${{ steps.site.outputs.url }}
         run: curl --fail --silent --show-error --location --retry 5 --retry-delay 10 --output /dev/null "$URL"

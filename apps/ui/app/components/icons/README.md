@@ -68,8 +68,9 @@ pnpm nx run ui:generate-svg-sprite
   typeset from the `Jost` variable font PicoGK itself bundles
   (`repos/PicoGK/assets/Jost.ttf`, SIL OFL 1.1) at `wght 300` with the `GK` pair
   conjoined, and the frame redrawn to match.
-- `tscircuit.svg` is an original monochrome chip glyph drawn for Tau (no upstream mark is
-  reused; tscircuit publishes its logo as raster only).
+- `tscircuit.svg` is the official tscircuit mark (the vector of <https://tscircuit.com/tscircuit-logo.png>),
+  `public/tsdot.svg` in [tscircuit/kicad-viewer](https://github.com/tscircuit/kicad-viewer) at commit
+  `d8bc6f703cc7572c1cf0401933ad86447b4fdc70`, licensed under MIT (Copyright 2025 tscircuit Inc.).
 - `python.svg` uses the official Python Software Foundation two-snake glyph (vendored at
   `repos/convex-backend/npm-packages/docs/static/img/python-logo.svg`), its gradients
   flattened to the brand's `#FFD43B`/white and set on a `#306998` rounded square so it

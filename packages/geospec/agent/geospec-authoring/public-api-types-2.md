@@ -1,6 +1,6 @@
 # geospec — Types (2)
 
-76 top-level symbols. Signatures are verbatim typescript.
+75 top-level symbols. Signatures are verbatim typescript.
 
 // Structured payload when `boundingBox` fails
 BoundingBoxFailure: {
@@ -138,15 +138,15 @@ GeometryEvidenceDiagnostic: Omit<GeometryDiagnostic, 'details'> & {
 
   message: string
 
-  suggestion: string
+  suggestion?: string
 
-  spatial: {
+  spatial?: {
           min?: Vec3;
           max?: Vec3;
           center?: Vec3;
       }
 
-  details: JSONValue
+  details?: JSONValue
 
 // Statistics about a parsed GLB geometry
 // Remarks: `vertexCount` and `meshCount` are kept on the type for internal diagnostic use (and for the kernel-author Vitest harness in `kernel-geometry-testing.utils.ts`); they are no longer exposed via the agent-facing requirement schema.
@@ -169,7 +169,7 @@ GeometryStats: {
 
   watertight: boolean
 
-  boundingBox: BoundingBoxStats
+  boundingBox?: BoundingBoxStats
 
 // One TRIANGLES primitive with identity for spatial-test feedback
 PrimitiveRecord: {
@@ -183,7 +183,7 @@ PrimitiveRecord: {
   // The glTF node / mesh name (from kernel ShapeConfig.name when present)
   name: string
 
-  color: string
+  color?: string
 
   vertices: number
 
@@ -273,7 +273,7 @@ WatertightIrregularEdgeSample: {
 
   primitives: string[]
 
-  color: string
+  color?: string
 
 // Per-primitive watertight diagnostic (local tessellation only)
 WatertightPrimitiveBreakdown: {
@@ -414,34 +414,34 @@ CreateModelLoaderOptions: {
 }
 
   // Initialized compiled engine supplied by the host, never selected by an authored spec
-  engine: GeoSpecNativeModelEngine
+  engine?: GeoSpecNativeModelEngine
 
   // Rooted host reader for direct filesystem or URL sources
-  readSource: GeoSpecNativeSourceReader
+  readSource?: GeoSpecNativeSourceReader
 
   // Geometry format to export when an individual call does not specify one
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Runtime client or lazy runtime factory
-  runtime: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
+  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
 
   // Source-specific runtime adapters, e.g
-  sourceAdapters: readonly GeoSpecRuntimeSourceAdapter[]
+  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
 
   // Project root used by runtime integrations
-  projectPath: string
+  projectPath?: string
 
   // STEP reader strategy used for STEP sources or exports
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
 // Geometry formats accepted by {@link import ('./load-model.js').loadModel}
 GeoSpecModelFormat: MeshFileFormat | 'step' | 'stp'
@@ -458,8 +458,8 @@ ManagedGeoSpecModelLoader: GeoSpecModelLoader & {
   dispose(): Promise<void>;
 
 // Runtime client surface consumed by `geospec/model`
-// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL.
-GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & {
+// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL. A client with `shutdown` is awaited through it when GeoSpec releases an owned runtime, so its host resources are closed before the caller (for example a worker thread) exits.
+GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & Partial<Pick<RuntimeClient, 'shutdown'>> & {
     open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
     on?(event: 'telemetry', handler: (batch: {
         readonly entries: ReadonlyArray<{
@@ -539,31 +539,31 @@ LoadModelCodeOptions: {
   file: keyof Code & string
 
   // Geometry format to export
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Explicit parameters passed to the runtime
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
   // Runtime client or lazy runtime factory
-  runtime: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
+  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
 
   // Source-specific runtime adapters, e.g
-  sourceAdapters: readonly GeoSpecRuntimeSourceAdapter[]
+  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
 
   // Project root used by runtime integrations
-  projectPath: string
+  projectPath?: string
 
   // STEP reader strategy used for STEP exports
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
 // Filesystem-backed model load options
 LoadModelFileOptions: {
@@ -593,52 +593,52 @@ LoadModelFileOptions: {
   file: string
 
   // Project root used by runtime integrations
-  projectPath: string
+  projectPath?: string
 
   // Geometry format to export
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Explicit parameters passed to the runtime
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
   // Runtime client or lazy runtime factory
-  runtime: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
+  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
 
   // Source-specific runtime adapters, e.g
-  sourceAdapters: readonly GeoSpecRuntimeSourceAdapter[]
+  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
 
   // STEP reader strategy used for STEP exports
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
 // Options accepted by {@link import ('./load-model.js').loadModel}
 LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadModelFileOptions
 
   // Geometry format to export
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Explicit parameters passed to the runtime
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP exports
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
 // Direct geometry-source model load options
 LoadModelSourceOptions: {
@@ -673,37 +673,37 @@ LoadModelSourceOptions: {
   source: MeshSource | StepSource
 
   // Named external resources consumed alongside the direct geometry bytes
-  resources: ReadonlyArray<{
+  resources?: ReadonlyArray<{
           readonly name: string;
           readonly source: MeshSource | StepSource;
       }>
 
   // Source geometry format
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Source path recorded in provenance
-  path: string
+  path?: string
 
   // Human-readable source name recorded in provenance
-  name: string
+  name?: string
 
   // Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical millimetre normalization
-  sourceUnit: GeoSpecUnit
+  sourceUnit?: GeoSpecUnit
 
   // Explicit parameters recorded in provenance
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP sources
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
 // Labeled broad-phase record
 RelationshipBroadPhase: {
@@ -739,9 +739,9 @@ RelationshipEvidence: {
 
   verdict: 'pass' | 'fail' | 'unsupported'
 
-  broadPhase: RelationshipBroadPhase
+  broadPhase?: RelationshipBroadPhase
 
-  final: RelationshipFinalEvidence
+  final?: RelationshipFinalEvidence
 
   // `GEOSPEC_SPATIAL_RELATIONSHIP_MISMATCH` on fail
   diagnostics: GeometryDiagnostic[]
@@ -784,10 +784,10 @@ RelationshipWitness: {
 
   value: number[]
 
-  topologyRef: string
+  topologyRef?: string
 
   // Where the witness points came from
-  provenance: 'mesh'
+  provenance?: 'mesh'
 
 // Collects suites, tests, assertions, and async completion state for one GeoSpec module execution
 GeoSpecCollector: {
@@ -852,11 +852,11 @@ GeoSpecCollectorOptions: {
     nativeAssertions?: GeoSpecAssertionClientOptions;
 }
 
-  matcherWallBackstop: number
+  matcherWallBackstop?: number
 
-  forensic: boolean
+  forensic?: boolean
 
-  nativeAssertions: GeoSpecAssertionClientOptions
+  nativeAssertions?: GeoSpecAssertionClientOptions
 
 // Compiled Vitest-style test-name pattern used by a GeoSpec run
 GeoSpecTestNamePattern: RegExp
@@ -876,13 +876,13 @@ DiscoverGeoSpecFilesOptions: {
 
   projectPath: string
 
-  files: readonly string[]
+  files?: readonly string[]
 
-  include: readonly string[]
+  include?: readonly string[]
 
-  exclude: readonly string[]
+  exclude?: readonly string[]
 
-  ignoredDirectories: readonly string[]
+  ignoredDirectories?: readonly string[]
 
 // File kind returned by a GeoSpec discovery filesystem
 GeoSpecDiscoveryFileKind: 'file' | 'directory'
@@ -952,28 +952,28 @@ GeoSpecRunFailure: {
 
   issues: VmIssue[]
 
-  bundle: BundleResult
+  bundle?: BundleResult
 
-  accounting: GeoSpecTestAccounting
+  accounting?: GeoSpecTestAccounting
 
-  lineage: GeoSpecRunLineage
+  lineage?: GeoSpecRunLineage
 
   // Tests registered before a module execution failure, including their retained assertions
-  tests: GeoSpecTestCase[]
+  tests?: GeoSpecTestCase[]
 
 // Result returned by {@link import ('./run-geospec-module.js').runGeoSpecModule}
 GeoSpecRunResult: GeoSpecRunSuccess | GeoSpecRunFailure
 
   success: false
 
-  bundle: BundleResult
+  bundle?: BundleResult
 
-  accounting: GeoSpecTestAccounting
+  accounting?: GeoSpecTestAccounting
 
-  lineage: GeoSpecRunLineage
+  lineage?: GeoSpecRunLineage
 
   // Tests registered before a module execution failure, including their retained assertions
-  tests: GeoSpecTestCase[]
+  tests?: GeoSpecTestCase[]
 
 // Successful GeoSpec run result
 GeoSpecRunSuccess: {
@@ -995,9 +995,9 @@ GeoSpecRunSuccess: {
 
   bundle: BundleResult
 
-  accounting: GeoSpecTestAccounting
+  accounting?: GeoSpecTestAccounting
 
-  lineage: GeoSpecRunLineage
+  lineage?: GeoSpecRunLineage
 
 // A collected GeoSpec test case
 GeoSpecTestCase: {
@@ -1018,7 +1018,7 @@ GeoSpecTestCase: {
 }
 
   // Registration ordinal before filtering, scoped to the source module's collection
-  ordinal: number
+  ordinal?: number
 
   // Hierarchical suite path
   suite: string[]
@@ -1036,7 +1036,7 @@ GeoSpecTestCase: {
   diagnostics: GeometryDiagnostic[]
 
   // Wall-clock cost of the test body plus its pending assertions, in milliseconds (R1)
-  durationMs: number
+  durationMs?: number
 
 // Test case status after runner collection
 GeoSpecTestStatus: 'passed' | 'failed' | 'unsupported' | 'inconclusive' | 'not-run' | 'skipped'
@@ -1091,58 +1091,58 @@ RunGeoSpecModuleOptions: {
   entryPath: string
 
   // JavaScript regular expression matched against full `suite > test` names
-  testNamePattern: string | RegExp
+  testNamePattern?: string | RegExp
 
   // Timeout for async test callbacks, in milliseconds
-  testTimeout: number
+  testTimeout?: number
 
   // Milliseconds
-  matcherWallBackstop: number
+  matcherWallBackstop?: number
 
   // Emit structured forensic events for this run
-  forensic: boolean
+  forensic?: boolean
 
   // Host-provided protocol-3 compiled assertion client
-  nativeAssertions: GeoSpecAssertionClientOptions
+  nativeAssertions?: GeoSpecAssertionClientOptions
 
   // Host-composed identity loader
-  nativeModelLoader: (options: Parameters<GeoSpecNativeModelLoader>[0]) => Promise<GeoSpecNativeSubject & {
+  nativeModelLoader?: (options: Parameters<GeoSpecNativeModelLoader>[0]) => Promise<GeoSpecNativeSubject & {
           readonly load?: GeoSpecModelLoadEvidence;
       }>
 
   // Model loader exposed to VM tests through `geospec/model`
-  modelLoader: GeoSpecModelLoader
+  modelLoader?: GeoSpecModelLoader
 
   // STEP loader exposed to VM tests through `geospec/step`
-  stepLoader: GeoSpecStepLoader
+  stepLoader?: GeoSpecStepLoader
 
   // Additional in-memory modules made available to the VM
-  builtinModules: Record<string, BuiltinModule>
+  builtinModules?: Record<string, BuiltinModule>
 
   // Internal profile counters used by opt-in benchmark tooling
-  internalProfile: GeoSpecRunProfile
+  internalProfile?: GeoSpecRunProfile
 
   // Successful bundle cache owned by a serial runner worker
-  bundleCache: GeoSpecModuleBundleCache
+  bundleCache?: GeoSpecModuleBundleCache
 
   // List-only collection pass (R3 shard splitting)
-  collectOnly: boolean
+  collectOnly?: boolean
 
 // Native assertion options whose engine can also admit and release subjects
 GeoSpecNativeRunnerAssertions: Omit<GeoSpecAssertionClientOptions, 'engine'> & {
     readonly engine: GeoSpecNativeModelEngine;
 }
 
-  claimId: (matcher: GeoSpecMatcherName, sequence: number) => string
+  readonly claimId?: (matcher: GeoSpecMatcherName, sequence: number) => string
 
   // Success-evidence profile of every claim and query
-  evidenceProfile: GeoSpecNativeEvidenceProfile
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
 
-  subjectSlot: string
+  readonly subjectSlot?: string
 
-  workUnitLimit: number
+  readonly workUnitLimit?: number
 
-  engine: GeoSpecNativeModelEngine
+  readonly engine: GeoSpecNativeModelEngine
 
 // Options for the native serial runner
 GeoSpecNativeRunnerOptions: Omit<GeoSpecRunnerOptions, 'modelLoader' | 'nativeAssertions' | 'nativeModelLoader' | 'stepLoader'> & {
@@ -1158,19 +1158,19 @@ GeoSpecNativeRunnerOptions: Omit<GeoSpecRunnerOptions, 'modelLoader' | 'nativeAs
   filesystem: VmFileSystem
 
   // Additional in-memory modules made available to the VM
-  builtinModules: RunGeoSpecModuleOptions['builtinModules']
+  builtinModules?: RunGeoSpecModuleOptions['builtinModules']
 
   // Internal profile counters used by opt-in benchmark tooling
-  internalProfile: GeoSpecRunProfile
+  internalProfile?: GeoSpecRunProfile
 
   // Actual protocol-3 engine used by authored assertions
-  nativeAssertions: GeoSpecNativeRunnerAssertions
+  readonly nativeAssertions: GeoSpecNativeRunnerAssertions
 
   // Optional managed loader
-  nativeModelLoader: ManagedGeoSpecNativeModelLoader
+  readonly nativeModelLoader?: ManagedGeoSpecNativeModelLoader
 
   // Defaults used when the runner constructs its own native loader
-  model: Omit<CreateGeoSpecNativeModelLoaderOptions, 'engine'>
+  readonly model?: Omit<CreateGeoSpecNativeModelLoaderOptions, 'engine'>
 
 // Defaults and host dependencies for a managed native model loader
 CreateGeoSpecNativeModelLoaderOptions: {
@@ -1190,20 +1190,20 @@ CreateGeoSpecNativeModelLoaderOptions: {
     readonly carried?: Map<string, unknown>;
 }
 
-  engine: GeoSpecNativeModelEngine
+  readonly engine: GeoSpecNativeModelEngine
 
-  format: Extract<GeoSpecModelFormat, 'glb' | 'step' | 'stp'>
+  readonly format?: Extract<GeoSpecModelFormat, 'glb' | 'step' | 'stp'>
 
-  projectPath: string
+  readonly projectPath?: string
 
-  readSource: GeoSpecNativeSourceReader
+  readonly readSource?: GeoSpecNativeSourceReader
 
-  runtime: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
+  readonly runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
 
-  sourceAdapters: readonly GeoSpecRuntimeSourceAdapter[]
+  readonly sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
 
   // Subject handles carried between the release scopes of loaders that share one engine, keyed by subjectHash
-  carried: Map<string, unknown>
+  readonly carried?: Map<string, unknown>
 
 // Native additions accepted by the injected `geospec/runner/native` loader
 GeoSpecNativeLoadModelOptions: LoadModelOptions<Code> & {
@@ -1214,28 +1214,28 @@ GeoSpecNativeLoadModelOptions: LoadModelOptions<Code> & {
 }
 
   // Geometry format to export
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Explicit parameters passed to the runtime
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP exports
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
   // Ordered external resource payloads declared to the native admission request
-  resources: readonly GeoSpecNativeModelResource[]
+  readonly resources?: readonly GeoSpecNativeModelResource[]
 
   // Format-specific native ingest options
-  ingestOptions: Readonly<Record<string, unknown>>
+  readonly ingestOptions?: Readonly<Record<string, unknown>>
 
 // Native engine operations required for model admission and run-level cleanup
 GeoSpecNativeModelEngine: GeoSpecNativeEngine & {
@@ -1270,12 +1270,12 @@ GeoSpecNativeModelSubject: GeoSpecNativeSubject & {
     readonly load?: GeoSpecModelLoadEvidence;
 }
 
-  contentHash: string
+  readonly contentHash?: string
 
-  subjectHash: string
+  readonly subjectHash?: string
 
   // Exact successful-load evidence retained by the admitting host, when available
-  load: GeoSpecModelLoadEvidence
+  readonly load?: GeoSpecModelLoadEvidence
 
 // One named external resource referenced by a direct glTF-family source
 GeoSpecNativeModelResource: {
@@ -1283,9 +1283,9 @@ GeoSpecNativeModelResource: {
     readonly source: LoadModelSourceOptions['source'];
 }
 
-  name: string
+  readonly name: string
 
-  source: LoadModelSourceOptions['source']
+  readonly source: LoadModelSourceOptions['source']
 
 // Resolve a non-memory source into ordinary ArrayBuffer-backed bytes
 // Remarks: The loader takes ownership of the returned bytes and admits them without a copy, so a reader must return bytes that nothing mutates afterwards (a fresh read, not a view of a shared or reused buffer).
@@ -1327,31 +1327,31 @@ GeoSpecNodeRunnerOptions: GeoSpecRunnerOptions & {
   filesystem: VmFileSystem
 
   // Model loader exposed to authored tests through `geospec/model`
-  modelLoader: RunGeoSpecModuleOptions['modelLoader']
+  modelLoader?: RunGeoSpecModuleOptions['modelLoader']
 
   // Protocol-3 assertion client used by explicitly native runners
-  nativeAssertions: RunGeoSpecModuleOptions['nativeAssertions']
+  nativeAssertions?: RunGeoSpecModuleOptions['nativeAssertions']
 
   // Managed native model loader released after each settled run
-  nativeModelLoader: ManagedGeoSpecNativeModelLoader
+  nativeModelLoader?: ManagedGeoSpecNativeModelLoader
 
   // STEP loader exposed to authored tests through `geospec/step`
-  stepLoader: RunGeoSpecModuleOptions['stepLoader']
+  stepLoader?: RunGeoSpecModuleOptions['stepLoader']
 
   // Additional in-memory modules made available to the VM
-  builtinModules: RunGeoSpecModuleOptions['builtinModules']
+  builtinModules?: RunGeoSpecModuleOptions['builtinModules']
 
   // Internal profile counters used by opt-in benchmark tooling
-  internalProfile: GeoSpecRunProfile
+  internalProfile?: GeoSpecRunProfile
 
   // Absolute project root path
   projectPath: string
 
   // Enable the authenticated persistent evidence cache
-  cache: boolean
+  cache?: boolean
 
   // Absolute out-of-tree evidence-cache directory
-  cacheDirectory: string
+  cacheDirectory?: string
 
 // Options accepted by {@link createGeoSpecNodePoolRunner}
 GeoSpecNodePoolRunnerOptions: {
@@ -1378,19 +1378,19 @@ GeoSpecNodePoolRunnerOptions: {
   projectPath: string
 
   // Compiled worker count
-  workers: number
+  workers?: number
 
   // Per-shard non-verdict watchdog override, milliseconds (R11)
-  shardTimeout: number
+  shardTimeout?: number
 
   // Persistent reference-engine evidence caching is unsupported
-  cache: boolean
+  cache?: boolean
 
   // Reference-engine cache directories are unsupported and refused when supplied
-  cacheDirectory: string
+  cacheDirectory?: string
 
   // Reference-engine runtime factories are unsupported and refused when supplied
-  runtimeFactoryModule: {
+  runtimeFactoryModule?: {
           /** Absolute URL or resolvable Node module specifier. */
           specifier: string;
           /** Named export with signature `(projectPath: string) => Promise<GeoSpecRuntimeClient>`. */
@@ -1404,22 +1404,22 @@ GeoSpecWebRunnerOptions: GeoSpecRunnerOptions
   filesystem: VmFileSystem
 
   // Model loader exposed to authored tests through `geospec/model`
-  modelLoader: RunGeoSpecModuleOptions['modelLoader']
+  modelLoader?: RunGeoSpecModuleOptions['modelLoader']
 
   // Protocol-3 assertion client used by explicitly native runners
-  nativeAssertions: RunGeoSpecModuleOptions['nativeAssertions']
+  nativeAssertions?: RunGeoSpecModuleOptions['nativeAssertions']
 
   // Managed native model loader released after each settled run
-  nativeModelLoader: ManagedGeoSpecNativeModelLoader
+  nativeModelLoader?: ManagedGeoSpecNativeModelLoader
 
   // STEP loader exposed to authored tests through `geospec/step`
-  stepLoader: RunGeoSpecModuleOptions['stepLoader']
+  stepLoader?: RunGeoSpecModuleOptions['stepLoader']
 
   // Additional in-memory modules made available to the VM
-  builtinModules: RunGeoSpecModuleOptions['builtinModules']
+  builtinModules?: RunGeoSpecModuleOptions['builtinModules']
 
   // Internal profile counters used by opt-in benchmark tooling
-  internalProfile: GeoSpecRunProfile
+  internalProfile?: GeoSpecRunProfile
 
 // Options accepted by {@link createGeoSpecWebPoolRunner}
 GeoSpecWebPoolRunnerOptions: {
@@ -1438,10 +1438,10 @@ GeoSpecWebPoolRunnerOptions: {
   createWorker: () => WebWorkerLike | Promise<WebWorkerLike>
 
   // Worker count
-  workers: number
+  workers?: number
 
   // Per-shard non-verdict watchdog override, milliseconds (R11)
-  shardTimeout: number
+  shardTimeout?: number
 
 // Options accepted by {@link startGeoSpecPoolWorkerHost}
 GeoSpecPoolWorkerHostOptions: {
@@ -1471,19 +1471,19 @@ GeoSpecPoolWorkerHostOptions: {
   filesystem: RunGeoSpecModuleOptions['filesystem']
 
   // Model loader exposed to authored tests through `geospec/model`
-  modelLoader: RunGeoSpecModuleOptions['modelLoader']
+  modelLoader?: RunGeoSpecModuleOptions['modelLoader']
 
   // Native assertion client shared with this worker's model admissions
-  nativeAssertions: RunGeoSpecModuleOptions['nativeAssertions']
+  nativeAssertions?: RunGeoSpecModuleOptions['nativeAssertions']
 
   // Managed native admissions, released after every shard and collection pass and before shutdown
-  nativeModelLoader: ManagedGeoSpecNativeModelLoader
+  nativeModelLoader?: ManagedGeoSpecNativeModelLoader
 
   // STEP loader exposed to authored tests through `geospec/step`
-  stepLoader: RunGeoSpecModuleOptions['stepLoader']
+  stepLoader?: RunGeoSpecModuleOptions['stepLoader']
 
   // Additional in-memory modules made available to the VM
-  builtinModules: RunGeoSpecModuleOptions['builtinModules']
+  builtinModules?: RunGeoSpecModuleOptions['builtinModules']
 
   // Post a message to the pool host
   postMessage: (message: GeoSpecPoolWorkerMessage) => void
@@ -1492,10 +1492,10 @@ GeoSpecPoolWorkerHostOptions: {
   onHostMessage: (listener: (message: GeoSpecPoolHostMessage) => void) => void
 
   // Sample this worker's resident memory in bytes (R15 telemetry)
-  measureMemoryBytes: () => number | undefined
+  measureMemoryBytes?: () => number | undefined
 
   // Release platform resources on shutdown (after the shared scope disposes)
-  onShutdown: () => Promise<void> | void
+  onShutdown?: () => Promise<void> | void
 
 GeoSpecPoolHostMessage: {
     type: 'initialize';
@@ -1538,7 +1538,7 @@ GeoSpecPoolShard: {
   file: string
 
   // Exact-test pattern for split shards (R3
-  testNamePattern: string
+  testNamePattern?: string
 
 GeoSpecPoolWorkerHandle: {
     postMessage(message: GeoSpecPoolHostMessage): void;
@@ -1629,7 +1629,7 @@ GeoSpecForensicEvent: {
 
   unit: 'milliseconds' | 'count'
 
-  shardId: number
+  shardId?: number
 
 // Public GeoSpec runner lifecycle surface
 GeoSpecRunner: {
@@ -1688,32 +1688,3 @@ GeoSpecRunnerEvent: {
 }
 
   type: 'forensic'
-
-// One GeoSpec test file executed by a worker-style runner
-GeoSpecRunnerFileResult: {
-    /** Absolute or project-relative GeoSpec test file path supplied to the runner. */
-    file: string;
-    /** Low-level module execution result for this file. */
-    result: GeoSpecRunResult;
-    /** Wall-clock cost of executing this file, in milliseconds (R1). */
-    durationMs?: number;
-    /** First deterministic model-load cache key observed in this file (R9 affinity telemetry). */
-    primaryLoadKey?: string;
-    /** Executing worker's isolate-resident memory at file completion, in bytes (R15 memory-class telemetry). */
-    workerMemoryBytes?: number;
-}
-
-  // Absolute or project-relative GeoSpec test file path supplied to the runner
-  file: string
-
-  // Low-level module execution result for this file
-  result: GeoSpecRunResult
-
-  // Wall-clock cost of executing this file, in milliseconds (R1)
-  durationMs: number
-
-  // First deterministic model-load cache key observed in this file (R9 affinity telemetry)
-  primaryLoadKey: string
-
-  // Executing worker's isolate-resident memory at file completion, in bytes (R15 memory-class telemetry)
-  workerMemoryBytes: number

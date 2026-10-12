@@ -358,6 +358,12 @@ StepBasic_Address: declare class StepBasic_Address extends Standard_Transient
 
 StepBasic_AheadOrBehind: typeof StepBasic_AheadOrBehind[keyof typeof StepBasic_AheadOrBehind]
 
+  readonly StepBasic_aobAhead: 'StepBasic_aobAhead'
+
+  readonly StepBasic_aobExact: 'StepBasic_aobExact'
+
+  readonly StepBasic_aobBehind: 'StepBasic_aobBehind'
+
 StepBasic_ApplicationContext: declare class StepBasic_ApplicationContext extends Standard_Transient
 
   // StepBasic_ApplicationContext.constructor (constructor)

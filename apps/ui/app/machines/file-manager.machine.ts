@@ -1,3 +1,4 @@
+import { ENV } from '#environment.config.js';
 import { setup, types } from 'xstate';
 import type { EnqueueObject, EventObject, SystemRegistry } from 'xstate';
 import type { FileSystemBackend } from '@taucad/types';
@@ -531,7 +532,33 @@ const initializeServicesActor = fromSafeAsync<
 
   try {
     const initializedChangeChannel = new WorkerChangeChannel({
-      transport: { listen: viewProxy.listen, watchReady: viewProxy.watchReady, closed: viewProxy.closed },
+      transport: {
+        listen: viewProxy.listen,
+        closed: viewProxy.closed,
+        watchReady: (request, handler) => {
+          const watch = viewProxy.watchReady(request, handler);
+          if (!ENV.TAU_DEBUG) {
+            return watch;
+          }
+          const fixture = (
+            globalThis as typeof globalThis & {
+              __tauE2eObservationWatch?: {
+                wrapViewWatch?(
+                  root: string,
+                  request: Parameters<typeof viewProxy.watchReady>[0],
+                  watch: ReturnType<typeof viewProxy.watchReady>,
+                ): ReturnType<typeof viewProxy.watchReady>;
+              };
+            }
+          ).__tauE2eObservationWatch;
+          try {
+            return fixture?.wrapViewWatch?.(context.rootDirectory, request, watch) ?? watch;
+          } catch (error) {
+            watch.unsubscribe();
+            throw error;
+          }
+        },
+      },
     });
     workerChangeChannel = initializedChangeChannel;
     const client = createComposedViewClient({
@@ -570,7 +597,12 @@ const initializeServicesActor = fromSafeAsync<
     if (backend === 'webaccess') {
       await proxy.pollExternalChanges(normalizePath(context.rootDirectory));
     }
-    await initializedTreeService.listDirectory('', { signal });
+    // A project registered after worker boot answers ROOT_UNAVAILABLE until
+    // configureProjectRoots runs; its tree stays unresolved rather than failing start-up.
+    await viewProxy.ready;
+    if (viewProxy.hello.payload.state !== 'unavailable') {
+      await initializedTreeService.listDirectory('', { signal });
+    }
 
     signal.throwIfAborted();
     ownsConstructed = false;

@@ -96,6 +96,12 @@ MathLin_QRResult: declare class MathLin_QRResult
 
 MathLin_LeastSquaresMethod: typeof MathLin_LeastSquaresMethod[keyof typeof MathLin_LeastSquaresMethod]
 
+  readonly NormalEquations: 'NormalEquations'
+
+  readonly QR: 'QR'
+
+  readonly SVD: 'SVD'
+
 MathLin_LeastSquaresResult: declare class MathLin_LeastSquaresResult
 
   // MathLin_LeastSquaresResult.constructor (constructor)

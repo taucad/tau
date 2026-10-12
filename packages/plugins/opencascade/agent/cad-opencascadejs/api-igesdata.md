@@ -1,6 +1,6 @@
 # libcascade — IGESData
 
-32 top-level symbols. Signatures are verbatim typescript.
+31 top-level symbols. Signatures are verbatim typescript.
 
 IGESData: declare class IGESData
 
@@ -106,6 +106,16 @@ IGESData_ColorEntity: declare class IGESData_ColorEntity extends IGESData_IGESEn
 
 IGESData_DefList: typeof IGESData_DefList[keyof typeof IGESData_DefList]
 
+  readonly IGESData_DefNone: 'IGESData_DefNone'
+
+  readonly IGESData_DefOne: 'IGESData_DefOne'
+
+  readonly IGESData_DefSeveral: 'IGESData_DefSeveral'
+
+  readonly IGESData_ErrorOne: 'IGESData_ErrorOne'
+
+  readonly IGESData_ErrorSeveral: 'IGESData_ErrorSeveral'
+
 IGESData_DefSwitch: declare class IGESData_DefSwitch
 
   // IGESData_DefSwitch.constructor (constructor)
@@ -133,6 +143,18 @@ IGESData_DefSwitch: declare class IGESData_DefSwitch
   [Symbol.dispose](): void;
 
 IGESData_DefType: typeof IGESData_DefType[keyof typeof IGESData_DefType]
+
+  readonly IGESData_DefVoid: 'IGESData_DefVoid'
+
+  readonly IGESData_DefValue: 'IGESData_DefValue'
+
+  readonly IGESData_DefReference: 'IGESData_DefReference'
+
+  readonly IGESData_DefAny: 'IGESData_DefAny'
+
+  readonly IGESData_ErrorVal: 'IGESData_ErrorVal'
+
+  readonly IGESData_ErrorRef: 'IGESData_ErrorRef'
 
 IGESData_DefaultGeneral: declare class IGESData_DefaultGeneral extends IGESData_GeneralModule
 
@@ -1307,25 +1329,12 @@ IGESData_Protocol: declare class IGESData_Protocol extends Interface_Protocol
 
 IGESData_ReadStage: typeof IGESData_ReadStage[keyof typeof IGESData_ReadStage]
 
-IGESData_ReadWriteModule: declare class IGESData_ReadWriteModule extends Interface_ReaderModule
+  readonly IGESData_ReadDir: 'IGESData_ReadDir'
 
-  // IGESData_ReadWriteModule.CaseIGES (method)
-  CaseIGES(typenum: number, formnum: number): number;
+  readonly IGESData_ReadOwn: 'IGESData_ReadOwn'
 
-  // IGESData_ReadWriteModule.WriteOwnParams (method)
-  WriteOwnParams(CN: number, ent: IGESData_IGESEntity, IW: IGESData_IGESWriter): void;
+  readonly IGESData_ReadAssocs: 'IGESData_ReadAssocs'
 
-  // IGESData_ReadWriteModule.get_type_name (method)
-  static get_type_name(): string;
+  readonly IGESData_ReadProps: 'IGESData_ReadProps'
 
-  // IGESData_ReadWriteModule.get_type_descriptor (method)
-  static get_type_descriptor(): Standard_Type;
-
-  // IGESData_ReadWriteModule.DynamicType (method)
-  DynamicType(): Standard_Type;
-
-  // IGESData_ReadWriteModule.delete (method)
-  delete(): void;
-
-  // IGESData_ReadWriteModule.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
+  readonly IGESData_ReadEnd: 'IGESData_ReadEnd'

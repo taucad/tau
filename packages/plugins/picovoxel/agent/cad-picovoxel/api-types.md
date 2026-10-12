@@ -31,9 +31,9 @@ CreateScalarFieldOptions: {
 
   from: Voxels
 
-  value: number
+  value?: number
 
-  sdThreshold: number
+  sdThreshold?: number
 
 CreateVectorFieldOptions: {
   from: Voxels;
@@ -43,9 +43,9 @@ CreateVectorFieldOptions: {
 
   from: Voxels
 
-  value: Vec3
+  value?: Vec3
 
-  sdThreshold: number
+  sdThreshold?: number
 
 CreateVoxelsOptions: {
   shape: 'empty';
@@ -95,7 +95,7 @@ GetSliceOptions: {
   mode?: SliceMode;
 }
 
-  mode: SliceMode
+  mode?: SliceMode
 
 // 4x4 transform, column-major in System.Numerics order (row-vector convention
 Mat4: Float32Array | readonly number[]
@@ -138,7 +138,7 @@ Overhang: number & {
   readonly [overhangBrand]: true;
 }
 
-  [overhangBrand]: true
+  readonly [overhangBrand]: true
 
 // A rotation quaternion as [x, y, z, w] (System.Numerics `Quaternion` analog)
 Quat: readonly [number, number, number, number]
@@ -148,7 +148,7 @@ Rad: number & {
   readonly [radBrand]: true;
 }
 
-  [radBrand]: true
+  readonly [radBrand]: true
 
 // A 2D vector as an immutable tuple (System.Numerics `Vector2` analog)
 Vec2: readonly [number, number]

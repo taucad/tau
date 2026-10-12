@@ -7,15 +7,11 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '#database/schema.js';
 import {
-  billingBudget,
-  billingBudgetFunding,
-  billingBudgetHold,
   billingOwnerBinding,
   billingPolicyActivation,
   creditAccount,
   creditOperation,
   creditTransaction,
-  supplierCostEvidence,
   user,
 } from '#database/schema.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
@@ -67,41 +63,9 @@ const createFixture = async () => {
   const userId = `usage-user-${suffix}`;
   const sku = `usage-sku-${suffix}`;
   const meterContractId = `usage-meter-${suffix}`;
-  const spendBudgetId = `usage-spend-${suffix}`;
-  const riskBudgetId = `usage-risk-${suffix}`;
-  const spendFundingId = `usage-spend-funding-${suffix}`;
-  const riskFundingId = `usage-risk-funding-${suffix}`;
   await database
     .insert(user)
     .values({ id: userId, name: 'Usage owner', email: `${suffix}@test.invalid`, emailVerified: true });
-  await database.insert(billingBudgetFunding).values([
-    { id: spendFundingId, environment, kind: 'spend', scope: suffix, fundedLifetime: 1_000_000n },
-    { id: riskFundingId, environment, kind: 'risk', scope: suffix, fundedLifetime: 1_000_000n },
-  ]);
-  await database.insert(billingBudget).values([
-    {
-      id: spendBudgetId,
-      environment,
-      fundingId: spendFundingId,
-      kind: 'spend',
-      scope: suffix,
-      periodStart: new Date('2020-01-01Z'),
-      periodEnd: new Date('2030-01-01Z'),
-      quantum: 'pico_usd',
-      approvedCap: 1_000_000n,
-    },
-    {
-      id: riskBudgetId,
-      environment,
-      fundingId: riskFundingId,
-      kind: 'risk',
-      scope: suffix,
-      periodStart: new Date('2020-01-01Z'),
-      periodEnd: new Date('2030-01-01Z'),
-      quantum: 'pico_usd',
-      approvedCap: 1_000_000n,
-    },
-  ]);
   const rateId = `usage-rate-${suffix}`;
   const cacheShortRateId = `usage-cache-short-${suffix}`;
   const cacheLongRateId = `usage-cache-long-${suffix}`;
@@ -195,8 +159,6 @@ const createFixture = async () => {
         meterContractId,
         rateIds: [rateId, cacheShortRateId, cacheLongRateId, cacheReadRateId, outputRateId],
         enabled: true,
-        spendBudgetId,
-        riskBudgetId,
       },
     ],
   });
@@ -212,7 +174,7 @@ const createFixture = async () => {
     causeId: purchaseId,
   });
   const replica = { schemaVersion: 1, meterContractIds: policy.policy.fleet.meterContractIds };
-  return { userId, accountId, sku, meterContractId, spendBudgetId, riskBudgetId, activationId, replica };
+  return { userId, accountId, sku, meterContractId, activationId, replica };
 };
 
 const admission = (fixture: Awaited<ReturnType<typeof createFixture>>, key: string): QualifiedAdmissionInput => ({
@@ -237,7 +199,6 @@ const admission = (fixture: Awaited<ReturnType<typeof createFixture>>, key: stri
     { dimension: 'cache_read', tier: null, quantity: 0n },
     { dimension: 'output', tier: null, quantity: 0n },
   ],
-  supplierMaximumPicoUsd: 10n,
   replica: fixture.replica,
   executionDeadline: new Date(Date.now() + 300_000),
 });
@@ -480,52 +441,16 @@ describe('BillingUsageService PostgreSQL foundation', () => {
       correctionTotalCreditAtoms: '10',
       corrections: { items: [expect.objectContaining({ kind: 'correction' })], complete: true, nextCursor: null },
     });
-    const receiptBeforeSupplier = await usage.getOperationReceipt({
+    // The supplier cost on the terminal receipt is Tau's own reporting data; the customer's receipt never carries it.
+    const customerReceipt = await usage.getOperationReceipt({
       authUserId: fixture.userId,
       operationId: receipts[1]!.operationId,
       rawQuery: {},
     });
-    const supplierSourceId = `supplier-object-${randomUUID()}`;
+    expect(customerReceipt.state).toBe('terminal');
     expect(
-      await ledger.appendSupplierEvidence({
-        operationId: receipts[1]!.operationId,
-        environment: 'development',
-        provider: 'provider-test',
-        credentialAccount: `credential-${randomUUID()}`,
-        sourceObjectId: supplierSourceId,
-        sourceRevision: 'final-1',
-        payloadDigest: `sha256:${randomUUID()}`,
-        currency: 'usd',
-        numerator: 1n,
-        denominator: 1_000_000_000_000n,
-        completeness: 'complete',
-        finality: 'final',
-        receivedAt: new Date(),
-      }),
-    ).toBe('inserted');
-    const [supplierEvidence] = await database
-      .select()
-      .from(supplierCostEvidence)
-      .where(eq(supplierCostEvidence.sourceObjectId, supplierSourceId));
-    expect(
-      await ledger.finalizeSupplier({
-        evidenceId: required(supplierEvidence, 'supplier evidence').id,
-        operationId: receipts[1]!.operationId,
-        accountId: fixture.accountId,
-        requestDigest: 'sha256:history-b',
-        expectedGeneration: 1n,
-      }),
-    ).toBe('final');
-    const receiptAfterSupplier = await usage.getOperationReceipt({
-      authUserId: fixture.userId,
-      operationId: receipts[1]!.operationId,
-      rawQuery: {},
-    });
-    expect(receiptAfterSupplier.state).toBe('terminal');
-    expect(receiptBeforeSupplier.state).toBe('terminal');
-    if (receiptAfterSupplier.state === 'terminal' && receiptBeforeSupplier.state === 'terminal') {
-      expect(receiptAfterSupplier.receipt).toEqual(receiptBeforeSupplier.receipt);
-    }
+      JSON.stringify(customerReceipt, (_key, value: unknown) => (typeof value === 'bigint' ? value.toString() : value)),
+    ).not.toMatch(/supplier/iu);
     const wrongOwnerId = `wrong-${randomUUID()}`;
     await expect(
       usage.getOperationReceipt({ authUserId: wrongOwnerId, operationId: receipts[1]!.operationId, rawQuery: {} }),
@@ -660,8 +585,6 @@ describe('BillingUsageService PostgreSQL foundation', () => {
     const fixture = await createFixture();
     const operationId = `legacy-operation-${randomUUID()}`;
     const transactionId = `legacy-transaction-${randomUUID()}`;
-    const spendHoldId = `legacy-spend-hold-${randomUUID()}`;
-    const riskHoldId = `legacy-risk-hold-${randomUUID()}`;
     const activationId = await database
       .select({ id: billingPolicyActivation.id, policyId: billingPolicyActivation.policyId })
       .from(billingPolicyActivation)
@@ -704,34 +627,11 @@ describe('BillingUsageService PostgreSQL foundation', () => {
         promoHeldAtoms: 0n,
         planHeldAtoms: 0n,
         purchasedHeldAtoms: 0n,
-        spendBudgetHoldId: spendHoldId,
-        riskBudgetHoldId: riskHoldId,
         dispatchState: 'accepted',
         customerState: 'pending',
-        supplierState: 'final',
         dueAt: new Date('2020-01-01T00:00:00.000Z'),
         usageOccurredAt: null,
       });
-      await transaction.insert(billingBudgetHold).values([
-        {
-          id: spendHoldId,
-          budgetId: fixture.spendBudgetId,
-          operationId,
-          initialBound: 0n,
-          remainingHeld: 0n,
-          consumed: 0n,
-          finalityState: 'final',
-        },
-        {
-          id: riskHoldId,
-          budgetId: fixture.riskBudgetId,
-          operationId,
-          initialBound: 0n,
-          remainingHeld: 0n,
-          consumed: 0n,
-          finalityState: 'final',
-        },
-      ]);
       await transaction.insert(creditTransaction).values({
         id: transactionId,
         accountId: fixture.accountId,

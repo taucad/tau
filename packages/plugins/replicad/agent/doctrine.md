@@ -30,4 +30,10 @@ export default function main(p = defaultParams): Shape3D {
 }
 ```
 
-Check invalid dimensions, open/self-intersecting sketches, coincident boolean faces, and accidental polyline curves first. `api-index.md` covers upstream `replicad` geometry; `tau-api-index.md` covers Tau's returned model, material and annotation types. Search the appropriate index before assuming a field or API is unavailable.
+Check invalid dimensions, open/self-intersecting sketches, coincident boolean faces, and accidental polyline curves first. `api-*` files cover upstream `replicad`; `tau-api-*` files cover Tau's returned model, material and annotation types. Grep them before assuming a field or API is unavailable.
+
+## Wrong / Correct
+
+- Wrong: `draw().moveTo([0, 0])`. Correct: `draw([0, 0])`, or `pen.movePointerTo([x, y])` before the first segment.
+- Wrong: starting a pen with `.tangentArcTo(…)` ("You need a previous curve"). Correct: draw a `lineTo`/`hLine`/arc first; a tangent arc continues the previous curve.
+- Wrong: `makeCylinder(r, h).translate(…)` reused in several places. Correct: build once, then `clone()` each copy before transforming.

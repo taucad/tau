@@ -13,7 +13,7 @@ import { cpus, release, totalmem } from 'node:os';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { sql } from 'drizzle-orm';
-import { billingBudget, billingBudgetFunding, user } from '#database/schema.js';
+import { user } from '#database/schema.js';
 import type { DatabaseType } from '#database/database.service.js';
 import { qualifiedMeterContracts, validateCommercialPolicy } from '#api/billing/billing-policy.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
@@ -95,14 +95,12 @@ export type WorkloadManifest = {
   sku: string;
   meterContractId: string;
   activationId: string;
-  spendBudgetId: string;
-  riskBudgetId: string;
   /** Admission authenticates the auth user; terminalization addresses the financial account. */
   accounts: Array<{ authUserId: string; accountId: string }>;
 };
 
 /**
- * Seeds one synthetic tariff, one shared spend/risk budget pair and `accounts` funded accounts.
+ * Seeds one synthetic tariff and `accounts` funded accounts.
  *
  * Funding is by **paid cause** through the shared fixtures (`seedPaidPurchase` then
  * `fulfillPaidFixture`), never `issueCurrentPromotion`: D1 holds and launch promotions stay off.
@@ -115,15 +113,12 @@ export async function seedWorkload(input: {
   accounts: number;
   suffix: string;
   fundedAtoms: bigint;
-  budgetCapPicoUsd: bigint;
   concurrency: number;
 }): Promise<WorkloadManifest> {
   const { suffix } = input;
   const sku = `load-sku-${suffix}`;
   const meterContractId = `load-meter-${suffix}`;
   const activationId = `load-activation-${suffix}`;
-  const spendBudgetId = `load-spend-${suffix}`;
-  const riskBudgetId = `load-risk-${suffix}`;
   registerLoadMeterContract(meterContractId);
   const validated = validateCommercialPolicy({
     schemaVersion: 1,
@@ -150,8 +145,6 @@ export async function seedWorkload(input: {
         meterContractId,
         rateIds: [`load-rate-${suffix}`],
         enabled: true,
-        spendBudgetId,
-        riskBudgetId,
       },
     ],
     offers: [
@@ -175,46 +168,6 @@ export async function seedWorkload(input: {
     /* D1: launch promotions stay off; every atom in this harness arrives by paid cause. */
     promotionalIssuance: { enabled: false, budgetCreditAtoms: '0', offer: null },
   });
-  await input.database.insert(billingBudgetFunding).values([
-    {
-      id: `${spendBudgetId}-funding`,
-      environment: loadEnvironment,
-      kind: 'spend',
-      scope: suffix,
-      fundedLifetime: input.budgetCapPicoUsd,
-    },
-    {
-      id: `${riskBudgetId}-funding`,
-      environment: loadEnvironment,
-      kind: 'risk',
-      scope: suffix,
-      fundedLifetime: input.budgetCapPicoUsd,
-    },
-  ]);
-  await input.database.insert(billingBudget).values([
-    {
-      id: spendBudgetId,
-      environment: loadEnvironment,
-      fundingId: `${spendBudgetId}-funding`,
-      kind: 'spend',
-      scope: suffix,
-      periodStart: new Date('2020-01-01Z'),
-      periodEnd: new Date('2030-01-01Z'),
-      quantum: 'pico_usd',
-      approvedCap: input.budgetCapPicoUsd,
-    },
-    {
-      id: riskBudgetId,
-      environment: loadEnvironment,
-      fundingId: `${riskBudgetId}-funding`,
-      kind: 'risk',
-      scope: suffix,
-      periodStart: new Date('2020-01-01Z'),
-      periodEnd: new Date('2030-01-01Z'),
-      quantum: 'pico_usd',
-      approvedCap: input.budgetCapPicoUsd,
-    },
-  ]);
   await seedBillingFixturePolicy({ database: input.database, policy: validated.canonicalContent, activationId });
   const accounts: WorkloadManifest['accounts'] = [];
   const pending = Array.from({ length: input.accounts }, (_, index) => `load-user-${suffix}-${index}`);
@@ -246,7 +199,7 @@ export async function seedWorkload(input: {
       }
     }),
   );
-  return { environment: loadEnvironment, sku, meterContractId, activationId, spendBudgetId, riskBudgetId, accounts };
+  return { environment: loadEnvironment, sku, meterContractId, activationId, accounts };
 }
 
 /** The exact admission a funded gateway invocation makes, with the supplier stubbed out. */
@@ -267,7 +220,6 @@ export const loadAdmission = (input: {
   activity: 'agent',
   sku: input.manifest.sku,
   maximumQuantities: [{ dimension: loadDimension, tier: null, quantity: authorizedUnits }],
-  supplierMaximumPicoUsd: authorizedUnits,
   replica: { schemaVersion: 1, meterContractIds: [input.manifest.meterContractId] },
   executionDeadline: new Date(Date.now() + input.executionTimeout),
   invocation: {
@@ -294,11 +246,13 @@ export type InvariantReport = {
   heldReconciliationViolations: number;
   resolvedWithoutExactlyOneJournal: number;
   pendingWithJournal: number;
-  /** Budget holds are released on supplier finality, not on customer terminalization. */
-  residualHoldsOnSupplierFinal: number;
+  /** Every terminal operation records its supplier cost, or the reason it has none, exactly once. */
+  unmeteredTerminalOperations: number;
+  /** Supplier holds and finality are retired: admission and settlement write neither. */
+  supplierHoldOrStateWrites: number;
   operationsByCustomerState: Record<string, number>;
   operationsByDispatchState: Record<string, number>;
-  operationsBySupplierState: Record<string, number>;
+  operationsBySupplierCost: Record<string, number>;
   transactionsByKind: Record<string, number>;
   passed: boolean;
 };
@@ -328,10 +282,14 @@ export async function assertInvariants(database: DatabaseType): Promise<Invarian
     from billing.credit_operation o
     cross join lateral (select count(*) as total from billing.credit_transaction t
       where t.operation_id = o.id and t.kind = 'operation_resolution') j`);
-  const [residual] = await database.execute(sql`
-    select count(*)::text as total from billing.billing_budget_hold h
-    join billing.credit_operation o on o.id = h.operation_id
-    where o.supplier_state in ('final', 'funded_exception') and h.remaining_held <> 0`);
+  const [unmetered] = await database.execute(sql`
+    select count(*)::text as total from billing.credit_operation o
+    where o.customer_state <> 'pending' and o.supplier_cost_pico_usd is null and o.supplier_cost_unpriced_reason is null`);
+  const [supplierWrites] = await database.execute(sql`
+    select ((select count(*) from billing.billing_budget_hold)
+      + (select count(*) from billing.credit_operation o
+        where o.supplier_state is not null or o.spend_budget_hold_id is not null or o.risk_budget_hold_id is not null))::text
+      as total`);
   const [held] = await database.execute(sql`
     select count(*)::text as total from billing.credit_account a
     join lateral (select coalesce(sum(o.promo_held_atoms), 0) as promo, coalesce(sum(o.plan_held_atoms), 0) as plan,
@@ -344,8 +302,12 @@ export async function assertInvariants(database: DatabaseType): Promise<Invarian
   const dispatchStates = await database.execute(
     sql`select dispatch_state, count(*)::text as total from billing.credit_operation group by 1 order by 1`,
   );
-  const supplierStates = await database.execute(
-    sql`select supplier_state, count(*)::text as total from billing.credit_operation group by 1 order by 1`,
+  const supplierCosts = await database.execute(
+    sql`select case when o.customer_state = 'pending' then 'pending'
+        when o.supplier_cost_pico_usd = 0 then 'zero'
+        when o.supplier_cost_pico_usd is not null then 'priced'
+        else coalesce(o.supplier_cost_unpriced_reason, 'unrecorded') end as supplier_cost,
+      count(*)::text as total from billing.credit_operation o group by 1 order by 1`,
   );
   const kinds = await database.execute(
     sql`select kind, count(*)::text as total from billing.credit_transaction group by 1 order by 1`,
@@ -356,10 +318,11 @@ export async function assertInvariants(database: DatabaseType): Promise<Invarian
     heldReconciliationViolations: Number(held?.['total'] ?? -1),
     resolvedWithoutExactlyOneJournal: Number(resolution?.['resolved'] ?? -1),
     pendingWithJournal: Number(resolution?.['pending'] ?? -1),
-    residualHoldsOnSupplierFinal: Number(residual?.['total'] ?? -1),
+    unmeteredTerminalOperations: Number(unmetered?.['total'] ?? -1),
+    supplierHoldOrStateWrites: Number(supplierWrites?.['total'] ?? -1),
     operationsByCustomerState: countRows([...customerStates], 'customer_state'),
     operationsByDispatchState: countRows([...dispatchStates], 'dispatch_state'),
-    operationsBySupplierState: countRows([...supplierStates], 'supplier_state'),
+    operationsBySupplierCost: countRows([...supplierCosts], 'supplier_cost'),
     transactionsByKind: countRows([...kinds], 'kind'),
     passed: false,
   };
@@ -369,7 +332,8 @@ export async function assertInvariants(database: DatabaseType): Promise<Invarian
     report.heldReconciliationViolations === 0 &&
     report.resolvedWithoutExactlyOneJournal === 0 &&
     report.pendingWithJournal === 0 &&
-    report.residualHoldsOnSupplierFinal === 0;
+    report.unmeteredTerminalOperations === 0 &&
+    report.supplierHoldOrStateWrites === 0;
   return report;
 }
 

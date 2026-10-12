@@ -5,6 +5,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshMatcapMaterial,
+  MeshStandardMaterial,
   Scene,
   ShaderLib,
   Texture,
@@ -12,7 +13,12 @@ import {
 } from 'three';
 import type { WebGLProgramParametersWithUniforms, WebGLRenderer } from 'three';
 import { applyMatcap } from '#components/geometry/graphics/three/materials/gltf-matcap.js';
+import { applyGltfSurfaceDepthBias } from '#components/geometry/graphics/three/materials/gltf-surface-depth-bias.js';
 import { createSectionClip, installSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
+import {
+  applyModelMaterialAppearance,
+  getOrCaptureModelMaterialAppearance,
+} from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -38,6 +44,58 @@ function getMatcapMaterial(mesh: Mesh): MeshMatcapMaterial {
 }
 
 describe('applyMatcap', () => {
+  it.each(['webgl', 'webgpu'] as const)(
+    'should restore authored opacity and selected bias after switching dimmed PBR to matcap on %s',
+    async (backend) => {
+      vi.spyOn(TextureLoader.prototype, 'load').mockReturnValue(new Texture());
+      const source = new MeshStandardMaterial({ metalness: 0.65, roughness: 0.32 });
+      const mesh: Mesh = new Mesh(createTriangleGeometry(), source);
+      const scene = new Scene();
+      scene.add(mesh);
+      const sourceAppearance = getOrCaptureModelMaterialAppearance(source);
+      applyModelMaterialAppearance(source, sourceAppearance, 0.25);
+      await applyMatcap({ scene }, 1, backend);
+      const replacement = mesh.material;
+      if (Array.isArray(replacement)) {
+        throw new TypeError('Expected one matcap replacement');
+      }
+      expect(replacement.opacity).toBe(0.25);
+      applyGltfSurfaceDepthBias(replacement, backend);
+      const replacementAppearance = getOrCaptureModelMaterialAppearance(replacement);
+      applyModelMaterialAppearance(replacement, replacementAppearance, 1);
+      expect(replacement.opacity).toBe(1);
+      expect(replacement.transparent).toBe(false);
+      expect(replacement.depthWrite).toBe(true);
+      expect(replacement.polygonOffsetFactor).toBe(backend === 'webgl' ? 1.5 : -1.5);
+    },
+  );
+
+  it('should seed mixed source alpha baselines without copying PBR color or changing reused snapshots', async () => {
+    vi.spyOn(TextureLoader.prototype, 'load').mockReturnValue(new Texture());
+    const captured = new MeshStandardMaterial({ color: 0xaa_55_22 });
+    const sourceAppearance = getOrCaptureModelMaterialAppearance(captured);
+    applyModelMaterialAppearance(captured, sourceAppearance, 0.25);
+    const authored = new MeshStandardMaterial({ opacity: 0.6, transparent: true, depthWrite: false });
+    const mesh: Mesh = new Mesh(createTriangleGeometry(), [captured, authored]);
+    const scene = new Scene();
+    scene.add(mesh);
+    await applyMatcap({ scene }, 0.5);
+    const replacement = getMatcapMaterial(mesh);
+    const snapshot = getOrCaptureModelMaterialAppearance(replacement);
+    expect(replacement.opacity).toBe(0.25);
+    expect(snapshot.opacity).toBe(0.6);
+    expect(snapshot.transparent).toBe(true);
+    expect(snapshot.depthWrite).toBe(false);
+    expect(snapshot.color?.equals(replacement.color)).toBe(true);
+    expect(snapshot.color?.equals(captured.color)).toBe(false);
+    applyModelMaterialAppearance(replacement, snapshot, 1);
+    expect(replacement.opacity).toBe(0.6);
+    expect(replacement.transparent).toBe(true);
+    await applyMatcap({ scene }, 0.5);
+    expect(mesh.material).toBe(replacement);
+    expect(getOrCaptureModelMaterialAppearance(replacement)).toBe(snapshot);
+  });
+
   it('should reuse the material and restore the source color after repeated tint cycles', async () => {
     vi.spyOn(TextureLoader.prototype, 'load').mockReturnValue(new Texture());
     const source = new MeshBasicMaterial({ color: 0xaa_55_22 });

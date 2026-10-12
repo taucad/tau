@@ -14,9 +14,9 @@ type PreviewProjectFileOptions = {
 
 /** Convert one disk-backed project file when needed and open native macOS Quick Look. */
 export const previewProjectFileInQuickLook = async (options: PreviewProjectFileOptions): Promise<void> => {
-  const bridge = desktopBridge();
-  if (!bridge) {
-    throw new Error('Quick Look is available only in the Tau desktop app.');
+  const quickLook = desktopBridge()?.quickLook;
+  if (!quickLook) {
+    throw new Error('Quick Look is not available in this build of Tau.');
   }
   const config = await getProjectFileSystemConfig(options.projectId);
   if (config?.backend !== 'node') {
@@ -24,12 +24,12 @@ export const previewProjectFileInQuickLook = async (options: PreviewProjectFileO
   }
   const path = assertRootedPath(options.path);
   const displayName = path.split('/').pop() ?? path;
-  const systemPreview = bridge.quickLook.directPreviewExtensions.some((extension) =>
+  const systemPreview = quickLook.directPreviewExtensions.some((extension) =>
     path.toLowerCase().endsWith(`.${extension}`),
   );
   if (systemPreview) {
     const root = config.path ?? nodeHomeRoot();
-    const result = await bridge.quickLook.previewPath({
+    const result = await quickLook.previewPath({
       path: `${root}/${config.providerBasePath}/${path}`,
       displayName,
     });
@@ -54,7 +54,7 @@ export const previewProjectFileInQuickLook = async (options: PreviewProjectFileO
     if (exported.files.length !== 1 || !file.name.endsWith('.usdz') || file.mimeType !== mimeTypes.usdz) {
       throw new Error('Quick Look conversion did not return one USDZ file.');
     }
-    const result = await bridge.quickLook.previewUsdz({ bytes: file.bytes, displayName: file.name });
+    const result = await quickLook.previewUsdz({ bytes: file.bytes, displayName: file.name });
     if (!result.success) {
       throw new Error(result.error);
     }

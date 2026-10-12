@@ -100,7 +100,7 @@ describe('systemSkillsCatalog', () => {
   });
 
   it.each([
-    ['cad-openscad', 10],
+    ['cad-openscad', 11],
     ['geospec-authoring', 13],
   ] as const)('returns actionable paths and every supporting file for %s', async (slug, supportingCount) => {
     const resolver = createSkillResolver({

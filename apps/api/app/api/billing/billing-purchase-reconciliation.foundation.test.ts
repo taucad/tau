@@ -132,7 +132,10 @@ async function seedKnownLeg(input: {
 }
 
 /** A subscription slot, its paid period and the single valid period grant the ledger would have written. */
-async function seedEntitlement(sourceStatus: string) {
+async function seedEntitlement(
+  sourceStatus: string,
+  cancellation?: { readonly sourceCancelAt: number; readonly localCancelAtPeriodEnd: boolean },
+) {
   const accountId = randomUUID();
   const suffix = randomUUID();
   const customerBindingId = `customer-${suffix}`;
@@ -206,7 +209,7 @@ async function seedEntitlement(sourceStatus: string) {
     offerSnapshot,
     slotState: 'current',
     status: 'active',
-    cancelAtPeriodEnd: false,
+    cancelAtPeriodEnd: cancellation?.localCancelAtPeriodEnd ?? false,
   });
   // `require_paid_receipt` is deferred: the period, its journal and the fulfilment commit together.
   await database.transaction(async (tx) => {
@@ -255,6 +258,7 @@ async function seedEntitlement(sourceStatus: string) {
     customer: customerId,
     livemode: false,
     cancel_at_period_end: false,
+    cancel_at: cancellation?.sourceCancelAt ?? null,
     created: Math.floor(paidAt.getTime() / 1000),
     items: { object: 'list', data: [], has_more: false, url: '/v1/subscription_items' },
   });
@@ -495,5 +499,28 @@ describe('purchase and entitlement reconciliation foundation', () => {
     expect(repeated[0]?.id).toBe(opened[0]?.id);
     expect(repeated[0]?.firstSeenAt).toEqual(opened[0]?.firstSeenAt);
     expect(await caseRows('entitlement_source_disagreement', entitlement.periodId)).toEqual([]);
+  });
+
+  /* Flexible billing mode schedules a portal cancellation as `cancel_at` alone, with `cancel_at_period_end`
+   * still false (staging, 2026-10-09, PR-04): that is the local cancellation intent, not a disagreement. */
+  it('reads a source scheduled to end at a set time as the local cancellation and cases the slot without it', async () => {
+    const cancelAt = Math.floor(Date.now() / 1000) + 2_592_000;
+    const agreed = await seedEntitlement('active', { sourceCancelAt: cancelAt, localCancelAtPeriodEnd: true });
+    const unaware = await seedEntitlement('active', { sourceCancelAt: cancelAt, localCancelAtPeriodEnd: false });
+
+    const result = await run(await seedScan(), 'sk_test_purchase_cancel_at');
+
+    expect(result.status).toBe('complete');
+    expect(await caseRows('entitlement_source_disagreement', agreed.subscriptionId)).toEqual([]);
+    const opened = await caseRows('entitlement_source_disagreement', unaware.subscriptionId);
+    expect(opened).toEqual([
+      expect.objectContaining({ accountId: unaware.accountId, state: 'open', sourceType: 'subscription' }),
+    ]);
+    expect(opened[0]?.evidence).toMatchObject({
+      sourceCancelAtPeriodEnd: false,
+      sourceCancelAt: cancelAt,
+      localCancelAtPeriodEnd: false,
+      reasons: ['cancellation_intent_mismatch'],
+    });
   });
 });

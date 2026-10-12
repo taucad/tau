@@ -1,0 +1,442 @@
+{
+  "slug": "cad-openscad",
+  "sources": {
+    "workspaceFiles": 112,
+    "exampleFiles": 58,
+    "transcriptRuns": 18
+  },
+  "symbols": [
+    {
+      "id": "openscad:module",
+      "name": "module",
+      "score": 100,
+      "workspace": 43,
+      "examples": 57,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:$fa",
+      "name": "$fa",
+      "score": 93,
+      "workspace": 46,
+      "examples": 47,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:$fs",
+      "name": "$fs",
+      "score": 93,
+      "workspace": 46,
+      "examples": 47,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:translate",
+      "name": "translate",
+      "score": 79,
+      "workspace": 31,
+      "examples": 48,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:color",
+      "name": "color",
+      "score": 76,
+      "workspace": 33,
+      "examples": 43,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:cube",
+      "name": "cube",
+      "score": 70,
+      "workspace": 50,
+      "examples": 20,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:cylinder",
+      "name": "cylinder",
+      "score": 67,
+      "workspace": 37,
+      "examples": 29,
+      "lookups": 1
+    },
+    {
+      "id": "openscad:difference",
+      "name": "difference",
+      "score": 63,
+      "workspace": 37,
+      "examples": 26,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:for",
+      "name": "for",
+      "score": 62,
+      "workspace": 33,
+      "examples": 29,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:rotate",
+      "name": "rotate",
+      "score": 55,
+      "workspace": 27,
+      "examples": 28,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:union",
+      "name": "union",
+      "score": 31,
+      "workspace": 20,
+      "examples": 11,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:sphere",
+      "name": "sphere",
+      "score": 30,
+      "workspace": 19,
+      "examples": 11,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:linear_extrude",
+      "name": "linear_extrude",
+      "score": 29,
+      "workspace": 21,
+      "examples": 7,
+      "lookups": 1
+    },
+    {
+      "id": "openscad:polygon",
+      "name": "polygon",
+      "score": 29,
+      "workspace": 22,
+      "examples": 7,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:$fn",
+      "name": "$fn",
+      "score": 28,
+      "workspace": 23,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:use",
+      "name": "use",
+      "score": 27,
+      "workspace": 7,
+      "examples": 20,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:hull",
+      "name": "hull",
+      "score": 22,
+      "workspace": 12,
+      "examples": 10,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:include",
+      "name": "include",
+      "score": 22,
+      "workspace": 5,
+      "examples": 17,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:cos",
+      "name": "cos",
+      "score": 18,
+      "workspace": 14,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:let",
+      "name": "let",
+      "score": 17,
+      "workspace": 14,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:scale",
+      "name": "scale",
+      "score": 17,
+      "workspace": 14,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:if",
+      "name": "if",
+      "score": 16,
+      "workspace": 12,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:sin",
+      "name": "sin",
+      "score": 16,
+      "workspace": 13,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:function",
+      "name": "function",
+      "score": 15,
+      "workspace": 11,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:rotate_extrude",
+      "name": "rotate_extrude",
+      "score": 15,
+      "workspace": 10,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:concat",
+      "name": "concat",
+      "score": 14,
+      "workspace": 11,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:polyhedron",
+      "name": "polyhedron",
+      "score": 11,
+      "workspace": 8,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:square",
+      "name": "square",
+      "score": 11,
+      "workspace": 7,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:intersection",
+      "name": "intersection",
+      "score": 10,
+      "workspace": 6,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:max",
+      "name": "max",
+      "score": 10,
+      "workspace": 7,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:sqrt",
+      "name": "sqrt",
+      "score": 10,
+      "workspace": 7,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:circle",
+      "name": "circle",
+      "score": 9,
+      "workspace": 8,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:atan",
+      "name": "atan",
+      "score": 7,
+      "workspace": 4,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:len",
+      "name": "len",
+      "score": 7,
+      "workspace": 5,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:offset",
+      "name": "offset",
+      "score": 7,
+      "workspace": 5,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:assert",
+      "name": "assert",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:pow",
+      "name": "pow",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:text",
+      "name": "text",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:children",
+      "name": "children",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:minkowski",
+      "name": "minkowski",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:each",
+      "name": "each",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:acos",
+      "name": "acos",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:atan2",
+      "name": "atan2",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:echo",
+      "name": "echo",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:floor",
+      "name": "floor",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:min",
+      "name": "min",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:str",
+      "name": "str",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:tan",
+      "name": "tan",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:abs",
+      "name": "abs",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:ceil",
+      "name": "ceil",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:chr",
+      "name": "chr",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:mirror",
+      "name": "mirror",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:ord",
+      "name": "ord",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "openscad:search",
+      "name": "search",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    }
+  ]
+}

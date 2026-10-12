@@ -231,77 +231,86 @@ export declare function weldShellsAndFaces(facesOrShells: Array<Face | Shell>, i
 //   ignoreType: If true, the function will not check if the result is a shell
 
 // addHolesInFace (function)
-(face: Face, holes: Wire[]) => Face
+export declare function addHolesInFace(face: Face, holes: Wire[]): Face;
 
 // assembleWire (function)
-(listOfEdges: (Edge | Wire)[]) => Wire
+export declare function assembleWire(listOfEdges: (Edge | Wire)[]): Wire;
 
 // Creates a predicate for a finder's `when` method that selects elements touching an axis-aligned bounding-box extreme of a shape
 // Remarks: An element is selected when its bounding-box minimum or maximum is within `tolerance` of the corresponding bound of `shape`. This means that a side face touching the top of a shape is considered top-most too. Combine this predicate with an orientation filter when only horizontal or vertical elements should be selected. The shape bounds are calculated once when the predicate is created. Element bounds are calculated whenever the predicate is evaluated.
 // atShapeExtremum (function)
-(shape: AnyShape, axis: CartesianAxis, extremum: "min" | "max", tolerance?: number) => ShapeExtremumFilter
+export declare function atShapeExtremum(shape: AnyShape, axis: CartesianAxis, extremum: "min" | "max", tolerance?: number): ShapeExtremumFilter;
 //   shape: Shape whose bounds define the extremum
 //   axis: Cartesian axis along which to compare bounds
 //   extremum: Whether to compare the minimum or maximum bound
 //   tolerance: Maximum difference between bounds
+// Example:
+//   const topEdges = new EdgeFinder()
+//     .when(atShapeExtremum(shape, "Z", "max"))
+//     .parallelTo("XY")
+//     .find(shape);
 
 // axis2d (function)
-(point: Point2D, direction: Point2D) => gp_Ax2d
+export declare function axis2d(point: Point2D, direction: Point2D): gp_Ax2d;
 
 // Creates a predicate selecting elements touching the shape's minimum Y bound
 // Remarks: "Back" is defined as the negative Y direction.
 // backMost (function)
-(shape: AnyShape, tolerance?: number) => ShapeExtremumFilter
+export declare function backMost(shape: AnyShape, tolerance?: number): ShapeExtremumFilter;
+// Example:
+//   finder.when(backMost(shape));
 
 // basicFaceExtrusion (function)
-(face: Face, extrusionVec: Vector) => Solid
+export declare function basicFaceExtrusion(face: Face, extrusionVec: Vector): Solid;
 
 // Creates a predicate selecting elements touching the shape's minimum Z bound
 // bottomMost (function)
-(shape: AnyShape, tolerance?: number) => ShapeExtremumFilter
+export declare function bottomMost(shape: AnyShape, tolerance?: number): ShapeExtremumFilter;
+// Example:
+//   finder.when(bottomMost(shape));
 
 // cast (function)
-(shape: TopoDS_Shape) => AnyShape
+export declare function cast(shape: TopoDS_Shape): AnyShape;
 
 // Combine a set of finder filters (defined with radius) to pass as a filter function
 // combineFinderFilters (function)
-<Type, T, R = number>(filters: {
+export declare function combineFinderFilters<Type, T, R = number>(filters: {
     filter: Finder<Type, T>;
     radius: R;
-}[]) => [(v: Type) => R | null, () => void]
+}[]): [(v: Type) => R | null, () => void];
 //   filters: An array of objects containing a filter and its radius
 
 // compoundShapes (function)
-(shapeArray: AnyShape[]) => AnyShape
+export declare function compoundShapes(shapeArray: AnyShape[]): AnyShape;
 
 // createNamedPlane (function)
-(plane: PlaneName, sourceOrigin?: Point | number) => Plane
+export declare function createNamedPlane(plane: PlaneName, sourceOrigin?: Point | number): Plane;
 
 // cut2D (function)
-(first: Shape2D, second: Shape2D) => Blueprint | Blueprints | CompoundBlueprint | null
+export declare function cut2D(first: Shape2D, second: Shape2D): Blueprint | Blueprints | CompoundBlueprint | null;
 
 // cutBlueprints (function)
-(first: Blueprint, second: Blueprint) => null | Blueprint | Blueprints
+export declare function cutBlueprints(first: Blueprint, second: Blueprint): null | Blueprint | Blueprints;
 
 // Creates the `Drawing` of parametric function
 // Remarks: The drawing will be a spline approximating the function. Note that the degree should be at maximum 3 if you need to export the drawing as an SVG.
 // drawParametricFunction (function)
-(func: (t: number) => Point2D, { pointsCount, start, stop, closeShape }?: {
+export declare function drawParametricFunction(func: (t: number) => Point2D, { pointsCount, start, stop, closeShape }?: {
     pointsCount?: number | undefined;
     start?: number | undefined;
     stop?: number | undefined;
     closeShape?: boolean | undefined;
-}, approximationConfig?: BSplineApproximationConfig) => Drawing
+}, approximationConfig?: BSplineApproximationConfig): Drawing;
 
 // Creates the `Drawing` by interpolating points as a curve
 // Remarks: The drawing will be a spline approximating the points. Note that the degree should be at maximum 3 if you need to export the drawing as an SVG.
 // drawPointsInterpolation (function)
-(points: Point2D[], approximationConfig?: BSplineApproximationConfig, options?: {
+export declare function drawPointsInterpolation(points: Point2D[], approximationConfig?: BSplineApproximationConfig, options?: {
     closeShape?: boolean;
-}) => Drawing
+}): Drawing;
 
 // drawRectangle (function)
-export declare function drawRoundedRectangle(width: number, height: number, r?: number | {
+export declare function drawRectangle(width: number, height: number, r?: number | {
     rx?: number;
     ry?: number;
 }): Drawing;
@@ -309,204 +318,217 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 // Creates a predicate selecting elements touching the shape's maximum Y bound
 // Remarks: "Front" is defined as the positive Y direction.
 // frontMost (function)
-(shape: AnyShape, tolerance?: number) => ShapeExtremumFilter
+export declare function frontMost(shape: AnyShape, tolerance?: number): ShapeExtremumFilter;
+// Example:
+//   finder.when(frontMost(shape));
 
 // fuse2D (function)
-(first: Shape2D, second: Shape2D) => Blueprint | Blueprints | CompoundBlueprint | null
+export declare function fuse2D(first: Shape2D, second: Shape2D): Blueprint | Blueprints | CompoundBlueprint | null;
 
 // fuseBlueprints (function)
-(first: Blueprint, second: Blueprint) => null | Blueprint | Blueprints
+export declare function fuseBlueprints(first: Blueprint, second: Blueprint): null | Blueprint | Blueprints;
 
 // GCWithObject (function)
-(obj: any) => <Type extends Deletable>(value: Type) => Type
+export declare function GCWithObject(obj: any): <Type extends Deletable>(value: Type) => Type;
 
 // GCWithScope (function)
-() => <Type extends Deletable>(value: Type) => Type
+export declare function GCWithScope(): <Type extends Deletable>(value: Type) => Type;
 
 // getFont (function)
-(fontFamily?: string) => default_2.Font
+export declare function getFont(fontFamily?: string): default_2.Font;
 
 // getManifold (function)
-() => ManifoldToplevel
+export declare function getManifold(): ManifoldToplevel;
 
 // getOC (function)
-() => OpenCascadeInstance
+export declare function getOC(): OpenCascadeInstance;
 
 // intersectBlueprints (function)
-(first: Blueprint, second: Blueprint) => null | Blueprint | Blueprints
+export declare function intersectBlueprints(first: Blueprint, second: Blueprint): null | Blueprint | Blueprints;
 
 // Creates a predicate selecting elements touching the shape's minimum X bound
 // leftMost (function)
-(shape: AnyShape, tolerance?: number) => ShapeExtremumFilter
+export declare function leftMost(shape: AnyShape, tolerance?: number): ShapeExtremumFilter;
+// Example:
+//   finder.when(leftMost(shape));
 
 // localGC (function)
-(debug?: boolean) => [<T extends Deletable>(v: T) => T, () => void, Set<Deletable> | undefined]
+export declare function localGC(debug?: boolean): [<T extends Deletable>(v: T) => T, () => void, Set<Deletable> | undefined];
 
 // loft (function)
-(wires: Wire[], { ruled, startPoint, endPoint }?: LoftConfig, returnShell?: boolean) => Shape3D
+export declare function loft(wires: Wire[], { ruled, startPoint, endPoint }?: LoftConfig, returnShell?: boolean): Shape3D;
 
 // makeAx1 (function)
-(center: Point, dir: Direction) => gp_Ax1
+export declare function makeAx1(center: Point, dir: Direction): gp_Ax1;
 
 // makeAx2 (function)
-(center: Point, dir: Direction, xDir?: Direction) => gp_Ax2
+export declare function makeAx2(center: Point, dir: Direction, xDir?: Direction): gp_Ax2;
 
 // makeAx3 (function)
-(center: Point, dir: Direction, xDir?: Direction) => gp_Ax3
+export declare function makeAx3(center: Point, dir: Direction, xDir?: Direction): gp_Ax3;
 
 // Builds a rectangular box of the given lengths
 // Remarks: The box is centred on the origin in X and Y (spanning `[-x/2, +x/2]` and `[-y/2, +y/2]`) and corner-based in Z (spanning `[0, +z]`). Translate by `[0, 0, -z/2]` to centre the box fully, or use {@link makeBox} when you want explicit two-corner control.
 // makeBaseBox (function)
-(xLength: number, yLength: number, zLength: number) => Shape3D
+export declare function makeBaseBox(xLength: number, yLength: number, zLength: number): Shape3D;
+// Example:
+//   const slab = makeBaseBox(30, 50, 10);
+//   // slab spans x: [-15, 15], y: [-25, 25], z: [0, 10]
 
 // makeBezierCurve (function)
-(points: Point[]) => Edge
+export declare function makeBezierCurve(points: Point[]): Edge;
 
 // Creates a box with the given corner points
 // makeBox (function)
-(corner1: Point, corner2: Point) => Solid
+export declare function makeBox(corner1: Point, corner2: Point): Solid;
 
 // makeBSplineApproximation (function)
-(points: Point[], { tolerance, smoothing, degMax, degMin, }?: BSplineApproximationConfig) => Edge
+export declare function makeBSplineApproximation(points: Point[], { tolerance, smoothing, degMax, degMin, }?: BSplineApproximationConfig): Edge;
 
 // makeCircle (function)
-(radius: number, center?: Point, normal?: Direction) => Edge
+export declare function makeCircle(radius: number, center?: Point, normal?: Direction): Edge;
 
 // makeCompound (function)
-(shapeArray: AnyShape[]) => AnyShape
+export declare function makeCompound(shapeArray: AnyShape[]): AnyShape;
 
 // Creates a cylinder with the given radius and height
 // makeCylinder (function)
-(radius: number, height: number, location?: Point, direction?: Direction) => Solid
+export declare function makeCylinder(radius: number, height: number, location?: Point, direction?: Direction): Solid;
 
 // makeDirection (function)
-export declare function resolveDirection(direction: Direction): Point;
+export declare function makeDirection(direction: Direction): Point;
 
 // makeEllipse (function)
-(majorRadius: number, minorRadius: number, center?: Point, normal?: Direction, xDir?: Direction) => Edge
+export declare function makeEllipse(majorRadius: number, minorRadius: number, center?: Point, normal?: Direction, xDir?: Direction): Edge;
 
 // makeEllipseArc (function)
-(majorRadius: number, minorRadius: number, startAngle: number, endAngle: number, center?: Point, normal?: Direction, xDir?: Direction) => Edge
+export declare function makeEllipseArc(majorRadius: number, minorRadius: number, startAngle: number, endAngle: number, center?: Point, normal?: Direction, xDir?: Direction): Edge;
 
 // Creates an ellipsoid with the given lengths of the axes, centred on the origin
 // makeEllipsoid (function)
-(aLength: number, bLength: number, cLength: number) => Solid
+export declare function makeEllipsoid(aLength: number, bLength: number, cLength: number): Solid;
 
 // makeFace (function)
-(wire: Wire, holes?: Wire[]) => Face
+export declare function makeFace(wire: Wire, holes?: Wire[]): Face;
 
 // makeHelix (function)
-(pitch: number, height: number, radius: number, center?: Point, dir?: Direction, lefthand?: boolean) => Wire
+export declare function makeHelix(pitch: number, height: number, radius: number, center?: Point, dir?: Direction, lefthand?: boolean): Wire;
 
 // makeLine (function)
-(v1: Point, v2: Point) => Edge
+export declare function makeLine(v1: Point, v2: Point): Edge;
 
 // makeNewFaceWithinFace (function)
-(originFace: Face, wire: Wire) => Face
+export declare function makeNewFaceWithinFace(originFace: Face, wire: Wire): Face;
 
 // makeNonPlanarFace (function)
-(wire: Wire) => Face
+export declare function makeNonPlanarFace(wire: Wire): Face;
 
 // makeOffset (function)
-(face: Face, offset: number, tolerance?: number) => Shape3D
+export declare function makeOffset(face: Face, offset: number, tolerance?: number): Shape3D;
 
 // makePlaneFromFace (function)
-(face: PlaneFace, originOnSurface?: Point2D) => Plane
+export declare function makePlaneFromFace(face: PlaneFace, originOnSurface?: Point2D): Plane;
 
 // makePolygon (function)
-(points: Point[]) => Face
+export declare function makePolygon(points: Point[]): Face;
 
 // Creates a sphere with the given radius, centred on the origin
 // makeSphere (function)
-(radius: number) => Solid
+export declare function makeSphere(radius: number): Solid;
 
 // makeTangentArc (function)
-(startPoint: Point, startTgt: Point, endPoint: Point) => Edge
+export declare function makeTangentArc(startPoint: Point, startTgt: Point, endPoint: Point): Edge;
 
 // makeThreePointArc (function)
-(v1: Point, v2: Point, v3: Point) => Edge
+export declare function makeThreePointArc(v1: Point, v2: Point, v3: Point): Edge;
 
 // makeVertex (function)
-(point: Point) => Vertex
+export declare function makeVertex(point: Point): Vertex;
 
 // Groups an array of blueprints such that blueprints that correspond to holes in other blueprints are set in a `CompoundBlueprint`
 // Remarks: The current algorithm does not handle cases where blueprints cross each other
 // organiseBlueprints (function)
-(blueprints: Blueprint[]) => Blueprints
+export declare function organiseBlueprints(blueprints: Blueprint[]): Blueprints;
 
 // Helper function to compute the inner radius of a polyside (even if a sagitta is defined
 // polysideInnerRadius (function)
-(outerRadius: number, sidesCount: number, sagitta?: number) => number
+export declare function polysideInnerRadius(outerRadius: number, sidesCount: number, sagitta?: number): number;
 
 // polysidesBlueprint (function)
-(radius: number, sidesCount: number, sagitta?: number) => Blueprint
+export declare function polysidesBlueprint(radius: number, sidesCount: number, sagitta?: number): Blueprint;
 
 // revolution (function)
-(face: Face, center?: Point, direction?: Direction, angle?: number) => Shape3D
+export declare function revolution(face: Face, center?: Point, direction?: Direction, angle?: number): Shape3D;
 
 // Creates a predicate selecting elements touching the shape's maximum X bound
 // rightMost (function)
-(shape: AnyShape, tolerance?: number) => ShapeExtremumFilter
+export declare function rightMost(shape: AnyShape, tolerance?: number): ShapeExtremumFilter;
+// Example:
+//   finder.when(rightMost(shape));
 
 // roundedRectangleBlueprint (function)
-(width: number, height: number, r?: number | {
+export declare function roundedRectangleBlueprint(width: number, height: number, r?: number | {
     rx?: number;
     ry?: number;
-}) => Blueprint
+}): Blueprint;
 
 // setManifold (function)
-(manifold: ManifoldToplevel) => void
+export declare function setManifold(manifold: ManifoldToplevel): void;
 
 // setOC (function)
-(oc: OpenCascadeInstance) => void
+export declare function setOC(oc: OpenCascadeInstance): void;
 
 // shapeType (function)
-(shape: TopoDS_Shape) => TopAbs_ShapeEnum
+export declare function shapeType(shape: TopoDS_Shape): TopAbs_ShapeEnum;
 
 // Creates the `Sketch` of a circle in a defined plane
 // sketchCircle (function)
-(radius: number, planeConfig?: PlaneConfig) => Sketch
+export declare function sketchCircle(radius: number, planeConfig?: PlaneConfig): Sketch;
 
 // Creates the `Sketch` of an ellispe in a defined plane
 // sketchEllipse (function)
-(xRadius?: number, yRadius?: number, planeConfig?: PlaneConfig) => Sketch
+export declare function sketchEllipse(xRadius?: number, yRadius?: number, planeConfig?: PlaneConfig): Sketch;
 
 // Creates the `Sketch` of an offset of a certain face
 // sketchFaceOffset (function)
-(face: Face, offset: number) => Sketch
+export declare function sketchFaceOffset(face: Face, offset: number): Sketch;
 
 // Creates the `Sketch` of a helix
 // sketchHelix (function)
-(pitch: number, height: number, radius: number, center?: Point, dir?: Direction, lefthand?: boolean) => Sketch
+export declare function sketchHelix(pitch: number, height: number, radius: number, center?: Point, dir?: Direction, lefthand?: boolean): Sketch;
 
 // Creates the `Sketch` of parametric function in a specified plane
 // Remarks: The sketch will be a spline approximating the function
 // sketchParametricFunction (function)
-(func: (t: number) => Point2D, planeConfig?: PlaneConfig, { pointsCount, start, stop }?: {
+export declare function sketchParametricFunction(func: (t: number) => Point2D, planeConfig?: PlaneConfig, { pointsCount, start, stop }?: {
     pointsCount?: number | undefined;
     start?: number | undefined;
     stop?: number | undefined;
-}, approximationConfig?: BSplineApproximationConfig) => Sketch
+}, approximationConfig?: BSplineApproximationConfig): Sketch;
 
 // Creates the `Sketch` of an polygon in a defined plane
 // Remarks: The sides of the polygon can be arcs of circle with a defined sagitta. The radius defines the out radius of the polygon without sagitta
 // sketchPolysides (function)
-(radius: number, sidesCount: number, sagitta?: number, planeConfig?: PlaneConfig) => Sketch
+export declare function sketchPolysides(radius: number, sidesCount: number, sagitta?: number, planeConfig?: PlaneConfig): Sketch;
 
 // Creates the `Sketch` of a rectangle in a defined plane
 // sketchRectangle (function)
-(xLength: number, yLength: number, planeConfig?: PlaneConfig) => Sketch
+export declare function sketchRectangle(xLength: number, yLength: number, planeConfig?: PlaneConfig): Sketch;
 
 // Creates the `Sketch` of a rounded rectangle in a defined plane
 // sketchRoundedRectangle (function)
-(width: number, height: number, r?: number | {
+export declare function sketchRoundedRectangle(width: number, height: number, r?: number | {
     rx?: number;
     ry?: number;
-}, planeConfig?: PlaneConfig) => Sketch
+}, planeConfig?: PlaneConfig): Sketch;
 
 // supportExtrude (function)
-(wire: Wire, center: Point, normal: Point, support: TopoDS_Shape) => Shape3D
+export declare function supportExtrude(wire: Wire, center: Point, normal: Point, support: TopoDS_Shape): Shape3D;
 
 // Creates a predicate selecting elements touching the shape's maximum Z bound
 // topMost (function)
-(shape: AnyShape, tolerance?: number) => ShapeExtremumFilter
+export declare function topMost(shape: AnyShape, tolerance?: number): ShapeExtremumFilter;
+// Example:
+//   shape.fillet(2, (finder, shape) =>
+//     finder.when(topMost(shape)).parallelTo("XY")
+//   );

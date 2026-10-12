@@ -6,7 +6,9 @@ import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 /** @public */
 export const evaluateModelInputSchema = z
   .object({
-    targetFile: rootedFilePathSchema.describe('The project-relative CAD source file to evaluate.'),
+    targetFile: rootedFilePathSchema.describe(
+      'The project-relative CAD source file to evaluate; the project entry is `assets.main.entryPath` in tau.json.',
+    ),
     includeCapabilities: z.boolean().optional().describe('Include view/export option schemas and reachable targets.'),
   })
   .strict();

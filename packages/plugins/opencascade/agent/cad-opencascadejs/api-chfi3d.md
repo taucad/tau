@@ -249,6 +249,12 @@ ChFi3d_FilBuilder: declare class ChFi3d_FilBuilder extends ChFi3d_Builder
 
 ChFi3d_FilletShape: typeof ChFi3d_FilletShape[keyof typeof ChFi3d_FilletShape]
 
+  readonly ChFi3d_Rational: 'ChFi3d_Rational'
+
+  readonly ChFi3d_QuasiAngular: 'ChFi3d_QuasiAngular'
+
+  readonly ChFi3d_Polynomial: 'ChFi3d_Polynomial'
+
 ChFi3d_SearchSing: declare class ChFi3d_SearchSing extends math_FunctionWithDerivative
 
   // ChFi3d_SearchSing.constructor (constructor)

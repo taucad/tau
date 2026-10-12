@@ -75,4 +75,14 @@ BSplCLib_EvaluatorFunction: declare class BSplCLib_EvaluatorFunction
 
 BSplCLib_KnotDistribution: typeof BSplCLib_KnotDistribution[keyof typeof BSplCLib_KnotDistribution]
 
+  readonly BSplCLib_NonUniform: 'BSplCLib_NonUniform'
+
+  readonly BSplCLib_Uniform: 'BSplCLib_Uniform'
+
 BSplCLib_MultDistribution: typeof BSplCLib_MultDistribution[keyof typeof BSplCLib_MultDistribution]
+
+  readonly BSplCLib_NonConstant: 'BSplCLib_NonConstant'
+
+  readonly BSplCLib_Constant: 'BSplCLib_Constant'
+
+  readonly BSplCLib_QuasiConstant: 'BSplCLib_QuasiConstant'

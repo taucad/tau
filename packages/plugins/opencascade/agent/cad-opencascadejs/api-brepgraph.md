@@ -1,6 +1,6 @@
 # libcascade — BRepGraph
 
-51 top-level symbols. Signatures are verbatim typescript.
+50 top-level symbols. Signatures are verbatim typescript.
 
 BRepGraph: declare class BRepGraph
 
@@ -433,7 +433,17 @@ BRepGraph_ChildExplorer: declare class BRepGraph_ChildExplorer
 
 BRepGraph_ChildExplorer_LinkKind: typeof BRepGraph_ChildExplorer_LinkKind[keyof typeof BRepGraph_ChildExplorer_LinkKind]
 
+  readonly None: 'None'
+
+  readonly Reference: 'Reference'
+
+  readonly Structural: 'Structural'
+
 BRepGraph_ChildExplorer_TraversalMode: typeof BRepGraph_ChildExplorer_TraversalMode[keyof typeof BRepGraph_ChildExplorer_TraversalMode]
+
+  readonly Recursive: 'Recursive'
+
+  readonly DirectChildren: 'DirectChildren'
 
 BRepGraph_Compact: declare class BRepGraph_Compact
 
@@ -464,6 +474,10 @@ BRepGraph_Compact_Options: declare class BRepGraph_Compact_Options
 
 BRepGraph_Compact_Options_CachePolicy: typeof BRepGraph_Compact_Options_CachePolicy[keyof typeof BRepGraph_Compact_Options_CachePolicy]
 
+  readonly Drop: 'Drop'
+
+  readonly CopyFresh: 'CopyFresh'
+
 BRepGraph_Copy: declare class BRepGraph_Copy
 
   // BRepGraph_Copy.Perform (method)
@@ -480,9 +494,25 @@ BRepGraph_Copy: declare class BRepGraph_Copy
 
 BRepGraph_Copy_GeomPolicy: typeof BRepGraph_Copy_GeomPolicy[keyof typeof BRepGraph_Copy_GeomPolicy]
 
+  readonly Copy: 'Copy'
+
+  readonly Share: 'Share'
+
+  readonly Drop: 'Drop'
+
 BRepGraph_Copy_MeshPolicy: typeof BRepGraph_Copy_MeshPolicy[keyof typeof BRepGraph_Copy_MeshPolicy]
 
+  readonly Copy: 'Copy'
+
+  readonly Share: 'Share'
+
+  readonly Drop: 'Drop'
+
 BRepGraph_Copy_CachePolicy: typeof BRepGraph_Copy_CachePolicy[keyof typeof BRepGraph_Copy_CachePolicy]
+
+  readonly Drop: 'Drop'
+
+  readonly CopyFresh: 'CopyFresh'
 
 BRepGraph_CopyRemap: declare class BRepGraph_CopyRemap
 
@@ -534,7 +564,15 @@ BRepGraph_CopyRemap: declare class BRepGraph_CopyRemap
 
 BRepGraph_CopyRemap_Mode: typeof BRepGraph_CopyRemap_Mode[keyof typeof BRepGraph_CopyRemap_Mode]
 
+  readonly Copy: 'Copy'
+
+  readonly Compact: 'Compact'
+
 BRepGraph_CopyRemap_MappingKind: typeof BRepGraph_CopyRemap_MappingKind[keyof typeof BRepGraph_CopyRemap_MappingKind]
+
+  readonly Explicit: 'Explicit'
+
+  readonly Identity: 'Identity'
 
 BRepGraph_Data: declare class BRepGraph_Data
 
@@ -1191,6 +1229,12 @@ BRepGraph_ItemId: declare class BRepGraph_ItemId
 
 BRepGraph_ItemId_Domain: typeof BRepGraph_ItemId_Domain[keyof typeof BRepGraph_ItemId_Domain]
 
+  readonly None: 'None'
+
+  readonly Node: 'Node'
+
+  readonly Reference: 'Reference'
+
 BRepGraph_ItemUID: declare class BRepGraph_ItemUID
 
   // BRepGraph_ItemUID.constructor (constructor)
@@ -1240,6 +1284,12 @@ BRepGraph_ItemUID: declare class BRepGraph_ItemUID
 
 BRepGraph_ItemUID_Domain: typeof BRepGraph_ItemUID_Domain[keyof typeof BRepGraph_ItemUID_Domain]
 
+  readonly None: 'None'
+
+  readonly Node: 'Node'
+
+  readonly Reference: 'Reference'
+
 BRepGraph_RootProductIterator: declare class BRepGraph_RootProductIterator
 
   // BRepGraph_RootProductIterator.constructor (constructor)
@@ -1261,78 +1311,4 @@ BRepGraph_RootProductIterator: declare class BRepGraph_RootProductIterator
   delete(): void;
 
   // BRepGraph_RootProductIterator.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-BRepGraph_Layer: declare class BRepGraph_Layer extends Standard_Transient
-
-  // BRepGraph_Layer.ID (method)
-  ID(): Standard_GUID;
-
-  // BRepGraph_Layer.Name (method)
-  Name(): TCollection_AsciiString;
-
-  // BRepGraph_Layer.OnNodeRemoved (method)
-  OnNodeRemoved(theNode: BRepGraph_NodeId): void;
-
-  // BRepGraph_Layer.OnItemRemoved (method)
-  OnItemRemoved(theItem: BRepGraph_ItemId): void;
-
-  // BRepGraph_Layer.OnNodeReplaced (method)
-  OnNodeReplaced(theOldNode: BRepGraph_NodeId, theNewNode: BRepGraph_NodeId): void;
-
-  // BRepGraph_Layer.CopyTo (method)
-  CopyTo(theCopy: BRepGraph_CopyRemap): void;
-
-  // BRepGraph_Layer.InvalidateAll (method)
-  InvalidateAll(): void;
-
-  // BRepGraph_Layer.Clear (method)
-  Clear(): void;
-
-  // BRepGraph_Layer.SubscribedKinds (method)
-  SubscribedKinds(): number;
-
-  // BRepGraph_Layer.OnNodeModified (method)
-  OnNodeModified(theNode: BRepGraph_NodeId): void;
-
-  // BRepGraph_Layer.OnItemModified (method)
-  OnItemModified(theItem: BRepGraph_ItemId): void;
-
-  // BRepGraph_Layer.OnNodesModified (method)
-  OnNodesModified(theModifiedNodes: NCollection_Array1_BRepGraph_NodeId): void;
-
-  // BRepGraph_Layer.KindBit (method)
-  static KindBit(theKind: BRepGraph_NodeId_Kind): number;
-
-  // BRepGraph_Layer.SubscribedRefKinds (method)
-  SubscribedRefKinds(): number;
-
-  // BRepGraph_Layer.OnRefRemoved (method)
-  OnRefRemoved(theRef: BRepGraph_RefId): void;
-
-  // BRepGraph_Layer.OnRefModified (method)
-  OnRefModified(theRef: BRepGraph_RefId): void;
-
-  // BRepGraph_Layer.OnRefsModified (method)
-  OnRefsModified(theModifiedRefs: NCollection_Array1_BRepGraph_RefId): void;
-
-  // BRepGraph_Layer.RefKindBit (method)
-  static RefKindBit(theKind: BRepGraph_RefId_Kind): number;
-
-  // BRepGraph_Layer.Revision (method)
-  Revision(): number;
-
-  // BRepGraph_Layer.get_type_name (method)
-  static get_type_name(): string;
-
-  // BRepGraph_Layer.get_type_descriptor (method)
-  static get_type_descriptor(): Standard_Type;
-
-  // BRepGraph_Layer.DynamicType (method)
-  DynamicType(): Standard_Type;
-
-  // BRepGraph_Layer.delete (method)
-  delete(): void;
-
-  // BRepGraph_Layer.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

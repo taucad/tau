@@ -310,6 +310,20 @@ describe('abandoned lease directories', () => {
       rmSync(livingDirectory, { recursive: true, force: true });
     }
   });
+
+  it('reclaims its own pid’s directory at boot, which a run restarted in place under the same pid left behind', async () => {
+    const ownDirectory = path.join(leaseRoot, String(process.pid));
+    mkdirSync(ownDirectory, { recursive: true });
+    writeFileSync(path.join(ownDirectory, 'pack'), Buffer.alloc(4096, 1));
+
+    const service = createService(
+      memoryStore(),
+      databaseStub({ storageBytes: 0, generation: 0, derivedGeneration: 0 }, { failTransaction: false }),
+    );
+    await service.settled();
+
+    expect(existsSync(path.join(ownDirectory, 'pack')), 'a previous run’s lease must be reclaimed at boot').toBe(false);
+  });
 });
 
 describe('GitRepositoryService derived state (D19)', () => {

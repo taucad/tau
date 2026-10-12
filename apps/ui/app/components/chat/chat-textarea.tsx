@@ -96,7 +96,7 @@ export const ChatTextarea = memo(function ({
   } = useChatComposer();
   const acpAgentId = execution.kind === 'acp' ? execution.agentId : undefined;
   const acpSessionData = useChatSessionSnapshot(session?.activeChatId ?? '', (active) =>
-    acpAgentId === undefined ? undefined : latestAcpSessionData(active?.chat.messages ?? [], acpAgentId),
+    acpAgentId === undefined ? undefined : latestAcpSessionData(active?.messages ?? [], acpAgentId),
   );
   const { setDraftText: setMainDraftText, setEditDraftText } = useDraftActions();
 

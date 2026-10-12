@@ -198,9 +198,9 @@ const capturedRows = [
     terminalRevision: '9',
     policyVersion: 'development-v2',
     activationId: 'hold-redesign-2026-09-12-v4',
-    meterContractId: 'model-meter-v1:anthropic-claude-haiku-4.5',
+    meterContractId: 'model-meter-v1:anthropic-claude-haiku-5.5',
     category: 'llm',
-    model: { id: 'claude-haiku-4-5-20251001', displayName: 'Haiku 4.5', providerId: 'anthropic' },
+    model: { id: 'claude-haiku-5-5', displayName: 'Haiku 5.5', providerId: 'anthropic' },
     activity: {
       kind: 'agent',
       projectHint: capturedProjectId,
@@ -300,7 +300,7 @@ describe('the identity a live spec judges its captured receipts by', () => {
     const faults = attributionFaults(captured, { projectId: slug, chatId: chatIdFromUrl(capturedUrl) });
 
     expect(faults).toEqual([
-      `27d02cdf-7291-49dc-9daa-441b8f1bb05d (claude-haiku-4-5-20251001) names project ${capturedProjectId}, not provider-switch-vertex-to-anthropic`,
+      `27d02cdf-7291-49dc-9daa-441b8f1bb05d (claude-haiku-5-5) names project ${capturedProjectId}, not provider-switch-vertex-to-anthropic`,
       `d84ed5a8-c31b-44c4-8a47-979ff5688926 (gemini-3.7-flash) names project ${capturedProjectId}, not provider-switch-vertex-to-anthropic`,
     ]);
   });

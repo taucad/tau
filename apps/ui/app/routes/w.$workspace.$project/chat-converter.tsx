@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { fileExtensions } from '@taucad/types/constants';
 import { runtimeContentSchema } from '@taucad/runtime';
+import { fileContentBytes } from '@taucad/fs-client/file-content-service';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useObservation } from '@taucad/fs-client/react/use-observation';
 import { XIcon, Download, Info, Check, ChevronDown, ChevronRight } from 'lucide-react';
@@ -985,34 +986,28 @@ const exportPreferencesSchema = z.object({
 
 export function useExportPreferences(
   fileManager: ReturnType<typeof useFileManager>,
-): readonly [ExportPreferences, (next: ExportPreferences) => void] {
-  const { contentService, readFile, writeFiles, exists } = fileManager;
+): readonly [ExportPreferences, (next: ExportPreferences) => void, { readonly error?: string; retry(): void }] {
+  const { contentService, writeFiles } = fileManager;
   const service = useMemo(
     () =>
       contentService
         ? new ObservationService<ExportPreferences>({
             resource: preferencesPath,
-            watch: (invalidate, reset) =>
-              contentService.watchReady({ paths: [preferencesPath] }, (event) => {
-                if (event.type === 'reset') {
-                  reset();
-                } else {
-                  invalidate();
-                }
-              }),
-            read: async () =>
-              (await exists(preferencesPath))
-                ? {
+            read: async (read) => {
+              const result = await read.observe(contentService.observeContent(preferencesPath));
+              return result.kind === 'orphaned'
+                ? defaultPreferences
+                : {
                     ...defaultPreferences,
                     ...exportPreferencesSchema.parse(
-                      JSON.parse(new TextDecoder().decode(await readFile(preferencesPath))),
+                      JSON.parse(new TextDecoder().decode(fileContentBytes({ path: preferencesPath, result }))),
                     ),
-                  }
-                : defaultPreferences,
+                  };
+            },
             equal: (previous, next) => JSON.stringify(previous) === JSON.stringify(next),
           })
         : undefined,
-    [contentService, exists, readFile],
+    [contentService],
   );
   const snapshot = useObservation(service);
   const activeSource = useRef(service);
@@ -1031,7 +1026,18 @@ export function useExportPreferences(
   const patch = local?.service === service ? local?.patch : undefined;
   const preferences = useMemo(() => ({ ...(snapshot.value ?? defaultPreferences), ...patch }), [snapshot.value, patch]);
 
-  const [write, setWrite] = useState<{ local: NonNullable<typeof local>; phase: 'pending' | 'saved' | 'failed' }>();
+  const [write, setWrite] = useState<{
+    local: NonNullable<typeof local>;
+    phase: 'pending' | 'saved' | 'failed';
+    error?: string;
+  }>();
+  const retry = useCallback(() => {
+    if (!service || activeSource.current !== service) {
+      return;
+    }
+    service.refresh();
+    setWrite((current) => (current?.local.service === service && current.phase === 'failed' ? undefined : current));
+  }, [service]);
   useEffect(() => {
     if (!service || !local || local.service !== service || snapshot.status !== 'ready') {
       return undefined;
@@ -1068,13 +1074,20 @@ export function useExportPreferences(
             return;
           }
           setWrite((current) => (current?.local === captured ? { local: captured, phase: 'saved' } : current));
-          service.invalidate();
+          service.refresh();
         } catch (error) {
           if (activeSource.current !== service) {
             return;
           }
-          setWrite((current) => (current?.local === captured ? { local: captured, phase: 'failed' } : current));
-          toast.error(error instanceof Error ? error.message : 'Export preferences could not be saved.');
+          setWrite((current) =>
+            current?.local === captured
+              ? {
+                  local: captured,
+                  phase: 'failed',
+                  error: error instanceof Error ? error.message : 'Export preferences could not be saved.',
+                }
+              : current,
+          );
         }
       };
       void persist();
@@ -1106,12 +1119,30 @@ export function useExportPreferences(
     },
     [preferences, service],
   );
+  const error =
+    snapshot.error ?? (write?.phase === 'failed' && write.local.service === service ? write.error : undefined);
   useEffect(() => {
-    if (snapshot.error) {
-      toast.error(snapshot.error);
+    if (error) {
+      toast.error(error, {
+        action: {
+          label: 'Retry',
+          onClick: retry,
+        },
+      });
     }
-  }, [snapshot.error]);
-  return [preferences, persistPreferences] as const;
+  }, [error, retry]);
+  return [
+    preferences,
+    persistPreferences,
+    {
+      error: error
+        ? snapshot.error
+          ? 'Export settings could not be loaded.'
+          : 'Export settings could not be saved.'
+        : undefined,
+      retry,
+    },
+  ] as const;
 }
 
 // =============================================================================
@@ -1181,7 +1212,7 @@ export const ConverterPanelBody = function ({
     [kernelClient, activeKernelId, capabilities],
   );
 
-  const [preferences, persistPreferences] = useExportPreferences(fileManager);
+  const [preferences, persistPreferences, preferenceHealth] = useExportPreferences(fileManager);
   const [isExporting, setIsExporting] = useState(false);
 
   const { selectedFormats, zipMultiple, formatContent, formatOptions } = preferences;
@@ -1436,6 +1467,18 @@ export const ConverterPanelBody = function ({
 
   return (
     <div data-slot='export-panel-body' className='flex size-full min-h-0 flex-col overflow-hidden bg-sidebar'>
+      {preferenceHealth.error ? (
+        <div
+          role='alert'
+          aria-label='Export settings unavailable'
+          className='flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2 text-xs'
+        >
+          <span>{preferenceHealth.error}</span>
+          <Button variant='ghost' size='sm' aria-label='Retry export settings' onClick={preferenceHealth.retry}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
       <div
         data-slot='export-scroll-body'
         className='min-h-0 flex-1 scroll-shadows-y overflow-y-auto p-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'

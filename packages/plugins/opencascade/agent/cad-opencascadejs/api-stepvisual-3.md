@@ -2,6 +2,52 @@
 
 37 top-level symbols. Signatures are verbatim typescript.
 
+StepVisual_StyledItem: declare class StepVisual_StyledItem extends StepRepr_RepresentationItem
+
+  // StepVisual_StyledItem.constructor (constructor)
+  constructor();
+
+  // StepVisual_StyledItem.Init (method)
+  Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
+  Init(aName: TCollection_HAsciiString): void;
+
+  // StepVisual_StyledItem.SetStyles (method)
+  SetStyles(aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment): void;
+
+  // StepVisual_StyledItem.Styles (method)
+  Styles(): NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment;
+
+  // StepVisual_StyledItem.StylesValue (method)
+  StylesValue(num: number): StepVisual_PresentationStyleAssignment;
+
+  // StepVisual_StyledItem.NbStyles (method)
+  NbStyles(): number;
+
+  // StepVisual_StyledItem.SetItem (method)
+  SetItem(aItem: StepRepr_RepresentationItem): void;
+  SetItem(aItem: StepVisual_StyledItemTarget): void;
+
+  // StepVisual_StyledItem.Item (method)
+  Item(): StepRepr_RepresentationItem;
+
+  // StepVisual_StyledItem.ItemAP242 (method)
+  ItemAP242(): StepVisual_StyledItemTarget;
+
+  // StepVisual_StyledItem.get_type_name (method)
+  static get_type_name(): string;
+
+  // StepVisual_StyledItem.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // StepVisual_StyledItem.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // StepVisual_StyledItem.delete (method)
+  delete(): void;
+
+  // StepVisual_StyledItem.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
 StepVisual_StyledItemTarget: declare class StepVisual_StyledItemTarget extends StepData_SelectType
 
   // StepVisual_StyledItemTarget.constructor (constructor)
@@ -29,6 +75,12 @@ StepVisual_StyledItemTarget: declare class StepVisual_StyledItemTarget extends S
   [Symbol.dispose](): void;
 
 StepVisual_SurfaceSide: typeof StepVisual_SurfaceSide[keyof typeof StepVisual_SurfaceSide]
+
+  readonly StepVisual_ssNegative: 'StepVisual_ssNegative'
+
+  readonly StepVisual_ssPositive: 'StepVisual_ssPositive'
+
+  readonly StepVisual_ssBoth: 'StepVisual_ssBoth'
 
 StepVisual_SurfaceSideStyle: declare class StepVisual_SurfaceSideStyle extends Standard_Transient
 
@@ -1184,58 +1236,4 @@ StepVisual_TessellatedWire: declare class StepVisual_TessellatedWire extends Ste
   delete(): void;
 
   // StepVisual_TessellatedWire.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-StepVisual_TextLiteral: declare class StepVisual_TextLiteral extends StepGeom_GeometricRepresentationItem
-
-  // StepVisual_TextLiteral.constructor (constructor)
-  constructor();
-
-  // StepVisual_TextLiteral.Init (method)
-  Init(aName: TCollection_HAsciiString, aLiteral: TCollection_HAsciiString, aPlacement: StepGeom_Axis2Placement, aAlignment: TCollection_HAsciiString, aPath: StepVisual_TextPath, aFont: StepVisual_FontSelect): void;
-  Init(aName: TCollection_HAsciiString): void;
-
-  // StepVisual_TextLiteral.SetLiteral (method)
-  SetLiteral(aLiteral: TCollection_HAsciiString): void;
-
-  // StepVisual_TextLiteral.Literal (method)
-  Literal(): TCollection_HAsciiString;
-
-  // StepVisual_TextLiteral.SetPlacement (method)
-  SetPlacement(aPlacement: StepGeom_Axis2Placement): void;
-
-  // StepVisual_TextLiteral.Placement (method)
-  Placement(): StepGeom_Axis2Placement;
-
-  // StepVisual_TextLiteral.SetAlignment (method)
-  SetAlignment(aAlignment: TCollection_HAsciiString): void;
-
-  // StepVisual_TextLiteral.Alignment (method)
-  Alignment(): TCollection_HAsciiString;
-
-  // StepVisual_TextLiteral.SetPath (method)
-  SetPath(aPath: StepVisual_TextPath): void;
-
-  // StepVisual_TextLiteral.Path (method)
-  Path(): StepVisual_TextPath;
-
-  // StepVisual_TextLiteral.SetFont (method)
-  SetFont(aFont: StepVisual_FontSelect): void;
-
-  // StepVisual_TextLiteral.Font (method)
-  Font(): StepVisual_FontSelect;
-
-  // StepVisual_TextLiteral.get_type_name (method)
-  static get_type_name(): string;
-
-  // StepVisual_TextLiteral.get_type_descriptor (method)
-  static get_type_descriptor(): Standard_Type;
-
-  // StepVisual_TextLiteral.DynamicType (method)
-  DynamicType(): Standard_Type;
-
-  // StepVisual_TextLiteral.delete (method)
-  delete(): void;
-
-  // StepVisual_TextLiteral.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

@@ -2,11 +2,12 @@
 import { render, screen, within } from '@testing-library/react';
 import { isValidElement } from 'react';
 import type { ReactElement, ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { NavUser } from '#components/nav/nav-user.js';
 import { metaConfig } from '#constants/meta.constants.js';
 
+const clientEnvironment = globalThis.window.ENV;
 const useNetworkConnectivityMock = vi.hoisted(() => vi.fn(() => true));
 const useEntitlementsMock = vi.hoisted(() => vi.fn(() => ({ tier: 'free', isResolved: true })));
 
@@ -74,6 +75,11 @@ describe('NavUser', () => {
     useEntitlementsMock.mockReturnValue({ tier: 'free', isResolved: true });
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    globalThis.window.ENV = clientEnvironment;
+  });
+
   it('shows product navigation, upgrade, and settings to free users', () => {
     render(<NavUser />, { wrapper: MemoryRouter });
 
@@ -110,17 +116,32 @@ describe('NavUser', () => {
 
     expect(screen.getByRole('button', { name: 'Help' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', 'https://docs.tau.new');
-    expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', 'https://tau.new/legal/privacy');
-    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', 'https://tau.new/legal/terms');
-    expect(screen.getByRole('link', { name: 'Open-source notices' })).toHaveAttribute(
-      'href',
-      'https://tau.new/legal/open-source',
-    );
+    expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '/legal/privacy');
+    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', '/legal/terms');
+    expect(screen.getByRole('link', { name: 'Open-source notices' })).toHaveAttribute('href', '/legal/open-source');
     expect(screen.getByText('Report a bug')).toBeInTheDocument();
     expect(screen.getByText('GitHub')).toBeInTheDocument();
     expect(screen.getByText('Community Discord')).toBeInTheDocument();
     expect(screen.getByText(`Tau v${metaConfig.version}`)).toBeInTheDocument();
     expect(screen.queryByText('About Tau')).not.toBeInTheDocument();
+  });
+
+  it('should link the legal pages to the web deployment the desktop shell is bound to', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    globalThis.window.ENV = {
+      ...clientEnvironment,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
+      TAU_FRONTEND_URL: 'https://taucad.dev',
+    };
+
+    render(<NavUser />, { wrapper: MemoryRouter });
+
+    expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', 'https://taucad.dev/legal/privacy');
+    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', 'https://taucad.dev/legal/terms');
+    expect(screen.getByRole('link', { name: 'Open-source notices' })).toHaveAttribute(
+      'href',
+      'https://taucad.dev/legal/open-source',
+    );
   });
 
   it('shows connectivity in the footer row and user menu only while offline', () => {

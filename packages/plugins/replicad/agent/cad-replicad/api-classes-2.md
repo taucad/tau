@@ -63,7 +63,7 @@ MeshShape: export declare class MeshShape extends WrappingObj<ManifoldInstance> 
   // MeshShape.mesh (method)
   mesh(): MeshShapeMesh;
 
-  boundingBox
+  readonly boundingBox: BoundingBox
 
   // MeshShape.volume (method)
   volume(): number;
@@ -80,7 +80,7 @@ MeshShape: export declare class MeshShape extends WrappingObj<ManifoldInstance> 
   // MeshShape.numEdge (method)
   numEdge(): number;
 
-  isEmpty
+  readonly isEmpty: boolean
 
   // Exports the mesh shape as an STL file Blob
   // Remarks: Since MeshShape is already a triangle mesh, no tessellation parameters are needed (tolerance/angularTolerance are accepted but ignored for API compatibility).
@@ -108,7 +108,7 @@ Plane: export declare class Plane
   // Plane.clone (method)
   clone(): Plane;
 
-  origin
+  origin: Vector
 
   // Plane.translateTo (method)
   translateTo(point: Point): Plane;
@@ -146,13 +146,13 @@ ProjectionCamera: export declare class ProjectionCamera extends WrappingObj<gp_A
   // ProjectionCamera.constructor (constructor)
   constructor(position?: Point, direction?: Direction, xAxis?: Direction);
 
-  position
+  readonly position: Vector
 
-  direction
+  readonly direction: Vector
 
-  xAxis
+  readonly xAxis: Vector
 
-  yAxis
+  readonly yAxis: Vector
 
   // ProjectionCamera.autoAxes (method)
   autoAxes(): void;
@@ -182,9 +182,9 @@ Shape: export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj
   // Shape.serialize (method)
   serialize(): string;
 
-  hashCode
+  readonly hashCode: number
 
-  isNull
+  readonly isNull: boolean
 
   // Shape.isSame (method)
   isSame(other: AnyShape): boolean;
@@ -235,15 +235,15 @@ Shape: export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj
   // Shape.scale (method)
   scale(scale: number, center?: Point): this;
 
-  edges
+  readonly edges: Edge[]
 
-  faces
+  readonly faces: Face[]
 
-  solids
+  readonly solids: Solid[]
 
-  wires
+  readonly wires: Wire[]
 
-  boundingBox
+  readonly boundingBox: BoundingBox
 
   // Exports the current shape as a set of triangle
   // Shape.mesh (method)
@@ -276,7 +276,7 @@ Sketch: export declare class Sketch implements SketchInterface
           defaultDirection?: Point;
       });
 
-  baseFace
+  baseFace: Face | null | undefined
 
   // Sketch.delete (method)
   delete(): void;
@@ -284,9 +284,9 @@ Sketch: export declare class Sketch implements SketchInterface
   // Sketch.clone (method)
   clone(): Sketch;
 
-  defaultOrigin
+  defaultOrigin: Vector
 
-  defaultDirection
+  defaultDirection: Vector
 
   // Transforms the lines into a face
   // Sketch.face (method)
@@ -524,11 +524,11 @@ Solid: export declare class Solid extends _3DShape<TopoDS_Solid>
 
 Surface: export declare class Surface extends WrappingObj<Adaptor3d_Surface>
 
-  surfaceType
+  readonly surfaceType: SurfaceType
 
 SurfacePhysicalProperties: export declare class SurfacePhysicalProperties extends PhysicalProperties
 
-  area
+  readonly area: number
 
 Transformation: export declare class Transformation extends WrappingObj<gp_Trsf>
 
@@ -571,15 +571,15 @@ Vector: export declare class Vector extends WrappingObj<gp_Vec>
   // Vector.constructor (constructor)
   constructor(vector?: Point);
 
-  repr
+  readonly repr: string
 
-  x
+  readonly x: number
 
-  y
+  readonly y: number
 
-  z
+  readonly z: number
 
-  Length
+  readonly Length: number
 
   // Vector.toTuple (method)
   toTuple(): [number, number, number];
@@ -633,7 +633,7 @@ Vertex: export declare class Vertex extends Shape<TopoDS_Vertex>
 
 VolumePhysicalProperties: export declare class VolumePhysicalProperties extends PhysicalProperties
 
-  volume
+  readonly volume: number
 
 Wire: export declare class Wire extends _1DShape<TopoDS_Wire>
 
@@ -647,7 +647,7 @@ WrappingObj: export declare class WrappingObj<Type extends Deletable>
   // WrappingObj.constructor (constructor)
   constructor(wrapped: Type);
 
-  wrapped
+  wrapped: Type
 
   // WrappingObj.delete (method)
   delete(): void;

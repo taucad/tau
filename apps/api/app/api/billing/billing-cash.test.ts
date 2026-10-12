@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 /* eslint-disable @typescript-eslint/naming-convention -- Stripe wire fixtures use provider field names. */
 import type { Stripe } from 'stripe';
-import { qualifyStripeCashProjection } from '#api/billing/billing-cash.service.js';
-import type { CashDisputeSource } from '#api/billing/billing-cash.service.js';
+import { mockDeep } from 'vitest-mock-extended';
+import { ZodError } from 'zod';
+import {
+  BillingCashService,
+  maximumRefundReasonLength,
+  qualifyStripeCashProjection,
+} from '#api/billing/billing-cash.service.js';
+import type { CashDisputeSource, ReviewedRefundRequest } from '#api/billing/billing-cash.service.js';
+import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
+import type { DatabaseService } from '#database/database.service.js';
 
 const refund = (
   input: Partial<Stripe.Refund> & Pick<Stripe.Refund, 'id' | 'amount' | 'status'>,
@@ -212,6 +221,59 @@ describe('Stripe cash source qualification', () => {
         disputeAllocations: { dp_overlap: { principalMinor: 300n, taxMinor: 0n } },
       }),
     ).toEqual({ status: 'attention', reason: 'cash_movement_overlap' });
+  });
+});
+
+describe('reviewed refund request boundary', () => {
+  const request = {
+    accountId: 'account_1',
+    reversalCaseId: 'case_1',
+    requestedPrincipalMinor: '250',
+    requestedTaxMinor: '0',
+    approvedMaximumGrossMinor: '250',
+    reviewActorId: 'operator_1',
+    reviewedAt: new Date('2026-10-09T00:00:00Z'),
+    reason: 'requested refund',
+    requestId: 'request_1',
+  } satisfies Omit<ReviewedRefundRequest, 'environment'>;
+  const prepared = { intentId: 'intent_1', legId: 'leg_1' };
+  /** A cash service whose transaction stands in for the database work after the request is accepted. */
+  const cashService = (environment: FinancialEnvironment) => {
+    const database = mockDeep<DatabaseService>();
+    database.database.transaction.mockResolvedValue(prepared);
+    const cash = new BillingCashService(
+      database,
+      mockDeep<Stripe>(),
+      mockDeep<Stripe>(),
+      mockDeep<CreditLedgerService>(),
+      {
+        environment,
+        stripeAccountId: 'acct_1',
+        livemode: environment.startsWith('prod-'),
+      },
+    );
+    return { cash, database };
+  };
+
+  it.each(['prod-us', 'prod-eu'] as const)(
+    'should prepare a reviewed refund in the %s environment',
+    async (environment) => {
+      const { cash, database } = cashService(environment);
+      await expect(cash.prepareReviewedRefund({ ...request, environment })).resolves.toEqual(prepared);
+      expect(database.database.transaction).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('should accept a reason at the shared operator cap and refuse a longer one before database work', async () => {
+    const { cash, database } = cashService('prod-us');
+    const longest = 'r'.repeat(maximumRefundReasonLength);
+    await expect(cash.prepareReviewedRefund({ ...request, environment: 'prod-us', reason: longest })).resolves.toEqual(
+      prepared,
+    );
+    await expect(
+      cash.prepareReviewedRefund({ ...request, environment: 'prod-us', reason: `${longest}r` }),
+    ).rejects.toThrow(ZodError);
+    expect(database.database.transaction).toHaveBeenCalledOnce();
   });
 });
 /* eslint-enable @typescript-eslint/naming-convention -- end Stripe wire fixtures */

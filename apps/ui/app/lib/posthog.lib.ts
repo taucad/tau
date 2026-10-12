@@ -82,6 +82,10 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
     // Invitation links carry bearer credentials in href; rrweb must omit the node before compression.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     session_recording: {
+      // Replays otherwise record chat messages, editor code, file names and agent output as
+      // rendered text; mask every text node and input (agent usage telemetry blueprint, Q3).
+      maskTextSelector: '*',
+      maskAllInputs: true,
       blockSelector: 'a[href*="/invitations/"], a[href*="%2Finvitations%2F" i]',
       // The SDK calls this for rrweb Meta href before snapshot compression too.
       maskCapturedNetworkRequestFn: (request) => ({

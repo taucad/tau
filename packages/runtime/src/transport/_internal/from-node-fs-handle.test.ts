@@ -1,4 +1,5 @@
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
+import parcelWatcher from '@parcel/watcher';
 import * as fs from 'node:fs/promises';
 import * as nodeFs from 'node:fs';
 import * as os from 'node:os';
@@ -6,6 +7,7 @@ import * as path from 'node:path';
 import { _fromNodeFsHandle as fromNodeFS } from '#transport/_internal/from-node-fs-handle.js';
 import type { RuntimeFileSystemBase, RuntimeWatchEvent } from '#types/runtime-kernel.types.js';
 import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
+import type { InlineRuntimeFileSystemBase } from '#transport/_internal/runtime-filesystem-handle.js';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
 const { realpathMock } = vi.hoisted(() => ({ realpathMock: vi.fn<typeof fs.realpath>() }));
@@ -36,7 +38,7 @@ vi.mock('node:fs', async (importOriginal) => {
  * suite exercises the underlying `RuntimeFileSystemBase` directly via
  * `.fs`. Runtime API integration is covered elsewhere.
  */
-function unwrap(basePath: string): RuntimeFileSystemBase {
+function unwrap(basePath: string): InlineRuntimeFileSystemBase {
   const handle = fromNodeFS(basePath);
   if (handle.kind !== 'inline') {
     throw new Error('fromNodeFS must return the inline-kind handle.');
@@ -452,6 +454,61 @@ describe('fromNodeFS watch', { timeout: 3 * watchDeliveryBudget.timeout }, () =>
       expect(live.events).toEqual([{ type: 'reset' }]);
     } finally {
       watch.mockRestore();
+    }
+  });
+
+  it('should settle disposeAsync only after an in-flight native admission is stopped', async () => {
+    const root = await createRoot();
+    const admission = Promise.withResolvers<Awaited<ReturnType<typeof parcelWatcher.subscribe>>>();
+    const stopped = Promise.withResolvers<void>();
+    const nativeStop = vi.fn(async () => stopped.promise);
+    const nativeSubscribe = vi.spyOn(parcelWatcher, 'subscribe').mockReturnValue(admission.promise);
+    /** Whether `promise` settles before the event loop turns; its rejection propagates. */
+    const settled = async (promise: Promise<void>): Promise<boolean> => {
+      const settles = async (): Promise<boolean> => {
+        await promise;
+        return true;
+      };
+      const turns = new Promise<boolean>((resolve) => {
+        setImmediate(() => {
+          resolve(false);
+        });
+      });
+      return Promise.race([settles(), turns]);
+    };
+    const fileSystem = unwrap(root) as InlineRuntimeFileSystemBase & WorkerFileSystemProxy;
+    if (!fileSystem.disposeAsync || !fileSystem.watchReady) {
+      throw new Error('The Node filesystem adapter must expose disposeAsync() and watchReady().');
+    }
+    try {
+      const events: RuntimeWatchEvent[] = [];
+      const registration = fileSystem.watchReady({ paths: ['main.ts'], recursive: false }, (event) =>
+        events.push(event),
+      );
+      await vi.waitFor(() => {
+        expect(nativeSubscribe).toHaveBeenCalledOnce();
+      });
+
+      // The worker that owns this adapter may exit as soon as disposal settles, so
+      // disposal must outlast the native subscribe that is still in flight...
+      const disposal = fileSystem.disposeAsync();
+      await expect(settled(disposal)).resolves.toBe(false);
+      expect(nativeStop).not.toHaveBeenCalled();
+
+      // ...and the native stop that the late admission triggers before it is refused.
+      admission.resolve({ unsubscribe: nativeStop });
+      await expect(registration.ready).rejects.toThrow('cancelled during admission');
+      expect(nativeStop).toHaveBeenCalledOnce();
+      await expect(settled(disposal)).resolves.toBe(false);
+
+      stopped.resolve();
+      await expect(disposal).resolves.toBeUndefined();
+      expect(events).toEqual([]);
+    } finally {
+      admission.resolve({ unsubscribe: nativeStop });
+      stopped.resolve();
+      await fileSystem.disposeAsync();
+      nativeSubscribe.mockRestore();
     }
   });
 });

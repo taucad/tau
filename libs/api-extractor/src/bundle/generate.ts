@@ -16,12 +16,12 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type { TauSkillsManifest } from '#bundle/bundle.types.js';
 import { doctrineFile, skillsManifestFile } from '#bundle/bundle.types.js';
@@ -31,7 +31,9 @@ import { csharpReferenceCorpus } from '#languages/csharp/reference.js';
 import { loadKclCorpus } from '#languages/kcl/extract.js';
 import { loadOpenscadCorpus } from '#languages/openscad/extract.js';
 import { extractTypescriptApi } from '#languages/typescript/extract.js';
+import { byTscircuitGroup, loadTscircuitCorpus } from '#languages/typescript/tscircuit.js';
 import type { ApiCorpus, ApiEntry, ApiSignature } from '#model/api-corpus.types.js';
+import type { CoreApiOptions, UsageRanking } from '#render/render-core.js';
 
 /** Workspace root, from this file's own location. @internal */
 const workspaceRoot = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -245,7 +247,78 @@ export type BundleOwner = {
     readonly prefix: string;
     readonly groupBy: (entry: ApiEntry) => string;
   };
+  /**
+   * The Core API section in `SKILL.md`, ranked by `src/generated/usage/<slug>.json`
+   * (written by `nx run api-extractor:collect-usage`).
+   */
+  readonly core?: CoreApiOptions;
 };
+
+/**
+ * An owner's committed usage ranking. A core section without one would quietly
+ * fall back to its pins, so a missing file fails the generation instead.
+ *
+ * @param slug - The owner's skill slug.
+ * @returns The ranking committed under `src/generated/usage/`.
+ * @public
+ */
+export const usageRanking = (slug: string): UsageRanking => {
+  const path = join(generatedRoot, 'usage', `${slug}.json`);
+  if (!existsSync(path)) {
+    throw new Error(`${slug} has a core section but no usage ranking; run nx run api-extractor:collect-usage`);
+  }
+  return readJson<UsageRanking>(path);
+};
+
+/** The import specifier a PicoVoxel declaration file belongs to, from its path in the package. */
+const picovoxelImportPath = (entry: ApiEntry, packageName: string): string => {
+  const directory = entry.source?.file.split('/').slice(0, -1).join('/');
+  // A bare path: electron-vite's esm-shim regex reads "import from '…'" inside a string as an import.
+  return `\`${directory === undefined || directory === '' ? packageName : `${packageName}/${directory}`}\``;
+};
+
+const occtCorePins = [
+  'BRepPrimAPI_MakeBox.constructor',
+  'BRepPrimAPI_MakeCylinder.constructor',
+  'BRepPrimAPI_MakeSphere.constructor',
+  'BRepPrimAPI_MakePrism.constructor',
+  'BRepPrimAPI_MakeRevol.constructor',
+  'BRepAlgoAPI_Fuse.constructor',
+  'BRepAlgoAPI_Cut.constructor',
+  'BRepAlgoAPI_Common.constructor',
+  'BRepBuilderAPI_MakeShape.Shape',
+  'BRepFilletAPI_MakeFillet.constructor',
+  'BRepFilletAPI_MakeFillet.Add',
+  'BRepFilletAPI_MakeChamfer.constructor',
+  'BRepFilletAPI_MakeChamfer.Add',
+  'TopExp_Explorer.constructor',
+  'TopExp_Explorer.More',
+  'TopExp_Explorer.Next',
+  'TopExp_Explorer.Current',
+  'TopoDS.Edge',
+  'TopoDS.Face',
+  'TopExp.FirstVertex',
+  'TopExp.LastVertex',
+  'BRep_Tool.Pnt',
+  'gp_Pnt.X',
+  'gp_Pnt.Y',
+  'gp_Pnt.Z',
+  'TopAbs_ShapeEnum',
+  'gp_Pnt.constructor',
+  'gp_Dir.constructor',
+  'gp_Vec.constructor',
+  'gp_Ax1.constructor',
+  'gp_Ax2.constructor',
+  'gp_Trsf.constructor',
+  'gp_Trsf.SetTranslation',
+  'gp_Trsf.SetRotation',
+  'BRepBuilderAPI_Transform.constructor',
+  'BRepBuilderAPI_MakeEdge.constructor',
+  'BRepBuilderAPI_MakeWire.constructor',
+  'BRepBuilderAPI_MakeWire.Add',
+  'BRepBuilderAPI_MakeFace.constructor',
+] as const;
+const occtCoreClasses = new Set(occtCorePins.map((pin) => pin.split('.')[0]));
 
 /**
  * Every skill-owning package, and how its bundle is built.
@@ -272,6 +345,21 @@ export const bundleOwners: readonly BundleOwner[] = [
       groupBy: byKind,
     },
     authoredReferences: ['tau-authoring-reference.md', 'kinematics-reference.md'],
+    core: {
+      budgetTokens: 4000,
+      pins: [
+        'draw',
+        'DrawingPen',
+        'drawCircle',
+        'drawRoundedRectangle',
+        'makeCylinder',
+        'makeBox',
+        'Sketch',
+        'Drawing',
+        'EdgeFinder',
+        'ShapeConfig',
+      ],
+    },
   },
   {
     slug: 'cad-jscad',
@@ -285,6 +373,7 @@ export const bundleOwners: readonly BundleOwner[] = [
     // Every top-level export is a namespace, which is the axis a JSCAD author
     // already navigates by (`primitives`, `booleans`, `transforms`).
     groupBy: (entry) => (entry.kind === 'namespace' ? entry.name : byKind(entry)),
+    core: { budgetTokens: 3000, pins: ['primitives', 'booleans', 'transforms', 'extrusions'] },
   },
   {
     slug: 'cad-manifold',
@@ -294,8 +383,28 @@ export const bundleOwners: readonly BundleOwner[] = [
     description:
       'Guides robust Manifold mesh CAD in main.ts. Use when creating or editing TypeScript geometry with manifold-3d/manifoldCAD.',
     whenToUse: 'Use when creating or editing TypeScript geometry with manifold-3d/manifoldCAD.',
-    corpus: typescriptCorpus('manifold-3d', 'manifold.d.ts'),
+    // `manifold-3d/manifoldCAD` is what models import; the root `manifold.d.ts` is the raw WASM module.
+    corpus: typescriptCorpus('manifold-3d', 'dist/manifoldCAD.d.ts'),
     groupBy: byKind,
+    core: {
+      budgetTokens: 4000,
+      pins: [
+        'Manifold',
+        'Manifold.cylinder',
+        'Manifold.sphere',
+        'Manifold.extrude',
+        'Manifold.revolve',
+        'Manifold.add',
+        'Manifold.subtract',
+        'Manifold.intersect',
+        'Manifold.asOriginal',
+        'CrossSection.circle',
+        'CrossSection.square',
+        'GLTFNode',
+        'GLTFMaterial',
+        'setMaterial',
+      ],
+    },
   },
   {
     slug: 'cad-opencascadejs',
@@ -314,6 +423,13 @@ export const bundleOwners: readonly BundleOwner[] = [
     groupBy: byOcctPackage,
     eagerGroups: () =>
       readJson<{ readonly eager: readonly string[] }>(join(generatedRoot, 'opencascade/opencascade.shards.json')).eager,
+    // Three workspace models cannot rank OCCT's 11k-symbol surface (return types reach its internals),
+    // so the core is the authoring classes alone, each with the members a model calls.
+    core: {
+      budgetTokens: 4000,
+      pins: occtCorePins,
+      exclude: (entry) => !occtCoreClasses.has(entry.name),
+    },
   },
   {
     slug: 'cad-build123d',
@@ -325,6 +441,24 @@ export const bundleOwners: readonly BundleOwner[] = [
     whenToUse: 'Use when creating or editing trusted Python CAD projects in Tau Desktop.',
     corpus: committedCorpus('build123d/build123d.bundled.json'),
     groupBy: byCategory,
+    core: {
+      budgetTokens: 4000,
+      pins: [
+        'BuildPart',
+        'BuildSketch',
+        'Box',
+        'Cylinder',
+        'Rectangle',
+        'Circle',
+        'Hole',
+        'CounterBoreHole',
+        'Pos',
+        'Locations',
+        'extrude',
+        'fillet',
+        'chamfer',
+      ],
+    },
   },
   {
     slug: 'cad-picogk',
@@ -343,6 +477,12 @@ export const bundleOwners: readonly BundleOwner[] = [
       groupBy: (entry) => `${entry.category ?? 'Advanced embedding'} — ${entry.path ?? 'other'}`,
     },
     authoredReferences: ['kinematics-reference.md', 'materials-reference.md', 'runtime-reference.md'],
+    core: {
+      budgetTokens: 3000,
+      pins: ['Library.Go', 'Voxels', 'Mesh', 'Lattice'],
+      // Models already know .NET; the selected standard-library slice stays in the reference.
+      exclude: (entry) => entry.category === 'Selected BCL reference',
+    },
   },
   {
     slug: 'cad-picovoxel',
@@ -364,6 +504,12 @@ export const bundleOwners: readonly BundleOwner[] = [
       groupBy: byKind,
     },
     authoredReferences: ['materials-reference.md', 'kinematics-reference.md'],
+    core: {
+      budgetTokens: 4500,
+      pins: ['Pico', 'Voxels', 'BaseBox', 'ImplicitGyroid'],
+      // Headings name the module to import from: `picovoxel`, `picovoxel/shapekernel`, …
+      groupBy: picovoxelImportPath,
+    },
   },
   {
     slug: 'cad-openscad',
@@ -375,6 +521,8 @@ export const bundleOwners: readonly BundleOwner[] = [
     whenToUse: 'Use when creating or editing .scad geometry.',
     corpus: () => loadOpenscadCorpus(),
     groupBy: byCategory,
+    // The whole builtin surface is smaller than one shard, so it ships whole.
+    core: { budgetTokens: 3000, includeUnused: true },
   },
   {
     slug: 'cad-zoo',
@@ -382,11 +530,28 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'Zoo KCL authoring',
     title: 'Zoo KCL authoring',
     description:
-      'Guides Zoo KCL modeling in main.kcl with pipe-based analytical geometry. Use when creating or editing KCL models.',
+      'Guides Zoo KCL modeling in main.kcl with constrained sketch blocks, regions and extrusions. Use when creating or editing KCL models.',
     whenToUse: 'Use when creating or editing KCL models.',
     // The extraction timestamp never reaches a rendered file, so the default is safe.
     corpus: () => loadKclCorpus(),
     groupBy: byCategory,
+    core: {
+      budgetTokens: 4500,
+      pins: [
+        'solver::line',
+        'solver::arc',
+        'solver::circle',
+        'solver::coincident',
+        'solver::distance',
+        'solver::horizontal',
+        'solver::vertical',
+        'solver::parallel',
+        'solver::perpendicular',
+        'solver::radius',
+        'region',
+        'extrude',
+      ],
+    },
   },
   {
     slug: 'cad-tscircuit',
@@ -396,6 +561,32 @@ export const bundleOwners: readonly BundleOwner[] = [
     description:
       'Guides tscircuit TSX electronics authoring in main.tsx. Use when creating or editing boards, schematics or PCB layouts in Tau.',
     whenToUse: 'Use when creating or editing boards, schematics or PCB layouts in Tau.',
+    corpus: () => loadTscircuitCorpus(),
+    groupBy: byTscircuitGroup,
+    core: {
+      budgetTokens: 4000,
+      pins: [
+        '<board>',
+        'BaseGroupProps.width',
+        'BaseGroupProps.height',
+        'CommonComponentProps.name',
+        'CommonLayoutProps.footprint',
+        'CommonLayoutProps.schX',
+        'CommonLayoutProps.schY',
+        'PcbLayoutProps.pcbX',
+        'PcbLayoutProps.pcbY',
+        'PcbLayoutProps.pcbRotation',
+        '<chip>',
+        '<resistor>',
+        '<capacitor>',
+        '<led>',
+        '<pinheader>',
+        '<net>',
+        '<trace>',
+        '<trace>.from',
+        '<trace>.to',
+      ],
+    },
   },
   {
     slug: 'geospec-authoring',
@@ -403,8 +594,8 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'GeoSpec authoring',
     title: 'GeoSpec authoring',
     description:
-      'Guides canonical GeoSpec tests in TypeScript, JavaScript and Python/pytest. Use for *.geospec.ts, *.geospec.js and GeoSpec pytest *.py tests.',
-    whenToUse: 'Use before creating or editing *.geospec.ts, *.geospec.js or GeoSpec pytest *.py tests.',
+      'Guides canonical GeoSpec geometry tests in TypeScript or JavaScript for every Tau kernel. Use for *.geospec.ts and *.geospec.js tests.',
+    whenToUse: 'Use before creating or editing *.geospec.ts or *.geospec.js tests, for a model in any kernel.',
     corpus: bundledTypescriptCorpus('geospec/geospec.bundled.json', 'geospec', {
       packageDirectory: 'packages/geospec',
       publicEntries: ['.', './model'],
@@ -417,6 +608,7 @@ export const bundleOwners: readonly BundleOwner[] = [
       prefix: 'public',
       groupBy: byKind,
     },
+    core: { budgetTokens: 4000, pins: ['expectGeo', 'loadModel', 'GeoSpecMatcher.*'] },
   },
   {
     slug: 'workbench',
@@ -486,6 +678,14 @@ export const generateBundles = async (
             groupBy: owner.groupBy,
             authoredFiles,
             ...(owner.eagerGroups === undefined ? {} : { eagerGroups: owner.eagerGroups() }),
+            ...(owner.core === undefined
+              ? {}
+              : {
+                  core: {
+                    options: owner.core,
+                    ranking: usageRanking(owner.slug),
+                  },
+                }),
             ...(owner.supplementalApi === undefined
               ? {}
               : {
@@ -518,11 +718,11 @@ export const generateBundles = async (
   return generated;
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const generated = await generateBundles();
   for (const owner of generated) {
     console.log(
-      `${owner.slug}: ${String(owner.bundle.shardCount)} shards, ${String(owner.bundle.bodyTokens)} body tokens, ${String(owner.bundle.bytes)} bytes -> ${owner.packageDirectory}/agent`,
+      `${owner.slug}: ${String(owner.bundle.shardCount)} shards, ${String(owner.bundle.bodyTokens)} body tokens (${String(owner.bundle.coreTokens)} core), ${String(owner.bundle.bytes)} bytes -> ${owner.packageDirectory}/agent`,
     );
   }
 }

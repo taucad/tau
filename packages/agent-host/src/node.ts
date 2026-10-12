@@ -1,7 +1,9 @@
+import { watch } from 'node:fs';
+import type { FSWatcher } from 'node:fs';
 import { mkdir, open, readFile, realpath, stat, unlink } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { FileHandle } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { isMainThread } from 'node:worker_threads';
 import { acquireNodeAuthorityWriter, NodeAuthorityWriterError } from '@taucad/filesystem/backend/node';
 import type { NodeAuthorityWriter } from '@taucad/filesystem/backend/node';
@@ -346,12 +348,76 @@ export type NodeChatStoreOptions = Readonly<{
 export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore => {
   const filePath = (chatId: string): string =>
     join(options.workspaceRoot, '.tau', 'chats', requireChatPathSegment(chatId), 'events.jsonl');
+  let observer: FSWatcher | undefined;
+  const subscriptions = new Map<
+    symbol,
+    Readonly<{
+      path: string;
+      onChange: () => void;
+      onError: (error: unknown) => void;
+    }>
+  >();
   return createChatStore({
     platform: 'node',
     /* `appendFile` then `sync()` per append, and the directory synced once at creation (W3 §11). */
     durability: 'exclusive-append',
     attachments: createNodeAttachmentReader(options.workspaceRoot),
     readBytes: async (chatId) => readIfPresent(filePath(chatId)),
+    observeBytes: async (chatId, { signal, onChange, onError }) => {
+      const key = Symbol(chatId);
+      subscriptions.set(key, { path: relative(options.workspaceRoot, filePath(chatId)), onChange, onError });
+      if (observer === undefined) {
+        try {
+          // One binding-owned watch also sees creation of a missing chat's ancestors.
+          const watching = watch(options.workspaceRoot, { recursive: true }, (_event, filename) => {
+            if (observer !== watching) {
+              return;
+            }
+            for (const subscription of subscriptions.values()) {
+              if (filename === null || filename === subscription.path || subscription.path.startsWith(`${filename}/`)) {
+                subscription.onChange();
+              }
+            }
+          });
+          observer = watching;
+          watching.on('error', (error) => {
+            if (observer !== watching) {
+              return;
+            }
+            // oxlint-disable-next-line unicorn/no-useless-spread -- callbacks can release or replace subscriptions.
+            for (const subscription of [...subscriptions.values()]) {
+              subscription.onError(error);
+            }
+          });
+          watching.on('close', () => {
+            if (observer === watching) {
+              observer = undefined;
+              // oxlint-disable-next-line unicorn/no-useless-spread -- notify precisely the owners present at closure.
+              for (const subscription of [...subscriptions.values()]) {
+                subscription.onError(new Error('The chat source observation closed.'));
+              }
+            }
+          });
+        } catch (error) {
+          subscriptions.delete(key);
+          throw error;
+        }
+      }
+      const release = (): void => {
+        signal.removeEventListener('abort', release);
+        subscriptions.delete(key);
+        if (subscriptions.size === 0) {
+          const watching = observer;
+          observer = undefined;
+          watching?.close();
+        }
+      };
+      signal.addEventListener('abort', release, { once: true });
+      if (signal.aborted) {
+        release();
+      }
+      return release;
+    },
     openWriter: async (chatId) => createNodeEventLog({ filePath: filePath(chatId), access: 'write' }),
     leadership: createNodeLeadership,
   });

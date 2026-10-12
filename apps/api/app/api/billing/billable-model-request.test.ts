@@ -95,7 +95,6 @@ const qualify = (input: {
       adapterExecutions += 1;
       throw new Error('Request qualification must not execute the fixture adapter.');
     },
-    classifyFinality: () => ({ state: 'unknown' }),
   };
   const resolver = new CodeOwnedBillableModelQualificationResolver({
     adapters: new Map([[routeId, adapter]]),

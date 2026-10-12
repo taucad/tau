@@ -26,28 +26,41 @@ ShapeConfig: {
     metalness?: never;
     roughness?: never;
 })
+// Example (Shape with PBR material properties):
+//   import { makeCylinder } from 'replicad';
+//   
+//   export default function main() {
+//   return {
+//   shape: makeCylinder(10, 30),
+//   material: {
+//   pbrMetallicRoughness: { metallicFactor: 1, roughnessFactor: 0.25 },
+//   extensions: { KHR_materials_anisotropy: { anisotropyStrength: 0.8 } },
+//   },
+//   density: 7.85,
+//   };
+//   }
 
   shape: AnyShape
 
-  name: string
+  name?: string
 
-  strokeType: string
+  strokeType?: string
 
   // Physical density in g/cm³ for STEP mass computation
-  density: number
+  density?: number
 
-  interfaces: InterfaceDeclarations
+  interfaces?: InterfaceDeclarations
 
   // CSS color, converted from sRGB to linear glTF base color
-  color: string
+  color?: string
 
-  opacity: number
+  opacity?: number
 
-  metalness: number
+  metalness?: number
 
-  roughness: number
+  roughness?: number
 
-  material: never
+  material?: never
 
 // Model-level textures and images shared by the returned BRep shapes
 Model: GlbResources & {
@@ -55,12 +68,12 @@ Model: GlbResources & {
 }
 
   // An array of textures
-  textures: ITexture[]
+  textures?: ITexture[]
 
   // An array of samplers
-  samplers: ISampler[]
+  samplers?: ISampler[]
 
-  images: GlbImage[]
+  images?: GlbImage[]
 
   shapes: ShapeConfig[]
 
@@ -125,35 +138,35 @@ Material: Omit<GLTF.IMaterial, 'extensions' | 'extras'> & {
 }
 
   // A set of parameter values that are used to define the metallic-roughness material model from Physically-Based Rendering (PBR) methodology
-  pbrMetallicRoughness: IMaterialPbrMetallicRoughness
+  pbrMetallicRoughness?: IMaterialPbrMetallicRoughness
 
   // The normal map texture
-  normalTexture: IMaterialNormalTextureInfo
+  normalTexture?: IMaterialNormalTextureInfo
 
   // The occlusion map texture
-  occlusionTexture: IMaterialOcclusionTextureInfo
+  occlusionTexture?: IMaterialOcclusionTextureInfo
 
   // The emissive map texture
-  emissiveTexture: ITextureInfo
+  emissiveTexture?: ITextureInfo
 
   // The RGB components of the emissive color of the material
-  emissiveFactor: number[]
+  emissiveFactor?: number[]
 
   // The alpha rendering mode of the material
-  alphaMode: MaterialAlphaMode
+  alphaMode?: MaterialAlphaMode
 
   // The alpha cutoff value of the material
-  alphaCutoff: number
+  alphaCutoff?: number
 
   // Specifies whether the material is double sided
-  doubleSided: boolean
+  doubleSided?: boolean
 
   // The user-defined name of this object
-  name: string
+  name?: string
 
-  extras: JSONObject
+  extras?: JSONObject
 
-  extensions: {
+  extensions?: {
           [extension: string]: unknown;
           KHR_materials_anisotropy?: {
               anisotropyStrength?: number;
@@ -216,7 +229,7 @@ Image: {
     data: Uint8Array<ArrayBuffer>;
 }
 
-  name: string
+  name?: string
 
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
 
@@ -228,12 +241,12 @@ Resources: Pick<GLTF.IGLTF, 'textures' | 'samplers'> & {
 }
 
   // An array of textures
-  textures: ITexture[]
+  textures?: ITexture[]
 
   // An array of samplers
-  samplers: ISampler[]
+  samplers?: ISampler[]
 
-  images: GlbImage[]
+  images?: GlbImage[]
 
 // Named face selector declaration resolved by the Tau Replicad kernel before export
 FaceDeclaration: {

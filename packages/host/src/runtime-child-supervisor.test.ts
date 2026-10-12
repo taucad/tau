@@ -77,3 +77,27 @@ describe('runtime child permission boundary', () => {
     });
   });
 });
+
+describe('runtime child control frames', () => {
+  it('delivers frames posted after the child is ready', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-post-'));
+    const outputPath = join(temporaryDirectory, 'messages.jsonl');
+    const modulePath = fileURLToPath(new URL('fixtures/message-echo-child.mjs', import.meta.url));
+    const child = await startRuntimeChild({ modulePath, args: [outputPath] });
+
+    child.post({ type: 'zoo-proxy-credential', url: 'wss://api.example.test/v1/kernels/zoo', token: 'zt1.a.b' });
+    child.post({ type: 'zoo-proxy-credential', url: 'wss://api.example.test/v1/kernels/zoo' });
+    const readLines = async (): Promise<string[]> => {
+      const text = await readFile(outputPath, 'utf8').catch(() => '');
+      return text.trim().split('\n');
+    };
+    await expect.poll(async () => readLines()).toHaveLength(2);
+
+    const lines = await readLines();
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { type: 'zoo-proxy-credential', url: 'wss://api.example.test/v1/kernels/zoo', token: 'zt1.a.b' },
+      { type: 'zoo-proxy-credential', url: 'wss://api.example.test/v1/kernels/zoo' },
+    ]);
+    await child.close();
+  });
+});

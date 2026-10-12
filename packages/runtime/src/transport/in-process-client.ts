@@ -276,9 +276,14 @@ export const inProcessClient = (
             /* Best-effort */
           }
           try {
-            // Inline adapters own host resources (node-fs `fs.watch` handles) that
-            // otherwise outlive the client and pin the process open.
-            inlineFileSystem?.dispose();
+            // Inline adapters own host resources (node-fs native watchers) that
+            // otherwise outlive the client and pin the process open. Await their
+            // release: a worker isolate may be terminated right after close.
+            if (inlineFileSystem?.disposeAsync) {
+              await inlineFileSystem.disposeAsync();
+            } else {
+              inlineFileSystem?.dispose();
+            }
           } catch {
             /* Best-effort */
           }

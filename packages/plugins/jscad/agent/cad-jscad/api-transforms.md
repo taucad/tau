@@ -11,11 +11,11 @@ transforms
 
   AlignOptions: export interface AlignOptions
 
-    modes: Array<'center' | 'max' | 'min' | 'none'>
+    modes?: Array<'center' | 'max' | 'min' | 'none'>
 
-    relativeTo: [NullableNumber] | [NullableNumber, NullableNumber] | [NullableNumber, NullableNumber, NullableNumber]
+    relativeTo?: [NullableNumber] | [NullableNumber, NullableNumber] | [NullableNumber, NullableNumber, NullableNumber]
 
-    grouped: boolean
+    grouped?: boolean
 
   // transforms.center (function)
   export function center<T extends Geometry>(options: CenterOptions, geometry: T): T
@@ -39,9 +39,9 @@ transforms
 
   CenterOptions: export interface CenterOptions
 
-    axes: [boolean, boolean, boolean]
+    axes?: [boolean, boolean, boolean]
 
-    relativeTo: Vec3
+    relativeTo?: Vec3
 
   // transforms.mirror (function)
   export function mirror<T extends Geometry>(options: MirrorOptions, geometry: T): T
@@ -65,9 +65,9 @@ transforms
 
   MirrorOptions: export interface MirrorOptions
 
-    origin: Vec3
+    origin?: Vec3
 
-    normal: Vec3
+    normal?: Vec3
 
   // transforms.rotate (function)
   export function rotate<T extends Geometry>(angles: Vec1 | Vec2 | Vec3, geometry: T): T

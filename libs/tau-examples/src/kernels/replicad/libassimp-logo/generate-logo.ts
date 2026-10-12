@@ -25,7 +25,9 @@ const ground = '#1c0e08';
 const rule = '#ff9a2e';
 
 const formatPath = (path: string): string =>
-  path.replaceAll(/-?\d+(?:\.\d+)?/g, (value) => String(Number(Number(value).toFixed(3))));
+  path.replaceAll(/-?\d+(?:\.\d+)?/g, (value) =>
+    String(Number(Number(value).toFixed(3))),
+  );
 
 const svgPath = (shape: LogoTile['shape']): string =>
   shape
@@ -123,9 +125,18 @@ const install = async (root: string): Promise<void> => {
   const { default: sharp } = await import('sharp');
   const rasterize = async (size: number): Promise<Buffer> =>
     sharp(Buffer.from(square)).resize(size, size).png().toBuffer();
-  const ico = toIco(await Promise.all(icoSizes.map(async (size) => [size, await rasterize(size)] as const)));
+  const ico = toIco(
+    await Promise.all(
+      icoSizes.map(async (size) => [size, await rasterize(size)] as const),
+    ),
+  );
   const apple = await sharp({
-    create: { width: appleSize, height: appleSize, channels: 3, background: ground },
+    create: {
+      width: appleSize,
+      height: appleSize,
+      channels: 3,
+      background: ground,
+    },
   })
     .composite([{ input: await rasterize(appleMark), gravity: 'centre' }])
     .removeAlpha()

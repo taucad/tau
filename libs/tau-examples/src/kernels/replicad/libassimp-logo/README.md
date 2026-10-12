@@ -12,24 +12,24 @@ render and for every generated repository asset.
 
 ## Part Census
 
-| Region | Count | Construction                                                        |
-| ------ | ----: | ------------------------------------------------------------------- |
+| Region | Count | Construction                                                                   |
+| ------ | ----: | ------------------------------------------------------------------------------ |
 | Blades |     6 | Rim ∩ wedge between two consecutive edge lines, minus opening, minus two slits |
-| Core   |     1 | The opening hexagon inset by the core gap                           |
+| Core   |     1 | The opening hexagon inset by the core gap                                      |
 
 Seven filled paths. There are no BRep parts, interfaces, or GeoSpec selectors.
 
 ## Construction Datums
 
-| Datum                   | Value                                                        |
-| ----------------------- | ------------------------------------------------------------ |
-| Brand coordinate system | `512 × 512` SVG view box, shared with the Tau logo           |
-| Rim                     | Hexagon, circumradius `236`, flat top: a ~6% safe area       |
-| Opening                 | Hexagon, circumradius `88`, same orientation                 |
+| Datum                   | Value                                                         |
+| ----------------------- | ------------------------------------------------------------- |
+| Brand coordinate system | `512 × 512` SVG view box, shared with the Tau logo            |
+| Rim                     | Hexagon, circumradius `236`, flat top: a ~6% safe area        |
+| Opening                 | Hexagon, circumradius `88`, same orientation                  |
 | Slit                    | `18` wide, on the interior side of each extended opening edge |
 | Twist                   | `60°` from radial, fixed by the hexagon; not a free parameter |
-| Core                    | Opening inset `16` (measured across the flats)               |
-| Light                   | `(−0.45, 0.60, 0.66)`, three-quarter key                     |
+| Core                    | Opening inset `16` (measured across the flats)                |
+| Light                   | `(−0.45, 0.60, 0.66)`, three-quarter key                      |
 
 `blades`, `opening`, `slitWidth` and `coreGap` are runtime parameters. Eight
 blades give an octagonal iris with a shallower `135°` twist; a larger opening
@@ -43,16 +43,16 @@ the key light orders the blades, and the ranks are spaced evenly along a
 seven-stop warm ramp. Ranking rather than sampling guarantees no two blades
 share a tone, which a clamped Lambert sample cannot.
 
-| Stop    | Colour    | Use                                 |
-| ------- | --------- | ----------------------------------- |
-| Oxblood | `#7a220c` | Blade furthest from the light       |
-| Ember   | `#a32f0c` | Blade                               |
-| Rust    | `#c93e0b` | Blade                               |
-| Flame   | `#ea520a` | Blade                               |
-| Orange  | `#ff6f12` | Blade                               |
+| Stop    | Colour    | Use                                  |
+| ------- | --------- | ------------------------------------ |
+| Oxblood | `#7a220c` | Blade furthest from the light        |
+| Ember   | `#a32f0c` | Blade                                |
+| Rust    | `#c93e0b` | Blade                                |
+| Flame   | `#ea520a` | Blade                                |
+| Orange  | `#ff6f12` | Blade                                |
 | Amber   | `#ff9a2e` | Blade nearest the light; banner rule |
-| Gold    | `#ffc53d` | Core only                           |
-| Cream   | `#fff0c2` | Reserved for banner highlights      |
+| Gold    | `#ffc53d` | Core only                            |
+| Cream   | `#fff0c2` | Reserved for banner highlights       |
 
 ## Verification
 

@@ -12,7 +12,13 @@
  * three-quarter key light and spaced evenly along a warm ramp, so the lit
  * side is bright, the far side dark, and no two blades share a tone.
  */
-import { draw, drawPolysides, drawRoundedRectangle, type Drawing, type Point2D } from 'replicad';
+import {
+  draw,
+  drawPolysides,
+  drawRoundedRectangle,
+  type Drawing,
+  type Point2D,
+} from 'replicad';
 
 export const defaultParams = {
   blades: 6,
@@ -66,10 +72,14 @@ export const tone = (t: number): string => {
   const mix = scaled - index;
   const from = hexToRgb(ramp[index]);
   const to = hexToRgb(ramp[index + 1]);
-  return rgbToHex(from.map((channel, axis) => channel + (to[axis] - channel) * mix));
+  return rgbToHex(
+    from.map((channel, axis) => channel + (to[axis] - channel) * mix),
+  );
 };
 
-const normalize3 = (v: readonly [number, number, number]): [number, number, number] => {
+const normalize3 = (
+  v: readonly [number, number, number],
+): [number, number, number] => {
   const length = Math.hypot(...v);
   return [v[0] / length, v[1] / length, v[2] / length];
 };
@@ -88,7 +98,10 @@ const exposure = (direction: Point2D, slope: number): number => {
  * ranks evenly over the six blade stops. A raw Lambert sample clamped at a
  * ceiling gave two lit blades the same tone; ranking cannot.
  */
-export const shadeRing = (directions: readonly Point2D[], slope: number): string[] => {
+export const shadeRing = (
+  directions: readonly Point2D[],
+  slope: number,
+): string[] => {
   const bladeCeiling = (ramp.length - 2) / (ramp.length - 1);
   const order = directions
     .map((direction, index) => ({ index, lambert: exposure(direction, slope) }))
@@ -101,11 +114,18 @@ export const shadeRing = (directions: readonly Point2D[], slope: number): string
 };
 
 const radians = (degrees: number): number => (degrees * Math.PI) / 180;
-const polar = (radius: number, degrees: number): Point2D => [radius * Math.cos(radians(degrees)), radius * Math.sin(radians(degrees))];
+const polar = (radius: number, degrees: number): Point2D => [
+  radius * Math.cos(radians(degrees)),
+  radius * Math.sin(radians(degrees)),
+];
 const add = (a: Point2D, b: Point2D): Point2D => [a[0] + b[0], a[1] + b[1]];
 const sub = (a: Point2D, b: Point2D): Point2D => [a[0] - b[0], a[1] - b[1]];
-const angleOf = (v: Point2D): number => (Math.atan2(v[1], v[0]) * 180) / Math.PI;
-const midpoint = (a: Point2D, b: Point2D): Point2D => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+const angleOf = (v: Point2D): number =>
+  (Math.atan2(v[1], v[0]) * 180) / Math.PI;
+const midpoint = (a: Point2D, b: Point2D): Point2D => [
+  (a[0] + b[0]) / 2,
+  (a[1] + b[1]) / 2,
+];
 
 const polygon = (points: readonly Point2D[]): Drawing => {
   const pen = draw(points[0]);
@@ -141,9 +161,11 @@ export type LogoTile = {
 export const createLibassimpLogo = (p = defaultParams): LogoTile[] => {
   const { blades, opening, slitWidth, coreGap } = p;
   const flatTop = 180 / blades;
-  const poly = (radius: number): Drawing => drawPolysides(radius, blades).rotate(flatTop);
+  const poly = (radius: number): Drawing =>
+    drawPolysides(radius, blades).rotate(flatTop);
   const rim = poly(safeRadius);
-  const vertex = (index: number): Point2D => polar(opening, 90 + flatTop - (360 / blades) * index);
+  const vertex = (index: number): Point2D =>
+    polar(opening, 90 + flatTop - (360 / blades) * index);
 
   const facings = Array.from({ length: blades }, (_, index) =>
     polar(1, angleOf(midpoint(vertex(index + 1), vertex(index + 2))) + 18),
@@ -156,8 +178,17 @@ export const createLibassimpLogo = (p = defaultParams): LogoTile[] => {
     const v1 = vertex(index + 2);
     const d0 = angleOf(sub(v0, previous));
     const d1 = angleOf(sub(v1, v0));
-    const wedge = polygon([v1, v0, add(v0, polar(900, d0)), add(v1, polar(900, d1))]);
-    const blade = rim.intersect(wedge).cut(poly(opening)).cut(edgeSlit(v0, d0, slitWidth)).cut(edgeSlit(v1, d1, slitWidth));
+    const wedge = polygon([
+      v1,
+      v0,
+      add(v0, polar(900, d0)),
+      add(v1, polar(900, d1)),
+    ]);
+    const blade = rim
+      .intersect(wedge)
+      .cut(poly(opening))
+      .cut(edgeSlit(v0, d0, slitWidth))
+      .cut(edgeSlit(v1, d1, slitWidth));
     return { name: `blade ${index + 1}`, shape: blade, color: fills[index] };
   });
 

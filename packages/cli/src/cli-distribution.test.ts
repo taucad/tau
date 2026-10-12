@@ -164,8 +164,9 @@ describe('tau CLI dist (real binary)', () => {
   });
 
   it('should ship a runtime worker entry that hosts the CLI runtime from workerData', async () => {
-    /* One realm per connection (kernel-realm-shared-state blueprint, WP-B3): the
-     * Tau Host runtime child and `tau mcp` start this entry once per connection or project. */
+    /* One realm per project (kernel-realm-shared-state blueprint, WP-B3): the
+     * coming `tau mcp` worker client starts this entry once per project. Tau Host
+     * does not use it; it starts one runtime child process per root instead. */
     const workerStat = await stat(runtimeWorkerPath);
     expect(workerStat.isFile()).toBe(true);
     const project = await mkdtemp(join(workspace, 'runtime-worker-'));

@@ -3,8 +3,8 @@
  * (kernel-realm-shared-state blueprint, WP-B3, component B4).
  *
  * `runtime.worker.ts` reads `{ projectRoot, plugin, config }` from `workerData`,
- * composes the CLI runtime with `loadCliRuntime`, and hosts it, so a long-lived
- * host gives each project or connection its own realm (invariant I8). The
+ * composes the CLI runtime with `loadCliRuntime`, and hosts it, so the coming
+ * `tau mcp` worker client gives each project its own realm (invariant I8). The
  * source entry is TypeScript, so the thread runs under tsx through the
  * transport's `workerCtor` seam (precedent:
  * `apps/runtime-e2e/src/node-worker-explicit-entry.test.ts`).

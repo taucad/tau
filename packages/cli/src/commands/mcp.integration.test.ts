@@ -656,11 +656,9 @@ describe('tau mcp with one thread per project', () => {
       /* The deadline, the termination grace, and the call's own overhead. */
       expect(elapsed).toBeLessThan((operationTimeoutSeconds + 15) * 1000);
 
-      /* The edited model runs in a fresh thread. The runtime terminates a timed-out
-       * thread one second after the timeout answers; a call inside that second
-       * still meets the old thread, and an agent's edit takes longer than that. */
+      /* The edited model runs in a fresh thread at once: the timed-out thread, which the
+       * runtime would terminate only a second later, never takes another call. */
       await writeFile(join(alpha, 'loop.ts'), boxModel);
-      await sleep(2000);
       const recovered = await call({ name: 'evaluate_model', arguments: { targetFile: 'loop.ts' } });
       expect(recovered.structuredContent, textOf(recovered)).toMatchObject({ status: 'ready' });
     },
@@ -713,6 +711,35 @@ describe('tau mcp with one thread per project', () => {
 });
 
 describe('tau mcp idle release', () => {
+  it(
+    'should keep a thread whose call outlasts the idle release',
+    async () => {
+      const project = join(scratch, 'idle-busy');
+      await mkdir(project);
+      await writeFile(join(project, 'main.ts'), boxModel);
+      await writeFile(join(project, 'slow.ts'), timedModel(join(scratch, 'idle-busy.jsonl'), 'idle-busy', 5000));
+      const served = launch(project, ['--idle-release', '2']);
+      disposers.push(stopIfRunning(served));
+      const client = new Client({ name: 'tau-mcp-integration-idle-busy', version: '1' });
+      await connect(client, served);
+      const evaluate = async (targetFile: string): Promise<CallToolResult> =>
+        CallToolResultSchema.parse(
+          await client.callTool({ name: 'evaluate_model', arguments: { targetFile } }, undefined, {
+            timeout: kernelCallLimit,
+          }),
+        );
+
+      expect((await evaluate('main.ts')).structuredContent).toMatchObject({ status: 'ready' });
+      /* Five seconds of computing against a two-second idle release. */
+      const slow = await evaluate('slow.ts');
+      expect(slow.structuredContent, textOf(slow)).toMatchObject({ status: 'ready' });
+      await client.close();
+      const { code } = await exitWithin(served, 10_000);
+      expect(code).toBe(0);
+    },
+    kernelCallLimit,
+  );
+
   it(
     "should release an idle project's thread and load a fresh one on its next call",
     async () => {

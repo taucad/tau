@@ -645,8 +645,10 @@ jobs:
       github.event_name == 'release' && needs.resolve.outputs.project == 'ui' &&
       github.ref == format('refs/tags/{0}', needs.resolve.outputs.tag)
     name: Production docs
+    # `deploy-docs.yml` asks for `actions: read` for its staging supersede check.
     permissions:
       contents: read
+      actions: read
     uses: ./.github/workflows/deploy-docs.yml
     with:
       environment: production

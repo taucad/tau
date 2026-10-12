@@ -55,16 +55,29 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Nx Environment
-        id: setup
         uses: ./.github/actions/setup-nx
+
+      - name: Select the apps with a staging deploy
+        id: deployables
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          set -o pipefail
+          echo "apps=$(pnpm nx show projects --projects tag:deploy:staging --json | tail -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Find each app's last staging deploy
+        id: deployed
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: ./.github/actions/staging-deploy-history
+        with:
+          mode: base
+          apps: ${{ steps.deployables.outputs.apps }}
+          github-token: ${{ github.token }}
 
       - name: Compute affected lanes
         id: plan
         env:
-          # With no earlier successful `main` run, nx-set-shas diffs against HEAD~1, so
-          # an app changed by an earlier, failed push would never be deployed. The
-          # staging deploys then take every app; the test lanes keep the affected set.
-          NO_PREVIOUS_BUILD: ${{ steps.setup.outputs.no-previous-build == 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          DEPLOYABLES: ${{ steps.deployables.outputs.apps || '[]' }}
+          DEPLOYED: ${{ steps.deployed.outputs.bases || '{}' }}
         run: |
           # `pipefail` so a failing `nx show projects` fails the step instead of
           # leaving an empty output behind `tail`. `tail -1` keeps the JSON array
@@ -78,11 +91,20 @@ jobs:
           echo "Affected tag:scope:api: $api"
           echo "Affected with a size target: $size"
           echo "Affected with a formal target: $formal"
-          deploy_apps=$apps
-          if [ "$NO_PREVIOUS_BUILD" = 'true' ]; then
-            deploy_apps=$(pnpm nx show projects --type=app --json | tail -1)
-            echo "No earlier successful main run: deploying every app: $deploy_apps"
-          fi
+          # Each staging app is diffed against the commit staging serves, not against
+          # the last green run that NX_BASE names: while `main` is red that base stays
+          # put and every push would redeploy everything changed since. An app with no
+          # usable record deploys. Only pushes to `main` select any.
+          deploy_apps='[]'
+          for app in $(jq -r '.[]' <<< "$DEPLOYABLES"); do
+            base=$(jq -r --arg app "$app" '.[$app] // empty' <<< "$DEPLOYED")
+            if [ -n "$base" ]; then
+              affected=$(pnpm nx show projects --affected --base="$base" --head=HEAD --projects "$app" --json | tail -1)
+              [ "$affected" != '[]' ] || continue
+            fi
+            deploy_apps=$(jq -c --arg app "$app" '. + [$app]' <<< "$deploy_apps")
+          done
+          echo "Staging deploys: $deploy_apps"
           {
             echo "apps<<EOF"
             echo "$apps"
@@ -1023,8 +1045,13 @@ jobs:
 
   # Staging deployments — deploy after builds pass so the Nx Cloud cache is populated.
   # The API ships to Fly here (`tau-api-staging`); the UI is built here and published
-  # to Netlify (`taucad` site, `taucad.dev`) by `deploy-ui-staging` below. Netlify
-  # no longer builds from Git and there are no PR deploy previews.
+  # to Netlify (`taucad` site, `taucad.dev`) by `deploy-ui-staging` below, and docs
+  # and the marketing review site by `deploy-docs-staging` and `deploy-www-staging`.
+  # Netlify no longer builds from Git and there are no PR deploy previews. Each
+  # Netlify production deploy spends credits from a monthly plan (the 2026-10-11
+  # outage paused every deploy), so each job runs only when `plan` lists its app:
+  # affected since the commit staging last recorded for it. Every deploy job skips a
+  # commit a newer run has deployed or is about to (`staging-deploy-superseded`).
   # `api` is in `needs` because the API's own suites left the `affected` lane: since
   # the git storage substrate landed, `test` for `tag:scope:api` — the repository
   # store, the commit protocol, the git transport, the lifecycle jobs and the git
@@ -1082,4 +1109,36 @@ jobs:
       environment: staging
       transport: ${{ needs.plan.outputs.geospec-cached == 'true' && 'cache' || 'this-run' }}
       geospec-key: ${{ needs.plan.outputs.geospec-key }}
+    secrets: inherit
+
+  # Docs (`docs.taucad.dev`) and the marketing review site wait for the same checks
+  # as the staging UI rather than the whole run, which a red Darwin suite or an
+  # unrelated deploy would otherwise hold back.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-docs-staging:
+    name: Deploy docs (Staging)
+    needs: [workspace, affected-lane, plan]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'docs') &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy-docs.yml
+    with:
+      environment: staging
+    secrets: inherit
+
+  deploy-www-staging:
+    name: Deploy www (Staging)
+    needs: [workspace, affected-lane, plan]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'www') &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy-www-review.yml
     secrets: inherit

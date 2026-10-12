@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/docs",
   "projectType": "application",
-  "tags": ["scope:ui", "type:app", "layer:feature"],
+  "tags": ["scope:ui", "type:app", "layer:feature", "deploy:staging"],
   "targets": {
     "generate-fumadocs": {
       "executor": "nx:run-commands",

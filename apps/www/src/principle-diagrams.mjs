@@ -246,49 +246,52 @@ const verify = () => {
   );
 };
 
-/** Make: the housing fixed to a tooling plate, an end mill in its collet finishing the top face. */
+/**
+ * Make: the housing bolted to a base, with its two cap screws and the bearing it carries dropping
+ * into place along dashed assembly axes. The finished part is shown becoming a working assembly.
+ */
 const make = () => {
-  const v = view(118, 88, 1.8);
-  const { a, b, t } = part;
-  const bed = { a: 31, b: 20, r: 2 };
-  const tool = { x: 17, y: -9, r: 4, tip: t + 0.4, flute: 12, length: 24 };
-  const rx = tool.r * v.s * RX;
-  const ry = tool.r * v.s * RY;
-  const [tipX, tipY] = v.p(tool.x, tool.y, tool.tip);
-  const [shoulderX, shoulderY] = v.p(tool.x, tool.y, tool.tip + tool.flute);
-  const shank = tool.tip + tool.length;
-  const bedHoles = [];
-  for (let x = -25; x <= 25; x += 10) {
-    for (let y = -15; y <= 15; y += 10) {
-      if (Math.abs(x) > a + 2 || Math.abs(y) > b + 2) {
-        const [cx, cy] = v.p(x, y, 0);
-        bedHoles.push(`<ellipse cx="${n(cx)}" cy="${n(cy)}" rx="${n(1.5 * v.s * RX)}" ry="${n(1.5 * v.s * RY)}"/>`);
-      }
-    }
-  }
-  /** Helical flutes read as curves crossing the front of the cutter. */
-  const flutes = [0, 1, 2]
-    .map((i) => {
-      const y0 = tipY - 1 - i * 6.5;
-      return `M ${n(tipX - rx)} ${n(y0)} Q ${n(tipX)} ${n(y0 - 9)} ${n(tipX + rx)} ${n(y0 - 13)}`;
-    })
-    .join(' ');
-  const chips = [
-    `M ${n(tipX + rx + 4)} ${n(tipY - 2)} q 5 -3 6 -9`,
-    `M ${n(tipX + rx + 8)} ${n(tipY + 5)} q 7 -1 10 -6`,
-    `M ${n(tipX - rx - 5)} ${n(tipY - 4)} q -4 -3 -4 -9`,
-  ];
+  const v = view(118, 89, 1.9);
+  const { t, holeX, bossH, boreR } = part;
+  const base = { a: 28, b: 19, r: 2 };
+  const screw = { r: 2.8, headR: 5, length: 8, z: t + 13, head: 4.5 };
+  const bearing = { r: boreR, bore: 2.6, width: 4, z: t + bossH + 11 };
+  /** A dashed axis from the hole up to the floating part, with an arrowhead pointing in. */
+  const axis = (/** @type {number} */ x, /** @type {number} */ z0, /** @type {number} */ z1) => {
+    const bottom = v.p(x, 0, z0);
+    const top = v.p(x, 0, z1);
+    /** @type {Point} */
+    const tip = [bottom[0], bottom[1] - 3];
+    return (
+      `<path d="M ${polyline([top, [tip[0], tip[1] - 5]])}" class="pd-ghost"/>` +
+      `<path d="M ${polyline([[tip[0], tip[1] - 5], tip])}" class="pd-accent pd-fine"/>` +
+      arrowhead(top, tip, 'pd-accent')
+    );
+  };
+  /** A socket-head cap screw floating above a flange hole. */
+  const capScrew = (/** @type {number} */ x, /** @type {string} */ id) => {
+    const headTop = screw.z + screw.length + screw.head;
+    const socket = Array.from({ length: 6 }, (_, i) => {
+      const angle = (i * Math.PI) / 3;
+      return v.p(x + 2.3 * Math.cos(angle), 2.3 * Math.sin(angle), headTop);
+    });
+    return (
+      cylinder(v, { x, y: 0, r: screw.r, z0: screw.z, z1: screw.z + screw.length }, `${id}-shank`) +
+      cylinder(v, { x, y: 0, r: screw.headR, z0: screw.z + screw.length, z1: headTop }, `${id}-head`) +
+      polygon(socket, 'pd-face-left pd-fine')
+    );
+  };
   return svg(
-    slab(v, { ...bed, z0: -3, z1: 0 }) +
-      `<g class="faint pd-fine">${bedHoles.join('')}</g>` +
+    slab(v, { ...base, z0: -3, z1: 0 }) +
       housing(v, 'pd-make') +
-      cylinder(v, { x: tool.x, y: tool.y, r: tool.r, z0: tool.tip, z1: shank }, 'pd-make-tool') +
-      `<path d="${flutes}" class="pd-fine"/>` +
-      `<path d="M ${n(shoulderX - rx)} ${n(shoulderY)} A ${n(rx)} ${n(ry)} 0 0 0 ${n(shoulderX + rx)} ${n(shoulderY)}" class="pd-fine"/>` +
-      // Collet nut and holder nose above the shank.
-      cylinder(v, { x: tool.x, y: tool.y, r: tool.r + 1, r1: 7.5, z0: shank, z1: shank + 8 }, 'pd-make-collet') +
-      cylinder(v, { x: tool.x, y: tool.y, r: 8, z0: shank + 8, z1: shank + 14 }, 'pd-make-holder') +
-      `<path d="${chips.join(' ')}" pathLength="1" class="pd-accent draw"/>`,
+      axis(-holeX, t, screw.z) +
+      axis(holeX, t, screw.z) +
+      axis(0, t + bossH, bearing.z) +
+      capScrew(-holeX, 'pd-make-s1') +
+      cylinder(v, { x: 0, y: 0, r: bearing.r, z0: bearing.z, z1: bearing.z + bearing.width }, 'pd-make-bearing') +
+      `<ellipse cx="${n(v.p(0, 0, bearing.z + bearing.width)[0])}" cy="${n(v.p(0, 0, bearing.z + bearing.width)[1])}" rx="${n(3.6 * v.s * RX)}" ry="${n(3.6 * v.s * RY)}" class="pd-fine"/>` +
+      hole(v, { x: 0, y: 0, r: bearing.bore, z: bearing.z + bearing.width }, 'pd-make-bore') +
+      capScrew(holeX, 'pd-make-s2'),
   );
 };
 

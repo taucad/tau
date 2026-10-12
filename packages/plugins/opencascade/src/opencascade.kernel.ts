@@ -616,6 +616,7 @@ export const opencascadeKernel = defineKernel({
       group: 'libcascade-occt',
       key: `${resolved.variant}:${resolved.wasmUrl ?? ''}`,
       async create() {
+        // ponytail: OCCT print/printErr reach the creating kernel's logger only; exact with one realm per client.
         const instance = await initOcct<OpenCascadeInstance>(resolved.wasmUrl, resolved.bindingsFactory, {
           tracer,
           ...(compiledModule ? { compiledModule } : {}),

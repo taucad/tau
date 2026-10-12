@@ -50,10 +50,12 @@ vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
   };
 });
 
-/* Observe every runtime child the daemon starts and each frame it posts to one, without changing either. */
+/* Observe every runtime child the daemon starts and each frame it posts to one, without changing either. A case
+ * can act at the instant a start begins through `runtimeChildStart.hook`. */
 const runtimeChildren = vi.hoisted(
   () => [] as Array<{ readonly handle: RuntimeChildHandle; readonly frames: Array<{ readonly type: string }> }>,
 );
+const runtimeChildStart = vi.hoisted(() => ({ hook: undefined as (() => void) | undefined }));
 vi.mock('#runtime-child-supervisor.js', async (importOriginal) => {
   const original = await importOriginal<typeof runtimeChildSupervisor>();
   return {
@@ -61,6 +63,7 @@ vi.mock('#runtime-child-supervisor.js', async (importOriginal) => {
     startRuntimeChild: async (
       options: Parameters<typeof original.startRuntimeChild>[0],
     ): Promise<RuntimeChildHandle> => {
+      runtimeChildStart.hook?.();
       const handle = await original.startRuntimeChild(options);
       const frames: Array<{ readonly type: string }> = [];
       runtimeChildren.push({ handle, frames });
@@ -224,7 +227,7 @@ type StubRelay = {
  * each one back by path. Unlike the real API it reaps nothing on its own, so a
  * test decides exactly when a peerless route dies.
  */
-const startRelay = async (): Promise<StubRelay> => {
+const startRelay = async (options: { readonly refuse?: (pathname: string) => boolean } = {}): Promise<StubRelay> => {
   const httpServer = createServer();
   resources.push(httpServer);
   const socketServer = new WebSocketServer({ noServer: true });
@@ -255,6 +258,10 @@ const startRelay = async (): Promise<StubRelay> => {
     response.end();
   });
   httpServer.on('upgrade', (request, socket, head) => {
+    if (options.refuse?.(new URL(request.url ?? '/', 'http://relay.invalid').pathname)) {
+      socket.destroy();
+      return;
+    }
     socketServer.handleUpgrade(request, socket, head, (accepted) => {
       const { pathname } = new URL(request.url ?? '/', 'http://relay.invalid');
       if (pathname === '/v1/agents/control') {
@@ -1991,6 +1998,77 @@ describe('startHostDaemon runtime child per root and session', () => {
       await daemon.close();
     }
     expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');
+  }, 30_000);
+
+  it('stays quiet about the runtime child a close interrupts while it starts', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-child-close-race-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const events: HostDaemonEvent[] = [];
+    let closing: Promise<void> | undefined;
+    /* With no agent root, the first child is the version probe the run loop starts after `ready`: close the
+     * daemon the instant that start begins. */
+    runtimeChildStart.hook = () => {
+      runtimeChildStart.hook = undefined;
+      closing = daemon.close();
+    };
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: proofChild },
+      onEvent: (event) => events.push(event),
+    });
+
+    await vi.waitFor(() => {
+      expect(closing).toBeDefined();
+    });
+    await closing;
+
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'warning', code: 'RUNTIME_CHILD_FAILED' }));
+  }, 30_000);
+
+  it('closes the child of an offer whose route never opens only after reporting why the session ended', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-child-unopened-route-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay({ refuse: (pathname) => pathname === routePath('session-1', 'fs') });
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const events: HostDaemonEvent[] = [];
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: proofChild },
+      onEvent: (event) => events.push(event),
+    });
+    try {
+      await daemon.ready;
+      await awaitControlReady(relay);
+      const control = await relay.control;
+
+      control.send(JSON.stringify(agentOffer(relay.url, 'session-1')));
+      await vi.waitFor(() => {
+        expect(events).toContainEqual(
+          expect.objectContaining({ type: 'session', sessionId: 'session-1', state: 'disconnected' }),
+        );
+      });
+
+      expect(relay.controlFrames).toContainEqual(
+        expect.objectContaining({ type: 'reject', sessionId: 'session-1', code: 'CHILD_UNAVAILABLE' }),
+      );
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ type: 'session', sessionId: 'session-1', code: 'CHILD_EXIT' }),
+      );
+    } finally {
+      await daemon.close();
+    }
   }, 30_000);
 
   it('gives each relay session its own child, and a child exit ends only its own session', async () => {

@@ -636,26 +636,32 @@ export const opencascadeKernel = defineKernel({
     });
     span.end();
 
-    let oc: OpenCascadeInstance;
-    let tracingSummary: OcTracingSummary | undefined;
-    if (ocTracing === 'summary' || ocTracing === 'per-call') {
-      const traced = wrapOcWithTracing(occt.value, tracer, { mode: ocTracing });
-      oc = traced.tracedInstance;
-      tracingSummary = traced.summary;
-    } else {
-      oc = wrapOcForExceptions(occt.value);
+    // `onDispose` never runs for a kernel whose initialisation failed, so release the hold here (I5).
+    try {
+      let oc: OpenCascadeInstance;
+      let tracingSummary: OcTracingSummary | undefined;
+      if (ocTracing === 'summary' || ocTracing === 'per-call') {
+        const traced = wrapOcWithTracing(occt.value, tracer, { mode: ocTracing });
+        oc = traced.tracedInstance;
+        tracingSummary = traced.summary;
+      } else {
+        oc = wrapOcForExceptions(occt.value);
+      }
+
+      registerKernelModule(runtime, { name: 'libcascade', exports: oc, version: '3.0.0' });
+      logger.debug('OpenCascade kernel initialized');
+
+      return {
+        oc,
+        occt,
+        isParallelMeshing: resolved.variant === 'multi',
+        tracingSummary,
+        nextSnapshotPath: createSnapshotPathAllocator(),
+      } satisfies OpenCascadeContext;
+    } catch (error) {
+      occt.release();
+      throw error;
     }
-
-    registerKernelModule(runtime, { name: 'libcascade', exports: oc, version: '3.0.0' });
-    logger.debug('OpenCascade kernel initialized');
-
-    return {
-      oc,
-      occt,
-      isParallelMeshing: resolved.variant === 'multi',
-      tracingSummary,
-      nextSnapshotPath: createSnapshotPathAllocator(),
-    } satisfies OpenCascadeContext;
   },
 
   async resolve({ entryPath }, runtime) {

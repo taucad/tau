@@ -88,7 +88,6 @@ import {
   tauCloudIntent,
   turnOffBackupByDefault,
   turnOffBackupConsequence,
-  useBackupAnnouncing,
   useTauCloudEligibility,
   useTauCloudIntent,
 } from '#hooks/use-cloud-projects.js';
@@ -143,7 +142,7 @@ export function ChatRevisions({
  * with no remote, and its per-project opt-out with what the opt-out does. Before
  * the default connection it is the opt-out before anything leaves the device;
  * after, *Turn off backup* disconnects (the revisions stay) and nothing
- * reconnects it, because the intent is gone. One handler with the toast's.
+ * reconnects it, because the intent is gone.
  *
  * @param props - The project's intent.
  * @returns The line, or nothing when it does not apply.
@@ -154,9 +153,7 @@ function BackupByDefaultLine({ intent }: { readonly intent: TauCloudIntent }): R
   const client = useRevisionClient();
   const commands = useRevisionCommands();
   const notice = backupByDefaultNotice(intent, useTauCloudEligibility(), status?.remote);
-  /* One offer at a time: while the creation toast carries it, this line waits (DESIGN). */
-  const announcing = useBackupAnnouncing(projectId);
-  if (notice === undefined || (notice === 'pending' && announcing)) {
+  if (notice === undefined) {
     return undefined;
   }
   return (

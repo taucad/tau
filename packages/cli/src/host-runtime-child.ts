@@ -5,6 +5,10 @@ import type { HostRuntimeHandle } from '@taucad/host/runtime-host';
 import { installZooProxyCredential, zooProxyCredentialFrameType } from '@taucad/zoo/proxy';
 
 import { loadCliRuntime } from '#runtime-options.js';
+import { installSandboxModuleHooks } from '#sandbox-modules.js';
+
+/* Before `start`: the CLI runtime imports its plugins, and with them their native addons, only when it loads. */
+installSandboxModuleHooks();
 
 const { values } = parseArgs({
   args: process.argv.slice(2),

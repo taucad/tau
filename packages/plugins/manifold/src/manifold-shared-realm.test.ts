@@ -9,7 +9,7 @@
  */
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import type * as KernelModule from '@taucad/runtime/kernel';
-import { createTestRuntimeClient } from '@taucad/runtime-testing';
+import { createTestRuntimeClient, extractGltfFromExportResult, getSignedVolumeFromGlb } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { esbuildBundler } from '@taucad/esbuild';
 import { manifoldKernel } from '#manifold.kernel.js';
@@ -106,5 +106,49 @@ describe('Manifold — two clients in one realm', { timeout: 120_000 }, () => {
     await render(clientA, 'edited.ts');
 
     expect(owner(probes()['a-edited'])).toBe('client A');
+  });
+
+  it('should render and export concurrent models from two clients in one realm', async () => {
+    // The model holds a live Manifold across an await, so the other client's evaluation runs in between.
+    const pausedCube = (size: number): string => `import { Manifold } from '${moduleName}';
+export default async function main() {
+  const cube = Manifold.cube([${size}, ${size}, ${size}], true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  return cube.add(Manifold.cube([1, 1, 1]).translate([${size}, 0, 0]));
+}
+`;
+    const rounds = [0, 1, 2];
+    const sizes = { a: 10, b: 12 } as const;
+    const files = (size: number): Record<string, string> =>
+      Object.fromEntries(rounds.map((round) => [`round-${round}.ts`, pausedCube(size + round)]));
+    const clientA = createClient(files(sizes.a));
+    const clientB = createClient(files(sizes.b));
+    clients.push(clientA, clientB);
+
+    const renderAndExport = async (client: ReturnType<typeof createClient>, path: string): Promise<number> => {
+      const document = client.open({ source: { path }, watch: false });
+      const view = document.view();
+      try {
+        const outcome = await view.rendering();
+        if (outcome.superseded || !outcome.rendering.success) {
+          expect.fail(`render ${path}: ${JSON.stringify(outcome)}`);
+        }
+        const glb = extractGltfFromExportResult(await document.export('glb'));
+        expect(glb, `export ${path}`).toBeDefined();
+        return await getSignedVolumeFromGlb(glb!);
+      } finally {
+        view.close();
+        document.close();
+      }
+    };
+
+    for (const round of rounds) {
+      const path = `round-${round}.ts`;
+      // oxlint-disable-next-line no-await-in-loop -- each round races the two clients against each other.
+      const [volumeA, volumeB] = await Promise.all([renderAndExport(clientA, path), renderAndExport(clientB, path)]);
+      // GLB is metres; each model is a centred cube plus a disjoint 1 mm cube.
+      expect(volumeA * 1e9, `client A ${path}`).toBeCloseTo((sizes.a + round) ** 3 + 1, 1);
+      expect(volumeB * 1e9, `client B ${path}`).toBeCloseTo((sizes.b + round) ** 3 + 1, 1);
+    }
   });
 });

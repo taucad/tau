@@ -580,7 +580,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     try {
       await child.close();
     } catch {
-      /* See above. */
+      /* A child that refuses to close is already gone or was killed; its exit settles `closed`. */
     }
   };
 

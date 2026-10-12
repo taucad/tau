@@ -729,7 +729,8 @@ describe('tau mcp idle release', () => {
           }),
         );
 
-      expect((await evaluate('main.ts')).structuredContent).toMatchObject({ status: 'ready' });
+      const warm = await evaluate('main.ts');
+      expect(warm.structuredContent, textOf(warm)).toMatchObject({ status: 'ready' });
       /* Five seconds of computing against a two-second idle release. */
       const slow = await evaluate('slow.ts');
       expect(slow.structuredContent, textOf(slow)).toMatchObject({ status: 'ready' });

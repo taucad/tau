@@ -46,8 +46,8 @@ const seconds = (name: string, value: string | undefined, fallback: number): num
  * which Claude Code sets for the servers it launches; the working directory.
  * Each project gets its own runtime thread on its first call: a model that
  * runs past `--operation-timeout` or ends its thread costs only that project
- * its thread, which its next call replaces, and a thread unused for
- * `--idle-release` is released.
+ * its thread, which its next call replaces, and a thread with no call in
+ * flight for `--idle-release` is released.
  *
  * @example <caption>Serve one project to an MCP client</caption>
  * ```text
@@ -135,29 +135,80 @@ export const mcpCommand = defineCommand({
         operationTimeout,
       });
     };
-    /* A client whose thread timed out or exited is terminated, and replaced on its project's next call. */
+    /* A client whose thread exited is terminated, and replaced on its project's next call. */
     const clients = keyedResource<string, Awaited<ReturnType<typeof openClient>>>(
       openClient,
       async (client) => client.shutdown(),
       (client) => client.lifecycleState !== 'terminated',
     );
-    // ponytail: idle is measured from a project's last call, so a call still running after `idleRelease` loses its thread; count calls in flight if one is seen.
+    const inFlight = new Map<string, number>();
     const idleTimers = new Map<string, NodeJS.Timeout>();
-    const clientFor = async (projectPath: string): Promise<Awaited<ReturnType<typeof openClient>>> => {
-      const { value, incarnation } = await clients.acquire(projectPath);
+    const armIdleRelease = (projectPath: string): void => {
       clearTimeout(idleTimers.get(projectPath));
       idleTimers.set(
         projectPath,
         setTimeout(async () => {
           idleTimers.delete(projectPath);
           try {
-            await clients.close(projectPath, incarnation);
+            await clients.close(projectPath);
           } catch {
             /* A client that fails to close is kept, and server close tries it again. */
           }
         }, idleRelease).unref(),
       );
-      return value;
+    };
+    const clientFor = async (projectPath: string): Promise<Awaited<ReturnType<typeof openClient>>> => {
+      const [{ value, incarnation }, { isOperationTimeoutError }] = await Promise.all([
+        clients.acquire(projectPath),
+        import('@taucad/runtime'),
+      ]);
+      if ((inFlight.get(projectPath) ?? 0) === 0) {
+        armIdleRelease(projectPath);
+      }
+      /* Every call the tools make through this client, and through the documents and views it opens, is counted:
+       * the idle release waits for the project's last call to settle. A call that times out evicts its thread at
+       * once, so the next call starts a fresh one rather than meeting a thread the runtime is about to terminate. */
+      const settle = async (pending: Promise<unknown>): Promise<unknown> => {
+        inFlight.set(projectPath, (inFlight.get(projectPath) ?? 0) + 1);
+        clearTimeout(idleTimers.get(projectPath));
+        try {
+          return await pending;
+        } catch (error) {
+          if (isOperationTimeoutError(error)) {
+            try {
+              await clients.close(projectPath, incarnation);
+            } catch {
+              /* Evicted all the same; server close tries the close again. */
+            }
+          }
+          throw error;
+        } finally {
+          const left = (inFlight.get(projectPath) ?? 1) - 1;
+          inFlight.set(projectPath, left);
+          if (left === 0) {
+            armIdleRelease(projectPath);
+          }
+        }
+      };
+      // ponytail: a Proxy over every method beats a hand-written wrapper of HostRuntimeClient's generic surface.
+      // oxlint-disable-next-line typescript/no-restricted-types -- a Proxy target is any object.
+      const track = <Target extends object>(target: Target): Target =>
+        new Proxy(target, {
+          get(object, key) {
+            const member: unknown = Reflect.get(object, key);
+            if (typeof member !== 'function') {
+              return member;
+            }
+            return (...parameters: unknown[]): unknown => {
+              const result: unknown = Reflect.apply(member, object, parameters);
+              if (result instanceof Promise) {
+                return settle(result);
+              }
+              return typeof result === 'object' && result !== null ? track(result) : result;
+            };
+          },
+        });
+      return track(value);
     };
     const checkouts = new Map<string, { readonly cwd: string }>();
     const registry = createHostToolRegistry({

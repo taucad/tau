@@ -3,11 +3,12 @@
 # complete release gate on the macOS producer, then runs the dependency-ordered dry-run publish on
 # Ubuntu. Nothing is published: the job holds no npm token and the publish step is gone.
 #
-# S20 (gate): a dispatch, or a pull request that changes this file. S21 (gitChecks): push a
-# throwaway `spike-publish-*` tag (never `v*`); its run skips the producer and the gate, takes the
-# GeoSpec products from the newest green `ci.yml` push run on `main`, and dry-runs the publish on
-# the tag's detached checkout, with pnpm's git checks on, or off when the tag name contains
-# `no-git-checks`. A dispatch chooses the same with its inputs.
+# S20 (gate): a dispatch, or a pull request that changes this file. S21 (gitChecks): a dispatch
+# with `gate` off skips the producer and the gate, takes the GeoSpec products from the newest green
+# `ci.yml` push run on `main`, and dry-runs the publish with pnpm's git checks on or off. With
+# `tag-checkout` it first pushes a throwaway `spike-publish-<run id>` tag (never `v*`) at the
+# dispatched commit, dry-runs on that tag's checkout, the way `publish.yml` runs on a release tag,
+# and deletes the tag afterwards.
 #
 # Differences from `publish.yml`, each a finding for W16: the producer uses the shared
 # `geospec-producer` action (the inline copy in `publish.yml` lacks the retained OCCT preparation
@@ -27,6 +28,10 @@ on:
         type: choice
         options: ['on', 'off']
         default: 'on'
+      tag-checkout:
+        description: 'Without the gate: dry-run on the checkout of a throwaway spike-publish-<run id> tag, deleted afterwards'
+        type: boolean
+        default: false
       products-sha:
         description: 'Without the gate: the main commit whose green ci.yml run supplies the GeoSpec products (default: the newest)'
         required: false
@@ -35,8 +40,6 @@ on:
     paths:
       - '.github/workflows/spike-publish-dry-run.yml'
       - 'scripts/src/check-pack-install.ts'
-  push:
-    tags: ['spike-publish-*']
 
 permissions:
   contents: read
@@ -49,16 +52,28 @@ concurrency:
 env:
   pnpm_config_verify_deps_before_run: warn
   NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
-  # The gate runs on a dispatch (its input) and on a pull request; never on a spike tag.
-  SPIKE_GATE: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.gate) }}
+  SPIKE_GATE: ${{ github.event_name == 'pull_request' || inputs.gate }}
   # A pull request checks out a detached merge commit, which is not what a release runs on.
-  SPIKE_GIT_CHECKS: >-
-    ${{ github.event_name != 'pull_request' && !contains(github.ref_name, 'no-git-checks') && inputs.git-checks != 'off' }}
+  SPIKE_GIT_CHECKS: ${{ github.event_name != 'pull_request' && inputs.git-checks != 'off' }}
+  SPIKE_TAG: spike-publish-${{ github.run_id }}
 
 jobs:
+  throwaway-tag:
+    name: Push the throwaway tag
+    if: github.event_name == 'workflow_dispatch' && !inputs.gate && inputs.tag-checkout
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Push ${{ env.SPIKE_TAG }} at the dispatched commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$SPIKE_TAG" -f sha="$GITHUB_SHA" --jq .ref
+
   plan:
     name: Plan release artifact prerequisites
-    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.gate)
+    if: github.event_name == 'pull_request' || inputs.gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -152,8 +167,8 @@ jobs:
 
   dry-run:
     name: Dry-run the publish (ubuntu-latest)
-    needs: [plan, geospec-producer]
-    if: ${{ !cancelled() }}
+    needs: [throwaway-tag, plan, geospec-producer]
+    if: ${{ !cancelled() && needs.throwaway-tag.result != 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -178,6 +193,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          ref: ${{ needs.throwaway-tag.result == 'success' && format('refs/tags/{0}', env.SPIKE_TAG) || '' }}
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
@@ -228,6 +244,7 @@ jobs:
           echo "ref=$GITHUB_REF event=$GITHUB_EVENT_NAME git-checks=$SPIKE_GIT_CHECKS"
           git rev-parse HEAD
           git symbolic-ref -q HEAD || echo 'HEAD is detached'
+          git describe --tags --exact-match 2>/dev/null || echo "no tag at HEAD"
           git status --short | head -20
 
       # The only step `publish.yml` runs that this keeps; `publish.yml`'s real publish step is gone.
@@ -249,3 +266,17 @@ jobs:
           name: spike-dry-run-${{ github.run_id }}
           path: ${{ runner.temp }}/dry-run.log
           if-no-files-found: ignore
+
+  delete-throwaway-tag:
+    name: Delete the throwaway tag
+    needs: [throwaway-tag, dry-run]
+    if: always() && needs.throwaway-tag.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Delete ${{ env.SPIKE_TAG }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$SPIKE_TAG"

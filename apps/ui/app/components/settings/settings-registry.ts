@@ -103,6 +103,12 @@ const settingsCatalog = [
         keywords: ['github', 'google', 'login'],
       },
       {
+        id: 'github-permissions',
+        label: 'GitHub permissions',
+        description: "Review or revoke Tau's sign-in and Gist access on GitHub",
+        keywords: ['github', 'gist', 'revoke', 'authorization', 'oauth', 'consent'],
+      },
+      {
         id: 'active-sessions',
         label: 'Active sessions',
         description: 'Review devices and revoke sessions',

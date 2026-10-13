@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchDictationStatus, transcribeDictation } from '#components/chat/dictation-client.js';
+import { fetchDictationStatus, transcribeDictation } from '#components/dictation/dictation-client.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- environment module shape
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));

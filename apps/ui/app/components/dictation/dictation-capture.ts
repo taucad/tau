@@ -1,4 +1,4 @@
-import processorUrl from '#components/chat/dictation-processor.js?worker&url';
+import processorUrl from '#components/dictation/dictation-processor.js?worker&url';
 
 export type DictationCapture = {
   /** Stops the microphone, drains the worklet and returns the whole recording as WAV. */

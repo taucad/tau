@@ -25,6 +25,7 @@ const cappedModelIds = [
   'openai-gpt-5.6-terra',
   'openai-gpt-5.6-luna',
   'openai-gpt-5.5',
+  'google-gemini-4-argon',
   'google-gemini-3.1-pro',
   'google-gemini-3.8-flash',
   'google-gemini-3.5-flash-lite',
@@ -318,6 +319,22 @@ describe('ModelService', () => {
 
     expect(listedModelIds).toContain('openai-gpt-6-astra');
     expect(modelList.openai['gpt-6-astra']?.recommended).toBe(true);
+  });
+
+  it('should list Gemini 4 Argon with image input and selectable reasoning', async () => {
+    const listedModels = await createModelService().getModels();
+    const argon = listedModels.find((model) => model.id === 'google-gemini-4-argon');
+
+    expect(argon).toMatchObject({
+      model: 'gemini-4-argon',
+      provider: { id: 'vertexai', name: 'Google' },
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+        reasoning: { levels: ['low', 'medium', 'high'] },
+      },
+    });
   });
 
   it('recommends Gemini 3.8 Flash instead of the Gemini 3.5 models', async () => {

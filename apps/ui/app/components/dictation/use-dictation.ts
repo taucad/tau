@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { dictationMaxAudioBytes } from '@taucad/chat/schemas';
-import { captureDictation } from '#components/chat/dictation-capture.js';
-import type { DictationCapture } from '#components/chat/dictation-capture.js';
-import { fetchDictationStatus, transcribeDictation } from '#components/chat/dictation-client.js';
+import { captureDictation } from '#components/dictation/dictation-capture.js';
+import type { DictationCapture } from '#components/dictation/dictation-capture.js';
+import { fetchDictationStatus, transcribeDictation } from '#components/dictation/dictation-client.js';
 
 export type DictationPhase = 'idle' | 'requesting' | 'recording' | 'stopping' | 'transcribing';
 
@@ -11,11 +11,15 @@ export const dictationLabels: Record<DictationPhase, string> = {
   requesting: 'Requesting microphone…',
   recording: 'Recording…',
   stopping: 'Stopping dictation…',
-  transcribing: 'Transcribing…',
+  transcribing: 'Transcribing',
 };
 
 /** Samples the API accepts: 24 kHz mono PCM16 after the 44-byte WAV header (about 8.6 minutes). */
 const maxDictationSamples = Math.floor((dictationMaxAudioBytes - 44) / 2);
+
+/** Bounded history with silent leading slots to fill a wide composer from the first frame. */
+const waveformHistoryLength = 256;
+const silentWaveform = Array.from<number>({ length: waveformHistoryLength }).fill(0);
 
 type Session = {
   readonly owner: unknown;
@@ -25,6 +29,9 @@ type Session = {
   capture?: DictationCapture;
   phase: DictationPhase;
 };
+
+/** A page has one dictation destination, even when several inputs offer a microphone. */
+let activeSession: Session | undefined;
 
 export type Dictation = {
   /** Whether the Tau API offers dictation to this user; undefined while checking. */
@@ -39,7 +46,11 @@ export type Dictation = {
   cancel(): void;
 };
 
-/** One microphone recording per composer, transcribed by the Tau API; pending text never mutates the draft. */
+/**
+ * Records and transcribes for one input owner. Only final text reaches `onTranscript`;
+ * preview text stays separate. Changing the owner or unmounting cancels pending work.
+ * Keep the owner stable across edits and change it when the destination changes.
+ */
 export function useDictation(onTranscript: (text: string) => void, draftOwner: unknown): Dictation {
   const [available, setAvailable] = useState<boolean>();
   const [phase, setPhase] = useState<DictationPhase>('idle');
@@ -47,6 +58,10 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
   const [transcript, setTranscript] = useState('');
   const [levels, setLevels] = useState<readonly number[]>([]);
   const current = useRef<Session | undefined>(undefined);
+  const receiveTranscript = useRef(onTranscript);
+  useLayoutEffect(() => {
+    receiveTranscript.current = onTranscript;
+  }, [onTranscript]);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -72,6 +87,9 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
       return;
     }
     current.current = undefined;
+    if (activeSession === session) {
+      activeSession = undefined;
+    }
     session.abort.abort();
     session.capture?.cancel();
     session.settle(success);
@@ -121,7 +139,7 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
           reset(session, false, 'No speech was recognized. Check your microphone and try again.');
           return;
         }
-        onTranscript(text);
+        receiveTranscript.current(text);
         reset(session, true);
       } catch (stopError) {
         if (!session.abort.signal.aborted) {
@@ -133,7 +151,7 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
         }
       }
     },
-    [onTranscript, reset],
+    [reset],
   );
 
   const stop = useCallback(async (): Promise<boolean> => {
@@ -153,15 +171,20 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
     if (current.current !== undefined || !available) {
       return;
     }
+    if (activeSession !== undefined) {
+      setError('Finish or cancel dictation in the other input first.');
+      return;
+    }
     let settle: (success: boolean) => void = () => undefined;
     const done = new Promise<boolean>((resolve) => {
       settle = resolve;
     });
     const session: Session = { owner: draftOwner, abort: new AbortController(), done, settle, phase: 'requesting' };
     current.current = session;
+    activeSession = session;
     setError(undefined);
     setTranscript('');
-    setLevels([]);
+    setLevels(silentWaveform);
     setPhase('requesting');
     try {
       session.capture = await captureDictation({
@@ -169,7 +192,7 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
         maxSamples: maxDictationSamples,
         onLevel: (level) => {
           if (current.current === session) {
-            setLevels((previous) => [...previous.slice(-79), level]);
+            setLevels((previous) => [...previous.slice(-(waveformHistoryLength - 1)), level]);
           }
         },
         onLimit: () => {

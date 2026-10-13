@@ -52,7 +52,7 @@ const refuseFor = (action: PendingAction): void => {
 /** Confirms the checkbox and asks to prepare closure. */
 const prepareClosure = async (): Promise<void> => {
   await userEvent.click(screen.getByRole('checkbox'));
-  await userEvent.click(screen.getByRole('button', { name: 'Prepare account closure' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Close account' }));
 };
 
 describe('AccountClosureSettings', () => {
@@ -64,9 +64,17 @@ describe('AccountClosureSettings', () => {
     prepare.mockResolvedValue({ state: 'cancellation_pending', closureId: 'closure-a' });
     getClosure.mockResolvedValue({ state: 'cancellation_pending', closureId: 'closure-a' });
     renderClosure();
-    const button = screen.getByRole('button', { name: 'Prepare account closure' });
+    const button = screen.getByRole('button', { name: 'Close account' });
     expect(button).toBeDisabled();
-    await userEvent.click(screen.getByRole('checkbox'));
+    const checkbox = screen.getByRole('checkbox', { name: 'I want to close my account.' });
+    await userEvent.click(screen.getByText('I want to close my account.'));
+    expect(checkbox).toBeChecked();
+    expect(button).toBeEnabled();
+    await userEvent.keyboard('[Space]');
+    expect(checkbox).not.toBeChecked();
+    expect(button).toBeDisabled();
+    expect(prepare).not.toHaveBeenCalled();
+    await userEvent.keyboard('[Space]');
     await userEvent.click(button);
     expect(deleteUser).not.toHaveBeenCalled();
     const refresh = await screen.findByRole('button', { name: 'Refresh closure status' });
@@ -157,7 +165,7 @@ describe('AccountClosureSettings', () => {
     current.mockRejectedValue(new Error('offline'));
     renderClosure();
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not check account closure status.');
-    expect(screen.getByRole('button', { name: 'Prepare account closure' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close account' })).toBeInTheDocument();
   });
 
   it('invokes Better Auth only for a deletion-ready closure', async () => {
@@ -179,7 +187,7 @@ describe('AccountClosureSettings', () => {
     const rendered = renderClosure();
     rendered.rerenderBinding({ ...binding, ownerId: 'user-b' });
     resolveBody({ state: 'ready_for_auth_deletion', closureId: 'closure-a' });
-    expect(await screen.findByText(/immediately ends this billing session/i)).toBeInTheDocument();
+    expect(await screen.findByText(/stops paid usage immediately/i)).toBeInTheDocument();
     expect(screen.queryByText(/closure status/i)).toBeNull();
   });
 });

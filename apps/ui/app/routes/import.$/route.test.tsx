@@ -6,6 +6,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import { largeObjectThresholdBytes, RevisionPortError } from '@taucad/revisions';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
+import { GithubRequestError } from '#lib/github-connections.js';
 import type { getGitHubClient } from '#lib/github-api.js';
 import type { ImportWorkerRequest, ImportWorkerResponse } from '#workers/import.worker.js';
 import ImportRoute from '#routes/import.$/route.js';
@@ -127,15 +128,24 @@ vi.mock('#routes/import.$/upload-card.js', () => ({ UploadCard: () => undefined 
 vi.mock('#lib/github-linked-import.js', () => ({ prepareLinkedGithubImport: linkedImport.prepare }));
 vi.mock('#components/github/github-repository-picker.js', () => ({
   useGithubConnectionAvailable: () => picker.available,
-  GithubRepositoryPicker: ({ onSelect }: { onSelect: (selection: GithubRepositorySelection) => void }) => (
-    <button
-      type='button'
-      onClick={() => {
-        onSelect(picked.selection);
-      }}
-    >
-      Pick linked repository
-    </button>
+  GithubRepositoryPicker: ({
+    onSelect,
+    shouldConnect,
+  }: {
+    onSelect: (selection: GithubRepositorySelection) => void;
+    shouldConnect?: boolean;
+  }) => (
+    <>
+      <button
+        type='button'
+        onClick={() => {
+          onSelect(picked.selection);
+        }}
+      >
+        Pick linked repository
+      </button>
+      {shouldConnect === true ? <p>GitHub connect started</p> : undefined}
+    </>
   ),
 }));
 
@@ -532,6 +542,46 @@ describe('ImportRoute GitHub card', () => {
     expect(screen.getByText('Choose the repository again to review its latest commit.')).toBeVisible();
     expect(screen.queryByRole('alert', { name: 'Import interrupted' })).not.toBeInTheDocument();
   });
+
+  it.each([
+    {
+      cause: 'removed',
+      code: 'GITHUB_CONNECTION_NOT_FOUND',
+      title: 'GitHub account no longer connected',
+      message: 'Choose octo/part again from a connected account.',
+      action: 'Choose repository again',
+      connects: false,
+    },
+    {
+      cause: 'lapsed',
+      code: 'GITHUB_RECONNECT_REQUIRED',
+      title: 'GitHub connection needs renewing',
+      message: 'Connect GitHub again, then choose octo/part.',
+      action: 'Connect GitHub again',
+      connects: true,
+    },
+  ])(
+    'should offer the fix for a $cause account rather than another Import and link (R23)',
+    async ({ code, title, message, action, connects }) => {
+      const user = userEvent.setup();
+      linkedImport.prepare.mockRejectedValueOnce(new GithubRequestError(401, code));
+      await renderImport();
+      await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+
+      await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+      expect(await screen.findByRole('alert', { name: title })).toBeInTheDocument();
+      expect(screen.getByText(message)).toBeVisible();
+      expect(screen.queryByRole('alert', { name: 'Import interrupted' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/try Import and link again/u)).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: action }));
+
+      expect(screen.queryByRole('heading', { name: 'Review linked import' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Pick linked repository' })).toBeInTheDocument();
+      expect(screen.queryByText('GitHub connect started') !== null).toBe(connects);
+    },
+  );
 
   it.each([
     {

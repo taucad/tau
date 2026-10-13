@@ -31,7 +31,7 @@ import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { cn } from '@taucad/ui/utils/cn';
 import { gitRemoteUrlProblem, isCeilingRefusal, isGithubRemoteUrl } from '@taucad/revisions';
-import type { RemoteFacet, SyncFacet, SyncFailureReason } from '@taucad/revisions';
+import type { RemoteFacet, RemoteRefusedReplacement, SyncFacet, SyncFailureReason } from '@taucad/revisions';
 /* The machine's own subpath: `SyncFailureReason` is not on the package barrel,
    and a second copy of the union here would be exactly the dual vocabulary the
    contract forbids (§3). */
@@ -45,6 +45,7 @@ import {
 } from '#lib/github-connections.js';
 import type { GithubRepository } from '#lib/github-connections.js';
 import { githubProjectBinding } from '#lib/github-project-binding.js';
+import type { GithubProjectBinding } from '#lib/github-project-binding.js';
 import { formatStorageLimit } from '@taucad/billing';
 import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
@@ -61,12 +62,20 @@ import {
   isGithubRemote,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionWhere } from '#routes/w.$workspace.$project/revision-vocabulary.js';
-import type { RemoteProbeTarget } from '#routes/w.$workspace.$project/revision-sync-region-probe.js';
 import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
 /** Which remote a person can pick. @public */
 export type RemoteChoice = 'none' | 'tau' | 'git';
+
+/** What a replacement in flight would cost if the new remote refused it (R2). */
+type KeptBackup = Readonly<{
+  projectId: string;
+  /** The project's GitHub binding before the replacement rebound it. */
+  binding: GithubProjectBinding | undefined;
+  /** The replacement's own send, which writes the new binding. */
+  sent: Promise<void>;
+}>;
 
 type PendingConnection =
   | Readonly<{ kind: 'tau' }>
@@ -244,6 +253,25 @@ const syncFailureAction = (
     }
   }
 };
+
+/**
+ * The one action a refused replacement implies (R2, rule 19).
+ *
+ * The refusal is the new remote's, so the kept remote's own fixes (*Reconnect
+ * GitHub*, *Sync now*) do not apply: a plan refusal is the plan's action, and
+ * anything else is picking a backup again.
+ *
+ * @param refusal - What the new remote answered.
+ * @param remote - The connection that stayed.
+ * @param viewer - The viewer's relationship to the project, which decides whether a plan action is theirs.
+ * @returns Which action to render, or `undefined` when there is nothing to do.
+ */
+const refusedReplacementAction = (
+  refusal: RemoteRefusedReplacement,
+  remote: RemoteFacet,
+  viewer: Pick<RevisionWhere, 'role' | 'isSignedOut'>,
+): ReturnType<typeof syncFailureAction> =>
+  refusal.reason === 'notEntitled' || refusal.reason === 'quota' ? syncFailureAction(refusal, remote, viewer) : 'retry';
 
 const connectingCopy = (remote: RemoteFacet): string =>
   remote.phase === 'disconnecting'
@@ -653,27 +681,64 @@ export function RevisionSyncRegion({
         : remote.kind === 'git' && remote.provider === undefined && remote.url === pending.url;
 
   /*
-   * R2: the project's store records a new remote, dropping the old one, before
-   * it asks the new one anything, so a refused address used to cost the
-   * backup that worked. A Git remote that would replace one is asked for its
-   * advertisement first; on a refusal the old one stays, with the refusal
-   * beside it. Tau Cloud is not probed: its repository only answers once
-   * connecting has registered the project (P51).
+   * R2: the platform asks a replacing remote for its advertisement before it
+   * records it, and a refusal leaves the old remote recorded and backing the
+   * project up (`remote.refusedReplacement`). The page has already rebound the
+   * project to the new remote by then (the binding, and the credential the
+   * worker holds), so a refusal puts the old binding back; a connected GitHub
+   * repository is granted its own credential again, the way the D3 re-grant does.
    */
-  const replacesBackup = (pending: PendingConnection): boolean =>
-    pending.kind !== 'tau' && remote.kind !== 'none' && !isSameDestination(pending);
+  const keptBackup = useRef<KeptBackup>(undefined);
+  const replacesBackup = (pending: PendingConnection): boolean => remote.kind !== 'none' && !isSameDestination(pending);
 
-  const isRefusedByProbe = async (target: RemoteProbeTarget): Promise<boolean> => {
-    try {
-      const { probeRemote } = await import('#routes/w.$workspace.$project/revision-sync-region-probe.js');
-      await probeRemote(target, ENV.TAU_API_URL);
-      return false;
-    } catch (error) {
-      const refusal = error instanceof Error ? error.message : 'The remote could not be reached.';
-      setPendingConnection(undefined);
-      setConnectionError(`${refusal} ${connectedLabel} is still this project’s backup.`);
-      return true;
+  const restoreKeptBackup = async (kept: KeptBackup): Promise<void> => {
+    /* The replacement's own binding write finishes first, so this one is the last word. */
+    await kept.sent.catch(() => undefined);
+    const { binding } = kept;
+    if (binding === undefined) {
+      githubProjectBinding.remove(kept.projectId);
+      return;
     }
+    if (!(remote.phase === 'connected' && remote.provider === 'github' && remote.url === binding.repositoryUrl)) {
+      githubProjectBinding.set(kept.projectId, binding);
+      return;
+    }
+    const token = await githubConnections.token(binding.connectionId);
+    await onConnect('git', binding.repositoryUrl, {
+      authorization: `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`,
+      provider: 'github',
+      repositoryId: String(binding.repositoryId),
+      connectionId: binding.connectionId,
+      generation: token.generation,
+      expiresAt: token.expiresAt,
+      fetchOnly: remote.fetchOnly,
+    });
+  };
+
+  /* Keyed on the attempt, not the object: every projection is a new object, and a
+   * projection posted before the worker took the replacement still carries the last refusal. */
+  const refusedAttempt = remote.refusedReplacement?.attempt;
+  useEffect(() => {
+    const kept = keptBackup.current;
+    if (refusedAttempt === undefined || kept === undefined) {
+      return;
+    }
+    keptBackup.current = undefined;
+    // oxlint-disable-next-line promise/prefer-await-to-then -- a refused re-grant is the next push's *Reconnect GitHub*, not this effect's.
+    restoreKeptBackup(kept).catch(() => undefined);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- R2: once per refusal; the ref carries what to restore.
+  }, [refusedAttempt]);
+
+  const sendConnection = async (pending: PendingConnection, send: () => Promise<void>): Promise<void> => {
+    /* Only these two phases probe a replacement; any other connect records over nothing. */
+    const keeps =
+      projectId !== undefined &&
+      (remote.phase === 'connected' || remote.phase === 'reconnectRequired') &&
+      replacesBackup(pending);
+    const binding = projectId === undefined ? undefined : githubProjectBinding.get(projectId);
+    const sent = send();
+    keptBackup.current = keeps ? { projectId, binding, sent } : undefined;
+    await sent;
   };
 
   const commitConnection = async (pending: PendingConnection): Promise<void> => {
@@ -681,32 +746,24 @@ export function RevisionSyncRegion({
     setCommitting(true);
     try {
       if (pending.kind === 'tau') {
-        await onConnect('tau');
+        await sendConnection(pending, async () => onConnect('tau'));
       } else if (pending.kind === 'git') {
-        if (replacesBackup(pending) && (await isRefusedByProbe({ url: pending.url }))) {
-          return;
-        }
-        await onConnect('git', pending.url);
+        await sendConnection(pending, async () => onConnect('git', pending.url));
       } else {
         const { connectionId, repository } = pending;
         const token = await githubConnections.token(connectionId);
         const authorization = `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`;
-        const repositoryId = String(repository.id);
-        if (
-          replacesBackup(pending) &&
-          (await isRefusedByProbe({ url: repository.cloneUrl, authorization, provider: 'github', repositoryId }))
-        ) {
-          return;
-        }
-        await onConnect('git', repository.cloneUrl, {
-          authorization,
-          provider: 'github',
-          repositoryId,
-          connectionId,
-          generation: token.generation,
-          expiresAt: token.expiresAt,
-          fetchOnly: repository.access !== 'write',
-        });
+        await sendConnection(pending, async () =>
+          onConnect('git', repository.cloneUrl, {
+            authorization,
+            provider: 'github',
+            repositoryId: String(repository.id),
+            connectionId,
+            generation: token.generation,
+            expiresAt: token.expiresAt,
+            fetchOnly: repository.access !== 'write',
+          }),
+        );
       }
       setPendingConnection(undefined);
       setChangingBackup(false);
@@ -1313,6 +1370,25 @@ export function RevisionSyncRegion({
           )}
         </div>
       ) : undefined}
+
+      {/*
+        R2: the new remote refused, so nothing was replaced. Its own sentence,
+        the backup that stays, and one action: *Upgrade* for a plan refusal,
+        otherwise reopening the choice.
+      */}
+      {remote.refusedReplacement === undefined || busy || changingBackup ? undefined : (
+        <div role='alert' aria-label='Backup change refused' className='flex flex-wrap items-center gap-2 text-sm'>
+          <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
+          <span className='min-w-0 flex-1'>
+            {`${remote.refusedReplacement.error} ${connectedLabel} is still this project’s backup.`}
+          </span>
+          {renderFailureAction(refusedReplacementAction(remote.refusedReplacement, remote, viewer), () => {
+            setPendingConnection(undefined);
+            setChoice(remote.kind);
+            setChangingBackup(true);
+          })}
+        </div>
+      )}
 
       {connectionError === undefined ? undefined : (
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>

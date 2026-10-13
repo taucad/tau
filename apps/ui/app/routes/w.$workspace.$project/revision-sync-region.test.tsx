@@ -17,7 +17,6 @@ import type { RevisionSyncRegionProps } from '#routes/w.$workspace.$project/revi
 import { GithubRequestError } from '#lib/github-connections.js';
 import type * as GithubConnectionsModule from '#lib/github-connections.js';
 import { githubProjectBinding } from '#lib/github-project-binding.js';
-import type { RemoteProbeTarget } from '#routes/w.$workspace.$project/revision-sync-region-probe.js';
 
 const githubToken = vi.hoisted(() =>
   vi.fn(async () => ({
@@ -30,10 +29,6 @@ const githubToken = vi.hoisted(() =>
 const githubRepository = vi.hoisted(() => vi.fn());
 /* No connected account unless a test lists one. */
 const githubList = vi.hoisted(() => vi.fn(async (): Promise<ReadonlyArray<{ id: string }>> => []));
-
-/* R2: every new remote answers unless a test says it refused. */
-const probeRemote = vi.hoisted(() => vi.fn(async (_target: RemoteProbeTarget, _apiBaseUrl: string) => undefined));
-vi.mock('#routes/w.$workspace.$project/revision-sync-region-probe.js', () => ({ probeRemote }));
 
 const configureAccess = vi.hoisted(() => vi.fn((_installUrl: string, _returnTo: string) => undefined));
 
@@ -338,31 +333,207 @@ describe('RevisionSyncRegion', () => {
     });
   });
 
-  /* R2: a new repository that refuses its advertisement leaves the old backup in place. */
-  it('should keep the current backup and show the refusal when the new repository does not answer (R2)', async () => {
-    probeRemote.mockRejectedValueOnce(new Error('This remote has no repository at this address for your account.'));
+  /* R2: the platform probes the new remote first; a refusal leaves the old one, and says so. */
+  it('should keep the current backup in view with the new repository’s refusal and one way back (R2)', async () => {
     const user = userEvent.setup();
-    const { connect, disconnect } = renderRegion(
-      facet({ kind: 'git', phase: 'connected', url: 'https://github.com/o/design.git', provider: 'github' }),
+    renderRegion(
+      facet({
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://github.com/o/design.git',
+        provider: 'github',
+        refusedReplacement: {
+          kind: 'git',
+          url: 'https://github.com/o/r.git',
+          error: 'This remote has no repository at this address for your account.',
+          reason: 'notFound',
+          attempt: 1,
+        },
+      }),
+      syncFacet({ state: 'backedUp' }),
     );
 
-    await chooseChangeBackup(user);
-    await user.click(screen.getByRole('button', { name: 'Pick GitHub repository' }));
-    expect(probeRemote).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: 'Replace backup' }));
-
-    expect(await screen.findByRole('alert', { name: 'Backup connection error' })).toHaveTextContent(
+    const alert = screen.getByRole('alert', { name: 'Backup change refused' });
+    expect(alert).toHaveTextContent(
       'This remote has no repository at this address for your account. o/design is still this project’s backup.',
     );
-    expect(probeRemote).toHaveBeenCalledWith(
-      expect.objectContaining({ url: 'https://github.com/o/r.git', provider: 'github', repositoryId: '99' }),
-      'https://api.test',
+    /* One action: picking a backup again, not the kept repository's *Reconnect GitHub*. */
+    expect(within(alert).getAllByRole('button')).toHaveLength(1);
+    await user.click(within(alert).getByRole('button', { name: 'Retry' }));
+    expect(screen.getByRole('button', { name: 'Pick GitHub repository' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert', { name: 'Backup change refused' })).not.toBeInTheDocument();
+  });
+
+  it('should offer the plan when Tau Cloud refuses to replace a Git backup on the owner’s plan (R2)', async () => {
+    const user = userEvent.setup();
+    const { upgrade } = renderRegion(
+      facet({
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://gitlab.example.com/o/r.git',
+        refusedReplacement: {
+          kind: 'tau',
+          error: 'Syncing files to Tau Cloud is a paid plan feature.',
+          reason: 'notEntitled',
+          attempt: 1,
+        },
+      }),
+      syncFacet({ state: 'backedUp' }),
     );
-    expect(probeRemote.mock.calls[0]?.[0].authorization).toMatch(/^Basic /u);
-    expect(connect).not.toHaveBeenCalled();
-    expect(disconnect).not.toHaveBeenCalled();
-    /* One action per refusal: the alert's *Retry*, not a second *Replace backup*. */
-    expect(screen.queryByRole('button', { name: 'Replace backup' })).not.toBeInTheDocument();
+
+    const alert = screen.getByRole('alert', { name: 'Backup change refused' });
+    expect(alert).toHaveTextContent(
+      'Syncing files to Tau Cloud is a paid plan feature. gitlab.example.com/o/r is still this project’s backup.',
+    );
+    expect(within(alert).getAllByRole('button')).toHaveLength(1);
+    expect(within(alert).queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    await user.click(within(alert).getByRole('button'));
+    expect(upgrade).toHaveBeenCalledTimes(1);
+  });
+
+  describe('when a replacement is refused, the kept backup keeps its binding (R2)', () => {
+    const kept = {
+      connectionId: '00000000-0000-4000-8000-000000000002',
+      repositoryId: 12,
+      repositoryUrl: 'https://github.com/o/design.git',
+      generation: 2,
+    } as const;
+    const refused = (attempt: number): NonNullable<RemoteFacet['refusedReplacement']> => ({
+      kind: 'git',
+      url: 'https://github.com/o/r.git',
+      error: 'Repository not found.',
+      reason: 'notFound',
+      attempt,
+    });
+
+    /* The hook rebinds the project to the repository it is sent, before the platform has asked it anything. */
+    const rebindingConnect = (connect: ReturnType<typeof renderRegion>['connect']): void => {
+      connect.mockImplementation(async (_kind, url, options) => {
+        if (options?.provider === 'github' && url !== undefined && options.connectionId !== undefined) {
+          githubProjectBinding.set('p1', {
+            connectionId: options.connectionId,
+            repositoryId: Number(options.repositoryId),
+            repositoryUrl: url,
+            generation: options.generation ?? 0,
+          });
+        } else {
+          githubProjectBinding.remove('p1');
+        }
+      });
+    };
+
+    beforeEach(() => {
+      onTestFinished(() => {
+        githubProjectBinding.remove('p1');
+      });
+    });
+
+    it('should grant the kept GitHub repository its own credential again', async () => {
+      const user = userEvent.setup();
+      githubProjectBinding.set('p1', kept);
+      const remote = facet({
+        kind: 'git',
+        phase: 'connected',
+        url: kept.repositoryUrl,
+        provider: 'github',
+        repositoryId: '12',
+      });
+      const { connect, show } = renderRegion(remote, syncFacet({ state: 'backedUp' }), { projectId: 'p1' });
+      rebindingConnect(connect);
+
+      await chooseChangeBackup(user);
+      await user.click(screen.getByRole('button', { name: 'Pick GitHub repository' }));
+      await user.click(screen.getByRole('button', { name: 'Replace backup' }));
+      await waitFor(() => {
+        expect(connect).toHaveBeenCalledTimes(1);
+      });
+      expect(connect).toHaveBeenLastCalledWith(
+        'git',
+        'https://github.com/o/r.git',
+        expect.objectContaining({ repositoryId: '99' }),
+      );
+      expect(githubProjectBinding.get('p1')?.repositoryId).toBe(99);
+
+      show({ ...remote, refusedReplacement: refused(1) });
+
+      await waitFor(() => {
+        expect(connect).toHaveBeenCalledTimes(2);
+      });
+      expect(githubToken).toHaveBeenLastCalledWith(kept.connectionId);
+      expect(connect).toHaveBeenLastCalledWith(
+        'git',
+        kept.repositoryUrl,
+        expect.objectContaining({
+          provider: 'github',
+          repositoryId: '12',
+          connectionId: kept.connectionId,
+          generation: 3,
+          authorization: expect.stringMatching(/^Basic /u) as unknown as string,
+        }),
+      );
+      expect(githubProjectBinding.get('p1')).toMatchObject({ repositoryId: 12, repositoryUrl: kept.repositoryUrl });
+    });
+
+    it('should drop the binding a refused GitHub repository left on a Tau Cloud backup', async () => {
+      const user = userEvent.setup();
+      const remote = facet({ kind: 'tau', phase: 'connected', url: 'https://api.test/v1/git/p1.git' });
+      const { connect, show } = renderRegion(remote, syncFacet({ state: 'backedUp' }), { projectId: 'p1' });
+      rebindingConnect(connect);
+
+      await chooseChangeBackup(user);
+      await user.click(screen.getByRole('radio', { name: 'Git remote' }));
+      await user.click(screen.getByRole('button', { name: 'Pick GitHub repository' }));
+      await user.click(screen.getByRole('button', { name: 'Replace backup' }));
+      await waitFor(() => {
+        expect(githubProjectBinding.get('p1')?.repositoryId).toBe(99);
+      });
+
+      show({ ...remote, refusedReplacement: refused(1) });
+
+      /* Otherwise the next revision is authored as the GitHub account and D99 looks up the wrong repository. */
+      await waitFor(() => {
+        expect(githubProjectBinding.get('p1')).toBeUndefined();
+      });
+      expect(connect).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not answer a replacement with the refusal that was already in view', async () => {
+      const user = userEvent.setup();
+      githubProjectBinding.set('p1', kept);
+      const remote = facet({
+        kind: 'git',
+        phase: 'connected',
+        url: kept.repositoryUrl,
+        provider: 'github',
+        repositoryId: '12',
+        refusedReplacement: refused(1),
+      });
+      const { connect, show } = renderRegion(remote, syncFacet({ state: 'backedUp' }), { projectId: 'p1' });
+      rebindingConnect(connect);
+
+      await user.click(
+        within(screen.getByRole('alert', { name: 'Backup change refused' })).getByRole('button', { name: 'Retry' }),
+      );
+      await user.click(screen.getByRole('button', { name: 'Pick GitHub repository' }));
+      await user.click(screen.getByRole('button', { name: 'Replace backup' }));
+      await waitFor(() => {
+        expect(connect).toHaveBeenCalledTimes(1);
+      });
+
+      /* A projection posted before the worker took the new connect still carries the old refusal. */
+      show({ ...remote, refusedReplacement: { ...refused(1) } });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      expect(connect).toHaveBeenCalledTimes(1);
+      expect(githubProjectBinding.get('p1')?.repositoryId).toBe(99);
+
+      show({ ...remote, refusedReplacement: refused(2) });
+      await waitFor(() => {
+        expect(connect).toHaveBeenCalledTimes(2);
+      });
+      expect(githubProjectBinding.get('p1')?.repositoryId).toBe(12);
+    });
   });
 
   /* R3: the confirmation names the repository on both sides, never the bare host. */
@@ -386,10 +557,7 @@ describe('RevisionSyncRegion', () => {
 
     expect(screen.getByText(`Replace ${names}? Every revision stays on this device.`)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Replace backup' }));
-    /* R2: an anonymous address is probed, with no credential, before it replaces the backup. */
-    expect(probeRemote).toHaveBeenCalledWith({ url: to }, 'https://api.test');
     expect(connect).toHaveBeenCalledWith('git', to);
-    expect(probeRemote.mock.invocationCallOrder[0]).toBeLessThan(connect.mock.invocationCallOrder[0] ?? 0);
   });
 
   it('asks before disconnecting, and says what disconnecting costs', async () => {

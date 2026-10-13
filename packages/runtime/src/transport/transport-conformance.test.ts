@@ -13,6 +13,8 @@
  * `encodeGeometry(g)`, `close()`, `closed` Promise.
  */
 
+import { EventEmitter } from 'node:events';
+
 import { afterEach, describe, it, expect, vi } from 'vitest';
 
 import { createChannelServer, wrapMessagePort, wrapWebSocket } from '@taucad/rpc';
@@ -1209,27 +1211,25 @@ describe('transport conformance — shared transport internals (T37)', () => {
       async (port: MessagePort): Promise<RuntimeTransportClient> => {
         const { nodeWorkerTransport } = await import('#transport/node-worker-transport.js');
         const wrapped = portBacked(port);
-        const worker = {
-          postMessage: (data: unknown, transfer?: readonly Transferable[]) => {
+        // oxlint-disable-next-line unicorn/prefer-event-target -- node:worker_threads.Worker is an EventEmitter; this fake must match it.
+        class PortBackedNodeWorker extends EventEmitter {
+          public constructor() {
+            super();
+            wrapped.onMessage((data) => this.emit('message', data));
+          }
+
+          public postMessage(data: unknown, transfer?: readonly Transferable[]): void {
             wrapped.postMessage(data, transfer);
-          },
-          on(event: string, listener: (data: unknown) => void) {
-            if (event === 'message') {
-              wrapped.onMessage(listener);
-            }
-            return worker;
-          },
-          off: () => worker,
-          terminate: async () => {
+          }
+
+          public async terminate(): Promise<number> {
             wrapped.close();
             return 0;
-          },
-        };
+          }
+        }
         return nodeWorkerTransport({
           url: new URL('about:blank'),
-          workerCtor: function fakeNodeWorker() {
-            return worker;
-          } as unknown as new (url: string | URL) => typeof worker,
+          workerCtor: PortBackedNodeWorker,
         }).materialize() as unknown as RuntimeTransportClient;
       },
     ],
@@ -1537,12 +1537,26 @@ function makeFakeWorkerCtor(): {
   };
 }
 
-type FakeNodeWorker = {
-  postMessage: (data: unknown, transferList?: unknown) => void;
-  on: (event: 'message', listener: (data: unknown) => void) => FakeNodeWorker;
-  off: (event: 'message', listener: (data: unknown) => void) => FakeNodeWorker;
-  terminate: () => Promise<number>;
-};
+/** A Node worker double: an `EventEmitter`, as `node:worker_threads.Worker` is, so it accepts every event `NodeWorkerLike` declares. */
+// oxlint-disable-next-line unicorn/prefer-event-target -- node:worker_threads.Worker is an EventEmitter; this fake must match it.
+class FakeNodeWorker extends EventEmitter {
+  private readonly onTerminate: () => void;
+
+  public constructor(onTerminate: () => void) {
+    super();
+    this.onTerminate = onTerminate;
+  }
+
+  public postMessage(): void {
+    /* No-op */
+  }
+
+  public async terminate(): Promise<number> {
+    this.onTerminate();
+    this.removeAllListeners();
+    return 0;
+  }
+}
 
 function makeFakeNodeWorkerCtor(): {
   workerCtor: new (url: string | URL) => FakeNodeWorker;
@@ -1555,43 +1569,22 @@ function makeFakeNodeWorkerCtor(): {
   const created: FakeNodeWorker[] = [];
   const urls: Array<string | URL> = [];
   let terminationCount = 0;
-  let latestListeners: Map<string, Set<(data: unknown) => void>> | undefined;
-  const ctor = function fakeNodeWorkerImpl(this: FakeNodeWorker, url: string | URL): FakeNodeWorker {
-    urls.push(url);
-    const listeners = new Map<string, Set<(data: unknown) => void>>();
-    latestListeners = listeners;
-    const fake: FakeNodeWorker = {
-      postMessage() {
-        /* No-op */
-      },
-      on(event, listener) {
-        const eventListeners = listeners.get(event) ?? new Set<(data: unknown) => void>();
-        eventListeners.add(listener);
-        listeners.set(event, eventListeners);
-        return fake;
-      },
-      off(event, listener) {
-        listeners.get(event)?.delete(listener);
-        return fake;
-      },
-      async terminate() {
+  class RecordedNodeWorker extends FakeNodeWorker {
+    public constructor(url: string | URL) {
+      super(() => {
         terminationCount++;
-        listeners.clear();
-        return 0;
-      },
-    };
-    created.push(fake);
-    return fake;
-  } as unknown as new (url: string | URL) => FakeNodeWorker;
+      });
+      urls.push(url);
+      created.push(this);
+    }
+  }
   return {
-    workerCtor: ctor,
+    workerCtor: RecordedNodeWorker,
     created,
     urls,
     terminateCalls: () => terminationCount,
     emit(type, payload) {
-      for (const listener of latestListeners?.get(type) ?? []) {
-        listener(payload);
-      }
+      created.at(-1)?.emit(type, payload);
     },
     dispose() {
       for (const w of created) {

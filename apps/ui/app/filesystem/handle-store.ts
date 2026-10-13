@@ -33,6 +33,7 @@
  * @see https://developer.mozilla.org/en-US/docs/Web/API/FileSystemDirectoryHandle
  */
 
+import { Topic } from '@taucad/events';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
@@ -67,6 +68,7 @@ const dbVersion = 4;
 const projectRootConfigurationChannelName = `${metaConfig.databasePrefix}project-root-configuration`;
 const homeBackendMetaKey = 'home-storage-backend';
 const projectCreationLocationMetaKey = 'project-creation-location';
+const persistentStorageWarningMetaKey = 'persistent-storage-warning';
 
 /**
  * Physical engine backing the system-owned Home workspace. `node` is the
@@ -381,6 +383,15 @@ async function withDb<T>(operation: (db: IDBDatabase) => Promise<T>): Promise<T>
 
 // ============ Persistent storage + disk-side identity marker ============
 
+/*
+ * A refusal used to be recorded on the workspace row and read by nothing, so an
+ * evictable origin looked no different from a durable one until the browser
+ * cleared it (R14). The refusal is session state: every request this session
+ * makes reaches the same answer until the person changes the site's settings.
+ */
+let persistentStorageRefused = false;
+const persistentStorageRefusal = new Topic<void>({ name: 'HandleStore.persistentStorageRefusal' });
+
 /**
  * Ask the browser to move the origin out of the evictable best-effort bucket
  * (R1). Connecting a workspace is the strongest available signal of intent, so
@@ -394,12 +405,68 @@ async function ensurePersistentStorage(): Promise<boolean | undefined> {
   if (typeof storage?.persisted !== 'function' || typeof storage.persist !== 'function') {
     return undefined;
   }
+  let persisted: boolean;
   try {
-    return (await storage.persisted()) || (await storage.persist());
+    persisted = (await storage.persisted()) || (await storage.persist());
   } catch (error) {
     console.warn('Persistent storage request failed', error);
     return undefined;
   }
+  if (!persisted && !persistentStorageRefused) {
+    persistentStorageRefused = true;
+    persistentStorageRefusal.emit();
+  }
+  return persisted;
+}
+
+/** True once the browser has refused this session's persistent-storage request. */
+export function isPersistentStorageRefused(): boolean {
+  return persistentStorageRefused;
+}
+
+/**
+ * Subscribe to the browser refusing persistent storage, in `useSyncExternalStore` shape.
+ *
+ * @param listener - Called once, when the first refusal arrives.
+ * @returns Unsubscribe.
+ */
+export function subscribePersistentStorageRefusal(listener: () => void): () => void {
+  return persistentStorageRefusal.subscribe(listener);
+}
+
+/**
+ * Claim the one warning a profile gets about refused persistent storage.
+ *
+ * The record lives in this database, so a browser that clears the origin
+ * clears it too, and the warning returns exactly when it is true again.
+ *
+ * @returns `true` the first time for this profile, `false` once it is recorded.
+ */
+export async function claimPersistentStorageWarning(): Promise<boolean> {
+  return withStorageWrite(async () =>
+    withDb(
+      async (db) =>
+        new Promise<boolean>((resolve, reject) => {
+          const tx = db.transaction(metaStoreName, 'readwrite');
+          const store = tx.objectStore(metaStoreName);
+          const read = store.get(persistentStorageWarningMetaKey);
+          let claimed = false;
+          read.addEventListener('success', () => {
+            if (read.result !== undefined) {
+              return;
+            }
+            claimed = true;
+            store.put({ key: persistentStorageWarningMetaKey, shownAt: Date.now() });
+          });
+          tx.addEventListener('complete', () => {
+            resolve(claimed);
+          });
+          tx.addEventListener('error', () => {
+            reject(tx.error ?? new Error('Failed to record the persistent storage warning'));
+          });
+        }),
+    ),
+  );
 }
 
 const [markerDirectoryName, markerFileName] = workspaceMarkerPath.split('/') as [string, string];

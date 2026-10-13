@@ -337,7 +337,7 @@ const announceConnected = (context: RemoteMachineContext, enq: RemoteEnqueue): v
 
 /* What `writeRemote` and the R2 probe are asked for: the destination the person picked. */
 const writeInputOf = (context: RemoteMachineContext): RemoteWriteActorInput => {
-  const candidate = context.candidate;
+  const { candidate } = context;
   return {
     projectId: context.projectId,
     kind: candidate?.kind ?? (context.kind === 'none' ? 'tau' : context.kind),

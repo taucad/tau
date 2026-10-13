@@ -1717,7 +1717,8 @@ describe.runIf(gitToolchainOnPath)('native remote credential transport', () => {
         );
         expect(await readFile(join(repositoryPath, '.git', 'config'), 'utf8')).not.toContain(authorization);
         /* Read last: the wrapper logs only the newest git command. */
-        expect((await port.listRemotes()).length).toBe(recorded ? 1 : 0);
+        const remotes = await port.listRemotes();
+        expect(remotes.length).toBe(recorded ? 1 : 0);
       } finally {
         await fixture.close();
         await rm(root, { force: true, recursive: true });

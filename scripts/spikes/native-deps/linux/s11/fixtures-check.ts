@@ -95,14 +95,11 @@ await test('tau check classifies every libs/tau-examples fixture', { timeout: 3_
   const records: Array<Partial<Entry> & Result> = [];
   const drain = async (): Promise<void> => {
     for (let entry = queue.shift(); entry !== undefined; entry = queue.shift()) {
-      // oxlint-disable-next-line no-await-in-loop -- a bounded worker pool drains the queue.
       // A spec fixture without a main file is checked through its first test export.
       const entryFile = entry.mainFile ?? entry.files.find((file) => file.startsWith('test-exports/')) ?? '';
-      const record = {
-        ...entry,
-        entryFile,
-        ...(await runCheck(join(examplesRoot, entry.kernel, entry.name, entryFile))),
-      };
+      // oxlint-disable-next-line no-await-in-loop -- a bounded worker pool drains the queue.
+      const result = await runCheck(join(examplesRoot, entry.kernel, entry.name, entryFile));
+      const record = { ...entry, entryFile, ...result };
       records.push(record);
       const first = record.issues[0];
       const detail =

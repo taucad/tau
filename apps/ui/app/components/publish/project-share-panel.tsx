@@ -3,8 +3,9 @@ import { NavLink, useLocation } from 'react-router';
 import { Check, ChevronDown, Link2, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
 import { sharePasswordLimits } from '@taucad/share/artifact';
 import { formatShareUrl } from '@taucad/share/locator';
+import type { ShareLocator } from '@taucad/share/locator';
 import { isShareError } from '@taucad/share/provider';
-import type { ShareProviderDescriptor } from '@taucad/share/provider';
+import type { ShareProtection, ShareProviderDescriptor } from '@taucad/share/provider';
 import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
@@ -14,6 +15,9 @@ import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { toast } from '#components/ui/sonner.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
+import { GithubGistManagement } from '#components/share/github-gist-management.js';
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 import type { PublishDraft, PublishFacet, PublishVisibility } from '@taucad/revisions';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
@@ -59,6 +63,34 @@ const shareMethodDescriptors = shareProviderRegistry.descriptors.filter(
 );
 const shareMethodGroups = [{ name: 'Share with', items: shareMethodDescriptors }];
 const getShareMethodValue = (descriptor: ShareProviderDescriptor): string => descriptor.id;
+
+/**
+ * The sharing method this panel opens on.
+ *
+ * A method named by the link (a GitHub return, a sign-in return) or chosen in
+ * this panel wins; otherwise the one this person chose last time (R8), as long
+ * as the panel still offers it; otherwise a direct link. A panel that cannot
+ * collect a snapshot offers only the hosted link.
+ *
+ * @param chosen - The method named by the link or picked in this panel.
+ * @param remembered - The stored preference, unvalidated.
+ * @param isPortableEnabled - Whether portable methods can collect a snapshot here.
+ * @returns The method to show.
+ */
+const resolveShareMethod = (
+  chosen: ShareMethod | undefined,
+  remembered: unknown,
+  isPortableEnabled: boolean,
+): ShareMethod => {
+  if (!isPortableEnabled) {
+    return 'tau';
+  }
+  if (chosen) {
+    return chosen;
+  }
+  const offered = shareMethodDescriptors.find((descriptor) => descriptor.id === remembered);
+  return offered?.id ?? 'direct';
+};
 
 function ShareMethodIcon({ method, className }: { readonly method: ShareMethod; readonly className?: string }) {
   if (method === 'direct') {
@@ -367,6 +399,11 @@ function PortableShareBody({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [shareUrl, setShareUrl] = useState<string>();
+  /* The Gist this panel made, so it can be managed where it was made (R8). */
+  const [publication, setPublication] = useState<{
+    readonly locator: ShareLocator;
+    readonly protection: ShareProtection;
+  }>();
   const [warnings, setWarnings] = useState<ShareProjectSnapshot['warnings']>([]);
   const [githubStatus, setGithubStatus] = useState<GithubGistConnectionStatus>();
   const [encrypted, setEncrypted] = useState(false);
@@ -438,23 +475,30 @@ function PortableShareBody({
       }
       const snapshot = await collectSnapshot(controller.signal);
       setWarnings(snapshot.warnings);
-      const url = await withBrowserShareProviderContext(async (context) => {
-        const publication = await providerPublish(
+      const protection: ShareProtection = encrypted
+        ? { kind: 'password', password, includePassword }
+        : { kind: 'none' };
+      const { url, locator } = await withBrowserShareProviderContext(async (context) => {
+        const published = await providerPublish(
           {
             snapshot,
-            protection: encrypted ? { kind: 'password', password, includePassword } : { kind: 'none' },
+            protection,
             visibility: method === 'github-gist' && publicGist ? 'public' : 'unlisted',
             signal: controller.signal,
           },
           context,
         );
-        return formatShareUrl({
-          origin: context.origin,
-          locator: publication.locator,
-          secrets: publication.secrets,
-        });
+        return {
+          url: formatShareUrl({
+            origin: context.origin,
+            locator: published.locator,
+            secrets: published.secrets,
+          }),
+          locator: published.locator,
+        };
       });
       setShareUrl(url);
+      setPublication({ locator, protection });
       try {
         await navigator.clipboard.writeText(url);
         triggerCopiedTick();
@@ -513,6 +557,14 @@ function PortableShareBody({
     consentRef.current = undefined;
     setBrowserConsent('cancelled');
     setBusy(false);
+  };
+
+  /* Unpublished: the link is gone, so the panel offers to make a new one. */
+  const forgetPublication = (): void => {
+    setPublication(undefined);
+    setShareUrl(undefined);
+    setWarnings([]);
+    setError(undefined);
   };
 
   const isDirect = method === 'direct';
@@ -659,6 +711,15 @@ function PortableShareBody({
       ) : null}
       {shareUrl ? <Input aria-label='Share link' readOnly value={shareUrl} /> : null}
       <div className='flex flex-wrap justify-end gap-2'>
+        {method === 'github-gist' && publication ? (
+          <GithubGistManagement
+            locator={publication.locator}
+            protection={publication.protection}
+            collectSnapshot={collectSnapshot}
+            onRepublished={setShareUrl}
+            onUnpublished={forgetPublication}
+          />
+        ) : null}
         {browserConsent === 'waiting' ? (
           <Button type='button' variant='ghost' onClick={cancelBrowserConsent}>
             Cancel
@@ -715,7 +776,16 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     githubAuthorizationFailure,
   } = properties;
   const { pathname, search } = useLocation();
-  const [shareMethod, setShareMethod] = useState<ShareMethod>(initialMethod ?? (collectSnapshot ? 'direct' : 'tau'));
+  const [chosenMethod, setChosenMethod] = useState<ShareMethod | undefined>(initialMethod);
+  const [rememberedMethod, setRememberedMethod] = useCookie<unknown>(cookieName.shareProvider, undefined);
+  const shareMethod = resolveShareMethod(chosenMethod, rememberedMethod, Boolean(collectSnapshot));
+  const setShareMethod = useCallback(
+    (next: ShareMethod): void => {
+      setChosenMethod(next);
+      setRememberedMethod(next);
+    },
+    [setRememberedMethod],
+  );
   const [portableBusy, setPortableBusy] = useState(false);
   const signInReturnTo = useMemo(() => {
     const authorizationReturn = parseGithubGistAuthorizationReturn(search);

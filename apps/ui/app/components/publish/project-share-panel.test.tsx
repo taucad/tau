@@ -16,9 +16,21 @@ import type * as useEntitlementsModule from '@taucad/billing/hooks/use-entitleme
 import type * as useSettingsDialogModule from '#hooks/use-settings-dialog.js';
 import type * as shareProvidersModule from '#lib/share-providers.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { store as preferenceStore } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
+import { metaConfig } from '#constants/meta.constants.js';
 
 const portableProviderPublish = vi.hoisted(() => vi.fn());
-const portableProviderLoad = vi.hoisted(() => vi.fn(async () => ({ publish: portableProviderPublish })));
+const portableProviderRepublish = vi.hoisted(() => vi.fn());
+const portableProviderUnpublish = vi.hoisted(() => vi.fn());
+const portableProviderLoad = vi.hoisted(() =>
+  vi.fn(async () => ({
+    publish: portableProviderPublish,
+    republish: portableProviderRepublish,
+    unpublish: portableProviderUnpublish,
+  })),
+);
+const shareProviderPreference = `${metaConfig.cookiePrefix}${cookieName.shareProvider}`;
 const getGithubGistConnectionStatus = vi.hoisted(() => vi.fn(async () => 'not-connected'));
 const connectGithubGist = vi.hoisted(() => vi.fn());
 const awaitGithubGistConnection = vi.hoisted(() => vi.fn<(signal: AbortSignal) => Promise<boolean>>());
@@ -185,6 +197,8 @@ describe('ProjectSharePanel', () => {
     toastSuccessMock.mockClear();
     toastErrorMock.mockClear();
     portableProviderLoad.mockClear();
+    portableProviderRepublish.mockReset();
+    portableProviderUnpublish.mockReset();
     portableProviderPublish.mockReset();
     portableProviderPublish.mockResolvedValue({
       locator: { providerId: 'direct' },
@@ -207,6 +221,7 @@ describe('ProjectSharePanel', () => {
 
   afterEach(() => {
     cleanup();
+    preferenceStore.remove(shareProviderPreference);
   });
 
   it('uses a full-width provider combobox with branded icons and publish-capable choices only', async () => {
@@ -486,6 +501,92 @@ describe('ProjectSharePanel', () => {
         expect.anything(),
       );
     });
+  });
+
+  it('should offer Manage for a Gist this panel made and republish or unpublish it here (R8)', async () => {
+    getGithubGistConnectionStatus.mockResolvedValue('connected');
+    portableProviderPublish.mockResolvedValueOnce({
+      locator: { providerId: 'github-gist', reference: `abc123.${'a'.repeat(40)}` },
+      secrets: {},
+    });
+    portableProviderRepublish.mockResolvedValueOnce({
+      locator: { providerId: 'github-gist', reference: `abc123.${'b'.repeat(40)}` },
+      secrets: {},
+    });
+    portableProviderUnpublish.mockResolvedValueOnce(undefined);
+    const snapshot: ShareProjectSnapshot = { entryPath: 'main.ts', files: [], warnings: [] };
+    renderPanel(
+      <ProjectSharePanel
+        projectId='proj_manage_gist'
+        projectName='Gist'
+        entryPath='main.ts'
+        collectSnapshot={vi.fn(async () => snapshot)}
+        initialMethod='github-gist'
+      />,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Create Gist and copy link' }));
+    expect(await screen.findByLabelText('Share link')).toHaveValue(
+      `https://tau.example/s/github-gist~abc123.${'a'.repeat(40)}`,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Manage GitHub Gist' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Republish Gist' }));
+    await waitFor(() => {
+      expect(screen.getByLabelText('Share link')).toHaveValue(
+        `https://tau.example/s/github-gist~abc123.${'b'.repeat(40)}`,
+      );
+    });
+    expect(portableProviderRepublish).toHaveBeenCalledWith(
+      {
+        locator: { providerId: 'github-gist', reference: `abc123.${'a'.repeat(40)}` },
+        snapshot,
+        protection: { kind: 'none' },
+      },
+      expect.anything(),
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Manage GitHub Gist' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Unpublish Gist' }));
+    await userEvent.click(
+      within(screen.getByRole('alertdialog', { name: 'Unpublish this GitHub Gist?' })).getByRole('button', {
+        name: 'Unpublish Gist',
+      }),
+    );
+
+    expect(await screen.findByRole('button', { name: 'Create Gist and copy link' })).toBeEnabled();
+    expect(portableProviderUnpublish).toHaveBeenCalledWith(
+      { locator: { providerId: 'github-gist', reference: `abc123.${'a'.repeat(40)}` } },
+      expect.anything(),
+    );
+    expect(screen.queryByLabelText('Share link')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Manage GitHub Gist' })).not.toBeInTheDocument();
+  });
+
+  it('should open on the sharing method chosen last time (R8)', async () => {
+    const collectSnapshot = vi.fn(async () => ({ entryPath: 'main.ts', files: [], warnings: [] }));
+    const first = renderPanel(
+      <ProjectSharePanel
+        projectId='proj_remembered'
+        projectName='Remembered'
+        entryPath='main.ts'
+        collectSnapshot={collectSnapshot}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Share with Direct link' }));
+    await userEvent.click(screen.getByRole('option', { name: 'GitHub Gist' }));
+    first.unmount();
+
+    renderPanel(
+      <ProjectSharePanel
+        projectId='proj_remembered'
+        projectName='Remembered'
+        entryPath='main.ts'
+        collectSnapshot={collectSnapshot}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Share with GitHub Gist' })).toBeInTheDocument();
   });
 
   it('restores the GitHub provider after authorization and uses safe app-owned result copy', async () => {

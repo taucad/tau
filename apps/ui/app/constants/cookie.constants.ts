@@ -76,6 +76,10 @@ export const cookieName = {
   // The last selected Parts page size.
   partPageSize: 'part-page-size',
 
+  /* Share */
+  // The last chosen sharing method in the workbench Share panel.
+  shareProvider: 'share-provider',
+
   /* Console */
   // The last selected log level.
   consoleLogLevel: 'console-log-level',

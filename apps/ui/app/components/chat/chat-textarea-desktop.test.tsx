@@ -317,13 +317,20 @@ describe('ChatTextareaDesktop draft rehydration', () => {
   const renderComposer = (
     inputText: string,
     acpSessionData: AcpSessionData,
-    options: { canResume?: boolean; handleSubmit?: (text?: string) => Promise<void>; useTauSkills?: boolean } = {},
+    options: {
+      canResume?: boolean;
+      handleSubmit?: (text?: string) => Promise<void>;
+      useTauSkills?: boolean;
+      mode?: 'main' | 'edit';
+      enableAutoFocus?: boolean;
+    } = {},
   ) => {
     const { canResume = false, handleSubmit = asyncNoop } = options;
     const element = (session: AcpSessionData): React.JSX.Element => (
       <TooltipProvider>
         <ChatTextareaDesktop
-          enableAutoFocus={false}
+          enableAutoFocus={options.enableAutoFocus ?? false}
+          mode={options.mode}
           dragKind={undefined}
           isSubmitting={false}
           isAttaching={false}
@@ -369,6 +376,29 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       },
     };
   };
+
+  it.each(['main', 'edit'] as const)(
+    'should focus the %s draft after rehydration without moving an edit to its end',
+    async (mode) => {
+      // The jsdom environment supplies selection, but not the layout methods ProseMirror uses to scroll it.
+      const createRange = document.createRange.bind(document);
+      vi.spyOn(document, 'createRange').mockImplementation(() =>
+        Object.assign(createRange(), {
+          getClientRects: () => [],
+          getBoundingClientRect: () => new DOMRect(),
+        }),
+      );
+      const text = 'A restored message with several words';
+      renderComposer(text, codexSession, { mode, enableAutoFocus: true });
+
+      await waitFor(() => {
+        const selection = globalThis.getSelection();
+        expect(screen.getByRole('textbox')).toHaveFocus();
+        expect(selection?.anchorNode?.textContent).toBe(text);
+        expect(selection?.anchorOffset).toBe(mode === 'edit' ? 0 : text.length);
+      });
+    },
+  );
 
   it('should show skill recovery in the functional composer after catalog closure', async () => {
     catalogHealth.status = 'closed';

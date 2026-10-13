@@ -46,7 +46,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: spike-publish-dry-run-${{ github.ref }}
+  group: spike-publish-dry-run-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

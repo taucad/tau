@@ -26,6 +26,10 @@ jobs:
     env:
       NX_DAEMON: 'false'
       NX_NO_CLOUD: 'true'
+      # The same build-time origins ci.yml and e2e-nightly.yml give every UI build.
+      TAU_API_URL: http://localhost:4000
+      TAU_WEBSOCKET_URL: ws://localhost:4001
+      TAU_FRONTEND_URL: http://localhost:3000
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

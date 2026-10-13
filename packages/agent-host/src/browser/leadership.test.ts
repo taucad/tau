@@ -4,7 +4,7 @@
  * scripted launcher (W6.r1 findings 2, 6 and 12).
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { StepClock } from '@taucad/xstate-testing/clock';
 
@@ -22,6 +22,8 @@ import {
   wait,
 } from '#browser/test/leadership.binding.fixture.js';
 import { chatLeadershipNames } from '#launchers/leadership/names.js';
+import type { ReadInput } from '#wire/frames.schema.js';
+import { agentWireVersion } from '#wire/frames.schema.js';
 import {
   cancel,
   closeLaunchers,
@@ -486,5 +488,143 @@ describe('browser leadership binding', () => {
     expect(leader.stolen()).toBe(false);
     expect(calls).not.toContain('openView');
     leader.close();
+  });
+});
+
+/* R21: a read its reader let go of is not a failure, so it is logged at debug and ends with the reader's own abort;
+ * a read that really failed is still an error. */
+describe('browser leadership read logging', () => {
+  afterEach(async () => {
+    await closePorts();
+    vi.restoreAllMocks();
+  });
+
+  const readInput = (chatId: string, signal?: AbortSignal): ReadInput => ({
+    chatId,
+    cursor: 0,
+    limit: 16,
+    maxBytes: 1_048_576,
+    ...(signal === undefined ? {} : { signal }),
+  });
+
+  /** A launcher read that parks until its reader lets go, then throws as the launcher's does. */
+  const parkedRead = async (input: ReadInput): Promise<never> =>
+    new Promise<never>((_resolve, reject) => {
+      const abort = (): void => {
+        reject(new DOMException('The read was aborted.', 'AbortError'));
+      };
+      if (input.signal?.aborted === true) {
+        abort();
+        return;
+      }
+      input.signal?.addEventListener('abort', abort, { once: true });
+    });
+
+  const consoleSpies = () => ({
+    debug: vi.spyOn(console, 'debug').mockImplementation(() => undefined),
+    error: vi.spyOn(console, 'error').mockImplementation(() => undefined),
+  });
+
+  it('should log a local read its reader aborted at debug and reject it with the abort', async () => {
+    const spies = consoleSpies();
+    let reading = false;
+    const { host } = scriptedHost({
+      read: async (input) => {
+        reading = true;
+        return parkedRead(input);
+      },
+    });
+    const port = bindTab(host, { project: uniqueProject() });
+    const reader = new AbortController();
+    const answered = port.read(readInput('chat-1', reader.signal), async () => {
+      throw new Error('The scripted read serves no local answer.');
+    });
+    await until(() => reading);
+
+    reader.abort();
+
+    await expect(answered).rejects.toMatchObject({ name: 'AbortError' });
+    expect(spies.error).not.toHaveBeenCalled();
+    expect(spies.debug).toHaveBeenCalledWith('[agent-host leadership] a read was aborted', 'chat-1');
+  });
+
+  it('should still log a local read that failed as an error and refuse it', async () => {
+    const spies = consoleSpies();
+    const failure = new Error('The log is unreadable.');
+    const { host } = scriptedHost({
+      read: async () => {
+        throw failure;
+      },
+    });
+    const port = bindTab(host, { project: uniqueProject() });
+
+    const answer = await port.read(readInput('chat-1', new AbortController().signal), async () => {
+      throw new Error('The scripted read serves no local answer.');
+    });
+
+    expect(answer).toEqual({ status: 'refused', chatId: 'chat-1', reason: 'owner-fenced' });
+    expect(spies.error).toHaveBeenCalledWith('[agent-host leadership] a read failed', 'chat-1', failure);
+    expect(spies.debug).not.toHaveBeenCalled();
+  });
+
+  it('should log a forwarded read at debug when this tab stops leading while serving it', async () => {
+    const spies = consoleSpies();
+    const project = uniqueProject();
+    const names = chatLeadershipNames(project, 'chat-1');
+    let serving = false;
+    const { host, calls } = scriptedHost({
+      read: async (input) => {
+        serving = true;
+        return parkedRead(input);
+      },
+    });
+    const port = bindTab(host, { project });
+    port.reconcile('chat-1', { wait: false });
+    await until(() => port.role('chat-1').role === 'leader' && calls.includes('claim'));
+    const follower = new BroadcastChannel(names.channel);
+    try {
+      follower.postMessage({
+        wire: agentWireVersion,
+        build: 'build-1',
+        kind: 'es',
+        chatId: 'chat-1',
+        sender: 'tab-a',
+        epoch: port.role('chat-1').epoch,
+        body: { corr: 'read-1', request: { chatId: 'chat-1', cursor: 0, limit: 16, maxBytes: 1_048_576 } },
+      });
+      await until(() => serving);
+
+      port.quiescent('chat-1', true);
+
+      await until(() => spies.debug.mock.calls.length > 0);
+      expect(spies.debug).toHaveBeenCalledWith('[agent-host leadership] a forwarded read was aborted', 'chat-1');
+      expect(spies.error).not.toHaveBeenCalled();
+    } finally {
+      follower.close();
+    }
+  });
+
+  /* D17: a reader that lets go of a forwarded read is answered from here, and the local read's abort is that answer. */
+  it('should reject a forwarded read its reader aborted with the local abort, not leave it unanswered', async () => {
+    const project = uniqueProject();
+    const holder = await playLeader(project, 'chat-1');
+    const { host } = scriptedHost();
+    const port = bindTab(host, { project });
+    const command = port.execute('chat-1', cancelCommand('cmd-1', 'chat-1'), async () => applied('cmd-1', 0));
+    holder.heartbeat();
+    await until(() => holder.commands.length > 0);
+    holder.answer(holder.commands[0]!.corr, applied('cmd-1', 1));
+    await command;
+    const reader = new AbortController();
+    const answered = port.read(readInput('chat-1', reader.signal), async () => {
+      throw new DOMException('The read was aborted.', 'AbortError');
+    });
+    holder.heartbeat();
+    await wait(50);
+
+    reader.abort();
+
+    await expect(within(answered, 500)).rejects.toMatchObject({ name: 'AbortError' });
+    holder.close();
   });
 });

@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type * as Revisions from '@taucad/revisions';
 import { bootstrapRemoteRevisionStore, largeObjectThresholdBytes } from '@taucad/revisions';
+import type * as GithubConnections from '#lib/github-connections.js';
 import { githubConnections } from '#lib/github-connections.js';
 import { prepareLinkedGithubImport } from '#lib/github-linked-import.js';
 import { setRevisionSessionUser } from '#lib/revision-actor.js';
@@ -81,5 +82,29 @@ describe('prepareLinkedGithubImport', () => {
       setup: { provenance: { actorId: 'tau-user-1', actor: { kind: 'user', id: 'tau-user-1', ...noreply } } },
     });
     setRevisionSessionUser(undefined);
+  });
+
+  describe('a GitHub account removed before Import and link (R23)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('should send the import page back to the account list, not to the backup', async () => {
+      const actual = await vi.importActual<typeof GithubConnections>('#lib/github-connections.js');
+      vi.mocked(githubConnections.token).mockImplementation(actual.githubConnections.token);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => Response.json({ code: 'GITHUB_CONNECTION_NOT_FOUND' }, { status: 401 })),
+      );
+
+      await expect(
+        prepareLinkedGithubImport({
+          selection,
+          targetBranch: 'main',
+          manifest: new TextEncoder().encode('{}'),
+          mainFile: 'main.scad',
+        }),
+      ).rejects.toThrow('This GitHub account is no longer connected. Refresh and choose another account.');
+    });
   });
 });

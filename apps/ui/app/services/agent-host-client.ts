@@ -146,20 +146,51 @@ export type AgentHostClientOptions = {
   /** The worker factory, for tests; the document's resident worker otherwise. */
   readonly createWorker?: (() => Worker) | undefined;
   /**
-   * The signed-in account the session cookie funds, read at every provide (W11 GI-Q6). The session's user by default;
-   * `undefined` when nobody is signed in or the session cannot be read.
+   * The signed-in account the session cookie funds, read at every provide (W11 GI-Q6). By default the session's user,
+   * read once per worker (R21); `undefined` when nobody is signed in or the session cannot be read.
    */
   readonly principal?: (() => Promise<string | undefined>) | undefined;
 };
 
-/** The signed-in user, as the auth client reads the session; `undefined` when there is none or it cannot be read. */
-const sessionPrincipal = async (): Promise<string | undefined> => {
+/** One read of the session: its user, and whether the auth server answered (a failed read is not kept). */
+type SessionRead = Readonly<{ principal: string | undefined; answered: boolean }>;
+
+/**
+ * Counts the session changes this document heard: the auth client signing in, signing out or changing the session, and
+ * the page shown again (when another tab may have). A worker's session read from an earlier count is read again.
+ */
+let sessionChanges = 0;
+let watchingSignal = false;
+let watchingPage = false;
+
+/** Count the session changes from the first read on: the triggers Better Auth's own session refetch listens to. */
+const watchSession = (signal: { listen: (listener: () => void) => unknown } | undefined): void => {
+  if (!watchingSignal && signal !== undefined) {
+    watchingSignal = true;
+    signal.listen(() => {
+      sessionChanges += 1;
+    });
+  }
+  if (!watchingPage && typeof document !== 'undefined') {
+    watchingPage = true;
+    const page = document;
+    page.addEventListener('visibilitychange', () => {
+      if (page.visibilityState === 'visible') {
+        sessionChanges += 1;
+      }
+    });
+  }
+};
+
+/** The signed-in user, as the auth client reads the session; no user when there is none or it cannot be read. */
+const readSession = async (): Promise<SessionRead> => {
   try {
     const { authClient } = await import('#lib/auth-client.js');
-    const { data } = await authClient.getSession();
-    return data?.user.id;
+    watchSession(authClient.$store.atoms['$sessionSignal']);
+    const { data, error } = await authClient.getSession();
+    return { principal: data?.user.id, answered: error === null };
   } catch {
-    return undefined;
+    return { principal: undefined, answered: false };
   }
 };
 
@@ -469,6 +500,8 @@ type Incarnation = {
    * and take fresh ones on a rebridge, until their release answers.
    */
   readonly retiring: Map<string, Readonly<{ projectId: string; options: AgentHostClientOptions }>>;
+  /** This worker's session read, shared by its provides until the session changes (R21). */
+  session?: Readonly<{ changes: number; read: Promise<SessionRead> }> | undefined;
   dead: boolean;
 };
 
@@ -629,10 +662,29 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     };
   };
 
+  /**
+   * The session's user for a provide in `live`: one read per worker, which every provide in it shares, read again once
+   * the session changed (R21). A read the auth server did not answer is not kept, so the next provide reads again.
+   */
+  const sessionPrincipalIn = async (live: Incarnation): Promise<string | undefined> => {
+    const cached = live.session;
+    if (cached?.changes === sessionChanges) {
+      const { principal } = await cached.read;
+      return principal;
+    }
+    const session = { changes: sessionChanges, read: readSession() };
+    live.session = session;
+    const { principal, answered } = await session.read;
+    if (!answered && live.session === session) {
+      live.session = undefined;
+    }
+    return principal;
+  };
+
   /** Give the live worker a new host incarnation for the project, with fresh bridges (RH-R4). */
   const provideTo = async (live: Incarnation, projectId: string): Promise<string> => {
     const options = registrationOf(projectId);
-    const principal = await (options.principal ?? sessionPrincipal)();
+    const principal = await (options.principal === undefined ? sessionPrincipalIn(live) : options.principal());
     const placementPort = options.openPlacementPort();
     if (placementPort === undefined) {
       throw Object.assign(

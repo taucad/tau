@@ -4574,7 +4574,7 @@ describe('ChatSessionStore', () => {
             publishLogPage(store, chatId, terminal, { cursor: 0, endCursor: 4 });
           } else {
             publishLogRows(store, chatId, terminal);
-            store.receiveHostReadAnswer(chatId, { status: 'refused', chatId, reason: 'unreadable' });
+            store.receiveHostReadAnswer(chatId, { status: 'refused', reason: 'unreadable' });
           }
           await store.requestTurn(chatId, queuedGesture('unknown'));
           publishLogRows(store, chatId, terminal);

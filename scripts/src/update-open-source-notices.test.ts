@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { generateNotices, parseVendoredComponents, platformFamilyName } from '#update-open-source-notices.mts';
+import {
+  generateNotices,
+  parseOcctRevision,
+  parseVendoredComponents,
+  platformFamilyName,
+} from '#update-open-source-notices.mts';
 
 describe('parseVendoredComponents', () => {
   it('reads cleared and deferred components and skips prose headings', () => {
@@ -52,6 +57,14 @@ describe('generateNotices', () => {
     vendored: [{ name: 'circuit-json', version: '0.0.485', status: 'DEFERRED', license: 'ISC' }],
     lgpl: 'GNU LESSER GENERAL PUBLIC LICENSE\n',
     occtException: 'Open CASCADE exception (version 1.0) to GNU LGPL version 2.1.\n',
+    engine: { version: '0.1.0-next.19', occtRevision: '3d097a0328e71b826377d4814ab05ec3c3d23871' },
+  });
+
+  it('names the installed GeoSpec engine release and the OCCT revision it compiles in', () => {
+    expect(notices).toContain('- The GeoSpec engine (`geospec-engine` 0.1.0-next.19), built from OCCT upstream');
+    expect(notices).toContain(
+      '  revision `3d097a0328e71b826377d4814ab05ec3c3d23871` ([source](https://github.com/taucad/geospec))',
+    );
   });
 
   it('gives the Open CASCADE notice, its components and the reverse-engineering permission', () => {
@@ -69,5 +82,22 @@ describe('generateNotices', () => {
     expect(notices).toContain('| [zod](https://github.com/colinhacks/zod) | 4.1.12 | MIT |');
     expect(notices).toContain('| unlabelled | 1.0.0 | Not declared |');
     expect(notices).toContain('| circuit-json | 0.0.485 | ISC, license text pending |');
+  });
+});
+
+describe('parseOcctRevision', () => {
+  it('reads the revision pinned by the OCCT source archive URL', () => {
+    const receipt = JSON.stringify({
+      occtSourceArchive: {
+        url: 'https://github.com/Open-Cascade-SAS/OCCT/archive/3d097a0328e71b826377d4814ab05ec3c3d23871.tar.gz',
+      },
+    });
+    expect(parseOcctRevision(receipt)).toBe('3d097a0328e71b826377d4814ab05ec3c3d23871');
+  });
+
+  it('refuses a receipt that pins no revision', () => {
+    expect(() =>
+      parseOcctRevision(JSON.stringify({ occtSourceArchive: { url: 'https://example.com/occt.tar.gz' } })),
+    ).toThrow('names no OCCT upstream revision');
   });
 });

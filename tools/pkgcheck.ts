@@ -482,14 +482,6 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
     '#bambu-studio/engine.js':
       'node/default platform swap for the Bambu Studio engine, pinned by src/slicer.plugin.test.ts',
   },
-  '@taucad/geospec-engine-native': {
-    '#native-binding':
-      'workspace NAPI-RS generated types/Node loader and published copied dist loader select a private platform addon outside src',
-    '#mixed-wasm-binding':
-      'workspace generated Emscripten glue and published copied dist glue retain an adjacent external Wasm asset outside src',
-    '#bench/*':
-      'NodeNext benchmark harness lives outside src and workspace lint bans the relative imports that would replace this private development-only alias',
-  },
   '@taucad/openrscad': {
     '#e2e/*.js': 'browser USDZ harness outside src/; relative imports are banned workspace-wide',
   },

@@ -27,7 +27,9 @@
 #   - `ui@*` and `desktop@*` also get the GeoSpec engine's complete source and
 #     relink kit and the OCCT licence texts as release assets (`source-kit`),
 #     because both ship OCCT compiled into the engine; so does a staging desktop
-#     prerelease.
+#     prerelease. The kit is the taucad/geospec release asset for the
+#     `geospec-engine` catalog pin; while that asset is missing, these releases
+#     refuse.
 #
 # A dispatched rebuild, from `main` or at the tag, builds without deploying;
 # production deploys only from the `release` event's run at the tag. Rollbacks
@@ -37,7 +39,8 @@
 # commit, so this workflow's run for that `head_sha` (event `release`, title the
 # tag) carries the release. Its production deploy jobs are `production-api`,
 # `production-ui` and `production-docs`, which start once `Verify <tag>` passes
-# (the desktop's macOS job waits on `desktop`), and the `production`
+# (`production-ui` also waits on `source-kit`; the desktop's macOS job waits on
+# `desktop`), and the `production`
 # environment's deployment status for the tag is the outcome.
 #
 # Nothing here publishes an npm package.
@@ -168,11 +171,9 @@ jobs:
           test "$actual" = "$VERSION" \
             || { echo "::error::$root/package.json is $actual, the tag says $VERSION"; exit 1; }
 
-      # The UI, desktop and API builds need the GeoSpec engine products, which
-      # only main CI's macOS producer makes. Waiting for that run also means a
-      # release is built only once main is green on its commit.
-      - name: Take the GeoSpec artifact from the release commit's main CI run
-        uses: ./.github/actions/geospec-artifact-from-main
+      # A release is built only once main is green on its commit.
+      - name: Require the release commit's main CI run to have passed
+        uses: ./.github/actions/main-ci-success
         with:
           wait-minutes: '180'
           github-token: ${{ github.token }}
@@ -186,8 +187,9 @@ jobs:
   # engine that the UI serves as Wasm and the desktop app bundles, so each UI
   # and desktop release carries the complete source and relink kit, the OCCT
   # licence and exception, and the GeoSpec notices as release assets. The kit
-  # comes from the release commit's main CI run and must match the receipt in
-  # packages/geospec-engine-native/licenses/SOURCE-RELINK.json.
+  # is the taucad/geospec release asset for the installed `geospec-engine` pin
+  # and must match the receipt in that package's licenses/SOURCE-RELINK.json;
+  # without it the job refuses.
   source-kit:
     needs: [resolve, verify-app]
     if: needs.resolve.outputs.project == 'ui' || needs.resolve.outputs.project == 'desktop'
@@ -210,28 +212,20 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
-      - name: Take the GeoSpec artifact from the release commit's main CI run
-        uses: ./.github/actions/geospec-artifact-from-main
+      - name: Take the GeoSpec source and relink kit for the engine pin
+        id: kit
+        uses: ./.github/actions/geospec-source-relink
         with:
           github-token: ${{ github.token }}
 
-      - name: Check the kit against its receipt
+      - name: Gather the kit and notices
+        env:
+          KIT: ${{ steps.kit.outputs.archive }}
+          LICENSES: ${{ steps.kit.outputs.licenses }}
         run: |
           set -euo pipefail
-          # The build writes the receipt and notices into the package it ships, so
-          # take them from there: committed copies describe an earlier build.
-          tarballs=out/artifacts/geospec-native-engine/ci/assembly/tarballs
-          tar -xzf "$tarballs/root.tgz" -C "$RUNNER_TEMP" package/licenses
-          licenses="$RUNNER_TEMP/package/licenses"
-          receipt="$licenses/SOURCE-RELINK.json"
-          name=$(jq -r .artifact.fileName "$receipt")
-          kit="$tarballs/$name"
-          expected=$(jq -r .artifact.sha256 "$receipt")
-          actual=$(sha256sum "$kit" | cut -d' ' -f1)
-          if [ "$actual" != "$expected" ]; then
-            echo "::error::$name is $actual; SOURCE-RELINK.json records $expected."
-            exit 1
-          fi
+          licenses="$LICENSES"
+          kit="$KIT"
           mkdir -p "$RUNNER_TEMP/source-kit"
           cp "$kit" "$RUNNER_TEMP/source-kit/"
           cp "$licenses/OCCT-LGPL-2.1.txt" "$licenses/OCCT-LGPL-exception.txt" "$RUNNER_TEMP/source-kit/"
@@ -281,61 +275,19 @@ jobs:
         with:
           node-version: '24.10.0'
 
-      # The GeoSpec native payload is produced on this host, as publish.yml does.
-      - name: Setup producer Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.13.14'
-
-      - name: Setup selected CPython 3.13 tooling
-        id: python313
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.13.14'
-          update-environment: false
-
-      - name: Setup selected CPython 3.14 tooling
-        id: python314
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.14.7'
-          update-environment: false
-
-      - name: Check host, capacity and installed tools
+      - name: Check the packaging host
         run: |
           test "$(uname -s)" = Darwin
           test "$(uname -m)" = arm64
-          node --input-type=module -e 'import {statfsSync} from "node:fs"; const s=statfsSync("."); const available=s.bavail*s.bsize; const required=19*1024**3; console.log({available,required}); if(available<required) throw new Error("Desktop packaging capacity unavailable");'
-          cmake --version
-          ninja --version
-          xcrun --find clang++
 
-      - name: Provision pinned Python wrapper tooling
-        env:
-          GEOSPEC_PYTHON313: ${{ steps.python313.outputs.python-path }}
-          GEOSPEC_PYTHON314: ${{ steps.python314.outputs.python-path }}
-        run: |
-          python3 - <<'PYTHON'
-          import os
-          from pathlib import Path
-          import re
-          import subprocess
-          import tomllib
-
-          project = Path('packages/geospec-engine-native/bindings/python/pyproject.toml')
-          requirements = tomllib.loads(project.read_text())['build-system']['requires']
-          assert len(requirements) == 1 and re.fullmatch(r'maturin==[0-9]+\.[0-9]+\.[0-9]+', requirements[0])
-          for selector, name in [('GEOSPEC_PYTHON313', 'python-venv'), ('GEOSPEC_PYTHON314', 'python314-venv')]:
-              environment = Path('node_modules/.cache/geospec-engine-native') / name
-              subprocess.run([os.environ[selector], '-m', 'venv', str(environment)], check=True)
-              subprocess.run([str(environment / 'bin/python'), '-m', 'pip', 'install',
-                              '--disable-pip-version-check', '--only-binary=:all:', '--no-deps', requirements[0]], check=True)
-          PYTHON
-
-      - name: Install the selected native Rust toolchain
-        run: |
-          rustup toolchain install 1.88 --profile minimal
-          rustup run 1.88 rustc --version
+      # The engine's darwin-arm64 binding installs with the workspace; its LGPL
+      # source and relink kit comes from the engine pin's taucad/geospec release,
+      # and package-macos-release refuses to package without it.
+      - name: Take the GeoSpec source and relink kit for the engine pin
+        id: geospec-kit
+        uses: ./.github/actions/geospec-source-relink
+        with:
+          github-token: ${{ github.token }}
 
       # prepare-build123d-python resolves its wheels with uv, as on the
       # portable hosts.
@@ -401,6 +353,8 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Package, sign and notarize
+        env:
+          TAU_GEOSPEC_SOURCE_RELINK_ARCHIVE: ${{ steps.geospec-kit.outputs.archive }}
         run: pnpm nx run desktop:package-macos-release --parallel=1
 
       # Uploaded before verification so a failed verify leaves the signed app
@@ -448,8 +402,8 @@ jobs:
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
       TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/${{ matrix.platform }}
     steps:
-      # Windows checkouts default to CRLF, which changes the GeoSpec product key
-      # main CI computed and breaks its lockfile parse; keep the committed bytes.
+      # Windows checkouts default to CRLF, which breaks the lockfile parse; keep
+      # the committed bytes.
       - name: Keep committed line endings
         run: git config --global core.autocrlf false
 
@@ -461,11 +415,6 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
-
-      - name: Take the GeoSpec artifact from the release commit's main CI run
-        uses: ./.github/actions/geospec-artifact-from-main
-        with:
-          github-token: ${{ github.token }}
 
       # prepare-build123d-python resolves its wheels with uv on both hosts;
       # prepare-git builds git on Linux against libcurl and zlib.
@@ -624,8 +573,10 @@ jobs:
       app: api
     secrets: inherit
 
+  # The UI serves OCCT compiled into the GeoSpec engine, so it ships only once
+  # `source-kit` has attached that engine's source and relink kit.
   production-ui:
-    needs: [resolve, verify-app]
+    needs: [resolve, verify-app, source-kit]
     if: >-
       github.event_name == 'release' && needs.resolve.outputs.project == 'ui' &&
       github.ref == format('refs/tags/{0}', needs.resolve.outputs.tag)
@@ -636,7 +587,6 @@ jobs:
     uses: ./.github/workflows/deploy-ui.yml
     with:
       environment: production
-      transport: main-run
     secrets: inherit
 
   production-docs:

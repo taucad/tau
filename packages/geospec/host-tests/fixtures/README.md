@@ -4,10 +4,13 @@
 retained bytes. Original paths inside the documents remain unchanged: they identify
 the historical source, not a requirement for a local Brain or build cache.
 
-The closure contains 94 original paths. Forty-five reuse byte-identical tracked
-package fixtures; 49 new loose files under `data/` total 16,072,908 bytes. Filenames
-are SHA-256 digests, with no extension so formatters cannot rewrite frozen JSON or
-STEP bytes. The manifest records lengths and hashes for both retained and reused
+The closure contains 112 original paths. Seventeen reuse byte-identical tracked
+fixtures under `packages/geospec-engine/fixtures`; the other 95 resolve to 94 loose
+files under `data/` totalling 22,765,000 bytes. The 27 inputs that lived in the
+compiled engine's source tree (its conformance corpora and OCCT test STEP files)
+moved into `data/` byte for byte when the engine left this repository for
+taucad/geospec. Filenames are SHA-256 digests, with no extension so formatters
+cannot rewrite frozen JSON or STEP bytes. The manifest records lengths and hashes for both retained and reused
 files. These are test inputs, not regenerated expected results or binary archives.
 
 `read-fixture.mjs` resolves only explicit manifest members and verifies their bytes.

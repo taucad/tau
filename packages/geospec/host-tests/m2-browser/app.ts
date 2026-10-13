@@ -1,5 +1,5 @@
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- The browser fixture resolves this import from the explicit clean consumer.
-import { Engine, canonicalize, initialize } from '@taucad/geospec-engine-native';
+import { Engine, canonicalize, initialize } from 'geospec-engine';
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from 'geospec/assertion-client';
 import type {
   GeoSpecAssertionClient,

@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       wait-minutes:
-        description: "How long to wait for the commit's ci.yml run on main to finish (it supplies the GeoSpec products)"
+        description: "How long to wait for the commit's ci.yml run on main to finish; previews publish only a passed commit"
         required: false
         default: '90'
 
@@ -40,9 +40,8 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
-      # The macOS producer cannot run here: take this commit's GeoSpec products from its main CI run.
-      - name: GeoSpec products from main
-        uses: ./.github/actions/geospec-artifact-from-main
+      - name: Require this commit's main CI run to have passed
+        uses: ./.github/actions/main-ci-success
         with:
           wait-minutes: ${{ inputs.wait-minutes }}
           github-token: ${{ github.token }}

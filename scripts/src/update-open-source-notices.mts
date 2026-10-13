@@ -6,7 +6,8 @@
  * package with its declared license, names the vendored tscircuit engine
  * components from their own license record, and carries the Open CASCADE
  * Technology notice with the unmodified LGPL-2.1 and Open CASCADE exception
- * texts. The UI renders the file at `/legal/open-source`; the macOS package
+ * texts, read from the installed `geospec-engine` package together with the
+ * OCCT revision its SOURCE-RELINK receipt pins. The UI renders the file at `/legal/open-source`; the macOS package
  * ships the same file inside the app bundle.
  *
  * Usage: node --import tsx scripts/src/update-open-source-notices.mts [--check]
@@ -27,7 +28,7 @@ import type { PackageInfo, ScannedPackage } from '#update-license-deps.mts';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDirectory = join(__dirname, '../..');
 const appDirectories = [join(rootDirectory, 'apps/ui'), join(rootDirectory, 'apps/desktop')];
-const occtLicenseDirectory = join(rootDirectory, 'packages/geospec-engine-native/licenses');
+const engineName = 'geospec-engine';
 const tscircuitLicenseFile = join(rootDirectory, 'packages/plugins/tscircuit/THIRD_PARTY_LICENSES.md');
 export const outputFile = join(rootDirectory, 'apps/ui/app/routes/legal.open-source/open-source-notices.txt');
 
@@ -142,13 +143,33 @@ const fence = (text: string): string[] => ['```text', text.replace(/\s+$/, ''), 
 const repositoryLink = (packageInfo: PackageInfo): string =>
   packageInfo.repository?.startsWith('https://') ? ` ([source](${packageInfo.repository}))` : '';
 
+/** The installed GeoSpec engine release and the OCCT revision it compiles in. */
+export type EngineRelease = { version: string; occtRevision: string };
+
+/**
+ * Read the OCCT upstream revision from the engine's SOURCE-RELINK receipt.
+ *
+ * @returns The 40-hex revision the receipt's OCCT source archive URL pins.
+ */
+export function parseOcctRevision(receipt: string): string {
+  const parsed = JSON.parse(receipt) as { occtSourceArchive?: { url?: unknown } };
+  const url = parsed.occtSourceArchive?.url;
+  const match = typeof url === 'string' ? /\/archive\/([0-9a-f]{40})\.tar\.gz$/u.exec(url) : null;
+  if (!match) {
+    throw new Error('The GeoSpec engine SOURCE-RELINK receipt names no OCCT upstream revision.');
+  }
+
+  return match[1]!;
+}
+
 export function generateNotices(input: {
   packages: PackageInfo[];
   vendored: VendoredComponent[];
   lgpl: string;
   occtException: string;
+  engine: EngineRelease;
 }): string {
-  const { packages, vendored, lgpl, occtException } = input;
+  const { packages, vendored, lgpl, occtException, engine } = input;
   const sorted = packages.toSorted((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
   const occtPackages = sorted.filter(({ name }) =>
     ['libcascade', 'occt-import-js', 'replicad-opencascadejs'].includes(name),
@@ -158,8 +179,9 @@ export function generateNotices(input: {
     '# Open-Source Notices',
     '',
     'Tau is open-source software. All Tau-authored source, including the GeoSpec engine, is licensed under the',
-    '[Apache License 2.0](https://github.com/taucad/tau/blob/main/license), and its complete source is published at',
-    '[github.com/taucad/tau](https://github.com/taucad/tau).',
+    '[Apache License 2.0](https://github.com/taucad/tau/blob/main/license). The complete source of Tau is published at',
+    '[github.com/taucad/tau](https://github.com/taucad/tau), and that of the GeoSpec engine at',
+    '[github.com/taucad/geospec](https://github.com/taucad/geospec).',
     '',
     'Tau includes third-party software, listed on this page with its licenses. Each component remains under its own',
     'license, and nothing in our [Terms of Service](/legal/terms) limits the rights those licenses give you.',
@@ -174,15 +196,15 @@ export function generateNotices(input: {
     'OCCT runs in the web and desktop apps as WebAssembly and, in the desktop app, as a native library, through these',
     'components:',
     '',
-    '- The GeoSpec engine (`@taucad/geospec-engine-native`), built from OCCT upstream',
-    '  revision `3d097a0328e71b826377d4814ab05ec3c3d23871`',
+    `- The GeoSpec engine (\`${engineName}\` ${engine.version}), built from OCCT upstream`,
+    `  revision \`${engine.occtRevision}\` ([source](https://github.com/taucad/geospec))`,
     ...occtPackages.map((packageInfo) => `- ${packageInfo.name} ${packageInfo.version}${repositoryLink(packageInfo)}`),
     '',
     'You may modify the OCCT portions of Tau for your own use, and reverse engineer them to debug such modifications.',
     'Every Tau web and desktop release on [GitHub Releases](https://github.com/taucad/tau/releases) attaches the',
     'corresponding OCCT source and relink kit, these license texts and the GeoSpec engine notices. The macOS app also',
-    'carries the kit inside the app bundle, under `Tau.app/Contents/Resources/SOURCES`. The source of Tau, including how',
-    'it builds and links OCCT, is at [github.com/taucad/tau](https://github.com/taucad/tau).',
+    'carries the kit inside the app bundle, under `Tau.app/Contents/Resources/SOURCES`. The source of the GeoSpec engine,',
+    'including how it builds and links OCCT, is at [github.com/taucad/geospec](https://github.com/taucad/geospec).',
     '',
     '## Third-Party Packages',
     '',
@@ -238,16 +260,27 @@ async function main(): Promise<void> {
       ]),
     ).values(),
   ];
-  const [tscircuitRecord, lgpl, occtException] = await Promise.all([
+  const engineDirectory = await resolvePackageDirectory(engineName, appDirectories[0]!);
+  if (!engineDirectory) {
+    throw new Error(`${engineName} is not installed for apps/ui; run pnpm install.`);
+  }
+  const engineManifest = await readManifest(engineDirectory);
+  if (engineManifest?.name !== engineName || !engineManifest.version) {
+    throw new Error(`The installed ${engineName} manifest is invalid.`);
+  }
+  const occtLicenseDirectory = join(engineDirectory, 'licenses');
+  const [tscircuitRecord, lgpl, occtException, sourceRelink] = await Promise.all([
     readFile(tscircuitLicenseFile, 'utf8'),
     readFile(join(occtLicenseDirectory, 'OCCT-LGPL-2.1.txt'), 'utf8'),
     readFile(join(occtLicenseDirectory, 'OCCT-LGPL-exception.txt'), 'utf8'),
+    readFile(join(occtLicenseDirectory, 'SOURCE-RELINK.json'), 'utf8'),
   ]);
   const notices = generateNotices({
     packages,
     vendored: parseVendoredComponents(tscircuitRecord),
     lgpl,
     occtException,
+    engine: { version: engineManifest.version, occtRevision: parseOcctRevision(sourceRelink) },
   });
   console.log(`App closure: ${String(closure.length)} packages, ${String(packages.length)} third-party listed`);
 

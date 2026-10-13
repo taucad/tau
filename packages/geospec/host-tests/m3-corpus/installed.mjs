@@ -13,8 +13,7 @@ import { fixturePath, readFixture } from '../fixtures/read-fixture.mjs';
 
 const backend = process.env.GEOSPEC_INSTALLED_BACKEND ?? 'native';
 assert.ok(backend === 'native' || backend === 'mixed');
-const backendSpecifier =
-  backend === 'mixed' ? '@taucad/geospec-engine-native/wasm' : '@taucad/geospec-engine-native/node';
+const backendSpecifier = backend === 'mixed' ? 'geospec-engine/wasm' : 'geospec-engine/node';
 const nativeModule = await import(backendSpecifier);
 if (backend === 'mixed') {
   await nativeModule.initialize();

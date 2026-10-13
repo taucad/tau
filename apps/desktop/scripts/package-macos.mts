@@ -16,9 +16,9 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, openSync, readSync } from 'node:fs';
-import { cp, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { flipFuses, FuseVersion } from '@electron/fuses';
@@ -125,7 +125,9 @@ if ([resolve('/'), homedir(), tmpdir(), desktopRoot, workspaceRoot].includes(out
 /* LGPL-2.1 co-delivery: the engine compiles OCCT in, so a release carries the engine's source and
  * relink archive. taucad/geospec publishes it beside each engine release; the receipt inside the
  * installed package pins its bytes. A development package still assembles, and says what it left out. */
-const geospecSourceRelinkArchive = process.env['TAU_GEOSPEC_SOURCE_RELINK_ARCHIVE'] || undefined;
+const geospecSourceRelinkArchive = process.env['TAU_GEOSPEC_SOURCE_RELINK_ARCHIVE']?.trim()
+  ? process.env['TAU_GEOSPEC_SOURCE_RELINK_ARCHIVE']
+  : undefined;
 if (release && geospecSourceRelinkArchive === undefined) {
   throw new Error(
     'A release package must ship the GeoSpec source/relink archive; set TAU_GEOSPEC_SOURCE_RELINK_ARCHIVE.',

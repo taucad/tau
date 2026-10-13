@@ -3,7 +3,7 @@ import { createRuntimeClient } from '@taucad/runtime/client';
 import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer';
 import { createHostGeoSpecRunner } from '@taucad/host/agent-tools';
 import { queryDirectAp242MinimumDistance } from '@taucad/agent-tools/geospec';
-import { Engine } from '@taucad/geospec-engine-native/node';
+import { Engine } from 'geospec-engine/node';
 import type { HostGeoSpecRuntimeClient } from '@taucad/host/agent-tools';
 import type { UtilityPort } from '#tau/services-host.impl.js';
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';

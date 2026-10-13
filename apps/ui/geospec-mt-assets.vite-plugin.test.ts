@@ -25,7 +25,7 @@ describe('GeoSpec qualified MT client assets', () => {
       writeFileSync(
         path.join(stage, 'package.json'),
         JSON.stringify({
-          name: '@taucad/geospec-engine-native',
+          name: 'geospec-engine',
           exports: {
             './mt-assets/permits-4/*': './dist/bindings/mt-wasm/permits-4/*',
           },

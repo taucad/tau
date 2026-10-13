@@ -125,10 +125,13 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
   const [oauthPending, setOauthPending] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
-  /* *Refresh* reloads each level explicitly, whether or not GitHub's answer changed. */
-  const [installationsReload, setInstallationsReload] = useState(0);
-  const [repositoriesReload, setRepositoriesReload] = useState(0);
-  const [branchesReload, setBranchesReload] = useState(0);
+  /*
+   * *Refresh* reloads each level explicitly, whether or not GitHub's answer changed. Each level's
+   * request carries the selection to keep; it applies only while it is still the current refresh.
+   */
+  const [installationsReload, setInstallationsReload] = useState<CatalogSelection>();
+  const [repositoriesReload, setRepositoriesReload] = useState<CatalogSelection>();
+  const [branchesReload, setBranchesReload] = useState<CatalogSelection>();
   const refreshing = useRef<CatalogSelection | undefined>(undefined);
   const oauthAbort = useRef<AbortController | undefined>(undefined);
   const oauthAttempt = useRef<string | undefined>(undefined);
@@ -180,7 +183,10 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     }
     let active = true;
     setBusy(true);
-    const kept = refreshing.current?.connectionId === connectionId ? refreshing.current : undefined;
+    const kept =
+      installationsReload === refreshing.current && installationsReload?.connectionId === connectionId
+        ? installationsReload
+        : undefined;
     refreshing.current = kept;
     /* A refresh keeps the current lists in place until the new ones arrive. */
     if (kept === undefined) {
@@ -211,7 +217,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         catalogGeneration.current += 1;
         const keepsInstallation = kept !== undefined && found.some((item) => String(item.id) === kept.installationId);
         if (keepsInstallation) {
-          setRepositoriesReload((reload) => reload + 1);
+          setRepositoriesReload(kept);
         } else {
           refreshing.current = undefined;
         }
@@ -241,7 +247,10 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     }
     let active = true;
     setBusy(true);
-    const kept = refreshing.current?.installationId === installationId ? refreshing.current : undefined;
+    const kept =
+      repositoriesReload === refreshing.current && repositoriesReload?.installationId === installationId
+        ? repositoriesReload
+        : undefined;
     const loadRepositories = async (): Promise<void> => {
       try {
         const result = await githubConnections.repositories(connectionId, Number(installationId));
@@ -276,7 +285,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         setRepositoryHasMore(result.repositories.length > 0 && result.repositories.length < result.totalCount);
         setRepositoryPage(1);
         if (keepsRepository) {
-          setBranchesReload((reload) => reload + 1);
+          setBranchesReload(kept);
           setBusy(false);
           return;
         }
@@ -312,7 +321,10 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     }
     let active = true;
     setBusy(true);
-    const kept = refreshing.current?.repository?.id === repository.id ? refreshing.current : undefined;
+    const kept =
+      branchesReload === refreshing.current && branchesReload?.repository?.id === repository.id
+        ? branchesReload
+        : undefined;
     const loadBranches = async (): Promise<void> => {
       try {
         const result = await githubConnections.branches(connectionId, repository.id);
@@ -439,14 +451,15 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
   /* R6: reload accounts, installations, repositories and branches, keeping each selection that still exists. */
   const refreshCatalog = useCallback(async (): Promise<void> => {
     catalogGeneration.current += 1;
-    refreshing.current = { connectionId, installationId, repository, branchName };
+    const selection = { connectionId, installationId, repository, branchName };
+    refreshing.current = selection;
     setNotice(undefined);
     const found = await loadConnections();
     if (found === undefined) {
       refreshing.current = undefined;
     } else if (found.some((item) => item.id === connectionId)) {
       /* The same account: its id did not change, so reload its installations explicitly. */
-      setInstallationsReload((reload) => reload + 1);
+      setInstallationsReload(selection);
     }
   }, [branchName, connectionId, installationId, loadConnections, repository]);
 

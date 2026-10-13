@@ -96,6 +96,13 @@ describe('desktopEnvironment', () => {
     });
   });
 
+  it.each([
+    ['false', false],
+    ['true', true],
+  ])('should publish TAU_DEBUG=%s to the renderer as %s', (raw, expected) => {
+    expect(clientEnvironment({ TAU_DEBUG: raw })['TAU_DEBUG']).toBe(expected);
+  });
+
   it('publishes the billing environment the cloud renderer needs', () => {
     expect(clientEnvironment({ TAU_BILLING_ENVIRONMENT: 'development' })).toMatchObject({
       TAU_BILLING_ENVIRONMENT: 'development',

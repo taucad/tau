@@ -93,7 +93,7 @@ export type AppIconTheme = 'light' | 'dark';
 /** What main puts behind {@link bootstrapArgumentPrefix}. */
 export type DesktopBootstrap = {
   /** The `window.ENV` allowlist, resolved in main. */
-  readonly env: Record<string, string>;
+  readonly env: Record<string, string | boolean>;
   /** `app.getPath('userData')/home` — known at preload time, per L2's contract. */
   readonly homeRoot: string;
   /** Capability advertisement used by the shared renderer's product catalog. */

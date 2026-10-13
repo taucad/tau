@@ -54,6 +54,7 @@ import {
   desktopAgentGatewayBaseUrl,
   desktopAgentSystemPrompt,
   desktopEnvironment,
+  isEnvironmentSwitchOn,
   packagedChannel,
   packagedOverridesEnabled,
   stripPackagedOverrides,
@@ -1089,7 +1090,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       refuse('services.unknown-concern');
       return;
     }
-    if (concern === 'geospecPerformance' && !/^(1|true)$/iu.test(environment['TAU_DEBUG'] ?? '')) {
+    if (concern === 'geospecPerformance' && !isEnvironmentSwitchOn(environment['TAU_DEBUG'])) {
       refuse('GeoSpec performance tools require TAU_DEBUG.');
       return;
     }

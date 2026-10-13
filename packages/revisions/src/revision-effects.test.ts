@@ -2966,7 +2966,7 @@ for (const actorSet of actorSets) {
       it('should name no file count when a later merge left nothing to choose (R13)', async () => {
         const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
         const revision = await conflicted(context);
-        /* main took the other side after the conflict was recorded, so no file still differs. */
+        /* The main line took the other side after the conflict was recorded, so no file still differs. */
         const later = await context.write({ 'a.txt': 'theirs\n' }, [context.ours], 'Took theirs');
         await context.port.updateRef({ name: 'main', expectedHead: revisionId(context.ours), head: revisionId(later) });
         await context.filesystem.writeFile('a.txt', 'theirs\n');

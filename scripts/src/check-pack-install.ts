@@ -120,7 +120,15 @@ export const unrewrittenSiblings = (manifest: Manifest, published: ReadonlySet<s
  * module body runs, so a missing sibling file surfaces as ERR_MODULE_NOT_FOUND and stays red.
  * Anything not listed here, and any listed entry that fails differently, is red.
  */
-const toleratedImportFailures: Record<string, string> = {};
+const toleratedImportFailures: Record<string, string> = {
+  // @rjsf/core and @rjsf/utils 5.x publish CommonJS `main` plus an ESM `module` field and no `exports`,
+  // so a bundler (the viewer's consumers) takes their ESM build while bare Node ESM cannot read their
+  // named exports. Reported for the viewer's owner; a bundled consumer is unaffected.
+  '@taucad/viewer/parameters/parameters': "The requested module '@rjsf/core' is a CommonJS module",
+  '@taucad/viewer/parameters/rjsf-field-path': "The requested module '@rjsf/core' is a CommonJS module",
+  '@taucad/viewer/parameters/rjsf-theme': "The requested module '@rjsf/core' does not provide an export named",
+  '@taucad/viewer/parameters/rjsf-validator': "The requested module '@rjsf/utils' is a CommonJS module",
+};
 
 /**
  * Payloads that only fail when instantiated, keyed by package name; the source runs inside the

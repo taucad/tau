@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router';
 import { useLoaderData, useLocation, useParams } from 'react-router';
 import { getActiveGroupValues, parameterEntryPath, parseProjectManifestBytes } from '@taucad/types';
@@ -425,26 +425,138 @@ export const PortableShareSurface = (): React.JSX.Element => {
  *
  * Its inset matches the viewer controls: the workbench's p-2 frame, its
  * 1px border, and the controls' inset-2 spacing. Shown from
- * `lg`, where the viewer is wide enough to keep the card off both the bar and
- * the workbench; phones and tablets have no desktop app to open.
+ * `lg`; viewer controls use the space beside it, compacting before moving above.
+ * Phones and tablets have no desktop app to open.
  *
  * @returns The offer's corner.
  */
-const ShareDesktopOffer = (): React.JSX.Element => (
-  <div className='pointer-events-none fixed bottom-[calc(var(--spacing)*4+1px)] left-[calc(var(--spacing)*4+1px)] z-50 hidden lg:block'>
-    <div className='pointer-events-auto [&>[data-slot=card]]:shadow-xs'>
-      <OpenInDesktop continueLabel='Continue in the browser' />
+const ShareDesktopOffer = (): React.JSX.Element => {
+  const offerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const offer = offerRef.current;
+    const surface = offer?.parentElement;
+    if (!offer || !surface) {
+      return;
+    }
+
+    let animationFrame = 0;
+    const observed = new Set<Element>();
+    const shifted = new Set<HTMLElement>();
+    const update = (): void => {
+      animationFrame = 0;
+      const offerBounds = offer.getBoundingClientRect();
+      const targets = new Set<Element>([offer]);
+      for (const controls of surface.querySelectorAll<HTMLElement>('[data-viewer-bottom-controls]')) {
+        const viewer = controls.closest<HTMLElement>('[data-viewer-frame]');
+        const menu = controls.querySelector<HTMLElement>('[data-slot="viewer-controls"]');
+        if (!viewer || !menu) {
+          continue;
+        }
+        targets.add(viewer);
+        targets.add(menu);
+        // Measure the natural layout, not the animated position, so a successful move cannot undo itself.
+        delete controls.dataset['desktopOfferCompact'];
+        const viewerBounds = viewer.getBoundingClientRect();
+        const menuBounds = menu.getBoundingClientRect();
+        const inset = Number.parseFloat(getComputedStyle(controls).bottom) || 0;
+        const bottom = viewerBounds.bottom - inset;
+        const sharesBottom =
+          offerBounds.width > 0 &&
+          offerBounds.height > 0 &&
+          menuBounds.width > 0 &&
+          offerBounds.right > viewerBounds.left + inset &&
+          offerBounds.left < viewerBounds.right - inset &&
+          bottom > offerBounds.top &&
+          bottom - menuBounds.height < offerBounds.bottom;
+        let x = 0;
+        let y = 0;
+        if (sharesBottom) {
+          const availableLeft = Math.max(offerBounds.right + inset, viewerBounds.left + inset);
+          const availableRight = viewerBounds.right - inset;
+          const availableWidth = availableRight - availableLeft;
+          let menuWidth = menuBounds.width;
+          if (menuWidth > availableWidth) {
+            controls.dataset['desktopOfferCompact'] = '';
+            menuWidth = menu.getBoundingClientRect().width;
+          }
+          if (menuWidth <= availableWidth) {
+            const naturalCenter = viewerBounds.left + viewerBounds.width / 2;
+            x = (availableLeft + availableRight) / 2 - naturalCenter;
+          } else {
+            // Only the final fallback moves above; the whole viewer can show the normal labels again.
+            delete controls.dataset['desktopOfferCompact'];
+            y = offerBounds.top - bottom - inset;
+          }
+        }
+        controls.style.setProperty('--share-desktop-offer-x', `${x}px`);
+        controls.style.setProperty('--share-desktop-offer-y', `${y}px`);
+        shifted.add(controls);
+      }
+      for (const element of observed) {
+        if (!targets.has(element)) {
+          resizeObserver.unobserve(element);
+          observed.delete(element);
+        }
+      }
+      for (const element of targets) {
+        if (!observed.has(element)) {
+          resizeObserver.observe(element);
+          observed.add(element);
+        }
+      }
+      for (const controls of shifted) {
+        if (!surface.contains(controls)) {
+          controls.style.removeProperty('--share-desktop-offer-x');
+          controls.style.removeProperty('--share-desktop-offer-y');
+          delete controls.dataset['desktopOfferCompact'];
+          shifted.delete(controls);
+        }
+      }
+    };
+    const schedule = (): void => {
+      if (!animationFrame) {
+        animationFrame = requestAnimationFrame(update);
+      }
+    };
+    const resizeObserver = new ResizeObserver(schedule);
+    // Viewers arrive asynchronously and tabs can be split/rearranged; dismissal also removes the card's content.
+    const mutationObserver = new MutationObserver(schedule);
+    mutationObserver.observe(surface, { childList: true, subtree: true });
+    window.addEventListener('resize', schedule);
+    schedule();
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      window.removeEventListener('resize', schedule);
+      for (const controls of shifted) {
+        controls.style.removeProperty('--share-desktop-offer-x');
+        controls.style.removeProperty('--share-desktop-offer-y');
+        delete controls.dataset['desktopOfferCompact'];
+      }
+    };
+  }, []);
+
+  return (
+    <div
+      ref={offerRef}
+      className='pointer-events-none fixed bottom-[calc(var(--spacing)*4+1px)] left-[calc(var(--spacing)*4+1px)] z-50 hidden lg:block'
+    >
+      <div className='pointer-events-auto [&>[data-slot=card]]:shadow-xs'>
+        <OpenInDesktop continueLabel='Continue in the browser' />
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 export default function ShareRoute(): React.JSX.Element {
   const data = useLoaderData<ShareRouteLoaderData | PublicationRouteLoaderData>();
   return (
-    <>
+    <div className='contents'>
       {'kind' in data && data.kind === 'portable' ? <PortableShareSurface /> : <PublicationViewRoute />}
       <ShareDesktopOffer />
-    </>
+    </div>
   );
 }
 

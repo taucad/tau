@@ -44,16 +44,21 @@ describe('exact credit atom arithmetic', () => {
     );
   });
 
-  it('displays two fractional digits and bounds a nonzero amount below that precision', () => {
-    expect(formatCreditAtomsDisplay(0n)).toBe('0');
-    expect(formatCreditAtomsDisplay(1n)).toBe('<0.01');
-    expect(formatCreditAtomsDisplay(-1n)).toBe('>-0.01');
-    expect(formatCreditAtomsDisplay(50n)).toBe('0.01');
-    expect(formatCreditAtomsDisplay(49n)).toBe('<0.01');
-    expect(formatCreditAtomsDisplay(10_000n)).toBe('1');
-    expect(formatCreditAtomsDisplay(12_345n)).toBe('1.23');
-    expect(formatCreditAtomsDisplay(12_355n)).toBe('1.24');
-    expect(formatCreditAtomsDisplay(-12_355n)).toBe('-1.24');
-    expect(formatCreditAtomsDisplay(15_000n)).toBe('1.5');
+  it.each([
+    [0n, '0'],
+    [1n, '<1'],
+    [4000n, '<1'],
+    [9999n, '<1'],
+    [10_000n, '1'],
+    [14_999n, '1'],
+    [15_000n, '2'],
+    [236_726n, '24'],
+    [80_424_272n, '8,042'],
+    [-1n, '>-1'],
+    [-14_999n, '-1'],
+    [-15_000n, '-2'],
+    [maxCreditAtoms, '922,337,203,685,478'],
+  ])('displays %s atoms as %s without fractional credits', (atoms, expected) => {
+    expect(formatCreditAtomsDisplay(atoms)).toBe(expected);
   });
 });

@@ -33,6 +33,7 @@ import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
 import { authErrorMessage, betterFetchErrorBodyMessage } from '#utils/auth-error.utils.js';
 import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
+import { usePersistentStorageWarning } from '#filesystem/use-persistent-storage-warning.js';
 
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
@@ -254,6 +255,7 @@ function LayoutDocument({
 
 export function ProductApp(): React.JSX.Element {
   useCloudPaymentActionReturn();
+  usePersistentStorageWarning();
   const data = useRouteLoaderData<RootLoaderData>('root');
   const page = <Page />;
   return data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (

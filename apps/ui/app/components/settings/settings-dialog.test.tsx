@@ -26,7 +26,7 @@ vi.mock('#components/settings/billing-settings.js', () => ({
     <div>
       Mounted billing
       {deferredBillingState.showTarget ? (
-        <section id='settings-credit-balance' aria-label='Credit balance' tabIndex={-1} />
+        <section id='settings-credit-balance' aria-label='Purchased credits' tabIndex={-1} />
       ) : null}
     </div>
   ),
@@ -144,7 +144,7 @@ describe('SettingsDialog', () => {
     const view = render(<SettingsTestSurface />);
 
     await user.type(screen.getByRole('searchbox', { name: 'Search settings' }), 'credit balance');
-    await user.click(screen.getByRole('button', { name: 'Credit balance' }));
+    await user.click(screen.getByRole('button', { name: 'Purchased credits' }));
     await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Billing settings' })).toHaveFocus();
     });
@@ -153,7 +153,7 @@ describe('SettingsDialog', () => {
     view.rerender(<SettingsTestSurface />);
 
     await waitFor(() => {
-      expect(screen.getByRole('region', { name: 'Credit balance' })).toHaveFocus();
+      expect(screen.getByRole('region', { name: 'Purchased credits' })).toHaveFocus();
     });
   });
 
@@ -166,7 +166,7 @@ describe('SettingsDialog', () => {
     view.rerender(<SettingsTestSurface url={url} />);
 
     await waitFor(() => {
-      expect(screen.getByRole('region', { name: 'Credit balance' })).toHaveFocus();
+      expect(screen.getByRole('region', { name: 'Purchased credits' })).toHaveFocus();
     });
   });
 

@@ -649,6 +649,37 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  /* R22: a host restores the pin it remembered across a reload, which may name a checkout discarded since. */
+  it('keeps the live checkout when a restored pin names a checkout the registry no longer lists (R22)', () => {
+    const harness = start();
+
+    registerCheckouts(harness, [live]);
+    harness.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
+
+    expect(harness.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-live');
+    expect(selectRevisionStatus(harness.actor.getSnapshot())).toMatchObject({
+      checkoutId: 'checkout-live',
+      checkoutRoot: '/projects/project-1',
+      line: { kind: 'unborn', name: 'main' },
+    });
+
+    harness.actor.stop();
+  });
+
+  it('checks a pin restored before the registry answers against its first listing (R22)', () => {
+    const kept = start();
+    kept.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
+    registerCheckouts(kept);
+    expect(kept.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-b');
+    kept.actor.stop();
+
+    const gone = start();
+    gone.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
+    registerCheckouts(gone, [live]);
+    expect(gone.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-live');
+    gone.actor.stop();
+  });
+
   it('re-roots a switch onto a branch that already has a checkout', () => {
     const harness = start();
 
@@ -2112,6 +2143,28 @@ describe('projectRevisionsMachine', () => {
         leaseChatIds: ['chat-1'],
       },
     ]);
+
+    harness.actor.stop();
+  });
+
+  /* D91, audit R1: *Rename* refuses a branch the remote holds, checked out or not, so the row says so before it is asked. */
+  it('should carry the fetch’s word on the remote onto a checked-out branch’s row', async () => {
+    const harness = start();
+
+    registerCheckouts(harness, [live, linked]);
+    await flush();
+    harness.actor.send({
+      type: 'branchesFetched',
+      branches: [
+        { name: 'main', head: 'rev-1', onRemote: true },
+        { name: 'agent/b', head: 'rev-2', onRemote: false },
+      ],
+    });
+    await flush();
+
+    const rows = selectRevisionStatus(harness.actor.getSnapshot()).branches;
+    expect(rows.find((row) => row.name === 'main')).toMatchObject({ checkoutId: 'checkout-live', onRemote: true });
+    expect(rows.find((row) => row.name === 'agent/b')).toMatchObject({ checkoutId: 'checkout-b', onRemote: false });
 
     harness.actor.stop();
   });

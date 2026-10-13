@@ -1,11 +1,12 @@
 import React, { useMemo } from 'react';
 import { Bar, BarChart, XAxis, YAxis } from 'recharts';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@taucad/ui/components/chart';
+import { ChartContainer, ChartTooltip } from '@taucad/ui/components/chart';
 import type { ChartConfig } from '@taucad/ui/components/chart';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import type { WireUsageModelPage } from '@taucad/billing';
 import { getUsageColor } from '#routes/usage/provider-colors.js';
-import { displayCredits } from '#routes/usage/credits.js';
+import { CreditUsageTooltip } from '#routes/usage/charts/credit-usage-tooltip.js';
+import { displayCredits, formatChartCredits } from '#routes/usage/credits.js';
 
 type UsageBarChartProps = {
   /** Server model groups for the whole range. */
@@ -34,6 +35,7 @@ function UsageBarChartComponent({
         .map((item) => ({
           model: item.modelDisplayName ?? item.modelId,
           credits: displayCredits(item.netUsedCreditAtoms),
+          creditAtoms: item.netUsedCreditAtoms,
           fill: getUsageColor(item.modelId),
         }))
         .sort((a, b) => b.credits - a.credits)
@@ -64,7 +66,13 @@ function UsageBarChartComponent({
       <CardContent className='min-w-0'>
         <ChartContainer config={chartConfig} className='h-75 w-full min-w-0'>
           <BarChart data={chartData} layout='vertical' margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-            <XAxis type='number' tickFormatter={(value: number) => `${value} cr`} tickLine={false} axisLine={false} />
+            <XAxis
+              type='number'
+              allowDecimals={false}
+              tickFormatter={(value: number) => `${formatChartCredits(value)} cr`}
+              tickLine={false}
+              axisLine={false}
+            />
             <YAxis
               dataKey='model'
               type='category'
@@ -74,18 +82,11 @@ function UsageBarChartComponent({
               tick={{ fontSize: 14 }}
             />
             {/* @ts-expect-error - ChartTooltipContent types don't match Recharts exactly */}
-            <ChartTooltip cursor={false} content={ChartTooltipContent} />
+            <ChartTooltip cursor={false} content={CreditUsageTooltip} />
             <Bar
               dataKey='credits'
-              // Discard `radius` and `ref` props as they are not used and cause type errors
-              shape={({ radius, ref, ...props }) => (
-                <rect
-                  {...props}
-                  // oxlint-disable-next-line react/prop-types -- Recharts typing limitation
-                  fill={(props.payload as { fill: string } | undefined)?.fill ?? 'var(--primary)'}
-                  rx={8}
-                  ry={8}
-                />
+              shape={({ x, y, width, height, fill }) => (
+                <rect x={x} y={y} width={width} height={height} fill={fill} rx={8} ry={8} />
               )}
             />
           </BarChart>

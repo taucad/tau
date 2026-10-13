@@ -151,7 +151,7 @@ describe('useCloudPaymentActionReturn', () => {
     recoverPaymentAction.mockResolvedValue(checkoutAction('fulfilled', { grantedCreditAtoms: '5370000' }));
     returnFromCheckout();
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith('537 credits added.');
+      expect(toast.success).toHaveBeenCalledWith('537 credits added to your purchased credits.');
     });
     expect(recoverPaymentAction).toHaveBeenCalledOnce();
     expect(recoverPaymentAction).toHaveBeenCalledWith(expect.objectContaining({ subjectId: 'account-a' }), 'action_1');
@@ -254,7 +254,7 @@ describe('useCloudPaymentActionReturn', () => {
       await vi.advanceTimersByTimeAsync(2000);
 
       await waitFor(() => {
-        expect(toast.success).toHaveBeenCalledWith('537 credits added.');
+        expect(toast.success).toHaveBeenCalledWith('537 credits added to your purchased credits.');
       });
       expect(toast.dismiss).toHaveBeenCalledWith('processing');
       expect(toast.warning).not.toHaveBeenCalled();
@@ -325,7 +325,7 @@ describe('useCloudPaymentActionReturn', () => {
     });
     returnFromCheckout();
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith('Tau Pro is active. 2000 credits added.');
+      expect(toast.success).toHaveBeenCalledWith('Tau Pro is active. 2,000 credits added to your monthly credits.');
     });
     expect(toast.success).toHaveBeenCalledOnce();
   });
@@ -347,7 +347,7 @@ describe('useCloudPaymentActionReturn', () => {
     getPaymentAction.mockResolvedValue(checkoutAction('fulfilled', { grantedCreditAtoms: '5370000' }));
     returnFromCheckout();
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith('537 credits added.');
+      expect(toast.success).toHaveBeenCalledWith('537 credits added to your purchased credits.');
     });
     expect(recoverPaymentAction).not.toHaveBeenCalled();
   });

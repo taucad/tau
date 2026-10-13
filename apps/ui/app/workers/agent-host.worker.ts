@@ -102,6 +102,7 @@ const visibility: ResidentWorkerContext['visibility'] = {
 };
 
 let tabId: string | undefined;
+let requestRebridge: ResidentWorkerContext['requestRebridge'];
 
 const requireTab = (): string => {
   if (tabId === undefined) {
@@ -115,7 +116,7 @@ const requireTab = (): string => {
 /** One project host per project; a newer `provide` replaces the incarnation, and `release` closes it (RH-R4). */
 const hosts = createProjectHosts<BrowserProjectHost>(async (args) => {
   const loaded = await loadImplementation();
-  return loaded.openBrowserProjectHost(args, { tabId: requireTab(), visibility });
+  return loaded.openBrowserProjectHost(args, { tabId: requireTab(), visibility, requestRebridge });
 });
 
 let connected = false;
@@ -159,7 +160,7 @@ workerScope.addEventListener('message', (event) => {
         case 'status': {
           const host = hosts.hostOf((args as Calls['status']['args']).projectId);
           return {
-            ...(host === undefined ? {} : { hostId: host.hostId }),
+            ...(host === undefined ? {} : { hostId: host.hostId, needsRebridge: host.needsRebridge() }),
             capability: await capabilityOf('exclusive-append'),
           };
         }
@@ -183,7 +184,7 @@ workerScope.addEventListener('message', (event) => {
       throw Object.assign(new Error('The agent host control channel has no streams.'), { code: 'COMMAND_UNREADABLE' });
     },
   };
-  serveAgentWorkerChannel<AgentHostWorkerProtocol>(connection.port, {
+  const served = serveAgentWorkerChannel<AgentHostWorkerProtocol>(connection.port, {
     sessionKey: connection.sessionId,
     protocolSchemas: agentHostWorkerProtocolSchemas,
     impl: server,
@@ -191,4 +192,7 @@ workerScope.addEventListener('message', (event) => {
     hello: { wire: agentWireVersion, build: agentHostWorkerBuild },
     keepaliveInterval,
   });
+  requestRebridge = (projectId, hostId) => {
+    served.notify('rebridgeRequested', { projectId, hostId });
+  };
 });

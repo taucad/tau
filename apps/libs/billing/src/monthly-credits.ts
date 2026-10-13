@@ -15,14 +15,13 @@ export const monthlyPlanCreditAtomsByTier: Readonly<Record<BillingTier, bigint |
 };
 
 /**
- * The recurring (plan and promotion) share of a balance, kept apart from
- * purchased credits, which never expire and are reported only in Billing.
+ * The monthly plan share of a balance, kept apart from promotional and purchased credits.
  * @public
  */
 export type MonthlyCredits = {
   /** Unheld monthly credit atoms the account can spend now; zero while in debt. */
   readonly availableCreditAtoms: bigint;
-  /** The bar's full scale: the plan allotment, else the monthly assets on hand. */
+  /** The plan allotment; zero when the contract-specific allowance is unknown. */
   readonly scaleCreditAtoms: bigint;
   /** Available share of the scale, clamped to 0–1 (rollover can exceed one allotment). */
   readonly fraction: number;
@@ -48,14 +47,14 @@ export const monthlyCreditsFromBalance = (
   balance: WireCreditBalance,
   tier: BillingTier,
 ): MonthlyCredits | undefined => {
-  const assets = BigInt(balance.planGrantCreditAtoms) + BigInt(balance.promoGrantCreditAtoms);
-  const held = BigInt(balance.planHeldCreditAtoms) + BigInt(balance.promoHeldCreditAtoms);
+  const assets = BigInt(balance.planGrantCreditAtoms);
+  const held = BigInt(balance.planHeldCreditAtoms);
   const allotment = monthlyPlanCreditAtomsByTier[tier];
-  if (allotment === undefined && assets === 0n) {
+  if (tier === 'free' && assets === 0n) {
     return undefined;
   }
   const availableCreditAtoms = BigInt(balance.debtCreditAtoms) > 0n ? 0n : assets - held;
-  const scaleCreditAtoms = allotment ?? assets;
+  const scaleCreditAtoms = allotment ?? 0n;
   const fraction =
     scaleCreditAtoms === 0n ? 0 : Math.min(1, Number((availableCreditAtoms * 10_000n) / scaleCreditAtoms) / 10_000);
   return { availableCreditAtoms, scaleCreditAtoms, fraction };

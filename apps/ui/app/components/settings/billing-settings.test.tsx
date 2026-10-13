@@ -45,12 +45,16 @@ const balance = {
   subjectId: 'account-a',
   availability: { state: 'available', reason: null },
   balance: {
-    eligibleAvailableCreditAtoms: '12000000000',
-    netBalanceCreditAtoms: '12000000000',
-    planGrantCreditAtoms: '10000000000',
-    purchasedCreditAtoms: '5000000000',
-    planHeldCreditAtoms: '2000000000',
-    purchasedHeldCreditAtoms: '1000000000',
+    eligibleAvailableCreditAtoms: '120000',
+    promoGrantCreditAtoms: '0',
+    promoHeldCreditAtoms: '0',
+    debtCreditAtoms: '0',
+    netBalanceCreditAtoms: '150000',
+    pendingIssuanceCreditAtoms: '0',
+    planGrantCreditAtoms: '100000',
+    purchasedCreditAtoms: '50000',
+    planHeldCreditAtoms: '20000',
+    purchasedHeldCreditAtoms: '10000',
   },
 };
 const entitlement = (tier: 'free' | 'pro' | 'enterprise') => ({
@@ -84,9 +88,12 @@ describe('BillingSettings', () => {
 
   it('renders source balances and holds from the C03 explanation', () => {
     renderSettings();
-    expect(screen.getByTestId('credit-balance')).toHaveTextContent('12');
-    expect(screen.getByText(/10.*from your plan.*5.*purchased/i)).toBeInTheDocument();
-    expect(screen.getByText(/3.*held for active work/i)).toBeInTheDocument();
+    expect(screen.getByTestId('credit-balance')).toHaveTextContent('4 credits available');
+    expect(screen.getByText('Purchased credits · Never expire')).toBeInTheDocument();
+    expect(screen.getByText('<1% left')).toBeInTheDocument();
+    expect(screen.getByText('1 credit reserved for active work.')).toBeInTheDocument();
+    expect(screen.queryByText('Balance details')).not.toBeInTheDocument();
+    expect(screen.queryByText('Total available')).not.toBeInTheDocument();
   });
 
   it('opens the first-party billing portal action', async () => {
@@ -115,7 +122,7 @@ describe('BillingSettings', () => {
     renderSettings();
     expect(screen.queryByTestId('credit-balance')).toBeNull();
     expect(screen.getByRole('alert')).toHaveTextContent('Balance unavailable.');
-    expect(screen.getByRole('button', { name: /add credits/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /add more/i })).toBeEnabled();
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(query.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['billing', 'credits'] });
   });
@@ -125,7 +132,7 @@ describe('BillingSettings', () => {
     query.fetching = 1;
     renderSettings();
     expect(screen.getByRole('status')).toHaveTextContent('Loading balance…');
-    expect(screen.getByRole('button', { name: /add credits/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /add more/i })).toBeEnabled();
   });
 
   it('names no plan until entitlements resolve', () => {
@@ -151,7 +158,9 @@ describe('BillingSettings', () => {
 
   it('renders lifecycle controls in authenticated billing settings', () => {
     renderSettings();
-    expect(screen.getByText('Automatic reload controls')).toBeInTheDocument();
+    expect(screen.queryByText('Automatic reload controls')).not.toBeInTheDocument();
+    expect(screen.queryByText('API CAD Gateway')).not.toBeInTheDocument();
+    expect(screen.getByText('$20 per month USD')).toBeInTheDocument();
     expect(screen.getByText('Account closure controls')).toBeInTheDocument();
   });
 });

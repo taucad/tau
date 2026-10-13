@@ -65,7 +65,7 @@ export async function prepareLinkedGithubImport({
   }
   const author = githubNoreplyAuthor(selection.connection.subject, selection.connection.login);
   const actorId = getRevisionSessionUser()?.id ?? `github:${String(selection.connection.subject)}`;
-  const credential = await githubConnections.token(selection.connection.id);
+  const credential = await githubConnections.token(selection.connection.id, 'import');
   const remoteAuthorization = `Basic ${globalThis.btoa(`x-access-token:${credential.accessToken}`)}`;
   const provider = await createMemoryProvider();
   const held = {

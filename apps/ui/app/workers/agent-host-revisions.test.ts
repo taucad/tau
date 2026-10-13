@@ -110,3 +110,23 @@ describe('createPortRevisionsClient', () => {
     port1.close();
   });
 });
+
+it('should release status waits and reject new reads when the revision connection is replaced', async () => {
+  const { port1, port2 } = new MessageChannel();
+  const client = createPortRevisionsClient(port1);
+  const describing = client.describe();
+  const conflict = client.conflict(undefined);
+  const describeCheck = expect(describing).rejects.toMatchObject({
+    code: 'PROJECT_HOST_CLOSED',
+    message: 'The project host closed.',
+  });
+  const conflictCheck = expect(conflict).rejects.toMatchObject({ code: 'PROJECT_HOST_CLOSED' });
+  try {
+    client.close();
+    await Promise.all([describeCheck, conflictCheck]);
+    await expect(client.log({})).rejects.toMatchObject({ code: 'PROJECT_HOST_CLOSED' });
+  } finally {
+    port1.close();
+    port2.close();
+  }
+});

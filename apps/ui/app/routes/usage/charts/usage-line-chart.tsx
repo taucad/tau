@@ -1,10 +1,11 @@
 import React, { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@taucad/ui/components/chart';
+import { ChartContainer, ChartTooltip } from '@taucad/ui/components/chart';
 import type { ChartConfig } from '@taucad/ui/components/chart';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import type { WireUsageDayPage } from '@taucad/billing';
-import { displayCredits } from '#routes/usage/credits.js';
+import { CreditUsageTooltip } from '#routes/usage/charts/credit-usage-tooltip.js';
+import { displayCredits, formatChartCredits } from '#routes/usage/credits.js';
 
 type UsageLineChartProps = {
   /** Server day groups; the client never re-buckets rows into days. */
@@ -32,6 +33,7 @@ function UsageLineChartComponent({
         .map((item) => ({
           dateLabel: item.day === 'unknown' ? 'Not reported' : item.day,
           credits: displayCredits(item.netUsedCreditAtoms),
+          creditAtoms: item.netUsedCreditAtoms,
         })),
     [days],
   );
@@ -62,14 +64,15 @@ function UsageLineChartComponent({
             <CartesianGrid strokeDasharray='3 3' vertical={false} />
             <XAxis dataKey='dateLabel' tickLine={false} axisLine={false} tickMargin={8} />
             <YAxis
-              tickFormatter={(value: number) => `${value} cr`}
+              allowDecimals={false}
+              tickFormatter={(value: number) => `${formatChartCredits(value)} cr`}
               tickLine={false}
               axisLine={false}
               tickMargin={8}
               width={60}
             />
             {/* @ts-expect-error - ChartTooltipContent types don't match Recharts exactly */}
-            <ChartTooltip cursor={false} content={ChartTooltipContent} />
+            <ChartTooltip cursor={false} content={CreditUsageTooltip} />
             <Bar dataKey='credits' fill='var(--color-credits)' radius={[4, 4, 0, 0]} />
           </BarChart>
         </ChartContainer>

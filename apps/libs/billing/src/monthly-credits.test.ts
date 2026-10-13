@@ -26,12 +26,14 @@ const balanceOf = (overrides: Partial<WireCreditBalance>): WireCreditBalance => 
 });
 
 describe('monthlyCreditsFromBalance', () => {
-  it('should meter unheld plan credits against the Pro allotment and ignore purchased credits', () => {
+  it('should meter unheld plan credits against the Pro allotment and ignore purchased and promotional credits', () => {
     const monthly = monthlyCreditsFromBalance(
       balanceOf({
         planGrantCreditAtoms: credits(1500),
         planHeldCreditAtoms: credits(100),
         purchasedCreditAtoms: credits(900),
+        promoGrantCreditAtoms: credits(100),
+        promoHeldCreditAtoms: credits(20),
       }),
       'pro',
     );
@@ -55,7 +57,7 @@ describe('monthlyCreditsFromBalance', () => {
     expect(monthly?.fraction).toBe(0);
   });
 
-  it('should scale a contract allotment against the monthly credits on hand', () => {
+  it('should keep a contract-specific allowance unknown instead of inventing a full scale', () => {
     const monthly = monthlyCreditsFromBalance(
       balanceOf({
         planGrantCreditAtoms: credits(8000),
@@ -63,8 +65,8 @@ describe('monthlyCreditsFromBalance', () => {
       }),
       'enterprise',
     );
-    expect(monthly?.scaleCreditAtoms).toBe(8000n * creditAtomsPerCredit);
-    expect(monthly?.fraction).toBe(0.75);
+    expect(monthly?.scaleCreditAtoms).toBe(0n);
+    expect(monthly?.fraction).toBe(0);
   });
 
   it('should omit the meter for an account without monthly credits', () => {

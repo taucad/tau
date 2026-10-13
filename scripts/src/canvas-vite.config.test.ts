@@ -93,6 +93,56 @@ describe('canvas Vite config', () => {
     expect(() => withAlias('escape.tsx')).toThrow('Canvas fixture aliases must remain inside the Tau checkout');
   });
 
+  it(
+    'should share billing and React Query providers with app hooks in a nested Brain canvas',
+    { timeout: 60_000 },
+    async () => {
+      const repoRoot = resolve(import.meta.dirname, '../..');
+      const parent = resolve(repoRoot, 'out/research');
+      mkdirSync(parent, { recursive: true });
+      const artifacts = mkdtempSync(resolve(parent, 'canvas-billing-'));
+      const output = mkdtempSync(resolve(tmpdir(), 'tau-canvas-billing-output-'));
+      temporaryPaths.push(artifacts, output);
+      writeFileSync(
+        resolve(artifacts, 'index.html'),
+        '<div id="root"></div><script type="module" src="/main.tsx"></script>',
+      );
+      writeFileSync(
+        resolve(artifacts, 'main.tsx'),
+        `
+      import { createRoot } from 'react-dom/client';
+      import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+      import { BillingSessionProvider } from '@taucad/billing/hooks/billing-session';
+      import { useCredits } from '@taucad/billing/hooks/use-credits';
+      const client = new QueryClient();
+      client.setQueryData(['billing', 'credits', undefined, undefined, undefined, undefined], { balance: { purchasedCreditAtoms: '370000' } });
+      function Balance() { const credits = useCredits(); return <p role="status">Purchased: {credits?.balance?.purchasedCreditAtoms}</p>; }
+      createRoot(document.getElementById('root')!).render(<QueryClientProvider client={client}><BillingSessionProvider value={{ apiBaseUrl: undefined, userId: undefined }}><Balance /></BillingSessionProvider></QueryClientProvider>);
+    `,
+      );
+      await build({ ...createCanvasConfig(artifacts, output, artifacts), logLevel: 'silent' });
+      const server = await createServer({
+        ...createCanvasConfig(artifacts, output, artifacts),
+        configFile: false,
+        logLevel: 'silent',
+        server: { host: '127.0.0.1', port: 0, fs: { allow: [artifacts, repoRoot] } },
+      });
+      try {
+        await server.listen();
+        const browser = await chromium.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          await page.goto(server.resolvedUrls!.local[0]!);
+          await page.getByRole('status').getByText('Purchased: 370000', { exact: true }).waitFor();
+        } finally {
+          await browser.close();
+        }
+      } finally {
+        await server.close();
+      }
+    },
+  );
+
   it('should compile React, Tau components, tokens, Tailwind, and Geist fonts', { timeout: 30_000 }, async () => {
     const artifacts = mkdtempSync(resolve(tmpdir(), 'tau-canvas-artifacts-'));
     const canvas = resolve(artifacts, 'canvas');

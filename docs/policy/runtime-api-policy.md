@@ -3,7 +3,7 @@ title: 'Runtime API Policy'
 description: 'Naming and ownership rules for runtime consumer, plugin-author, transport, filesystem, and artifact APIs.'
 status: active
 created: '2026-07-20'
-updated: '2026-10-12'
+updated: '2026-10-13'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/runtime-architecture-policy.md
@@ -401,14 +401,16 @@ export default defineTauPlugin({
 
 ### 11. Hold Realm-Shared Backends Through `services.realm`
 
-A kernel whose library binds its backend at module scope holds that backend through `services.realm` instead of creating one per `initialize`. Name the `group` after the backend and the `key` after its build, keep the hold in the kernel context, and release it in `onDispose`. Keep per-client state (tracers, compute-reuse scopes) in a per-kernel wrapper over the shared value.
+A kernel whose library binds its backend at module scope holds that backend through `services.realm` instead of creating one per `initialize`. Declare the backend once at module scope with `createRealmGroup<Value>(name)`, naming it after the backend (prefix a third-party name with its package name), and pass that token as `group`; the token fixes the held value's type. Name the `key` after the build, keep the hold in the kernel context, and release it in `onDispose`. Keep the token module-local until a second package must hold the same backend. Keep per-client state (tracers, compute-reuse scopes) in a per-kernel wrapper over the shared value.
 
 CORRECT:
 
 ```typescript
+const replicadOcct = createRealmGroup<OpenCascadeInstance>('replicad-occt');
+
 async initialize(options, services) {
   const occt = await services.realm.hold({
-    group: 'replicad-occt',
+    group: replicadOcct,
     key: `${variant}:${wasmUrl ?? ''}`,
     create: async () => initOcct(wasmUrl, bindingsFactory),
   });

@@ -580,8 +580,8 @@ catalogs:
       specifier: ^0.3.0
       version: 0.3.0
     libcascade:
-      specifier: 3.0.3
-      version: 3.0.3
+      specifier: 3.1.0
+      version: 3.1.0
     lighthouse:
       specifier: ^13.4.0
       version: 13.4.0
@@ -1216,7 +1216,7 @@ importers:
         version: 6.17.1
       libcascade:
         specifier: 'catalog:'
-        version: 3.0.3
+        version: 3.1.0
       lucide-react:
         specifier: ^0.552.0
         version: 0.552.0(react@19.2.7)
@@ -3185,7 +3185,7 @@ importers:
         version: link:../../packages/geospec
       libcascade:
         specifier: 'catalog:'
-        version: 3.0.3
+        version: 3.1.0
       manifold-3d:
         specifier: 'catalog:'
         version: 3.4.1(@gltf-transform/core@4.5.1)(@gltf-transform/extensions@4.5.1)(@gltf-transform/functions@4.5.1(@types/node@24.0.15))(esbuild-wasm@0.28.2)
@@ -4245,7 +4245,7 @@ importers:
         version: link:../../core/occt
       libcascade:
         specifier: 'catalog:'
-        version: 3.0.3
+        version: 3.1.0
     devDependencies:
       '@taucad/esbuild':
         specifier: workspace:*
@@ -21219,8 +21219,8 @@ packages:
     resolution: {integrity: sha512-V7E9nuZpC92WK/hRAHpmiuAu5KpvMrWrmcWfwYLX+jzJ6xHaYk9YF3HN+hQR42yx5pZ1w3y6KemL6/vAwTRJYA==}
     engines: {node: '>=22.14.0'}
 
-  libcascade@3.0.3:
-    resolution: {integrity: sha512-TJKsadeBzmq2I/tHZIq/IlrbbWZOUdessMxf1RdrYazge26luOfdW79WAS3rIN+8b9IF5zWdPDR5WP8k07IMvQ==}
+  libcascade@3.1.0:
+    resolution: {integrity: sha512-xnzWqgWG9f8nSXkKY3Y0iI7IjOci0zXse+B/pVXE8wlfGO58OJtZecPc4BZ3TAQLKXDg875pngTCgYSFaiZp7g==}
     engines: {node: '>=22'}
 
   license-webpack-plugin@4.0.2:
@@ -45256,7 +45256,7 @@ snapshots:
       libassimp-linux-x64-gnu: 0.3.0
       libassimp-win32-x64-msvc: 0.3.0
 
-  libcascade@3.0.3: {}
+  libcascade@3.1.0: {}
 
   license-webpack-plugin@4.0.2(webpack@5.107.2(@swc/core@1.15.8(@swc/helpers@0.5.23))(esbuild@0.27.7)(lightningcss@1.32.0)(postcss@8.5.25)):
     dependencies:

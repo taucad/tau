@@ -45,7 +45,13 @@ A successful result may still carry error-severity findings, warnings, or inform
 
 `VIEW_UNKNOWN` means the requested ID was never declared. `VIEW_UNAVAILABLE` means it is declared but not offered by this evaluation. Recovery should preserve the person's saved choice until they select a replacement.
 
-`KERNEL_REALM_CONFLICT` means a kernel needs a different build of a realm-shared backend than the one this JavaScript realm already holds; `details` names the `group`, the `heldKey`, the `requestedKey` and the refusing `producer`. Release every holder of the held build first, or host the second build in its own worker.
+`KERNEL_REALM_CONFLICT` means this JavaScript realm cannot hold a realm-shared backend a kernel asked for; `details.producer` names the refusing kernel and `details.reason` the case:
+
+| `details.reason` | Cause                                                                                                                               | Recovery                                                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `build`          | The realm holds another build (`heldKey`) of `group` than the `requestedKey`.                                                       | Use one build per realm, or give the second client its own worker (`nodeWorkerTransport` or a Web Worker).       |
+| `declaration`    | A second declaration of `group`, usually a duplicate copy of the kernel package, already holds it.                                  | Deduplicate the kernel package, or host it in its own worker.                                                    |
+| `runtime`        | The group token or the realm's shared state comes from an `@taucad/runtime` copy of another plugin ABI (`heldAbi`, `requestedAbi`). | Install one `@taucad/runtime` version (a peer dependency of every kernel), or host the kernel in its own worker. |
 
 ### 3. Handle operational rejection
 

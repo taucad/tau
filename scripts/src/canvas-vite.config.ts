@@ -229,9 +229,15 @@ export const createCanvasConfig = (
           if (source === 'package.json' && importer?.startsWith(`${appRoot}${sep}`)) {
             return resolve(appRoot, '../package.json');
           }
-          // A canvas in a linked Brain sits outside a worktree checkout; its workspace imports
-          // resolve as the app's do, or a worktree canvas renders the main checkout's libraries.
-          if (source.startsWith('@taucad/') && importer !== undefined && !importer.startsWith(`${repoRoot}${sep}`)) {
+          // Brain canvases share the app's dependency graph, including provider singletons,
+          // whether Brain lives inside this checkout or outside a linked worktree.
+          if (
+            importer?.startsWith(`${realpathSync(allowedRoot)}${sep}`) &&
+            !source.startsWith('.') &&
+            !source.startsWith('/') &&
+            !source.startsWith('#') &&
+            !source.startsWith('\0')
+          ) {
             return this.resolve(source, resolve(appRoot, 'root.tsx'), { skipSelf: true });
           }
           if (!source.startsWith('#') || !importer) {

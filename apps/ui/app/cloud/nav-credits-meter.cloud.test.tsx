@@ -1,3 +1,4 @@
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -39,10 +40,12 @@ const balanceOf = (overrides: Record<string, string>) => ({
 /** The meter's Add credits action is a menu item, so it needs an open menu around it. */
 const renderInMenu = (node: ReactNode): void => {
   render(
-    <DropdownMenu open>
-      <DropdownMenuTrigger>Account</DropdownMenuTrigger>
-      <DropdownMenuContent>{node}</DropdownMenuContent>
-    </DropdownMenu>,
+    <TooltipProvider>
+      <DropdownMenu open>
+        <DropdownMenuTrigger>Account</DropdownMenuTrigger>
+        <DropdownMenuContent>{node}</DropdownMenuContent>
+      </DropdownMenu>
+    </TooltipProvider>,
   );
 };
 
@@ -60,11 +63,37 @@ describe('NavCreditsMeter', () => {
         purchasedCreditAtoms: credits(5000),
       }),
     );
-    render(<NavCreditsMeter />);
-    expect(screen.getByText('1,240 left')).toBeInTheDocument();
+    renderInMenu(<NavCreditsMeter />);
+    expect(screen.getByText('62% left')).toBeInTheDocument();
     const bar = screen.getByRole('progressbar', { name: 'Monthly credits' });
     expect(bar).toHaveAttribute('aria-valuenow', '62');
-    expect(bar).toHaveAttribute('aria-valuetext', '1,240 of 2,000 monthly credits left');
+    expect(bar).toHaveAttribute('aria-valuetext', '62% of monthly credits left');
+  });
+
+  it('should preserve exact whole percentages without floating-point rounding loss', () => {
+    useCredits.mockReturnValue(balanceOf({ planGrantCreditAtoms: credits(580) }));
+    renderInMenu(<NavCreditsMeter />);
+    expect(screen.getByText('29% left')).toBeInTheDocument();
+  });
+
+  it('should hide the purchased balance row when no purchased credits remain', () => {
+    useCredits.mockReturnValue(balanceOf({ planGrantCreditAtoms: credits(1240) }));
+    renderInMenu(<NavCreditsMeter />);
+    expect(screen.getByText('62% left')).toBeInTheDocument();
+    expect(screen.queryByText('Purchased credits')).not.toBeInTheDocument();
+  });
+
+  it('should keep a fractional monthly balance distinct from zero and subtract purchased holds', () => {
+    useCredits.mockReturnValue(
+      balanceOf({
+        planGrantCreditAtoms: '1',
+        purchasedCreditAtoms: credits(500),
+        purchasedHeldCreditAtoms: credits(20),
+      }),
+    );
+    renderInMenu(<NavCreditsMeter />);
+    expect(screen.getByText('<1% left')).toBeInTheDocument();
+    expect(screen.getByText('480')).toBeInTheDocument();
   });
 
   it('should not offer Add credits while monthly credits are healthy', () => {
@@ -83,20 +112,21 @@ describe('NavCreditsMeter', () => {
   it('should offer Add credits when monthly credits are gone', () => {
     useCredits.mockReturnValue(balanceOf({ planGrantCreditAtoms: credits(40), debtCreditAtoms: credits(3) }));
     renderInMenu(<NavCreditsMeter />);
-    expect(screen.getByText('0 left')).toBeInTheDocument();
+    expect(screen.getByText('0% left')).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Add credits' })).toBeInTheDocument();
   });
 
-  it('should render nothing for a free account with only purchased credits', () => {
+  it('should show purchased credits without a monthly meter for a free account', () => {
     useEntitlements.mockReturnValue({ tier: 'free', isResolved: true });
     useCredits.mockReturnValue(balanceOf({ purchasedCreditAtoms: credits(500) }));
-    const { container } = render(<NavCreditsMeter />);
-    expect(container).toBeEmptyDOMElement();
+    renderInMenu(<NavCreditsMeter />);
+    expect(screen.getByText('500')).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   });
 
   it('should say the balance is unavailable for a paid account when the read failed', () => {
     useCredits.mockReturnValue(undefined);
-    render(<NavCreditsMeter />);
+    renderInMenu(<NavCreditsMeter />);
     expect(screen.getByText('Unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   });
@@ -104,7 +134,7 @@ describe('NavCreditsMeter', () => {
   it('should hold a busy bar while the first balance read is in flight', () => {
     useCredits.mockReturnValue(undefined);
     query.fetching = 1;
-    render(<NavCreditsMeter />);
+    renderInMenu(<NavCreditsMeter />);
     expect(screen.getByRole('progressbar', { name: 'Monthly credits' })).toHaveAttribute('aria-busy', 'true');
   });
 
@@ -113,6 +143,31 @@ describe('NavCreditsMeter', () => {
     useCredits.mockReturnValue(balanceOf({ planGrantCreditAtoms: credits(10) }));
     const { container } = render(<NavCreditsMeter />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('should retain a fully reserved purchased balance and expose the monthly allowance in a tooltip', async () => {
+    useCredits.mockReturnValue(
+      balanceOf({
+        planGrantCreditAtoms: '236726',
+        purchasedCreditAtoms: credits(20),
+        purchasedHeldCreditAtoms: credits(20),
+      }),
+    );
+    renderInMenu(<NavCreditsMeter />);
+    expect(screen.getByText('Purchased credits')).toBeInTheDocument();
+    expect(screen.getByText('0')).toBeInTheDocument();
+    expect(screen.getByText('20 credits reserved for active work')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('menuitem', { name: 'About monthly credits' }));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('24 credits available this month');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('2,000 credits per month');
+  });
+
+  it('should not invent a percentage for Enterprise', () => {
+    useEntitlements.mockReturnValue({ tier: 'enterprise', isResolved: true });
+    useCredits.mockReturnValue(balanceOf({ planGrantCreditAtoms: credits(6000) }));
+    renderInMenu(<NavCreditsMeter />);
+    expect(screen.getByText('Custom allowance')).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   });
 
   it('should emit nothing in the self-hosted build', () => {

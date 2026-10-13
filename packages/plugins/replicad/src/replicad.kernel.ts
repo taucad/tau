@@ -34,6 +34,7 @@ import {
   createKernelParameterDeclaration,
   nonemptyExportFiles,
   applyLibrarySourceMaps,
+  createRealmGroup,
   preserveExportNames,
   demangleStackFrames,
   classifyLibraryFrames,
@@ -140,6 +141,9 @@ const tracedPhase = async <T>(
     span.end();
   }
 };
+
+/** `replicad` binds OpenCASCADE at module scope, so every kernel in a realm shares one instance (I2). */
+const replicadOcct = createRealmGroup<OpenCascadeInstance>('replicad-occt');
 
 const geistRegularUrl = new URL('fonts/Geist-Regular.ttf', import.meta.url).href;
 const replicadSourceMapUrl = new URL('sourcemaps/replicad.js.map', import.meta.url).href;
@@ -538,9 +542,8 @@ export const replicadKernel = defineKernel({
       return kernelOpenCascade;
     };
 
-    // `replicad` binds OpenCASCADE at module scope, so every kernel in this realm shares one instance (I2).
-    const occt = await runtime.realm.hold<OpenCascadeInstance>({
-      group: 'replicad-occt',
+    const occt = await runtime.realm.hold({
+      group: replicadOcct,
       key: `${resolved.variant}:${resolved.wasmUrl ?? ''}`,
       async create() {
         // ponytail: OCCT print/printErr reach the creating kernel's logger only; exact with one realm per client.

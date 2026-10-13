@@ -47,7 +47,7 @@ import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { flagParameter } from '#utils/search-parameter.codecs.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest } from '@taucad/types';
-import { largeObjectThresholdBytes } from '@taucad/revisions';
+import { largeObjectThresholdBytes, RevisionPortError } from '@taucad/revisions';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { GithubRepositoryPicker, useGithubConnectionAvailable } from '#components/github/github-repository-picker.js';
@@ -136,6 +136,41 @@ const repositoryUnavailableAdvice = (error: Error | undefined, canChooseFromAcco
   }
 };
 
+type LinkedImportRefusal = Readonly<{ title: string; message: string }>;
+
+/**
+ * A deliberate refusal of *Import and link*, headlined as one (R4). Anything
+ * else stopped the import part-way and keeps the "Import interrupted" recovery.
+ *
+ * @param error - What the linked import threw.
+ * @param targetBranch - The local and sync branch the import tried to create.
+ * @param sourceBranch - The GitHub branch the review was taken from.
+ * @returns The refusal's headline and next step, or `undefined` for an interruption.
+ */
+const linkedImportRefusal = (
+  error: unknown,
+  targetBranch: string,
+  sourceBranch: string,
+): LinkedImportRefusal | undefined => {
+  if (!(error instanceof RevisionPortError) || error.code !== 'REMOTE_REF_CONFLICT') {
+    return undefined;
+  }
+  /* Another branch already holds the chosen name; the reviewed branch itself moving is a change, not a taken name. */
+  if (
+    targetBranch !== sourceBranch &&
+    error.message === `Remote branch ${targetBranch} already names another revision.`
+  ) {
+    return {
+      title: 'This branch name is taken on GitHub',
+      message: 'Choose another name for the local and sync branch.',
+    };
+  }
+  return {
+    title: 'This repository changed on GitHub',
+    message: 'Choose the repository again to review its latest commit.',
+  };
+};
+
 // oxlint-disable-next-line complexity -- TODO: consider refactoring.
 export default function ImportRoute(): React.JSX.Element {
   const { owner, repo, ref, path, mainFile, rejectedUrl } = useLoaderData<typeof clientLoader>();
@@ -148,6 +183,7 @@ export default function ImportRoute(): React.JSX.Element {
   const [linkedTargetBranch, setLinkedTargetBranch] = useState('');
   const [linkedBusy, setLinkedBusy] = useState(false);
   const [linkedError, setLinkedError] = useState<string>();
+  const [linkedRefusal, setLinkedRefusal] = useState<LinkedImportRefusal>();
   const [linkedReviewBlocked, setLinkedReviewBlocked] = useState(false);
   const [linkedSyncChats, setLinkedSyncChats] = useState(true);
   const githubConnectionAvailable = useGithubConnectionAvailable();
@@ -506,6 +542,7 @@ export default function ImportRoute(): React.JSX.Element {
     );
     setLinkedSyncChats(manifest?.success === true ? manifest.data.syncChats !== false : true);
     setLinkedReviewBlocked(manifest?.success === false || unsupportedLargeBlob !== undefined);
+    setLinkedRefusal(undefined);
     setLinkedError(
       manifest?.success === false
         ? 'This repository has an invalid tau.json. Fix or remove it before importing as a linked project.'
@@ -521,6 +558,7 @@ export default function ImportRoute(): React.JSX.Element {
     }
     setLinkedBusy(true);
     setLinkedError(undefined);
+    setLinkedRefusal(undefined);
     try {
       const parsed =
         linkedSelection.manifest === undefined ? undefined : parseProjectManifestBytes(linkedSelection.manifest);
@@ -570,11 +608,13 @@ export default function ImportRoute(): React.JSX.Element {
         generation: prepared.generation,
         author: githubNoreplyAuthor(linkedSelection.connection.subject, linkedSelection.connection.login),
       });
+      /* Busy until the route leaves: the listing now holds the project this import
+       * just wrote, and the review must not call it "already a project" (R12). */
       void navigate(projectUrl(created.slugs));
     } catch (error) {
       presentLocationError(error);
+      setLinkedRefusal(linkedImportRefusal(error, linkedTargetBranch, linkedSelection.branch.name));
       setLinkedError(error instanceof Error ? error.message : 'The linked project could not be imported.');
-    } finally {
       setLinkedBusy(false);
     }
   }, [
@@ -974,13 +1014,16 @@ export default function ImportRoute(): React.JSX.Element {
               </div>
               {linkedError === undefined ? undefined : (
                 <PageNotice
-                  title={linkedReviewBlocked ? 'Repository needs attention' : 'Import interrupted'}
+                  title={
+                    linkedReviewBlocked ? 'Repository needs attention' : (linkedRefusal?.title ?? 'Import interrupted')
+                  }
                   message={
                     linkedReviewBlocked
                       ? linkedManifest?.success === false
                         ? 'Fix or remove the invalid tau.json, then choose the repository again.'
                         : 'Track large files with Git LFS, then choose the repository again.'
-                      : 'Import and link did not finish. Review the details, then try Import and link again.'
+                      : (linkedRefusal?.message ??
+                        'Import and link did not finish. Review the details, then try Import and link again.')
                   }
                   detail={linkedError}
                 />
@@ -1056,30 +1099,35 @@ export default function ImportRoute(): React.JSX.Element {
                     Sync project chats with this repository
                   </Label>
                 </div>
-                <span className='text-sm font-medium'>Setup change</span>
-                <dl className='grid max-w-xl gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-[auto_minmax(0,1fr)]'>
-                  <dt>Writes</dt>
-                  <dd>
-                    {linkedNeedsSetup ? (
-                      <>
-                        Add or update <span className='font-mono'>tau.json</span>
-                        {linkedSelection.files.length === 0 ? ` and create ${linkedMainFile}` : ''}, with Tau’s{' '}
-                        <span className='font-mono'>.gitignore</span> and{' '}
-                        <span className='font-mono'>.gitattributes</span> entries.
-                      </>
-                    ) : (
-                      <>
-                        Tau’s <span className='font-mono'>.gitignore</span> and{' '}
-                        <span className='font-mono'>.gitattributes</span> entries, only when missing.
-                      </>
-                    )}
-                  </dd>
-                  <dt>Commit author</dt>
-                  <dd>{linkedSelection.connection.login} using GitHub’s no-reply address.</dd>
-                  <dt>Visibility</dt>
-                  <dd>{linkedSelection.repository.visibility}</dd>
-                </dl>
-                {linkedExisting.status === 'resolved' && linkedManifestId !== undefined ? (
+                {/* A blocked review writes nothing, so it lists no setup change (R5). */}
+                {linkedReviewBlocked ? undefined : (
+                  <>
+                    <span className='text-sm font-medium'>Setup change</span>
+                    <dl className='grid max-w-xl gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-[auto_minmax(0,1fr)]'>
+                      <dt>Writes</dt>
+                      <dd>
+                        {linkedNeedsSetup ? (
+                          <>
+                            Add or update <span className='font-mono'>tau.json</span>
+                            {linkedSelection.files.length === 0 ? ` and create ${linkedMainFile}` : ''}, with Tau’s{' '}
+                            <span className='font-mono'>.gitignore</span> and{' '}
+                            <span className='font-mono'>.gitattributes</span> entries.
+                          </>
+                        ) : (
+                          <>
+                            Tau’s <span className='font-mono'>.gitignore</span> and{' '}
+                            <span className='font-mono'>.gitattributes</span> entries, only when missing.
+                          </>
+                        )}
+                      </dd>
+                      <dt>Commit author</dt>
+                      <dd>{linkedSelection.connection.login} using GitHub’s no-reply address.</dd>
+                      <dt>Visibility</dt>
+                      <dd>{linkedSelection.repository.visibility}</dd>
+                    </dl>
+                  </>
+                )}
+                {!linkedBusy && linkedExisting.status === 'resolved' && linkedManifestId !== undefined ? (
                   <>
                     <span aria-hidden className='max-md:hidden' />
                     <div role='alert' className='flex flex-wrap items-center gap-3 text-sm'>

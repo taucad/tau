@@ -7,6 +7,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { ActiveSessions } from '#components/auth/settings/security/active-sessions.js';
 import { ChangePassword } from '#components/auth/settings/security/change-password.js';
 import { LinkedAccounts } from '#components/auth/settings/security/linked-accounts.js';
+import { GithubPermissions } from '#components/auth/settings/security/github-permissions.js';
 
 export type SecuritySettingsProps = {
   className?: string;
@@ -36,6 +37,7 @@ export function SecuritySettings({ className }: SecuritySettingsProps): React.JS
           <LinkedAccounts />
         </SettingsItem>
       ) : null}
+      <GithubPermissions />
       <SettingsItem settingId='active-sessions'>
         <ActiveSessions />
       </SettingsItem>

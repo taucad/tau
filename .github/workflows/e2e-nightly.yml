@@ -2,10 +2,11 @@ name: E2E nightly
 
 # The browser-backed suites, out of pull request and `main` CI: every `type:e2e`
 # project's Vitest Browser matrices and development-server qualifications, the
-# real-device WebGPU qualification and the funded desktop live turn. Each night they
-# run against the head of `main`, with the GeoSpec engine products a `main` CI run
-# cached for that commit's native source closure, whether or not the rest of that
-# run passed. A failure here is a red nightly, never a merge gate.
+# real-device WebGPU qualification, the funded desktop live turn and the live GitHub
+# account rows (C10, A4); each secret-gated lane skips until its secrets exist. Each
+# night they run against the head of `main`, with the GeoSpec engine products a
+# `main` CI run cached for that commit's native source closure, whether or not the
+# rest of that run passed. A failure here is a red nightly, never a merge gate.
 # `workflow_dispatch` takes an optional commit to run against instead.
 
 on:

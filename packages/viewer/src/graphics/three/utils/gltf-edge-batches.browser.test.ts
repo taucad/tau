@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterAll } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   Matrix4,
   BoxGeometry,
@@ -104,17 +104,37 @@ function edgeBatch(object: Object3D | undefined): ReturnType<typeof createEdgeBa
   return mesh as ReturnType<typeof createEdgeBatch>;
 }
 
+/* Each test releases its renderer, and any render target it bound, before the next one requests a device. */
 const renderers: Array<{ dispose(): void }> = [];
-afterAll(() => {
-  for (const r of renderers) {
+afterEach(() => {
+  for (const r of renderers.splice(0)) {
     r.dispose();
   }
 });
+
+/**
+ * Bind an offscreen 128 × 128 target so renders never present to a canvas: headless Chromium drops its GPU instance
+ * (and every live WebGPU device) shortly after a canvas presentation.
+ *
+ * @param renderer - The renderer that keeps the target bound for the rest of the test.
+ */
+function renderOffscreen(renderer: RendererInstance): void {
+  if (renderer instanceof WebGLRenderer) {
+    const target = new WebGLRenderTarget(128, 128);
+    renderers.push(target);
+    renderer.setRenderTarget(target);
+  } else {
+    const target = new RenderTarget(128, 128);
+    renderers.push(target);
+    renderer.setRenderTarget(target);
+  }
+}
 
 describe.each(['webgl', 'webgpu'] as const)('edge prototype occurrence %s', (backend) => {
   it('should replace the initial lines-off owner once and reuse off/on cohorts', async () => {
     const renderer = await createRenderer('viewport', backend, document.createElement('canvas'));
     renderers.push(renderer);
+    renderOffscreen(renderer);
     const root = new Group();
     const scene = new Scene();
     scene.add(root);
@@ -228,6 +248,7 @@ describe.each(['webgl', 'webgpu'] as const)('edge prototype occurrence %s', (bac
     canvas.height = 128;
     const renderer = await createRenderer('viewport', backend, canvas);
     renderers.push(renderer);
+    renderOffscreen(renderer);
     if (backend === 'webgpu') {
       expect(nativeDevice(renderer).createBuffer).toBeTypeOf('function');
     }

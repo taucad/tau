@@ -315,7 +315,7 @@ const ExpandedChatHistory = memo(function ({
                 isVisible={!atBottom}
                 onScrollToBottom={scrollToBottom}
               />
-              <ChatMessagePlanning key={activeChatId} className='mb-2 px-3' />
+              <ChatMessagePlanning key={activeChatId} className='mb-3 px-3' />
               <div className='mx-2 -mb-3 flex flex-col rounded-t-lg border border-b-0 bg-muted/40 pb-3 empty:hidden'>
                 <ChatTodoList key={activeChatId} />
                 <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />

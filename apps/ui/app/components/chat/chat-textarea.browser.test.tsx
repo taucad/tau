@@ -465,7 +465,7 @@ describe('question dictation', () => {
       const reply = screen.getByRole('group', { name: 'Answer input' });
       const idleHeight = reply.getBoundingClientRect().height;
       const expectAlignedActions = (label: string): void => {
-        const action = screen.getByRole('button', { name: label, exact: true }).getBoundingClientRect();
+        const action = screen.getByRole('button', { name: label }).getBoundingClientRect();
         const send = screen.getByRole('button', { name: 'Send answer' }).getBoundingClientRect();
         expect(action.top).toBe(send.top);
         expect(action.bottom).toBe(send.bottom);

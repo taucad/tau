@@ -119,6 +119,49 @@ describe('a decision that travels (D14)', () => {
   });
 });
 
+describe('a decision whose file count is not a choice (R13)', () => {
+  it('should say Checking files while the conflict is being read, never a count', () => {
+    decision({ ...foreign, labels: undefined, paths: [], busy: true });
+
+    expect(screen.getByRole('status')).toHaveTextContent('Checking files…');
+    expect(screen.queryByText(/0 files/u)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Merge into main' })).toBeDisabled();
+  });
+
+  it('should say nothing still differs, with Merge as the one action, when a later merge reconciled every file', async () => {
+    const user = userEvent.setup();
+    const onFinishResolution = vi.fn();
+    render(
+      <ConflictDecision
+        conflict={{ ...foreign, paths: [], ready: true }}
+        currentBranch='main'
+        conflictTexts={{}}
+        onKeepSide={vi.fn()}
+        onOpenConflict={vi.fn()}
+        onAskChat={vi.fn()}
+        onFinishResolution={onFinishResolution}
+        onResolveInEditor={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Nothing still differs on main. Merge to finish this decision.')).toBeInTheDocument();
+    expect(screen.queryByText(/0 files/u)).not.toBeInTheDocument();
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Ask chat to resolve' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Merge into main' }));
+    expect(onFinishResolution).toHaveBeenCalledWith('rev-c');
+  });
+
+  it('should say the conflict could not be read when its read failed, never a count', () => {
+    decision({ ...foreign, labels: undefined, paths: [], busy: false });
+
+    expect(screen.getByText('This conflict could not be read. Reload the page to read it again.')).toBeInTheDocument();
+    expect(screen.queryByText(/0 files/u)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Merge into main' })).toBeDisabled();
+  });
+});
+
 describe('a conflict line in Branches (D14)', () => {
   it('names a line by its decision, and offers no Switch or branch verbs on this device’s own', () => {
     branches({ ...foreign, branch: 'conflicts/main/device-a', foreign: false });

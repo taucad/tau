@@ -1,0 +1,27 @@
+{
+  "$comment": "MIT components the desktop app's PicoGK C# kernel ships, read by scripts/src/update-open-source-notices.mts. The generator checks Roslyn and SkiaSharp against the worker's NuGet lock; the .NET runtime version is apps/desktop/scripts/prepare-picogk-dotnet.mts dotnetRuntimeVersion.",
+  "components": [
+    {
+      "name": ".NET Runtime",
+      "package": "Microsoft.NETCore.App.Runtime",
+      "version": "10.0.11",
+      "copyright": "Copyright (c) .NET Foundation and Contributors",
+      "source": "https://github.com/dotnet/runtime"
+    },
+    {
+      "name": "Roslyn",
+      "package": "Microsoft.CodeAnalysis.CSharp",
+      "version": "5.9.0",
+      "copyright": "Copyright (c) .NET Foundation and Contributors",
+      "source": "https://github.com/dotnet/roslyn"
+    },
+    {
+      "name": "SkiaSharp",
+      "package": "SkiaSharp",
+      "version": "3.119.0",
+      "copyright": "Copyright (c) 2015-2016 Xamarin, Inc. Copyright (c) 2017-2018 Microsoft Corporation.",
+      "source": "https://github.com/mono/SkiaSharp"
+    }
+  ],
+  "mitLicense": "Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n"
+}

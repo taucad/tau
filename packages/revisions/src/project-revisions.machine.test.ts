@@ -648,6 +648,37 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  /* R22: a host restores the pin it remembered across a reload, which may name a checkout discarded since. */
+  it('keeps the live checkout when a restored pin names a checkout the registry no longer lists (R22)', () => {
+    const harness = start();
+
+    registerCheckouts(harness, [live]);
+    harness.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
+
+    expect(harness.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-live');
+    expect(selectRevisionStatus(harness.actor.getSnapshot())).toMatchObject({
+      checkoutId: 'checkout-live',
+      checkoutRoot: '/projects/project-1',
+      line: { kind: 'unborn', name: 'main' },
+    });
+
+    harness.actor.stop();
+  });
+
+  it('checks a pin restored before the registry answers against its first listing (R22)', () => {
+    const kept = start();
+    kept.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
+    registerCheckouts(kept);
+    expect(kept.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-b');
+    kept.actor.stop();
+
+    const gone = start();
+    gone.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
+    registerCheckouts(gone, [live]);
+    expect(gone.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-live');
+    gone.actor.stop();
+  });
+
   it('re-roots a switch onto a branch that already has a checkout', () => {
     const harness = start();
 

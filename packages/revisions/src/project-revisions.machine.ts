@@ -1399,6 +1399,13 @@ const projectRevisionsMachineDefinition = setup({
           return {};
         },
         pinTo: ({ context, event }: RootArgs<'pinTo'>, enq: ProjectRevisionsEnqueue): RootTransition => {
+          /* A pin a host remembered across a reload can name a checkout discarded
+           * since. Once the registry has answered, the workbench stays where it is
+           * rather than on a checkout with no root; before then, the registry's
+           * first answer checks it and falls back to the live checkout (R22). */
+          if (context.registrySettled && !context.checkouts.some((checkout) => checkout.id === event.checkoutId)) {
+            return {};
+          }
           const patch = {
             selectedCheckoutId: event.checkoutId,
             follow: 'pinned',

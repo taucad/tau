@@ -41,6 +41,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/skills',
   '@taucad/slicer',
   '@taucad/tscircuit',
+  '@taucad/types',
   '@taucad/zoo',
   'pino-pretty',
   'zod',
@@ -105,6 +106,7 @@ export default defineConfig(
       define,
       build: {
         outDir: 'dist/preload',
+        externalizeDeps: { exclude: ['@taucad/types', 'zod'] },
         lib: {
           entry: resolve(import.meta.dirname, 'src/preload/preload.ts'),
           formats: ['es'],

@@ -1,3 +1,4 @@
+import { BrowserPane } from '#components/browser/browser-pane.js';
 import {
   createContext,
   Fragment,
@@ -14,6 +15,7 @@ import type { ComponentProps, ReactNode } from 'react';
 import { useSelector } from '@xstate/react';
 import {
   Activity,
+  Globe,
   Bot,
   Box,
   BriefcaseBusiness,
@@ -399,6 +401,12 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
     id: 'activity',
     label: 'Activity',
     surfaces: [
+      {
+        id: 'browser',
+        label: paneTitle('browser'),
+        icon: Globe,
+        panel: { id: 'workbench:browser', component: 'browser', title: paneTitle('browser') },
+      },
       {
         id: 'revisions',
         label: paneTitle('revisions'),
@@ -791,6 +799,7 @@ export function WorkbenchLeftActions(properties: IDockviewHeaderActionsProps): R
 }
 
 const components = {
+  browser: BrowserPane,
   editor: EditorPanel,
   newTab: WorkbenchPlaceholderPanel,
   parameters: ParametersWorkbenchPanel,
@@ -810,6 +819,7 @@ const components = {
 };
 
 export const workbenchPanels = {
+  browser: getWorkbenchSurface('browser').panel!,
   parameters: getWorkbenchSurface('parameters').panel!,
   model: getWorkbenchSurface('model').panel!,
   kinematics: getWorkbenchSurface('kinematics').panel!,

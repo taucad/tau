@@ -1900,6 +1900,9 @@ importers:
       '@taucad/tscircuit':
         specifier: workspace:*
         version: link:../../packages/plugins/tscircuit
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../libs/types
       '@taucad/zoo':
         specifier: workspace:*
         version: link:../../packages/plugins/zoo

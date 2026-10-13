@@ -101,7 +101,7 @@ Copy [prompt.template.md](prompt.template.md) to `docs/research/artifacts/<chart
 The operator does these; the coordinator tells them in the final message, with the prompt inline:
 
 1. Create the cloud project and connect every repository the resumption file names (the program's repositories, the IaC repository, Tau Brain).
-2. Use the `tau-brain` cloud environment (attach Tau Brain as a source with its sparse exclude patterns; setup script `cd /home/user/tau && bash scripts/agent-env.sh setup`), which installs the workspace's Node, pnpm and dependencies and links Brain at `repos/tau-brain` so `docs/research` and `docs/handbooks` resolve. The handbook page `docs/handbooks/cloud/operate/agent-environments.md` holds the fields. No operator credential goes into the environment.
+2. Set the project's environment to `tau`, the one Claude cloud environment for every repository set; its setup script (`scripts/cloud-env-setup.sh`) installs a session-start hook that installs the workspace's Node, pnpm and dependencies and links an attached Tau Brain at `repos/tau-brain` so `docs/research` and `docs/handbooks` resolve. Routines the executor creates name the same environment and attach Brain with its sparse exclude patterns. The handbook page `docs/handbooks/cloud/operate/agent-environments.md` holds the fields. No operator credential goes into the environment.
 3. Paste the prompt.
 
 Then `update-agent-memory`: the handoff state, the remaining operator steps and the pings to expect.

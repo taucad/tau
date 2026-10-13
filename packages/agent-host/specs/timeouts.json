@@ -788,6 +788,14 @@
       "owner": "W36"
     },
     {
+      "id": "E32",
+      "bound": "tau mcp idle release: a project's worker thread closes after --idle-release seconds (default 900) with no tool call in flight",
+      "site": "packages/cli/src/commands/mcp.ts",
+      "token": "idleRelease",
+      "class": "Debounce",
+      "owner": "tau mcp"
+    },
+    {
       "id": "D25",
       "bound": "Charter D17: read-only oversized replay retirement after 2 s idle; cancelled by active reads/acquisition, never source freshness authority",
       "site": "packages/agent-host/src/launchers/agent-launcher.ts",

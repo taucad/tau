@@ -120,8 +120,11 @@ Stdout carries result data only: tab-separated plain lines by default, one `{"v"
 
 `tau mcp` serves Tau's CAD tools — `evaluate_model`, `test_model`, `screenshot`, `export_model` and `arrange_workbench` — over stdio to the MCP client that launched it. Stdout carries the MCP protocol only. Each call works in the first of: `--project`; the folder Codex sends with the call; `CLAUDE_PROJECT_DIR`; the working directory. Screenshots come back inline; they and GeoSpec reports over 128 KiB are saved in a temporary folder that is removed when the server stops. `--plugin` and `--config` work as they do for `export`.
 
+Each project folder gets its own worker thread on its first call, so projects evaluate, export and screenshot in parallel (`test_model` calls run one at a time) and a model that hangs or crashes its thread costs only that project. An operation that runs past `--operation-timeout` seconds (default 600) fails, and the project's next call starts a fresh thread. A thread with no tool call in flight for `--idle-release` seconds (default 900) is released, and the project's next call loads a fresh one.
+
 ```bash
 tau mcp --project ./bracket
+tau mcp --operation-timeout 120 --idle-release 300
 ```
 
 For Codex and Claude Code, install [`@taucad/agent-plugin`](https://www.npmjs.com/package/@taucad/agent-plugin): it starts `tau mcp` for the agent and adds Tau's CAD skills.

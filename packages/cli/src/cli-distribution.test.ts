@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
+import type { RuntimeWorkerData } from '#runtime.worker.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -177,7 +178,7 @@ describe('tau CLI dist (real binary)', () => {
     const client = createRuntimeClient({
       transport: nodeWorkerTransport({
         url: pathToFileURL(runtimeWorkerPath),
-        workerData: { projectRoot: project, plugin: [] },
+        workerData: { projectRoot: project, plugin: [] } satisfies RuntimeWorkerData,
         fileSystem: fromNodeFs(project),
         workerCtor: TsxWorker,
       }),

@@ -224,7 +224,7 @@ catalog:
   jsdom: ~26.0.0
   '@types/jsdom': ^21.1.7
   katex: 0.18.2
-  knip: ^6.17.1
+  knip: 6.17.1
   libassimp: ^0.3.0
   libcascade: 3.1.0
   lighthouse: ^13.5.0
@@ -440,6 +440,7 @@ overrides:
   graphics-debug@0.0.100>react-router-dom: 7.18.2
   graphics-debug@0.0.99>react-router-dom: 7.18.2
   ipx@3.1.1>sharp: 0.35.5
+  knip@6.17.1>smol-toml: 1.9.1
   mermaid>dompurify: 3.4.16
   mermaid>katex: 0.18.2
   micromark-extension-math>katex: 0.18.2

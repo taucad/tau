@@ -12,7 +12,11 @@
  *
  * A subset only works when it is closed under workspace dependencies; omitting a sibling makes npm
  * fall back to the registry and 404. Requesting `packages/runtime` also packs the packages its
- * README quick start imports and their publishable closure, computed from the graph.
+ * README quick start imports and their publishable closure, computed from the graph. Requesting
+ * `packages/cli` packs the CLI's publishable closure except the GeoSpec engine packages, which Tau's
+ * train does not publish (charter D36; `@taucad/host` peers them optionally), and then runs the
+ * installed `tau` from a project folder outside the app with an empty config directory: `export` to
+ * a GLB, `check`, `mcp` answering `initialize`, and the typed not-prepared refusal for a `.py` model.
  *
  * `--from-urls` is the consumer leg of the pkg.pr.new full run (`preview-packages.yml`): it packs
  * nothing and installs every package the run published, by the URLs in the `--json` file that
@@ -43,6 +47,7 @@ import { bundledLibraries, publishable, publishableClosure, publishWaves, worksp
 import { chromium } from 'playwright';
 import type { Page } from 'playwright';
 import ts from 'typescript';
+import { runCliSurface } from '#check-pack-install-cli.js';
 
 type Dependencies = Record<string, string>;
 
@@ -1122,25 +1127,6 @@ for (const [name, file] of Object.entries(plan.instantiations)) {
 console.log(JSON.stringify(failures));
 `;
 
-/** Export a replicad model to GLB with the installed `tau` bin, from a project folder outside the app. */
-const runCliExport = (temporaryRoot: string, appRoot: string): void => {
-  const project = join(temporaryRoot, 'project');
-  mkdirSync(project);
-  writeFileSync(
-    join(project, 'main.ts'),
-    "import { makeBaseBox } from 'replicad';\nexport default () => makeBaseBox(10, 20, 30);\n",
-  );
-  const output = join(project, 'main.glb');
-  run(join(appRoot, 'node_modules/.bin/tau'), ['export', 'main.ts', '--ext=glb', `--output=${output}`], project);
-  invariant(existsSync(output), `tau export wrote no file at ${output}.`);
-  const bytes = readFileSync(output);
-  invariant(
-    bytes.byteLength > 12 && bytes.subarray(0, 4).toString('latin1') === 'glTF',
-    `tau export wrote ${String(bytes.byteLength)} bytes that are not a GLB.`,
-  );
-  console.log(`tau export main.ts --ext=glb: ${String(bytes.byteLength)} bytes of glTF.`);
-};
-
 /** Every node of the installed tree that names a package of the run must have come from its pkg.pr.new URL. */
 const assertSiblingsFromPreview = (appRoot: string, published: ReadonlySet<string>): void => {
   type Node = { readonly resolved?: string; readonly dependencies?: Record<string, Node> };
@@ -1184,6 +1170,12 @@ type InstallPlan = {
   readonly previewNames?: ReadonlySet<string>;
 };
 
+/**
+ * The GeoSpec engine projects: published from taucad/geospec, never by Tau's train (charter D36), so a
+ * consumer of the CLI closure installs without them. `@taucad/host` declares both as optional peers.
+ */
+const geospecEngineProjects: ReadonlySet<string> = new Set(['geospec-engine', 'geospec-engine-native']);
+
 /** Pack the requested (or every) publishable directory into TGZs. */
 const planFromTarballs = async (requested: readonly string[], artifactRoot: string): Promise<InstallPlan> => {
   const resolved = await workspace({ fresh: true });
@@ -1215,9 +1207,15 @@ const planFromTarballs = async (requested: readonly string[], artifactRoot: stri
         return root === undefined ? [] : [root];
       })
     : [];
+  const cliDirectories = requested.includes('packages/cli')
+    ? publishableClosure(resolved, ['cli']).flatMap((name) => {
+        const root = projectByName.get(name)?.root;
+        return root === undefined || geospecEngineProjects.has(name) ? [] : [root];
+      })
+    : [];
   const packageDirectories =
     requested.length > 0
-      ? [...new Set([...requested, ...quickStartDirectories, ...tscircuitDirectories])]
+      ? [...new Set([...requested, ...quickStartDirectories, ...tscircuitDirectories, ...cliDirectories])]
       : releaseTrainDirectories;
 
   const tarballs: string[] = [];
@@ -1358,6 +1356,8 @@ const main = async (): Promise<void> => {
   const artifactRoot = join(temporaryRoot, 'artifact');
   const appRoot = join(temporaryRoot, 'app');
   let passed = false;
+  const runStarted = performance.now();
+  const elapsed = (): string => `${(Math.round(performance.now() - runStarted) / 1000).toFixed(1)} s`;
 
   mkdirSync(artifactRoot);
   mkdirSync(appRoot);
@@ -1370,6 +1370,7 @@ const main = async (): Promise<void> => {
       previewFile === undefined
         ? await planFromTarballs(arguments_, artifactRoot)
         : await planFromUrls(previewFile, artifactRoot);
+    console.log(`Elapsed after ${previewFile === undefined ? 'packing' : 'downloading'}: ${elapsed()}.`);
 
     // The app declares zod itself, the way a consumer satisfying the plugin peer
     // does; `assertSingleZodInstance` then proves npm did not fork it.
@@ -1402,6 +1403,7 @@ const main = async (): Promise<void> => {
     // The install saves what it adds to the temporary app: npm 11 reports unsaved packages as
     // extraneous, which `npm ls` (and so every tree check below) counts as a problem.
     run('npm', ['install', '--no-audit', '--no-fund', ...plan.installArguments], appRoot);
+    console.log(`Elapsed after npm install: ${elapsed()}.`);
 
     assertSingleZodInstance(appRoot);
     if (plan.names.includes('@taucad/tscircuit')) {
@@ -1434,7 +1436,11 @@ const main = async (): Promise<void> => {
       `Imported ${String(specifiers.length)} published subpaths and instantiated ${String(Object.keys(instantiations).length)} native payload(s).`,
     );
 
-    if (existsSync(join(appRoot, 'node_modules/@taucad/tscircuit'))) {
+    // The tscircuit checks compile a consumer that also imports `@taucad/react`, which the CLI closure lacks.
+    if (
+      existsSync(join(appRoot, 'node_modules/@taucad/tscircuit')) &&
+      existsSync(join(appRoot, 'node_modules/@taucad/react'))
+    ) {
       await runInstalledTscircuit(appRoot, zod.version);
     }
     const runtimeRoot = join(appRoot, 'node_modules/@taucad/runtime');
@@ -1450,9 +1456,9 @@ const main = async (): Promise<void> => {
       }
     }
     if (existsSync(join(appRoot, 'node_modules/@taucad/cli'))) {
-      runCliExport(temporaryRoot, appRoot);
+      await runCliSurface(temporaryRoot, appRoot);
     }
-    console.log(`npm-local install (${plan.sourceLabel}) and published-surface smoke passed.`);
+    console.log(`npm-local install (${plan.sourceLabel}) and published-surface smoke passed in ${elapsed()}.`);
     passed = true;
   } finally {
     if (passed) {

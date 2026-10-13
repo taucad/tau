@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GithubRequestError, githubConnections, githubErrorMessage, safeReturnPath } from '#lib/github-connections.js';
+import {
+  GithubRequestError,
+  githubConnectReturn,
+  githubConnections,
+  githubErrorMessage,
+  githubSetupReturn,
+  safeReturnPath,
+} from '#lib/github-connections.js';
 
 const token = { accessToken: 'test-access', expiresAt: '2026-09-23T12:00:00.000Z', generation: 1 };
 const repository = {
@@ -114,6 +121,42 @@ describe('a removed GitHub account (R23)', () => {
     expect(githubErrorMessage(error)).toBe(
       'This GitHub account is no longer connected. Refresh and choose another account.',
     );
+  });
+});
+
+describe('return paths remembered across GitHub', () => {
+  let fetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    globalThis.sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    globalThis.sessionStorage.clear();
+  });
+
+  it('should forget the setup return once it is taken (R10)', () => {
+    githubSetupReturn.remember('/w/home/part');
+
+    expect(githubSetupReturn.take()).toBe('/w/home/part');
+    expect(githubSetupReturn.take()).toBeUndefined();
+  });
+
+  it('should remember where a browser connection returns, for a fresh attempt (R24)', async () => {
+    const started = { attemptId: '5c9b4a3e-3f5e-4a8e-9a55-7f7ad8f0a3a1', authorizationUrl: 'https://github.com/login' };
+    fetch.mockResolvedValueOnce(Response.json(started));
+    await githubConnections.start('/w/home/part');
+
+    expect(githubConnectReturn.read()).toBe('/w/home/part');
+
+    /* The desktop app polls for its own attempt; this tab never returns from it. */
+    fetch.mockResolvedValueOnce(Response.json(started));
+    await githubConnections.start('/w/home/other', 'desktop-poll');
+
+    expect(githubConnectReturn.read()).toBe('/w/home/part');
   });
 });
 

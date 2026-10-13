@@ -217,11 +217,17 @@ export const githubConnections = Object.freeze({
   start: async (
     returnTo: string,
     completionMode: 'browser' | 'desktop-poll' = 'browser',
-  ): Promise<{ attemptId: string; authorizationUrl: string }> =>
-    request('/connections/start', z.object({ attemptId: z.uuid(), authorizationUrl: z.url() }), {
+  ): Promise<{ attemptId: string; authorizationUrl: string }> => {
+    const started = await request('/connections/start', z.object({ attemptId: z.uuid(), authorizationUrl: z.url() }), {
       method: 'POST',
       body: JSON.stringify({ returnTo, completionMode }),
-    }),
+    });
+    if (completionMode === 'browser') {
+      /* R24: an expired attempt's callback cannot say where this one was going. */
+      githubConnectReturn.remember(returnTo);
+    }
+    return started;
+  },
   complete: async (attemptId: string): Promise<GithubConnection> =>
     request('/connections/complete', connectionSchema, { method: 'POST', body: JSON.stringify({ attemptId }) }),
   cancel: async (attemptId: string): Promise<void> => {
@@ -316,30 +322,68 @@ export const safeReturnPath = (value: string | undefined): string | undefined =>
   return resolved.origin === returnBase && !path.startsWith('//') ? path : undefined;
 };
 
-const setupReturnKey = 'tau:github-setup-return';
+/** A return path this tab remembers across a round trip to GitHub. */
+type TabReturn = Readonly<{
+  /** Stores `path` in this tab's session storage. */
+  remember: (path: string) => void;
+  /** The remembered same-origin path, left in place. */
+  read: () => string | undefined;
+  /** The remembered same-origin path, forgotten as it is read. */
+  take: () => string | undefined;
+}>;
+
+/**
+ * A return path kept in session storage. Storage can be refused (private
+ * mode); nothing is remembered then, and the completion page offers its own
+ * way back.
+ *
+ * @param key - The session storage key.
+ * @returns The path's memory.
+ */
+const tabReturn = (key: string): TabReturn => {
+  const read = (): string | undefined => {
+    try {
+      return safeReturnPath(globalThis.sessionStorage.getItem(key) ?? undefined);
+    } catch {
+      return undefined;
+    }
+  };
+  return Object.freeze({
+    remember(path: string): void {
+      try {
+        globalThis.sessionStorage.setItem(key, path);
+      } catch {
+        // Storage refused: nothing is remembered.
+      }
+    },
+    read,
+    take(): string | undefined {
+      const path = read();
+      try {
+        globalThis.sessionStorage.removeItem(key);
+      } catch {
+        // Storage refused: nothing was remembered.
+      }
+      return path;
+    },
+  });
+};
 
 /**
  * Where "Configure GitHub access" returns once GitHub redirects to the App's
  * Setup URL (`/github/complete?installation_id=…&setup_action=…`, D16d). That
- * redirect carries no Tau state, so the page remembers it for this tab.
+ * redirect carries no Tau state, so the page remembers it for this tab, and
+ * the completion page takes it: a later setup redirect (an install started on
+ * GitHub itself) must not return to this one's page (R10).
  */
-export const githubSetupReturn = Object.freeze({
-  remember(path: string): void {
-    try {
-      globalThis.sessionStorage.setItem(setupReturnKey, path);
-    } catch {
-      // Storage refused (private mode): the completion page offers its own way back.
-    }
-  },
-  /* Read, not consumed: a render may run twice, and the next Configure overwrites it. */
-  read(): string | undefined {
-    try {
-      return safeReturnPath(globalThis.sessionStorage.getItem(setupReturnKey) ?? undefined);
-    } catch {
-      return undefined;
-    }
-  },
-});
+export const githubSetupReturn = tabReturn('tau:github-setup-return');
+
+/**
+ * Where the last GitHub connection started in this tab returns (R24). GitHub's
+ * callback for an attempt that outlived its start record carries no Tau state,
+ * so *Connect GitHub again* reads it to return where the first attempt would have.
+ */
+export const githubConnectReturn = tabReturn('tau:github-connect-return');
 
 /**
  * Sends the page to GitHub to change which repositories the Tau app reaches.

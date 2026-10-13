@@ -91,7 +91,7 @@ const main = async (): Promise<void> => {
     logger,
   });
   const { signal } = new AbortController();
-  const time = async <T,>(operation: () => Promise<T>): Promise<{ milliseconds: number; value: T }> => {
+  const time: <T>(operation: () => Promise<T>) => Promise<{ milliseconds: number; value: T }> = async (operation) => {
     const started = performance.now();
     const value = await operation();
     return { milliseconds: performance.now() - started, value };

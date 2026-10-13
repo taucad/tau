@@ -31,7 +31,11 @@ type Payload =
 type Plan = { readonly closures: Record<string, readonly Payload[]> };
 type Written = { readonly path: string; readonly byteLength: number; readonly sha256: string | undefined };
 
-const pool = async <T,>(items: readonly T[], width: number, run: (item: T) => Promise<void>): Promise<void> => {
+const pool: <T>(items: readonly T[], width: number, run: (item: T) => Promise<void>) => Promise<void> = async (
+  items,
+  width,
+  run,
+) => {
   let next = 0;
   const lane = async (): Promise<void> => {
     while (next < items.length) {

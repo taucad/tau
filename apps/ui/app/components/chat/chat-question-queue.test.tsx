@@ -160,6 +160,17 @@ describe('ChatQuestionQueue', () => {
     expect(screen.queryByRole('button', { name: /question/u })).not.toBeInTheDocument();
   });
 
+  it('should count and render only asks whose transcript cards are off screen', () => {
+    asks = [askOf('ask_visible', 'Visible', 120), askOf('ask_hidden', 'Hidden', 120)];
+    onScreen = new Set(['ask_visible']);
+    render(<ChatQuestionQueue />);
+    settle();
+
+    expect(screen.getByRole('button', { name: '1 question waiting · Hidden' })).toBeVisible();
+    expect(screen.getByText('Hidden?')).toBeVisible();
+    expect(screen.queryByText('Visible?')).not.toBeInTheDocument();
+  });
+
   it('should hide settled asks that were defaulted, declined or cancelled', () => {
     asks = [
       askOf('ask_defaulted', 'Defaulted', 0),

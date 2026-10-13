@@ -214,7 +214,7 @@ export function ChatQuestionQueue({
   }
 
   const { text: summary, remaining } = traySummary({
-    waiting,
+    waiting: offScreenWaiting,
     answers: questions.answers,
     now,
   });
@@ -259,7 +259,7 @@ export function ChatQuestionQueue({
           tabIndex={0}
           className='flex max-h-[min(22rem,45cqh)] scroll-shadows-y flex-col divide-y overflow-y-auto overscroll-contain border-t bg-background px-2 pb-3 focus-visible:focus-outline'
         >
-          {waiting.map((ask) => (
+          {offScreenWaiting.map((ask) => (
             <li key={ask.id}>
               <ChatQuestionCard isFlat ask={ask} />
             </li>

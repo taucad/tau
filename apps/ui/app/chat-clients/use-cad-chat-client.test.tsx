@@ -290,8 +290,11 @@ const requestTurn = async (gesture: ChatTurnGesture): Promise<void> => {
 };
 
 const buildActions = (): ActionsMock => ({
-  sendMessage: vi.fn(async (message: MyUIMessage, options?: { attachments?: readonly StoredAttachmentRef[] }) =>
-    requestTurn({ kind: 'send', message, ...options }),
+  sendMessage: vi.fn(
+    async (
+      message: MyUIMessage,
+      options?: { attachments?: readonly StoredAttachmentRef[]; execution?: CadAgentExecution },
+    ) => requestTurn({ kind: 'send', message, ...options }),
   ),
   regenerate: vi.fn(async () => requestTurn({ kind: 'regenerate' })),
   editMessage: vi.fn(
@@ -329,6 +332,7 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
   vi.mocked(useChatSessionStore).mockReturnValue({
     requestTurn: vi.fn(),
     startPendingSeed: vi.fn(),
+    refreshMessageQueue: vi.fn(),
     setTurnPlacement: vi.fn(),
     respondToProjectedApproval: browserHostHarness.resolveInterrupt,
     getProjection: () => {
@@ -782,6 +786,29 @@ describe('useCadChatClient', () => {
       reason: undefined,
       optionId: 'allow-always',
     });
+  });
+
+  it('should capture the selected execution before an attachment save yields', async () => {
+    useActiveChatInstanceMock.mockReturnValue(mock<Chat<MyUIMessage>>());
+    const selected = buildAgent();
+    mountAgentMock(selected);
+    const actions = buildActions();
+    installActions(actions);
+    const saved = Promise.withResolvers<void>();
+    promoteDraftAttachments.mockImplementation(async () => saved.promise);
+    const view = renderClient();
+    let sending: Promise<void> | undefined;
+    act(() => {
+      sending = view.result.current.submit({ text: 'Keep this model', attachments: [imageAttachment] });
+    });
+    const changed = { ...selected, execution: { ...selected.execution, model: 'different-model' } };
+    mountAgentMock(changed);
+    view.rerender();
+    await act(async () => {
+      saved.resolve();
+      await sending;
+    });
+    expect(actions.sendMessage.mock.calls[0]?.[1]).toMatchObject({ execution: selected.execution });
   });
 
   it('should admit one Start command when submit hands over the user message', async () => {

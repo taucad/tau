@@ -6,6 +6,7 @@
   "tags": ["scope:ui", "type:app", "layer:feature", "release:app", "deploy:staging"],
   "targets": {
     "formal:lean": {},
+    "formal": {},
     "render-calibration": {
       "executor": "nx:run-commands",
       "continuous": true,

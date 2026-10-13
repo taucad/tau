@@ -462,7 +462,10 @@ export function useDraftActions(): DraftActions {
  * was a second admission policy, and the two disagreed (F10).
  */
 export type ChatActions = DraftActions & {
-  sendMessage: (message: SendMessageInput, options?: { attachments?: readonly StoredAttachmentRef[] }) => Promise<void>;
+  sendMessage: (
+    message: SendMessageInput,
+    options?: { attachments?: readonly StoredAttachmentRef[]; execution?: CadAgentExecution },
+  ) => Promise<void>;
   regenerate: () => void;
   /**
    * Resume a run the host still holds, preserving its already-settled work.
@@ -541,6 +544,7 @@ export function useChatActions(chatId?: string): ChatActions {
         await store.requestTurn(resolvedChatId, {
           kind: 'send',
           message: outgoingMessage,
+          ...(options?.execution === undefined ? {} : { execution: options.execution }),
           ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
         });
       },

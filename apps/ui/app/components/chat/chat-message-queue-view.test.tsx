@@ -1,0 +1,97 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+import { ChatMessageQueueView } from '#components/chat/chat-message-queue-view.js';
+import type { ChatMessageQueueProps } from '#components/chat/chat-message-queue-view.js';
+
+const fixture = (overrides: Partial<ChatMessageQueueProps> = {}): ChatMessageQueueProps => ({
+  items: [
+    {
+      id: 'one',
+      requestId: 'req_one',
+      message: { id: 'one', role: 'user', parts: [{ type: 'text', text: 'Keep the scope large' }] },
+    },
+  ],
+  onEdit: vi.fn(async () => undefined),
+  onSteer: vi.fn(async () => undefined),
+  onMoveFirst: vi.fn(async () => undefined),
+  onRetry: vi.fn(),
+  ...overrides,
+});
+describe('queued message adornment', () => {
+  it('should retain text and show a spinner while Steer is pending, then report a failed save', async () => {
+    const user = userEvent.setup();
+    const operation = Promise.withResolvers<void>();
+    const props = fixture({ onSteer: async () => operation.promise });
+    render(<ChatMessageQueueView {...props} />);
+    await user.click(screen.getByRole('button', { name: 'Steer' }));
+    expect(screen.getByText('Keep the scope large')).toBeVisible();
+    expect(screen.getByRole('status')).toHaveTextContent('Steering');
+    expect(screen.getByRole('button', { name: 'Delete queued message 1' })).toBeDisabled();
+    operation.reject(new Error('Disk full. Message is still saved.'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Disk full');
+    expect(screen.getByText('Keep the scope large')).toBeVisible();
+  });
+  it('should edit inline without replacing the composer or dropping the queued item', async () => {
+    const user = userEvent.setup();
+    const props = fixture();
+    render(<ChatMessageQueueView {...props} />);
+    await user.click(screen.getByRole('button', { name: 'Options for queued message 1' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Edit message' }));
+    const editor = screen.getByRole('textbox', { name: 'Edit queued message' });
+    await user.clear(editor);
+    await user.type(editor, 'Make the gear stronger');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(props.onEdit).toHaveBeenCalledWith('one', 'Make the gear stronger');
+    });
+  });
+  it('should make uncertain deliveries immutable and expose a retry action', async () => {
+    const user = userEvent.setup();
+    const props = fixture({ sendingId: 'one', error: 'Waiting for acknowledgement' });
+    render(<ChatMessageQueueView {...props} />);
+    expect(screen.getByRole('button', { name: 'Steer' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Delete queued message 1' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(props.onRetry).toHaveBeenCalledOnce();
+  });
+  it.each(['delete', 'edit'] as const)(
+    'should retry the failed %s action without sending the message',
+    async (action) => {
+      const user = userEvent.setup();
+      const retried = Promise.withResolvers<void>();
+      const onEdit = vi
+        .fn<ChatMessageQueueProps['onEdit']>()
+        .mockRejectedValueOnce(new Error('Storage unavailable'))
+        .mockImplementationOnce(async () => retried.promise);
+      const props = fixture({ onEdit });
+      render(<ChatMessageQueueView {...props} />);
+      if (action === 'edit') {
+        await user.click(screen.getByRole('button', { name: 'Options for queued message 1' }));
+        await user.click(screen.getByRole('menuitem', { name: 'Edit message' }));
+        const editor = screen.getByRole('textbox', { name: 'Edit queued message' });
+        await user.clear(editor);
+        await user.type(editor, 'Keep this exact edit');
+        await user.click(screen.getByRole('button', { name: 'Save' }));
+      } else {
+        await user.click(screen.getByRole('button', { name: 'Delete queued message 1' }));
+      }
+      expect(await screen.findByRole('alert')).toHaveTextContent('Storage unavailable');
+      try {
+        await user.click(screen.getByRole('button', { name: 'Retry' }));
+        expect(onEdit.mock.calls).toEqual([
+          ['one', action === 'edit' ? 'Keep this exact edit' : undefined],
+          ['one', action === 'edit' ? 'Keep this exact edit' : undefined],
+        ]);
+        expect(props.onRetry).not.toHaveBeenCalled();
+        expect(screen.getByRole('status')).toHaveTextContent(action === 'edit' ? 'Saving' : 'Removing');
+        expect(screen.getByRole('button', { name: 'Steer' })).toBeDisabled();
+      } finally {
+        retried.resolve();
+      }
+      await waitFor(() => {
+        expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      });
+    },
+  );
+});

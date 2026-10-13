@@ -423,16 +423,16 @@ export const PortableShareSurface = (): React.JSX.Element => {
  * the shell's parser would refuse, so in both of those cases this is an empty
  * box that takes no pointer events and paints nothing.
  *
- * Its bottom-left corner matches the workbench's p-2 inset and rounded-lg
- * frame, away from the parameter list on the right. Shown from
+ * Its inset matches the viewer controls: the workbench's p-2 frame, its
+ * 1px border, and the controls' inset-2 spacing. Shown from
  * `lg`, where the viewer is wide enough to keep the card off both the bar and
  * the workbench; phones and tablets have no desktop app to open.
  *
  * @returns The offer's corner.
  */
 const ShareDesktopOffer = (): React.JSX.Element => (
-  <div className='pointer-events-none fixed bottom-2 left-2 z-50 hidden lg:block'>
-    <div className='pointer-events-auto [&>[data-slot=card]]:rounded-bl-lg'>
+  <div className='pointer-events-none fixed bottom-[calc(var(--spacing)*4+1px)] left-[calc(var(--spacing)*4+1px)] z-50 hidden lg:block'>
+    <div className='pointer-events-auto'>
       <OpenInDesktop continueLabel='Continue in the browser' />
     </div>
   </div>

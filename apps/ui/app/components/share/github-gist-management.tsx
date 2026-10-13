@@ -31,7 +31,7 @@ import {
   shareProviderRegistry,
   withBrowserShareProviderContext,
 } from '#lib/share-providers.js';
-import type { GithubGistConnectionStatus } from '#lib/share-providers.js';
+import type { GithubGistAuthorizationSurface, GithubGistConnectionStatus } from '#lib/share-providers.js';
 import { toast } from '#components/ui/sonner.js';
 
 type GithubGistManagementProps = {
@@ -40,6 +40,8 @@ type GithubGistManagementProps = {
   readonly collectSnapshot: () => Promise<ShareProjectSnapshot>;
   readonly onRepublished: (url: string) => void;
   readonly onUnpublished: () => void;
+  /** Where GitHub sends the person back after a reconnect: the share page, or the editor with Share open. */
+  readonly surface?: GithubGistAuthorizationSurface;
 };
 
 /** Owner lifecycle controls for a canonical Tau project stored in a GitHub Gist. */
@@ -49,6 +51,7 @@ export function GithubGistManagement({
   collectSnapshot,
   onRepublished,
   onUnpublished,
+  surface = 'share-page',
 }: GithubGistManagementProps): React.JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
@@ -158,7 +161,7 @@ export function GithubGistManagement({
     setBusy(true);
     setRefocusConnect(false);
     try {
-      const handoff = await connectGithubGist({ returnUrl: globalThis.location.href, surface: 'share-page' });
+      const handoff = await connectGithubGist({ returnUrl: globalThis.location.href, surface });
       if (handoff === 'redirect') {
         return;
       }

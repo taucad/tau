@@ -8,6 +8,7 @@ import { MemoryRouter } from 'react-router';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ReactElement } from 'react';
 import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
+import { ShareError } from '@taucad/share/provider';
 import type { RevisionTag } from '@taucad/revisions';
 import { entitlementsFromTier } from '@taucad/billing';
 import { ProjectSharePanel, nextVersionName } from '#components/publish/project-share-panel.js';
@@ -561,6 +562,36 @@ describe('ProjectSharePanel', () => {
     );
     expect(screen.queryByLabelText('Share link')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Manage GitHub Gist' })).not.toBeInTheDocument();
+  });
+
+  it('should bring a Manage reconnect back to the workbench with Share open (R8)', async () => {
+    getGithubGistConnectionStatus.mockResolvedValue('connected');
+    portableProviderPublish.mockResolvedValueOnce({
+      locator: { providerId: 'github-gist', reference: `abc123.${'a'.repeat(40)}` },
+      secrets: {},
+    });
+    portableProviderRepublish.mockRejectedValueOnce(
+      new ShareError('SHARE_AUTH_REQUIRED', 'The GitHub connection needs to be renewed.'),
+    );
+    renderPanel(
+      <ProjectSharePanel
+        projectId='proj_manage_reconnect'
+        projectName='Gist'
+        entryPath='main.ts'
+        collectSnapshot={vi.fn(async () => ({ entryPath: 'main.ts', files: [], warnings: [] }))}
+        initialMethod='github-gist'
+      />,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Create Gist and copy link' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Manage GitHub Gist' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Republish Gist' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }));
+
+    expect(connectGithubGist).toHaveBeenCalledWith({
+      returnUrl: globalThis.location.href,
+      surface: 'editor',
+    });
   });
 
   it('should open on the sharing method chosen last time (R8)', async () => {

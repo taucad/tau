@@ -718,6 +718,7 @@ function PortableShareBody({
             collectSnapshot={collectSnapshot}
             onRepublished={setShareUrl}
             onUnpublished={forgetPublication}
+            surface='editor'
           />
         ) : null}
         {browserConsent === 'waiting' ? (

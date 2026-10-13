@@ -23,7 +23,8 @@ const pageCeilings: Readonly<Record<string, number>> = {
   'runtime/api/middleware.mdx': 500,
   'runtime/api/testing.mdx': 500,
   'runtime/api/transport.mdx': 1450,
-  'runtime/api/types.mdx': 550,
+  // Raised 550 -> 560 on 2026-10-13 for the RealmGroup and RealmHoldInput tables (typed realm groups).
+  'runtime/api/types.mdx': 560,
   'runtime/concepts/architecture.mdx': 1650,
   'runtime/concepts/interactive-architecture.mdx': 1100,
   'runtime/concepts/kernel-selection.mdx': 850,

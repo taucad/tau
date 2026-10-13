@@ -2,6 +2,11 @@ import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
 
+const webGpuProfile = process.env['TAU_E2E_WEBGPU_PROFILE'] ?? 'hardware';
+if (webGpuProfile !== 'hardware' && webGpuProfile !== 'software') {
+  throw new TypeError(`Unsupported TAU_E2E_WEBGPU_PROFILE: ${webGpuProfile}`);
+}
+
 /**
  * Native pixel, draw and buffer-lifetime qualification against the installed Three package, and the measurement
  * worker loaded through the bundler's `new Worker(new URL(…))` resolution.
@@ -12,6 +17,7 @@ export default defineConfig({
   resolve: { dedupe: ['three'] },
   optimizeDeps: { include: ['three', 'three/addons', 'three/webgpu', 'three/tsl'] },
   test: {
+    provide: { webGpuProfile },
     include: [
       'src/graphics/three/utils/gltf-surface-batches.browser.test.ts',
       'src/graphics/three/utils/gltf-edge-batches.browser.test.ts',
@@ -25,7 +31,15 @@ export default defineConfig({
       enabled: true,
       headless: true,
       screenshotDirectory: '../../out/test-results/gltf-batches-browser',
-      provider: playwright({ launchOptions: { channel: 'chromium', args: ['--enable-unsafe-webgpu'] } }),
+      provider: playwright({
+        launchOptions: {
+          channel: 'chromium',
+          args:
+            webGpuProfile === 'software'
+              ? ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader']
+              : ['--enable-unsafe-webgpu'],
+        },
+      }),
       instances: [{ browser: 'chromium' }],
     },
   },

@@ -30,6 +30,7 @@ export default defineConfig({
     },
   },
   test: {
+    provide: { webGpuProfile: process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software' ? 'software' : 'hardware' },
     include: ['app/components/geometry/viewer-resize.browser.test.tsx'],
     testTimeout: 60_000,
     fileParallelism: false,

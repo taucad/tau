@@ -593,6 +593,7 @@
     "@taucad/image": "workspace:*",
     "@taucad/nx": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/ui": "workspace:*",
     "@taucad/utils": "workspace:*",

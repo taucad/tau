@@ -38,7 +38,15 @@ export type KimiCompletion = Omit<OpenAIClient.Chat.Completions.ChatCompletion, 
   readonly usage?: KimiUsage;
 };
 
-type KimiCompletionChunkDelta = OpenAIClient.Chat.Completions.ChatCompletionChunk['choices'][number]['delta'] & {
+type OpenAICompletionChunkDelta = OpenAIClient.Chat.Completions.ChatCompletionChunk['choices'][number]['delta'];
+
+// Kimi exposes function tools; OpenAI's newer custom-tool variant is not part of its wire contract.
+type KimiToolCallDelta = Omit<NonNullable<OpenAICompletionChunkDelta['tool_calls']>[number], 'type'> & {
+  readonly type?: 'function';
+};
+
+type KimiCompletionChunkDelta = Omit<OpenAICompletionChunkDelta, 'tool_calls'> & {
+  readonly tool_calls?: KimiToolCallDelta[];
   readonly reasoning?: string;
   readonly reasoning_content?: string;
 };

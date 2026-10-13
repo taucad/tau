@@ -235,6 +235,8 @@
     "@react-router/dev": "catalog:",
     "@react-router/fs-routes": "catalog:",
     "@silvenon/vite-plugin-devtools-json": "^1.0.1",
+    "@swc-node/register": "catalog:",
+    "@swc/core": "catalog:",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.1",
     "@taucad/agent-host": "workspace:*",

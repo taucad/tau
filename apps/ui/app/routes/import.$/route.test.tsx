@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
+import { largeObjectThresholdBytes, RevisionPortError } from '@taucad/revisions';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import type { getGitHubClient } from '#lib/github-api.js';
 import type { ImportWorkerRequest, ImportWorkerResponse } from '#workers/import.worker.js';
@@ -18,6 +19,7 @@ const slugs = vi.hoisted(() => ({
   byId: new Map<string, { workspaceSlug: string; projectSlug: string }>(),
 }));
 const linkedImport = vi.hoisted(() => ({ prepare: vi.fn() }));
+const projects = vi.hoisted(() => ({ create: vi.fn() }));
 type RepositoryMetadata = Awaited<ReturnType<ReturnType<typeof getGitHubClient>['getRepository']>>;
 const getRepository = vi.hoisted(() =>
   vi.fn<GitHubApiClient['getRepository']>(async () => {
@@ -109,7 +111,7 @@ vi.mock('#lib/github-api.js', () => ({
     getAuthHeaders: () => ({}),
   }),
 }));
-vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ createProject: vi.fn() }) }));
+vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ createProject: projects.create }) }));
 vi.mock('#hooks/use-project-creation-location-error.js', () => ({ useProjectCreationLocationError: () => vi.fn() }));
 vi.mock('#hooks/use-project-slug-route.js', () => ({
   useProjectSlugs: (projectId: string | undefined) => {
@@ -129,7 +131,7 @@ vi.mock('#components/github/github-repository-picker.js', () => ({
     <button
       type='button'
       onClick={() => {
-        onSelect(selection);
+        onSelect(picked.selection);
       }}
     >
       Pick linked repository
@@ -176,6 +178,7 @@ const selection = {
   ],
   manifest,
 } satisfies GithubRepositorySelection;
+const picked: { selection: GithubRepositorySelection } = { selection };
 
 const renderImport = async (url = '/import'): Promise<void> => {
   await act(async () => {
@@ -194,6 +197,7 @@ describe('ImportRoute GitHub card', () => {
     vi.clearAllMocks();
     picker.available = true;
     slugs.byId.clear();
+    picked.selection = selection;
   });
 
   afterEach(() => {
@@ -489,5 +493,99 @@ describe('ImportRoute GitHub card', () => {
     await user.type(screen.getByRole('textbox', { name: 'Local and sync branch' }), '-tau');
 
     expect(screen.queryByRole('alert', { name: 'Import interrupted' })).not.toBeInTheDocument();
+  });
+  it('should headline a branch name GitHub already holds as a refusal, not an interruption (R4)', async () => {
+    const user = userEvent.setup();
+    linkedImport.prepare.mockRejectedValueOnce(
+      new RevisionPortError('REMOTE_REF_CONFLICT', 'Remote branch audit-g1 already names another revision.'),
+    );
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    const branch = screen.getByRole('textbox', { name: 'Local and sync branch' });
+    await user.clear(branch);
+    await user.type(branch, 'audit-g1');
+
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+    expect(await screen.findByRole('alert', { name: 'This branch name is taken on GitHub' })).toBeInTheDocument();
+    expect(screen.getByText('Choose another name for the local and sync branch.')).toBeVisible();
+    expect(screen.queryByRole('alert', { name: 'Import interrupted' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/did not finish/u)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import and link' })).toBeEnabled();
+
+    await user.type(branch, '-2');
+
+    expect(screen.queryByRole('alert', { name: 'This branch name is taken on GitHub' })).not.toBeInTheDocument();
+  });
+
+  it('should headline the reviewed branch moving on GitHub as a change to review again (R4)', async () => {
+    const user = userEvent.setup();
+    linkedImport.prepare.mockRejectedValueOnce(
+      new RevisionPortError('REMOTE_REF_CONFLICT', 'Remote branch main already names another revision.'),
+    );
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+    expect(await screen.findByRole('alert', { name: 'This repository changed on GitHub' })).toBeInTheDocument();
+    expect(screen.getByText('Choose the repository again to review its latest commit.')).toBeVisible();
+    expect(screen.queryByRole('alert', { name: 'Import interrupted' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      blocker: 'an invalid tau.json',
+      blocked: { ...selection, manifest: new TextEncoder().encode('{') },
+    },
+    {
+      blocker: 'a large ordinary Git blob',
+      blocked: {
+        ...selection,
+        files: [
+          ...selection.files,
+          { path: 'scan.stl', mode: '100644', size: largeObjectThresholdBytes, oid: 'd'.repeat(40) },
+        ],
+      },
+    },
+  ] satisfies Array<{ blocker: string; blocked: GithubRepositorySelection }>)(
+    'should list no setup change while $blocker blocks the review (R5)',
+    async ({ blocked }) => {
+      picked.selection = blocked;
+      await renderImport();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+
+      expect(screen.getByRole('alert', { name: 'Repository needs attention' })).toBeInTheDocument();
+      expect(screen.queryByText('Setup change')).not.toBeInTheDocument();
+      expect(screen.queryByText('Writes')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Import and link' })).toBeDisabled();
+    },
+  );
+
+  it('should not call the project this import just wrote already a project on this device (R12)', async () => {
+    const user = userEvent.setup();
+    /* The project binding stores the connection, whose id is a UUID. */
+    picked.selection = {
+      ...selection,
+      connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
+    };
+    linkedImport.prepare.mockResolvedValueOnce({ files: {}, generation: 1 });
+    projects.create.mockImplementationOnce(async ({ id }: { id: string }) => {
+      /* Discovery lists the new project before the route has left the review. */
+      slugs.byId.set(id, { workspaceSlug: 'home', projectSlug: 'part' });
+      return { id, slugs: { workspaceSlug: 'home', projectSlug: 'part' } };
+    });
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    expect(screen.queryByText('This repository is already a project on this device.')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+
+    await waitFor(() => {
+      expect(projects.create).toHaveBeenCalledWith(expect.objectContaining({ id: existingProjectId }));
+    });
+    expect(await screen.findByRole('button', { name: 'Importing and linking…' })).toBeDisabled();
+    expect(screen.queryByText('This repository is already a project on this device.')).not.toBeInTheDocument();
   });
 });

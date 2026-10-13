@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CornerDownRight, ListEnd, MoreHorizontal, Paperclip, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
+import { cn } from '@taucad/ui/utils/cn';
 import { Textarea } from '@taucad/ui/components/textarea';
 import {
   DropdownMenu,
@@ -59,7 +60,10 @@ export function ChatMessageQueueView({
     })();
   };
   return (
-    <section aria-label='Queued messages' className='max-h-64 overflow-y-auto'>
+    <section
+      aria-label='Queued messages'
+      className='@container/message-queue max-h-64 min-w-0 overflow-y-auto overscroll-contain'
+    >
       <ul className='m-0 list-none p-0'>
         {items.map((item, index) => {
           const content = item.message.parts
@@ -73,46 +77,50 @@ export function ChatMessageQueueView({
             pending?.id === item.id ? pending.label : item.steer === undefined ? 'Sending…' : 'Steering…';
           const locked = busy || pending !== undefined || item.command !== undefined || item.steer !== undefined;
           return (
-            <li key={item.id} aria-busy={busy} className='border-b border-border/50 px-3 py-2 last:border-b-0'>
-              <div className='flex flex-wrap items-center gap-2'>
+            <li key={item.id} aria-busy={busy} className='min-w-0 px-2 py-1'>
+              <div className='flex min-w-0 items-center gap-2 @max-[14rem]/message-queue:flex-wrap'>
                 {busy ? (
-                  <Loader className='size-4 shrink-0 motion-reduce:animate-none' />
+                  <Loader className='size-4 shrink-0 text-muted-foreground motion-reduce:animate-none' />
                 ) : (
                   <ListEnd aria-hidden='true' className='size-4 shrink-0 text-muted-foreground' />
                 )}
-                <span className='min-w-32 flex-1 truncate text-sm' title={content}>
+                <span className='min-w-0 flex-1 truncate text-sm' title={content}>
                   {content || 'Attached files'}
                 </span>
                 {attachments > 0 ? (
                   <span
                     aria-label={`${String(attachments)} attachments`}
-                    className='flex items-center gap-1 text-xs text-muted-foreground'
+                    className='flex shrink-0 items-center gap-1 text-xs text-muted-foreground'
                   >
                     <Paperclip aria-hidden='true' className='size-3' />
                     {attachments}
                   </span>
                 ) : null}
-                {busy ? (
-                  <span role='status' className='text-xs text-muted-foreground'>
-                    {busyLabel}
-                  </span>
-                ) : null}
-                <div className='ml-auto flex items-center gap-1'>
+                <div className='flex shrink-0 items-center gap-1 text-muted-foreground @max-[14rem]/message-queue:basis-full @max-[14rem]/message-queue:flex-wrap @max-[14rem]/message-queue:justify-end'>
                   <Button
                     variant='ghost'
-                    size='sm'
+                    size='xs'
+                    className={cn('rounded-full font-normal', busy && 'disabled:opacity-100')}
+                    aria-label='Steer'
                     disabled={locked}
                     title='Interrupt the current turn and send this message'
                     onClick={() => {
                       act(item.id, 'Steering…', async () => onSteer(item.id));
                     }}
                   >
-                    <CornerDownRight aria-hidden='true' className='size-4' />
-                    Steer
+                    {busy ? (
+                      <span role='status'>{busyLabel}</span>
+                    ) : (
+                      <>
+                        <CornerDownRight aria-hidden='true' className='size-4' />
+                        Steer
+                      </>
+                    )}
                   </Button>
                   <Button
                     variant='ghost'
                     size='icon-sm'
+                    className='rounded-full'
                     aria-label={`Delete queued message ${String(index + 1)}`}
                     disabled={locked}
                     onClick={() => {
@@ -126,6 +134,7 @@ export function ChatMessageQueueView({
                       <Button
                         variant='ghost'
                         size='icon-sm'
+                        className='rounded-full'
                         aria-label={`Options for queued message ${String(index + 1)}`}
                         disabled={locked}
                       >
@@ -199,8 +208,8 @@ export function ChatMessageQueueView({
         })}
       </ul>
       {actionError !== undefined || error !== undefined ? (
-        <div role='alert' className='flex items-center gap-2 px-3 py-2 text-sm'>
-          <span className='flex-1'>{actionError?.message ?? error}</span>
+        <div role='alert' className='flex items-start gap-2 px-2 py-2 text-xs text-muted-foreground'>
+          <span className='min-w-0 flex-1 self-center wrap-anywhere'>{actionError?.message ?? error}</span>
           <Button
             variant='ghost'
             size='sm'

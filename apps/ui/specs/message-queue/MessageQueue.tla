@@ -1,4 +1,7 @@
 -------------------------- MODULE MessageQueue --------------------------
+\* Presentation review: compact responsive rows and muted/loading styles do not
+\* change admission, cancellation, persisted command identity or queue transitions.
+\* Enlarged-text reflow and readable busy labels retain the same disabled guards.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

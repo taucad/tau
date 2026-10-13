@@ -499,10 +499,10 @@ export const ChatTextareaDesktop = memo(function ({
         ref={containerReference}
         className={cn(
           'group/chat-textarea @container',
-          'relative flex w-full flex-col border bg-background pt-3 pb-2',
+          'relative flex w-full flex-col border border-border/60 bg-background pt-3 pb-2',
           radius,
           'cursor-text overflow-hidden',
-          'shadow-md',
+          'shadow-sm',
           'has-[.tiptap:focus-visible]:focus-outline',
           className,
         )}

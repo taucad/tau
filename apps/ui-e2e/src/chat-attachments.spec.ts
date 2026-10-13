@@ -146,7 +146,7 @@ test('should preserve history and attachment bytes when a saved Codex chat switc
     throw new Error(`Missing persisted chat ${id}.`);
   }, chatId);
   await target.navigate(chatUrl);
-  await target.expectVisible(selectors.getByRole('button', { name: 'Open image bracket-photo.jpg' }), 60_000);
+  await target.expectVisible(agentTrigger(), 60_000);
   await target.click(agentTrigger());
   await target.click(selectors.getByRole('button', { name: /^Agent: codex/u }));
   await target.click(selectors.getByRole('option', { name: /^Tau/u }));

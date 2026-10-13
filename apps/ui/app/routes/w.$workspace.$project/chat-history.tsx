@@ -336,7 +336,7 @@ const ExpandedChatHistory = memo(function ({
                 itemContent={renderItem}
                 computeItemKey={computeItemKey}
                 followOutput={followOutput}
-                className='mt-1 min-h-0 min-w-0 flex-1'
+                className='mx-auto mt-1 min-h-0 w-[calc(100%_-_1rem)] max-w-xl min-w-0 flex-1'
                 atBottomStateChange={handleAtBottomStateChange}
                 components={virtuosoComponents}
               />

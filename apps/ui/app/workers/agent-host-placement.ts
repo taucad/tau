@@ -118,7 +118,7 @@ export const createResidentPlacement = (
     abandon: async (input) => call(async (channel) => channel.abandon(input)),
     acknowledge: async (input) => call(async (channel) => channel.acknowledge(input)),
     reconcile: async (input) => call(async (channel) => channel.reconcile(input)),
-    settlements: async function* ({ signal }) {
+    async *settlements({ signal }) {
       const watching = AbortSignal.any([signal, hostLifetime.signal]);
       while (!isAborted(watching)) {
         const before = current;

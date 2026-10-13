@@ -111,7 +111,7 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
             }
             return answer;
           },
-          settlements: async function* ({ signal }) {
+          async *settlements({ signal }) {
             for await (const fact of active.settlements({ signal })) {
               // Lose both the completion response and its notification; the successor must replay durable proof.
               if (first && (lost === 'complete' || lost === 'restart') && fact.kind === 'settled') {
@@ -171,6 +171,7 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
           choices: [
             {
               delta: {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI wire field.
                 tool_calls: [
                   {
                     index: 0,
@@ -180,6 +181,7 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
                   },
                 ],
               },
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI wire field.
               finish_reason: 'tool_calls',
             },
           ],

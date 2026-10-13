@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import { join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
 import { defaultConfigDirectory, startHostDaemon } from '@taucad/host';
@@ -14,7 +15,7 @@ import { consola } from 'consola';
 import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
 import { machineProviders } from '#machine-providers.js';
-import { exitCodes } from '#output.js';
+import { cliError, exitCodes } from '#output.js';
 import type { ComputeStoreWorkerData } from '#compute-store.worker.js';
 
 const runtimeChildModulePath = (): string =>
@@ -120,6 +121,55 @@ const reportEvent = (event: HostDaemonEvent): void => {
 };
 
 /**
+ * A refused workspace, with the flag that serves another one.
+ *
+ * @param error - Why the daemon did not start.
+ * @returns The same error, or a refusal of the workspace's store that names `--workspace`.
+ */
+const workspaceRefusal = (error: unknown): unknown =>
+  error instanceof Error && Reflect.get(error, 'code') === 'INVALID_REPOSITORY'
+    ? cliError('INVALID_REPOSITORY', `${error.message} Pass --workspace=<directory> to serve another directory.`, {
+        exit: exitCodes.refused,
+      })
+    : error;
+
+/**
+ * The agent workspace: the one named, or the current directory when it is safe to default to.
+ *
+ * The workspace is a revision store. Named explicitly, a Git checkout's root is
+ * adopted and a directory inside one gets a repository of its own. Defaulted,
+ * neither is something the person asked for: `tau serve` started in a checkout
+ * by accident recorded revisions onto its branch. So the current directory is
+ * used only when it is a Tau project or lies outside every Git checkout.
+ *
+ * @param workspace - The `--workspace` value or `TAU_HOST_WORKSPACE`, when given.
+ * @param cwd - The current directory.
+ * @returns The absolute workspace root.
+ * @throws {CliError} `WORKSPACE_REQUIRED` when defaulting would adopt or nest inside a Git checkout.
+ */
+export const agentWorkspaceRoot = (workspace: string | undefined, cwd: string): string => {
+  if (workspace !== undefined) {
+    return resolve(workspace);
+  }
+  const root = resolve(cwd);
+  if (existsSync(join(root, 'tau.json'))) {
+    return root;
+  }
+  for (let current = root; ; current = dirname(current)) {
+    if (existsSync(join(current, '.git'))) {
+      throw cliError(
+        'WORKSPACE_REQUIRED',
+        `The current directory is inside the Git checkout at ${current}, so tau serve will not default its workspace to it. Pass --workspace=<directory>: an empty directory for a new project, or this one to record Tau revisions in that repository.`,
+        exitCodes.usage,
+      );
+    }
+    if (dirname(current) === current) {
+      return root;
+    }
+  }
+};
+
+/**
  * Build Launcher 1's configuration from the CLI surface.
  *
  * The admission secret never rides `argv` — it is read from
@@ -166,7 +216,7 @@ const agentOptions = (args: {
    * paired with authenticates the relay only (C67). */
   const tauApiToken = process.env['TAU_API_TOKEN'];
   return {
-    workspaceRoot: resolve(args.workspace ?? process.cwd()),
+    workspaceRoot: agentWorkspaceRoot(args.workspace, process.cwd()),
     tauCloudEnabled: tauCloudEnabled(),
     ...(tauApiToken === undefined || tauApiToken === '' ? {} : { tauApiToken }),
     /* The gateway lives on the Tau API, which is also the relay origin unless
@@ -266,7 +316,8 @@ export const serveCommand = defineCommand({
     },
     workspace: {
       type: 'string',
-      description: 'Workspace root the agent host reads, writes and logs chats under',
+      description:
+        'Workspace root the agent host reads, writes and logs chats under. Defaults to the current directory when it is a Tau project or outside every Git checkout',
       required: false,
       default: process.env['TAU_HOST_WORKSPACE'],
     },
@@ -405,7 +456,20 @@ export const serveCommand = defineCommand({
       onEvent: reportEvent,
     });
     try {
-      await daemon.ready;
+      /* A signal before the daemon is ready stops it too: opening the workspace's
+       * store can take a while, and Ctrl+C must not wait for it. */
+      const started = await Promise.race([
+        daemon.ready.then(
+          (): 'ready' => 'ready',
+          (error: unknown) => {
+            throw workspaceRefusal(error);
+          },
+        ),
+        stopped.promise.then((): 'signal' => 'signal'),
+      ]);
+      if (started === 'signal') {
+        return;
+      }
       const signalOutcome = async (): Promise<{ readonly type: 'signal' }> => {
         await stopped.promise;
         return { type: 'signal' };

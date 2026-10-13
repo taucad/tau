@@ -400,17 +400,17 @@ describe('dictation recording and transcription', () => {
 
 describe('question dictation', () => {
   it.each([
-    { width: 800, theme: 'light', variant: 'text' },
-    { width: 800, theme: 'dark', variant: 'text' },
-    { width: 320, theme: 'light', variant: 'text' },
-    { width: 320, theme: 'dark', variant: 'text' },
-    { width: 320, theme: 'dark', variant: 'options' },
-    { width: 800, theme: 'light', variant: 'options' },
-    { width: 320, theme: 'light', variant: 'tray' },
-    { width: 320, theme: 'light', variant: 'multiline' },
+    { width: 800, theme: 'light', variant: 'text', sendWhileRecording: true },
+    { width: 800, theme: 'dark', variant: 'text', sendWhileRecording: false },
+    { width: 320, theme: 'light', variant: 'text', sendWhileRecording: true },
+    { width: 320, theme: 'dark', variant: 'text', sendWhileRecording: false },
+    { width: 320, theme: 'dark', variant: 'options', sendWhileRecording: true },
+    { width: 800, theme: 'light', variant: 'options', sendWhileRecording: false },
+    { width: 320, theme: 'light', variant: 'tray', sendWhileRecording: true },
+    { width: 320, theme: 'light', variant: 'multiline', sendWhileRecording: true },
   ])(
-    'should review and send a dictated answer at $width in $theme mode with $variant',
-    async ({ width, theme, variant }) => {
+    'should finish dictation at $width in $theme mode with $variant (send: $sendWhileRecording)',
+    async ({ width, theme, variant, sendWhileRecording }) => {
       await page.viewport(width, 600);
       document.documentElement.classList.toggle('dark', theme === 'dark');
       dictationAvailable = true;
@@ -467,6 +467,7 @@ describe('question dictation', () => {
       await page.getByRole('button', { name: 'Dictate', exact: true }).click();
       expect(onHold).toHaveBeenCalled();
       await expect.element(page.getByRole('status', { name: 'Requesting microphone…' })).toBeVisible();
+      await expect.element(page.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'true');
       const requesting = screen.getByRole('status', { name: 'Requesting microphone…' });
       expect(requesting.scrollHeight).toBeLessThanOrEqual(requesting.clientHeight);
       expect(reply.getBoundingClientRect().height).toBe(idleHeight);
@@ -483,19 +484,22 @@ describe('question dictation', () => {
           recordLevel?.(Math.max(0, Math.sin(index * 0.31)) * 0.12);
         }
       });
-      expect(screen.queryByRole('button', { name: 'Send answer' })).toBeNull();
+      await expect.element(page.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'false');
       expect(reply.getBoundingClientRect().height).toBe(idleHeight);
       const cancel = screen.getByRole('button', { name: 'Cancel dictation' }).getBoundingClientRect();
       const stop = screen.getByRole('button', { name: 'Stop dictation' }).getBoundingClientRect();
       const waveform = screen.getByRole('img', { name: 'Microphone waveform' }).getBoundingClientRect();
+      const send = screen.getByRole('button', { name: 'Send answer' }).getBoundingClientRect();
       expect(cancel.top).toBe(stop.top);
+      expect(send.top).toBe(stop.top);
+      expect(send.left).toBeGreaterThanOrEqual(stop.right);
       expect(waveform.left).toBeGreaterThanOrEqual(cancel.right);
       expect(waveform.right).toBeLessThanOrEqual(stop.left);
       await page.screenshot({
         element: region,
         path: `../../../../../out/test-results/composer/question-recording-${width}-${theme}-${variant}.png`,
       });
-      await page.getByRole('button', { name: 'Stop dictation' }).click();
+      await page.getByRole('button', { name: sendWhileRecording ? 'Send answer' : 'Stop dictation' }).click();
       await expect.element(page.getByRole('status', { name: 'Transcribing', exact: true })).toBeVisible();
       expect(reply.getBoundingClientRect().height).toBe(idleHeight);
       await page.screenshot({
@@ -503,12 +507,18 @@ describe('question dictation', () => {
         path: `../../../../../out/test-results/composer/question-transcribing-${width}-${theme}-${variant}.png`,
       });
       expect(region.scrollWidth).toBe(region.clientWidth);
+      await expect.element(page.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'true');
+      expect(onAnswer).not.toHaveBeenCalled();
       const progress = screen.getByRole('status', { name: 'Transcribing' });
       const microphone = screen.getByRole('button', { name: 'Transcribing' });
       expect(progress.getBoundingClientRect().right).toBeLessThanOrEqual(microphone.getBoundingClientRect().left);
       await act(async () => {
         transcription?.resolve('Use a brushed finish.');
       });
+      if (sendWhileRecording) {
+        expect(onAnswer).toHaveBeenCalledExactlyOnceWith('material', { text: `${draft} Use a brushed finish.` });
+        return;
+      }
       await expect.element(box).toHaveValue(`${draft} Use a brushed finish.`);
       expect(onAnswer).not.toHaveBeenCalled();
       await box.fill('Aluminium. Use a brushed finish on both sides.');

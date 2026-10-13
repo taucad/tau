@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { ArrowUp } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { DictationButton, DictationFeedback, DictationRecording } from '#components/dictation/dictation-controls.js';
 import { useDictation } from '#components/dictation/use-dictation.js';
 
-/** Own-words reply. Dictation edits the draft; sending remains an explicit action after transcription. */
+/** Own-words reply. Stop reviews the transcript; Send finishes dictation and submits the final answer. */
 export function QuestionTextAnswer({
   draft,
   onDraftChange,
@@ -32,9 +32,17 @@ export function QuestionTextAnswer({
   const inputRef = useRef<HTMLDivElement>(null);
   const [recordingHeight, setRecordingHeight] = useState<number>();
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const latestDraft = useRef(draft);
+  useLayoutEffect(() => {
+    latestDraft.current = draft;
+  }, [draft]);
   const insertTranscript = useCallback(
     (text: string): void => {
-      onDraftChange((previous) => `${previous}${previous === '' || /\s$/u.test(previous) ? '' : ' '}${text}`);
+      const previous = latestDraft.current;
+      const next = `${previous}${previous === '' || /\s$/u.test(previous) ? '' : ' '}${text}`;
+      // Send resumes before React necessarily commits the updated draft.
+      latestDraft.current = next;
+      onDraftChange(next);
     },
     [onDraftChange],
   );
@@ -45,10 +53,23 @@ export function QuestionTextAnswer({
     onHold();
     await dictation.start();
   }, [dictation.start, onHold]);
-  const send = (): void => {
-    const text = draft.trim();
-    if (isOpen && !isDictating && text !== '') {
-      onAnswer(text);
+  const sending = useRef(false);
+  const canSend = isOpen && (isDictating ? dictation.phase === 'recording' : draft.trim() !== '');
+  const send = async (): Promise<void> => {
+    if (!canSend || sending.current) {
+      return;
+    }
+    sending.current = true;
+    try {
+      if (isDictating && !(await dictation.stop())) {
+        return;
+      }
+      const text = latestDraft.current.trim();
+      if (text !== '') {
+        onAnswer(text);
+      }
+    } finally {
+      sending.current = false;
     }
   };
   const wasDictating = useRef(false);
@@ -101,7 +122,7 @@ export function QuestionTextAnswer({
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
-                send();
+                void send();
               }
             }}
           />
@@ -109,23 +130,32 @@ export function QuestionTextAnswer({
         {dictation.available === true && isOpen ? (
           <DictationButton phase={dictation.phase} onStart={start} onStop={dictation.stop} />
         ) : null}
-        {isDictating ? null : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type='button'
-                size='icon-sm'
-                aria-label='Send answer'
-                className='shrink-0 self-end rounded-full'
-                disabled={!isOpen || draft.trim() === ''}
-                onClick={send}
-              >
-                <ArrowUp aria-hidden='true' />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Send answer</TooltipContent>
-          </Tooltip>
-        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type='button'
+              size='icon-sm'
+              aria-label='Send answer'
+              className={cn(
+                'shrink-0 rounded-full aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
+                !isDictating && 'self-end',
+              )}
+              aria-disabled={!canSend}
+              onClick={() => {
+                void send();
+              }}
+            >
+              <ArrowUp aria-hidden='true' />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {dictation.phase === 'recording'
+              ? 'Stop dictation and send answer'
+              : isDictating
+                ? 'Wait for dictation to finish'
+                : 'Send answer'}
+          </TooltipContent>
+        </Tooltip>
       </InputGroup>
       <DictationFeedback transcript={dictation.transcript} error={dictation.error} />
     </div>

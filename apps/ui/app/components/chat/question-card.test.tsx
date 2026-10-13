@@ -235,7 +235,7 @@ describe('question dictation', () => {
     vi.mocked(onHold).mockClear();
     await user.click(screen.getByRole('button', { name: 'Dictate' }));
     expect(onHold).toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: 'Send answer' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'false');
     expect(screen.queryByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
     expect(onAnswer).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Stop dictation' }));
@@ -248,6 +248,47 @@ describe('question dictation', () => {
     expect(onAnswer).toHaveBeenCalledExactlyOnceWith('form', { text: 'A seashell. Use rounded corners.' });
   });
 
+  it.each(['', 'A seashell. '])('should finish dictation and send once with draft %j', async (draft) => {
+    const response = Promise.withResolvers<string>();
+    const { user, onAnswer } = await openReply();
+    dictationDependencies.transcribe.mockReturnValue(response.promise);
+    if (draft !== '') {
+      await user.type(screen.getByRole('textbox', { name: 'Your answer' }), draft);
+    }
+    await user.click(screen.getByRole('button', { name: 'Dictate' }));
+    expect(screen.getByRole('button', { name: 'Stop dictation' })).toBeEnabled();
+    await user.dblClick(screen.getByRole('button', { name: 'Send answer' }));
+    await screen.findByRole('status', { name: 'Transcribing' });
+    expect(screen.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'true');
+    expect(onAnswer).not.toHaveBeenCalled();
+    await act(async () => {
+      response.resolve('Use rounded corners.');
+    });
+    expect(capture.finish).toHaveBeenCalledOnce();
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith('form', { text: `${draft}Use rounded corners.` });
+  });
+
+  it.each(['empty', 'error'])('should preserve the draft without sending on %s transcription', async (result) => {
+    const response = Promise.withResolvers<string>();
+    const { user, onAnswer } = await openReply();
+    dictationDependencies.transcribe.mockReturnValue(response.promise);
+    await user.type(screen.getByRole('textbox', { name: 'Your answer' }), 'Keep this.');
+    await user.click(screen.getByRole('button', { name: 'Dictate' }));
+    await user.click(screen.getByRole('button', { name: 'Send answer' }));
+    await screen.findByRole('status', { name: 'Transcribing' });
+    await act(async () => {
+      if (result === 'empty') {
+        response.resolve('  ');
+      } else {
+        response.reject(new Error('Transcription failed.'));
+      }
+    });
+    expect(screen.getByRole('alert', { name: 'Dictation error' })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveValue('Keep this.');
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'false');
+  });
+
   it('should cancel pending speech on Escape while preserving typed text', async () => {
     const response = Promise.withResolvers<string>();
     const { user, onAnswer } = await openReply();
@@ -255,7 +296,7 @@ describe('question dictation', () => {
     const box = screen.getByRole('textbox', { name: 'Your answer' });
     await user.type(box, 'Keep this.');
     await user.click(screen.getByRole('button', { name: 'Dictate' }));
-    await user.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    await user.click(screen.getByRole('button', { name: 'Send answer' }));
     await screen.findByRole('status', { name: 'Transcribing' });
     await user.keyboard('{Escape}');
     await act(async () => {
@@ -273,7 +314,7 @@ describe('question dictation', () => {
     const { user, onAnswer } = await openReply();
     dictationDependencies.transcribe.mockReturnValue(response.promise);
     await user.click(screen.getByRole('button', { name: 'Dictate' }));
-    await user.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    await user.click(screen.getByRole('button', { name: 'Send answer' }));
     await screen.findByRole('status', { name: 'Transcribing' });
     cleanup();
     await act(async () => {
@@ -293,7 +334,7 @@ describe('question dictation', () => {
       'Microphone access was denied',
     );
     expect(box).toHaveValue('Keep this.');
-    expect(screen.getByRole('button', { name: 'Send answer' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'false');
   });
 
   it('should offer dictation on text-only questions without opening Something else', async () => {
@@ -331,7 +372,7 @@ describe('question dictation', () => {
     );
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Dictate' }));
-    await user.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    await user.click(screen.getByRole('button', { name: 'Send answer' }));
     await screen.findByRole('status', { name: 'Transcribing' });
     view.rerender(
       <TooltipProvider>

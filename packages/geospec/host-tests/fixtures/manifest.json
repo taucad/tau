@@ -560,6 +560,126 @@
       "path": "packages/geospec/host-tests/fixtures/data/0e1de1773cc470afd9b4a1898958a49502881c1e31bd6d39f35199fb9f004c8e",
       "byteLength": 649433,
       "sha256": "0e1de1773cc470afd9b4a1898958a49502881c1e31bd6d39f35199fb9f004c8e"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/component-interference/original.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2",
+      "byteLength": 29458,
+      "sha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/8146b9dc39ebf7948106b413796946749d0270a05752285c32613d270d7e996e.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/8146b9dc39ebf7948106b413796946749d0270a05752285c32613d270d7e996e",
+      "byteLength": 41285,
+      "sha256": "8146b9dc39ebf7948106b413796946749d0270a05752285c32613d270d7e996e"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/83ff405e40ac3ebdbd2bee8f41311ef31fcbf55c6036047ee70acee63ed190c1.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/83ff405e40ac3ebdbd2bee8f41311ef31fcbf55c6036047ee70acee63ed190c1",
+      "byteLength": 34481,
+      "sha256": "83ff405e40ac3ebdbd2bee8f41311ef31fcbf55c6036047ee70acee63ed190c1"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/53b154c0c6e51e2c9df18a58b65cc143bd09d121a7eb80866174eb667629e523.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/53b154c0c6e51e2c9df18a58b65cc143bd09d121a7eb80866174eb667629e523",
+      "byteLength": 34429,
+      "sha256": "53b154c0c6e51e2c9df18a58b65cc143bd09d121a7eb80866174eb667629e523"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/916e6d894e5731dd1757819d60651c5c193aa6ef586a477e7b4fec3480b7a353.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/916e6d894e5731dd1757819d60651c5c193aa6ef586a477e7b4fec3480b7a353",
+      "byteLength": 34428,
+      "sha256": "916e6d894e5731dd1757819d60651c5c193aa6ef586a477e7b4fec3480b7a353"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/910615d25257ed938c167efe54d52347f783d949733ef33e4db7d35113947bde.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/910615d25257ed938c167efe54d52347f783d949733ef33e4db7d35113947bde",
+      "byteLength": 34484,
+      "sha256": "910615d25257ed938c167efe54d52347f783d949733ef33e4db7d35113947bde"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/4cfa4bc016587e62cc1d8e7a3910498e790b3798bfb0c0e0278954ae05765233.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/4cfa4bc016587e62cc1d8e7a3910498e790b3798bfb0c0e0278954ae05765233",
+      "byteLength": 51165,
+      "sha256": "4cfa4bc016587e62cc1d8e7a3910498e790b3798bfb0c0e0278954ae05765233"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/2652031ce90e9acc60d6b8ebac4312b5ff4b7d0dc28cc4e1f57bc1bf0540616b.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/2652031ce90e9acc60d6b8ebac4312b5ff4b7d0dc28cc4e1f57bc1bf0540616b",
+      "byteLength": 51165,
+      "sha256": "2652031ce90e9acc60d6b8ebac4312b5ff4b7d0dc28cc4e1f57bc1bf0540616b"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/904eb404f782faa1f60c386a6f500b0b70490d75b8cacdb8022740a70f9ae1ec.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/904eb404f782faa1f60c386a6f500b0b70490d75b8cacdb8022740a70f9ae1ec",
+      "byteLength": 40998,
+      "sha256": "904eb404f782faa1f60c386a6f500b0b70490d75b8cacdb8022740a70f9ae1ec"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/03daaf6ac5524806b48d005ab6b49c3250d6abbd8c39ef5710ac40ee32704fb1.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/03daaf6ac5524806b48d005ab6b49c3250d6abbd8c39ef5710ac40ee32704fb1",
+      "byteLength": 24710,
+      "sha256": "03daaf6ac5524806b48d005ab6b49c3250d6abbd8c39ef5710ac40ee32704fb1"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/5c250e57746cef5c1d6a029b40860de0459baa758325c41a8a4fc7e52093916b.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/5c250e57746cef5c1d6a029b40860de0459baa758325c41a8a4fc7e52093916b",
+      "byteLength": 40998,
+      "sha256": "5c250e57746cef5c1d6a029b40860de0459baa758325c41a8a4fc7e52093916b"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/nominal-bore-void/guide.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940",
+      "byteLength": 29381,
+      "sha256": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/4233c74ae571e5634a91fc3fa6a64233feef37b0128d782e18cac3313b57c027.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/4233c74ae571e5634a91fc3fa6a64233feef37b0128d782e18cac3313b57c027",
+      "byteLength": 83467,
+      "sha256": "4233c74ae571e5634a91fc3fa6a64233feef37b0128d782e18cac3313b57c027"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/3305d8a9c5aaf77f6f0c86b6d424c765de948b965fd4aaab895d400736624dfe.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/3305d8a9c5aaf77f6f0c86b6d424c765de948b965fd4aaab895d400736624dfe",
+      "byteLength": 92494,
+      "sha256": "3305d8a9c5aaf77f6f0c86b6d424c765de948b965fd4aaab895d400736624dfe"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/e6f0dcbe58c517648898a647d4e34a7fd2fb5a169fffb139a262cd703ad6f9fb.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/e6f0dcbe58c517648898a647d4e34a7fd2fb5a169fffb139a262cd703ad6f9fb",
+      "byteLength": 92493,
+      "sha256": "e6f0dcbe58c517648898a647d4e34a7fd2fb5a169fffb139a262cd703ad6f9fb"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/57300928a77da014119780c6a1bc19dcf64856fae3c0fd9658927f78fe8bc969.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/57300928a77da014119780c6a1bc19dcf64856fae3c0fd9658927f78fe8bc969",
+      "byteLength": 92522,
+      "sha256": "57300928a77da014119780c6a1bc19dcf64856fae3c0fd9658927f78fe8bc969"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/f72143e5bbfbe2d312b3f3c1b4f1c6d9c4cfccaad8539b7b7abee005c67d123a.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/f72143e5bbfbe2d312b3f3c1b4f1c6d9c4cfccaad8539b7b7abee005c67d123a",
+      "byteLength": 83463,
+      "sha256": "f72143e5bbfbe2d312b3f3c1b4f1c6d9c4cfccaad8539b7b7abee005c67d123a"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/766b023c6849c4eab7f7e99bec1fde959427a8aaa8380890223273702684e2d3.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/766b023c6849c4eab7f7e99bec1fde959427a8aaa8380890223273702684e2d3",
+      "byteLength": 22311,
+      "sha256": "766b023c6849c4eab7f7e99bec1fde959427a8aaa8380890223273702684e2d3"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/126354deac9bb10658b5f49d76665975e893f80c352ee94c4da63c3b9059f944.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/126354deac9bb10658b5f49d76665975e893f80c352ee94c4da63c3b9059f944",
+      "byteLength": 22311,
+      "sha256": "126354deac9bb10658b5f49d76665975e893f80c352ee94c4da63c3b9059f944"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/subject-and-cavity-target.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6",
+      "byteLength": 44254,
+      "sha256": "e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/box-clearance/two-mm.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/e06e3a53c9d73b4e2813bcc6a5f98f69038794ccfe3c286874bbde0a88aa824c",
+      "byteLength": 30334,
+      "sha256": "e06e3a53c9d73b4e2813bcc6a5f98f69038794ccfe3c286874bbde0a88aa824c"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/box-clearance/four-mm.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/3a585dd4afcfe4568b2a1a539b237f395dc27077df035030e3115f753a9188d3",
+      "byteLength": 30334,
+      "sha256": "3a585dd4afcfe4568b2a1a539b237f395dc27077df035030e3115f753a9188d3"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/finite-contact/assets/67a79282812d725cf3750b20fecd904ed4a7f7e2ef0e0bfb2a2cffb1c6711ed2.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/67a79282812d725cf3750b20fecd904ed4a7f7e2ef0e0bfb2a2cffb1c6711ed2",
+      "byteLength": 30334,
+      "sha256": "67a79282812d725cf3750b20fecd904ed4a7f7e2ef0e0bfb2a2cffb1c6711ed2"
+    },
+    "packages/geospec-engine-native/native/occt/rust/tests/fixtures/ap242-box.step": {
+      "path": "packages/geospec/host-tests/fixtures/data/9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf",
+      "byteLength": 15465,
+      "sha256": "9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf"
     }
   }
 }

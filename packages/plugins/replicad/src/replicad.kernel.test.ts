@@ -176,7 +176,7 @@ function assertExportSuccess(result: ExportResult): asserts result is Extract<Ex
   }
 }
 
-const expectStandardReplicadSvgPaths = (svg: string, { minPathCount = 1 } = {}): Array<string | null> => {
+const expectStandardReplicadSvgPaths = (svg: string, { minPathCount = 1 } = {}): Array<string | undefined> => {
   const window = new Window();
   const document_ = new window.DOMParser().parseFromString(svg, 'image/svg+xml');
   const root = document_.documentElement;
@@ -190,7 +190,7 @@ const expectStandardReplicadSvgPaths = (svg: string, { minPathCount = 1 } = {}):
     expect(path.getAttribute('vector-effect')).toBe('non-scaling-stroke');
   }
 
-  return paths.map((path) => path.getAttribute('stroke'));
+  return paths.map((path) => path.getAttribute('stroke') ?? undefined);
 };
 
 const readGltfSize = async (glbBytes: Uint8Array<ArrayBuffer>): Promise<[number, number, number]> => {

@@ -37,9 +37,14 @@ const kernelCallLimit = 300_000;
 /** The `initialize` capabilities each host sends (host probes, blueprint D5). */
 const mcpAppsCapabilities = {
   roots: { listChanged: true },
-  extensions: { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } },
+  extensions: {
+    'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] },
+  },
 };
-const claudeCodeCapabilities = { roots: { listChanged: true }, elicitation: { form: {}, url: {} } };
+const claudeCodeCapabilities = {
+  roots: { listChanged: true },
+  elicitation: { form: {}, url: {} },
+};
 
 /**
  * A GLB of one wavy surface, `segments`² quads of unindexed triangles.
@@ -184,7 +189,9 @@ const connect = async (name: string, capabilities: Record<string, unknown>): Pro
 };
 
 const callTool = async (client: Client, name: string, args: Record<string, unknown>): Promise<CallToolResult> =>
-  (await client.callTool({ name, arguments: args }, undefined, { timeout: kernelCallLimit })) as CallToolResult;
+  (await client.callTool({ name, arguments: args }, undefined, {
+    timeout: kernelCallLimit,
+  })) as CallToolResult;
 
 const shown = (result: CallToolResult): TauViewerShowResult => {
   expect(result.isError).toBeFalsy();
@@ -240,7 +247,9 @@ const mountInHarness = async (client: Client, result: CallToolResult | undefined
   if (showModel === undefined) {
     throw new Error('The server lists no show_model.');
   }
-  const { resourceUri } = (showModel._meta?.['ui'] ?? {}) as { resourceUri: string };
+  const { resourceUri } = (showModel._meta?.['ui'] ?? {}) as {
+    resourceUri: string;
+  };
   const { contents } = await client.readResource({ uri: resourceUri });
   const { resources } = await client.listResources();
   const listed = resources.find((resource) => resource.uri === resourceUri);
@@ -291,7 +300,9 @@ const drawn = async (root: Frame | Page, action: string): Promise<void> => {
   await root.getByRole('img', { name: '3D model preview' }).waitFor({ timeout: 120_000 });
   await root.locator('canvas').waitFor();
   await expect
-    .poll(async () => root.getByRole('button', { name: action }).isEnabled(), { timeout: 120_000 })
+    .poll(async () => root.getByRole('button', { name: action }).isEnabled(), {
+      timeout: 120_000,
+    })
     .toBe(true);
 };
 
@@ -320,10 +331,7 @@ beforeAll(async () => {
   );
   await writeFile(join(project, 'surface.glb'), surfaceGlb(850));
   /* Exchange formats the server converts to GLB (W7). */
-  await copyFile(
-    join(repoRoot, 'packages/geospec-engine/src/model/__fixtures__/intersecting-cylinders.step'),
-    join(project, 'cylinders.step'),
-  );
+  await copyFile(join(here, 'fixtures/intersecting-cylinders.step'), join(project, 'cylinders.step'));
   await writeFile(join(project, 'wedge.stl'), wedgeStl);
   await writeFile(join(project, 'wedge.obj'), wedgeObject);
   await writeFile(join(project, 'small.glb'), surfaceGlb(8));
@@ -332,11 +340,17 @@ beforeAll(async () => {
     logLevel: 'silent',
     build: {
       write: false,
-      lib: { entry: join(here, 'basic-host/host.ts'), formats: ['iife'], name: 'tauBasicHost' },
+      lib: {
+        entry: join(here, 'basic-host/host.ts'),
+        formats: ['iife'],
+        name: 'tauBasicHost',
+      },
     },
   });
   /* One library build without a watcher: one output whose first file is the IIFE. */
-  const [first] = [output].flat() as Array<{ output?: ReadonlyArray<{ code?: unknown }> }>;
+  const [first] = [output].flat() as Array<{
+    output?: ReadonlyArray<{ code?: unknown }>;
+  }>;
   const code = first?.output?.[0]?.code;
   if (typeof code !== 'string') {
     throw new TypeError('The basic-host harness did not build.');
@@ -368,15 +382,24 @@ describe('the viewer page in an MCP Apps host', () => {
   it(
     'should draw a CAD source as an inline card with two actions, then the tab composition',
     async () => {
-      const result = await callTool(client, 'show_model', { targetFile: 'main.ts' });
-      expect(shown(result).model).toMatchObject({ sourceFile: 'main.ts', mimeType: 'model/gltf-binary' });
-      const page = await mountInHarness(client, result, { displayMode: 'inline' });
+      const result = await callTool(client, 'show_model', {
+        targetFile: 'main.ts',
+      });
+      expect(shown(result).model).toMatchObject({
+        sourceFile: 'main.ts',
+        mimeType: 'model/gltf-binary',
+      });
+      const page = await mountInHarness(client, result, {
+        displayMode: 'inline',
+      });
       const frame = viewerFrame(page);
 
       await drawn(frame, 'Add to chat');
       expect(await frame.getByRole('group', { name: 'Viewer controls' }).count()).toBe(0);
       const addToChat = frame.getByRole('button', { name: 'Add to chat' });
-      const openFullView = frame.getByRole('button', { name: 'Open full view' });
+      const openFullView = frame.getByRole('button', {
+        name: 'Open full view',
+      });
       expect(await addToChat.isVisible()).toBe(true);
       expect(await openFullView.isVisible()).toBe(true);
       await capture(page, 'basic-host-inline');
@@ -410,7 +433,9 @@ describe('the viewer page in an MCP Apps host', () => {
   it(
     'should send the reference as a message on a host that takes no model context',
     async () => {
-      const result = await callTool(client, 'show_model', { targetFile: 'small.glb' });
+      const result = await callTool(client, 'show_model', {
+        targetFile: 'small.glb',
+      });
       const page = await mountInHarness(client, result, {
         displayMode: 'inline',
         hostCapabilities: { serverTools: {}, message: { text: {} } },
@@ -432,8 +457,13 @@ describe('the viewer page in an MCP Apps host', () => {
   it(
     'should keep both card actions inside a host height cap below the card height',
     async () => {
-      const result = await callTool(client, 'show_model', { targetFile: 'small.glb' });
-      const page = await mountInHarness(client, result, { displayMode: 'inline', maxHeight: 300 });
+      const result = await callTool(client, 'show_model', {
+        targetFile: 'small.glb',
+      });
+      const page = await mountInHarness(client, result, {
+        displayMode: 'inline',
+        maxHeight: 300,
+      });
       const frame = viewerFrame(page);
 
       await drawn(frame, 'Add to chat');
@@ -454,10 +484,14 @@ describe('the viewer page in an MCP Apps host', () => {
   it(
     'should stream a 50 MB GLB in gzipped ranges no larger than one reply',
     async () => {
-      const result = await callTool(client, 'show_model', { targetFile: 'surface.glb' });
+      const result = await callTool(client, 'show_model', {
+        targetFile: 'surface.glb',
+      });
       const { model } = shown(result);
       expect(model.byteLength).toBeGreaterThan(50 * 1000 * 1000);
-      const page = await mountInHarness(client, result, { displayMode: 'fullscreen' });
+      const page = await mountInHarness(client, result, {
+        displayMode: 'fullscreen',
+      });
       const frame = viewerFrame(page);
 
       await drawn(frame, 'Add to chat');
@@ -482,11 +516,18 @@ describe('exchange formats (W7)', () => {
       for (const targetFile of ['cylinders.step', 'wedge.stl', 'wedge.obj']) {
         // oxlint-disable-next-line no-await-in-loop -- one kernel conversion at a time.
         const { model } = shown(await callTool(client, 'show_model', { targetFile }));
-        expect(model).toMatchObject({ sourceFile: targetFile, mimeType: 'model/gltf-binary' });
+        expect(model).toMatchObject({
+          sourceFile: targetFile,
+          mimeType: 'model/gltf-binary',
+        });
         expect(model.path).toMatch(/^\.tau\/artifacts\/.+\.glb$/u);
       }
-      const result = await callTool(client, 'show_model', { targetFile: 'cylinders.step' });
-      const page = await mountInHarness(client, result, { displayMode: 'fullscreen' });
+      const result = await callTool(client, 'show_model', {
+        targetFile: 'cylinders.step',
+      });
+      const page = await mountInHarness(client, result, {
+        displayMode: 'fullscreen',
+      });
       await drawn(viewerFrame(page), 'Add to chat');
       await capture(page, 'step-converted');
       expect(pageErrors).toEqual([]);
@@ -506,8 +547,12 @@ describe("the tab's panels (W10)", () => {
   it(
     "should list the structure, write a parameter edit Tau reads, and keep the page's view in the project",
     async () => {
-      const first = await callTool(client, 'show_model', { targetFile: 'plate.ts' });
-      const page = await mountInHarness(client, first, { displayMode: 'fullscreen' });
+      const first = await callTool(client, 'show_model', {
+        targetFile: 'plate.ts',
+      });
+      const page = await mountInHarness(client, first, {
+        displayMode: 'fullscreen',
+      });
       const frame = viewerFrame(page);
       await drawn(frame, 'Add to chat');
       const panels = frame.getByRole('complementary', { name: 'Model panels' });
@@ -564,7 +609,10 @@ describe("the tab's panels (W10)", () => {
       );
       expect(
         views.map((record) => {
-          const { entryPath, camera } = record as { entryPath: string; camera: { kind: string } };
+          const { entryPath, camera } = record as {
+            entryPath: string;
+            camera: { kind: string };
+          };
           return { entryPath, camera: camera.kind };
         }),
       ).toContainEqual({ entryPath: 'plate.ts', camera: 'pose' });
@@ -587,8 +635,12 @@ describe('the live view (W6)', () => {
     'should keep a card on its model in fullscreen when another show_model follows',
     async () => {
       const cardClient = await connect('claude-ai', mcpAppsCapabilities);
-      const first = await callTool(cardClient, 'show_model', { targetFile: 'main.ts' });
-      const page = await mountInHarness(cardClient, first, { displayMode: 'fullscreen' });
+      const first = await callTool(cardClient, 'show_model', {
+        targetFile: 'main.ts',
+      });
+      const page = await mountInHarness(cardClient, first, {
+        displayMode: 'fullscreen',
+      });
       await drawn(viewerFrame(page), 'Add to chat');
       /* The card reports its view once its model is drawn, which can land after its actions are live. */
       await expect
@@ -603,10 +655,14 @@ describe('the live view (W6)', () => {
 
       /* Another conversation of the same server shows a model; a capture round trip proves the card synced since. */
       await callTool(cardClient, 'show_model', { targetFile: 'surface.glb' });
-      const captured = await callTool(cardClient, 'view_state', { capture: true });
+      const captured = await callTool(cardClient, 'view_state', {
+        capture: true,
+      });
       expect(captured.isError).toBeFalsy();
       expect(captured.content.some((block) => block.type === 'image')).toBe(true);
-      const { view } = captured.structuredContent as { view: TauViewerViewState };
+      const { view } = captured.structuredContent as {
+        view: TauViewerViewState;
+      };
       expect(view.model).toMatchObject({ sourceFile: 'main.ts' });
       const calls = await recorded(page, 'toolCalls');
       const reads = calls.filter((call) => call.name === 'app_read');
@@ -622,7 +678,9 @@ describe('the live view (W6)', () => {
     async () => {
       await callTool(client, 'show_model', { targetFile: 'main.ts' });
       /* A thread tab opens without a tool result and follows what the agent shows. */
-      const page = await mountInHarness(client, undefined, { displayMode: 'fullscreen' });
+      const page = await mountInHarness(client, undefined, {
+        displayMode: 'fullscreen',
+      });
       const frame = viewerFrame(page);
       await drawn(frame, 'Add to chat');
 
@@ -654,7 +712,10 @@ describe('the live view (W6)', () => {
         )
         .toBeGreaterThan(0);
       const view = await viewNow();
-      expect(view).toMatchObject({ composition: 'tab', model: { sourceFile: 'main.ts' } });
+      expect(view).toMatchObject({
+        composition: 'tab',
+        model: { sourceFile: 'main.ts' },
+      });
       expect(view.camera?.verticalSpan).toBeGreaterThan(0);
       const [picked] = view.selected;
 
@@ -671,7 +732,10 @@ describe('the live view (W6)', () => {
           },
         )
         .toEqual([]);
-      await callTool(client, 'show_model', { targetFile: 'main.ts', select: [picked?.componentId] });
+      await callTool(client, 'show_model', {
+        targetFile: 'main.ts',
+        select: [picked?.componentId],
+      });
       await expect
         .poll(
           async () => {
@@ -727,7 +791,9 @@ describe('the viewer page from a text host', () => {
       expect(viewerUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?model=/u);
       /* A later show does not change what the first link opens. */
       shown(await callTool(client, 'show_model', { targetFile: 'small.glb' }));
-      const page = await browser.newPage({ viewport: { width: 900, height: 640 } });
+      const page = await browser.newPage({
+        viewport: { width: 900, height: 640 },
+      });
       await page.goto(viewerUrl ?? '');
 
       await drawn(page, 'Copy prompt');

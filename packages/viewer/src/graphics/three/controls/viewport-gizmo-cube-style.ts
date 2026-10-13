@@ -2,7 +2,7 @@ import { Color, SRGBColorSpace } from 'three';
 import { axesHelperColors } from '#graphics/three/overlay-colors.constants.js';
 
 /** The cube's dimensions and texture density, independent of canvas pixel ratio. @internal */
-export const viewportGizmoMetrics = { radius: 0.18, segments: 4, textureSize: 256, fontSize: 64 } as const;
+export const viewportGizmoMetrics = { radius: 0.3, segments: 4, textureSize: 256, fontSize: 64 } as const;
 
 /** Display colors resolved from the host's Tau tokens. @internal */
 export type ViewportGizmoStyle = {

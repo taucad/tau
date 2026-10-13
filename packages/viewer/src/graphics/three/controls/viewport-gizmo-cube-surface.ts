@@ -145,7 +145,9 @@ export const applyViewportGizmoSurface = (gizmo: ViewportGizmo, style: ViewportG
       material.toneMapped = false;
       material.needsUpdate = true;
     }
-    idle.color.set(style.bevel);
+    // The original cube gives corners the face tone. Keep those eight targets
+    // distinct from the lighter edge bands, including at the three-way junctions.
+    idle.color.set(object.userData['kind'] === 'corner' ? style.face : style.bevel);
     idle.vertexColors = false;
     hover.color.set(style.hover);
 

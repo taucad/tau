@@ -492,6 +492,7 @@ export type ResidentAgentWorker = Readonly<{
   acquire: (options: AgentHostClientOptions) => () => void;
   /** Swap fresh bridges into every open project host, as after a file-manager restart; no host closes (RV1-F1). */
   reprovide: () => Promise<void>;
+  recover: (projectId: string) => Promise<void>;
 }>;
 
 /**
@@ -507,6 +508,8 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   const tabId = randomUuid();
   const projects = new Map<string, ProjectRegistration>();
   let current: Incarnation | undefined;
+  const recovering = new Map<string, Promise<void>>();
+  const recoveryWanted = new Set<string>();
 
   const retire = (live: Incarnation, reason: string): void => {
     if (live.dead) {
@@ -551,6 +554,20 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       retiring: new Map(),
       dead: false,
     };
+    channel.onNotify('rebridgeRequested', ({ projectId, hostId }) => {
+      if (current !== live || live.dead) {
+        return;
+      }
+      recoveryWanted.add(projectId);
+      // async-iife: bootstrap -- worker notifications have no caller; recovery is tracked by rebridgeIn.
+      void (async () => {
+        try {
+          await recoverProject(live, { projectId, hostId });
+        } catch (error) {
+          console.warn('[agent-host] Project connection recovery failed', { projectId, hostId, error });
+        }
+      })();
+    });
     channel.onClose((info) => {
       retire(live, info.code);
     });
@@ -597,7 +614,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   };
 
   /** Open the bridges one host incarnation is given: both filesystems, and the compute store when durable. */
-  const openBridges = (options: AgentHostClientOptions) => {
+  const openBridges = (options: AgentHostClientOptions, renewPlacement = true) => {
     const computeMode = options.computeMode ?? 'memory';
     const bridge = options.openFileSystemBridge();
     let projectRootBridge: FileSystemBridgeConnection;
@@ -611,9 +628,27 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       bridge.dispose();
       projectRootBridge.dispose();
     };
-    const computeStorePort = computeMode === 'durable' ? options.openComputeStorePort?.() : undefined;
+    let computeStorePort: MessagePort | undefined;
+    let placementPort: MessagePort | undefined;
+    let revisionsPort: MessagePort | undefined;
+    try {
+      computeStorePort = computeMode === 'durable' ? options.openComputeStorePort?.() : undefined;
+      revisionsPort = options.openRevisionsPort?.();
+      placementPort = renewPlacement ? options.openPlacementPort() : undefined;
+      if (renewPlacement && placementPort === undefined) {
+        throw Object.assign(new Error('The project revision root is not open.'), { code: 'REVISIONS_UNAVAILABLE' });
+      }
+    } catch (error) {
+      dispose();
+      computeStorePort?.close();
+      placementPort?.close();
+      revisionsPort?.close();
+      throw error;
+    }
     if (computeMode === 'durable' && !computeStorePort) {
       dispose();
+      placementPort?.close();
+      revisionsPort?.close();
       throw new AgentHostWorkerError(
         'COMPUTE_AUTHORITY_UNAVAILABLE',
         'Durable compute requires the project authority.',
@@ -624,7 +659,15 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       fileSystemPort: bridge.port,
       projectRootPort: projectRootBridge.port,
       computeStorePort,
-      transferables: [bridge.port, projectRootBridge.port, ...(computeStorePort ? [computeStorePort] : [])],
+      placementPort,
+      revisionsPort,
+      transferables: [
+        bridge.port,
+        projectRootBridge.port,
+        ...(computeStorePort ? [computeStorePort] : []),
+        ...(placementPort ? [placementPort] : []),
+        ...(revisionsPort ? [revisionsPort] : []),
+      ],
       dispose,
     };
   };
@@ -633,18 +676,19 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   const provideTo = async (live: Incarnation, projectId: string): Promise<string> => {
     const options = registrationOf(projectId);
     const principal = await (options.principal ?? sessionPrincipal)();
-    const placementPort = options.openPlacementPort();
+    const {
+      computeMode,
+      fileSystemPort,
+      projectRootPort,
+      computeStorePort,
+      placementPort,
+      revisionsPort,
+      transferables,
+      dispose,
+    } = openBridges(options);
     if (placementPort === undefined) {
-      throw Object.assign(
-        new Error(
-          "This project's revision root is not open, so the agent host cannot place turns. Reopen the project.",
-        ),
-        { code: 'REVISIONS_UNAVAILABLE' },
-      );
+      throw new Error('Placement bridge was not opened.');
     }
-    const { computeMode, fileSystemPort, projectRootPort, computeStorePort, transferables, dispose } =
-      openBridges(options);
-    const revisionsPort = options.openRevisionsPort?.();
     const hostId = randomUuid();
     live.bridges.set(hostId, dispose);
     try {
@@ -668,7 +712,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
           testingEnabled: options.testingEnabled,
           ...(principal === undefined ? {} : { principal }),
         },
-        transferables: [...transferables, ...(revisionsPort ? [revisionsPort] : []), placementPort],
+        transferables,
       });
       /* The replaced incarnation drains its runs on its own bridges (T3); only its bridges go, once it has closed, so a
        * late close never takes the new host's (I31, RH-A26). */
@@ -732,26 +776,91 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
    */
   const rebridgeIn = async (
     live: Incarnation,
-    { projectId, hostId }: Readonly<{ projectId: string; hostId: string }>,
+    target: Readonly<{ projectId: string; hostId: string; onlyIfNeeded?: boolean }>,
     options: AgentHostClientOptions,
   ): Promise<void> => {
-    const { fileSystemPort, projectRootPort, computeStorePort, transferables, dispose } = openBridges(options);
-    try {
-      const answer = await live.channel.call('rebridge', {
-        value: { projectId, hostId, fileSystemPort, projectRootPort, computeStorePort },
-        transferables,
-      });
-      if (answer.status === 'rebridged') {
-        const previous = live.bridges.get(hostId);
-        live.bridges.set(hostId, dispose);
-        previous?.();
+    const { projectId, hostId } = target;
+    const existing = recovering.get(hostId);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const perform = async (): Promise<void> => {
+      if (target.onlyIfNeeded) {
+        const status = await live.channel.call('status', { projectId });
+        if (status.hostId !== hostId || status.needsRebridge !== true) {
+          return;
+        }
+      }
+      if (live.dead) {
         return;
       }
-    } catch (error) {
+      const active = live.provided.get(projectId);
+      const renewPlacement = active === undefined ? live.retiring.has(hostId) : (await active) === hostId;
+      // A pending provide may have been released while we waited; it must not fence its successor.
+      if (live.provided.get(projectId) !== active) {
+        return;
+      }
+      const bridges = openBridges(options, renewPlacement);
+      const {
+        fileSystemPort,
+        projectRootPort,
+        computeStorePort,
+        placementPort,
+        revisionsPort,
+        transferables,
+        dispose,
+      } = bridges;
+      try {
+        const answer = await live.channel.call('rebridge', {
+          value: { projectId, hostId, fileSystemPort, projectRootPort, computeStorePort, placementPort, revisionsPort },
+          transferables,
+        });
+        if (answer.status === 'rebridged') {
+          const previous = live.bridges.get(hostId);
+          live.bridges.set(hostId, dispose);
+          previous?.();
+          recoveryWanted.delete(projectId);
+          return;
+        }
+      } catch (error) {
+        dispose();
+        computeStorePort?.close();
+        placementPort?.close();
+        revisionsPort?.close();
+        throw toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
+      }
       dispose();
-      throw toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
+    };
+    const pending = perform();
+    recovering.set(hostId, pending);
+    try {
+      await pending;
+    } finally {
+      if (recovering.get(hostId) === pending) {
+        recovering.delete(hostId);
+      }
     }
-    dispose();
+  };
+
+  const recoverProject = async (
+    live: Incarnation,
+    { projectId, hostId }: Readonly<{ projectId: string; hostId: string }>,
+  ): Promise<void> => {
+    const opening = live.provided.get(projectId);
+    if (live.dead) {
+      return;
+    }
+    if (opening === undefined) {
+      const retiring = live.retiring.get(hostId);
+      if (retiring !== undefined) {
+        await rebridgeIn(live, { projectId, hostId }, retiring.options);
+      }
+      return;
+    }
+    if ((await opening) !== hostId || !projects.has(projectId)) {
+      return;
+    }
+    await rebridgeIn(live, { projectId, hostId, onlyIfNeeded: true }, registrationOf(projectId));
   };
 
   /** Release the project's host in the live worker, by incarnation, then dispose that host's bridges (T3, I31). */
@@ -845,6 +954,14 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       }
       await live.ready;
       return live.channel.call('runStoppability', { projectId, chatId });
+    },
+    recover: async (projectId) => {
+      const live = current;
+      const opening = live?.provided.get(projectId);
+      if (!recoveryWanted.has(projectId) || live === undefined || opening === undefined || live.dead) {
+        return;
+      }
+      await recoverProject(live, { projectId, hostId: await opening });
     },
     reprovide: async () => {
       const live = current;
@@ -945,6 +1062,10 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
   const transport = createDaemonAgentHostTransport(client);
   return {
     ...transport,
+    execute: async (command) => {
+      await resident.recover(projectId);
+      return transport.execute(command);
+    },
     close: () => {
       closed = true;
       transport.close();

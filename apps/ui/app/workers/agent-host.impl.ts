@@ -47,6 +47,7 @@ import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { agentHostWorkerBuild } from '#workers/agent-host.contract.js';
 import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers/agent-host.contract.js';
 import { closeProvidedPorts, createDisposers } from '#workers/agent-host-projects.js';
+import { createResidentPlacement } from '#workers/agent-host-placement.js';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
@@ -76,6 +77,7 @@ type ProjectFileSystemBridge = Pick<
 export type ResidentWorkerContext = Readonly<{
   /** This tab's id among the origin's tabs (RH-R5). */
   tabId: string;
+  requestRebridge?: (projectId: string, hostId: string) => void;
   visibility: NonNullable<BrowserChatStoreOptions['visibility']>;
   /** M1's timers; the worker leaves the defaults, and the browser tier shortens idle eviction (RH-A15). */
   delays?: AgentLauncherOptions['delays'];
@@ -84,6 +86,7 @@ export type ResidentWorkerContext = Readonly<{
 /** One project host incarnation (RH-R4): its launcher serves every stream of the project. */
 export type BrowserProjectHost = Readonly<{
   hostId: string;
+  needsRebridge: () => boolean;
   /** Read this host's current leadership actor without taking a lock. */
   stoppability: (chatId: string) => ReturnType<AgentLauncher['stoppability']>;
   /** Serve one stream; closing it only detaches (D17). */
@@ -564,7 +567,9 @@ const composeProjectHost = async (
     imageService.dispose();
   });
   const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
-  const revisions = provide.revisionsPort === undefined ? undefined : createPortRevisionsClient(provide.revisionsPort);
+  const revisionsSlot =
+    provide.revisionsPort === undefined ? undefined : swappable(createPortRevisionsClient(provide.revisionsPort));
+  const revisions = revisionsSlot?.view;
   opened(() => revisions?.close());
   const geoSpecClient = createGeoSpecWorkerRpcClient({
     openFileSystemBridge: () => createFileSystemBridgePort(agentView),
@@ -681,13 +686,18 @@ const composeProjectHost = async (
     };
   };
   /* W8 TS-S5: the placement session the page brokered into the file-manager worker for this project. */
-  const turnPlacement: TurnPlacementChannel = connectTurnPlacementChannel({
-    port: provide.placementPort,
-    projectId: provide.authority.projectId,
-    toolsFor: placedTools,
+  const placementConnection = (port: MessagePort): TurnPlacementChannel =>
+    connectTurnPlacementChannel({
+      port,
+      projectId: provide.authority.projectId,
+      toolsFor: placedTools,
+    });
+  const placement = createResidentPlacement(placementConnection(provide.placementPort), () => {
+    worker.requestRebridge?.(provide.projectId, provide.hostId);
   });
+  const turnPlacement = placement.port;
   opened(() => {
-    turnPlacement.close('project host failed to open');
+    placement.close();
   });
   let cachedSkillFingerprint = '';
   let cachedSkills: Awaited<ReturnType<SkillResolver['getPromptSkillListing']>> = [];
@@ -799,6 +809,7 @@ const composeProjectHost = async (
 
   return {
     hostId: provide.hostId,
+    needsRebridge: placement.needsRecovery,
     stoppability: (chatId) => launcher.stoppability(chatId),
     connect: (port) => {
       const channel = serveAgentChannel(port, launcher, {
@@ -814,13 +825,30 @@ const composeProjectHost = async (
     rebridge: async (ports) => {
       let next: Awaited<ReturnType<typeof openProjectBridges>>;
       try {
+        if (revisionsSlot !== undefined && ports.revisionsPort === undefined) {
+          throw Object.assign(new Error('The replacement revision reader is not available.'), {
+            code: 'REVISIONS_UNAVAILABLE',
+          });
+        }
         next = await openProjectBridges(ports);
       } catch (error) {
         /* A failed rebridge keeps the bridges the host has, and closes every port it was sent (W6.r1 round 4). */
         closeProvidedPorts(ports);
+        // Opening the new placement may already have fenced the prior session at the root.
+        if (ports.placementPort !== undefined) {
+          placement.invalidate();
+        }
         throw error;
       }
       const replaced = [fileSystemSlot.swap(next.fileSystem), projectRootSlot.swap(next.projectRoot)];
+      if (ports.revisionsPort !== undefined && revisionsSlot !== undefined) {
+        revisionsSlot.swap(createPortRevisionsClient(ports.revisionsPort)).close();
+      } else {
+        ports.revisionsPort?.close();
+      }
+      if (ports.placementPort !== undefined) {
+        placement.replace(placementConnection(ports.placementPort));
+      }
       if (ports.computeStorePort !== undefined && computeConnection !== undefined) {
         computeConnection.rebind(ports.computeStorePort);
       } else {
@@ -892,7 +920,7 @@ const composeProjectHost = async (
       });
       imageService.dispose();
       revisions?.close();
-      turnPlacement.close('project host closed');
+      placement.close();
       runtimeClient.terminate();
       computeConnection?.dispose();
       fileSystem.dispose();

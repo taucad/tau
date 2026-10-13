@@ -10,11 +10,12 @@
 
 import { Worker as NodeWorker } from 'node:worker_threads';
 import type { WorkerOptions } from 'node:worker_threads';
-import { assertType, describe, it } from 'vitest';
+import { assertType, describe, expectTypeOf, it } from 'vitest';
 import type { RuntimeTransportHost } from '#transport/runtime-transport.types.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { nodeWorkerHost } from '#transport/node-worker-host.js';
 import { nodeWorkerTransport } from '#transport/node-worker-transport.js';
+import type { NodeWorkerLike } from '#transport/node-worker-transport.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 
 describe('nodeWorkerHost — type conformance (R2)', () => {
@@ -58,5 +59,17 @@ describe('nodeWorkerHost — type conformance (R2)', () => {
     nodeWorkerTransport({ url, workerCtor: TsxWorker, workerData: { projectRoot: '/projects/a' } });
     // @ts-expect-error The seam is a constructor, not a factory function.
     nodeWorkerTransport({ url, workerCtor: () => new NodeWorker(url) });
+  });
+
+  it('requires a custom worker to report its error and exit events', () => {
+    expectTypeOf<NodeWorker>().toExtend<NodeWorkerLike>();
+    type MessageOnlyWorker = {
+      postMessage(value: unknown): void;
+      on(event: 'message', listener: (data: unknown) => void): MessageOnlyWorker;
+      off(event: 'message', listener: (data: unknown) => void): MessageOnlyWorker;
+      terminate(): Promise<number>;
+    };
+    /* The transport settles a crashed or exited worker from these events; a worker without them hangs until the operation timeout. */
+    expectTypeOf<MessageOnlyWorker>().not.toExtend<NodeWorkerLike>();
   });
 });

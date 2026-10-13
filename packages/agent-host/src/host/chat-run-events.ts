@@ -101,6 +101,7 @@ export type ChatRunOutcomeEvent =
   | Readonly<{ type: 'placed'; key: TurnAttemptKey; placement: TurnPlacement }>
   | Readonly<{
       type: 'placementRefused';
+      details?: RunFailureDetail['details'];
       key: TurnAttemptKey;
       code: string;
       message: string;

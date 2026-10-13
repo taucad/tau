@@ -3764,6 +3764,9 @@ importers:
       '@taucad/bambu':
         specifier: workspace:*
         version: link:../plugins/bambu
+      '@taucad/bundler-core':
+        specifier: workspace:*
+        version: link:../core/bundler
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../filesystem

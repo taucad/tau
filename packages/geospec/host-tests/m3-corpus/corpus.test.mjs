@@ -4,7 +4,12 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
-import { loadCurrentM3Campaign, loadM3Corpus, projectCurrentM3Campaign } from './corpus.mjs';
+import {
+  loadCurrentM3Campaign,
+  loadM3Corpus,
+  projectCurrentM3Campaign,
+  requireDefinitionsInBinary,
+} from './corpus.mjs';
 import { fixtureWorkspaceRoot, readFixture } from '../fixtures/read-fixture.mjs';
 import { loadAuthority } from '../f1-public-a1/authority.mjs';
 
@@ -299,4 +304,25 @@ void test('should resolve all 70 exact assets through the existing fixture closu
     }
   }
   assert.equal(assets.size, 70);
+});
+
+void test('should bind pinned definitions to the consumed engine binary bytes', () => {
+  const definitions = {
+    f1: { path: 'f1.rs', sha256: 'd0af57f6550b508cc9fdb63b84180a554541ff3c7b8f53346ba1350449043350' },
+    f2: { path: 'f2.rs', sha256: '4beeda4833a7609b9b22f58e25df6554be61233f4eb5224320e69251f7a265d7' },
+  };
+  const binary = Buffer.concat([
+    Buffer.from([0, 97, 115, 109]),
+    Buffer.from(definitions.f1.sha256, 'latin1'),
+    Buffer.from([0]),
+    Buffer.from(definitions.f2.sha256, 'latin1'),
+  ]);
+  requireDefinitionsInBinary(definitions, binary, 'engine.wasm');
+  const drifted = { ...definitions, f2: { ...definitions.f2, sha256: 'f'.repeat(64) } };
+  assert.throws(() => {
+    requireDefinitionsInBinary(drifted, binary, 'engine.wasm');
+  }, /does not carry definition f2/u);
+  assert.throws(() => {
+    requireDefinitionsInBinary({ f1: { path: 'f1.rs', sha256: 'D0AF' } }, binary, 'engine.wasm');
+  }, /pinned definition identity/u);
 });

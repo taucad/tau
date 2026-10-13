@@ -3,7 +3,9 @@
  *
  * It walks the production dependency closure of `apps/ui` and `apps/desktop`
  * (through the workspace libraries they bundle), lists every third-party
- * package with its declared license, names the vendored tscircuit engine
+ * package with its declared license (the engine's platform packages from the
+ * installed `geospec-engine`'s optionalDependencies, so every host lists the
+ * same set), names the vendored tscircuit engine
  * components from their own license record, and carries the Open CASCADE
  * Technology notice with the unmodified LGPL-2.1 and Open CASCADE exception
  * texts, read from the installed `geospec-engine` package together with the
@@ -57,6 +59,34 @@ export function platformFamilyName(manifest: { os?: string[]; cpu?: string[] }, 
   return platformSuffix.test(name) ? name.replace(platformSuffix, '$1{platform}') : undefined;
 }
 
+/** The engine's platform packages, which pnpm installs only on their own host. */
+const isEnginePlatformPackage = (name: string): boolean => name.startsWith(`${engineName}-`);
+
+/**
+ * List the engine's platform packages from the installed engine's
+ * optionalDependencies, so the notices name every native binding the engine
+ * ships whichever host generates them. A platform package is published with
+ * the engine and carries its license and repository.
+ *
+ * @returns One entry per platform package, sorted by name.
+ */
+export function enginePlatformPackages(
+  engine: PackageInfo,
+  optionalDependencies: Record<string, string> | undefined,
+): PackageInfo[] {
+  return Object.entries(optionalDependencies ?? {})
+    .map(([name, version]) => {
+      if (!isEnginePlatformPackage(name)) {
+        throw new Error(`${engine.name} has an optional dependency outside its platform packages: ${name}`);
+      }
+      if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version)) {
+        throw new Error(`${engine.name} pins ${name} to "${version}", not an exact version`);
+      }
+      return { ...engine, name, version };
+    })
+    .toSorted((a, b) => a.name.localeCompare(b.name));
+}
+
 /**
  * Collect the closure the apps ship: each app's production and optional
  * dependencies, the non-test workspace libraries it bundles from its
@@ -95,6 +125,11 @@ async function collectAppClosure(): Promise<ScannedPackage[]> {
     const manifest = await readManifest(directory);
     const packageInfo = manifest && toPackageInfo(manifest);
     if (!manifest || !packageInfo) {
+      continue;
+    }
+
+    if (isEnginePlatformPackage(packageInfo.name)) {
+      // Listed from the engine's optionalDependencies instead, so the host's platform does not decide the list.
       continue;
     }
 
@@ -252,22 +287,23 @@ async function main(): Promise<void> {
   const isCheck = process.argv.includes('--check');
 
   const closure = await collectAppClosure();
-  const packages = [
-    ...new Map(
-      selectThirdPartyPackages(closure, rootDirectory).map((packageInfo) => [
-        `${packageInfo.name}@${packageInfo.version}`,
-        packageInfo,
-      ]),
-    ).values(),
-  ];
   const engineDirectory = await resolvePackageDirectory(engineName, appDirectories[0]!);
   if (!engineDirectory) {
     throw new Error(`${engineName} is not installed for apps/ui; run pnpm install.`);
   }
   const engineManifest = await readManifest(engineDirectory);
-  if (engineManifest?.name !== engineName || !engineManifest.version) {
+  const engineInfo = engineManifest && toPackageInfo(engineManifest);
+  if (engineManifest?.name !== engineName || !engineManifest.version || !engineInfo) {
     throw new Error(`The installed ${engineName} manifest is invalid.`);
   }
+  const packages = [
+    ...new Map(
+      [
+        ...selectThirdPartyPackages(closure, rootDirectory),
+        ...enginePlatformPackages(engineInfo, engineManifest.optionalDependencies),
+      ].map((packageInfo) => [`${packageInfo.name}@${packageInfo.version}`, packageInfo]),
+    ).values(),
+  ];
   const occtLicenseDirectory = join(engineDirectory, 'licenses');
   const [tscircuitRecord, lgpl, occtException, sourceRelink] = await Promise.all([
     readFile(tscircuitLicenseFile, 'utf8'),

@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from 'geospec/assertion-client';
 import { createGeoSpecVitestAdapter } from 'geospec/vitest';
 import { loadM3CorpusProfileV3 } from './profile-v3.mjs';
-import { loadCurrentM3Campaign, requireEvaluationEnvelope } from './corpus.mjs';
+import { loadCurrentM3Campaign, requireDefinitionsInBinary, requireEvaluationEnvelope } from './corpus.mjs';
 import { fixturePath, readFixture } from '../fixtures/read-fixture.mjs';
 
 const backend = process.env.GEOSPEC_INSTALLED_BACKEND ?? 'native';
@@ -263,7 +263,11 @@ const materializeCampaignRow = (campaignPath, row) => {
 };
 
 const loadDefaultInstalledCampaign = () => {
-  const campaign = loadCurrentM3Campaign(backend, requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'));
+  // The engine's Rust sources are not in this workspace: bind the pinned definitions to the installed engine's WASM.
+  const engineWasm = fileURLToPath(import.meta.resolve('geospec-engine/wasm-binary'));
+  const campaign = loadCurrentM3Campaign(backend, requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'), (definitions) => {
+    requireDefinitionsInBinary(definitions, readFileSync(engineWasm), engineWasm);
+  });
   // The 18 held controls stay out of the installed campaign, as in the v4 selection.
   const ordinary = campaign.rows.filter((row) => row.authority.scope === 'ordinary');
   assert.equal(ordinary.length, 334);

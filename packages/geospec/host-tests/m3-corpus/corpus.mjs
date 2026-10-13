@@ -48,8 +48,34 @@ export function projectCurrentM3Campaign(campaign) {
   };
 }
 
+/** Require every pinned definition source to embed its reviewed identity. @internal */
+export function requireDefinitionSources(definitions, workspaceRoot) {
+  for (const definition of Object.values(definitions)) {
+    const source = readFileSync(resolve(workspaceRoot, definition.path), 'utf8');
+    assert.ok(source.includes(`"${definition.sha256}"`), `independent definition changed: ${definition.path}`);
+  }
+}
+
+/** Require the consumed engine binary to carry every pinned definition identity. @internal */
+export function requireDefinitionsInBinary(definitions, bytes, label) {
+  const binary = Buffer.from(bytes);
+  for (const [name, definition] of Object.entries(definitions)) {
+    assert.match(definition.sha256, /^[0-9a-f]{64}$/u, `${name}: pinned definition identity`);
+    assert.ok(
+      binary.includes(definition.sha256, 0, 'latin1'),
+      `${label} does not carry definition ${name} (${definition.sha256})`,
+    );
+  }
+}
+
 /** Load current semantic expectations; binary provenance belongs to execution receipts. @internal */
-export function loadCurrentM3Campaign(backend, workspaceRoot = fixtureWorkspaceRoot) {
+export function loadCurrentM3Campaign(
+  backend,
+  workspaceRoot = fixtureWorkspaceRoot,
+  requireDefinitions = (definitions) => {
+    requireDefinitionSources(definitions, workspaceRoot);
+  },
+) {
   assert.ok(backend === 'native' || backend === 'mixed', 'current campaign requires an explicit native/mixed profile');
   const bytes = readFixture(CURRENT_AUTHORITY, workspaceRoot);
   assert.equal(sha256(bytes), CURRENT_AUTHORITY_SHA256, 'current independent authority changed');
@@ -59,10 +85,7 @@ export function loadCurrentM3Campaign(backend, workspaceRoot = fixtureWorkspaceR
   assert.equal(campaign.registryVersion, 5);
   assert.equal(campaign.canonicalProfile, 'geospec-jcs-v1');
   assert.equal(campaign.numericProfile, 'geospec-demand-v6');
-  for (const definition of Object.values(campaign.definitions)) {
-    const source = readFileSync(resolve(workspaceRoot, definition.path), 'utf8');
-    assert.ok(source.includes(`"${definition.sha256}"`), `independent definition changed: ${definition.path}`);
-  }
+  requireDefinitions(campaign.definitions);
   assert.equal(campaign.rows.length, 352);
   assert.equal(new Set(campaign.rows.map((row) => row.id)).size, 352);
   return {

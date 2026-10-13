@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  enginePlatformPackages,
   generateNotices,
   parseOcctRevision,
   parseVendoredComponents,
@@ -99,5 +100,40 @@ describe('parseOcctRevision', () => {
     expect(() =>
       parseOcctRevision(JSON.stringify({ occtSourceArchive: { url: 'https://example.com/occt.tar.gz' } })),
     ).toThrow('names no OCCT upstream revision');
+  });
+});
+
+describe('enginePlatformPackages', () => {
+  const engine = {
+    name: 'geospec-engine',
+    version: '0.1.0-next.19',
+    license: 'Apache-2.0',
+    repository: 'https://github.com/taucad/geospec',
+  };
+
+  it('lists every platform package the engine pins, whichever host is installed', () => {
+    expect(
+      enginePlatformPackages(engine, {
+        'geospec-engine-linux-x64-gnu': '0.1.0-next.19',
+        'geospec-engine-darwin-arm64': '0.1.0-next.19',
+      }),
+    ).toEqual([
+      { ...engine, name: 'geospec-engine-darwin-arm64' },
+      { ...engine, name: 'geospec-engine-linux-x64-gnu' },
+    ]);
+  });
+
+  it('lists none when the engine pins no platform package', () => {
+    expect(enginePlatformPackages(engine, undefined)).toEqual([]);
+  });
+
+  it('refuses a platform package pinned to a range', () => {
+    expect(() => enginePlatformPackages(engine, { 'geospec-engine-darwin-arm64': '^0.1.0' })).toThrow(
+      'not an exact version',
+    );
+  });
+
+  it('refuses an optional dependency that is not an engine platform package', () => {
+    expect(() => enginePlatformPackages(engine, { fsevents: '2.3.3' })).toThrow('outside its platform packages');
   });
 });

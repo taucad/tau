@@ -114,7 +114,7 @@ jobs:
           for (const name of readdirSync(directory).filter((entry) => entry.endsWith(".json") && entry !== "vitest.json").sort()) {
             const value = JSON.parse(readFileSync(join(directory, name), "utf8"));
             const brief = name.startsWith("wrap-grant-discovery")
-              ? { ok: value.ok, grants: value.grants, last: value.steps.at(-1) }
+              ? { ok: value.ok, grants: value.grants, profileIdenticalToUnrestricted: value.profileIdenticalToUnrestricted, first: value.steps[0], last: value.steps.at(-1) }
               : name.endsWith("child.json") || name.startsWith("native-child") || name === "standard-child.json"
                 ? { execArgv: value.execArgv ?? value.probe?.execArgv, has: value.has ?? value.probe?.has, discovered: value.discoveredReadRoots }
                 : value;

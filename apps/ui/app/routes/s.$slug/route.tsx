@@ -432,7 +432,7 @@ export const PortableShareSurface = (): React.JSX.Element => {
  */
 const ShareDesktopOffer = (): React.JSX.Element => (
   <div className='pointer-events-none fixed bottom-[calc(var(--spacing)*4+1px)] left-[calc(var(--spacing)*4+1px)] z-50 hidden lg:block'>
-    <div className='pointer-events-auto'>
+    <div className='pointer-events-auto [&>[data-slot=card]]:shadow-xs'>
       <OpenInDesktop continueLabel='Continue in the browser' />
     </div>
   </div>

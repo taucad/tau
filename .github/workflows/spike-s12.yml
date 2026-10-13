@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/spike-s12.yml'
       - 'scripts/spikes/native-deps/linux/s12/**'
+      - 'scripts/spikes/native-deps/linux/annotate.sh'
   workflow_dispatch:
 
 permissions:
@@ -31,7 +32,12 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
       - name: Build the serve UI
-        run: pnpm nx run ui:build:serve --outputStyle=stream
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          set -o pipefail
+          start=$(date +%s)
+          pnpm nx run ui:build:serve --outputStyle=stream 2>&1 | tee "$RUNNER_TEMP/evidence/build.log"
+          echo "build_seconds=$(( $(date +%s) - start ))" | tee "$RUNNER_TEMP/evidence/build-time.txt"
       - name: Measure the layer and serve it from the store
         run: |
           mkdir -p "$RUNNER_TEMP/evidence"
@@ -40,7 +46,14 @@ jobs:
         if: always()
         run: |
           { echo '```'; cat "$RUNNER_TEMP/evidence/measure.txt" 2>/dev/null; grep -hE 'Test Files|Tests ' "$RUNNER_TEMP"/evidence/serve-ui-build.*.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          rm -f "$RUNNER_TEMP/evidence/serve-ui-client.tar.gz"
+          rm -f "$RUNNER_TEMP/evidence/serve-ui-client.tar.gz" "$RUNNER_TEMP/evidence/build.log"
+      - name: Collect the summary
+        if: always()
+        run: |
+          { cat "$RUNNER_TEMP/evidence/build-time.txt"; grep -iE 'error|killed|failed' "$RUNNER_TEMP/evidence/build.log" | grep -v 'externalized' | tail -20; cat "$RUNNER_TEMP/evidence/measure.txt"; for f in "$RUNNER_TEMP"/evidence/serve-ui-build.*.txt; do echo "== $(basename "$f")"; grep -E '✓|×|✗|FAIL|Test Files|Tests ' "$f"; done; } > "$RUNNER_TEMP/evidence/s12-summary.txt" 2>/dev/null || true
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S12' "$RUNNER_TEMP/evidence/s12-summary.txt"
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

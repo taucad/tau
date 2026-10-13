@@ -9,6 +9,7 @@ on:
       - '.github/workflows/spike-s8.yml'
       - 'scripts/spikes/native-deps/linux/s8/**'
       - 'packages/plugins/build123d/python/requirements.lock'
+      - 'scripts/spikes/native-deps/linux/annotate.sh'
   workflow_dispatch:
 
 permissions:
@@ -40,6 +41,9 @@ jobs:
           node -e 'const r=require(process.argv[1]);console.log(JSON.stringify(r.summary,null,2));for(const c of r.cases)console.log(c.pass?"PASS":"FAIL",c.id,JSON.stringify(c.result).slice(0,300))' "$RUNNER_TEMP/evidence/s8.json" | tee "$RUNNER_TEMP/evidence/s8-summary.txt"
           { echo '```'; cat "$RUNNER_TEMP/evidence/s8-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S8' "$RUNNER_TEMP/evidence/s8-summary.txt"
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

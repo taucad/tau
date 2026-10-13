@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/spike-s7.yml'
       - 'scripts/spikes/native-deps/linux/s7/**'
+      - 'scripts/spikes/native-deps/linux/annotate.sh'
   workflow_dispatch:
 
 permissions:
@@ -48,6 +49,9 @@ jobs:
           node -e 'const r=require(process.argv[1]);console.log(JSON.stringify(r.summary,null,2));for(const m of r.matrix)console.log(m.id,m.expected,m.observed,m.match?"match":"MISMATCH",m.proxyHits.length,m.fetch.cause??m.fetch.status,m.ms+"ms",m.label);for(const m of r.mirrorRuns)console.log(m.id,"exit",m.exit,JSON.stringify(m.results.map(x=>[x.name,x.outcome,x.code,x.detail?.cause,Math.round(x.ms??x.detail?.ms??0)+"ms"])),"proxyHits",m.proxyHits.length,"mirrorRequests",m.mirrorRequests.length,m.label)' "$RUNNER_TEMP/evidence/s7.json" | tee "$RUNNER_TEMP/evidence/s7-summary.txt"
           { echo '```'; cat "$RUNNER_TEMP/evidence/s7-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S7' "$RUNNER_TEMP/evidence/s7-summary.txt"
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

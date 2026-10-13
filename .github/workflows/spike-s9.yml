@@ -11,6 +11,7 @@ on:
       - 'scripts/spikes/native-deps/linux/s8/read-wheel.ts'
       - 'scripts/spikes/native-deps/linux/s8/survey.ts'
       - 'packages/plugins/build123d/python/requirements.lock'
+      - 'scripts/spikes/native-deps/linux/annotate.sh'
   workflow_dispatch:
 
 permissions:
@@ -42,6 +43,13 @@ jobs:
         run: |
           node scripts/spikes/native-deps/linux/s9/wheel-crt-survey.ts | tee "$RUNNER_TEMP/evidence/wheel-crt-survey.json"
           { echo '```json'; cat "$RUNNER_TEMP/evidence/wheel-crt-survey.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Collect the summary
+        if: always()
+        run: |
+          { cat "$RUNNER_TEMP/s9/summary.txt"; node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1]));for(const w of r.platformWheels)console.log(w.wheel,"native="+w.nativeModules,"crt="+(w.crt.join(" ")||"none"));console.log("pure wheels",r.pureWheels)' "$RUNNER_TEMP/evidence/wheel-crt-survey.json"; } > "$RUNNER_TEMP/evidence/s9-summary.txt" || true
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S9' "$RUNNER_TEMP/evidence/s9-summary.txt"
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

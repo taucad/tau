@@ -1,8 +1,6 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- The input is hash-verified frozen JSON without a runtime schema package. */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 // oxlint-disable-next-line no-restricted-imports -- The standalone data harness reads its local fixture closure without workspace aliases.
 import { fixturePath, fixtureWorkspaceRoot, readFixture } from '../fixtures/read-fixture.mjs';
 
@@ -48,14 +46,6 @@ export function projectCurrentM3Campaign(campaign) {
   };
 }
 
-/** Require every pinned definition source to embed its reviewed identity. @internal */
-export function requireDefinitionSources(definitions, workspaceRoot) {
-  for (const definition of Object.values(definitions)) {
-    const source = readFileSync(resolve(workspaceRoot, definition.path), 'utf8');
-    assert.ok(source.includes(`"${definition.sha256}"`), `independent definition changed: ${definition.path}`);
-  }
-}
-
 /** Require the consumed engine binary to carry every pinned definition identity. @internal */
 export function requireDefinitionsInBinary(definitions, bytes, label) {
   const binary = Buffer.from(bytes);
@@ -68,15 +58,14 @@ export function requireDefinitionsInBinary(definitions, bytes, label) {
   }
 }
 
-/** Load current semantic expectations; binary provenance belongs to execution receipts. @internal */
-export function loadCurrentM3Campaign(
-  backend,
-  workspaceRoot = fixtureWorkspaceRoot,
-  requireDefinitions = (definitions) => {
-    requireDefinitionSources(definitions, workspaceRoot);
-  },
-) {
+/**
+ * Load current semantic expectations; binary provenance belongs to execution receipts.
+ * `requireDefinitions` binds the pinned definition identities to the engine the caller consumes.
+ * @internal
+ */
+export function loadCurrentM3Campaign(backend, workspaceRoot = fixtureWorkspaceRoot, requireDefinitions = undefined) {
   assert.ok(backend === 'native' || backend === 'mixed', 'current campaign requires an explicit native/mixed profile');
+  assert.equal(typeof requireDefinitions, 'function', 'current campaign requires a definition guard');
   const bytes = readFixture(CURRENT_AUTHORITY, workspaceRoot);
   assert.equal(sha256(bytes), CURRENT_AUTHORITY_SHA256, 'current independent authority changed');
   const original = JSON.parse(bytes);

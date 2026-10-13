@@ -127,7 +127,7 @@ jobs:
           node "$t\probes\copy.mjs" "$t\pbs-tar" "$t\pbs-node"
           node "$t\probes\copy.mjs" "$t\pbs-tar" "$t\pbs-motw"
           $release = Invoke-RestMethod 'https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json'
-          $file = $release.releases | Where-Object { $_.runtime.version -eq $env:DOTNET_RUNTIME_VERSION } | ForEach-Object { $_.runtime.files } | Where-Object { $_.rid -eq 'win-x64' -and $_.name -like '*.zip' } | Select-Object -First 1
+          $file = $release.releases | Where-Object { $_.runtime.version -eq $env:DOTNET_RUNTIME_VERSION } | ForEach-Object { $_.runtime.files } | Where-Object { $_.rid -eq 'win-x64' -and $_.name -eq 'dotnet-runtime-win-x64.zip' } | Select-Object -First 1
           "dotnet runtime file: $($file.name) $($file.url)" | Tee-Object -FilePath "$t\evidence\dotnet-source.txt"
           node "$t\probes\fetch.mjs" $file.url "$t\dotnet.zip" sha512 $file.hash
           Expand-Archive -Path "$t\dotnet.zip" -DestinationPath "$t\dotnet-zip"
@@ -141,11 +141,13 @@ jobs:
           $out = "$t\evidence\streams-signatures.txt"
           $files = @("$t\pbs.tar.gz", "$t\pbs-tar\python.exe", "$t\pbs-node\python.exe", "$t\pbs-motw\python.exe", "$t\dotnet.zip", "$t\dotnet-node\dotnet.exe")
           foreach ($f in $files) {
+            if (-not (Test-Path -LiteralPath $f)) { "streams $($f.Replace($t, '')) = missing" | Tee-Object -FilePath $out -Append; continue }
             $streams = (Get-Item -LiteralPath $f -Stream * | ForEach-Object Stream) -join ','
             "streams $($f.Replace($t, '')) = $streams" | Tee-Object -FilePath $out -Append
           }
           $signed = @("$t\pbs-node\python.exe", "$t\pbs-node\python313.dll", "$t\pbs-node\vcruntime140.dll", "$t\dotnet-node\dotnet.exe", "$t\dotnet-node\host\fxr\$env:DOTNET_RUNTIME_VERSION\hostfxr.dll", "$t\dotnet-node\shared\Microsoft.NETCore.App\$env:DOTNET_RUNTIME_VERSION\coreclr.dll", (Get-Command node).Source)
           foreach ($f in $signed) {
+            if (-not (Test-Path -LiteralPath $f)) { "authenticode $($f.Replace($t, '')) = missing" | Tee-Object -FilePath $out -Append; continue }
             $s = Get-AuthenticodeSignature -LiteralPath $f
             "authenticode $($f.Replace($t, '')) = $($s.Status) $($s.SignatureType) signer=$(if ($s.SignerCertificate) { ($s.SignerCertificate.Subject -split ',')[0] } else { 'none' })" | Tee-Object -FilePath $out -Append
           }
@@ -233,7 +235,8 @@ jobs:
         continue-on-error: true
         run: |
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\evidence" | Out-Null
-          node -e "const os = require('node:os'); const h = process.report.getReport().header; console.log(JSON.stringify({ nodeArch: process.arch, osMachine: os.machine(), reportArch: h.arch, reportMachine: h.osMachine, PROCESSOR_ARCHITECTURE: process.env.PROCESSOR_ARCHITECTURE, PROCESSOR_ARCHITEW6432: process.env.PROCESSOR_ARCHITEW6432 ?? null, cpu: os.cpus()[0]?.model }))" | Tee-Object -FilePath "$env:RUNNER_TEMP\evidence\indicators.txt"
+          node -e "const os = require('node:os'); const h = process.report.getReport().header; console.log(JSON.stringify({ nodeArch: process.arch, osMachine: os.machine(), reportArch: h.arch, reportMachine: h.osMachine, PROCESSOR_ARCHITECTURE: process.env.PROCESSOR_ARCHITECTURE, PROCESSOR_ARCHITEW6432: process.env.PROCESSOR_ARCHITEW6432 ?? null, PROCESSOR_IDENTIFIER: process.env.PROCESSOR_IDENTIFIER, cpu: os.cpus()[0]?.model }))" | Tee-Object -FilePath "$env:RUNNER_TEMP\evidence\indicators.txt"
+          node -e "const r = require('node:child_process').spawnSync('reg', ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', '/v', 'PROCESSOR_ARCHITECTURE'], { encoding: 'utf8' }); console.log('node ' + process.arch + ' reg query machine PROCESSOR_ARCHITECTURE: ' + (r.stdout.match(/REG_SZ\s+(\S+)/) || [])[1])" | Tee-Object -FilePath "$env:RUNNER_TEMP\evidence\indicators.txt" -Append
           "pwsh (native) PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE PROCESSOR_ARCHITEW6432=$env:PROCESSOR_ARCHITEW6432" | Tee-Object -FilePath "$env:RUNNER_TEMP\evidence\indicators.txt" -Append
       - name: Spawn the win-x64 interpreter with the OCP wheel from this Node
         run: |

@@ -105,6 +105,16 @@ jobs:
           uvBin=$(readlink -f "$(command -v uv)")
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/$PBS_ARCHIVE" "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/${PBS_ARCHIVE//+/%2B}"
           echo "$PBS_SHA256  $RUNNER_TEMP/$PBS_ARCHIVE" | sha256sum --check --quiet
+          cat > "$RUNNER_TEMP/gl-import.sh" <<'SH'
+          sp=/closure/lib/python3.13/site-packages
+          sh -c "$INSTALL" || { echo "GL install failed"; exit 0; }
+          echo "GL installed"
+          ldd "$sp"/OCP/OCP.*.so 2>&1 | grep 'not found' | sed "s#$sp/##g" | sort | uniq -c | sort -rn | head -8
+          out=$(/closure/bin/python3 -I -c 'import OCP; print("OCP imported")' 2>&1)
+          rc=$?
+          echo "$out" | grep -E 'Error|imported' | tail -1 | sed "s#$sp/##g" | cut -c1-260
+          echo "import OCP exit=$rc"
+          SH
           for image in debian:10 rockylinux:8; do
             docker pull -q "$image" > /dev/null
             out="$RUNNER_TEMP/evidence/${image//:/-}"
@@ -121,6 +131,14 @@ jobs:
                 result=$(docker run --rm "${mounts[@]}" "$image" /closure/bin/python3 -I -c "import $module" 2>&1) || status=$?
                 echo "import $module: exit=$status $(echo "$result" | grep -E 'Error|error' | tail -1 | sed "s#/closure/lib/python3.13/site-packages/##g" | cut -c1-260)"
               done
+              echo "-- ldd of the OCP extension in the base image (missing objects and symbol versions)"
+              docker run --rm "${mounts[@]}" "$image" sh -c 'ldd /closure/lib/python3.13/site-packages/OCP/OCP.*.so 2>&1' | grep -E 'not found' | sed "s#/closure/lib/python3.13/site-packages/##g" | sort | uniq -c | sort -rn | head -12 || true
+              echo "-- with the system GL library installed (libgl1 / mesa-libGL), import OCP again"
+              case "$image" in
+                debian:10) install='echo "deb http://archive.debian.org/debian buster main" > /etc/apt/sources.list && apt-get -qq -o Acquire::Check-Valid-Until=false update > /dev/null && DEBIAN_FRONTEND=noninteractive apt-get -qq install -y libgl1 > /dev/null' ;;
+                *) install='dnf -q -y install mesa-libGL > /dev/null' ;;
+              esac
+              docker run --rm -e INSTALL="$install" "${mounts[@]}" "$image" sh /spike/gl-import.sh 2>&1 | tail -12
               echo "-- selection prototype, --network none, floor declared"
               docker run --rm --network none "${mounts[@]}" "$image" /opt/node/bin/node /spike/select.mjs /spike/floor.json declared 2>&1 | tail -2
               echo "-- selection prototype, --network none, floor not declared"

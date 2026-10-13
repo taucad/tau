@@ -3,6 +3,7 @@ import { Mic, Square, X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Loader } from '@taucad/ui/components/loader';
+import { cn } from '@taucad/ui/utils/cn';
 import { dictationLabels } from '#components/chat/use-dictation.js';
 import type { DictationPhase } from '#components/chat/use-dictation.js';
 
@@ -35,7 +36,8 @@ export const ChatDictationButton = memo(function ({ phase, onStart, onStop }: Di
           size='icon-sm'
           aria-label={label}
           aria-disabled={busy}
-          className='shrink-0 rounded-full aria-disabled:opacity-50'
+          aria-busy={busy}
+          className={cn('shrink-0 rounded-full', phase !== 'idle' && 'bg-muted')}
           onClick={handleClick}
         >
           {busy ? (
@@ -70,7 +72,7 @@ export const ChatDictationRecording = memo(function ({
             variant='ghost'
             size='icon-sm'
             aria-label='Cancel dictation'
-            className='shrink-0 rounded-full'
+            className='shrink-0 rounded-full bg-muted'
             onClick={onCancel}
           >
             <X aria-hidden='true' className='size-4' />
@@ -78,31 +80,33 @@ export const ChatDictationRecording = memo(function ({
         </TooltipTrigger>
         <TooltipContent>Cancel dictation</TooltipContent>
       </Tooltip>
-      <div
-        role='img'
-        aria-label='Microphone waveform'
-        data-slot='dictation-waveform'
-        data-level={levels.at(-1) ?? 0}
-        className='flex h-7 min-w-0 flex-1 items-center justify-end gap-0.75 overflow-hidden mask-x-from-[calc(100%-var(--spacing)*4)] mask-x-to-100% text-muted-foreground motion-reduce:hidden'
-      >
-        {levels.map((level, index) => (
-          <span
-            // Fixed time slots, never interactive or reordered.
-            // oxlint-disable-next-line react/no-array-index-key -- Fixed waveform time slots shift levels, not DOM identity.
-            key={index}
-            className='max-h-6 min-h-0.75 w-0.75 shrink-0 rounded-full bg-current'
-            style={{ height: `${Math.max(0, Math.min(1, level * 8)) * 100}%` }}
-          />
-        ))}
-      </div>
+      {phase === 'recording' ? (
+        <div
+          role='img'
+          aria-label='Microphone waveform'
+          data-slot='dictation-waveform'
+          data-level={levels.at(-1) ?? 0}
+          className='flex h-7 min-w-0 flex-1 items-center justify-end gap-0.75 overflow-hidden mask-x-from-[calc(100%-var(--spacing)*4)] mask-x-to-100% text-muted-foreground motion-reduce:hidden'
+        >
+          {levels.map((level, index) => (
+            <span
+              // Fixed time slots, never interactive or reordered.
+              // oxlint-disable-next-line react/no-array-index-key -- Fixed waveform time slots shift levels, not DOM identity.
+              key={index}
+              className='max-h-6 min-h-0.75 w-0.75 shrink-0 rounded-full bg-current'
+              style={{ height: `${Math.max(0, Math.min(1, level * 8)) * 100}%` }}
+            />
+          ))}
+        </div>
+      ) : null}
       <span
         role='status'
         aria-label={dictationLabels[phase]}
         aria-busy={phase !== 'recording'}
         className={
           phase === 'recording'
-            ? 'sr-only motion-reduce:not-sr-only motion-reduce:text-xs motion-reduce:text-muted-foreground'
-            : 'shrink-0 text-xs text-muted-foreground'
+            ? 'sr-only motion-reduce:not-sr-only motion-reduce:flex motion-reduce:h-7 motion-reduce:flex-1 motion-reduce:items-center motion-reduce:justify-center motion-reduce:text-sm motion-reduce:text-muted-foreground'
+            : 'flex h-7 min-w-0 flex-1 items-center justify-center text-sm text-muted-foreground'
         }
       >
         {dictationLabels[phase]}

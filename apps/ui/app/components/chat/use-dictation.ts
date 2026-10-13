@@ -11,7 +11,7 @@ export const dictationLabels: Record<DictationPhase, string> = {
   requesting: 'Requesting microphone…',
   recording: 'Recording…',
   stopping: 'Stopping dictation…',
-  transcribing: 'Transcribing…',
+  transcribing: 'Transcribing',
 };
 
 /** Samples the API accepts: 24 kHz mono PCM16 after the 44-byte WAV header (about 8.6 minutes). */

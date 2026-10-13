@@ -10,10 +10,11 @@ import { kernelConfigurations } from '@taucad/types/constants';
 import { storedRef } from '#utils/attachment.test-utils.js';
 
 let dictationAvailable = false;
+let transcription: ReturnType<typeof Promise.withResolvers<string>> | undefined;
 let recordLevel: ((level: number) => void) | undefined;
 vi.doMock('#components/chat/dictation-client.js', () => ({
   fetchDictationStatus: async () => ({ available: dictationAvailable }),
-  transcribeDictation: async () => 'Make the corners round.',
+  transcribeDictation: async () => transcription?.promise ?? 'Make the corners round.',
 }));
 vi.doMock('#components/chat/dictation-capture.js', () => ({
   captureDictation: async ({ onLevel }: { onLevel: (level: number) => void }) => {
@@ -158,6 +159,7 @@ const renderComposer = (props: Partial<ComposerProps>) => {
 afterEach(() => {
   cleanup();
   dictationAvailable = false;
+  transcription = undefined;
   recordLevel = undefined;
   globalThis.document.documentElement.classList.remove('dark');
 });
@@ -321,51 +323,72 @@ describe('composer bar resize geometry', () => {
   });
 });
 
-describe('dictation during a chat stream', () => {
+describe('dictation recording and transcription', () => {
   it.each([
-    { width: 800, theme: 'light' },
-    { width: 800, theme: 'dark' },
-    { width: 320, theme: 'light' },
-  ])('should record and transcribe independently at $width in $theme mode', async ({ width, theme }) => {
-    await page.viewport(width, 480);
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    dictationAvailable = true;
-    const cancelChat = vi.fn();
-    const submit = vi.fn().mockResolvedValue(undefined);
-    const { containerReference } = renderComposer({
-      status: 'streaming',
-      inputText: 'Keep working on the bracket.',
-      handleCancelClick: cancelChat,
-      handleSubmit: submit,
-    });
-    await page.getByRole('button', { name: 'Dictate', exact: true }).click();
-    await expect.element(page.getByRole('button', { name: 'Stop dictation', exact: true })).toBeVisible();
-    act(() => {
-      // Deterministic microphone samples; the real composer and dictation hook render them.
-      for (let index = 0; index < 100; index++) {
-        const peak = Math.max(0, Math.sin(index * 0.31) + Math.sin(index * 0.79) * 0.6 - 0.6);
-        recordLevel?.(index > 45 ? peak * 0.12 : 0);
+    { width: 800, theme: 'light', status: 'streaming' },
+    { width: 800, theme: 'dark', status: 'streaming' },
+    { width: 320, theme: 'light', status: 'streaming' },
+    { width: 800, theme: 'light', status: 'ready' },
+  ] as const)(
+    'should record and transcribe at $width in $theme mode while $status',
+    async ({ width, theme, status }) => {
+      await page.viewport(width, 480);
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+      dictationAvailable = true;
+      transcription = Promise.withResolvers<string>();
+      const cancelChat = vi.fn();
+      const submit = vi.fn().mockResolvedValue(undefined);
+      const { containerReference } = renderComposer({
+        status,
+        inputText: 'Keep working on the bracket.',
+        handleCancelClick: cancelChat,
+        handleSubmit: submit,
+      });
+      await page.getByRole('button', { name: 'Dictate', exact: true }).click();
+      await expect.element(page.getByRole('button', { name: 'Stop dictation', exact: true })).toBeVisible();
+      act(() => {
+        // Deterministic microphone samples; the real composer and dictation hook render them.
+        for (let index = 0; index < 100; index++) {
+          const peak = Math.max(0, Math.sin(index * 0.31) + Math.sin(index * 0.79) * 0.6 - 0.6);
+          recordLevel?.(index > 45 ? peak * 0.12 : 0);
+        }
+      });
+      const waveform = screen.getByRole('img', { name: 'Microphone waveform' });
+      const cancelRecording = screen.getByRole('button', { name: 'Cancel dictation' });
+      const stopRecording = screen.getByRole('button', { name: 'Stop dictation' });
+      expect(waveform.getBoundingClientRect().width).toBeGreaterThan(width / 2);
+      expect(waveform.getBoundingClientRect().left).toBeGreaterThan(cancelRecording.getBoundingClientRect().right);
+      expect(waveform.getBoundingClientRect().right).toBeLessThan(stopRecording.getBoundingClientRect().left);
+      expect(containerReference.current!.scrollWidth).toBe(containerReference.current!.clientWidth);
+      await page.getByRole('textbox').click();
+      await page.screenshot({
+        element: screen.getByRole('region', { name: 'Composer' }),
+        path: `../../../../../out/test-results/composer/dictation-${width}-${theme}-${status}.png`,
+      });
+      await page.getByRole('button', { name: 'Stop dictation', exact: true }).click();
+      await expect.element(page.getByRole('status', { name: 'Transcribing', exact: true })).toBeVisible();
+      expect(screen.queryByRole('img', { name: 'Microphone waveform' })).toBeNull();
+      await expect.element(page.getByRole('button', { name: 'Cancel dictation' })).toBeEnabled();
+      await expect
+        .element(page.getByRole('button', { name: 'Transcribing', exact: true }))
+        .toHaveAttribute('aria-busy', 'true');
+      await page.getByRole('textbox').click();
+      await page.screenshot({
+        element: screen.getByRole('region', { name: 'Composer' }),
+        path: `../../../../../out/test-results/composer/transcribing-${width}-${theme}-${status}.png`,
+      });
+      await act(async () => {
+        transcription?.resolve('Make the corners round.');
+      });
+      await expect
+        .element(page.getByRole('textbox'))
+        .toHaveTextContent('Keep working on the bracket. Make the corners round.');
+      expect(submit).not.toHaveBeenCalled();
+      expect(cancelChat).not.toHaveBeenCalled();
+      if (status === 'streaming') {
+        await page.getByRole('button', { name: 'Stop', exact: true }).click();
+        expect(cancelChat).toHaveBeenCalledOnce();
       }
-    });
-    const waveform = screen.getByRole('img', { name: 'Microphone waveform' });
-    const cancelRecording = screen.getByRole('button', { name: 'Cancel dictation' });
-    const stopRecording = screen.getByRole('button', { name: 'Stop dictation' });
-    expect(waveform.getBoundingClientRect().width).toBeGreaterThan(width / 2);
-    expect(waveform.getBoundingClientRect().left).toBeGreaterThan(cancelRecording.getBoundingClientRect().right);
-    expect(waveform.getBoundingClientRect().right).toBeLessThan(stopRecording.getBoundingClientRect().left);
-    expect(containerReference.current!.scrollWidth).toBe(containerReference.current!.clientWidth);
-    await page.getByRole('textbox').click();
-    await page.screenshot({
-      element: screen.getByRole('region', { name: 'Composer' }),
-      path: `../../../../../out/test-results/composer/dictation-${width}-${theme}.png`,
-    });
-    await page.getByRole('button', { name: 'Stop dictation', exact: true }).click();
-    await expect
-      .element(page.getByRole('textbox'))
-      .toHaveTextContent('Keep working on the bracket. Make the corners round.');
-    expect(submit).not.toHaveBeenCalled();
-    expect(cancelChat).not.toHaveBeenCalled();
-    await page.getByRole('button', { name: 'Stop', exact: true }).click();
-    expect(cancelChat).toHaveBeenCalledOnce();
-  });
+    },
+  );
 });

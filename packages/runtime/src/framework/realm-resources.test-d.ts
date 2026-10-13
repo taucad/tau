@@ -53,8 +53,8 @@ describe('services.realm', () => {
   });
 
   it('rejects a string group', async () => {
-    // @ts-expect-error -- a bare string is not a group: declare the backend once with createRealmGroup.
     await services.realm.hold({
+      // @ts-expect-error -- a bare string is not a group: declare the backend once with createRealmGroup.
       group: 'test-heap',
       key: 'single:',
       create: async () => ({ heap: new Uint8Array(1) }),

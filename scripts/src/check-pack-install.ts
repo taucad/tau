@@ -38,6 +38,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 import { bundledLibraries, publishable, publishableClosure, publishWaves, workspace } from '@taucad/nx';
 import { chromium } from 'playwright';
 import type { Page } from 'playwright';
@@ -320,7 +321,10 @@ const assertSingleZodInstance = (appRoot: string): void => {
   console.log(`zod: one instance in the installed tree (${[...installs][0]!}).`);
 };
 
-/** The vendored graph must not reappear as consumer dependencies. */
+/**
+ * The vendored graph must not reappear as dependencies of the installed `@taucad/tscircuit`. Only its
+ * own subtree is walked: in the full train other packages install replicad and OCCT by design.
+ */
 const assertTscircuitInstallShape = (appRoot: string): void => {
   const listing = spawnSync('npm', ['ls', '--json', '--all'], {
     cwd: appRoot,
@@ -333,7 +337,8 @@ const assertTscircuitInstallShape = (appRoot: string): void => {
     `Cannot verify tscircuit install tree: npm ls failed (${String(listing.status)}). ${listing.error?.message ?? listing.stderr}`,
   );
   const tree = JSON.parse(listing.stdout) as Node;
-  invariant(tree.dependencies?.['@taucad/tscircuit'], 'npm ls omitted installed @taucad/tscircuit.');
+  const tscircuit = tree.dependencies?.['@taucad/tscircuit'];
+  invariant(tscircuit, 'npm ls omitted installed @taucad/tscircuit.');
   const forbidden = new Set([
     '@resvg/resvg-js',
     'occt-import-js',
@@ -354,7 +359,7 @@ const assertTscircuitInstallShape = (appRoot: string): void => {
       walk(child);
     }
   };
-  walk(tree);
+  walk(tscircuit);
   invariant(found.size === 0, `Vendored tscircuit packages leaked into the consumer install: ${[...found].join(', ')}`);
 };
 
@@ -850,8 +855,66 @@ const checkInstalledTypes = (appRoot: string): void => {
   console.log(`Packed TypeScript ${ts.version}: strict consumer and view/export/option/file-entry completions passed.`);
 };
 
-/** Exercise Zod 4.0.0 through public runtime admission, not a local schema-only parse. */
-export const installedZodFloorSource = `
+/** The Zod the consumer app pins: the runtime's declared peer floor, unless an installed package needs more. */
+export const declaredZodFloor = '4.0.0';
+
+/**
+ * The lowest Zod every installed package admits through its own `dependencies` (an application such
+ * as `@taucad/cli` may depend on Zod rather than peer it). A dependency floor above the peer floor
+ * would install a second Zod, so the app pins the highest such floor instead, and says so.
+ */
+export const consumerZodVersion = (manifests: readonly Manifest[]): { version: string; raisedBy: string[] } => {
+  const parts = (version: string): number[] => version.split('.').map(Number);
+  const newer = (left: string, right: string): boolean => {
+    const [a, b] = [parts(left), parts(right)];
+    const index = a.findIndex((value, position) => value !== b[position]);
+    return index !== -1 && a[index]! > b[index]!;
+  };
+  let version = declaredZodFloor;
+  const raisedBy: string[] = [];
+  for (const manifest of manifests) {
+    const range = manifest.dependencies?.['zod'];
+    if (range === undefined) {
+      continue;
+    }
+    const floor = /^\^(?<floor>\d+\.\d+\.\d+)$/u.exec(range)?.groups?.['floor'];
+    invariant(floor !== undefined, `${manifest.name} depends on zod ${range}, which is not a caret range.`);
+    if (newer(floor, declaredZodFloor)) {
+      raisedBy.push(`${manifest.name} (zod ${range})`);
+      if (newer(floor, version)) {
+        version = floor;
+      }
+    }
+  }
+  return { version, raisedBy };
+};
+
+/** The `package.json` inside an npm tarball, read without unpacking it. */
+export const tarballManifest = (tarball: Uint8Array<ArrayBuffer>): Manifest => {
+  const tar = gunzipSync(tarball);
+  for (let offset = 0; offset + 512 <= tar.byteLength; ) {
+    const header = tar.subarray(offset, offset + 512);
+    const field = (start: number, length: number): string =>
+      header
+        .subarray(start, start + length)
+        .toString('latin1')
+        .replace(/\0.*$/su, '');
+    const name = field(0, 100);
+    if (name === '') {
+      break;
+    }
+    const size = Number.parseInt(field(124, 12).trim() || '0', 8);
+    const path = [field(345, 155), name].filter(Boolean).join('/');
+    if (/^[^/]+\/package\.json$/u.test(path)) {
+      return JSON.parse(tar.subarray(offset + 512, offset + 512 + size).toString('utf8')) as Manifest;
+    }
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  throw new Error('The tarball holds no top-level package.json.');
+};
+
+/** Exercise the pinned Zod (the declared floor where it can be installed) through public runtime admission. */
+export const installedZodFloorSource = (zodVersion: string): string => `
 import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createRuntimeClient, defineKernel, defineRuntime, fromMemoryFs } from '@taucad/runtime';
@@ -862,7 +925,7 @@ const requireFromRuntime = createRequire(import.meta.resolve('@taucad/runtime'))
 const requireFromConsumer = createRequire(import.meta.url);
 if (realpathSync(requireFromRuntime.resolve('zod/package.json')) !== realpathSync(requireFromConsumer.resolve('zod/package.json'))) throw new Error('Runtime and consumer resolved different Zod packages.');
 const version = requireFromRuntime('zod/package.json').version;
-if (version !== '4.0.0') throw new Error('Declared Zod floor was not installed: ' + version);
+if (version !== '${zodVersion}') throw new Error('Pinned Zod was not installed: ' + version);
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 const quantitySchema = quantity({ unit: 'm', space: 'linear' }).positive().max(10).describe('Length').default(0.2);
 assert(quantitySchema.parse(undefined) === 0.2 && !quantitySchema.safeParse(0).success, 'Quantity default or refinement changed.');
@@ -947,7 +1010,7 @@ try {
   const missing = await doc.export('data', { options: {} });
   assert(!missing.success, 'Missing required export option was admitted.');
 } finally { doc.close(); await client.shutdown(); }
-console.log('Installed Zod 4.0.0 union/discriminated/default/transform/required/strict/loose/schemaless and identity passed.');
+console.log('Installed Zod ${zodVersion} union/discriminated/default/transform/required/strict/loose/schemaless and identity passed.');
 `;
 
 const installedTscircuitSource = `
@@ -984,11 +1047,11 @@ try {
 `;
 
 /** Render the installed tscircuit package in Node and an alias-free browser bundle. */
-const runInstalledTscircuit = async (appRoot: string): Promise<void> => {
+const runInstalledTscircuit = async (appRoot: string, zodVersion: string): Promise<void> => {
   const source = join(appRoot, 'tscircuit-render.mjs');
   const bundle = join(appRoot, 'tscircuit-render.browser.mjs');
   checkInstalledTypes(appRoot);
-  writeFileSync(join(appRoot, 'tscircuit-zod-floor.mjs'), installedZodFloorSource);
+  writeFileSync(join(appRoot, 'tscircuit-zod-floor.mjs'), installedZodFloorSource(zodVersion));
   run(process.execPath, ['tscircuit-zod-floor.mjs'], appRoot);
   writeFileSync(source, installedTscircuitSource);
   run(process.execPath, [source], appRoot);
@@ -1103,6 +1166,8 @@ type InstallPlan = {
   readonly names: readonly string[];
   /** Arguments to the one `npm install`. */
   readonly installArguments: readonly string[];
+  /** The packed or downloaded tarballs, one per package. */
+  readonly tarballs: readonly string[];
   /** Whether npm's `resolved` for a top-level package is the source this mode installed. */
   readonly installedFromSource: (name: string, resolved: string | undefined) => boolean;
   readonly sourceLabel: string;
@@ -1170,6 +1235,7 @@ const planFromTarballs = async (requested: readonly string[], artifactRoot: stri
     // One install for every tarball: npm resolves the sibling `@taucad/*` and `geospec`
     // specifiers against the local files instead of their stale registry copies.
     installArguments: tarballs,
+    tarballs,
     installedFromSource: (_name, resolvedFrom) => resolvedFrom?.startsWith('file:') === true,
     sourceLabel: 'TGZ resolved from disk',
     bundledLibraryNames,
@@ -1181,13 +1247,14 @@ const planFromUrls = async (previewFile: string, artifactRoot: string): Promise<
   const packages = previewPackages(JSON.parse(readFileSync(resolve(previewFile), 'utf8')));
   const urlByName = new Map(packages.map(({ name, url }) => [name, url]));
   invariant(urlByName.size === packages.length, 'The preview file lists a package name twice.');
+  const tarballs = packages.map(({ name }) => join(artifactRoot, `${name.replaceAll(/\W/gu, '-')}.tgz`));
   const sizes = await Promise.all(
-    packages.map(async ({ name, url }) => {
+    packages.map(async ({ url }, index) => {
       const response = await fetch(url);
       invariant(response.ok, `GET ${url} answered ${String(response.status)} ${response.statusText}.`);
       const bytes = new Uint8Array(await response.arrayBuffer());
       invariant(bytes.byteLength > 0, `${url} served an empty tarball.`);
-      writeFileSync(join(artifactRoot, `${name.replaceAll(/\W/gu, '-')}.tgz`), bytes);
+      writeFileSync(tarballs[index]!, bytes);
       return bytes.byteLength;
     }),
   );
@@ -1203,6 +1270,7 @@ const planFromUrls = async (previewFile: string, artifactRoot: string): Promise<
   return {
     names: packages.map(({ name }) => name),
     installArguments: packages.map(({ url }) => url),
+    tarballs,
     // The URL npm records is the one it fetched; pkg.pr.new may serve a sibling under its long or compact form.
     installedFromSource: (_name, resolvedFrom) => resolvedFrom?.startsWith(previewUrlPrefix) === true,
     sourceLabel: 'pkg.pr.new URL(s) installed, no registry copies',
@@ -1297,6 +1365,12 @@ const main = async (): Promise<void> => {
 
     // The app declares zod itself, the way a consumer satisfying the plugin peer
     // does; `assertSingleZodInstance` then proves npm did not fork it.
+    const zod = consumerZodVersion(plan.tarballs.map((tarball) => tarballManifest(readFileSync(tarball))));
+    if (zod.raisedBy.length > 0) {
+      console.log(
+        `zod: pinned ${zod.version}, not the declared floor ${declaredZodFloor}, for ${zod.raisedBy.join(', ')}.`,
+      );
+    }
     writeFileSync(
       join(appRoot, 'package.json'),
       JSON.stringify(
@@ -1306,7 +1380,7 @@ const main = async (): Promise<void> => {
           dependencies: {
             react: '19.2.7',
             'react-dom': '19.2.7',
-            zod: '4.0.0',
+            zod: zod.version,
             ...(plan.names.includes('@taucad/middleware') ? { xstate: '6.0.0-alpha.59' } : {}),
             // `@taucad/viewer` peers `@xstate/react@^7.0.0-alpha.3`, whose newest alpha (alpha.4) requires
             // xstate ^6.0.0-alpha.61, so a consumer on the xstate Tau tests pins the release Tau tests.
@@ -1317,7 +1391,9 @@ const main = async (): Promise<void> => {
         2,
       ),
     );
-    run('npm', ['install', '--no-save', '--no-audit', '--no-fund', ...plan.installArguments], appRoot);
+    // The install saves what it adds to the temporary app: npm 11 reports unsaved packages as
+    // extraneous, which `npm ls` (and so every tree check below) counts as a problem.
+    run('npm', ['install', '--no-audit', '--no-fund', ...plan.installArguments], appRoot);
 
     assertSingleZodInstance(appRoot);
     if (plan.names.includes('@taucad/tscircuit')) {
@@ -1351,7 +1427,7 @@ const main = async (): Promise<void> => {
     );
 
     if (existsSync(join(appRoot, 'node_modules/@taucad/tscircuit'))) {
-      await runInstalledTscircuit(appRoot);
+      await runInstalledTscircuit(appRoot, zod.version);
     }
     const runtimeRoot = join(appRoot, 'node_modules/@taucad/runtime');
     if (existsSync(runtimeRoot)) {

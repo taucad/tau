@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import type { Manifest } from '#check-pack-install.js';
 import {
   assetUrlSpecifiers,
+  consumerZodVersion,
   packageAssetUrlSpecifiers,
   importableSpecifiers,
   isToleratedImportFailure,
@@ -15,6 +16,7 @@ import {
   previewPackages,
   requiredArtifactPaths,
   probeSource,
+  tarballManifest,
   unrewrittenSiblings,
 } from '#check-pack-install.js';
 
@@ -249,6 +251,57 @@ describe('unrewrittenSiblings', () => {
         published,
       ),
     ).toStrictEqual([]);
+  });
+});
+
+describe('consumerZodVersion', () => {
+  it('keeps the declared floor when no package depends on a newer Zod', () => {
+    expect(
+      consumerZodVersion([
+        { name: '@taucad/runtime', version: '1.0.0', peerDependencies: { zod: '^4.0.0' } },
+        { name: '@taucad/units', version: '1.0.0', dependencies: { zod: '^4.0.0' } },
+      ]),
+    ).toStrictEqual({ version: '4.0.0', raisedBy: [] });
+  });
+
+  it('raises the pin to the highest dependency floor and names who raised it', () => {
+    expect(
+      consumerZodVersion([
+        { name: '@taucad/cli', version: '1.0.0', dependencies: { zod: '^4.4.3' } },
+        { name: 'geospec', version: '1.0.0', dependencies: { zod: '^4.10.0' } },
+      ]),
+    ).toStrictEqual({ version: '4.10.0', raisedBy: ['@taucad/cli (zod ^4.4.3)', 'geospec (zod ^4.10.0)'] });
+  });
+
+  it('refuses a Zod dependency range it cannot read a floor from', () => {
+    expect(() => consumerZodVersion([{ name: 'x', version: '1.0.0', dependencies: { zod: '>=4' } }])).toThrow(
+      'not a caret range',
+    );
+  });
+});
+
+describe('tarballManifest', () => {
+  it('reads package/package.json from an npm-packed tarball', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-pack-manifest-'));
+    try {
+      const packageDirectory = join(directory, 'source');
+      mkdirSync(packageDirectory);
+      writeFileSync(join(packageDirectory, 'README.md'), '# Example');
+      writeFileSync(
+        join(packageDirectory, 'package.json'),
+        JSON.stringify({ name: '@taucad/example', version: '1.2.3', dependencies: { zod: '^4.4.3' } }),
+      );
+      const result = spawnSync('npm', ['pack', '--silent', '--pack-destination', directory], {
+        cwd: packageDirectory,
+        encoding: 'utf8',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const manifest = tarballManifest(readFileSync(join(directory, result.stdout.trim())));
+
+      expect(manifest).toMatchObject({ name: '@taucad/example', version: '1.2.3', dependencies: { zod: '^4.4.3' } });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 

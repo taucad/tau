@@ -76,7 +76,7 @@ const main = async (): Promise<void> => {
   const manifest = JSON.parse(
     readFileSync(join(resourceRoot, 'tau-runtime-manifest.json'), 'utf8'),
   ) as ResourceManifest;
-  const privateRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tau-spike-build123d-')));
+  const privateRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tau-build123d-spike-')));
   const workspacePath = join(privateRoot, 'workspace');
   const artifactPath = join(privateRoot, 'artifacts');
   mkdirSync(workspacePath);

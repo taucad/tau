@@ -135,7 +135,8 @@ test('should preserve history and attachment bytes when a saved Codex chat switc
         }
         throw error;
       }
-      const record = JSON.parse(await (await file.getFile()).text()) as Record<string, unknown>;
+      const stored = await file.getFile();
+      const record = JSON.parse(await stored.text()) as Record<string, unknown>;
       record['activeExecution'] = { kind: 'acp', hostId: 'desktop', agentId: 'codex', model: 'gpt-6-sol' };
       const writer = await file.createWritable();
       await writer.write(JSON.stringify(record));
@@ -173,7 +174,8 @@ test('should preserve history and attachment bytes when a saved Codex chat switc
   await sendDraft('Continue using the original bracket attachments.');
   await expect.poll(gatewayRequestCount, { timeout: 120_000 }).toBe(requestsBefore + 1);
   await expectLogInvariant(chatId, { runs: 2, settlements: ['turn.finalized', 'turn.finalized'] });
-  const continuedRequest = (await gatewayRequests()).at(-1)!;
+  const requests = await gatewayRequests();
+  const continuedRequest = requests.at(-1)!;
   expect(JSON.stringify(continuedRequest.messages)).toContain(sentText);
   expect(JSON.stringify(continuedRequest.messages)).toContain(replyText);
   expect(JSON.stringify(continuedRequest.messages)).toContain(jpeg.base64);

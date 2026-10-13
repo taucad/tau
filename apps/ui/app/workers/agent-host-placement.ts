@@ -4,12 +4,22 @@ import type { TurnPlacementChannel } from '@taucad/agent-host/channel-client';
 /** Milliseconds a placement call waits for the page to reconnect its project authority. */
 const recoveryBound = 15_000;
 const isAborted = (signal: AbortSignal): boolean => signal.aborted;
+export type PlacementDiagnostic = {
+  event: 'placement.closed' | 'placement.replaced' | 'placement.disposed' | 'placement.recovery-failed';
+  generation: number;
+  previousGeneration?: number;
+  origin?: 'local' | 'remote' | 'timeout';
+  code?: string;
+  reason?: string;
+};
+
 type CloseInfo = Parameters<Parameters<TurnPlacementChannel['onClose']>[0]>[0];
 
 /** Keep attempt identities and settlement listeners across replacement of a project's placement session. */
 export const createResidentPlacement = (
   initial: TurnPlacementChannel,
   requestRecovery: () => void = () => undefined,
+  observe: (event: PlacementDiagnostic) => void = () => undefined,
 ): Readonly<{
   port: TurnPlacementPort;
   needsRecovery: () => boolean;
@@ -18,8 +28,17 @@ export const createResidentPlacement = (
   close: () => void;
 }> => {
   const hostLifetime = new AbortController();
+  let generationNumber = 0;
+  const report = (event: PlacementDiagnostic): void => {
+    try {
+      observe(event);
+    } catch {
+      /* Diagnostics never change placement outcomes. */
+    }
+  };
   const generation = (channel: TurnPlacementChannel) => ({
     channel,
+    number: ++generationNumber,
     changed: Promise.withResolvers<void>(),
     replaced: new AbortController(),
     closed: false,
@@ -29,6 +48,12 @@ export const createResidentPlacement = (
   let automaticRecovery = true;
   const watch = (entry: typeof current): void => {
     entry.channel.onClose((info) => {
+      if (entry.closed) {
+        return;
+      }
+      if (entry === current && !hostLifetime.signal.aborted) {
+        report({ event: 'placement.closed', generation: entry.number, ...info });
+      }
       entry.closeInfo = info;
       entry.closed = true;
       if (entry === current && !hostLifetime.signal.aborted && automaticRecovery) {
@@ -82,6 +107,7 @@ export const createResidentPlacement = (
       try {
         await next(before, AbortSignal.any([hostLifetime.signal, AbortSignal.timeout(recoveryBound)]));
       } catch {
+        report({ event: 'placement.recovery-failed', generation: before.number });
         throw Object.assign(error, {
           details: {
             phase: 'placement.reconnect',
@@ -98,6 +124,7 @@ export const createResidentPlacement = (
         }
         return result;
       } catch (retryError) {
+        report({ event: 'placement.recovery-failed', generation: replacement.number });
         if (retryError instanceof Error) {
           Object.assign(retryError, {
             details: {
@@ -161,12 +188,17 @@ export const createResidentPlacement = (
     replace: (channel: TurnPlacementChannel): void => {
       const previous = current;
       current = generation(channel);
+      report({ event: 'placement.replaced', generation: current.number, previousGeneration: previous.number });
       watch(current);
       previous.changed.resolve();
       previous.replaced.abort();
       previous.channel.close('placement session replaced');
     },
     close: (): void => {
+      if (hostLifetime.signal.aborted) {
+        return;
+      }
+      report({ event: 'placement.disposed', generation: current.number });
       hostLifetime.abort();
       current.changed.resolve();
       current.channel.close('project host closed');

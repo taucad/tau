@@ -1,3 +1,4 @@
+import { recordChannelDiagnostic } from '#db/channel-diagnostics.js';
 /**
  * The resident worker's project host (W6 RH-S8): one per project the tab has open, built from the ports the page
  * provides. Every stream of the project is served by one launcher (`createAgentLauncher`), whose chats are led among
@@ -692,9 +693,31 @@ const composeProjectHost = async (
       projectId: provide.authority.projectId,
       toolsFor: placedTools,
     });
-  const placement = createResidentPlacement(placementConnection(provide.placementPort), () => {
-    worker.requestRebridge?.(provide.projectId, provide.hostId);
-  });
+  const diagnose = (event: Parameters<typeof recordChannelDiagnostic>[0]['event']): void => {
+    recordChannelDiagnostic({
+      event,
+      tabId: worker.tabId,
+      hostId: provide.hostId,
+      projectId: provide.projectId,
+      visible: worker.visibility.visible(),
+    });
+  };
+  diagnose('host.opened');
+  const placement = createResidentPlacement(
+    placementConnection(provide.placementPort),
+    () => {
+      worker.requestRebridge?.(provide.projectId, provide.hostId);
+    },
+    (event) => {
+      recordChannelDiagnostic({
+        ...event,
+        tabId: worker.tabId,
+        hostId: provide.hostId,
+        projectId: provide.projectId,
+        visible: worker.visibility.visible(),
+      });
+    },
+  );
   const turnPlacement = placement.port;
   opened(() => {
     placement.close();
@@ -866,6 +889,7 @@ const composeProjectHost = async (
     drain: async (signal) => {
       /* Nothing new is admitted here: no stream is served, the registry routes no connect to a released host, and the
        * launcher refuses a new start, from any tab. */
+      diagnose('host.released');
       draining = true;
       for (const channel of channels) {
         channel.dispose('project host released');
@@ -906,6 +930,7 @@ const composeProjectHost = async (
       }
     },
     close: async () => {
+      diagnose('host.closed');
       for (const channel of channels) {
         channel.dispose('project host closed');
       }

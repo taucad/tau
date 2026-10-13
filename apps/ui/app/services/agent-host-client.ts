@@ -1,3 +1,4 @@
+import { recordChannelDiagnostic } from '#db/channel-diagnostics.js';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import type { SourceLiveEvent, AgentLogEvent, Channel, StorageDurabilityClass } from '@taucad/agent-host';
 import { isGatewayProviderKind } from '@taucad/agent-host';
@@ -597,15 +598,30 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
         try {
           await recoverProject(live, { projectId, hostId });
         } catch (error) {
+          recordChannelDiagnostic({
+            event: 'placement.recovery-failed',
+            tabId,
+            workerId: sessionId,
+            projectId,
+            hostId,
+          });
           console.warn('[agent-host] Project connection recovery failed', { projectId, hostId, error });
         }
       })();
     });
+    recordChannelDiagnostic({ event: 'worker.opened', tabId, workerId: sessionId });
     channel.onClose((info) => {
+      recordChannelDiagnostic({ event: 'worker.closed', tabId, workerId: sessionId, ...info });
       retire(live, info.code);
     });
     if (typeof document !== 'undefined') {
       const report = (): void => {
+        recordChannelDiagnostic({
+          event: 'page.visibility',
+          tabId,
+          workerId: sessionId,
+          visible: document.visibilityState === 'visible',
+        });
         if (!live.dead) {
           // async-iife: bootstrap -- a visibility report is best effort; a dead worker is retired by its channel.
           void (async (): Promise<void> => {
@@ -617,9 +633,23 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
           })();
         }
       };
+      const hidden = (): void => {
+        recordChannelDiagnostic({ event: 'page.hidden', tabId, workerId: sessionId });
+      };
+      const shown = (): void => {
+        recordChannelDiagnostic({ event: 'page.shown', tabId, workerId: sessionId });
+      };
+      if ('window' in globalThis) {
+        globalThis.addEventListener('pagehide', hidden);
+        globalThis.addEventListener('pageshow', shown);
+      }
       document.addEventListener('visibilitychange', report);
       channel.onClose(() => {
         document.removeEventListener('visibilitychange', report);
+        if ('window' in globalThis) {
+          globalThis.removeEventListener('pagehide', hidden);
+          globalThis.removeEventListener('pageshow', shown);
+        }
       });
       report();
     }

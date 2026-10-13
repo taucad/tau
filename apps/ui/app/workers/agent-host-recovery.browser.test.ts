@@ -1,3 +1,4 @@
+import { readChannelDiagnostics } from '#db/channel-diagnostics.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import type { RevisionFileSystem } from '@taucad/revisions/revision-effects';
@@ -16,7 +17,7 @@ import { rootedProvider } from '#workers/test/rooted-provider.fixture.js';
 
 afterEach(disposeOpfsProject);
 
-it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 'reader'] as const)(
+it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 'reader', 'reopen'] as const)(
   'should recover %s interruption with the same attempt and no repeated model invocation',
   async (lost) => {
     const options = await opfsProject(`lost-${lost}`);
@@ -96,7 +97,7 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
           complete: async (input) => {
             completions.push(input);
             const answer = await active.complete(input);
-            if ((lost === 'complete' || lost === 'restart') && !dropped) {
+            if ((lost === 'complete' || lost === 'restart' || lost === 'reopen') && !dropped) {
               dropped = true;
               port2.close();
             }
@@ -114,7 +115,11 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
           async *settlements({ signal }) {
             for await (const fact of active.settlements({ signal })) {
               // Lose both the completion response and its notification; the successor must replay durable proof.
-              if (first && (lost === 'complete' || lost === 'restart') && fact.kind === 'settled') {
+              if (
+                first &&
+                (lost === 'complete' || lost === 'restart' || lost === 'reopen') &&
+                fact.kind === 'settled'
+              ) {
                 continue;
               }
               yield fact;
@@ -215,11 +220,12 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
       return url.includes('/v1/llm/') ? modelCalls() : fetchOriginal(input, init);
     };
     const recoveries: Array<Promise<void>> = [];
-    try {
-      host = await openBrowserProjectHost(
+    let hostId = 'recovery-host';
+    const openHost = async () =>
+      openBrowserProjectHost(
         {
           projectId: options.authority.projectId,
-          hostId: 'recovery-host',
+          hostId,
           ...openFiles(),
           placementPort: await openPlacement(),
           revisionsPort: openReader(),
@@ -240,7 +246,7 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
               const placementPort = await openPlacement();
               await host!.rebridge({
                 projectId: options.authority.projectId,
-                hostId: 'recovery-host',
+                hostId,
                 ...openFiles(),
                 placementPort,
                 revisionsPort: openReader(),
@@ -250,6 +256,8 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
           },
         },
       );
+    try {
+      host = await openHost();
       if (lost === 'reader') {
         servers[0]!.close();
       }
@@ -259,7 +267,7 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
         await expect(
           host.rebridge({
             projectId: options.authority.projectId,
-            hostId: 'recovery-host',
+            hostId,
             ...openFiles(),
             projectRootPort: broken.port,
             placementPort: await openPlacement(),
@@ -309,10 +317,35 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
         expect(readerCalls).toEqual([1]);
       }
       expect(admissions).toHaveLength(lost === 'admit' ? 2 : 1);
-      expect(completions).toHaveLength(lost === 'complete' || lost === 'restart' ? 2 : 1);
+      expect(completions).toHaveLength(lost === 'complete' || lost === 'restart' || lost === 'reopen' ? 2 : 1);
       expect(new Set(admissions.map((input) => JSON.stringify(input))).size).toBe(1);
       expect(new Set(completions.map((input) => JSON.stringify(input))).size).toBe(1);
       expect(admissions[0]?.key).toMatchObject({ chatId: 'chat', runId: 'run', attempt: 1 });
+      await vi.waitFor(async () => {
+        const saved = await readChannelDiagnostics();
+        const rows = saved.filter((row) => row.projectId === options.authority.projectId);
+        expect(rows).toContainEqual(expect.objectContaining({ event: 'placement.closed', hostId, generation: 1 }));
+        expect(rows).toContainEqual(
+          expect.objectContaining({ event: 'placement.replaced', hostId, generation: 2, previousGeneration: 1 }),
+        );
+      });
+      if (lost === 'reopen') {
+        client.close();
+        await host.drain(AbortSignal.timeout(5000));
+        await host.close();
+        hostId = 'reopened-host';
+        host = await openHost();
+        const reopened = new MessageChannel();
+        host.connect(reopened.port1);
+        client = createAgentChannelClient({ connect: () => reopened.port2, sessionKey: 'reopened-test' });
+        await vi.waitFor(async () => {
+          const saved = await readChannelDiagnostics();
+          const rows = saved.filter((row) => row.projectId === options.authority.projectId);
+          expect(rows).toContainEqual(expect.objectContaining({ event: 'host.released', hostId: 'recovery-host' }));
+          expect(rows).toContainEqual(expect.objectContaining({ event: 'host.closed', hostId: 'recovery-host' }));
+          expect(rows).toContainEqual(expect.objectContaining({ event: 'host.opened', hostId: 'reopened-host' }));
+        });
+      }
       await expect(client.execute(command)).resolves.toMatchObject({ status: 'replayed' });
       expect(modelCalls).toHaveBeenCalledTimes(lost === 'reader' ? 2 : 1);
       if (lost === 'reader') {

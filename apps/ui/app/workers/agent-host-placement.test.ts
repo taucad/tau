@@ -95,3 +95,48 @@ it('should recover a second idle closure when an operation next needs placement'
   await expect(answer).resolves.toMatchObject({ status: 'applied' });
   resident.close();
 });
+
+it('should report the first close before recovery and retain the recovered generation', () => {
+  const first = channel();
+  const second = channel();
+  const observations: unknown[] = [];
+  const recover = () => {
+    observations.push('recovery requested');
+  };
+  const resident = createResidentPlacement(first.port, recover, (event) => observations.push(event));
+  first.fail();
+  first.fail();
+  resident.replace(second.port);
+  first.fail();
+  resident.close();
+  expect(observations).toEqual([
+    {
+      event: 'placement.closed',
+      generation: 1,
+      origin: 'timeout',
+      code: 'PEER_UNRESPONSIVE',
+      reason: 'liveness-timeout',
+    },
+    'recovery requested',
+    { event: 'placement.replaced', generation: 2, previousGeneration: 1 },
+    { event: 'placement.disposed', generation: 2 },
+  ]);
+});
+
+it('should recover with the identical request even when diagnostics throw', async () => {
+  const first = channel();
+  const second = channel();
+  first.port.complete.mockRejectedValue(closed());
+  second.port.complete.mockResolvedValue({ requestId: input.requestId, status: 'applied' });
+  const recover = vi.fn();
+  const resident = createResidentPlacement(first.port, recover, () => {
+    throw new Error('Storage unavailable');
+  });
+  const answer = resident.port.complete(input);
+  first.fail();
+  resident.replace(second.port);
+  await expect(answer).resolves.toMatchObject({ status: 'applied' });
+  expect(second.port.complete).toHaveBeenCalledExactlyOnceWith(input);
+  expect(recover).toHaveBeenCalledOnce();
+  resident.close();
+});

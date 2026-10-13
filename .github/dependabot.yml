@@ -6,6 +6,7 @@ updates:
       interval: 'weekly'
       day: 'monday'
       time: '09:00'
+      timezone: 'Etc/UTC'
     open-pull-requests-limit: 10
     versioning-strategy: 'increase'
     commit-message:
@@ -15,24 +16,39 @@ updates:
       - 'dependencies'
       - 'automated'
     groups:
-      patch-updates:
+      # Security updates have their own groups; routine batches cannot hold them.
+      # These types follow manifest declarations, not runtime exposure analysis.
+      security-production:
+        applies-to: 'security-updates'
+        dependency-type: 'production'
         patterns:
           - '*'
-        update-types:
-          - 'patch'
-      nx:
+      security-development:
+        applies-to: 'security-updates'
+        dependency-type: 'development'
         patterns:
-          - '*nx*'
+          - '*'
+      # First match wins: keep related packages ahead of the patch catch-all.
+      # Nx majors need a coherent migration across nx and all official plugins.
+      nx:
+        applies-to: 'version-updates'
+        patterns:
+          - 'nx'
+          - '@nx/*'
+          - '@nrwl/*'
         update-types:
+          - 'major'
           - 'minor'
           - 'patch'
       react:
+        applies-to: 'version-updates'
         patterns:
           - '*react*'
         update-types:
           - 'minor'
           - 'patch'
       testing:
+        applies-to: 'version-updates'
         patterns:
           - '*vitest*'
           - '*playwright*'
@@ -40,10 +56,17 @@ updates:
           - 'minor'
           - 'patch'
       eslint:
+        applies-to: 'version-updates'
         patterns:
           - '*eslint*'
         update-types:
           - 'minor'
+          - 'patch'
+      patch-updates:
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+        update-types:
           - 'patch'
 
   - package-ecosystem: 'github-actions'
@@ -52,6 +75,7 @@ updates:
       interval: 'weekly'
       day: 'monday'
       time: '10:00'
+      timezone: 'Etc/UTC'
     open-pull-requests-limit: 5
     commit-message:
       prefix: 'ci'
@@ -61,12 +85,24 @@ updates:
       - 'ci'
       - 'automated'
 
+    groups:
+      actions-minor-patch:
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+        update-types:
+          - 'minor'
+          - 'patch'
+
   - package-ecosystem: 'docker'
-    directory: '/apps/api'
+    directories:
+      - '/apps/api'
+      - '/packages/host'
     schedule:
       interval: 'weekly'
       day: 'monday'
       time: '11:00'
+      timezone: 'Etc/UTC'
     open-pull-requests-limit: 5
     commit-message:
       prefix: 'chore(docker)'
@@ -76,27 +112,13 @@ updates:
       - 'docker'
       - 'automated'
 
-  - package-ecosystem: 'docker'
-    directory: '/apps/ui'
-    schedule:
-      interval: 'weekly'
-      day: 'monday'
-      time: '11:00'
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: 'chore(docker)'
-      include: 'scope'
-    labels:
-      - 'dependencies'
-      - 'docker'
-      - 'automated'
-
-  - package-ecosystem: 'docker'
+  - package-ecosystem: 'docker-compose'
     directory: '/infra'
     schedule:
       interval: 'weekly'
       day: 'monday'
       time: '11:00'
+      timezone: 'Etc/UTC'
     open-pull-requests-limit: 5
     commit-message:
       prefix: 'chore(infra)'
@@ -107,12 +129,13 @@ updates:
       - 'infrastructure'
       - 'automated'
 
-  - package-ecosystem: 'docker'
-    directory: '/docker/search'
+  - package-ecosystem: 'docker-compose'
+    directory: '/infra/search'
     schedule:
       interval: 'weekly'
       day: 'monday'
       time: '11:00'
+      timezone: 'Etc/UTC'
     open-pull-requests-limit: 5
     commit-message:
       prefix: 'chore(search)'
@@ -122,3 +145,50 @@ updates:
       - 'docker'
       - 'search'
       - 'automated'
+
+  # Active native manifests; provenance-controlled sources and frozen fixtures stay separate.
+  - package-ecosystem: 'cargo'
+    directories:
+      - '/packages/geospec-engine-native/rust'
+      - '/packages/geospec-engine-native/bindings/emscripten'
+      - '/packages/geospec-engine-native/bindings/node'
+      - '/packages/geospec-engine-native/bindings/python'
+      - '/packages/geospec-engine-native/bindings/wasm'
+      - '/packages/geospec-engine-native/native/cache-host'
+      - '/packages/geospec-engine-native/native/manifold-rust/adapter'
+      - '/packages/geospec-engine-native/native/occt/rust'
+      - '/packages/geospec-engine-native/native/runtime'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '12:00'
+      timezone: 'Etc/UTC'
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'chore(root)'
+    groups:
+      cargo-minor-patch:
+        applies-to: 'version-updates'
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+      cargo-security:
+        applies-to: 'security-updates'
+        patterns: ['*']
+  - package-ecosystem: 'pip'
+    directory: '/packages/geospec-engine-native/bindings/python'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '13:00'
+      timezone: 'Etc/UTC'
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'chore(root)'
+    groups:
+      python-minor-patch:
+        applies-to: 'version-updates'
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+      python-security:
+        applies-to: 'security-updates'
+        patterns: ['*']

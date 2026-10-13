@@ -147,7 +147,7 @@ const settingsCatalog = [
       },
       {
         id: 'close-account',
-        label: 'Close Tau account',
+        label: 'Close account',
         description: 'Close your account and delete your data',
         keywords: ['delete', 'remove'],
       },

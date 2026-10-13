@@ -420,9 +420,23 @@ describe('ChatMessage column wrapper layout', () => {
     expect(wrapper.className).not.toContain('overflow-y-auto');
     expect(wrapper.className).not.toContain('overflow-y-scroll');
 
-    const rowsWrap = innerBubble.querySelector('.flex.flex-col.gap-1');
+    const rowsWrap = innerBubble.firstElementChild;
     expect(rowsWrap).not.toBeNull();
     expect(rowsWrap!.querySelectorAll('p').length).toBeGreaterThan(0);
+  });
+
+  it('should preserve authored line breaks and literal text when opening a user message', () => {
+    const text = `**Keep these words literal** ${'with natural wrapping '.repeat(30)}\n\nLast line`;
+    setMessages([userMessage('msg-1', text)]);
+    render(<ChatMessage messageId='msg-1' />);
+
+    const bubble = getColumnWrapper().firstElementChild?.firstElementChild;
+    if (!(bubble instanceof HTMLElement)) {
+      throw new Error('User bubble missing');
+    }
+    expect([...bubble.querySelectorAll('p')].map((paragraph) => paragraph.textContent).join('\n')).toBe(text);
+    fireEvent.click(bubble);
+    expect(mockStartEditingMessage).toHaveBeenCalledWith('msg-1');
   });
 
   it.each([

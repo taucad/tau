@@ -19,7 +19,7 @@ import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { serializeMessage } from '#utils/chat.utils.js';
-import { inlineSegmentText, parseInlineReferences } from '#utils/at-reference.utils.js';
+import { parseInlineReferences } from '#utils/at-reference.utils.js';
 import type { ActivityFamily, ActivityGroup, AggregatedGroup } from '#utils/assistant-message-activity.js';
 import {
   groupAssistantParts,
@@ -43,6 +43,7 @@ import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { When } from '#components/ui/utils/when.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { chatInputPaddingClassName, chatInputTextClassName } from '#components/chat/chat-input-styles.js';
 import { ChatMessageToolWebSearch } from '#routes/w.$workspace.$project/chat-message-tool-web-search.js';
 import { ChatMessageToolWebBrowser } from '#routes/w.$workspace.$project/chat-message-tool-web-browser.js';
 import { ChatMessageToolFileEdit } from '#routes/w.$workspace.$project/chat-message-tool-edit-file.js';
@@ -81,50 +82,6 @@ import { FileLink } from '#components/files/file-link.js';
 import { isSafeRelativePath } from '@taucad/utils/path';
 import { isRecord } from '@taucad/utils/schema';
 import { CadReferenceChip } from '#components/chat/cad-reference-chip.js';
-
-/**
- * Split a line into chunks of `maxLen` characters without breaking `@path` or `/command` references.
- * When a split point falls inside a reference, the chunk extends to include the full reference.
- */
-function splitLinePreservingReferences(line: string, maxLength: number, out: string[]): void {
-  const segments = parseInlineReferences(line);
-  let currentChunk = '';
-
-  for (const segment of segments) {
-    const isAtomic = segment.type !== 'text';
-    const text = inlineSegmentText(segment);
-
-    if (currentChunk.length + text.length <= maxLength) {
-      currentChunk += text;
-    } else if (isAtomic) {
-      if (currentChunk.length > 0) {
-        out.push(currentChunk);
-        currentChunk = '';
-      }
-      currentChunk = text;
-    } else {
-      let remaining = text;
-      while (remaining.length > 0) {
-        const space = maxLength - currentChunk.length;
-        if (space <= 0) {
-          out.push(currentChunk);
-          currentChunk = '';
-          continue;
-        }
-        currentChunk += remaining.slice(0, space);
-        remaining = remaining.slice(space);
-        if (currentChunk.length >= maxLength) {
-          out.push(currentChunk);
-          currentChunk = '';
-        }
-      }
-    }
-  }
-
-  if (currentChunk.length > 0) {
-    out.push(currentChunk);
-  }
-}
 
 function segmentKey(segment: ReturnType<typeof parseInlineReferences>[number], index: number): string {
   if (segment.type === 'atReference') {
@@ -810,14 +767,15 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
   const isCollapsedUserMessage = isUser && !isEditing;
 
   const collapsedUserRows = useMemo(() => {
-    if (!isCollapsedUserMessage || !displayMessage || fileParts.length > 0) {
+    if (!isCollapsedUserMessage || !displayMessage) {
       return [];
     }
 
     const rows: string[] = [];
-    let remaining = userMessagePreviewCharacterLimit;
+    const rowLimit = fileParts.length > 0 ? Number.POSITIVE_INFINITY : userMessageCollapseRowThreshold;
+    let remaining = fileParts.length > 0 ? Number.POSITIVE_INFINITY : userMessagePreviewCharacterLimit;
     for (const part of displayMessage.parts) {
-      if (part.type !== 'text' || remaining === 0 || rows.length > userMessageCollapseRowThreshold) {
+      if (part.type !== 'text' || remaining === 0 || rows.length > rowLimit) {
         continue;
       }
 
@@ -825,23 +783,18 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
       remaining -= preview.length;
       const normalizedText = preview.replaceAll('\r\n', '\n');
       for (const line of normalizedText.split('\n')) {
-        if (rows.length > userMessageCollapseRowThreshold) {
+        if (rows.length > rowLimit) {
           break;
         }
-        if (line.length === 0) {
-          rows.push('');
-          continue;
-        }
-
-        splitLinePreservingReferences(line, 220, rows);
+        rows.push(line);
       }
     }
 
-    return rows.length > 0 ? rows.slice(0, userMessageCollapseRowThreshold + 1) : [''];
+    return rows.length > 0 ? rows.slice(0, rowLimit + 1) : [''];
   }, [displayMessage, fileParts.length, isCollapsedUserMessage]);
 
   const collapsedUserCharacterCount = useMemo(() => {
-    if (!isCollapsedUserMessage || !displayMessage || fileParts.length > 0) {
+    if (!isCollapsedUserMessage || !displayMessage) {
       return 0;
     }
 
@@ -853,7 +806,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
     }
 
     return characterCount;
-  }, [displayMessage, fileParts.length, isCollapsedUserMessage]);
+  }, [displayMessage, isCollapsedUserMessage]);
 
   const shouldCollapseUserMessage =
     isCollapsedUserMessage &&
@@ -861,11 +814,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
       collapsedUserCharacterCount > userMessageCollapseCharacterThreshold);
   const shouldRenderCollapsedUserRows = shouldCollapseUserMessage && fileParts.length === 0;
 
-  /* A user's files are the strip above their words; an agent's read in place. */
-  const inlineParts = useMemo(
-    () => (isUser ? displayMessage?.parts.filter((part) => part.type !== 'file') : displayMessage?.parts) ?? [],
-    [isUser, displayMessage?.parts],
-  );
+  const inlineParts = displayMessage?.parts ?? [];
 
   const collapsedUserRowsWithStableKeys = useMemo(() => {
     if (!displayMessage) {
@@ -983,7 +932,8 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               className={cn(
                 'flex flex-col gap-0 min-w-0',
                 isUser &&
-                  'relative z-10 cursor-action rounded-lg border bg-background px-3 py-1 outline-none hover:border-foreground/20 focus-visible:focus-outline',
+                  'relative z-10 cursor-action rounded-lg border bg-background px-3 outline-none hover:border-foreground/20 focus-visible:focus-outline',
+                isUser && chatInputPaddingClassName,
                 shouldRenderCollapsedUserRows && 'max-h-60.5 overflow-hidden',
                 fileParts.length > 0 && 'pt-3',
               )}
@@ -995,13 +945,10 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               {fileParts.length > 0 ? (
                 <ChatMessageFileAttachments parts={fileParts} directory={attachmentDirectories?.transcript} />
               ) : null}
-              {shouldRenderCollapsedUserRows ? (
-                <div className='flex flex-col gap-1 pr-1'>
+              {isUser ? (
+                <div className={chatInputTextClassName}>
                   {collapsedUserRowsWithStableKeys.map(({ keyPrefix, row }) => (
-                    <p
-                      key={`${keyPrefix}:${row.slice(0, 120)}`}
-                      className='text-sm leading-relaxed wrap-break-word whitespace-pre-wrap text-foreground/90'
-                    >
+                    <p key={`${keyPrefix}:${row.slice(0, 120)}`} className='min-h-5'>
                       <TextWithAtReferences text={row} />
                     </p>
                   ))}

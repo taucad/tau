@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import type { WireAccountClosure, WirePaymentAction } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
 import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { Checkbox } from '@taucad/ui/components/checkbox';
+import { Label } from '@taucad/ui/components/label';
 import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import { authClient } from '#lib/auth-client.js';
 import { createPaymentRequestId } from '#lib/billing-payment-client.js';
@@ -95,6 +97,7 @@ export function AccountClosureSettings({
   readonly onReviewPayment: () => void;
 }): React.JSX.Element {
   const financial = useFinancialSession();
+  const confirmationId = useId();
   const requestId = useRef(createPaymentRequestId());
   const [closure, setClosure] = useState<WireAccountClosure>();
   const [confirmed, setConfirmed] = useState(false);
@@ -155,26 +158,29 @@ export function AccountClosureSettings({
   return (
     <SettingsSectionCard>
       <CardHeader>
-        <CardTitle className='text-base'>Close Tau account</CardTitle>
+        <CardTitle className='text-base'>Close account</CardTitle>
       </CardHeader>
       <CardContent className='flex flex-col gap-3 border-destructive/40 text-sm'>
         <p className='text-muted-foreground'>
-          This immediately ends this billing session, turns off automatic reload, and starts subscription cancellation.
-          Cancellation may finish after sign-out.
+          Closing your account stops paid usage immediately and cancels your subscription. Once cancellation is
+          complete, you can delete your account.
         </p>
         {closure ? (
           <p>Closure status: {closure.state.replaceAll('_', ' ')}</p>
         ) : (
-          <label className='flex items-start gap-2'>
-            <input
-              type='checkbox'
+          <div className='flex items-start gap-2'>
+            <Checkbox
+              id={confirmationId}
+              className='mt-0.5'
               checked={confirmed}
-              onChange={(event) => {
-                setConfirmed(event.target.checked);
+              onCheckedChange={(checked) => {
+                setConfirmed(checked === true);
               }}
             />
-            I understand and want to close this account.
-          </label>
+            <Label htmlFor={confirmationId} className='leading-snug font-normal'>
+              I want to close my account.
+            </Label>
+          </div>
         )}
         {!closure ? (
           <Button
@@ -190,7 +196,7 @@ export function AccountClosureSettings({
               })
             }
           >
-            Prepare account closure
+            Close account
           </Button>
         ) : undefined}
         {closure && ['closing', 'cancellation_pending', 'attention'].includes(closure.state) ? (

@@ -11,11 +11,15 @@ export const dictationLabels: Record<DictationPhase, string> = {
   requesting: 'Requesting microphone…',
   recording: 'Recording…',
   stopping: 'Stopping dictation…',
-  transcribing: 'Transcribing…',
+  transcribing: 'Transcribing',
 };
 
 /** Samples the API accepts: 24 kHz mono PCM16 after the 44-byte WAV header (about 8.6 minutes). */
 const maxDictationSamples = Math.floor((dictationMaxAudioBytes - 44) / 2);
+
+/** Bounded history with silent leading slots to fill a wide composer from the first frame. */
+const waveformHistoryLength = 256;
+const silentWaveform = Array.from<number>({ length: waveformHistoryLength }).fill(0);
 
 type Session = {
   readonly owner: unknown;
@@ -161,7 +165,7 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
     current.current = session;
     setError(undefined);
     setTranscript('');
-    setLevels([]);
+    setLevels(silentWaveform);
     setPhase('requesting');
     try {
       session.capture = await captureDictation({
@@ -169,7 +173,7 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
         maxSamples: maxDictationSamples,
         onLevel: (level) => {
           if (current.current === session) {
-            setLevels((previous) => [...previous.slice(-79), level]);
+            setLevels((previous) => [...previous.slice(-(waveformHistoryLength - 1)), level]);
           }
         },
         onLimit: () => {

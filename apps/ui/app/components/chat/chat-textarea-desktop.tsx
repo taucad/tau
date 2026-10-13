@@ -1,3 +1,4 @@
+import { chatInputPaddingClassName } from '#components/chat/chat-input-styles.js';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
 import type { Editor } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
@@ -415,10 +416,20 @@ export const ChatTextareaDesktop = memo(function ({
   }, [addContextChipsRef, addContextReferencesRef, insertContextReferences]);
 
   useEffect(() => {
-    if (enableAutoFocus && editor) {
-      editor.commands.focus('end');
+    if (!enableAutoFocus || !editor) {
+      return undefined;
     }
-  }, [enableAutoFocus, editor]);
+    // Rehydration installs the draft in a microtask. Focus after it so opening
+    // a history message keeps its first line visible instead of scrolling to the end.
+    const frame = requestAnimationFrame(() => {
+      if (!editor.isDestroyed) {
+        editor.commands.focus(mode === 'edit' ? 'start' : 'end');
+      }
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [enableAutoFocus, editor, mode]);
 
   // Lock Tiptap while `await onSubmit(...)` is in-flight inside the textarea
   // hook (homepage create-project + `await navigate`, vs fire-and-forget
@@ -467,14 +478,9 @@ export const ChatTextareaDesktop = memo(function ({
   const dictationButton = useMemo(
     () =>
       dictation.available === true ? (
-        <ChatDictationButton
-          phase={dictation.phase}
-          disabled={isSubmitting || status === 'streaming' || status === 'submitted'}
-          onStart={dictation.start}
-          onStop={dictation.stop}
-        />
+        <ChatDictationButton phase={dictation.phase} onStart={dictation.start} onStop={dictation.stop} />
       ) : undefined,
-    [dictation.available, dictation.phase, dictation.start, dictation.stop, isSubmitting, status],
+    [dictation.available, dictation.phase, dictation.start, dictation.stop],
   );
   const dictationRecording = useMemo(
     () =>
@@ -499,7 +505,8 @@ export const ChatTextareaDesktop = memo(function ({
         ref={containerReference}
         className={cn(
           'group/chat-textarea @container',
-          'relative flex w-full flex-col border border-border/60 bg-background pt-3 pb-2',
+          'relative flex w-full flex-col border border-border/60 bg-background',
+          chatInputPaddingClassName,
           radius,
           'cursor-text overflow-hidden',
           'shadow-sm',

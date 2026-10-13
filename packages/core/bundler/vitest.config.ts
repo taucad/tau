@@ -1,8 +1,9 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
     environment: 'node',
+    exclude: [...configDefaults.exclude, '**/*.browser.test.ts'],
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],

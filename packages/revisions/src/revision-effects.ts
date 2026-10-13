@@ -169,6 +169,7 @@ import type {
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
   RevisionPort,
+  RevisionRemoteAddress,
   RevisionReceipt,
   RevisionRecord,
   RevisionTag,
@@ -753,6 +754,30 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     tree.byteLength <= heldTreeBytes ? tree : undefined;
   /** Checkouts this process has already swept the litter of an interrupted apply from. */
   const swept = new Set<string>();
+
+  /*
+   * Where a chosen remote is recorded, and under which name. A GitHub
+   * destination gets an identity-stable remote name: if it is replaced while an
+   * old request is settling, that request can only finish against (or fail
+   * with) the retired name; it can never resolve `origin` again and be
+   * redirected into the new repository.
+   */
+  const remoteAddressOf = (input: RemoteWriteActorInput): RevisionRemoteAddress => {
+    const name =
+      input.kind === 'tau'
+        ? tauRemoteName
+        : input.provider === 'github' && input.repositoryId !== undefined
+          ? `github-${input.repositoryId}`
+          : 'origin';
+    const url = input.url ?? (input.kind === 'tau' ? options.remoteUrl?.(input.projectId) : undefined);
+    if (url === undefined) {
+      throw new RevisionPortError(
+        'INVALID_TRANSPORT',
+        'This host does not know where this project’s Tau Cloud repository is.',
+      );
+    }
+    return { name, url };
+  };
 
   const fromAuthorityPromise = <Output, Input>(
     effect: AsyncLogicFunction<Output, Input>,
@@ -3627,23 +3652,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
       writeRemote: fromAuthorityPromise<RemoteWriteActorOutput, RemoteWriteActorInput>(async ({ input }) => {
         await ensureStore();
-        /* A GitHub destination gets an identity-stable remote name. If it is
-         * replaced while an old request is settling, that request can only
-         * finish against (or fail with) the retired name; it can never resolve
-         * `origin` again and be redirected into the new repository. */
-        const name =
-          input.kind === 'tau'
-            ? tauRemoteName
-            : input.provider === 'github' && input.repositoryId !== undefined
-              ? `github-${input.repositoryId}`
-              : 'origin';
-        const url = input.url ?? (input.kind === 'tau' ? options.remoteUrl?.(input.projectId) : undefined);
-        if (url === undefined) {
-          throw new RevisionPortError(
-            'INVALID_TRANSPORT',
-            'This host does not know where this project’s Tau Cloud repository is.',
-          );
-        }
+        const { name, url } = remoteAddressOf(input);
         const [current] = await port.listRemotes();
         if (
           current !== undefined &&
@@ -3697,6 +3706,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         if (input.kind === 'tau') {
           await options.registerRemoteProject?.(projectId);
         }
+      }),
+
+      /*
+       * R2: *Change backup* asks the new remote `validate`'s question before
+       * `writeRemote` replaces the old one, so a refused address costs nothing.
+       * Nothing is recorded: the address is read under the name it would be
+       * recorded with, on this host's own transport, so the refusal reads as a
+       * sync would read it. Tau Cloud answers only for a registered project (P51).
+       */
+      probe: fromAuthorityPromise<void, RemoteWriteActorInput>(async ({ input }) => {
+        await ensureStore();
+        if (input.kind === 'tau') {
+          await options.registerRemoteProject?.(projectId);
+        }
+        await port.listRemoteRefs(remoteAddressOf(input));
       }),
 
       /* The cheapest question that proves a remote is really there: what refs

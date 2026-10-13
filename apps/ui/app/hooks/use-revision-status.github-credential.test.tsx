@@ -555,3 +555,173 @@ describe('connecting a remote', () => {
     });
   });
 });
+
+describe('replacing a backup with another remote (R2)', () => {
+  const pickedUrl = 'https://github.com/o/new.git';
+  const picked = {
+    authorization: basic('picked'),
+    provider: 'github',
+    repositoryId: '42',
+    connectionId,
+    generation: 3,
+    expiresAt: expiringIn(eightHours),
+  } as const;
+  const refused = (attempt: number): NonNullable<RemoteFacet['refusedReplacement']> => ({
+    kind: 'git',
+    url: pickedUrl,
+    error: 'Repository not found.',
+    reason: 'notFound',
+    attempt,
+  });
+
+  let regionCommands: ReturnType<typeof useRevisionCommands> | undefined;
+
+  /** The surface that sends *Replace backup*: mounted beside the lifecycle owner, and unmountable on its own. */
+  function SyncRegion(): React.JSX.Element {
+    regionCommands = useRevisionCommands();
+    return <div data-testid='sync-region' />;
+  }
+
+  /**
+   * Open the project backed up to `remote`, with the Sync region mounted.
+   *
+   * @param remote - The recorded remote.
+   * @returns The scripted client and the region's unmount.
+   */
+  const mountBackedUp = async (
+    remote: Partial<RemoteFacet>,
+  ): Promise<ReturnType<typeof scriptedClient> & Readonly<{ unmountRegion: () => void }>> => {
+    githubToken.mockResolvedValue({ accessToken: 'kept', expiresAt: expiringIn(eightHours), generation: 3 });
+    const scripted = mountBound();
+    await vi.waitFor(() => {
+      expect(scripted.client.open).toHaveBeenCalledOnce();
+    });
+    scripted.show({ phase: 'connected', ...remote }, { state: 'backedUp' });
+    const region = render(<SyncRegion />);
+    let mounted = true;
+    const unmountRegion = (): void => {
+      if (mounted) {
+        mounted = false;
+        region.unmount();
+      }
+    };
+    unmounts.push(unmountRegion);
+    scripted.client.send.mockClear();
+    scripted.client.remoteCredential.mockClear();
+    return { ...scripted, unmountRegion };
+  };
+
+  afterEach(() => {
+    regionCommands = undefined;
+  });
+
+  it('should leave the previous GitHub binding and credential when the new repository refuses after the Sync region unmounts', async () => {
+    const scripted = await mountBackedUp(githubRemote);
+
+    await regionCommands?.connectRemote('git', pickedUrl, picked);
+    /* The probe needs the new repository's credential; the binding waits for its answer. */
+    expect(scripted.frames()).toStrictEqual([
+      expect.objectContaining({ repositoryUrl: pickedUrl, authorization: basic('picked') }),
+    ]);
+    expect(githubProjectBinding.get(projectId)).toMatchObject({ repositoryId: 99, repositoryUrl });
+
+    scripted.unmountRegion();
+    scripted.show({ phase: 'connecting' });
+    scripted.show({ ...githubRemote, phase: 'connected', refusedReplacement: refused(1) });
+
+    await vi.waitFor(() => {
+      expect(scripted.frames().at(-1)).toMatchObject({ repositoryUrl, authorization: basic('kept') });
+    });
+    expect(githubToken).toHaveBeenLastCalledWith(connectionId);
+    expect(githubProjectBinding.get(projectId)).toMatchObject({ repositoryId: 99, repositoryUrl, generation: 3 });
+    expect(scripted.sent().at(-1)).toStrictEqual({ command: 'syncNow' });
+  });
+
+  it('should bind the new repository once it reports connected', async () => {
+    const scripted = await mountBackedUp(githubRemote);
+
+    await regionCommands?.connectRemote('git', pickedUrl, picked);
+    scripted.unmountRegion();
+    scripted.show({ phase: 'connecting' });
+    expect(githubProjectBinding.get(projectId)?.repositoryId).toBe(99);
+
+    scripted.show({ kind: 'git', url: pickedUrl, provider: 'github', repositoryId: '42', phase: 'connected' });
+
+    await vi.waitFor(() => {
+      expect(githubProjectBinding.get(projectId)).toMatchObject({ repositoryId: 42, repositoryUrl: pickedUrl });
+    });
+    expect(scripted.frames()).toStrictEqual([expect.objectContaining({ repositoryUrl: pickedUrl })]);
+  });
+
+  it('should not answer a replacement with the refusal that was already in view', async () => {
+    const scripted = await mountBackedUp({ ...githubRemote, refusedReplacement: refused(1) });
+
+    await regionCommands?.connectRemote('git', pickedUrl, picked);
+    /* A projection posted before the worker took the new pick still carries the old refusal. */
+    scripted.show({ ...githubRemote, phase: 'connected', refusedReplacement: { ...refused(1) } });
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 0);
+    });
+    expect(scripted.frames()).toStrictEqual([expect.objectContaining({ repositoryUrl: pickedUrl })]);
+
+    scripted.show({ ...githubRemote, phase: 'connected', refusedReplacement: refused(2) });
+
+    await vi.waitFor(() => {
+      expect(scripted.frames().at(-1)).toMatchObject({ repositoryUrl, authorization: basic('kept') });
+    });
+    expect(githubProjectBinding.get(projectId)?.repositoryId).toBe(99);
+  });
+
+  it('should keep a Tau Cloud backup unbound and drop the refused repository credential', async () => {
+    githubProjectBinding.remove(projectId);
+    const tauRemote = { kind: 'tau', url: 'http://localhost:4000/v1/git/alpha.git' } as const;
+    const scripted = await mountBackedUp(tauRemote);
+
+    await regionCommands?.connectRemote('git', pickedUrl, picked);
+    scripted.unmountRegion();
+    scripted.show({ phase: 'connecting' });
+    scripted.show({ ...tauRemote, phase: 'connected', refusedReplacement: refused(1) });
+
+    await vi.waitFor(() => {
+      expect(scripted.frames().at(-1)).toStrictEqual({ apiBaseUrl });
+    });
+    expect(githubProjectBinding.get(projectId)).toBeUndefined();
+  });
+
+  it('should keep the GitHub binding when Tau Cloud refuses to replace it', async () => {
+    const scripted = await mountBackedUp(githubRemote);
+
+    await regionCommands?.connectRemote('tau');
+    expect(githubProjectBinding.get(projectId)?.repositoryId).toBe(99);
+    scripted.unmountRegion();
+    scripted.show({ phase: 'connecting' });
+    scripted.show({
+      ...githubRemote,
+      phase: 'connected',
+      refusedReplacement: {
+        kind: 'tau',
+        error: 'Syncing files to Tau Cloud is a paid plan feature.',
+        reason: 'notEntitled',
+        attempt: 1,
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(scripted.frames().at(-1)).toMatchObject({ repositoryUrl, authorization: basic('kept') });
+    });
+    expect(githubProjectBinding.get(projectId)).toMatchObject({ repositoryId: 99, repositoryUrl });
+  });
+
+  it('should hand the kept repository its credential back when the probe is cancelled', async () => {
+    const scripted = await mountBackedUp(githubRemote);
+
+    await regionCommands?.connectRemote('git', pickedUrl, picked);
+    scripted.show({ phase: 'connecting' });
+    scripted.show({ ...githubRemote, phase: 'connected' });
+
+    await vi.waitFor(() => {
+      expect(scripted.frames().at(-1)).toMatchObject({ repositoryUrl, authorization: basic('kept') });
+    });
+    expect(githubProjectBinding.get(projectId)?.repositoryId).toBe(99);
+  });
+});

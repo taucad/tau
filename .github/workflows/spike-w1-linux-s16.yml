@@ -1,0 +1,93 @@
+# Spike S16 (native-dependency-resolution charter, wave 1): linux-arm64 is a working build123d target end to end (Q70, W14)
+# Prepares the linux-arm64 closure with uv (the py-lib3mf marker path) and runs the build123d native and
+# sandbox suites under bubblewrap. Numbers are re-emitted as annotations for readers without log access.
+name: Spike S16 (linux-arm64 build123d)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/spike-w1-linux-s16.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-w1-s16-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s16:
+    name: S16 build123d on ubuntu-24.04-arm under bubblewrap
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+      - name: Record the host
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          {
+            echo "uname_m=$(uname -m)"
+            echo "glibc=$(ldd --version | head -1)"
+            echo "node=$(node -p 'process.version + " " + process.platform + "-" + process.arch')"
+            echo "node_glibc_runtime=$(node -p 'process.report.getReport().header.glibcVersionRuntime')"
+            echo "bwrap=$(bwrap --version)"
+            echo "uv=$(uv --version)"
+            echo "apparmor_restrict_unprivileged_userns=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)"
+          } | tee "$RUNNER_TEMP/evidence/host.txt"
+      - name: Prepare the linux-arm64 closure with uv
+        run: |
+          set -o pipefail
+          start=$(date +%s)
+          pnpm nx run desktop:prepare-build123d-python --outputStyle=stream 2>&1 | tee "$RUNNER_TEMP/evidence/prepare.log"
+          echo "prepare_seconds=$(( $(date +%s) - start ))" | tee "$RUNNER_TEMP/evidence/prepare-time.txt"
+      - name: Record the closure
+        run: |
+          root=apps/desktop/resources/python/linux-arm64
+          sp=$(find "$root/lib" -maxdepth 2 -type d -name site-packages | head -1)
+          {
+            jq -r '"target=\(.target) python=\(.pythonVersion) build123d=\(.build123dVersion) ocp=\(.ocpVersion) archive=\(.sourceArchive)"' "$root/tau-runtime-manifest.json"
+            echo "distributions=$(jq '.distributions | length' "$root/tau-runtime-manifest.json")"
+            echo "lib3mf_distributions=$(jq -c '[.distributions[] | select(.name | test("lib3mf"; "i")) | "\(.name)==\(.version)"]' "$root/tau-runtime-manifest.json")"
+            echo "ocp_wheel_tag=$(grep -h '^Tag:' "$sp"/cadquery_ocp_novtk-*.dist-info/WHEEL | tr '\n' ' ')"
+            echo "ocp_native_modules=$(find "$sp/OCP" -name '*.so' | wc -l)"
+            echo "closure_bytes=$(du -sb "$root" | cut -f1)"
+            echo "python_file=$(file -bL "$root/bin/python3" | cut -c1-80)"
+          } | tee "$RUNNER_TEMP/evidence/closure.txt"
+      - name: Import the native modules with the prepared interpreter
+        continue-on-error: true
+        run: |
+          root=apps/desktop/resources/python/linux-arm64
+          "$root/bin/python3" -I -c 'import platform, OCP, build123d, numpy, lib3mf; from build123d import Box; print("machine", platform.machine(), "OCP", OCP.__file__.split("site-packages/")[1], "lib3mf", lib3mf.__file__.split("site-packages/")[1], "box_volume", Box(1, 2, 3).volume)' 2>&1 | tee "$RUNNER_TEMP/evidence/imports.txt"
+      - name: Run the build123d native and sandbox suites
+        working-directory: packages/plugins/build123d
+        run: |
+          set -o pipefail
+          pnpm exec vitest run src/build123d.native.integration.test.ts src/build123d.native-sandbox.integration.test.ts --reporter=verbose 2>&1 | tee "$RUNNER_TEMP/evidence/suites.log"
+      - name: Collect the summary
+        if: always()
+        run: |
+          {
+            cat "$RUNNER_TEMP/evidence/host.txt" "$RUNNER_TEMP/evidence/prepare-time.txt" "$RUNNER_TEMP/evidence/closure.txt" "$RUNNER_TEMP/evidence/imports.txt"
+            grep -E 'lib3mf' "$RUNNER_TEMP/evidence/prepare.log" | sed 's/\x1b\[[0-9;]*m//g' | head -5
+            sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/evidence/suites.log" | grep -E '✓|×|✗|FAIL|Test Files|Tests |Duration'
+          } > "$RUNNER_TEMP/evidence/s16-summary.txt" 2>/dev/null || true
+          { echo '```'; cat "$RUNNER_TEMP/evidence/s16-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S16' "$RUNNER_TEMP/evidence/s16-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s16-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

@@ -32,6 +32,14 @@ export type RuntimePlatformPackages = Readonly<{
    * `@parcel/watcher`'s addon. Each is staged at the version its consumer installed.
    */
   bundledOptionalDependencies: readonly string[];
+  /**
+   * The sandbox runtime's vendored helpers this target never executes, relative to the package root.
+   * The runtime runs `vendor/seccomp/<arch>/apply-seccomp` only under Linux bubblewrap and
+   * `vendor/srt-win/<arch>/srt-win.exe` only on Windows, each for the host's own architecture
+   * (`dist/sandbox/generate-seccomp-filter.js` and `dist/sandbox/windows-sandbox-utils.js`), and
+   * `native-sandbox.ts` reads the seccomp directory on Linux only.
+   */
+  unusedSandboxHelpers: readonly string[];
 }>;
 
 /** Platform package names, exactly as each engine's `optionalDependencies` declares them. */
@@ -46,6 +54,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
       '@img/sharp-darwin-arm64',
       '@parcel/watcher-darwin-arm64',
     ],
+    unusedSandboxHelpers: ['vendor/seccomp', 'vendor/srt-win'],
   },
   'linux-x64': {
     openrscadEngine: '@taulabs/openrscad-engine-linux-x64-gnu',
@@ -57,6 +66,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
       '@img/sharp-linux-x64',
       '@parcel/watcher-linux-x64-glibc',
     ],
+    unusedSandboxHelpers: ['vendor/seccomp/arm64', 'vendor/srt-win'],
   },
   'win32-x64': {
     openrscadEngine: '@taulabs/openrscad-engine-win32-x64-msvc',
@@ -65,6 +75,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
     nanoraster: 'nanoraster-win32-x64-msvc',
     /* `@img/sharp-win32-x64` carries libvips itself; there is no separate libvips package. */
     bundledOptionalDependencies: ['@img/sharp-win32-x64', '@parcel/watcher-win32-x64'],
+    unusedSandboxHelpers: ['vendor/seccomp', 'vendor/srt-win/arm64'],
   },
 };
 
@@ -306,6 +317,9 @@ export const stageRuntimePackages = async (
       optionalDependencies: platform.bundledOptionalDependencies,
     });
   }
+  const unusedSandboxHelpers = new Set(
+    platform.unusedSandboxHelpers.map((path) => resolve(packages.sandboxRuntime.source, path)),
+  );
   for (const { name, source } of [
     ...packages.acpAdapters,
     { name: '@anthropic-ai/sandbox-runtime', source: packages.sandboxRuntime.source },
@@ -317,7 +331,7 @@ export const stageRuntimePackages = async (
       name,
       source,
       modulesRoot: resolve(stageRoot, 'node_modules'),
-      filter: excludesBuildDiagnostics,
+      filter: (path) => excludesBuildDiagnostics(path) && !unusedSandboxHelpers.has(path),
     });
   }
 };

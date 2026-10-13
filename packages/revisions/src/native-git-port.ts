@@ -71,6 +71,7 @@ import type {
   RevisionRef,
   RevisionTag,
   RemoteRef,
+  RevisionRemoteAddress,
   UpdateRevisionRefInput,
   UpdateRevisionRefResult,
   WriteRevisionInput,
@@ -976,10 +977,18 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
   };
 
-  const listRemoteReferences = async (remote: string): Promise<readonly RemoteRef[]> => {
-    guardTransportValue(remote, 'remote');
+  const listRemoteReferences = async (remote: string | RevisionRemoteAddress): Promise<readonly RemoteRef[]> => {
+    const name = typeof remote === 'string' ? remote : remote.name;
+    guardTransportValue(name, 'remote');
+    /* R2: an address not recorded yet is read by URL, with the credential its
+     * address would get once recorded under `name`; git's config is not written. */
+    const target = typeof remote === 'string' ? remote : remote.url;
+    if (typeof remote !== 'string') {
+      guardTransportValue(remote.url, 'url');
+    }
+    const env = await remoteEnvironment(name, typeof remote === 'string' ? undefined : [remoteOf(name, remote.url)]);
     const listing = textDecoder
-      .decode(await output(['ls-remote', '--refs', '--', remote], { env: await remoteEnvironment(remote), remote }))
+      .decode(await output(['ls-remote', '--refs', '--', target], { env, remote: name }))
       .trim();
     return Object.freeze(
       listing

@@ -378,9 +378,23 @@ export const createUiReactCompilerPlugin = (): Plugin => {
   if (compilerPlugins.length !== 1 || compilerPlugin === undefined) {
     throw new Error(`Expected one ${uiReactCompilerPluginName} plugin, received ${compilerPlugins.length}.`);
   }
+  const compilerTransform = compilerPlugin.transform;
+  if (compilerTransform === undefined || typeof compilerTransform === 'function') {
+    throw new Error(`Expected a filtered ${uiReactCompilerPluginName} transform.`);
+  }
 
   return {
     ...compilerPlugin,
+    transform: {
+      ...compilerTransform,
+      filter: {
+        ...compilerTransform.filter,
+        // Oxc 0.148's React compiler emits undefined for BigInt literals, breaking
+        // credit arithmetic. Leave these modules to Vite's ordinary TSX transform.
+        // A match inside a comment/string only forgoes optional memoization.
+        code: { exclude: /\b(?:0[xX][\dA-Fa-f_]+|0[oO][0-7_]+|0[bB][01_]+|[\d_]+)n\b/u },
+      },
+    },
     applyToEnvironment: (environment) => environment.config.consumer === 'client',
   };
 };

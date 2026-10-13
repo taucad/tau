@@ -168,6 +168,7 @@ const start = (): Harness => {
           actors: {
             readRemote: promises.actor('readRemote'),
             writeRemote: promises.actor('writeRemote'),
+            probe: promises.actor('probe'),
             removeRemote: promises.actor('removeRemote'),
             authorize: promises.actor('authorize'),
             validate: promises.actor('validate'),
@@ -2411,6 +2412,73 @@ describe('projectRevisionsMachine', () => {
     await flush();
     expect(selectRevisionStatus(harness.actor.getSnapshot()).sync.state).toBe('noRemote');
 
+    harness.actor.stop();
+  });
+
+  /*
+   * R2 and I2 at the root: the root retires the scheduler on every `connect`,
+   * so a replacement the new remote refuses must hand the old remote back to
+   * it, with the revision it still owes that remote, and never read as backed up.
+   */
+  it('keeps the recorded remote and the revision it is owed when a replacement is refused (R2)', async () => {
+    const harness = start();
+    const origin = { name: 'origin', url: 'https://github.com/o/design.git', kind: 'git' } as const;
+    const owed = {
+      ref: 'refs/heads/main',
+      head: 'rev-1',
+      expected: undefined,
+      reason: 'unacknowledged',
+      recordedAt: 1,
+      remote: 'origin',
+    } as const;
+    const syncStates: string[] = [];
+    const subscription = harness.actor.subscribe((snapshot) => {
+      syncStates.push(selectRevisionStatus(snapshot).sync.state);
+    });
+
+    await readyRegistry(harness, [live]);
+    harness.promises.settle('readRemote', { output: { remote: origin } });
+    harness.promises.settle('readPending', { output: { version: 1, entries: [owed] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'origin', branch: 'main' } });
+    await flush();
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(1);
+
+    harness.actor.send({
+      type: 'remote',
+      event: {
+        type: 'connect',
+        kind: 'git',
+        url: 'https://github.com/o/r.git',
+        provider: 'github',
+        repositoryId: '99',
+      },
+    });
+    await flush();
+    harness.promises.settle('probe', {
+      error: new RevisionPortError(
+        'REMOTE_NOT_FOUND',
+        'This remote has no repository at this address for your account.',
+      ),
+    });
+    await flush();
+
+    const status = selectRevisionStatus(harness.actor.getSnapshot());
+    expect(harness.promises.inputsFor('writeRemote')).toStrictEqual([]);
+    expect(harness.promises.inputsFor('removeRemote')).toStrictEqual([]);
+    expect(status.remote).toMatchObject({
+      kind: 'git',
+      url: origin.url,
+      phase: 'connected',
+      refusedReplacement: { url: 'https://github.com/o/r.git', reason: 'notFound' },
+    });
+    /* The scheduler is back on the old remote, still owing it the revision. */
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(2);
+    expect(harness.promises.inputsFor('syncFetch').at(-1)).toMatchObject({ remote: 'origin' });
+    expect(status.sync.pendingCount).toBe(1);
+    expect(syncStates).not.toContain('backedUp');
+
+    subscription.unsubscribe();
     harness.actor.stop();
   });
 

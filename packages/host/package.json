@@ -67,6 +67,7 @@
     "@parcel/watcher": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/bambu": "workspace:*",
+    "@taucad/bundler-core": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/jobs": "workspace:*",
     "@taucad/mcp": "workspace:*",

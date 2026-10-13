@@ -1,0 +1,148 @@
+# Spike S17 (native-dependency-resolution charter, wave 1): a glibc-2.28 host fails the linux-x64 closure with a
+# typed refusal, not a crash (D15, W14). The preparation host (W2) does not exist yet, so the spike records
+# (1) which import fails in debian:10 and rockylinux:8 and how, (2) what today's uv install path does there, and
+# (3) whether a `minimumLibcVersion` floor computed as D15 specifies (max of the payloads' floors) refuses before
+# any download, using a spike-only selection prototype run with `--network none`.
+name: Spike S17 (glibc 2.28 floor)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/spike-w1-linux-s17.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-w1-s17-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s17:
+    name: S17 linux-x64 closure in debian:10 and rockylinux:8
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+      PBS_ARCHIVE: cpython-3.13.15+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz
+      PBS_SHA256: 0651dd7157d3debf769e15a52c1de9de7fbcdc36ba72faf79fde3c44f14d9461
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+      - name: Prepare the linux-x64 closure on the host (glibc 2.39)
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          set -o pipefail
+          pnpm nx run desktop:prepare-build123d-python --outputStyle=stream 2>&1 | tail -5
+      - name: Compute the payload floors (D15 generator rule, from wheel tags and ELF symbol versions)
+        run: |
+          root=apps/desktop/resources/python/linux-x64
+          sp=$(find "$root/lib" -maxdepth 2 -type d -name site-packages | head -1)
+          # Wheel tag floors: manylinux_2_X -> 2.X, manylinux2014 -> 2.17, manylinux2010 -> 2.12, manylinux1 -> 2.5.
+          for wheel in "$sp"/*.dist-info/WHEEL; do
+            dist=$(basename "$(dirname "$wheel")" .dist-info)
+            grep -h '^Tag:' "$wheel" | sed 's/^Tag: //' | while read -r tag; do
+              platform=${tag##*-}
+              case "$platform" in
+                manylinux_*) floor=$(echo "$platform" | sed -E 's/^manylinux_([0-9]+)_([0-9]+)_.*/\1.\2/') ;;
+                manylinux2014_*) floor=2.17 ;;
+                manylinux2010_*) floor=2.12 ;;
+                manylinux1_*) floor=2.5 ;;
+                *) continue ;;
+              esac
+              echo "$floor $dist $platform"
+            done
+          done | sort -t. -k1,1n -k2,2n | awk '{ best[$2] = $0 } END { for (d in best) print best[d] }' | sort -t. -k1,1n -k2,2n > "$RUNNER_TEMP/evidence/wheel-floors.txt"
+          echo "pbs_interpreter_floor=2.17 (x86_64-unknown-linux-gnu, python-build-standalone)" >> "$RUNNER_TEMP/evidence/wheel-floors.txt"
+          # ELF floors: the highest GLIBC_ symbol version each shared object needs.
+          find "$root" -type f \( -name '*.so' -o -name '*.so.*' -o -path "$root/bin/python3*" \) -print0 | while IFS= read -r -d '' so; do
+            v=$(objdump -T "$so" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/GLIBC_//' | sort -t. -k1,1n -k2,2n | tail -1)
+            [ -n "$v" ] && echo "$v ${so#"$root"/}"
+          done | sort -t. -k1,1n -k2,2n > "$RUNNER_TEMP/evidence/elf-floors.txt"
+          floor=$(grep -vE '^pbs_' "$RUNNER_TEMP/evidence/wheel-floors.txt" | tail -1 | cut -d' ' -f1)
+          echo "{\"minimumLibcVersion\":\"$floor\"}" > "$RUNNER_TEMP/floor.json"
+          {
+            echo "computed minimumLibcVersion (max wheel floor) = $floor"
+            echo "wheel floors (highest per distribution):"; sed 's/^/  /' "$RUNNER_TEMP/evidence/wheel-floors.txt"
+            echo "ELF objects needing GLIBC > 2.28: $(awk -F'[. ]' '$1 > 2 || ($1 == 2 && $2 > 28)' "$RUNNER_TEMP/evidence/elf-floors.txt" | wc -l) of $(wc -l < "$RUNNER_TEMP/evidence/elf-floors.txt")"
+            echo "highest ELF requirements:"; tail -5 "$RUNNER_TEMP/evidence/elf-floors.txt" | sed 's/^/  /'
+            echo "by top-level directory (objects > 2.28):"
+            awk -F'[. ]' '$1 > 2 || ($1 == 2 && $2 > 28)' "$RUNNER_TEMP/evidence/elf-floors.txt" | awk '{ split($2, p, "/"); key = (p[4] != "" ? p[4] : $2); n[key]++; if ($1 > m[key]) m[key] = $1 } END { for (k in n) print "  " k ": " n[k] " (max GLIBC_" m[k] ")" }' | sort
+          } | tee "$RUNNER_TEMP/evidence/floors.txt"
+      - name: Write the spike-only selection prototype
+        run: |
+          cat > "$RUNNER_TEMP/select.mjs" <<'JS'
+          // Spike-only prototype of D16 step "highest satisfied floor" for one Linux target; not the W2 implementation.
+          import { readFileSync } from 'node:fs';
+          const [floorFile, mode] = process.argv.slice(2);
+          let requests = 0;
+          globalThis.fetch = async (url) => { requests += 1; throw new Error(`spike: no request allowed (${String(url)})`); };
+          process.report.excludeNetwork = true;
+          const report = process.report.getReport();
+          const glibc = report.header.glibcVersionRuntime;
+          const musl = !glibc && report.sharedObjects.some((path) => /ld-musl|libc\.musl/.test(path));
+          const host = { os: process.platform, arch: process.arch, libc: glibc ? 'glibc' : musl ? 'musl' : 'unknown', libcVersion: glibc ?? null };
+          const { minimumLibcVersion } = JSON.parse(readFileSync(floorFile, 'utf8'));
+          const target = { os: 'linux', arch: 'x64', libc: 'glibc', ...(mode === 'declared' ? { minimumLibcVersion } : {}) };
+          const compare = (a, b) => { const [x, y] = [a, b].map((v) => v.split('.').map(Number)); for (let i = 0; i < Math.max(x.length, y.length); i += 1) { const d = (x[i] ?? 0) - (y[i] ?? 0); if (d !== 0) return Math.sign(d); } return 0; };
+          let outcome;
+          if (host.os !== target.os || host.arch !== target.arch) outcome = { state: 'blocked', reason: 'unsupported-target', detail: { axis: host.os !== target.os ? 'os' : 'arch' } };
+          else if (host.libc !== target.libc) outcome = { state: 'blocked', reason: 'unsupported-target', detail: { axis: 'libc', host: host.libc, nearest: 'linux-x64-glibc' } };
+          else if (target.minimumLibcVersion && compare(host.libcVersion, target.minimumLibcVersion) < 0) outcome = { state: 'blocked', reason: 'unsupported-target', detail: { axis: 'minimumLibcVersion', required: target.minimumLibcVersion, host: host.libcVersion, nearest: null } };
+          else outcome = { state: 'selected', key: 'linux-x64-glibc', next: 'download' };
+          console.log(JSON.stringify({ mode, host, target, outcome, requestsBeforeDecision: requests }));
+          JS
+      - name: Run the closure, today's install path and the selection prototype in each container
+        run: |
+          root="$PWD/apps/desktop/resources/python/linux-x64"
+          nodeHome=$(dirname "$(dirname "$(command -v node)")")
+          uvBin=$(readlink -f "$(command -v uv)")
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$PBS_ARCHIVE" "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/${PBS_ARCHIVE//+/%2B}"
+          echo "$PBS_SHA256  $RUNNER_TEMP/$PBS_ARCHIVE" | sha256sum --check --quiet
+          for image in debian:10 rockylinux:8; do
+            docker pull -q "$image" > /dev/null
+            out="$RUNNER_TEMP/evidence/${image//:/-}"
+            mkdir -p "$out"
+            mounts=(-v "$root:/closure:ro" -v "$nodeHome:/opt/node:ro" -v "$RUNNER_TEMP:/spike:ro")
+            {
+              echo "== $image ($(docker image inspect --format '{{index .RepoDigests 0}}' "$image"))"
+              echo "host libc: $(docker run --rm "$image" ldd --version 2>&1 | head -1)"
+              echo "-- interpreter start"
+              docker run --rm "${mounts[@]}" "$image" /closure/bin/python3 -I -c 'import sys, platform; print(sys.version.split()[0], platform.libc_ver())' 2>&1 | tail -2
+              echo "-- imports (first failing line)"
+              for module in numpy scipy sklearn lib3mf OCP build123d; do
+                status=0
+                result=$(docker run --rm "${mounts[@]}" "$image" /closure/bin/python3 -I -c "import $module" 2>&1) || status=$?
+                echo "import $module: exit=$status $(echo "$result" | grep -E 'Error|error' | tail -1 | sed "s#/closure/lib/python3.13/site-packages/##g" | cut -c1-260)"
+              done
+              echo "-- selection prototype, --network none, floor declared"
+              docker run --rm --network none "${mounts[@]}" "$image" /opt/node/bin/node /spike/select.mjs /spike/floor.json declared 2>&1 | tail -2
+              echo "-- selection prototype, --network none, floor not declared"
+              docker run --rm --network none "${mounts[@]}" "$image" /opt/node/bin/node /spike/select.mjs /spike/floor.json undeclared 2>&1 | tail -2
+              echo "-- today's install path without a floor: fresh PBS tree + uv pip install --require-hashes"
+              docker run --rm -v "$uvBin:/opt/uv:ro" -v "$RUNNER_TEMP/$PBS_ARCHIVE:/pbs.tar.gz:ro" -v "$PWD/packages/plugins/build123d/python/requirements.lock:/requirements.lock:ro" \
+                -e UV_CACHE_DIR=/tmp/uv-cache "$image" sh -c 'mkdir -p /tmp/py && tar -xzf /pbs.tar.gz -C /tmp/py --strip-components=1 && /opt/uv pip install --python /tmp/py/bin/python3 --require-hashes --no-deps -r /requirements.lock; echo "uv exit=$?"' > "$out/uv-install.log" 2>&1
+              grep -vE '^\s*$' "$out/uv-install.log" | grep -iE 'error|no wheel|hint|compatible|exit=|Installed|Prepared' | cut -c1-300 | head -8
+            } 2>&1 | tee "$out/result.txt"
+          done
+      - name: Collect the summary
+        if: always()
+        run: |
+          { cat "$RUNNER_TEMP/evidence/floors.txt"; cat "$RUNNER_TEMP"/evidence/*/result.txt; } > "$RUNNER_TEMP/evidence/s17-summary.txt" 2>/dev/null || true
+          { echo '```'; cat "$RUNNER_TEMP/evidence/s17-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S17' "$RUNNER_TEMP/evidence/s17-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s17-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

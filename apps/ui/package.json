@@ -27,6 +27,7 @@
     "@taucad/billing": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/build123d": "workspace:*",
+    "@taucad/bundler-core": "workspace:*",
     "@taucad/camera": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/converter": "workspace:*",

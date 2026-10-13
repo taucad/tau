@@ -18,6 +18,8 @@ import {
   attachRuntimePluginFactoryOptions,
 } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
+import { toBuiltinModulePackage } from '#kernels/kernel-module-helpers.js';
+import type { InstalledPackageManifest } from '#kernels/kernel-module-helpers.js';
 import type { ContentHookInputFor, ContentKeysOf, RuntimeContentDeclaration } from '#types/runtime-content.types.js';
 import { validateRuntimeContentDeclarations } from '#types/runtime-content.types.js';
 
@@ -198,6 +200,13 @@ export type KernelDefinitionV2<
   readonly extensions: Extensions;
   readonly detectImport?: RegExp;
   readonly builtinModuleNames?: readonly string[];
+  /**
+   * The npm packages the builtin modules come from, keyed by the dependency name a model imports,
+   * each as the installed package's own `package.json` names it (`name`, `version`). Import the
+   * manifest where the package exports it; otherwise pin it with a test against the installed
+   * manifest. Surfaced as {@link KernelPlugin.builtinDependencies}.
+   */
+  readonly builtinPackages?: Readonly<Record<string, InstalledPackageManifest>>;
   readonly name: string;
   readonly version: string;
   readonly implementationAssets?: readonly RuntimeImplementationAsset[];
@@ -430,8 +439,17 @@ export function defineKernelV2<
     Exports
   >,
 ): KernelFactoryV2<Id, Extensions, OptionsSchema, EvaluateSchema, Views, Exports, typeof definition> {
-  const { id, extensions, detectImport, builtinModuleNames, permissions, views, exports, ...implementation } =
-    definition;
+  const {
+    id,
+    extensions,
+    detectImport,
+    builtinModuleNames,
+    builtinPackages,
+    permissions,
+    views,
+    exports,
+    ...implementation
+  } = definition;
   for (const [viewId, view] of Object.entries(views)) {
     assertDeclaration(id, { kind: 'view', id: viewId }, view);
     const viewOptionsSchema = view.optionsSchema;
@@ -480,6 +498,16 @@ export function defineKernelV2<
           ? {}
           : { detectImport: { source: detectImport.source, flags: detectImport.flags } }),
         ...(builtinModuleNames === undefined ? {} : { builtinModuleNames }),
+        ...(builtinPackages === undefined
+          ? {}
+          : {
+              builtinDependencies: Object.fromEntries(
+                Object.entries(builtinPackages).map(([name, installed]) => [
+                  name,
+                  toBuiltinModulePackage(name, installed).spec,
+                ]),
+              ),
+            }),
         ...(permissions === undefined ? {} : { permissions }),
         views: viewMetadata,
         exports: exportMetadata,

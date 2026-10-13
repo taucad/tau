@@ -9,7 +9,7 @@ import {
   TableFooter,
   Table,
 } from '@taucad/ui/components/table';
-import { formatCreditAtoms } from '@taucad/billing';
+import { formatCredits } from '#utils/credits.utils.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
 import { useProjectChatUsage } from '#hooks/use-chats.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
@@ -147,7 +147,7 @@ export function ChatDetailsUsage({ enabled = true }: { readonly enabled?: boolea
           'No Tau-funded turns in this project.'
         ) : (
           <>
-            <span className='font-mono text-foreground'>{formatCreditAtoms(total.creditAtoms)}</span> credits charged
+            <span className='font-mono text-foreground'>{formatCredits(total.creditAtoms)}</span> charged
             {total.pending > 0 ? ` · ${String(total.pending)} pending` : ''}
           </>
         )}

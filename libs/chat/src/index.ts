@@ -18,6 +18,7 @@ export * from '#schemas/tools/export-model.tool.schema.js';
 export * from '#schemas/tools/screenshot.tool.schema.js';
 export * from '#schemas/tools/revisions.tool.schema.js';
 export * from '#schemas/tools/update-todos.tool.schema.js';
+export * from '#schemas/tools/install-packages.tool.schema.js';
 export * from '#schemas/tools/print.tool.schema.js';
 export * from '#schemas/todo-list.schema.js';
 export * from '#schemas/tools/ask-questions.tool.schema.js';

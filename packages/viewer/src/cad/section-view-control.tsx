@@ -34,6 +34,8 @@ export function ToolToggle({
   shortcut,
   onToggle,
 }: ToolToggleProps): React.JSX.Element {
+  const hasGeometry = useGraphicsSelector((state) => state.context.geometryRadius > 0);
+  const unavailable = !hasGeometry && !isActive;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -45,14 +47,15 @@ export function ToolToggle({
           data-active={isActive}
           data-tool={tool}
           className='gap-1 text-xs data-[active=true]:bg-accent @min-[520px]/viewer:w-auto @min-[520px]/viewer:px-2 data-[active=true]:[&_svg]:text-viewer-tool-active'
-          onClick={onToggle}
+          aria-disabled={unavailable}
+          onClick={unavailable ? undefined : onToggle}
         >
           {icon}
           <span className='hidden @min-[520px]/viewer:inline'>{label}</span>
         </Button>
       </TooltipTrigger>
       <TooltipContent>
-        {isActive ? `Stop ${label.toLowerCase()}` : name}
+        {unavailable ? 'Available when a model is displayed' : isActive ? `Stop ${label.toLowerCase()}` : name}
         {shortcut ? (
           <KeyShortcut variant='tooltip' className='ml-1'>
             {shortcut}

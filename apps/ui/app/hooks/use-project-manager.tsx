@@ -57,6 +57,7 @@ import type {
   WorkspaceBindingRepairResult,
   WorkspaceEntry,
 } from '#filesystem/handle-store.js';
+import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { isBuildSuperseded } from '#filesystem/build-skew.js';
@@ -69,7 +70,7 @@ import { attachmentKind, attachmentReferenceOf } from '#utils/attachment.utils.j
 import { buildUserMessage } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { createAttachmentStore, createChatAttachmentStore, isNotFound } from '#db/attachment-store.js';
-import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
+import { getMainFile, getEmptyCode, getKernelDependencies, getKernelOption } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultProjectName } from '#constants/project-names.js';
 import type { AppUiPreferences, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
@@ -1504,6 +1505,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           projectName: projectName ?? defaultProjectName,
           mainFileName,
           emptyCodeContent: encodeTextFile(emptyCode),
+          language: getKernelOption(options.kernel).language,
+          dependencies: await getKernelDependencies(options.kernel),
         });
         projectData = result.projectData;
         files = result.files;
@@ -1894,6 +1897,36 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     }
   }, [discoverProjects, getReadiedWorker, settleRecovery]);
 
+  /**
+   * Release the rows a cleared browser left behind for a project id (R14).
+   *
+   * The route config, editor layout and library state are keyed by the id and
+   * survive the browser deleting every file, so re-importing the same project
+   * met "already on this device" with nothing in the library to open. Only a
+   * Home route whose folder is proven to hold no file is released; its rows go
+   * the way the discovery sweep removes an orphan's, and the import proceeds.
+   * Folders on disk, unreadable folders and folders with any file left keep
+   * the refusal.
+   */
+  const releaseOrphanedProjectRoute = useCallback(
+    async (projectId: string, worker: Remote<ObjectStoreWorker>): Promise<void> => {
+      const config = await getProjectFileSystemConfig(projectId);
+      if (config === undefined || !(await isOrphanedProjectRoute(config, fileManager.scopedStorage))) {
+        return;
+      }
+      /* A `tau.json` naming the id anywhere else is the project, not an orphan:
+       * releasing its route would let this import create a second copy. */
+      const { entries } = await discoverProjects();
+      if (entries.some((entry) => 'manifest' in entry && 'id' in entry.manifest && entry.manifest.id === projectId)) {
+        return;
+      }
+      await worker.deleteProjectResources(projectId);
+      await deleteProjectFileSystemConfig(projectId);
+      await fileManager.workspace.syncProjectRoots();
+    },
+    [discoverProjects, fileManager.scopedStorage, fileManager.workspace],
+  );
+
   /* A supplied id is checked and then written, so two creations of it — an
      *Open* racing materialize on sign-in, or two tabs — hold one lock per id
      across the check and the write; the second sees the first's project and is
@@ -1922,11 +1955,15 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           if (recoveriesRef.current.has(unfinished.operationId)) {
             throw new Error(`An earlier creation of this project has not finished on this device: ${id}`);
           }
+        } else if (
+          !operations.some((operation) => operation.kind === 'permanent-delete' && operation.projectId === id)
+        ) {
+          await releaseOrphanedProjectRoute(id, worker);
         }
         return createProjectOnce(options);
       });
     },
-    [createProjectOnce, ensureDiscoveryReady, getReadiedWorker, settleRecovery],
+    [createProjectOnce, ensureDiscoveryReady, getReadiedWorker, releaseOrphanedProjectRoute, settleRecovery],
   );
 
   /**

@@ -68,7 +68,11 @@ describe('ChatErrorCredits', () => {
   it('should render fallback copy when no provider description is supplied', () => {
     render(<ChatErrorCredits resumable />);
 
-    expect(screen.getByText('Your credit balance is too low. Add credits, then resume this chat.')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Your available monthly and purchased credits do not cover this turn. Add credits, then resume this chat.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('should resume the chat without regenerating when Resume is clicked', async () => {
@@ -132,7 +136,7 @@ describe('ChatErrorCredits', () => {
     render(
       <ChatErrorCredits
         resumable
-        description='Your credit balance is too low.'
+        description='Your available monthly and purchased credits do not cover this turn.'
         details={{
           requiredCreditAtoms: '3084332',
           availableCreditAtoms: '2960000',
@@ -143,7 +147,9 @@ describe('ChatErrorCredits', () => {
 
     // 3,084,332 - 2,960,000 = 124,332 atoms -> 13 whole credits (rounded up).
     expect(screen.getByText('Tau paused this turn: 13 more credits needed for Astra.')).toBeInTheDocument();
-    expect(screen.queryByText('Your credit balance is too low.')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Your available monthly and purchased credits do not cover this turn.'),
+    ).not.toBeInTheDocument();
   });
 
   it('should keep the provider description when the refusal carried no shortfall', () => {

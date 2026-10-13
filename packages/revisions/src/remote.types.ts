@@ -78,6 +78,35 @@ export type RemoteFacet = Readonly<{
   fetchOnly: boolean;
   provider: 'github' | undefined;
   repositoryId: string | undefined;
+  /**
+   * The last replacement the new remote refused (R2).
+   *
+   * *Change backup* asks the new remote for its advertisement before it
+   * replaces this one, so a refusal leaves this remote recorded, still backing
+   * the project up, with the refusal beside it. Cleared by the next `connect`
+   * and by disconnecting.
+   */
+  refusedReplacement?: RemoteRefusedReplacement;
+}>;
+
+/**
+ * A new remote that refused to replace the recorded one (R2).
+ *
+ * @public
+ */
+export type RemoteRefusedReplacement = Readonly<{
+  kind: RemoteKind;
+  /** The refused address; absent for Tau Cloud, which the host resolves. */
+  url?: string;
+  /** The remote's refusal, already safe to render. */
+  error: string;
+  /** Its class, from `sync.machine`'s classifier, for exactly one action (rule 19). */
+  reason: SyncFailureReason | undefined;
+  /**
+   * Which refusal this is, counting from 1 for this machine: the same refusal
+   * repeated by a second attempt is a new one, which its sentence alone cannot say.
+   */
+  attempt: number;
 }>;
 
 /** Events accepted by remoteMachine. @public */

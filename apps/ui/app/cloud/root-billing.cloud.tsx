@@ -4,7 +4,7 @@ import { useSession } from '@better-auth-ui/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { BillingSessionProvider, useBillingSession } from '@taucad/billing/hooks/billing-session';
-import { formatCreditAtoms } from '@taucad/billing';
+import { formatCredits } from '#utils/credits.utils.js';
 import type { WirePaymentAction } from '@taucad/billing';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
 import { authClient } from '#lib/auth-client.js';
@@ -116,7 +116,7 @@ export const useCloudPaymentActionReturn = (): void => {
           if (!action.receipt) {
             return undefined;
           }
-          const added = `${formatCreditAtoms(BigInt(action.receipt.grantedCreditAtoms))} credits added.`;
+          const added = `${formatCredits(BigInt(action.receipt.grantedCreditAtoms))} added to your ${action.purpose === 'subscription_checkout' ? 'monthly' : 'purchased'} credits.`;
           // A paid Pro subscription settles here with its first credits; billing never reports it as completed.
           return toast.success(action.purpose === 'subscription_checkout' ? `Tau Pro is active. ${added}` : added);
         }

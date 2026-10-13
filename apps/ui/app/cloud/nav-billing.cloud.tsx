@@ -3,11 +3,12 @@ import { useIsFetching } from '@tanstack/react-query';
 import { buttonVariants } from '@taucad/ui/components/button';
 import { DropdownMenuItem } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
-import { monthlyCreditsFromBalance } from '@taucad/billing';
+import { formatCreditAtomsDisplay, monthlyCreditsFromBalance } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { MonthlyCreditsMeter } from '#components/billing/monthly-credits-meter.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { formatCredits } from '#utils/credits.utils.js';
 import { ProBadge } from '#components/tier-badge.js';
 import type { NavRoute } from '#constants/route.constants.js';
 
@@ -66,7 +67,7 @@ function AddCreditsItem(): React.JSX.Element {
 
 /**
  * Monthly credits meter for the top of the account menu. Shown once the plan is
- * known and the account has monthly credits; purchased credits stay in Billing.
+ * known, with purchased credits reported separately from the monthly allowance.
  * When monthly credits run low it offers Add credits under the bar.
  */
 export function NavCreditsMeter(): React.JSX.Element | undefined {
@@ -78,8 +79,35 @@ export function NavCreditsMeter(): React.JSX.Element | undefined {
   }
   if (credits?.balance) {
     const monthly = monthlyCreditsFromBalance(credits.balance, tier);
-    return monthly === undefined ? undefined : (
-      <MonthlyCreditsMeter state={{ status: 'ready', monthly }} addCredits={<AddCreditsItem />} />
+    const purchased =
+      BigInt(credits.balance.debtCreditAtoms) > 0n
+        ? 0n
+        : BigInt(credits.balance.purchasedCreditAtoms) - BigInt(credits.balance.purchasedHeldCreditAtoms);
+    const availablePurchased = purchased > 0n ? purchased : 0n;
+    if (monthly === undefined && BigInt(credits.balance.purchasedCreditAtoms) === 0n) {
+      return undefined;
+    }
+    return monthly === undefined ? (
+      <div className='flex flex-col gap-2 px-2 py-2 text-xs'>
+        <div className='flex items-baseline justify-between gap-2'>
+          <span className='text-muted-foreground'>Purchased credits</span>
+          <span className='font-medium tabular-nums'>{formatCreditAtomsDisplay(availablePurchased)}</span>
+        </div>
+        {BigInt(credits.balance.purchasedHeldCreditAtoms) > 0n ? (
+          <p className='text-muted-foreground'>
+            {formatCredits(BigInt(credits.balance.purchasedHeldCreditAtoms))} reserved for active work
+          </p>
+        ) : undefined}
+      </div>
+    ) : (
+      <MonthlyCreditsMeter
+        state={{ status: 'ready', monthly }}
+        purchasedCreditAtoms={BigInt(credits.balance.purchasedCreditAtoms) > 0n ? availablePurchased : undefined}
+        purchasedHeldCreditAtoms={BigInt(credits.balance.purchasedHeldCreditAtoms)}
+        monthlyHeldCreditAtoms={BigInt(credits.balance.planHeldCreditAtoms)}
+        isInMenu
+        addCredits={<AddCreditsItem />}
+      />
     );
   }
   // Free accounts have no plan grant, so an unknown balance shows nothing rather than a placeholder.
@@ -88,6 +116,7 @@ export function NavCreditsMeter(): React.JSX.Element | undefined {
   }
   return (
     <MonthlyCreditsMeter
+      isInMenu
       state={{
         status: credits === undefined && isBalanceLoading ? 'loading' : 'unavailable',
       }}

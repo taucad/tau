@@ -550,15 +550,15 @@ export const ChatViewer = memo(function ({
   );
 });
 
-/** Stands in for geometry that has not arrived; subscribes to loading so the viewer does not. */
-function GeometryPlaceholder({ isEmpty = false }: { readonly isEmpty?: boolean }): React.JSX.Element {
+/** Announces absent geometry without hiding the interactive empty scene. */
+function GeometryStatus({ isEmpty = false }: { readonly isEmpty?: boolean }): React.JSX.Element {
   const isCadLoading = useCadSelector(selectIsCadLoading, false);
   return (
     <div
       role='status'
       aria-label={isEmpty ? 'Empty model' : isCadLoading ? 'Loading geometry' : 'Waiting for geometry'}
       aria-busy={isCadLoading || undefined}
-      className='size-full bg-background'
+      className='sr-only'
     />
   );
 }
@@ -1037,7 +1037,7 @@ const ViewerContent = memo(function ({
       }}
     >
       {/* Status overlays: the running build phase in the bar's skin, outside the bar so the bar never moves for it.
-          With nothing rendered yet the pill is the viewer's only content, so it sits where the model will appear;
+          Before geometry arrives the pill sits where the model will appear;
           over a model it sits in the upper sixth, below the 96 px gizmo band and the pane's tab strip and above the
           model's middle. In the editor the view menus, the failure and a view notice live in the bottom bar. */}
       <div
@@ -1076,7 +1076,7 @@ const ViewerContent = memo(function ({
         onPointerMove={updateViewerPointerPosition}
         onPointerLeave={clearViewerPointerPosition}
       >
-        {artifact && presentedArtifact ? (
+        {isGeometryUnitClosed ? null : (
           <CadViewer
             enableZoom
             enablePan
@@ -1088,7 +1088,7 @@ const ViewerContent = memo(function ({
             enableLines={enableLines}
             enableMatcap={enableMatcap}
             upDirection={upDirection}
-            artifact={presentedArtifact}
+            artifact={artifact ? presentedArtifact : undefined}
             artifactHash={presentedArtifactKey}
             sourceFile={presentedSourceFile}
             // Keep R3F on default offsetX/Y compute; eventPrefix='client'
@@ -1097,15 +1097,9 @@ const ViewerContent = memo(function ({
             gizmoContainer={`#viewport-gizmo-container-${viewId}`}
             onModelComponentSecondaryPointerCandidate={handleModelComponentSecondaryPointerCandidate}
           />
-        ) : overlayFailureMessage ? (
-          <RuntimeErrorOverlay
-            message={overlayFailureMessage}
-            className='size-full flex-col justify-center gap-3 bg-background text-center [&>svg]:size-10'
-          />
-        ) : (
-          <GeometryPlaceholder isEmpty={emptyModel} />
         )}
-        {artifact && overlayFailureMessage ? (
+        {!artifact && !overlayFailureMessage ? <GeometryStatus isEmpty={emptyModel} /> : null}
+        {overlayFailureMessage ? (
           <RuntimeErrorOverlay
             message={overlayFailureMessage}
             className='absolute top-4 right-4 left-4 z-10 mx-auto w-fit max-w-[calc(100%-2rem)] rounded-md border border-feature/40 bg-background/90 p-2 shadow-sm backdrop-blur-sm'

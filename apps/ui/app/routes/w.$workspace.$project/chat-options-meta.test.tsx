@@ -235,11 +235,11 @@ describe('ChatOptionsMeta — receipt credits', () => {
     );
   });
 
-  it('sums settled receipts and names the unresolved ones', async () => {
+  it('rounds settled receipt credits and names the unresolved ones', async () => {
     renderMeta();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Tau credits: 1.23 · 1 pending')).toBeInTheDocument();
+      expect(screen.getByLabelText('Tau credits: 1 · 1 pending')).toBeInTheDocument();
     });
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
   });

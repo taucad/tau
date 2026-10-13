@@ -175,22 +175,31 @@ pnpm nx build agent-plugin
 
 The build copies the kernel skills into `skills/` and writes `.dev/cli.json`, a pointer at this checkout's `tsx` and `packages/cli/src/bin.ts`; neither is committed or published. The launcher runs the pointer with the Node.js that started it, so a plugin loaded from the checkout, or copied out of it by either host, runs your working-tree CLI with nothing on `PATH`. CLI changes apply the next time the host starts the server, in a new session or thread. The launcher skips a pointer into a deleted worktree; set `TAU_CLI` to try another CLI.
 
-Claude Code loads the folder in place with `--plugin-dir`; a marketplace install copies it to `~/.claude/plugins/cache/tau-dev/tau/<version>/`, `.dev/cli.json` included:
+`pnpm plugin:dev` installs that folder into each host from the repository root:
+
+```bash
+pnpm plugin:dev install                       # Claude Code and Codex: adds the tau-dev catalog and installs tau@tau-dev
+pnpm plugin:dev install --host codex          # one host only
+pnpm plugin:dev desktop --project ~/my-model  # Claude Desktop: a tau-dev server in claude_desktop_config.json, with a backup
+pnpm plugin:dev doctor --smoke                # starts the launcher as a host would and builds, tests and screenshots a block
+pnpm plugin:dev uninstall                     # and `desktop --remove`
+```
+
+`doctor --smoke` calls `test_model`, which needs this checkout's GeoSpec engine (`pnpm nx run geospec-engine-native:build-node`, with Rust 1.88), and `screenshot`, which needs a graphics adapter.
+
+Claude Code reads a catalog added from a local folder in place, so a rebuild reaches it at the next session. Codex copies the folder into `~/.codex/plugins/cache/tau-dev/tau/<version>/`. By hand, the same steps are:
 
 ```bash
 claude --plugin-dir packages/agent-plugin            # in place, this session only
 claude plugin marketplace add ./packages/agent-plugin # the folder's own catalog, tau-dev
-claude plugin install tau@tau-dev                     # a copy; add --scope project for one project
-```
-
-Codex copies the folder into `~/.codex/plugins/cache/tau-dev/tau/<version>/`:
-
-```bash
+claude plugin install tau@tau-dev                     # add --scope project for one project
 codex plugin marketplace add ./packages/agent-plugin
 codex plugin add tau@tau-dev
 ```
 
-After changing a skill, a manifest or the launcher, rebuild, refresh both copies and start a new session or thread: `claude plugin update tau@tau-dev`, run in the project folder for a `--scope project` install, and `codex plugin add tau@tau-dev` again. CLI changes need no refresh: each copy's `.dev/cli.json` still points at this checkout.
+After changing a skill, a manifest or the launcher, rebuild, run `codex plugin add tau@tau-dev` again (or `pnpm plugin:dev install --host codex`) and start a new session or thread. CLI changes need no refresh: each copy's `.dev/cli.json` still points at this checkout.
+
+`pnpm plugin:dev preview --sha <commit>` installs a [pkg.pr.new](https://pkg.pr.new) build of a `main` commit instead, published by the `Preview packages` workflow: the plugin from a scratch catalog in `~/.cache/tau-plugin-preview` and the CLI with `npm install --global`, so nothing reads the checkout.
 
 ```bash
 pnpm nx run-many -t lint test typecheck build -p agent-plugin

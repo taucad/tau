@@ -34,6 +34,7 @@ import {
   createKernelParameterDeclaration,
   nonemptyExportFiles,
   applyLibrarySourceMaps,
+  createRealmGroup,
   preserveExportNames,
   demangleStackFrames,
   classifyLibraryFrames,
@@ -140,6 +141,9 @@ const tracedPhase = async <T>(
     span.end();
   }
 };
+
+/** `replicad` binds OpenCASCADE at module scope, so every kernel in a realm shares one instance (I2). */
+const replicadOcct = createRealmGroup<OpenCascadeInstance>('replicad-occt');
 
 const geistRegularUrl = new URL('fonts/Geist-Regular.ttf', import.meta.url).href;
 const replicadSourceMapUrl = new URL('sourcemaps/replicad.js.map', import.meta.url).href;
@@ -290,6 +294,14 @@ type ReplicadContext = {
 
 type ReplicadLibrary = typeof ReplicadModule;
 
+/**
+ * The installed `replicad` dependency's own `name` and `version`: Tau runs the `@taulabs/replicad`
+ * fork under the `replicad` import name. The fork exports no `./package.json`, and a built kernel
+ * cannot read an unexported manifest, so this pins it; `replicad-package-identity.test.ts` fails
+ * when it differs from the installed package.
+ */
+const replicadPackage = { name: '@taulabs/replicad', version: '1.1.0-taulabs.0' } as const;
+
 // Match both the public package name (`replicad/`) and the aliased pnpm path
 // (`@taulabs/replicad/`) — the package.json aliases `replicad` to the Tau fork,
 // so the actual on-disk file lives at `node_modules/.pnpm/.../@taulabs/replicad/dist/replicad.js`
@@ -388,13 +400,14 @@ function registerReplicadModule(runtime: KernelServices, replicadLibrary: Replic
   registerKernelModule(runtime, {
     name: 'replicad',
     exports: replicadLibrary,
-    version: '0.19.1',
+    package: replicadPackage,
     globalName: 'replicad',
   });
   registerKernelModule(runtime, {
     name: '@taucad/replicad/annotations',
     exports: { ...tauReplicadAnnotations },
-    version: '0.19.1',
+    // Tau-owned: no npm identity (npm's `@taucad/replicad` is an older replicad fork, not this plugin).
+    version: replicadPackage.version,
     globalName: 'tauReplicadAnnotations',
   });
 }
@@ -472,6 +485,7 @@ export const replicadKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: replicadDetectPattern,
   builtinModuleNames: ['replicad', '@taucad/replicad/annotations'],
+  builtinPackages: { replicad: replicadPackage },
   name: 'ReplicadKernel',
   version: '1.4.0',
   optionsSchema: replicadOptionsSchema,
@@ -538,9 +552,8 @@ export const replicadKernel = defineKernel({
       return kernelOpenCascade;
     };
 
-    // `replicad` binds OpenCASCADE at module scope, so every kernel in this realm shares one instance (I2).
-    const occt = await runtime.realm.hold<OpenCascadeInstance>({
-      group: 'replicad-occt',
+    const occt = await runtime.realm.hold({
+      group: replicadOcct,
       key: `${resolved.variant}:${resolved.wasmUrl ?? ''}`,
       async create() {
         // ponytail: OCCT print/printErr reach the creating kernel's logger only; exact with one realm per client.
@@ -619,7 +632,7 @@ export const replicadKernel = defineKernel({
       }
       const computeProducer = {
         id: '@taucad/replicad',
-        version: 'replicad@1.1.0-taulabs.0|replicad-opencascadejs@0.23.0-beta.0|adapter@1',
+        version: `replicad@${replicadPackage.version}|replicad-opencascadejs@0.23.0-beta.0|adapter@1`,
         implementationAssets,
       };
       const computeEnvironment = {

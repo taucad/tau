@@ -46,7 +46,12 @@ import { buildComputeStoreBridge } from '#transport/_internal/compute-store-brid
 export type NodeWorkerLike = {
   postMessage(value: unknown, transferList?: readonly NodeTransferable[]): void;
   on(event: 'message', listener: (data: unknown) => void): NodeWorkerLike;
+  /** The transport settles the client from `'error'` and `'exit'`; a worker that never emits them hangs until the operation timeout. */
+  on(event: 'error', listener: (error: Error) => void): NodeWorkerLike;
+  on(event: 'exit', listener: (exitCode: number) => void): NodeWorkerLike;
   off(event: 'message', listener: (data: unknown) => void): NodeWorkerLike;
+  off(event: 'error', listener: (error: Error) => void): NodeWorkerLike;
+  off(event: 'exit', listener: (exitCode: number) => void): NodeWorkerLike;
   terminate(): Promise<number>;
 };
 
@@ -270,12 +275,7 @@ export const nodeWorkerClient = (
         options.url,
         options.workerData === undefined ? undefined : { workerData: options.workerData },
       );
-      const eventWorker = worker as NodeWorkerLike & {
-        on(event: 'error', listener: (error: Error) => void): NodeWorkerLike;
-        on(event: 'exit', listener: (exitCode: number) => void): NodeWorkerLike;
-        off(event: 'error', listener: (error: Error) => void): NodeWorkerLike;
-        off(event: 'exit', listener: (exitCode: number) => void): NodeWorkerLike;
-      };
+      const eventWorker = worker;
       const onWorkerError = (error: Error): void => {
         void finish({ cause: 'wire-failure', error });
       };

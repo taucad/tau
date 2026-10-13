@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { Ask, AskAnswers } from '@taucad/chat';
@@ -110,35 +111,110 @@ describe('ChatQuestionQueue', () => {
     expect(answer).toHaveBeenCalledWith('ask_form', 'q', { choice: 'Form two' });
   });
 
-  it('keeps answered questions behind Show answered while something waits', () => {
+  it('should omit answered asks while another question waits', () => {
     asks = [askOf('ask_old', 'Old', 120), askOf('ask_new', 'New', 120)];
     answers = Object.fromEntries([['ask_old', answered('Old one')]]);
     render(<ChatQuestionQueue />);
     settle();
 
-    const list = screen.getByRole('list', { name: 'Questions' });
-    expect(within(list).queryByText('Old?')).not.toBeInTheDocument();
-    fireEvent.click(within(list).getByRole('button', { name: 'Show answered (1)' }));
-    expect(within(list).getByText('Old?')).toBeVisible();
-    fireEvent.click(within(list).getByRole('button', { name: 'Hide answered' }));
-    expect(within(list).queryByText('Old?')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1 question waiting · New' })).toBeVisible();
+    expect(screen.queryByText('Old?')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Show answered/u })).not.toBeInTheDocument();
   });
 
-  it('lists answered questions directly when nothing waits, collapsed by default', () => {
+  it('should hide the tray when every ask is answered', () => {
     asks = [askOf('ask_old', 'Old', 120)];
     answers = Object.fromEntries([['ask_old', answered('Old one')]]);
     render(<ChatQuestionQueue />);
     settle();
 
-    const trigger = screen.getByRole('button', { name: '1 question answered' });
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(trigger);
-    const list = screen.getByRole('list', { name: 'Questions' });
-    expect(within(list).getByText('Old?')).toBeVisible();
-    expect(within(list).queryByRole('button', { name: /Show answered/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /question/u })).not.toBeInTheDocument();
   });
 
-  it('closes again once the question it opened for is answered', () => {
+  it('should count individual unanswered questions across asks', () => {
+    const form = askOf('ask_form', 'Scope', 120);
+    const kinematics = askOf('unused', 'Kinematics', 120).questions.map((question) => ({
+      ...question,
+      id: 'kinematics',
+    }));
+    asks = [{ ...form, questions: [...form.questions, ...kinematics] }, askOf('ask_other', 'Material', 120)];
+    const { rerender } = render(<ChatQuestionQueue />);
+    settle();
+
+    expect(screen.getByRole('button', { name: '3 questions waiting · Scope' })).toBeVisible();
+    answers = Object.fromEntries([['ask_form', answered('Scope one')]]);
+    rerender(<ChatQuestionQueue />);
+
+    expect(screen.getByRole('button', { name: '2 questions waiting · Kinematics' })).toBeVisible();
+    expect(screen.queryByText('Scope one')).not.toBeInTheDocument();
+    expect(screen.getByText('Kinematics?')).toBeVisible();
+  });
+
+  it('should stay hidden when only settled asks are off screen', () => {
+    asks = [askOf('ask_old', 'Old', 120), askOf('ask_new', 'New', 120)];
+    answers = Object.fromEntries([['ask_old', answered('Old one')]]);
+    onScreen = new Set(['ask_new']);
+    render(<ChatQuestionQueue />);
+    settle();
+
+    expect(screen.queryByRole('button', { name: /question/u })).not.toBeInTheDocument();
+  });
+
+  it('should count and render only asks whose transcript cards are off screen', () => {
+    asks = [askOf('ask_visible', 'Visible', 120), askOf('ask_hidden', 'Hidden', 120)];
+    onScreen = new Set(['ask_visible']);
+    render(<ChatQuestionQueue />);
+    settle();
+
+    expect(screen.getByRole('button', { name: '1 question waiting · Hidden' })).toBeVisible();
+    expect(screen.getByText('Hidden?')).toBeVisible();
+    expect(screen.queryByText('Visible?')).not.toBeInTheDocument();
+  });
+
+  it('should hide settled asks that were defaulted, declined or cancelled', () => {
+    asks = [
+      askOf('ask_defaulted', 'Defaulted', 0),
+      askOf('ask_declined', 'Declined', undefined),
+      {
+        ...askOf('ask_cancelled', 'Cancelled', undefined),
+        resolution: { outcome: 'cancelled', at: new Date(askedAt).toISOString() },
+      },
+    ];
+    answers = Object.fromEntries([['ask_declined', { questions: {}, declined: true }]]);
+    render(<ChatQuestionQueue />);
+    settle();
+
+    expect(screen.queryByRole('button', { name: /question/u })).not.toBeInTheDocument();
+  });
+
+  it('should return focus when an answered tray disappears', () => {
+    asks = [askOf('ask_form', 'Form', 120)];
+    const composerRef = createRef<HTMLTextAreaElement>();
+    const focusComposer = (): void => {
+      composerRef.current?.focus();
+    };
+    const view = (
+      <>
+        <ChatQuestionQueue onDismissFocus={focusComposer} />
+        <textarea ref={composerRef} aria-label='Composer' />
+      </>
+    );
+    const { rerender } = render(view);
+    settle();
+    screen.getByRole('button', { name: /^B, Form two/u }).focus();
+
+    answers = Object.fromEntries([['ask_form', answered('Form two')]]);
+    rerender(
+      <>
+        <ChatQuestionQueue onDismissFocus={focusComposer} />
+        <textarea ref={composerRef} aria-label='Composer' />
+      </>,
+    );
+
+    expect(screen.getByRole('textbox', { name: 'Composer' })).toHaveFocus();
+  });
+
+  it('should disappear once the last waiting question is answered', () => {
     asks = [askOf('ask_form', 'Form', 120)];
     const { rerender } = render(<ChatQuestionQueue />);
     settle();
@@ -147,6 +223,6 @@ describe('ChatQuestionQueue', () => {
     answers = Object.fromEntries([['ask_form', answered('Form two')]]);
     rerender(<ChatQuestionQueue />);
 
-    expect(screen.getByRole('button', { name: '1 question answered' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: /question/u })).not.toBeInTheDocument();
   });
 });

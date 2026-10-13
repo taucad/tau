@@ -559,6 +559,32 @@ describe('tau tui', () => {
     await expect(finished).resolves.toBeUndefined();
   }, 120_000);
 
+  /*
+   * R18: Ink re-subscribes the keyboard handler only after React's passive effects run, a turn of the event loop
+   * after the frame paints. An enter that arrives in between reaches the handler of the render before, which held an
+   * empty draft. A starved machine does that to the enter `submit` types once the prompt is painted; here the enter
+   * is typed from the paint itself, so the window is open every time.
+   */
+  it('should start a run when the enter arrives as the prompt paints', async () => {
+    const { terminal, finished } = mount('chat-tui-enter');
+    await untilPainted(terminal, /Following /u);
+    const prompt = 'sent as it paints';
+    const enterOnPaint = (chunk: Uint8Array<ArrayBuffer>): void => {
+      if (Buffer.from(chunk).toString('utf8').includes(prompt)) {
+        terminal.stdout.off('data', enterOnPaint);
+        terminal.stdin.write('\r');
+      }
+    };
+    terminal.stdout.on('data', enterOnPaint);
+
+    terminal.stdin.write(prompt);
+    await untilPainted(terminal, /start: applied at \d+/u);
+    expect(await chatLog('chat-tui-enter')).toContain(prompt);
+
+    terminal.stdin.write('q');
+    await expect(finished).resolves.toBeUndefined();
+  }, 120_000);
+
   it('should report the label the daemon returned for a cancel', async () => {
     const { terminal, finished } = mount('chat-tui-cancel');
     await submit(terminal, 'hold this one');

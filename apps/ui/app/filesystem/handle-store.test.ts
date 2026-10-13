@@ -520,11 +520,55 @@ describe('createWorkspace persistent storage', () => {
 
   it('tolerates a browser without the Storage Manager API', async () => {
     stubStorage(undefined);
-    const { createWorkspace } = await loadStore();
+    const { createWorkspace, isPersistentStorageRefused } = await loadStore();
 
     const workspace = await createWorkspace(makeHandle('tau-workspace'));
 
     expect(workspace.storagePersisted).toBeUndefined();
+    expect(isPersistentStorageRefused()).toBe(false);
+  });
+
+  /* R14: the refusal was recorded on the workspace row and read by nothing. */
+  it('reports a refused request to its subscribers once', async () => {
+    stubStorage({ persist: async () => false, persisted: async () => false });
+    const { createWorkspace, isPersistentStorageRefused, subscribePersistentStorageRefusal } = await loadStore();
+    const listener = vi.fn();
+    subscribePersistentStorageRefusal(listener);
+
+    await createWorkspace(makeHandle('tau-workspace'));
+    await createWorkspace(makeHandle('second-workspace'));
+
+    expect(isPersistentStorageRefused()).toBe(true);
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it('reports a refusal from the boot-time request too', async () => {
+    stubStorage({ persist: async () => false, persisted: async () => false });
+    const { getProjectRootConfigs, isPersistentStorageRefused, subscribePersistentStorageRefusal } = await loadStore();
+    const refused = new Promise<void>((resolve) => {
+      subscribePersistentStorageRefusal(resolve);
+    });
+
+    await getProjectRootConfigs();
+    await refused;
+
+    expect(isPersistentStorageRefused()).toBe(true);
+  });
+
+  it('does not report a granted request', async () => {
+    stubStorage({ persist: async () => true, persisted: async () => false });
+    const { createWorkspace, isPersistentStorageRefused } = await loadStore();
+
+    await createWorkspace(makeHandle('tau-workspace'));
+
+    expect(isPersistentStorageRefused()).toBe(false);
+  });
+
+  it('lets a profile claim the refusal warning only once', async () => {
+    const { claimPersistentStorageWarning } = await loadStore();
+
+    await expect(claimPersistentStorageWarning()).resolves.toBe(true);
+    await expect(claimPersistentStorageWarning()).resolves.toBe(false);
   });
 });
 

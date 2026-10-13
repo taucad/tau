@@ -131,7 +131,8 @@ const createRig = ({
     target: [0, 0, 0],
     direction: initialDirection,
     up,
-    verticalSpan: 2,
+    // Keep the seed bounds in front of the camera so the empty scene has stable depth precision.
+    verticalSpan: 4,
     perspectiveZoom: 1,
   };
 

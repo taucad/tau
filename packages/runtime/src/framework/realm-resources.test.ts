@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { createRealmResources } from '#framework/realm-resources.js';
+import { createRealmGroup, realmResources } from '#framework/realm-resources.js';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
-import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import { attachRuntimePluginDefinition, runtimePluginAbiVersion } from '#plugins/plugin-runtime-definition.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import type { AnyKernelDefinitionV2 } from '#types/runtime-kernel-v2.types.js';
+import { realmGroupState } from '#types/runtime-kernel.types.js';
+import type { RealmGroup } from '#types/runtime-kernel.types.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
 import {
@@ -14,15 +16,32 @@ import {
 } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-enable no-restricted-imports, import/extensions */
 
-describe('createRealmResources', () => {
+let groupCount = 0;
+/** A fresh token with a name no other test holds. */
+const createTestGroup = <Value>(): RealmGroup<Value> => createRealmGroup<Value>(`realm-test-${++groupCount}`);
+
+/** The issue a refused hold carries. */
+const refusalIssue = async (hold: Promise<unknown>): Promise<KernelIssue> => {
+  const error: unknown = await hold.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(error).toBeInstanceOf(Error);
+  expect(error).toHaveProperty('issues');
+  const { issues } = error as Error & { issues: KernelIssue[] };
+  expect(issues).toHaveLength(1);
+  return issues[0]!;
+};
+
+describe('realmResources', () => {
   it('should create one value for two holders and dispose it on the last release', async () => {
-    const realm = createRealmResources();
+    const group = createTestGroup<{ heap: string }>();
     const value = { heap: 'A' };
     const create = vi.fn(async () => value);
     const dispose = vi.fn();
 
-    const first = await realm.hold({ group: 'occt', key: 'single:a.wasm', create, dispose });
-    const second = await realm.hold({ group: 'occt', key: 'single:a.wasm', create, dispose });
+    const first = await realmResources.hold({ group, key: 'single:a.wasm', create, dispose });
+    const second = await realmResources.hold({ group, key: 'single:a.wasm', create, dispose });
 
     expect(create).toHaveBeenCalledOnce();
     expect(first.value).toBe(value);
@@ -35,13 +54,14 @@ describe('createRealmResources', () => {
   });
 
   it('should recreate the value after the last holder released it', async () => {
-    const realm = createRealmResources();
+    const group = createTestGroup<{ generation: number }>();
     let generation = 0;
     const create = vi.fn(async () => ({ generation: ++generation }));
 
-    const first = await realm.hold({ group: 'occt', key: 'single', create });
+    const first = await realmResources.hold({ group, key: 'single', create });
     first.release();
-    const second = await realm.hold({ group: 'occt', key: 'single', create });
+    const second = await realmResources.hold({ group, key: 'single', create });
+    second.release();
 
     expect(create).toHaveBeenCalledTimes(2);
     expect(first.value).toEqual({ generation: 1 });
@@ -49,12 +69,12 @@ describe('createRealmResources', () => {
   });
 
   it('should ignore a repeated release of one hold', async () => {
-    const realm = createRealmResources();
+    const group = createTestGroup<string>();
     const dispose = vi.fn();
     const create = async (): Promise<string> => 'heap';
 
-    const first = await realm.hold({ group: 'occt', key: 'single', create, dispose });
-    const second = await realm.hold({ group: 'occt', key: 'single', create, dispose });
+    const first = await realmResources.hold({ group, key: 'single', create, dispose });
+    const second = await realmResources.hold({ group, key: 'single', create, dispose });
     first.release();
     first.release();
 
@@ -65,42 +85,45 @@ describe('createRealmResources', () => {
   });
 
   it('should share one pending creation between concurrent holders', async () => {
-    const realm = createRealmResources();
+    const group = createTestGroup<{ heap: string }>();
     const pending = Promise.withResolvers<{ heap: string }>();
     const create = vi.fn(async () => pending.promise);
 
     const holds = Promise.all([
-      realm.hold({ group: 'occt', key: 'single', create }),
-      realm.hold({ group: 'occt', key: 'single', create }),
+      realmResources.hold({ group, key: 'single', create }),
+      realmResources.hold({ group, key: 'single', create }),
     ]);
     pending.resolve({ heap: 'shared' });
     const [first, second] = await holds;
+    first.release();
+    second.release();
 
     expect(create).toHaveBeenCalledOnce();
     expect(first.value).toBe(second.value);
   });
 
   it('should let the next holder retry after a rejected creation', async () => {
-    const realm = createRealmResources();
+    const group = createTestGroup<string>();
     const create = vi
       .fn<() => Promise<string>>()
       .mockRejectedValueOnce(new Error('wasm init failed'))
       .mockResolvedValueOnce('heap');
 
-    await expect(realm.hold({ group: 'occt', key: 'single', create })).rejects.toThrow('wasm init failed');
-    const retried = await realm.hold({ group: 'occt', key: 'single', create });
+    await expect(realmResources.hold({ group, key: 'single', create })).rejects.toThrow('wasm init failed');
+    const retried = await realmResources.hold({ group, key: 'single', create });
+    retried.release();
 
     expect(create).toHaveBeenCalledTimes(2);
     expect(retried.value).toBe('heap');
   });
 
   it('should reject every concurrent holder of a rejected creation', async () => {
-    const realm = createRealmResources();
+    const group = createTestGroup<string>();
     const pending = Promise.withResolvers<string>();
     const create = vi.fn(async () => pending.promise);
 
-    const first = realm.hold({ group: 'occt', key: 'single', create });
-    const second = realm.hold({ group: 'occt', key: 'single', create });
+    const first = realmResources.hold({ group, key: 'single', create });
+    const second = realmResources.hold({ group, key: 'single', create });
     pending.reject(new Error('wasm init failed'));
 
     await expect(first).rejects.toThrow('wasm init failed');
@@ -108,45 +131,34 @@ describe('createRealmResources', () => {
     expect(create).toHaveBeenCalledOnce();
   });
 
-  it('should reject a different key for a held group with KERNEL_REALM_CONFLICT naming both keys', async () => {
-    const realm = createRealmResources();
+  it('should refuse a different key for a held group with KERNEL_REALM_CONFLICT for reason build', async () => {
+    const group = createRealmGroup<string>('replicad-occt');
     const create = vi.fn(async () => 'heap');
-    const held = await realm.hold({ group: 'replicad-occt', key: 'single:a.wasm', create });
+    const held = await realmResources.hold({ group, key: 'single:a.wasm', create });
 
-    try {
-      await realm.hold({ group: 'replicad-occt', key: 'multi:b.wasm', create });
-      expect.fail('a second build of a held group should be refused');
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      const { message, issues } = error as Error & { issues: KernelIssue[] };
-      expect(message).toBe(
-        'This realm already holds "single:a.wasm" for "replicad-occt" and cannot also hold "multi:b.wasm".',
-      );
-      expect(issues).toEqual([
-        {
-          code: 'KERNEL_REALM_CONFLICT',
-          message,
-          severity: 'error',
-          type: 'kernel',
-          details: { group: 'replicad-occt', heldKey: 'single:a.wasm', requestedKey: 'multi:b.wasm' },
-        },
-      ]);
-    }
+    const issue = await refusalIssue(realmResources.hold({ group, key: 'multi:b.wasm', create }));
 
+    expect(issue).toEqual({
+      code: 'KERNEL_REALM_CONFLICT',
+      message: 'This realm already holds "single:a.wasm" for "replicad-occt" and cannot also hold "multi:b.wasm".',
+      severity: 'error',
+      type: 'kernel',
+      details: { reason: 'build', group: 'replicad-occt', heldKey: 'single:a.wasm', requestedKey: 'multi:b.wasm' },
+    });
     expect(create).toHaveBeenCalledOnce();
     held.release();
-    await expect(realm.hold({ group: 'replicad-occt', key: 'multi:b.wasm', create })).resolves.toMatchObject({
-      value: 'heap',
-    });
+    const rebuilt = await realmResources.hold({ group, key: 'multi:b.wasm', create });
+    rebuilt.release();
+    expect(rebuilt.value).toBe('heap');
   });
 
   it('should let a different key proceed once a pending creation fails', async () => {
-    const realm = createRealmResources();
+    const group = createTestGroup<string>();
     const pending = Promise.withResolvers<string>();
 
     const settled = Promise.allSettled([
-      realm.hold({ group: 'occt', key: 'single', create: async () => pending.promise }),
-      realm.hold({ group: 'occt', key: 'multi', create: async () => 'multi heap' }),
+      realmResources.hold({ group, key: 'single', create: async () => pending.promise }),
+      realmResources.hold({ group, key: 'multi', create: async () => 'multi heap' }),
     ]);
     pending.reject(new Error('wasm init failed'));
     const [first, second] = await settled;
@@ -156,43 +168,149 @@ describe('createRealmResources', () => {
   });
 
   it('should refuse a different key once a pending creation succeeds', async () => {
-    const realm = createRealmResources();
+    const group = createTestGroup<string>();
     const pending = Promise.withResolvers<string>();
     const create = vi.fn(async () => 'multi heap');
 
     const settled = Promise.allSettled([
-      realm.hold({ group: 'occt', key: 'single', create: async () => pending.promise }),
-      realm.hold({ group: 'occt', key: 'multi', create }),
+      realmResources.hold({ group, key: 'single', create: async () => pending.promise }),
+      realmResources.hold({ group, key: 'multi', create }),
     ]);
     pending.resolve('single heap');
     const [first, second] = await settled;
 
     expect(first).toMatchObject({ status: 'fulfilled', value: { value: 'single heap' } });
-    expect(second).toMatchObject({ status: 'rejected', reason: { issues: [{ code: 'KERNEL_REALM_CONFLICT' }] } });
+    expect(second).toMatchObject({
+      status: 'rejected',
+      reason: { issues: [{ code: 'KERNEL_REALM_CONFLICT', details: { reason: 'build' } }] },
+    });
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('should share holds between two copies of the runtime module in one realm', async () => {
+  it('should keep groups independent', async () => {
+    const replicadGroup = createTestGroup<string>();
+    const libcascadeGroup = createTestGroup<string>();
+    const replicad = await realmResources.hold({ group: replicadGroup, key: 'single', create: async () => 'replicad' });
+    const libcascade = await realmResources.hold({
+      group: libcascadeGroup,
+      key: 'full',
+      create: async () => 'libcascade',
+    });
+    replicad.release();
+    libcascade.release();
+
+    expect([replicad.value, libcascade.value]).toEqual(['replicad', 'libcascade']);
+  });
+
+  it('should refuse a second token of a held name for reason declaration and free the name after release', async () => {
+    const group = createRealmGroup<string>('duplicate-declaration');
+    const impostor = createRealmGroup<number>('duplicate-declaration');
+    const create = vi.fn(async () => 1);
+    const held = await realmResources.hold({ group, key: 'single', create: async () => 'heap' });
+
+    const issue = await refusalIssue(realmResources.hold({ group: impostor, key: 'single', create }));
+
+    expect(issue).toEqual({
+      code: 'KERNEL_REALM_CONFLICT',
+      message: 'Another declaration of realm group "duplicate-declaration" already holds its instance in this realm.',
+      severity: 'error',
+      type: 'kernel',
+      details: { reason: 'declaration', group: 'duplicate-declaration' },
+    });
+    expect(create).not.toHaveBeenCalled();
+    held.release();
+    const freed = await realmResources.hold({ group: impostor, key: 'single', create });
+    freed.release();
+    expect(freed.value).toBe(1);
+  });
+
+  it('should refuse a token made by another runtime ABI for reason runtime', async () => {
+    const foreignAbi = runtimePluginAbiVersion + 1;
+    const foreign: RealmGroup<string> = {
+      name: 'foreign-token',
+      [realmGroupState]: { abi: foreignAbi, entry: undefined },
+    };
+    const create = vi.fn(async () => 'heap');
+
+    const issue = await refusalIssue(realmResources.hold({ group: foreign, key: 'single', create }));
+
+    expect(issue).toEqual({
+      code: 'KERNEL_REALM_CONFLICT',
+      message: `This realm's shared resources belong to @taucad/runtime plugin ABI ${foreignAbi}; this copy speaks ABI ${runtimePluginAbiVersion}.`,
+      severity: 'error',
+      type: 'kernel',
+      details: { reason: 'runtime', heldAbi: foreignAbi, requestedAbi: runtimePluginAbiVersion },
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  describe('with foreign realm state', () => {
+    const directoryKey = Symbol.for('@taucad/runtime/realm-resources');
+    let occupant: unknown;
+
+    beforeEach(() => {
+      occupant = Reflect.get(globalThis, directoryKey);
+    });
+
+    afterEach(() => {
+      Reflect.set(globalThis, directoryKey, occupant);
+    });
+
+    it('should refuse a hold when another runtime ABI wrote the realm directory, for reason runtime', async () => {
+      const foreignAbi = runtimePluginAbiVersion - 1;
+      Reflect.set(globalThis, directoryKey, { abi: foreignAbi, holders: new Map() });
+      const create = vi.fn(async () => 'heap');
+
+      const issue = await refusalIssue(
+        realmResources.hold({ group: createTestGroup<string>(), key: 'single', create }),
+      );
+
+      expect(issue).toMatchObject({
+        code: 'KERNEL_REALM_CONFLICT',
+        message: `This realm's shared resources belong to @taucad/runtime plugin ABI ${foreignAbi}; this copy speaks ABI ${runtimePluginAbiVersion}.`,
+        details: { reason: 'runtime', heldAbi: foreignAbi, requestedAbi: runtimePluginAbiVersion },
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('should refuse a hold when something other than a realm directory occupies its key, for reason runtime', async () => {
+      // The shape an unstamped runtime copy left there: a registry object with its own `hold`.
+      Reflect.set(globalThis, directoryKey, { hold: async () => undefined });
+      const create = vi.fn(async () => 'heap');
+
+      const issue = await refusalIssue(
+        realmResources.hold({ group: createTestGroup<string>(), key: 'single', create }),
+      );
+
+      expect(issue).toEqual({
+        code: 'KERNEL_REALM_CONFLICT',
+        message: `This realm's shared resources were not written by @taucad/runtime plugin ABI ${runtimePluginAbiVersion}.`,
+        severity: 'error',
+        type: 'kernel',
+        details: { reason: 'runtime', requestedAbi: runtimePluginAbiVersion },
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
+
+  it("should share one token's instance between two copies of the runtime module in one realm", async () => {
     const create = vi.fn(async () => 'heap');
     const first = await import('#framework/realm-resources.js');
     vi.resetModules();
     const second = await import('#framework/realm-resources.js');
+    const group = first.createRealmGroup<string>('duplicate-copies');
 
-    const held = await first.realmResources.hold({ group: 'duplicate-copies', key: 'single', create });
-    const shared = await second.realmResources.hold({ group: 'duplicate-copies', key: 'single', create });
+    const held = await first.realmResources.hold({ group, key: 'single', create });
+    const shared = await second.realmResources.hold({ group, key: 'single', create });
+    const impostor = await refusalIssue(
+      second.realmResources.hold({ group: second.createRealmGroup<string>('duplicate-copies'), key: 'single', create }),
+    );
     held.release();
     shared.release();
 
     expect(create).toHaveBeenCalledOnce();
     expect(shared.value).toBe(held.value);
-  });
-
-  it('should keep groups independent', async () => {
-    const realm = createRealmResources();
-    const replicad = await realm.hold({ group: 'replicad-occt', key: 'single', create: async () => 'replicad' });
-    const libcascade = await realm.hold({ group: 'libcascade-occt', key: 'full', create: async () => 'libcascade' });
-
-    expect([replicad.value, libcascade.value]).toEqual(['replicad', 'libcascade']);
+    expect(impostor.details).toEqual({ reason: 'declaration', group: 'duplicate-copies' });
   });
 });
 
@@ -217,7 +335,11 @@ afterEach(async () => {
 });
 
 /** A kernel that holds one realm resource from `initialize` and releases it in `onDispose`. */
-const createHoldingKernel = (create: () => Promise<Record<string, unknown>>, key = 'v1'): AnyKernelDefinitionV2 => ({
+const createHoldingKernel = (
+  group: RealmGroup<Record<string, unknown>>,
+  create: () => Promise<Record<string, unknown>>,
+  key = 'v1',
+): AnyKernelDefinitionV2 => ({
   id: 'realm-kernel',
   extensions: ['realm'],
   name: 'Realm kernel',
@@ -225,7 +347,7 @@ const createHoldingKernel = (create: () => Promise<Record<string, unknown>>, key
   views: { display: { title: 'Display', mimeType: 'model/gltf-binary' } },
   exports: {},
   initialize: async (_options, services) => {
-    const hold = await services.realm.hold({ group: 'realm-resources-test', key, create });
+    const hold = await services.realm.hold({ group, key, create });
     return { hold };
   },
   onDispose: async (context) => {
@@ -269,29 +391,31 @@ const startWorker = async (kernel: AnyKernelDefinitionV2, id = 'realm-kernel'): 
 describe('services.realm', () => {
   it('should share one realm resource between two kernel workers and free it after both clean up', async () => {
     await seedTestFileSystem({ 'model.realm': 'realm' });
+    const group = createRealmGroup<Record<string, unknown>>('realm-resources-test');
     const create = vi.fn(async () => ({ heap: 'shared' }));
 
-    const first = await startWorker(createHoldingKernel(create));
+    const first = await startWorker(createHoldingKernel(group, create));
     await expect(openDocument(first)).resolves.toMatchObject({ success: true });
-    const second = await startWorker(createHoldingKernel(create));
+    const second = await startWorker(createHoldingKernel(group, create));
     await expect(openDocument(second)).resolves.toMatchObject({ success: true });
     expect(create).toHaveBeenCalledOnce();
 
     await first.cleanup();
     await second.cleanup();
-    const third = await startWorker(createHoldingKernel(create));
+    const third = await startWorker(createHoldingKernel(group, create));
     await expect(openDocument(third)).resolves.toMatchObject({ success: true });
     expect(create).toHaveBeenCalledTimes(2);
   });
 
   it('should report a second build of a held group to the client as KERNEL_REALM_CONFLICT', async () => {
     await seedTestFileSystem({ 'model.realm': 'realm' });
+    const group = createRealmGroup<Record<string, unknown>>('realm-resources-test');
     const create = vi.fn(async () => ({ heap: 'shared' }));
 
-    await expect(openDocument(await startWorker(createHoldingKernel(create, 'single')))).resolves.toMatchObject({
+    await expect(openDocument(await startWorker(createHoldingKernel(group, create, 'single')))).resolves.toMatchObject({
       success: true,
     });
-    const refused = await openDocument(await startWorker(createHoldingKernel(create, 'multi')));
+    const refused = await openDocument(await startWorker(createHoldingKernel(group, create, 'multi')));
 
     expect(refused).toMatchObject({
       success: false,
@@ -299,6 +423,7 @@ describe('services.realm', () => {
         {
           code: 'KERNEL_REALM_CONFLICT',
           details: {
+            reason: 'build',
             group: 'realm-resources-test',
             heldKey: 'single',
             requestedKey: 'multi',
@@ -321,7 +446,7 @@ describe('services.realm', () => {
     };
     const shared = Object.assign(new Error('shared failure'), { issues: [issue] });
     const refusing = (id: string): AnyKernelDefinitionV2 => ({
-      ...createHoldingKernel(async () => ({})),
+      ...createHoldingKernel(createTestGroup(), async () => ({})),
       id,
       initialize: async () => {
         throw shared;
@@ -340,7 +465,7 @@ describe('services.realm', () => {
     await seedTestFileSystem({ 'model.realm': 'realm' });
     const failure = z.object({ wasmUrl: z.string() }).safeParse({}).error;
     const kernel: AnyKernelDefinitionV2 = {
-      ...createHoldingKernel(async () => ({})),
+      ...createHoldingKernel(createTestGroup(), async () => ({})),
       initialize: async () => {
         throw failure ?? new Error('The fixture schema accepted its input.');
       },
@@ -367,7 +492,7 @@ describe('services.realm', () => {
     };
     const foreign = { code: 'invalid_type', message: 'Invalid input', path: ['wasmUrl'] };
     const kernel: AnyKernelDefinitionV2 = {
-      ...createHoldingKernel(async () => ({})),
+      ...createHoldingKernel(createTestGroup(), async () => ({})),
       initialize: async () => {
         throw Object.assign(new Error(conflict.message), { issues: [conflict, foreign] });
       },
@@ -402,7 +527,7 @@ describe('services.realm', () => {
       type: 'kernel',
     };
     const kernel: AnyKernelDefinitionV2 = {
-      ...createHoldingKernel(async () => ({})),
+      ...createHoldingKernel(createTestGroup(), async () => ({})),
       initialize: async () => {
         // oxlint-disable-next-line typescript/only-throw-error -- a kernel may reject with any value; this one carries issues.
         throw { issues: [conflict] };

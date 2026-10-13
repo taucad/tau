@@ -132,6 +132,7 @@ assert.deepEqual(runtimePlatformPackages['darwin-arm64'], {
     '@img/sharp-darwin-arm64',
     '@parcel/watcher-darwin-arm64',
   ],
+  unusedSandboxHelpers: ['vendor/seccomp', 'vendor/srt-win'],
 });
 for (const [target, packages] of Object.entries(runtimePlatformPackages)) {
   const [platform, arch] = target.split('-') as [string, string];
@@ -145,6 +146,20 @@ for (const [target, packages] of Object.entries(runtimePlatformPackages)) {
   );
 }
 console.log('✓ each target stages its own native platform packages');
+
+/* Sandbox helpers: a target keeps only the one it executes, for its own architecture. */
+const sandboxHelpers = ['vendor/seccomp/arm64', 'vendor/seccomp/x64', 'vendor/srt-win/arm64', 'vendor/srt-win/x64'];
+const keptSandboxHelpers = (target: keyof typeof runtimePlatformPackages): string[] =>
+  sandboxHelpers.filter(
+    (helper) =>
+      !runtimePlatformPackages[target].unusedSandboxHelpers.some(
+        (unused) => helper === unused || helper.startsWith(`${unused}/`),
+      ),
+  );
+assert.deepEqual(keptSandboxHelpers('darwin-arm64'), []);
+assert.deepEqual(keptSandboxHelpers('linux-x64'), ['vendor/seccomp/x64']);
+assert.deepEqual(keptSandboxHelpers('win32-x64'), ['vendor/srt-win/x64']);
+console.log('✓ macOS stages no sandbox helper; Linux keeps x64 apply-seccomp and Windows x64 srt-win');
 
 /* The licence gate precedes every archive the script writes. */
 const packageSource = readFileSync(new URL('package-desktop.mts', import.meta.url), 'utf8');

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, MessageCircleQuestionMark } from 'lucide-react';
 import { askStatus } from '@taucad/chat';
 import type { Ask, AskAnswers } from '@taucad/chat';
@@ -110,23 +110,24 @@ export const waitingByUrgency = (
 /** The collapsed tray line: what waits and, for the most urgent ask, how long until its recommendation. */
 const traySummary = ({
   waiting,
-  settledCount,
   answers,
   now,
 }: {
   readonly waiting: readonly Ask[];
-  readonly settledCount: number;
   readonly answers: Readonly<Record<string, AskAnswers>>;
   readonly now: number;
 }): { readonly text: string; readonly remaining: number | undefined } => {
   const [first] = waiting;
   if (first === undefined) {
-    return { text: `${plural(settledCount, 'question')} answered`, remaining: undefined };
+    return { text: '', remaining: undefined };
   }
   const status = askStatus(first, answers[first.id], now);
   const next = first.questions.find((question) => answers[first.id]?.questions[question.id] === undefined);
   return {
-    text: `${plural(waiting.length, 'question')} waiting · ${next?.header ?? next?.question ?? ''}`,
+    text: `${plural(
+      waiting.reduce((count, ask) => count + ask.questions.length, 0),
+      'question',
+    )} waiting · ${next?.header ?? next?.question ?? ''}`,
     remaining: status.kind === 'open' ? status.remaining : undefined,
   };
 };
@@ -152,33 +153,48 @@ const useSettled = (): boolean => {
 };
 
 /**
- * The composer tray's question section: every question this chat's agents asked, reachable after it scrolled away.
+ * Unanswered questions, reachable in the composer after their transcript cards scroll away.
+ * Opens for a new waiting ask and disappears once no off-screen ask needs an answer.
  *
- * Shows while some ask's card is off screen (agent questions blueprint D8).
- * Waiting questions come first, most urgent on top, answerable in place;
- * answered ones, newest first, sit behind "Show answered" while anything
- * waits. It opens by itself when a new question is waiting off screen and
- * closes again once nothing waits.
- *
+ * @param props - Focus recovery when the tray disappears.
+ * @param props.onDismissFocus - Return focus to the composer if focus was inside the removed tray.
  * @returns The section, or nothing.
  * @public
  */
-export function ChatQuestionQueue(): React.JSX.Element | undefined {
+export function ChatQuestionQueue({
+  onDismissFocus,
+}: {
+  readonly onDismissFocus?: () => void;
+}): React.JSX.Element | undefined {
   const questions = useOptionalChatQuestions();
   const onScreen = useOnScreenAskIds();
   const [isOpen, setIsOpen] = useState(false);
-  const [isShowingAnswered, setIsShowingAnswered] = useState(false);
   const isSettled = useSettled();
   const announced = useRef(new Set<string>());
-  /* Opened by a new question rather than by the person: closes again once nothing waits. */
-  const isAutoOpened = useRef(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
+  const trayRef = useCallback<React.RefCallback<HTMLDivElement>>(
+    (node) => {
+      if (node === null) {
+        return undefined;
+      }
+      return () => {
+        if (node.contains(document.activeElement)) {
+          onDismissFocus?.();
+        }
+      };
+    },
+    [onDismissFocus],
+  );
   const asks = questions?.asks ?? [];
   const now = questions?.now ?? 0;
-  const waiting = useMemo(() => waitingByUrgency(asks, questions?.answers, now), [asks, now, questions?.answers]);
-  const settled = useMemo(() => asks.filter((ask) => !waiting.includes(ask)).toReversed(), [asks, waiting]);
-  const offScreenWaiting = waiting.filter((ask) => !onScreen.has(ask.id));
+  const waiting = useMemo(
+    () =>
+      waitingByUrgency(asks, questions?.answers, now).map((ask) => ({
+        ...ask,
+        questions: ask.questions.filter((question) => questions?.answers[ask.id]?.questions[question.id] === undefined),
+      })),
+    [asks, now, questions?.answers],
+  );
+  const offScreenWaiting = useMemo(() => waiting.filter((ask) => !onScreen.has(ask.id)), [onScreen, waiting]);
 
   useEffect(() => {
     if (!isSettled) {
@@ -189,52 +205,36 @@ export function ChatQuestionQueue(): React.JSX.Element | undefined {
       announced.current.add(ask.id);
     }
     if (fresh.length > 0) {
-      isAutoOpened.current = true;
       setIsOpen(true);
-    } else if (waiting.length === 0 && isAutoOpened.current) {
-      isAutoOpened.current = false;
-      if (listRef.current?.contains(document.activeElement)) {
-        triggerRef.current?.focus();
-      }
-      setIsOpen(false);
     }
   }, [isSettled, offScreenWaiting, waiting]);
 
-  if (!isSettled || questions === undefined || asks.every((ask) => onScreen.has(ask.id))) {
+  if (!isSettled || questions === undefined || offScreenWaiting.length === 0) {
     return undefined;
   }
 
-  const isWaiting = waiting.length > 0;
   const { text: summary, remaining } = traySummary({
-    waiting,
-    settledCount: settled.length,
+    waiting: offScreenWaiting,
     answers: questions.answers,
     now,
   });
 
   return (
     <Collapsible
+      ref={trayRef}
       open={isOpen}
       className='group/tray-section not-first:border-t'
       onOpenChange={(open) => {
-        isAutoOpened.current = false;
         setIsOpen(open);
       }}
     >
       <CollapsibleTrigger asChild>
         <Button
-          ref={triggerRef}
           variant='ghost'
           size='xs'
-          className={cn(
-            'relative flex h-auto min-h-8 w-full min-w-0 items-center justify-start gap-1.5 rounded-none px-2 py-1.5 text-left font-normal hover:bg-accent/50 hover:text-foreground focus-visible:z-10 group-first/tray-section:rounded-t-lg',
-            isWaiting ? 'text-foreground' : 'text-muted-foreground',
-          )}
+          className='relative flex h-auto min-h-8 w-full min-w-0 items-center justify-start gap-1.5 rounded-none px-2 py-1.5 text-left font-normal text-foreground group-first/tray-section:rounded-t-lg hover:bg-accent/50 hover:text-foreground focus-visible:z-10'
         >
-          <MessageCircleQuestionMark
-            aria-hidden='true'
-            className={cn('size-3.5 shrink-0', isWaiting ? 'text-primary' : undefined)}
-          />
+          <MessageCircleQuestionMark aria-hidden='true' className='size-3.5 shrink-0 text-primary' />
           <span className='min-w-0 flex-1 truncate text-xs' title={summary}>
             {summary}
           </span>
@@ -254,47 +254,16 @@ export function ChatQuestionQueue(): React.JSX.Element | undefined {
       </CollapsibleTrigger>
       <CollapsibleContent>
         <ul
-          ref={listRef}
           aria-label='Questions'
           // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable list must be keyboard reachable (WCAG 2.1.1)
           tabIndex={0}
           className='flex max-h-[min(22rem,45cqh)] scroll-shadows-y flex-col divide-y overflow-y-auto overscroll-contain border-t bg-background px-2 pb-3 focus-visible:focus-outline'
         >
-          {waiting.map((ask) => (
+          {offScreenWaiting.map((ask) => (
             <li key={ask.id}>
               <ChatQuestionCard isFlat ask={ask} />
             </li>
           ))}
-          {/* Answered questions pile up; with something waiting they stay behind a toggle. */}
-          {waiting.length > 0 && settled.length > 0 ? (
-            <li className='py-1'>
-              <Button
-                variant='ghost'
-                size='xs'
-                aria-expanded={isShowingAnswered}
-                className='w-full justify-start text-muted-foreground'
-                onClick={() => {
-                  setIsShowingAnswered((value) => !value);
-                }}
-              >
-                <ChevronRight
-                  aria-hidden='true'
-                  className={cn(
-                    'transition-transform duration-200 motion-reduce:transition-none',
-                    isShowingAnswered && 'rotate-90',
-                  )}
-                />
-                {isShowingAnswered ? 'Hide answered' : `Show answered (${String(settled.length)})`}
-              </Button>
-            </li>
-          ) : null}
-          {waiting.length === 0 || isShowingAnswered
-            ? settled.map((ask) => (
-                <li key={ask.id}>
-                  <ChatQuestionCard isFlat ask={ask} />
-                </li>
-              ))
-            : null}
         </ul>
       </CollapsibleContent>
     </Collapsible>

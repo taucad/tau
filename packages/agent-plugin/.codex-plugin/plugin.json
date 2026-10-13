@@ -14,16 +14,21 @@
   "mcpServers": "./mcp/codex.json",
   "interface": {
     "displayName": "Tau",
-    "shortDescription": "Code-CAD with renders, GeoSpec tests and exports.",
+    "shortDescription": "Code-CAD you can see and test",
     "longDescription": "Author parametric CAD in replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel or tscircuit, then let Tau evaluate it, run its GeoSpec geometry tests, render screenshots and export STEP, STL, 3MF or glTF from your project folder.",
     "developerName": "Tau",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
     "websiteURL": "https://tau.new",
+    "supportURL": "https://github.com/taucad/tau/issues",
+    "privacyPolicyURL": "https://tau.new/legal/privacy",
+    "termsOfServiceURL": "https://tau.new/legal/terms",
     "defaultPrompt": [
       "Model a parametric wall bracket in replicad and show me a screenshot.",
       "Run the GeoSpec tests for this Tau project and fix what fails."
-    ]
+    ],
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/icon.svg"
   },
   "extensions": {
     "com.openai": {

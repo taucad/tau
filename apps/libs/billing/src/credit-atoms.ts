@@ -70,21 +70,17 @@ export const formatCreditAtoms = (atoms: bigint): string => {
   return `${negative ? '-' : ''}${whole}${fraction.length === 0 ? '' : `.${fraction}`}`;
 };
 
-const atomsPerDisplayDigit = creditAtomsPerCredit / 100n;
-
 /**
- * Formats atom values for ordinary display: at most two fractional digits with
- * trailing zeros trimmed, and a bounded form for a nonzero amount that is too
- * small at that precision. `formatCreditAtoms` keeps the exact detail value.
+ * Formats credits as the nearest whole credit, keeping nonzero amounts below
+ * one credit visible as a bound. Accounting retains its original atom precision.
  * @public
  */
 export const formatCreditAtomsDisplay = (atoms: bigint): string => {
   const negative = atoms < 0n;
   const absolute = negative ? -atoms : atoms;
-  const hundredths = (2n * absolute + atomsPerDisplayDigit) / (2n * atomsPerDisplayDigit);
-  if (hundredths === 0n) {
-    return absolute === 0n ? '0' : negative ? '>-0.01' : '<0.01';
+  if (absolute < creditAtomsPerCredit) {
+    return absolute === 0n ? '0' : negative ? '>-1' : '<1';
   }
-  const fraction = (hundredths % 100n).toString().padStart(2, '0').replace(/0+$/u, '');
-  return `${negative ? '-' : ''}${hundredths / 100n}${fraction.length === 0 ? '' : `.${fraction}`}`;
+  const whole = (absolute + creditAtomsPerCredit / 2n) / creditAtomsPerCredit;
+  return `${negative ? '-' : ''}${whole.toLocaleString('en-US')}`;
 };

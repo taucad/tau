@@ -79,7 +79,12 @@ const TurnGroup = memo(function ({
   readonly isLast: boolean;
 }) {
   return (
-    <div className={cn('py-1 gap-1 flex flex-col', isLast && 'min-h-(--chat-live-turn-min-h)')}>
+    <div
+      className={cn(
+        'mx-auto flex w-[calc(100%_-_1rem)] max-w-xl flex-col gap-1 py-1',
+        isLast && 'min-h-(--chat-live-turn-min-h)',
+      )}
+    >
       {messageIds.map((id, index) => (
         <ChatMessage
           key={id}
@@ -119,7 +124,7 @@ const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: st
 
 const ChatHistoryHeader = (): undefined => undefined;
 const ChatHistoryEmptyPlaceholder = (): React.JSX.Element => (
-  <div className='flex h-full px-3 py-6'>
+  <div className='mx-auto flex h-full w-[calc(100%_-_1rem)] max-w-xl px-3 py-6'>
     <ChatHistoryEmpty />
   </div>
 );
@@ -187,6 +192,9 @@ const ExpandedChatHistory = memo(function ({
   );
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
+  const focusComposer = useCallback(() => {
+    chatTextareaRef.current?.focus();
+  }, []);
   const location = useLocation();
   useEffect(() => {
     if (location.state?.focusChatComposer === true) {
@@ -366,7 +374,7 @@ const ExpandedChatHistory = memo(function ({
               />
               <div className='mx-2 -mb-3 flex flex-col rounded-t-lg border border-b-0 bg-muted/40 pb-3 empty:hidden'>
                 <ChatTodoList key={activeChatId} />
-                <ChatQuestionQueue key={`${activeChatId}:questions`} />
+                <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />
               </div>
               <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />
             </div>

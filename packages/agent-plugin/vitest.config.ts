@@ -5,7 +5,7 @@ export default defineConfig({
   cacheDir: '../../node_modules/.vite/packages/agent-plugin',
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'app/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'app/**/*.test.ts', 'scripts/**/*.test.ts'],
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],

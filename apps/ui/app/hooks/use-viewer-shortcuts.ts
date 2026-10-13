@@ -79,6 +79,11 @@ export const useViewerShortcuts = (
   const { formattedKeyCombination: fitView } = useKeybinding(
     fitViewKey,
     () => {
+      const { geometryRadius, artifact } = graphicsRef.getSnapshot().context;
+      if (geometryRadius <= 0 && artifact?.mimeType !== 'image/svg+xml') {
+        announce('No model to fit');
+        return;
+      }
       graphicsRef.send({ type: 'fitView' });
       announce('Fitted to view');
     },
@@ -87,7 +92,12 @@ export const useViewerShortcuts = (
   const { formattedKeyCombination: section } = useKeybinding(
     sectionKey,
     () => {
-      const isActive = !graphicsRef.getSnapshot().context.isSectionViewActive;
+      const { isSectionViewActive, geometryRadius } = graphicsRef.getSnapshot().context;
+      if (!isSectionViewActive && geometryRadius <= 0) {
+        announce('A model is required for section view');
+        return;
+      }
+      const isActive = !isSectionViewActive;
       graphicsRef.send({
         type: 'setSectionViewActive',
         payload: isActive,
@@ -100,7 +110,12 @@ export const useViewerShortcuts = (
   const { formattedKeyCombination: measure } = useKeybinding(
     measureKey,
     () => {
-      const isActive = !graphicsRef.getSnapshot().context.isMeasureActive;
+      const { isMeasureActive, geometryRadius } = graphicsRef.getSnapshot().context;
+      if (!isMeasureActive && geometryRadius <= 0) {
+        announce('A model is required for measurement');
+        return;
+      }
+      const isActive = !isMeasureActive;
       graphicsRef.send({ type: 'setMeasureActive', payload: isActive });
       announce(isActive ? 'Measure on' : 'Measure off');
     },

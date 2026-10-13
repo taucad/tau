@@ -14,6 +14,8 @@ import { ENV } from '#environment.config.js';
 
 export type FlagDefinition = {
   readonly schema: z.ZodDefault<z.ZodBoolean>;
+  /** Whether users can discover and override this flag in Experimental settings. */
+  readonly showInExperimental: boolean;
   readonly label: string;
   readonly description: string;
 };
@@ -27,42 +29,56 @@ export type FlagDefinition = {
 const tauDebugDefault = Boolean(ENV.TAU_DEBUG);
 
 export const flagRegistry = {
+  automaticReload: {
+    schema: z.boolean().default(false),
+    showInExperimental: false,
+    label: 'Automatic reload',
+    description: 'Show automatic credit reload controls in Billing.',
+  },
   partsWarehouse: {
+    showInExperimental: true,
     schema: z.boolean().default(true),
     label: 'Parts warehouse',
     description: 'Browse and remix reusable parametric parts.',
   },
   webGpu: {
+    showInExperimental: true,
     schema: z.boolean().default(false),
     label: 'WebGPU rendering',
     description: 'Use the experimental WebGPU renderer when supported. Turn off to return to WebGL.',
   },
   webGpuShaderStacks: {
+    showInExperimental: true,
     schema: z.boolean().default(false),
     label: 'WebGPU shader stacks',
     description: 'Capture shader source stacks for diagnostics. This slows large model loading substantially.',
   },
   webGpuInspector: {
+    showInExperimental: true,
     schema: z.boolean().default(false),
     label: 'WebGPU inspector',
     description: 'Load the Three.js pipeline inspector for WebGPU diagnostics.',
   },
   planMode: {
+    showInExperimental: true,
     schema: z.boolean().default(false),
     label: 'Planning Mode',
     description: 'Show mode selector and plan viewer in chat.',
   },
   pluginsStore: {
+    showInExperimental: true,
     schema: z.boolean().default(false),
     label: 'Plugins Store',
     description: 'Expose the plugin and skill store while it is under development.',
   },
   tauDebug: {
+    showInExperimental: true,
     schema: z.boolean().default(tauDebugDefault),
     label: 'Tau Debug',
     description: 'Enable in-app debug surfaces (e2e diagnostic panels, geometry inspectors).',
   },
   marketingLanding: {
+    showInExperimental: true,
     schema: z.boolean().default(false),
     label: 'Marketing Landing',
     description:
@@ -73,6 +89,8 @@ export const flagRegistry = {
 export type FeatureFlagName = keyof typeof flagRegistry;
 
 export const featureFlagNames = Object.keys(flagRegistry) as FeatureFlagName[];
+
+export const experimentalFeatureFlagNames = featureFlagNames.filter((name) => flagRegistry[name].showInExperimental);
 
 /**
  * Zod object schema built from the registry.

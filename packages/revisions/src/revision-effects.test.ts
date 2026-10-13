@@ -2950,6 +2950,7 @@ for (const actorSet of actorSets) {
         expect(await context.port.readRef('main')).toBe(finished.revisionId);
         const landed = await context.port.readRevision(revisionId(finished.revisionId));
         expect(landed?.parents).toStrictEqual([context.ours, revision]);
+        expect(landed?.summary.generated).toBe('Resolved 1 file on main');
         const resolvedTree = await context.port.readTree(revisionId(finished.revisionId));
         expect(new TextDecoder().decode(resolvedTree?.get('a.txt'))).toBe('mine\n');
         /* Everything that settled rides through untouched, and no marker byte
@@ -2960,6 +2961,24 @@ for (const actorSet of actorSets) {
         expect(await context.filesystem.readFile('settled.txt', 'utf8')).toBe('theirs only\n');
         expect(await context.port.readRef(line)).toBe(revision);
         expect(await listed(context)).toStrictEqual([]);
+      }, 30_000);
+
+      it('should name no file count when a later merge left nothing to choose (R13)', async () => {
+        const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+        const revision = await conflicted(context);
+        /* The main line took the other side after the conflict was recorded, so no file still differs. */
+        const later = await context.write({ 'a.txt': 'theirs\n' }, [context.ours], 'Took theirs');
+        await context.port.updateRef({ name: 'main', expectedHead: revisionId(context.ours), head: revisionId(later) });
+        await context.filesystem.writeFile('a.txt', 'theirs\n');
+
+        const finished = await run<{ revisionId: string }>(context.actors.resolution.finishMerge, {
+          projectId: 'project-1',
+          revisionId: revision,
+        });
+
+        const landed = await context.port.readRevision(revisionId(finished.revisionId));
+        expect(landed?.summary.generated).toBe('Finished the merge into main');
+        expect(landed?.parents).toStrictEqual([later, revision]);
       }, 30_000);
 
       /* RV-W7 #7: a decision made here is a merge, and Undo never reaches past it. */
@@ -3431,6 +3450,74 @@ describe('connecting a remote', () => {
     expect(await port.listRemotes()).toEqual([
       expect.objectContaining({ name: 'github-22', url: 'https://github.com/new/project.git', repositoryId: '22' }),
     ]);
+  });
+
+  /* R2: *Change backup* asks the new remote `validate`'s question before `writeRemote` replaces the old one. */
+  it('probes a replacing remote under the name it would be recorded with, and records nothing (R2)', async () => {
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'origin', url: 'https://github.com/old/project.git' });
+    const before = await port.listRemotes();
+    const asked: unknown[] = [];
+    const registerRemoteProject = vi.fn(async (_id: string) => undefined);
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async (remote) => {
+          asked.push(remote);
+          return [];
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      remoteUrl: (id) => `https://api.tau.new/v1/git/${id}.git`,
+      registerRemoteProject,
+    });
+
+    await run(actors.remote.probe, {
+      projectId: 'project-1',
+      kind: 'git',
+      url: 'https://github.com/new/project.git',
+      provider: 'github',
+      repositoryId: '22',
+    });
+    await run(actors.remote.probe, { projectId: 'project-1', kind: 'git', url: 'https://gitlab.example.com/o/r.git' });
+    expect(registerRemoteProject).not.toHaveBeenCalled();
+    /* Tau Cloud answers only for a registered project (P51). */
+    await run(actors.remote.probe, { projectId: 'project-1', kind: 'tau', url: undefined });
+
+    expect(asked).toStrictEqual([
+      { name: 'github-22', url: 'https://github.com/new/project.git' },
+      { name: 'origin', url: 'https://gitlab.example.com/o/r.git' },
+      { name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' },
+    ]);
+    expect(registerRemoteProject).toHaveBeenCalledWith('project-1');
+    expect(await port.listRemotes()).toStrictEqual(before);
+  });
+
+  it('fails the probe with the new remote’s refusal and leaves the recorded remote alone (R2)', async () => {
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'origin', url: 'https://github.com/old/project.git' });
+    const before = await port.listRemotes();
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async () => {
+          throw new RevisionPortError(
+            'REMOTE_NOT_FOUND',
+            'This remote has no repository at this address for your account.',
+          );
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+    });
+
+    await expect(
+      run(actors.remote.probe, { projectId: 'project-1', kind: 'git', url: 'https://github.com/gone/project.git' }),
+    ).rejects.toThrow('This remote has no repository at this address for your account.');
+    expect(await port.listRemotes()).toStrictEqual(before);
   });
 
   it('registers the project on Tau Cloud, and only on Tau Cloud', async () => {

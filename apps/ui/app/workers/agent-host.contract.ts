@@ -134,6 +134,9 @@ export type AgentHostProjectRebridge = {
   readonly hostId: string;
   readonly fileSystemPort: MessagePort;
   readonly projectRootPort: MessagePort;
+  /** Omitted for a retiring host with a successor, whose placement it must not fence. */
+  readonly placementPort?: MessagePort | undefined;
+  readonly revisionsPort?: MessagePort | undefined;
   readonly computeStorePort?: MessagePort | undefined;
 };
 
@@ -177,6 +180,7 @@ export type AgentHostExternalContext = {
 
 /** One project in the worker: the host incarnation that serves it, if any, and the worker's capability (LT14). */
 export type AgentHostProjectStatus = {
+  readonly needsRebridge?: boolean | undefined;
   readonly hostId?: string | undefined;
   readonly capability: AgentHostCapabilityReport;
 };
@@ -239,7 +243,9 @@ export type AgentHostWorkerProtocol = {
       readonly wireResult: unknown;
     };
   };
-  readonly notifies: Record<never, never>;
+  readonly notifies: {
+    readonly rebridgeRequested: { readonly args: { readonly projectId: string; readonly hostId: string } };
+  };
   readonly listens: Record<never, never>;
 };
 
@@ -395,6 +401,8 @@ export const agentHostWorkerProtocolSchemas = {
         hostId: nonEmptyString,
         fileSystemPort: messagePortSchema,
         projectRootPort: messagePortSchema,
+        placementPort: messagePortSchema.optional(),
+        revisionsPort: messagePortSchema.optional(),
         computeStorePort: messagePortSchema.optional(),
       }),
       result: z.strictObject({ status: z.enum(['rebridged', 'needs']) }),
@@ -406,7 +414,11 @@ export const agentHostWorkerProtocolSchemas = {
     },
     status: {
       args: z.strictObject({ projectId: nonEmptyString }),
-      result: z.strictObject({ hostId: nonEmptyString.optional(), capability: capabilityReportSchema }),
+      result: z.strictObject({
+        hostId: nonEmptyString.optional(),
+        needsRebridge: z.boolean().optional(),
+        capability: capabilityReportSchema,
+      }),
     },
     runStoppability: {
       args: z.strictObject({ projectId: nonEmptyString, chatId: nonEmptyString }),
@@ -414,7 +426,7 @@ export const agentHostWorkerProtocolSchemas = {
     },
     visibility: { args: z.strictObject({ visible: z.boolean() }), result: z.unknown() },
   },
-  notifies: {},
+  notifies: { rebridgeRequested: z.strictObject({ projectId: nonEmptyString, hostId: nonEmptyString }) },
   listens: {},
 } satisfies WireProtocolSchemas<AgentHostWorkerProtocol>;
 

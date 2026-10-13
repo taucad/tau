@@ -2,7 +2,7 @@ import { Check, Focus } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
-import { useGraphics } from '#hooks/use-graphics.jsx';
+import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 
 type FitViewControlProps = Readonly<{
@@ -17,6 +17,9 @@ type FitViewControlProps = Readonly<{
  */
 export function FitViewControl({ shortcut }: FitViewControlProps): React.JSX.Element {
   const graphicsRef = useGraphics();
+  const canFit = useGraphicsSelector(
+    (state) => state.context.geometryRadius > 0 || state.context.artifact?.mimeType === 'image/svg+xml',
+  );
   const { ticked, trigger } = useTickAnimation();
 
   const handleFit = (): void => {
@@ -27,12 +30,18 @@ export function FitViewControl({ shortcut }: FitViewControlProps): React.JSX.Ele
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant='ghost' size='icon-sm' aria-label='Fit view' onClick={handleFit}>
+        <Button
+          variant='ghost'
+          size='icon-sm'
+          aria-label='Fit view'
+          aria-disabled={!canFit}
+          onClick={canFit ? handleFit : undefined}
+        >
           {ticked ? <Check className='size-4 text-success' /> : <Focus className='size-4' />}
         </Button>
       </TooltipTrigger>
       <TooltipContent>
-        {ticked ? 'View fitted' : 'Fit view'}
+        {canFit ? (ticked ? 'View fitted' : 'Fit view') : 'Available when a model is displayed'}
         {shortcut ? (
           <KeyShortcut variant='tooltip' className='ml-1'>
             {shortcut}

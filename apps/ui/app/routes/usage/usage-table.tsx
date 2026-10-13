@@ -8,7 +8,8 @@ import {
   DataTableColumnVisibilityDropdown,
 } from '#components/ui/data-table.js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import { formatCreditAtoms } from '@taucad/billing';
+import { formatCredits } from '#utils/credits.utils.js';
+import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';
 import { usageColumns, usageEventId, usageEventNetAtoms } from '#routes/usage/columns.js';
 import { chatLabel, projectLabel } from '#routes/usage/activity-names.js';
@@ -58,7 +59,7 @@ function DetailRow({
 
 const tokenValue = (value: string | undefined): string => value ?? 'Not reported';
 
-/** The per-action credit explanation: exact credits, tokens and the pinned public rates. */
+/** The per-action credit explanation: credits, tokens and the pinned public rates. */
 function UsageEventDetail({
   event,
   projectNames,
@@ -73,7 +74,7 @@ function UsageEventDetail({
   return (
     <div className='grid gap-4 rounded-md border p-4 text-sm md:grid-cols-3' data-testid='usage-event-detail'>
       <dl className='flex flex-col gap-1'>
-        <DetailRow label='Credits' value={`${formatCreditAtoms(usageEventNetAtoms(event))} credits`} />
+        <DetailRow label='Credits' value={formatCredits(usageEventNetAtoms(event))} />
         <DetailRow label='Model' value={event.model.id} />
         <DetailRow label='Activity' value={event.activity.kind} />
         <DetailRow
@@ -95,8 +96,11 @@ function UsageEventDetail({
         <>
           <dl className='flex flex-col gap-1'>
             <DetailRow label='Status' value={`${event.executionStatus} · ${event.customerState}`} />
-            <DetailRow label='Authorized maximum' value={formatCreditAtoms(BigInt(event.authorizedMaxCreditAtoms))} />
-            <DetailRow label='Charged' value={formatCreditAtoms(BigInt(event.chargedCreditAtoms))} />
+            <DetailRow
+              label='Authorized maximum'
+              value={formatCreditAtomsDisplay(BigInt(event.authorizedMaxCreditAtoms))}
+            />
+            <DetailRow label='Charged' value={formatCreditAtomsDisplay(BigInt(event.chargedCreditAtoms))} />
             <DetailRow label='Token evidence' value={event.tokens.status} />
             <DetailRow label='Uncached input' value={tokenValue(event.tokens.uncachedInput ?? undefined)} />
             <DetailRow label='Cache read' value={tokenValue(event.tokens.cacheRead ?? undefined)} />

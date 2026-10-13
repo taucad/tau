@@ -46,6 +46,9 @@
     "/packages/geospec-engine-native/licenses/**",
     "/packages/geospec-engine-native/bindings/python/licenses/**",
     "/packages/plugins/brep/licenses/**",
+    // Written by packages/plugins/tscircuit/tsdown.engine.ts on every build with each vendored
+    // package's LICENSE text verbatim; the committed bytes must equal the generator's output.
+    "/packages/plugins/tscircuit/THIRD_PARTY_LICENSES.md",
     // Vendored upstream sources; PROVENANCE.json pins each file's sha256 to its original bytes.
     "/packages/plugins/picogk/dotnet/fixtures/**",
     // Same: PicoVoxel example ports are pinned by sha256 in provenance.json; Tau's main.ts adapters

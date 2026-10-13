@@ -43,12 +43,14 @@ import {
 // =============================================================================
 
 /**
- * Versions reported to the bundler's module registry. `@tscircuit/core` does not
- * export its `package.json`; keep these in step with the `pnpm-workspace.yaml`
- * catalog pins.
+ * `name` and `version` of the installed packages the vendored engine bundles. They are dev
+ * dependencies (and `@tscircuit/core` exports no `./package.json`), so a built kernel cannot read
+ * their manifests; `tscircuit-package-identity.test.ts` fails when these differ from the installed
+ * packages.
  */
-const tscircuitCoreVersion = '0.0.1844';
-const tscircuitPropsVersion = '0.0.646';
+const corePackage = { name: '@tscircuit/core', version: '0.0.1844' } as const;
+const propsPackage = { name: '@tscircuit/props', version: '0.0.646' } as const;
+const reactPackage = { name: 'react', version: '19.2.7' } as const;
 
 /** `circuit-json-to-gltf` writes Y-up millimetres; Tau's GLB space is Y-up metres. */
 const millimetersToMeters = 0.001;
@@ -417,6 +419,12 @@ export const tscircuitKernel = defineKernel({
   id: 'tscircuit',
   extensions: ['tsx', 'jsx'],
   builtinModuleNames: ['tscircuit', '@tscircuit/core'],
+  builtinPackages: {
+    tscircuit: corePackage,
+    '@tscircuit/core': corePackage,
+    '@tscircuit/props': propsPackage,
+    react: reactPackage,
+  },
   name: 'TscircuitKernel',
   version: '1.1.0',
   views: {
@@ -464,14 +472,15 @@ export const tscircuitKernel = defineKernel({
     registerKernelModule(runtime, {
       name: 'react',
       exports: { ...react },
-      version: react.version,
+      package: reactPackage,
       globalName: 'React',
     });
-    registerKernelModule(runtime, { name: 'react/jsx-runtime', exports: { ...jsxRuntime }, version: react.version });
-    registerKernelModule(runtime, { name: '@tscircuit/core', exports: tscircuitCore, version: tscircuitCoreVersion });
-    registerKernelModule(runtime, { name: 'tscircuit', exports: tscircuitCore, version: tscircuitCoreVersion });
+    registerKernelModule(runtime, { name: 'react/jsx-runtime', exports: { ...jsxRuntime }, package: reactPackage });
+    registerKernelModule(runtime, { name: '@tscircuit/core', exports: tscircuitCore, package: corePackage });
+    // `tscircuit` runs `@tscircuit/core`, so its identity is the alias `npm:@tscircuit/core@<version>`.
+    registerKernelModule(runtime, { name: 'tscircuit', exports: tscircuitCore, package: corePackage });
     // Types-only package: an empty runtime module, as `@tscircuit/eval` provides.
-    registerKernelModule(runtime, { name: '@tscircuit/props', exports: {}, version: tscircuitPropsVersion });
+    registerKernelModule(runtime, { name: '@tscircuit/props', exports: {}, package: propsPackage });
     runtime.logger.debug('Initialized tscircuit kernel with @tscircuit/core');
     return {
       async renderCircuit(module, parameters) {

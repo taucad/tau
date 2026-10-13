@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -8,12 +8,16 @@ import { describe, expect, it } from 'vitest';
 import type { Manifest } from '#check-pack-install.js';
 import {
   assetUrlSpecifiers,
+  consumerZodVersion,
   packageAssetUrlSpecifiers,
   importableSpecifiers,
   isToleratedImportFailure,
   manifestViolations,
+  previewPackages,
   requiredArtifactPaths,
   probeSource,
+  tarballManifest,
+  unrewrittenSiblings,
 } from '#check-pack-install.js';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -187,6 +191,120 @@ describe('manifestViolations', () => {
   });
 });
 
+describe('previewPackages', () => {
+  const runtimeUrl = 'https://pkg.pr.new/taucad/tau/@taucad/runtime@1f80f46';
+
+  it('returns the name and URL of every package a pkg-pr-new run listed', () => {
+    expect(
+      previewPackages({
+        packages: [{ name: '@taucad/runtime', url: runtimeUrl, shasum: 'abc' }],
+        templates: [],
+      }),
+    ).toStrictEqual([{ name: '@taucad/runtime', url: runtimeUrl }]);
+  });
+
+  it('rejects a file with no packages', () => {
+    expect(() => previewPackages({ packages: [] })).toThrow('The preview file lists no packages.');
+    expect(() => previewPackages(null)).toThrow('The preview file lists no packages.');
+  });
+
+  it('rejects an entry whose URL is not a pkg.pr.new URL', () => {
+    expect(() =>
+      previewPackages({ packages: [{ name: '@taucad/runtime', url: 'https://registry.npmjs.org/x.tgz' }] }),
+    ).toThrow('not a pkg.pr.new package');
+  });
+});
+
+describe('unrewrittenSiblings', () => {
+  const published = new Set(['@taucad/runtime', '@taucad/units']);
+  const previewVersion = '0.0.0-preview-1f80f46';
+
+  it('rejects a registry version, a dependency kept at a registry range and a peer not on the run version', () => {
+    expect(
+      unrewrittenSiblings(
+        {
+          name: '@taucad/replicad',
+          version: '0.1.0-beta.0',
+          dependencies: { '@taucad/units': '0.1.0-beta.0', zod: '^4.4.3' },
+          peerDependencies: { '@taucad/runtime': '^0.1.0-beta.0' },
+        },
+        published,
+      ),
+    ).toStrictEqual([
+      '@taucad/replicad carries version 0.1.0-beta.0, not a 0.0.0-preview-<sha> version.',
+      '@taucad/replicad declares @taucad/units as 0.1.0-beta.0, not a pkg.pr.new URL.',
+      "@taucad/replicad declares peer @taucad/runtime as ^0.1.0-beta.0, not the run's 0.1.0-beta.0.",
+    ]);
+  });
+
+  it('accepts dependencies on run URLs and peers on the run version, and leaves other names alone', () => {
+    expect(
+      unrewrittenSiblings(
+        {
+          name: '@taucad/host',
+          version: previewVersion,
+          dependencies: {
+            '@taucad/units': 'https://pkg.pr.new/taucad/tau/@taucad/units@1f80f46a34135790d19f791e8c305c044d1518fd',
+          },
+          peerDependencies: { '@taucad/runtime': previewVersion, '@taucad/geospec-engine': '^0.1.0-beta.0' },
+        },
+        published,
+      ),
+    ).toStrictEqual([]);
+  });
+});
+
+describe('consumerZodVersion', () => {
+  it('keeps the declared floor when no package depends on a newer Zod', () => {
+    expect(
+      consumerZodVersion([
+        { name: '@taucad/runtime', version: '1.0.0', peerDependencies: { zod: '^4.0.0' } },
+        { name: '@taucad/units', version: '1.0.0', dependencies: { zod: '^4.0.0' } },
+      ]),
+    ).toStrictEqual({ version: '4.0.0', raisedBy: [] });
+  });
+
+  it('raises the pin to the highest dependency floor and names who raised it', () => {
+    expect(
+      consumerZodVersion([
+        { name: '@taucad/cli', version: '1.0.0', dependencies: { zod: '^4.4.3' } },
+        { name: 'geospec', version: '1.0.0', dependencies: { zod: '^4.10.0' } },
+      ]),
+    ).toStrictEqual({ version: '4.10.0', raisedBy: ['@taucad/cli (zod ^4.4.3)', 'geospec (zod ^4.10.0)'] });
+  });
+
+  it('refuses a Zod dependency range it cannot read a floor from', () => {
+    expect(() => consumerZodVersion([{ name: 'x', version: '1.0.0', dependencies: { zod: '>=4' } }])).toThrow(
+      'not a caret range',
+    );
+  });
+});
+
+describe('tarballManifest', () => {
+  it('reads package/package.json from an npm-packed tarball', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-pack-manifest-'));
+    try {
+      const packageDirectory = join(directory, 'source');
+      mkdirSync(packageDirectory);
+      writeFileSync(join(packageDirectory, 'README.md'), '# Example');
+      writeFileSync(
+        join(packageDirectory, 'package.json'),
+        JSON.stringify({ name: '@taucad/example', version: '1.2.3', dependencies: { zod: '^4.4.3' } }),
+      );
+      const result = spawnSync('npm', ['pack', '--silent', '--pack-destination', directory], {
+        cwd: packageDirectory,
+        encoding: 'utf8',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const manifest = tarballManifest(readFileSync(join(directory, result.stdout.trim())));
+
+      expect(manifest).toMatchObject({ name: '@taucad/example', version: '1.2.3', dependencies: { zod: '^4.4.3' } });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('isToleratedImportFailure', () => {
   it('tolerates a missing external optional peer', () => {
     expect(
@@ -225,6 +343,26 @@ describe('isToleratedImportFailure', () => {
             "Cannot find module '/app/node_modules/@taucad/example/dist/native/example_multi.js' imported from /app/node_modules/@taucad/example/dist/native/init.js",
         },
         ['electron', 'vite'],
+      ),
+    ).toBe(false);
+  });
+
+  it('tolerates a listed viewer subpath only for its stated CommonJS interop failure', () => {
+    const specifier = '@taucad/viewer/parameters/rjsf-validator';
+    expect(
+      isToleratedImportFailure(
+        {
+          specifier,
+          message:
+            "Named export 'validationDataMerge' not found. The requested module '@rjsf/utils' is a CommonJS module, which may not support all module.exports as named exports.",
+        },
+        [],
+      ),
+    ).toBe(true);
+    expect(
+      isToleratedImportFailure(
+        { specifier, code: 'ERR_MODULE_NOT_FOUND', message: "Cannot find module './rjsf-context.mjs'" },
+        [],
       ),
     ).toBe(false);
   });

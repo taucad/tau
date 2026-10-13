@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { legalUrl } from '#lib/legal-url.js';
 import { CreditCard } from 'lucide-react';
-import { formatCreditAtoms, topupPrincipalBoundsMinor } from '@taucad/billing';
+import { formatCredits } from '#utils/credits.utils.js';
+import { formatCreditAtomsDisplay, topupPrincipalBoundsMinor } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
@@ -420,7 +421,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
               <dl className='flex flex-col gap-1.5 rounded-md border px-3 py-2.5 text-sm'>
                 <div className='flex justify-between'>
                   <dt>Credits</dt>
-                  <dd>{formatCreditAtoms(BigInt(frozen.creditAtoms))}</dd>
+                  <dd>{formatCreditAtomsDisplay(BigInt(frozen.creditAtoms))}</dd>
                 </div>
                 <div className='flex justify-between'>
                   <dt>Amount</dt>
@@ -520,7 +521,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
           {visibleAction?.state === 'fulfilled' && visibleAction.receipt ? (
             <div className='rounded-md border px-3 py-2.5 text-sm'>
               <p className='font-medium'>
-                {formatCreditAtoms(BigInt(visibleAction.receipt.grantedCreditAtoms))} credits added.
+                {formatCredits(BigInt(visibleAction.receipt.grantedCreditAtoms))} added to your purchased credits.
               </p>
               <p>
                 {/* Checkout-basis quotes learn their total in Checkout, so there is no frozen amount to print. */}

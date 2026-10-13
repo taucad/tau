@@ -8,10 +8,17 @@
  * registry — the registry copies are stale or absent.
  *
  * Usage: node scripts/src/check-pack-install.ts [package-dir…]
+ *        node scripts/src/check-pack-install.ts --from-urls <preview.json>
  *
  * A subset only works when it is closed under workspace dependencies; omitting a sibling makes npm
  * fall back to the registry and 404. Requesting `packages/runtime` also packs the packages its
  * README quick start imports and their publishable closure, computed from the graph.
+ *
+ * `--from-urls` is the consumer leg of the pkg.pr.new full run (`preview-packages.yml`): it packs
+ * nothing and installs every package the run published, by the URLs in the `--json` file that
+ * `pkg-pr-new publish` wrote, into the same clean application under the OS temp dir. Every installed
+ * `@taucad/*` and `geospec` sibling must then come from that run, never the registry, and the same
+ * surface checks run, followed by `tau export` to a GLB from the installed CLI.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -31,6 +38,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 import { bundledLibraries, publishable, publishableClosure, publishWaves, workspace } from '@taucad/nx';
 import { chromium } from 'playwright';
 import type { Page } from 'playwright';
@@ -58,13 +66,69 @@ export type ImportFailure = {
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
 
+/** One package a pkg.pr.new run published, as its `--json` output lists it. */
+export type PreviewPackage = {
+  readonly name: string;
+  readonly url: string;
+};
+
+const previewUrlPrefix = 'https://pkg.pr.new/';
+
+/** The packages listed in a `pkg-pr-new publish --json` file; anything else in it is ignored. */
+export const previewPackages = (preview: unknown): PreviewPackage[] => {
+  const packages =
+    typeof preview === 'object' && preview !== null && 'packages' in preview ? preview.packages : undefined;
+  if (!Array.isArray(packages) || packages.length === 0) {
+    throw new Error('The preview file lists no packages.');
+  }
+  return packages.map((entry: unknown) => {
+    const { name, url } = (entry ?? {}) as { name?: unknown; url?: unknown };
+    if (typeof name !== 'string' || typeof url !== 'string' || !url.startsWith(previewUrlPrefix)) {
+      throw new Error(`The preview file holds an entry that is not a pkg.pr.new package: ${JSON.stringify(entry)}`);
+    }
+    return { name, url };
+  });
+};
+
+/**
+ * Sibling specifiers a published preview manifest kept from the workspace. `--previewVersion`
+ * rewrites a dependency or optional dependency on another package of the same run to that
+ * package's pkg.pr.new URL, and `--peerDeps` rewrites such a peer to the run's preview version
+ * (the manifest's own `0.0.0-preview-<sha>`); anything else lets npm take the registry copy.
+ */
+export const unrewrittenSiblings = (manifest: Manifest, published: ReadonlySet<string>): string[] => [
+  ...(manifest.version.startsWith('0.0.0-preview-')
+    ? []
+    : [`${manifest.name} carries version ${manifest.version}, not a 0.0.0-preview-<sha> version.`]),
+  ...[manifest.dependencies, manifest.optionalDependencies].flatMap((dependencies) =>
+    Object.entries(dependencies ?? {}).flatMap(([name, specifier]) =>
+      published.has(name) && !specifier.startsWith(previewUrlPrefix)
+        ? [`${manifest.name} declares ${name} as ${specifier}, not a pkg.pr.new URL.`]
+        : [],
+    ),
+  ),
+  ...Object.entries(manifest.peerDependencies ?? {}).flatMap(([name, specifier]) =>
+    published.has(name) && specifier !== manifest.version
+      ? [`${manifest.name} declares peer ${name} as ${specifier}, not the run's ${manifest.version}.`]
+      : [],
+  ),
+];
+
 /**
  * Subpaths that cannot be imported in a bare Node process for a stated reason, keyed by a
  * substring the produced error must contain. A tolerated entry still has to *resolve* — the
  * module body runs, so a missing sibling file surfaces as ERR_MODULE_NOT_FOUND and stays red.
  * Anything not listed here, and any listed entry that fails differently, is red.
  */
-const toleratedImportFailures: Record<string, string> = {};
+const toleratedImportFailures: Record<string, string> = {
+  // @rjsf/core and @rjsf/utils 5.x publish CommonJS `main` plus an ESM `module` field and no `exports`,
+  // so a bundler (the viewer's consumers) takes their ESM build while bare Node ESM cannot read their
+  // named exports. Reported for the viewer's owner; a bundled consumer is unaffected.
+  '@taucad/viewer/parameters/parameters': "The requested module '@rjsf/core' is a CommonJS module",
+  '@taucad/viewer/parameters/rjsf-field-path': "The requested module '@rjsf/core' is a CommonJS module",
+  '@taucad/viewer/parameters/rjsf-theme': "The requested module '@rjsf/core' does not provide an export named",
+  '@taucad/viewer/parameters/rjsf-validator': "The requested module '@rjsf/utils' is a CommonJS module",
+};
 
 /**
  * Payloads that only fail when instantiated, keyed by package name; the source runs inside the
@@ -265,7 +329,10 @@ const assertSingleZodInstance = (appRoot: string): void => {
   console.log(`zod: one instance in the installed tree (${[...installs][0]!}).`);
 };
 
-/** The vendored graph must not reappear as consumer dependencies. */
+/**
+ * The vendored graph must not reappear as dependencies of the installed `@taucad/tscircuit`. Only its
+ * own subtree is walked: in the full train other packages install replicad and OCCT by design.
+ */
 const assertTscircuitInstallShape = (appRoot: string): void => {
   const listing = spawnSync('npm', ['ls', '--json', '--all'], {
     cwd: appRoot,
@@ -278,7 +345,8 @@ const assertTscircuitInstallShape = (appRoot: string): void => {
     `Cannot verify tscircuit install tree: npm ls failed (${String(listing.status)}). ${listing.error?.message ?? listing.stderr}`,
   );
   const tree = JSON.parse(listing.stdout) as Node;
-  invariant(tree.dependencies?.['@taucad/tscircuit'], 'npm ls omitted installed @taucad/tscircuit.');
+  const tscircuit = tree.dependencies?.['@taucad/tscircuit'];
+  invariant(tscircuit, 'npm ls omitted installed @taucad/tscircuit.');
   const forbidden = new Set([
     '@resvg/resvg-js',
     'occt-import-js',
@@ -299,7 +367,7 @@ const assertTscircuitInstallShape = (appRoot: string): void => {
       walk(child);
     }
   };
-  walk(tree);
+  walk(tscircuit);
   invariant(found.size === 0, `Vendored tscircuit packages leaked into the consumer install: ${[...found].join(', ')}`);
 };
 
@@ -795,8 +863,66 @@ const checkInstalledTypes = (appRoot: string): void => {
   console.log(`Packed TypeScript ${ts.version}: strict consumer and view/export/option/file-entry completions passed.`);
 };
 
-/** Exercise Zod 4.0.0 through public runtime admission, not a local schema-only parse. */
-export const installedZodFloorSource = `
+/** The Zod the consumer app pins: the runtime's declared peer floor, unless an installed package needs more. */
+export const declaredZodFloor = '4.0.0';
+
+/**
+ * The lowest Zod every installed package admits through its own `dependencies` (an application such
+ * as `@taucad/cli` may depend on Zod rather than peer it). A dependency floor above the peer floor
+ * would install a second Zod, so the app pins the highest such floor instead, and says so.
+ */
+export const consumerZodVersion = (manifests: readonly Manifest[]): { version: string; raisedBy: string[] } => {
+  const parts = (version: string): number[] => version.split('.').map(Number);
+  const newer = (left: string, right: string): boolean => {
+    const [a, b] = [parts(left), parts(right)];
+    const index = a.findIndex((value, position) => value !== b[position]);
+    return index !== -1 && a[index]! > b[index]!;
+  };
+  let version = declaredZodFloor;
+  const raisedBy: string[] = [];
+  for (const manifest of manifests) {
+    const range = manifest.dependencies?.['zod'];
+    if (range === undefined) {
+      continue;
+    }
+    const floor = /^\^(?<floor>\d+\.\d+\.\d+)$/u.exec(range)?.groups?.['floor'];
+    invariant(floor !== undefined, `${manifest.name} depends on zod ${range}, which is not a caret range.`);
+    if (newer(floor, declaredZodFloor)) {
+      raisedBy.push(`${manifest.name} (zod ${range})`);
+      if (newer(floor, version)) {
+        version = floor;
+      }
+    }
+  }
+  return { version, raisedBy };
+};
+
+/** The `package.json` inside an npm tarball, read without unpacking it. */
+export const tarballManifest = (tarball: Uint8Array<ArrayBuffer>): Manifest => {
+  const tar = gunzipSync(tarball);
+  for (let offset = 0; offset + 512 <= tar.byteLength; ) {
+    const header = tar.subarray(offset, offset + 512);
+    const field = (start: number, length: number): string =>
+      header
+        .subarray(start, start + length)
+        .toString('latin1')
+        .replace(/\0.*$/su, '');
+    const name = field(0, 100);
+    if (name === '') {
+      break;
+    }
+    const size = Number.parseInt(field(124, 12).trim() || '0', 8);
+    const path = [field(345, 155), name].filter(Boolean).join('/');
+    if (/^[^/]+\/package\.json$/u.test(path)) {
+      return JSON.parse(tar.subarray(offset + 512, offset + 512 + size).toString('utf8')) as Manifest;
+    }
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  throw new Error('The tarball holds no top-level package.json.');
+};
+
+/** Exercise the pinned Zod (the declared floor where it can be installed) through public runtime admission. */
+export const installedZodFloorSource = (zodVersion: string): string => `
 import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createRuntimeClient, defineKernel, defineRuntime, fromMemoryFs } from '@taucad/runtime';
@@ -807,7 +933,7 @@ const requireFromRuntime = createRequire(import.meta.resolve('@taucad/runtime'))
 const requireFromConsumer = createRequire(import.meta.url);
 if (realpathSync(requireFromRuntime.resolve('zod/package.json')) !== realpathSync(requireFromConsumer.resolve('zod/package.json'))) throw new Error('Runtime and consumer resolved different Zod packages.');
 const version = requireFromRuntime('zod/package.json').version;
-if (version !== '4.0.0') throw new Error('Declared Zod floor was not installed: ' + version);
+if (version !== '${zodVersion}') throw new Error('Pinned Zod was not installed: ' + version);
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 const quantitySchema = quantity({ unit: 'm', space: 'linear' }).positive().max(10).describe('Length').default(0.2);
 assert(quantitySchema.parse(undefined) === 0.2 && !quantitySchema.safeParse(0).success, 'Quantity default or refinement changed.');
@@ -892,7 +1018,7 @@ try {
   const missing = await doc.export('data', { options: {} });
   assert(!missing.success, 'Missing required export option was admitted.');
 } finally { doc.close(); await client.shutdown(); }
-console.log('Installed Zod 4.0.0 union/discriminated/default/transform/required/strict/loose/schemaless and identity passed.');
+console.log('Installed Zod ${zodVersion} union/discriminated/default/transform/required/strict/loose/schemaless and identity passed.');
 `;
 
 const installedTscircuitSource = `
@@ -929,11 +1055,11 @@ try {
 `;
 
 /** Render the installed tscircuit package in Node and an alias-free browser bundle. */
-const runInstalledTscircuit = async (appRoot: string): Promise<void> => {
+const runInstalledTscircuit = async (appRoot: string, zodVersion: string): Promise<void> => {
   const source = join(appRoot, 'tscircuit-render.mjs');
   const bundle = join(appRoot, 'tscircuit-render.browser.mjs');
   checkInstalledTypes(appRoot);
-  writeFileSync(join(appRoot, 'tscircuit-zod-floor.mjs'), installedZodFloorSource);
+  writeFileSync(join(appRoot, 'tscircuit-zod-floor.mjs'), installedZodFloorSource(zodVersion));
   run(process.execPath, ['tscircuit-zod-floor.mjs'], appRoot);
   writeFileSync(source, installedTscircuitSource);
   run(process.execPath, [source], appRoot);
@@ -996,7 +1122,70 @@ for (const [name, file] of Object.entries(plan.instantiations)) {
 console.log(JSON.stringify(failures));
 `;
 
-const main = async (): Promise<void> => {
+/** Export a replicad model to GLB with the installed `tau` bin, from a project folder outside the app. */
+const runCliExport = (temporaryRoot: string, appRoot: string): void => {
+  const project = join(temporaryRoot, 'project');
+  mkdirSync(project);
+  writeFileSync(
+    join(project, 'main.ts'),
+    "import { makeBaseBox } from 'replicad';\nexport default () => makeBaseBox(10, 20, 30);\n",
+  );
+  const output = join(project, 'main.glb');
+  run(join(appRoot, 'node_modules/.bin/tau'), ['export', 'main.ts', '--ext=glb', `--output=${output}`], project);
+  invariant(existsSync(output), `tau export wrote no file at ${output}.`);
+  const bytes = readFileSync(output);
+  invariant(
+    bytes.byteLength > 12 && bytes.subarray(0, 4).toString('latin1') === 'glTF',
+    `tau export wrote ${String(bytes.byteLength)} bytes that are not a GLB.`,
+  );
+  console.log(`tau export main.ts --ext=glb: ${String(bytes.byteLength)} bytes of glTF.`);
+};
+
+/** Every node of the installed tree that names a package of the run must have come from its pkg.pr.new URL. */
+const assertSiblingsFromPreview = (appRoot: string, published: ReadonlySet<string>): void => {
+  type Node = { readonly resolved?: string; readonly dependencies?: Record<string, Node> };
+  const listing = spawnSync('npm', ['ls', '--json', '--all', '--long'], {
+    cwd: appRoot,
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  invariant(!listing.error, `Cannot inspect the installed tree: ${listing.error?.message}`);
+  const tree = JSON.parse(listing.stdout) as Node;
+  const strays = new Set<string>();
+  let checked = 0;
+  const walk = (node: Node): void => {
+    for (const [name, child] of Object.entries(node.dependencies ?? {})) {
+      if (published.has(name)) {
+        checked += 1;
+        if (child.resolved?.startsWith(previewUrlPrefix) !== true) {
+          strays.add(`${name} from ${child.resolved ?? 'nowhere'}`);
+        }
+      }
+      walk(child);
+    }
+  };
+  walk(tree);
+  invariant(strays.size === 0, `Siblings installed from outside the preview run:\n${[...strays].join('\n')}`);
+  console.log(`Installed tree: ${String(checked)} sibling node(s), every one from a pkg.pr.new URL of this run.`);
+};
+
+type InstallPlan = {
+  /** Package names to check after the install. */
+  readonly names: readonly string[];
+  /** Arguments to the one `npm install`. */
+  readonly installArguments: readonly string[];
+  /** The packed or downloaded tarballs, one per package. */
+  readonly tarballs: readonly string[];
+  /** Whether npm's `resolved` for a top-level package is the source this mode installed. */
+  readonly installedFromSource: (name: string, resolved: string | undefined) => boolean;
+  readonly sourceLabel: string;
+  readonly bundledLibraryNames: ReadonlySet<string>;
+  /** Packages of a pkg.pr.new run, whose siblings must all come from that run. */
+  readonly previewNames?: ReadonlySet<string>;
+};
+
+/** Pack the requested (or every) publishable directory into TGZs. */
+const planFromTarballs = async (requested: readonly string[], artifactRoot: string): Promise<InstallPlan> => {
   const resolved = await workspace({ fresh: true });
   const projectByName = new Map(publishable(resolved).map((project) => [project.name, project]));
   // The release train, in dependency order, derived from the graph.
@@ -1011,7 +1200,6 @@ const main = async (): Promise<void> => {
     publishable(resolved).flatMap((project) => bundledLibraries(resolved, project.name)),
   );
 
-  const requested = process.argv.slice(2);
   // The runtime README quick start imports these plugins, so a subset that packs the runtime must
   // pack them and everything they publishably depend on, or the install 404s against the registry.
   const quickStartDirectories =
@@ -1031,6 +1219,141 @@ const main = async (): Promise<void> => {
     requested.length > 0
       ? [...new Set([...requested, ...quickStartDirectories, ...tscircuitDirectories])]
       : releaseTrainDirectories;
+
+  const tarballs: string[] = [];
+  const names: string[] = [];
+  for (const packageDirectory of packageDirectories) {
+    const packageRoot = resolve(repositoryRoot, packageDirectory);
+    names.push((JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as Manifest).name);
+    const destination = join(artifactRoot, basename(packageDirectory));
+    mkdirSync(destination);
+    // `prepack` hooks write to stdout, so the tarball is identified by the (empty, per-package)
+    // destination directory rather than by parsing `pnpm pack --json`.
+    run('pnpm', ['pack', '--pack-destination', destination], packageRoot);
+    const produced = readdirSync(destination).filter((filename) => filename.endsWith('.tgz'));
+    invariant(produced.length === 1, `pnpm pack must create exactly one TGZ for ${packageDirectory}.`);
+    const tarball = resolve(destination, produced[0]!);
+    const tarballBytes = statSync(tarball).size;
+    invariant(tarballBytes > 0, `${packageDirectory} TGZ is empty.`);
+    console.log(`TGZ ${basename(tarball)}: ${tarballBytes} bytes (${(tarballBytes / 1_048_576).toFixed(3)} MiB)`);
+    tarballs.push(tarball);
+  }
+  return {
+    names,
+    // One install for every tarball: npm resolves the sibling `@taucad/*` and `geospec`
+    // specifiers against the local files instead of their stale registry copies.
+    installArguments: tarballs,
+    tarballs,
+    installedFromSource: (_name, resolvedFrom) => resolvedFrom?.startsWith('file:') === true,
+    sourceLabel: 'TGZ resolved from disk',
+    bundledLibraryNames,
+  };
+};
+
+/** Fetch every package of a pkg.pr.new run once to record its size, and install them by URL. */
+const planFromUrls = async (previewFile: string, artifactRoot: string): Promise<InstallPlan> => {
+  const packages = previewPackages(JSON.parse(readFileSync(resolve(previewFile), 'utf8')));
+  const urlByName = new Map(packages.map(({ name, url }) => [name, url]));
+  invariant(urlByName.size === packages.length, 'The preview file lists a package name twice.');
+  const tarballs = packages.map(({ name }) => join(artifactRoot, `${name.replaceAll(/\W/gu, '-')}.tgz`));
+  const sizes = await Promise.all(
+    packages.map(async ({ url }, index) => {
+      const response = await fetch(url);
+      invariant(response.ok, `GET ${url} answered ${String(response.status)} ${response.statusText}.`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      invariant(bytes.byteLength > 0, `${url} served an empty tarball.`);
+      writeFileSync(tarballs[index]!, bytes);
+      return bytes.byteLength;
+    }),
+  );
+  let totalBytes = 0;
+  for (const [index, { url }] of packages.entries()) {
+    const bytes = sizes[index]!;
+    totalBytes += bytes;
+    console.log(`URL ${url}: ${bytes} bytes (${(bytes / 1_048_576).toFixed(3)} MiB)`);
+  }
+  console.log(
+    `Preview run: ${String(packages.length)} packages, ${String(totalBytes)} bytes (${(totalBytes / 1_048_576).toFixed(3)} MiB) in total.`,
+  );
+  return {
+    names: packages.map(({ name }) => name),
+    installArguments: packages.map(({ url }) => url),
+    tarballs,
+    // The URL npm records is the one it fetched; pkg.pr.new may serve a sibling under its long or compact form.
+    installedFromSource: (_name, resolvedFrom) => resolvedFrom?.startsWith(previewUrlPrefix) === true,
+    sourceLabel: 'pkg.pr.new URL(s) installed, no registry copies',
+    // The run's own manifests carry the publish shape; the bundled-library list needs the workspace graph.
+    bundledLibraryNames: new Set(),
+    previewNames: new Set(urlByName.keys()),
+  };
+};
+
+/** Check each installed package's manifest, files and assets, and plan its import probes. */
+const verifyInstalledPackages = (
+  appRoot: string,
+  plan: InstallPlan,
+): {
+  specifiers: string[];
+  instantiations: Record<string, string>;
+  failureContext: Map<string, readonly string[]>;
+  assetUrls: number;
+} => {
+  const dependencyTree = JSON.parse(run('npm', ['ls', '--json', '--depth=0'], appRoot)) as {
+    dependencies?: Record<string, { version?: string; resolved?: string }>;
+  };
+  const specifiers: string[] = [];
+  const instantiations: Record<string, string> = {};
+  const failureContext = new Map<string, readonly string[]>();
+  let assetUrls = 0;
+  for (const name of plan.names) {
+    const installedRoot = join(appRoot, 'node_modules', name);
+    const installed = JSON.parse(readFileSync(join(installedRoot, 'package.json'), 'utf8')) as Manifest;
+
+    const violations = [
+      ...manifestViolations(installed, plan.bundledLibraryNames),
+      ...(plan.previewNames === undefined ? [] : unrewrittenSiblings(installed, plan.previewNames)),
+    ];
+    invariant(violations.length === 0, violations.join('\n'));
+
+    for (const required of requiredArtifactPaths(installed)) {
+      invariant(
+        existsSync(join(installedRoot, required)),
+        `${installed.name} ships a manifest path that the installed tree lacks: ${required}`,
+      );
+    }
+
+    assetUrls += assertAssetUrlsResolve(installedRoot, installed.name);
+
+    const resolvedFrom = dependencyTree.dependencies?.[installed.name];
+    invariant(
+      resolvedFrom?.version === installed.version && plan.installedFromSource(name, resolvedFrom.resolved),
+      `${installed.name} did not resolve from its ${plan.sourceLabel}: ${JSON.stringify(resolvedFrom)}`,
+    );
+
+    const peerDependencies = Object.keys(installed.peerDependencies ?? {});
+    for (const specifier of importableSpecifiers(installed)) {
+      specifiers.push(specifier);
+      failureContext.set(specifier, peerDependencies);
+    }
+    const probe = instantiationProbes[installed.name];
+    if (probe !== undefined) {
+      const file = `./instantiate-${installed.name.replaceAll(/\W/gu, '-')}.mjs`;
+      writeFileSync(join(appRoot, file), probe);
+      instantiations[installed.name] = file;
+      failureContext.set(`${installed.name} (instantiate)`, peerDependencies);
+    }
+  }
+  return { specifiers, instantiations, failureContext, assetUrls };
+};
+
+const main = async (): Promise<void> => {
+  const arguments_ = process.argv.slice(2);
+  const fromUrlsIndex = arguments_.indexOf('--from-urls');
+  const previewFile = fromUrlsIndex === -1 ? undefined : arguments_[fromUrlsIndex + 1];
+  invariant(
+    fromUrlsIndex === -1 || (previewFile !== undefined && arguments_.length === 2),
+    'Usage: check-pack-install.ts --from-urls <preview.json> (no package directories with it).',
+  );
   const temporaryRoot = mkdtempSync(join(tmpdir(), 'tau-npm-local-'));
   const artifactRoot = join(temporaryRoot, 'artifact');
   const appRoot = join(temporaryRoot, 'app');
@@ -1043,25 +1366,19 @@ const main = async (): Promise<void> => {
     console.log(`npm: ${run('npm', ['--version'], appRoot).trim()}`);
     console.log(`Platform: ${process.platform}/${process.arch}`);
 
-    const tarballs: string[] = [];
-    for (const packageDirectory of packageDirectories) {
-      const packageRoot = resolve(repositoryRoot, packageDirectory);
-      const destination = join(artifactRoot, basename(packageDirectory));
-      mkdirSync(destination);
-      // `prepack` hooks write to stdout, so the tarball is identified by the (empty, per-package)
-      // destination directory rather than by parsing `pnpm pack --json`.
-      run('pnpm', ['pack', '--pack-destination', destination], packageRoot);
-      const produced = readdirSync(destination).filter((filename) => filename.endsWith('.tgz'));
-      invariant(produced.length === 1, `pnpm pack must create exactly one TGZ for ${packageDirectory}.`);
-      const tarball = resolve(destination, produced[0]!);
-      const tarballBytes = statSync(tarball).size;
-      invariant(tarballBytes > 0, `${packageDirectory} TGZ is empty.`);
-      console.log(`TGZ ${basename(tarball)}: ${tarballBytes} bytes (${(tarballBytes / 1_048_576).toFixed(3)} MiB)`);
-      tarballs.push(tarball);
-    }
+    const plan =
+      previewFile === undefined
+        ? await planFromTarballs(arguments_, artifactRoot)
+        : await planFromUrls(previewFile, artifactRoot);
 
     // The app declares zod itself, the way a consumer satisfying the plugin peer
     // does; `assertSingleZodInstance` then proves npm did not fork it.
+    const zod = consumerZodVersion(plan.tarballs.map((tarball) => tarballManifest(readFileSync(tarball))));
+    if (zod.raisedBy.length > 0) {
+      console.log(
+        `zod: pinned ${zod.version}, not the declared floor ${declaredZodFloor}, for ${zod.raisedBy.join(', ')}.`,
+      );
+    }
     writeFileSync(
       join(appRoot, 'package.json'),
       JSON.stringify(
@@ -1071,70 +1388,31 @@ const main = async (): Promise<void> => {
           dependencies: {
             react: '19.2.7',
             'react-dom': '19.2.7',
-            zod: '4.0.0',
-            ...(packageDirectories.includes('packages/plugins/middleware') ? { xstate: '6.0.0-alpha.59' } : {}),
+            zod: zod.version,
+            ...(plan.names.includes('@taucad/middleware') ? { xstate: '6.0.0-alpha.59' } : {}),
+            // `@taucad/viewer` peers `@xstate/react@^7.0.0-alpha.3`, whose newest alpha (alpha.4) requires
+            // xstate ^6.0.0-alpha.61, so a consumer on the xstate Tau tests pins the release Tau tests.
+            ...(plan.names.includes('@taucad/viewer') ? { '@xstate/react': '7.0.0-alpha.3' } : {}),
           },
         },
         undefined,
         2,
       ),
     );
-    // One install for every tarball: npm resolves the sibling `@taucad/*` and `geospec`
-    // specifiers against the local files instead of their stale registry copies.
-    run('npm', ['install', '--no-save', '--no-audit', '--no-fund', ...tarballs], appRoot);
-
-    const dependencyTree = JSON.parse(run('npm', ['ls', '--json', '--depth=0'], appRoot)) as {
-      dependencies?: Record<string, { version?: string; resolved?: string }>;
-    };
+    // The install saves what it adds to the temporary app: npm 11 reports unsaved packages as
+    // extraneous, which `npm ls` (and so every tree check below) counts as a problem.
+    run('npm', ['install', '--no-audit', '--no-fund', ...plan.installArguments], appRoot);
 
     assertSingleZodInstance(appRoot);
-    if (packageDirectories.includes('packages/plugins/tscircuit')) {
+    if (plan.names.includes('@taucad/tscircuit')) {
       assertTscircuitInstallShape(appRoot);
     }
-
-    const specifiers: string[] = [];
-    const instantiations: Record<string, string> = {};
-    const failureContext = new Map<string, readonly string[]>();
-    let assetUrls = 0;
-    for (const packageDirectory of packageDirectories) {
-      const sourceManifest = JSON.parse(
-        readFileSync(resolve(repositoryRoot, packageDirectory, 'package.json'), 'utf8'),
-      ) as Manifest;
-      const installedRoot = join(appRoot, 'node_modules', sourceManifest.name);
-      const installed = JSON.parse(readFileSync(join(installedRoot, 'package.json'), 'utf8')) as Manifest;
-
-      const violations = manifestViolations(installed, bundledLibraryNames);
-      invariant(violations.length === 0, violations.join('\n'));
-
-      for (const required of requiredArtifactPaths(installed)) {
-        invariant(
-          existsSync(join(installedRoot, required)),
-          `${installed.name} ships a manifest path that the installed tree lacks: ${required}`,
-        );
-      }
-
-      assetUrls += assertAssetUrlsResolve(installedRoot, installed.name);
-
-      const resolvedFrom = dependencyTree.dependencies?.[installed.name];
-      invariant(
-        resolvedFrom?.version === installed.version && resolvedFrom.resolved?.startsWith('file:') === true,
-        `${installed.name} did not resolve from its local TGZ: ${JSON.stringify(resolvedFrom)}`,
-      );
-
-      const peerDependencies = Object.keys(installed.peerDependencies ?? {});
-      for (const specifier of importableSpecifiers(installed)) {
-        specifiers.push(specifier);
-        failureContext.set(specifier, peerDependencies);
-      }
-      const probe = instantiationProbes[installed.name];
-      if (probe !== undefined) {
-        const file = `./instantiate-${installed.name.replaceAll(/\W/gu, '-')}.mjs`;
-        writeFileSync(join(appRoot, file), probe);
-        instantiations[installed.name] = file;
-        failureContext.set(`${installed.name} (instantiate)`, peerDependencies);
-      }
+    if (plan.previewNames !== undefined) {
+      assertSiblingsFromPreview(appRoot, plan.previewNames);
     }
-    console.log(`npm install: ${packageDirectories.length} TGZ resolved from disk, no registry copies.`);
+
+    const { specifiers, instantiations, failureContext, assetUrls } = verifyInstalledPackages(appRoot, plan);
+    console.log(`npm install: ${String(plan.names.length)} ${plan.sourceLabel}.`);
     console.log(`Asset URLs: ${String(assetUrls)} relative or exported package reference(s) resolve after install.`);
 
     writeFileSync(join(appRoot, 'probe-plan.json'), JSON.stringify({ specifiers, instantiations }));
@@ -1157,7 +1435,7 @@ const main = async (): Promise<void> => {
     );
 
     if (existsSync(join(appRoot, 'node_modules/@taucad/tscircuit'))) {
-      await runInstalledTscircuit(appRoot);
+      await runInstalledTscircuit(appRoot, zod.version);
     }
     const runtimeRoot = join(appRoot, 'node_modules/@taucad/runtime');
     if (existsSync(runtimeRoot)) {
@@ -1171,7 +1449,10 @@ const main = async (): Promise<void> => {
         await runInstalledReactRuntime(appRoot);
       }
     }
-    console.log('npm-local TGZ install and published-surface smoke passed.');
+    if (existsSync(join(appRoot, 'node_modules/@taucad/cli'))) {
+      runCliExport(temporaryRoot, appRoot);
+    }
+    console.log(`npm-local install (${plan.sourceLabel}) and published-surface smoke passed.`);
     passed = true;
   } finally {
     if (passed) {

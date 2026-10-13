@@ -13,7 +13,13 @@
  */
 
 import type { FeatureFlagName, FeatureFlags } from '#flags/flag.constants.js';
-import { featureFlagsSchema, featureFlagDefaults, featureFlagStorageKey } from '#flags/flag.constants.js';
+import {
+  featureFlagsSchema,
+  featureFlagDefaults,
+  featureFlagStorageKey,
+  featureFlagNames,
+  flagRegistry,
+} from '#flags/flag.constants.js';
 
 type MinimalReadStorage = Pick<Storage, 'getItem'>;
 type MinimalStorage = Pick<Storage, 'getItem' | 'setItem'>;
@@ -43,7 +49,13 @@ export function resolveFlags(storage?: MinimalReadStorage): FeatureFlags {
     }
 
     const parsed: unknown = JSON.parse(raw);
-    return featureFlagsSchema.parse(typeof parsed === 'object' && parsed !== null ? parsed : {});
+    const resolved = featureFlagsSchema.parse(typeof parsed === 'object' && parsed !== null ? parsed : {});
+    for (const name of featureFlagNames) {
+      if (!flagRegistry[name].showInExperimental) {
+        resolved[name] = featureFlagDefaults[name];
+      }
+    }
+    return resolved;
   } catch {
     return featureFlagDefaults;
   }

@@ -28,6 +28,13 @@ beforeEach(() => {
 });
 
 describe('isFeatureEnabled', () => {
+  it('should keep code-only flags at their defaults even with stored overrides', () => {
+    const storage = createMockStorage({ 'tau:flags': JSON.stringify({ automaticReload: true }) });
+    expect(isFeatureEnabled('automaticReload', storage)).toBe(false);
+    setFlagOverrides({ automaticReload: true }, storage);
+    expect(isFeatureEnabled('automaticReload', storage)).toBe(false);
+  });
+
   it('should disable WebGPU by default and persist an opt-in', () => {
     const storage = createMockStorage();
     expect(isFeatureEnabled('webGpu', storage)).toBe(false);

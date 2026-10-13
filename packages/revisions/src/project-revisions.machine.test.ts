@@ -168,6 +168,7 @@ const start = (): Harness => {
           actors: {
             readRemote: promises.actor('readRemote'),
             writeRemote: promises.actor('writeRemote'),
+            probe: promises.actor('probe'),
             removeRemote: promises.actor('removeRemote'),
             authorize: promises.actor('authorize'),
             validate: promises.actor('validate'),
@@ -646,6 +647,37 @@ describe('projectRevisionsMachine', () => {
     expect(harness.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-live');
 
     harness.actor.stop();
+  });
+
+  /* R22: a host restores the pin it remembered across a reload, which may name a checkout discarded since. */
+  it('keeps the live checkout when a restored pin names a checkout the registry no longer lists (R22)', () => {
+    const harness = start();
+
+    registerCheckouts(harness, [live]);
+    harness.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
+
+    expect(harness.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-live');
+    expect(selectRevisionStatus(harness.actor.getSnapshot())).toMatchObject({
+      checkoutId: 'checkout-live',
+      checkoutRoot: '/projects/project-1',
+      line: { kind: 'unborn', name: 'main' },
+    });
+
+    harness.actor.stop();
+  });
+
+  it('checks a pin restored before the registry answers against its first listing (R22)', () => {
+    const kept = start();
+    kept.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
+    registerCheckouts(kept);
+    expect(kept.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-b');
+    kept.actor.stop();
+
+    const gone = start();
+    gone.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
+    registerCheckouts(gone, [live]);
+    expect(gone.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-live');
+    gone.actor.stop();
   });
 
   it('re-roots a switch onto a branch that already has a checkout', () => {
@@ -2115,6 +2147,28 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  /* D91, audit R1: *Rename* refuses a branch the remote holds, checked out or not, so the row says so before it is asked. */
+  it('should carry the fetch’s word on the remote onto a checked-out branch’s row', async () => {
+    const harness = start();
+
+    registerCheckouts(harness, [live, linked]);
+    await flush();
+    harness.actor.send({
+      type: 'branchesFetched',
+      branches: [
+        { name: 'main', head: 'rev-1', onRemote: true },
+        { name: 'agent/b', head: 'rev-2', onRemote: false },
+      ],
+    });
+    await flush();
+
+    const rows = selectRevisionStatus(harness.actor.getSnapshot()).branches;
+    expect(rows.find((row) => row.name === 'main')).toMatchObject({ checkoutId: 'checkout-live', onRemote: true });
+    expect(rows.find((row) => row.name === 'agent/b')).toMatchObject({ checkoutId: 'checkout-b', onRemote: false });
+
+    harness.actor.stop();
+  });
+
   /* 25–28: the conflict cards (W10, S33). */
   it('spawns one resolution child per undecided conflict and retires it once the line contains it (D14)', async () => {
     const harness = start();
@@ -2358,6 +2412,73 @@ describe('projectRevisionsMachine', () => {
     await flush();
     expect(selectRevisionStatus(harness.actor.getSnapshot()).sync.state).toBe('noRemote');
 
+    harness.actor.stop();
+  });
+
+  /*
+   * R2 and I2 at the root: the root retires the scheduler on every `connect`,
+   * so a replacement the new remote refuses must hand the old remote back to
+   * it, with the revision it still owes that remote, and never read as backed up.
+   */
+  it('keeps the recorded remote and the revision it is owed when a replacement is refused (R2)', async () => {
+    const harness = start();
+    const origin = { name: 'origin', url: 'https://github.com/o/design.git', kind: 'git' } as const;
+    const owed = {
+      ref: 'refs/heads/main',
+      head: 'rev-1',
+      expected: undefined,
+      reason: 'unacknowledged',
+      recordedAt: 1,
+      remote: 'origin',
+    } as const;
+    const syncStates: string[] = [];
+    const subscription = harness.actor.subscribe((snapshot) => {
+      syncStates.push(selectRevisionStatus(snapshot).sync.state);
+    });
+
+    await readyRegistry(harness, [live]);
+    harness.promises.settle('readRemote', { output: { remote: origin } });
+    harness.promises.settle('readPending', { output: { version: 1, entries: [owed] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'origin', branch: 'main' } });
+    await flush();
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(1);
+
+    harness.actor.send({
+      type: 'remote',
+      event: {
+        type: 'connect',
+        kind: 'git',
+        url: 'https://github.com/o/r.git',
+        provider: 'github',
+        repositoryId: '99',
+      },
+    });
+    await flush();
+    harness.promises.settle('probe', {
+      error: new RevisionPortError(
+        'REMOTE_NOT_FOUND',
+        'This remote has no repository at this address for your account.',
+      ),
+    });
+    await flush();
+
+    const status = selectRevisionStatus(harness.actor.getSnapshot());
+    expect(harness.promises.inputsFor('writeRemote')).toStrictEqual([]);
+    expect(harness.promises.inputsFor('removeRemote')).toStrictEqual([]);
+    expect(status.remote).toMatchObject({
+      kind: 'git',
+      url: origin.url,
+      phase: 'connected',
+      refusedReplacement: { url: 'https://github.com/o/r.git', reason: 'notFound' },
+    });
+    /* The scheduler is back on the old remote, still owing it the revision. */
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(2);
+    expect(harness.promises.inputsFor('syncFetch').at(-1)).toMatchObject({ remote: 'origin' });
+    expect(status.sync.pendingCount).toBe(1);
+    expect(syncStates).not.toContain('backedUp');
+
+    subscription.unsubscribe();
     harness.actor.stop();
   });
 

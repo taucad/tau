@@ -60,6 +60,7 @@ jobs:
 
       - name: Check host and toolchain
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           sw_vers
           sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
           cmake --version
@@ -67,13 +68,18 @@ jobs:
           xcrun --find clang++
 
       - name: Prepare build123d Python (desktop producer)
-        run: pnpm nx run desktop:prepare-build123d-python-macos
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          pnpm nx run desktop:prepare-build123d-python-macos
 
       - name: Prepare PicoGK .NET (desktop producer)
-        run: pnpm nx run desktop:prepare-picogk-dotnet-macos
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          pnpm nx run desktop:prepare-picogk-dotnet-macos
 
       - name: Republish the PicoGK worker with ReadyToRun (S2)
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           mkdir -p "$RUNNER_TEMP/trees/python" "$RUNNER_TEMP/trees/picogk" "$RUNNER_TEMP/producer"
           scripts/spikes/native-deps/publish-picogk-r2r.sh apps/desktop/resources/picogk/darwin-arm64 \
             "$RUNNER_TEMP/trees/picogk-r2r" "$RUNNER_TEMP/producer/s2-layer.json"
@@ -81,6 +87,7 @@ jobs:
 
       - name: Pack the trees
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           cp -R apps/desktop/resources/python/darwin-arm64 "$RUNNER_TEMP/trees/python/darwin-arm64"
           cp -R apps/desktop/resources/picogk/darwin-arm64 "$RUNNER_TEMP/trees/picogk/darwin-arm64"
           tar -cf "$RUNNER_TEMP/producer/trees.tar" -C "$RUNNER_TEMP/trees" .
@@ -103,6 +110,13 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+      - name: Publish the producer records as check annotations
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          cp "$RUNNER_TEMP"/producer/*.json "$RUNNER_TEMP/out/" 2> /dev/null || true
+          scripts/spikes/native-deps/annotate.sh
+
   s1:
     name: S1 bytecode precompilation
     needs: produce
@@ -123,6 +137,7 @@ jobs:
       - &unpack-trees
         name: Unpack the trees
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           mkdir -p "$RUNNER_TEMP/trees" "$RUNNER_TEMP/out"
           tar -xf "$RUNNER_TEMP/artifact/trees.tar" -C "$RUNNER_TEMP/trees"
           rm -f "$RUNNER_TEMP/artifact/trees.tar"
@@ -133,6 +148,7 @@ jobs:
 
       - name: Precompile a clone with the D22 command
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           clone="$TREES/python-compiled"
           /bin/cp -c -R "$TREES/python/darwin-arm64" "$clone"
           pyc_count() { find "$1" -name '*.pyc' | wc -l | tr -d ' '; }
@@ -160,6 +176,7 @@ jobs:
 
       - name: Measure cold handshakes (purged page cache, interleaved, three runs each)
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           mkdir -p "$OUT/s1"
           spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
           for run in 1 2 3; do
@@ -176,12 +193,17 @@ jobs:
       - &summarize
         name: Summarize against the charter line
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           lower=$(echo "$SPIKE_ID" | tr '[:upper:]' '[:lower:]')
           extra=()
           if [ -f "$OUT/$lower-extra.json" ]; then extra=(--extra "$OUT/$lower-extra.json"); fi
           node --import @oxc-node/core/register scripts/spikes/native-deps/summarize.mts --spike "$SPIKE_ID" \
             --dir "$OUT/$lower" --out "$OUT/$lower-summary.json" --title "$SPIKE_TITLE" ${extra[@]+"${extra[@]}"}
 
+      - &annotate
+        name: Publish the results as check annotations
+        if: always()
+        run: scripts/spikes/native-deps/annotate.sh
       - &upload-records
         name: Upload the records
         if: always()
@@ -213,6 +235,7 @@ jobs:
 
       - name: Measure cold handshake and first build (purged page cache, interleaved, three runs each)
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           mkdir -p "$OUT/s2"
           jq '{layer: .}' "$RUNNER_TEMP/producer/s2-layer.json" > "$OUT/s2-extra.json"
           spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
@@ -227,6 +250,7 @@ jobs:
           done
 
       - *summarize
+      - *annotate
       - *upload-records
 
   s3:
@@ -244,6 +268,7 @@ jobs:
       - *unpack-trees
       - name: Calibrate in-memory sha256 throughput
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           node --input-type=module -e '
             import { createHash, randomBytes } from "node:crypto";
             const bytes = randomBytes(256 * 1024 * 1024);
@@ -255,6 +280,7 @@ jobs:
 
       - name: Verify both closures (three runs per mode)
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           mkdir -p "$OUT/s3" "$OUT/s3-receipts"
           spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
           threads=$(sysctl -n hw.ncpu)
@@ -277,6 +303,7 @@ jobs:
           rm -f "$OUT"/s3-receipts/python.json "$OUT"/s3-receipts/picogk.json
 
       - *summarize
+      - *annotate
       - *upload-records
 
   s5:
@@ -299,6 +326,7 @@ jobs:
       - *unpack-trees
       - name: Build the floor and Accelerate variants
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           sw_vers
           scripts/spikes/native-deps/wheel-tier-variant.sh "$TREES/python/darwin-arm64" "$TREES/python-floor" 12.0 "$OUT/s5-floor-tags.json"
           scripts/spikes/native-deps/wheel-tier-variant.sh "$TREES/python/darwin-arm64" "$TREES/python-accelerate" 14.0 "$OUT/s5-accelerate-tags.json"
@@ -306,6 +334,7 @@ jobs:
 
       - name: Run the build123d workload (purged page cache, interleaved, five runs each)
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           mkdir -p "$OUT/s5"
           spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
           for run in 1 2 3 4 5; do
@@ -317,6 +346,7 @@ jobs:
           done
 
       - *summarize
+      - *annotate
       - *upload-records
 
   s6:
@@ -335,6 +365,7 @@ jobs:
       - *unpack-trees
       - name: Ensure Rosetta 2
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           if ! /usr/bin/arch -x86_64 /usr/bin/true 2> /dev/null; then
             sudo softwareupdate --install-rosetta --agree-to-license
           fi
@@ -342,10 +373,13 @@ jobs:
           /usr/bin/arch -x86_64 /usr/sbin/sysctl -n sysctl.proc_translated
 
       - name: Prepare the darwin-x64 build123d Python (desktop producer, x64 target)
-        run: node --import @oxc-node/core/register apps/desktop/scripts/prepare-build123d-python.mts --target darwin-x64
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          node --import @oxc-node/core/register apps/desktop/scripts/prepare-build123d-python.mts --target darwin-x64
 
       - name: Bundle the benchmark for both Node architectures
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           echo "ARM_NODE=$(command -v node)" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/bench"
           node_modules/.bin/esbuild scripts/spikes/native-deps/build123d-bench.mts --bundle --platform=node --format=esm \
@@ -360,6 +394,7 @@ jobs:
 
       - name: Run the build123d workload (arm64 vs x64 under Rosetta, interleaved, three runs each)
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           x64_node=$(command -v node)
           file "$ARM_NODE" "$x64_node"
           /usr/bin/arch -x86_64 "$x64_node" -p 'JSON.stringify({ arch: process.arch, cpu: require("node:os").cpus()[0].model })'
@@ -378,6 +413,7 @@ jobs:
       - name: Restore arm64 Node for the summary
         run: echo "$(dirname "$ARM_NODE")" >> "$GITHUB_PATH"
       - *summarize
+      - *annotate
       - *upload-records
 
   s13:
@@ -395,6 +431,7 @@ jobs:
       - *unpack-trees
       - name: Fetch and digest-check the payloads (data only)
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
           payloads="$RUNNER_TEMP/payloads"
           mkdir -p "$payloads"
@@ -407,6 +444,7 @@ jobs:
 
       - name: Unpack each closure (purged page cache, three runs, with and without hash-while-write)
         run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           mkdir -p "$OUT/s13"
           spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
           for run in 1 2 3; do
@@ -424,4 +462,5 @@ jobs:
           done
 
       - *summarize
+      - *annotate
       - *upload-records

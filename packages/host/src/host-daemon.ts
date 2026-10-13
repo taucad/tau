@@ -1489,10 +1489,17 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         emit({ type: 'warning', code: 'ZOO_TOKEN', message: error instanceof Error ? error.message : String(error) });
       }
     })();
+    /* A stored credential is a local read, so a host that is already paired is
+     * paired before its agent channel opens: a Tau run sent the moment the
+     * channel is ready is never refused `HOST_NOT_PAIRED`. */
+    const storedCredential = await readHostCredential();
+    if (storedCredential) {
+      pairedWith(storedCredential);
+    }
     /* Before pairing: the local agent channel and any served UI are reachable
-     * the moment the daemon starts. Until pairing lands the credential state is
-     * `unpaired`, so reads and external agents serve and a Tau run is refused
-     * `HOST_NOT_PAIRED` (RH-R13). */
+     * the moment the daemon starts. Until pairing lands the credential state of
+     * a host with no stored credential is `unpaired`, so reads and external
+     * agents serve and a Tau run is refused `HOST_NOT_PAIRED` (RH-R13). */
     if (options.agent) {
       await startAgent(options.agent);
     }
@@ -1521,7 +1528,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         await delay(Math.min(1000 * 2 ** attempt, reconnectDelayMaximum), undefined, { signal: shutdown.signal });
       }
     };
-    let hostCredential = (await readHostCredential()) ?? (await pair());
+    let hostCredential = storedCredential ?? (await pair());
     pairedWith(hostCredential);
     let reconnectAttempt = 0;
     while (!shutdown.signal.aborted) {

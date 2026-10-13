@@ -432,7 +432,7 @@ test('deletes the chat record and its draft stage and keeps the tombstoned chat 
   const row = selectors.getByCss('[data-slot="chat-trigger"]').filter({ hasText: 'Attachments chat' });
   await target.hover(row);
   await target.click(selectors.getByRole('button', { name: 'More actions for Attachments chat' }));
-  await target.click(selectors.getByRole('menuitem', { name: 'Delete' }));
+  await target.click(selectors.getByRole('menuitem', { name: 'Move to Trash' }));
 
   await expect.poll(async () => readHomeJson(recordPaths.chat(projectId, chatId)), { timeout: 30_000 }).toBeUndefined();
   await expectFiles(recordPaths.chatDraftAttachments(projectId, chatId), []);

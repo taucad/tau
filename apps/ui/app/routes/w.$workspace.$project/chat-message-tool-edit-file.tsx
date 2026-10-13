@@ -2,7 +2,7 @@ import { Pencil } from 'lucide-react';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import { CollapsibleFileOperation } from '#components/chat/chat-tool-file-operation.js';
-import { CopyButton } from '#components/copy-button.js';
+import { CopyButton } from '@taucad/ui/components/copy-button';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import {
   ChatToolCard,

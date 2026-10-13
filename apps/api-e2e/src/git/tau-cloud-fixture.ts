@@ -60,6 +60,33 @@ const psql = async (statement: string): Promise<string> => {
 };
 
 /**
+ * Post to a Better Auth email route, waiting out its per-origin rate limit.
+ *
+ * @param route - The route under `/v1/auth/`.
+ * @param headers - The request headers, origin included.
+ * @param body - The JSON body.
+ * @returns The first response that is not a `429`, or the last `429` once the retries run out.
+ */
+const postAuthWaitingOutRateLimit = async (
+  route: string,
+  headers: Readonly<Record<string, string>>,
+  body: unknown,
+): Promise<Response> => {
+  const post = async (): Promise<Response> =>
+    fetch(`${gitE2EApiUrl}/v1/auth/${route}`, { method: 'POST', headers, body: JSON.stringify(body) });
+  let response = await post();
+  for (let attempt = 0; response.status === 429 && attempt < 6; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- waiting out a rate limit is sequential by definition.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 5000);
+    });
+    // oxlint-disable-next-line no-await-in-loop -- ditto: one retry at a time.
+    response = await post();
+  }
+  return response;
+};
+
+/**
  * Sign up, verify, sign in and fund one throwaway owner.
  *
  * @param label - A short name for the account, so a stranded row says which test left it.
@@ -75,36 +102,19 @@ export const seedTauCloudOwner = async (label: string): Promise<TauCloudOwner> =
   assertTestEmail(account.email);
   const headers = { 'content-type': 'application/json', origin: gitE2EFrontendUrl };
 
-  /* Better Auth allows three sign-ups per ten seconds per origin, and this file
+  /* Better Auth rate-limits sign-up and sign-in per origin, and this file
      seeds three accounts before its first case. Waiting out a `429` here rather
      than spacing the call sites keeps the limit the fixture's problem: the next
      case that needs one more owner does not have to know about it. */
-  let signUp = await fetch(`${gitE2EApiUrl}/v1/auth/sign-up/email`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(account),
-  });
-  for (let attempt = 0; signUp.status === 429 && attempt < 6; attempt += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- waiting out a rate limit is sequential by definition.
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 5000);
-    });
-    // oxlint-disable-next-line no-await-in-loop -- ditto: one retry at a time.
-    signUp = await fetch(`${gitE2EApiUrl}/v1/auth/sign-up/email`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(account),
-    });
-  }
+  const signUp = await postAuthWaitingOutRateLimit('sign-up/email', headers, account);
   if (!signUp.ok) {
     throw new Error(`Git E2E sign-up failed with HTTP ${String(signUp.status)}: ${await signUp.text()}`);
   }
   await psql(`UPDATE "user" SET email_verified = true WHERE email = '${account.email}';`);
 
-  const signIn = await fetch(`${gitE2EApiUrl}/v1/auth/sign-in/email`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ email: account.email, password: account.password }),
+  const signIn = await postAuthWaitingOutRateLimit('sign-in/email', headers, {
+    email: account.email,
+    password: account.password,
   });
   if (!signIn.ok) {
     throw new Error(`Git E2E sign-in failed with HTTP ${String(signIn.status)}: ${await signIn.text()}`);

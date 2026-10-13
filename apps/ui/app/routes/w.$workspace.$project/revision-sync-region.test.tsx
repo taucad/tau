@@ -272,6 +272,23 @@ describe('RevisionSyncRegion', () => {
     );
   });
 
+  it('should open the branch on GitHub when the pane is on one (D92)', async () => {
+    const user = userEvent.setup();
+    renderRegion(
+      facet({ kind: 'git', phase: 'connected', url: 'https://github.com/o/design.git', provider: 'github' }),
+      syncFacet({ state: 'backedUp' }),
+      { branch: 'audit/g1#2' },
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Backup settings' }));
+
+    /* Each segment encoded, the separators kept: GitHub reads `/tree/<ref>` greedily. */
+    expect(screen.getByRole('menuitem', { name: 'Open on GitHub' })).toHaveAttribute(
+      'href',
+      'https://github.com/o/design/tree/audit/g1%232',
+    );
+  });
+
   it('can change the linked repository or GitHub account without disconnecting first', async () => {
     const user = userEvent.setup();
     renderRegion(
@@ -503,6 +520,10 @@ describe('RevisionSyncRegion', () => {
       }),
     );
 
+    /* D94: a connected GitHub account did save a credential, so its sentence stands. */
+    expect(screen.getByRole('alert', { name: 'GitHub connection' })).toHaveTextContent(
+      'The remote rejected the saved credentials.',
+    );
     await user.click(screen.getByRole('button', { name: 'Reconnect GitHub' }));
     await user.click(screen.getByRole('button', { name: 'Pick GitHub repository' }));
 
@@ -682,15 +703,19 @@ describe('RevisionSyncRegion', () => {
     expect(screen.queryByText(/^Replace /u)).not.toBeInTheDocument();
   });
 
-  /* D18: a host that is not GitHub is offered neither GitHub nor Tau copy. */
-  it('should say the remote rejected the credentials, and retry, for a host that is not GitHub', async () => {
+  /* D18: a host that is not GitHub is offered neither GitHub nor Tau copy.
+   * D94: and, being anonymous, is never told it had saved credentials. */
+  it('should say the remote asked for a sign-in Tau does not have, and retry, for a host that is not GitHub', async () => {
     const user = userEvent.setup();
     const region = renderRegion(
       facet({ kind: 'git', phase: 'reconnectRequired', url: 'https://gitlab.example.com/o/r.git' }),
     );
 
     const alert = screen.getByRole('alert', { name: 'Remote credentials' });
-    expect(alert).toHaveTextContent('The remote rejected the saved credentials.');
+    expect(alert).toHaveTextContent(
+      'This remote asked for a sign-in Tau does not have, or has no repository at this address.',
+    );
+    expect(alert).not.toHaveTextContent(/saved credentials/u);
     expect(screen.queryByRole('button', { name: 'Reconnect GitHub' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Retry' }));
@@ -819,6 +844,42 @@ describe('RevisionSyncRegion', () => {
     );
 
     expect(screen.getByText(copy, { exact: true })).toBeInTheDocument();
+  });
+
+  /* D100: signed out, this device withholds its GitHub credential; GitHub refused nothing. */
+  it.each([
+    [0, 'Backed up'],
+    [1, 'Not backed up · 1 revision'],
+  ] as const)('should ask a signed-out viewer to sign in when %i revisions wait, saying “%s”', (pendingCount, copy) => {
+    renderRegion(
+      facet({ kind: 'git', provider: 'github', phase: 'connected', url: 'https://github.com/rifont/example.git' }),
+      syncFacet({
+        state: 'failed',
+        reason: 'unauthorized',
+        pendingCount,
+        error: 'Sign in to Tau to sync with GitHub.',
+      }),
+      { isSignedOut: true },
+    );
+
+    const row = screen.getByRole('status', { name: 'Backup status' });
+    expect(within(row).getByText(copy, { exact: true })).toBeInTheDocument();
+    expect(within(row).getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/auth/sign-in');
+    expect(row).not.toHaveTextContent('refused access');
+    expect(screen.queryByRole('button', { name: 'Reconnect GitHub' })).not.toBeInTheDocument();
+  });
+
+  it('should offer a signed-in viewer Reconnect GitHub for the same refusal (D68)', () => {
+    renderRegion(
+      facet({ kind: 'git', provider: 'github', phase: 'connected', url: 'https://github.com/rifont/example.git' }),
+      syncFacet({ state: 'failed', reason: 'unauthorized', pendingCount: 0, error: 'GitHub refused the credential.' }),
+      { isSignedOut: false },
+    );
+
+    const row = screen.getByRole('status', { name: 'Backup status' });
+    expect(within(row).getByText('Backed up · GitHub refused access', { exact: true })).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: 'Reconnect GitHub' })).toBeInTheDocument();
+    expect(within(row).queryByRole('link', { name: 'Sign in' })).not.toBeInTheDocument();
   });
 
   it('says nothing about backup when the project has no remote', () => {
@@ -957,6 +1018,28 @@ describe('RevisionSyncRegion with a moved GitHub repository (D11)', () => {
     });
     const row = screen.getByRole('status', { name: 'Backup status' });
     expect(within(row).getByText(refused.error ?? '')).toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: 'Update remote' })).not.toBeInTheDocument();
+  });
+
+  /* D99: GitHub serves a renamed repository's old address without redirecting, so no sync ever fails. */
+  it('should offer the new address on a backed-up row when GitHub reports the repository renamed (D99)', async () => {
+    githubRepository.mockResolvedValue(renamed);
+    renderRegion(bound, syncFacet({ state: 'backedUp' }), { projectId: 'p1' });
+
+    const row = screen.getByRole('status', { name: 'Backup status' });
+    expect(await within(row).findByText('This repository moved to octo/renamed.')).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: 'Update remote' })).toBeInTheDocument();
+  });
+
+  it('should add nothing to a backed-up row whose address still holds (D99)', async () => {
+    githubRepository.mockResolvedValue({ ...renamed, cloneUrl: 'https://github.com/o/r.git' });
+    renderRegion(bound, syncFacet({ state: 'backedUp' }), { projectId: 'p1' });
+
+    await waitFor(() => {
+      expect(githubRepository).toHaveBeenCalledOnce();
+    });
+    const row = screen.getByRole('status', { name: 'Backup status' });
+    expect(within(row).queryByText(/moved/u)).not.toBeInTheDocument();
     expect(within(row).queryByRole('button', { name: 'Update remote' })).not.toBeInTheDocument();
   });
 });

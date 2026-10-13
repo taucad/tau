@@ -4,7 +4,7 @@
       "slug": "cad-build123d",
       "name": "Build123d authoring",
       "description": "Guides native Build123d BRep authoring in main.py. Use when creating or editing trusted Python CAD projects in Tau Desktop.",
-      "version": "0.1.0-beta.0",
+      "version": "0.1.0-beta.1",
       "whenToUse": "Use when creating or editing trusted Python CAD projects in Tau Desktop.",
       "directory": "cad-build123d",
       "files": [

@@ -1,0 +1,51 @@
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+// oxlint-disable-next-line no-restricted-imports -- `pnpm plugin:dev` runs this script by path; the `#` import map covers only src/.
+import { desktopConfigPath, desktopServerName, previewUrl, withDesktopServer } from './dev.js';
+
+describe('desktopConfigPath', () => {
+  it("names Claude Desktop's config file on each platform", () => {
+    expect(desktopConfigPath('darwin', '/Users/a', {})).toBe(
+      join('/Users/a', 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
+    );
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Windows names the variable APPDATA.
+    expect(desktopConfigPath('win32', 'C:/Users/a', { APPDATA: 'C:/Users/a/AppData/Roaming' })).toBe(
+      join('C:/Users/a/AppData/Roaming', 'Claude', 'claude_desktop_config.json'),
+    );
+    expect(desktopConfigPath('linux', '/home/a', {})).toBe(
+      join('/home/a', '.config', 'Claude', 'claude_desktop_config.json'),
+    );
+  });
+});
+
+describe('withDesktopServer', () => {
+  const server = { command: '/usr/bin/node', args: ['/repo/packages/agent-plugin/dist/launch.mjs', '--project', '/p'] };
+
+  it('adds the tau-dev server and keeps every other server and setting', () => {
+    const config = { mcpServers: { tau: { command: 'node', args: ['launch.mjs'] } }, globalShortcut: 'Alt+Space' };
+
+    expect(withDesktopServer(config, server)).toEqual({
+      mcpServers: { tau: { command: 'node', args: ['launch.mjs'] }, [desktopServerName]: server },
+      globalShortcut: 'Alt+Space',
+    });
+  });
+
+  it('starts a config when there is none', () => {
+    expect(withDesktopServer(undefined, server)).toEqual({ mcpServers: { [desktopServerName]: server } });
+  });
+
+  it('removes only the tau-dev server', () => {
+    const config = { mcpServers: { tau: { command: 'node' }, [desktopServerName]: server } };
+
+    expect(withDesktopServer(config, undefined)).toEqual({ mcpServers: { tau: { command: 'node' } } });
+  });
+});
+
+describe('previewUrl', () => {
+  it('names the long-form pkg.pr.new tarball of a workspace package', () => {
+    expect(previewUrl('@taucad/agent-plugin', 'abc1234')).toBe(
+      'https://pkg.pr.new/taucad/tau/@taucad/agent-plugin@abc1234',
+    );
+  });
+});

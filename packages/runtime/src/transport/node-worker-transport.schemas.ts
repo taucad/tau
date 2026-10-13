@@ -9,8 +9,11 @@ import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-module.schema.js';
 import type { ComputeBinding } from '#types/runtime-compute.types.js';
+import type { NodeWorkerClientOptions, NodeWorkerData } from '#transport/node-worker-client.js';
 
-const workerCtorSchema = z.custom<unknown>((value) => typeof value === 'function');
+const workerCtorSchema = z.custom<NonNullable<NodeWorkerClientOptions['workerCtor']>>(
+  (value) => typeof value === 'function',
+);
 
 const runtimeFileSystemSchema = z.custom<RuntimeFileSystem>(
   (value) => value === undefined || isRuntimeFileSystem(value),
@@ -26,6 +29,11 @@ export const nodeWorkerClientOptionsSchema = z
      * unit-test injection of a fake worker.
      */
     workerCtor: workerCtorSchema.optional(),
+    /**
+     * Structured-cloned into the worker as `workerData`. Not validated here:
+     * `new Worker` throws `DataCloneError` on a value it cannot clone.
+     */
+    workerData: z.custom<NodeWorkerData>().optional(),
     /**
      * Optional shared-memory pool descriptor.
      */

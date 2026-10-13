@@ -1,3 +1,4 @@
+import { once } from 'node:events';
 import { writeFile } from 'node:fs/promises';
 
 /** Run one permission probe. */
@@ -7,6 +8,29 @@ const denied = async (probe) => {
     return false;
   } catch {
     return true;
+  }
+};
+
+/**
+ * Whether a worker started with `options` is refused, or cannot read a file
+ * outside the child's grants.
+ *
+ * @param options - The worker's own options.
+ * @returns Whether it was contained.
+ */
+const refusesWorker = async (options) => {
+  const { Worker } = /** @type {typeof import('node:worker_threads')} */ (process.getBuiltinModule('worker_threads'));
+  const workerOptions = /** @type {import('node:worker_threads').WorkerOptions} */ (options);
+  try {
+    const worker = new Worker(
+      "const { parentPort } = require('node:worker_threads'); let read = true; try { require('node:fs').readFileSync('/etc/hosts'); } catch { read = false; } parentPort.postMessage(read);",
+      { eval: true, ...workerOptions },
+    );
+    const answer = await once(worker, 'message');
+    await worker.terminate();
+    return answer[0] !== true;
+  } catch (error) {
+    return error instanceof Error && 'code' in error && error.code === 'ERR_ACCESS_DENIED';
   }
 };
 
@@ -36,6 +60,9 @@ const handleStart = async (message) => {
   );
   const wasi = /** @type {typeof import('node:wasi')} */ (process.getBuiltinModule('wasi'));
   const inspector = /** @type {typeof import('node:inspector')} */ (process.getBuiltinModule('inspector'));
+  const os = /** @type {typeof import('node:os')} */ (process.getBuiltinModule('os'));
+  const path = process.getBuiltinModule('path');
+  const url = /** @type {typeof import('node:url')} */ (process.getBuiltinModule('url'));
   const networkResponse = await fetch(networkUrl);
   const proof = {
     filesystem: await denied(
@@ -54,6 +81,14 @@ const handleStart = async (message) => {
         await worker.terminate();
       })(),
     ),
+    /* A worker carries its own permission flags: Node cannot let the host start
+     * workers and refuse these, so the child may start none (operator ruling Q8). */
+    workerExecArgvEscalation: await refusesWorker({
+      execArgv: ['--permission', '--allow-fs-read=*', '--allow-child-process'],
+    }),
+    workerNodeOptionsEscalation: await refusesWorker({
+      env: { ...process.env, NODE_OPTIONS: '--allow-fs-read=*' },
+    }),
     addon: await denied(
       (async () => {
         process.dlopen({ exports: {} }, new URL('missing.node', import.meta.url).pathname);
@@ -70,6 +105,14 @@ const handleStart = async (message) => {
         inspector.close();
       })(),
     ),
+    /* A bundling kernel writes its bundle to `os.tmpdir()` and imports it back. */
+    temporaryDirectoryReadable: await (async () => {
+      const temporaryFile = path.join(os.tmpdir(), 'permission-proof.mjs');
+      await writeFile(temporaryFile, 'export default true;');
+      const module = /** @type {{ default: unknown }} */ (await import(url.pathToFileURL(temporaryFile).href));
+      return module.default === true;
+    })().catch(() => false),
+    temporaryDirectory: os.tmpdir(),
     environmentSecretAbsent: process.env.TAU_HOST_TEST_SECRET === undefined,
     network: networkResponse.ok,
     arbitraryNetworkAllowed: await (async () => {

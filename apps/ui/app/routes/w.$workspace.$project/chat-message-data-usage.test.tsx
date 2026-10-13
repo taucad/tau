@@ -135,7 +135,7 @@ describe('ChatMessageDataUsage', () => {
     renderUsage([usagePart({ operationId: 'op1', attemptId: 'att_1', billingStatus: 'terminal' })]);
 
     await waitFor(() => {
-      expect(screen.getByLabelText(/Tau credits: 1\.23$/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Tau credits: 1$/)).toBeInTheDocument();
     });
     expect(recordBillingRevisionMinimum).toHaveBeenCalledWith({
       environment: 'development',
@@ -160,7 +160,7 @@ describe('ChatMessageDataUsage', () => {
     renderUsage([usagePart({ operationId: 'op1' }), usagePart({ id: 'dat_2', operationId: 'op2' })]);
 
     await waitFor(() => {
-      expect(screen.getByLabelText(/Tau credits: 1\.23 · 1 pending/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Tau credits: 1 · 1 pending/)).toBeInTheDocument();
     });
   });
 
@@ -178,7 +178,7 @@ describe('ChatMessageDataUsage', () => {
     await waitFor(() => {
       expect(screen.getByLabelText(/Tau credits: Pending/)).toBeInTheDocument();
     });
-    expect(screen.queryByLabelText(/1\.23/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Tau credits: 1/)).not.toBeInTheDocument();
   });
 
   /* V6: the transcript is history. An external agent's turn names that agent
@@ -207,7 +207,7 @@ describe('ChatMessageDataUsage', () => {
     renderUsage([usagePart()]);
 
     const trigger = screen.getByRole('button', { name: /^Usage: openai-gpt-5\.5, 14 tokens/ });
-    expect(trigger.className).toContain('size-7');
+    expect(trigger.className).toContain('size-6');
     expect(trigger.querySelector('[data-testid="model-icon-openai"]')).not.toBeNull();
   });
 

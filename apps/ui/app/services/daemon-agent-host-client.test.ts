@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import type { AgentChannelClient, AgentLogEvent, HostRunSnapshot } from '@taucad/agent-host';
-import type { CommandAnswer, HostCommand, ReadRequest } from '@taucad/agent-host/wire';
+import type { CatchUpFrame, CommandAnswer, HostCommand, ReadRequest } from '@taucad/agent-host/wire';
 import { createAgentHostClient } from '#services/agent-host-client.js';
 import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
 
@@ -78,11 +78,20 @@ const fakeChannel = (answer?: (command: HostCommand) => CommandAnswer | undefine
       const events = rows.slice(request.cursor, request.cursor + request.limit);
       return {
         status: 'batch',
+        sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
         chatId: request.chatId,
         cursor: request.cursor,
         nextCursor: request.cursor + events.length,
         endCursor: rows.length,
         events,
+      };
+    },
+    catchUp: async function* catchUp() {
+      yield {
+        type: 'validated',
+        health: { historyIntact: true, newerHistory: false, quarantined: false },
+        position: { cursor: 0, sourceGeneration: 'daemon-source' },
+        observedEndCursor: 0,
       };
     },
     liveEvents: () => empty(),
@@ -94,6 +103,54 @@ const fakeChannel = (answer?: (command: HostCommand) => CommandAnswer | undefine
 };
 
 describe('createDaemonAgentHostTransport', () => {
+  it('recaptures history on the same client after read ownership refusal without declaring transport death', async () => {
+    const channel = fakeChannel();
+    channel.read = async ({ chatId }) => ({ status: 'refused', chatId, reason: 'owner-fenced' });
+    const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
+    const ended = Promise.withResolvers<void>();
+    client.subscribe({ chatId: 'chat-owner-recovery', cursor: 0 }, () => undefined, ended.resolve);
+    try {
+      await ended.promise;
+      const frames: CatchUpFrame[] = [];
+      for await (const frame of client.catchUp({ chatId: 'chat-owner-recovery', limit: 2, maxBytes: 1024 })) {
+        frames.push(frame);
+      }
+      expect(frames).toEqual([
+        {
+          type: 'validated',
+          health: { historyIntact: true, newerHistory: false, quarantined: false },
+          position: { cursor: 0, sourceGeneration: 'daemon-source' },
+          observedEndCursor: 0,
+        },
+      ]);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('forwards the required catch-up stream from its authoritative daemon channel', async () => {
+    const client = createAgentHostClient(createDaemonAgentHostTransport(fakeChannel()));
+    try {
+      const frames: CatchUpFrame[] = [];
+      for await (const frame of client.catchUp({ chatId: 'chat-catch-up', limit: 2, maxBytes: 1024 })) {
+        frames.push(frame);
+      }
+      expect(frames).toEqual([
+        {
+          type: 'validated',
+          health: { historyIntact: true, newerHistory: false, quarantined: false },
+          position: {
+            cursor: 0,
+            sourceGeneration: 'daemon-source',
+          },
+          observedEndCursor: 0,
+        },
+      ]);
+    } finally {
+      await client.close();
+    }
+  });
+
   it('should send a browser admission as one keyed start without the daemon-owned fields', async () => {
     const channel = fakeChannel();
     const client = createAgentHostClient(createDaemonAgentHostTransport(channel));

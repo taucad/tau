@@ -91,12 +91,12 @@ describe('projects()', () => {
 });
 
 describe('publishable()', () => {
-  it('is every non-private type:package project, sorted — fifty-one today', () => {
+  it('is every non-private type:package project, sorted — fifty-three today', () => {
     const names = publishable(live).map((entry) => entry.name);
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    expect(names).toHaveLength(51);
+    expect(names).toHaveLength(53);
     expect(names).toEqual([...names].sort());
     // Both ends of the train.
     for (const name of ['runtime', 'runtime-testing', 'geospec-engine']) {
@@ -154,6 +154,22 @@ describe('validateTags()', () => {
     ).toEqual([
       'fixture/unknown-release: unknown tag "release:npm" (release: must be one of app)',
       'fixture/two-releases: expected exactly one release: tag, found release:app, release:app',
+    ]);
+  });
+
+  it('should allow no deploy tag or deploy:staging and reject unknown or duplicate deploy tags', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('undeployed', ['scope:ui', 'type:app'], undefined),
+          project('staged', ['scope:ui', 'type:app', 'deploy:staging'], undefined),
+          project('unknown-deploy', ['scope:ui', 'type:app', 'deploy:preview'], undefined),
+          project('two-deploys', ['scope:ui', 'type:app', 'deploy:staging', 'deploy:staging'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/unknown-deploy: unknown tag "deploy:preview" (deploy: must be one of staging)',
+      'fixture/two-deploys: expected exactly one deploy: tag, found deploy:staging, deploy:staging',
     ]);
   });
 

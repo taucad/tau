@@ -17,7 +17,7 @@ import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
 import { toggleChatKeyCombination } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -25,7 +25,7 @@ import {
   FloatingPanelContentHeader,
   FloatingPanelErrorContent,
 } from '#components/ui/floating-panel.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatHistoryEmpty } from '#routes/w.$workspace.$project/chat-history-empty.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
@@ -79,7 +79,12 @@ const TurnGroup = memo(function ({
   readonly isLast: boolean;
 }) {
   return (
-    <div className={cn('py-1 gap-1 flex flex-col', isLast && 'min-h-(--chat-live-turn-min-h)')}>
+    <div
+      className={cn(
+        'mx-auto flex w-[calc(100%_-_1rem)] max-w-xl flex-col gap-1 py-1',
+        isLast && 'min-h-(--chat-live-turn-min-h)',
+      )}
+    >
       {messageIds.map((id, index) => (
         <ChatMessage
           key={id}
@@ -119,10 +124,13 @@ const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: st
 
 const ChatHistoryHeader = (): undefined => undefined;
 const ChatHistoryEmptyPlaceholder = (): React.JSX.Element => (
-  <div className='flex h-full px-3 py-6'>
+  <div className='mx-auto flex h-full w-[calc(100%_-_1rem)] max-w-xl px-3 py-6'>
     <ChatHistoryEmpty />
   </div>
 );
+// Initial positioning waits for Virtuoso's measured content, including an initially empty pane.
+const initialChatTurn = { index: 'LAST', align: 'start' } as const;
+
 const virtuosoComponents = {
   Scroller: ChatScroller,
   Header: ChatHistoryHeader,
@@ -184,6 +192,9 @@ const ExpandedChatHistory = memo(function ({
   );
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
+  const focusComposer = useCallback(() => {
+    chatTextareaRef.current?.focus();
+  }, []);
   const location = useLocation();
   useEffect(() => {
     if (location.state?.focusChatComposer === true) {
@@ -222,9 +233,9 @@ const ExpandedChatHistory = memo(function ({
   // Memoising the call site avoids re-rendering tooltip-heavy children.
   const submitChat = cadChat.submit;
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
-    async ({ content, attachments }) => {
+    async ({ content, attachments, references }) => {
       // Pending until the message lands, so the composer stays busy through admission (R8).
-      await submitChat({ text: content, attachments });
+      await submitChat({ text: content, attachments, ...(references === undefined ? {} : { references }) });
     },
     [submitChat],
   );
@@ -256,13 +267,13 @@ const ExpandedChatHistory = memo(function ({
   // defers the scroll until after Virtuoso lays out the new last item, so
   // `scrollToIndex` measures the spacer height correctly.
   const lastTurnId = groups.at(-1)?.messageIds[0];
-  const previousLastTurnIdRef = useRef(lastTurnId);
+  // A populated transcript may arrive before this pane mounts; it still opens at its latest turn.
+  const previousLastTurnIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (lastTurnId === previousLastTurnIdRef.current) {
       return;
     }
-    previousLastTurnIdRef.current = lastTurnId;
     const frame = requestAnimationFrame(() => {
       const scroller = virtuosoRef.current;
       if (!scroller) {
@@ -273,6 +284,7 @@ const ExpandedChatHistory = memo(function ({
         align: 'start',
         behavior: instantScrollBehavior,
       });
+      previousLastTurnIdRef.current = lastTurnId;
     });
     return () => {
       cancelAnimationFrame(frame);
@@ -328,6 +340,7 @@ const ExpandedChatHistory = memo(function ({
               <Virtuoso
                 ref={virtuosoRef}
                 data={groups}
+                initialTopMostItemIndex={initialChatTurn}
                 itemContent={renderItem}
                 computeItemKey={computeItemKey}
                 followOutput={followOutput}
@@ -361,7 +374,7 @@ const ExpandedChatHistory = memo(function ({
               />
               <div className='mx-2 -mb-3 flex flex-col rounded-t-lg border border-b-0 bg-muted/40 pb-3 empty:hidden'>
                 <ChatTodoList key={activeChatId} />
-                <ChatQuestionQueue key={`${activeChatId}:questions`} />
+                <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />
               </div>
               <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />
             </div>

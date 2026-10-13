@@ -4,7 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import type { PrintRequester } from '@taucad/runtime/machine';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
-import { disclosureMotion } from '#components/revisions/revision-actions.js';
+import { disclosureMotion } from '@taucad/ui/components/actions';
 
 /** Who the pane acts as when it creates or resolves a request. @public */
 export const operator: PrintRequester = { kind: 'user', id: 'operator', label: 'You' };

@@ -5,23 +5,23 @@ import type { ActorRefFrom } from 'xstate';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Box3, HalfFloatType, REVISION, Vector3, WebGLRenderer, WebGLRenderTarget } from 'three';
 import type { Scene } from 'three';
-import { applyCanonicalGltfBounds } from '#components/geometry/graphics/three/gltf-world.js';
+import { applyCanonicalGltfBounds } from '@taucad/viewer/graphics/three/gltf-world';
 import { z } from 'zod';
 import type { Geometry } from '@taucad/types';
 import { ModelComponentMaterialSummary } from '#components/geometry/cad/model-component-action-menu.js';
-import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
-import { GltfMesh } from '#components/geometry/graphics/three/react/gltf-mesh.js';
-import { ThreeProvider } from '#components/geometry/graphics/three/three-context.js';
-import { defaultStudioLighting } from '#components/geometry/graphics/three/utils/lights.utils.js';
-import type { StudioLightingSettings } from '#components/geometry/graphics/three/utils/lights.utils.js';
+import { buildGltfComponentManifest } from '@taucad/viewer/graphics/metadata/gltf-component-manifest';
+import { GltfMesh } from '@taucad/viewer/graphics/three/react/gltf-mesh';
+import { ThreeProvider } from '@taucad/viewer/graphics/three/three-context';
+import { defaultStudioLighting } from '@taucad/viewer/graphics/three/utils/lights.utils';
+import type { StudioLightingSettings } from '@taucad/viewer/graphics/three/utils/lights.utils';
 import {
   defaultPostProcessingSettings,
   resolveAoRadiusCssPixels,
-} from '#components/geometry/graphics/three/post-processing-settings.js';
-import type { PostProcessingSettings } from '#components/geometry/graphics/three/post-processing-settings.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
-import { defaultGraphicsSettings } from '#constants/editor.constants.js';
-import { GraphicsProvider, useCameraRig, useGraphicsSelector, useRenderFrame } from '#hooks/use-graphics.js';
+} from '@taucad/viewer/graphics/three/post-processing-settings';
+import type { PostProcessingSettings } from '@taucad/viewer/graphics/three/post-processing-settings';
+import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
+import { GraphicsProvider, useCameraRig, useGraphicsSelector, useRenderFrame } from '@taucad/viewer/hooks/use-graphics';
 import { ThemeProvider } from '#hooks/use-theme.js';
 import { createFrameGpuTimer } from '#routes/[__e2e].onshape-render-profile/gpu-timing.js';
 import type { FrameGpuTimer } from '#routes/[__e2e].onshape-render-profile/gpu-timing.js';

@@ -62,7 +62,7 @@ const capturedComboBox: {
   value?: unknown;
   renderLabel?: (item: KernelConfiguration, selected?: KernelConfiguration) => React.ReactNode;
 } = {};
-vi.mock('#components/ui/combobox-responsive.js', () => ({
+vi.mock('@taucad/ui/components/combobox-responsive', () => ({
   ComboBoxResponsive: (properties: {
     readonly onSelect?: (id: string) => void;
     readonly value?: unknown;

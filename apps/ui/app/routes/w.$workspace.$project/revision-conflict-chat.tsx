@@ -11,19 +11,22 @@ import { buildUserMessage } from '#utils/chat.utils.js';
 /**
  * What the seeded chat is asked to do (AC14, A18/I12 — document words only).
  *
- * The prompt names the files and nothing else: the three terms are in the
- * graph, and the turn's placement carries the revision to read them from, so
- * restating the sides here would be a second, staler copy of them.
+ * The prompt names the files and the conflicted revision, not the sides: the
+ * turn's checkout holds only one of them, so the agent reads both from the
+ * graph with the `revisions` tool's `conflict` action rather than from a
+ * second, staler copy pasted here.
  *
+ * @param revisionId - The conflicted revision.
  * @param paths - The files still without a side.
  * @returns The first message of the resolution chat.
  */
-const resolutionPrompt = (paths: readonly string[]): string =>
+const resolutionPrompt = (revisionId: string, paths: readonly string[]): string =>
   [
     `Two lines changed the same ${paths.length === 1 ? 'file' : 'files'}. Please compose them:`,
     ...paths.map((path) => `- ${path}`),
     '',
     'Keep both sets of changes where they do not fight, and pick the one that belongs where they do.',
+    `Read both versions with the revisions tool: { action: 'conflict', revision: '${revisionId}' }.`,
   ].join('\n');
 
 /**
@@ -34,11 +37,10 @@ const resolutionPrompt = (paths: readonly string[]): string =>
  * crosses the port as `resolveWithChat` and lands here, which seeds one chat
  * and binds its placement.
  *
- * The binding is what makes the turn a *resolution*: it lands on the conflicted
- * branch's own checkout and its body names the conflicted revision, so the
- * agent reads the three terms back out of the graph rather than out of the
- * prompt (A22). Nothing here materializes markers, and nothing writes them into
- * a tree.
+ * The binding places the turn on the checkout of the branch the decision lands
+ * on, which holds only one side; the prompt names the conflicted revision so
+ * the agent reads both sides with the `revisions` tool (A22). Nothing here
+ * materializes markers, and nothing writes them into a tree.
  *
  * @returns Nothing; this is a subscriber, not a surface.
  */
@@ -60,7 +62,7 @@ export function RevisionConflictChat(): undefined {
     const seed = async (
       request: Readonly<{ revisionId: string; checkoutId: string | undefined; paths: readonly string[] }>,
     ): Promise<void> => {
-      const message = buildUserMessage({ text: resolutionPrompt(request.paths) });
+      const message = buildUserMessage({ text: resolutionPrompt(request.revisionId, request.paths) });
       /* The same one-shot startup request *Fix with AI* uses, so the seeded
        * turn fires once on hydration and a plain pending tail is still only
        * display state (apps/ui/AGENTS.md). */

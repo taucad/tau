@@ -49,6 +49,15 @@ for (const required of [
 await rm(output, { recursive: true, force: true });
 await mkdir(join(output, '_www/assets'), { recursive: true });
 await cp(publicDirectory, join(output, '_www/assets'), { recursive: true });
+// The frozen gearbox tessellation is owned by @taucad/planetary-gearbox and served beside the site assets.
+await Promise.all(
+  ['planetary.json', 'planetary.bin.gz', 'planetary-face18.json', 'planetary-face18.bin.gz'].map(async (name) =>
+    cp(
+      fileURLToPath(import.meta.resolve(`@taucad/planetary-gearbox/assets/${name}`)),
+      join(output, '_www/assets', name),
+    ),
+  ),
+);
 /** @type {(content: string) => string} */
 const hash = (content) => createHash('sha256').update(content).digest('hex').slice(0, 12);
 const baseTokens = await readFile(resolve(root, '../../packages/ui/src/styles/tokens.css'), 'utf8');
@@ -94,7 +103,7 @@ const articlePages = validateArticles(published).map((article) => {
     title: `${article.title} · Tau`,
     description: article.description,
     body: () =>
-      `<article class="wrap prose"><header class="page-intro"><p class="kicker">The Tau journal</p><h1>${escapeHtml(article.title)}</h1><p>By ${escapeHtml(article.author)} · <time datetime="${article.date}">${article.date}</time></p></header>${article.paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join('')}<p><a href="/blog/">← All journal entries</a></p></article>`,
+      `<article class="wrap prose"><header class="page-intro"><p class="kicker">The Tau blog</p><h1>${escapeHtml(article.title)}</h1><p>By ${escapeHtml(article.author)} · <time datetime="${article.date}">${article.date}</time></p></header>${article.paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join('')}<p><a href="/blog/">← All posts</a></p></article>`,
   };
 });
 if (new Set(articlePages.map((p) => p.path)).size !== articlePages.length) {
@@ -106,7 +115,7 @@ await Promise.all(
     let html = renderPage({ page, origin, launch, asset, analyticsEndpoint });
     if (page.path === '/blog/' && articlePages.length > 0) {
       html = html
-        .replace(/<div class="cell journal-empty">.*?<\/div><\/div>/su, '')
+        .replace(/<div class="cell blog-empty">.*?<\/div><\/div>/su, '')
         .replace(
           '<div id="articles"></div>',
           `<div class="feature-grid">${articlePages.map((article) => `<article class="cell"><h2><a href="${article.path}">${escapeHtml(article.title.replace(' · Tau', ''))}</a></h2><p>${escapeHtml(article.description)}</p></article>`).join('')}</div>`,

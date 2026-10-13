@@ -12,7 +12,6 @@ import {
   asBuffer,
   jsonSchemaFromJson,
   defineKernel,
-  getModuleRegistry,
   isRecordObject,
   extractDefaultParameters,
   registerKernelModule,
@@ -212,11 +211,11 @@ function registerJscadModules(runtime: KernelServices, modeling: JscadModeling):
   });
 
   for (const subpath of jscadSubmodules) {
-    const submoduleExports: unknown = Reflect.get(modeling, subpath);
-    if (isRecordObject(submoduleExports)) {
+    if (isRecordObject(Reflect.get(modeling, subpath))) {
       registerKernelModule(runtime, {
         name: `@jscad/modeling/${subpath}`,
-        exports: submoduleExports,
+        exports: modeling,
+        exportPath: subpath,
         package: modelingPackage,
       });
     }
@@ -227,16 +226,18 @@ function registerJscadModules(runtime: KernelServices, modeling: JscadModeling):
 // Module execution helpers
 // =============================================================================
 
-async function runMain(module: Record<string, unknown>, parameters: Record<string, unknown>): Promise<unknown> {
+async function runMain(
+  module: Record<string, unknown>,
+  parameters: Record<string, unknown>,
+  modeling: JscadModeling,
+): Promise<unknown> {
   const mainFunction = module['default'] ?? module['main'];
   if (!isCallable(mainFunction)) {
     return undefined;
   }
 
   if (mainFunction.length >= 2) {
-    const registry = getModuleRegistry();
-    const injectedModule = registry.values().next();
-    return mainFunction(injectedModule.done ? undefined : injectedModule.value, parameters);
+    return mainFunction(modeling, parameters);
   }
 
   return mainFunction(parameters);
@@ -369,7 +370,7 @@ export const jscadKernel = defineKernel({
 
     let shapes: unknown;
     try {
-      shapes = await runMain(module, parameters);
+      shapes = await runMain(module, parameters, context.modeling);
     } catch (error) {
       const stackFrames = parseStackTrace(error, {
         classifyFrame: createFrameClassifier(),

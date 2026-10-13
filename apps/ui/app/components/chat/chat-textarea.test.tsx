@@ -59,7 +59,7 @@ vi.mock('#components/chat/chat-textarea-desktop.js', () => ({
     return null;
   },
 }));
-vi.mock('#components/ui/utils/client-only.js', () => ({
+vi.mock('@taucad/ui/components/client-only', () => ({
   ClientOnly: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
 vi.mock('#components/chat/chat-textarea-skeleton.js', () => ({ ChatTextareaSkeleton: () => null }));

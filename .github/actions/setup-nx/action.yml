@@ -6,11 +6,10 @@ inputs:
     description: 'Node.js version used by this job. 24.21 segfaults Nx as it exits, so the default stays on 24.20.0.'
     required: false
     default: '24.20.0'
-
-outputs:
-  no-previous-build:
-    description: "'true' when nrwl/nx-set-shas found no earlier successful run and fell back to HEAD~1"
-    value: ${{ steps.shas.outputs.noPreviousBuild }}
+  save-pnpm-store:
+    description: "'false' restores the pnpm store without saving it after the job, for jobs whose end gates a workflow"
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -52,7 +51,19 @@ runs:
         echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
     - name: Setup pnpm cache
+      if: inputs.save-pnpm-store == 'true'
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ${{ env.STORE_PATH }}
+        key: ${{ runner.os }}-${{ runner.arch }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-pnpm-store-
+
+    # Saving a missed store is a post step of about 2.5 minutes on macOS (1.1 GB), which
+    # holds back every job that needs this one.
+    - name: Restore pnpm cache
+      if: inputs.save-pnpm-store != 'true'
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: ${{ env.STORE_PATH }}
         key: ${{ runner.os }}-${{ runner.arch }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
@@ -90,5 +101,4 @@ runs:
         chmod +x "$bin/nx"
 
     - name: Set NX SHAs
-      id: shas
       uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1

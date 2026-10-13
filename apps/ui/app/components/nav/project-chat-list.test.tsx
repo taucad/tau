@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
@@ -12,7 +12,14 @@ const mockUseChats = vi.fn();
 const mockUseChatRecords = vi.fn();
 const mockWarmMonaco = vi.hoisted(() => vi.fn());
 vi.mock('#lib/monaco-warmup.js', () => ({ warmMonaco: mockWarmMonaco }));
-const mockObserve = vi.hoisted(() => vi.fn(() => () => undefined));
+const { mockObserve, mockRelease, mockStore } = vi.hoisted(() => {
+  const release = vi.fn<(chatId: string) => void>();
+  const observe = vi.fn((chatId: string, _projectId: string) => () => {
+    release(chatId);
+  });
+  return { mockObserve: observe, mockRelease: release, mockStore: { observe } };
+});
+const mockUseChatSessionStore = vi.fn(() => mockStore);
 const mockNavigate = vi.fn();
 const mockLinkState = vi.fn();
 let search = '?chat=chat_12';
@@ -22,7 +29,7 @@ vi.mock('#hooks/use-chats.js', () => ({
   useChats: (...args: Parameters<typeof useChats>) => mockUseChats(...args) as ReturnType<typeof useChats>,
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({ observe: mockObserve }),
+  useChatSessionStore: () => mockUseChatSessionStore(),
 }));
 vi.mock('#hooks/use-chat-records.js', () => ({
   useChatRecords: (...args: Parameters<typeof useChatRecords>) =>
@@ -168,6 +175,7 @@ const { ProjectChatList, sortProjectChats } = await import('#components/nav/proj
 describe('ProjectChatList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseChatSessionStore.mockReturnValue(mockStore);
     search = '?chat=chat_12';
     pendingLocation = undefined;
     mockUseChats.mockReturnValue(defaultChatsResult);
@@ -204,6 +212,105 @@ describe('ProjectChatList', () => {
     expect(mockUseChatRecords).toHaveBeenCalledWith('proj_one');
     expect(mockUseChats).toHaveBeenCalledWith('proj_one', { enabled: false });
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it.each([true, false])(
+    'should retain all observation leases across metadata changes when expanded=%s',
+    (isExpanded) => {
+      const { rerender, unmount } = render(
+        <ProjectChatList project={project} isProjectActive={false} isExpanded={isExpanded} />,
+      );
+      expect(mockObserve.mock.calls).toEqual(defaultChatsResult.chats.map((entry) => [entry.id, project.id]));
+      expect(screen.queryAllByRole('link')).toHaveLength(isExpanded ? 5 : 0);
+
+      mockUseChatRecords.mockReturnValue({
+        ...defaultChatsResult,
+        chats: defaultChatsResult.chats.map((entry) => ({
+          ...entry,
+          name: `Renamed ${entry.id}`,
+          updatedAt: entry.updatedAt + 100,
+          recencyAt: entry.id === 'chat_1' ? 1000 : entry.updatedAt,
+        })),
+      });
+      rerender(<ProjectChatList project={project} isProjectActive={false} isExpanded={isExpanded} />);
+
+      expect(mockRelease).not.toHaveBeenCalled();
+      expect(mockObserve).toHaveBeenCalledTimes(12);
+      if (isExpanded) {
+        expect(screen.getAllByRole('link')[0]).toHaveAccessibleName('Renamed chat_1');
+      } else {
+        expect(screen.queryByRole('link')).not.toBeInTheDocument();
+      }
+      unmount();
+      expect(mockRelease.mock.calls.map(([chatId]) => chatId).sort()).toEqual(
+        defaultChatsResult.chats.map((entry) => entry.id).sort(),
+      );
+    },
+  );
+
+  it('should retain observation leases when metadata rows are reordered', () => {
+    const { rerender, unmount } = render(<ProjectChatList project={project} isProjectActive />);
+    mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [...defaultChatsResult.chats].reverse() });
+    rerender(<ProjectChatList project={project} isProjectActive />);
+
+    expect(mockRelease).not.toHaveBeenCalled();
+    expect(mockObserve).toHaveBeenCalledTimes(12);
+    expect(screen.getAllByRole('link')).toHaveLength(5);
+    unmount();
+    expect(mockRelease).toHaveBeenCalledTimes(12);
+  });
+
+  it('should change only observation leases whose chat membership changes', () => {
+    const { rerender, unmount } = render(
+      <ProjectChatList project={project} isProjectActive={false} isExpanded={false} />,
+    );
+    mockUseChatRecords.mockReturnValue({
+      ...defaultChatsResult,
+      chats: [...defaultChatsResult.chats.filter((entry) => entry.id !== 'chat_1'), chat(13)],
+    });
+    rerender(<ProjectChatList project={project} isProjectActive={false} isExpanded={false} />);
+
+    expect(mockRelease.mock.calls).toEqual([['chat_1']]);
+    expect(mockObserve).toHaveBeenCalledTimes(13);
+    expect(mockObserve).toHaveBeenLastCalledWith('chat_13', project.id);
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    unmount();
+    expect(mockRelease.mock.calls.map(([chatId]) => chatId).sort()).toEqual(
+      Array.from({ length: 13 }, (_, index) => `chat_${index + 1}`).sort(),
+    );
+  });
+
+  it('should release the old project leases before observing the replacement project', () => {
+    const { rerender, unmount } = render(
+      <ProjectChatList project={project} isProjectActive={false} isExpanded={false} />,
+    );
+    const replacement = { ...project, id: 'proj_replacement' };
+    rerender(<ProjectChatList project={replacement} isProjectActive={false} isExpanded={false} />);
+    expect(mockRelease).toHaveBeenCalledTimes(12);
+    expect(Math.max(...mockRelease.mock.invocationCallOrder)).toBeLessThan(mockObserve.mock.invocationCallOrder[12]!);
+    expect(mockObserve.mock.calls.slice(12)).toEqual(
+      defaultChatsResult.chats.map((entry) => [entry.id, replacement.id]),
+    );
+    unmount();
+    expect(mockRelease).toHaveBeenCalledTimes(24);
+  });
+
+  it('should transfer every observation when the store owner changes', () => {
+    const replacementRelease = vi.fn<(chatId: string) => void>();
+    const replacementObserve = vi.fn((chatId: string, _projectId: string) => () => {
+      replacementRelease(chatId);
+    });
+    const { rerender, unmount } = render(
+      <ProjectChatList project={project} isProjectActive={false} isExpanded={false} />,
+    );
+    mockUseChatSessionStore.mockReturnValue({ observe: replacementObserve });
+    rerender(<ProjectChatList project={project} isProjectActive={false} isExpanded={false} />);
+    expect(mockRelease).toHaveBeenCalledTimes(12);
+    expect(replacementObserve.mock.calls).toEqual(defaultChatsResult.chats.map((entry) => [entry.id, project.id]));
+    expect(replacementRelease).not.toHaveBeenCalled();
+    unmount();
+    expect(mockRelease).toHaveBeenCalledTimes(12);
+    expect(replacementRelease).toHaveBeenCalledTimes(12);
   });
 
   it('reads navigation rows from metadata even when the mutation hook has no chats', () => {
@@ -377,13 +484,46 @@ describe('ProjectChatList', () => {
     expect(document.querySelector('[data-slot=chat-status][data-glyph=failed]')).toBeInTheDocument();
   });
 
-  it('shows a failure row with no control when the chats could not load', () => {
-    mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], error: 'offline' });
-    render(<ProjectChatList project={project} isProjectActive />);
-    const failure = document.querySelector('[data-slot=failure-row]');
-    expect(failure).toHaveTextContent("Couldn't load chats");
-    expect(failure?.querySelector('button, a')).toBeNull();
-  });
+  it.each([false, true])(
+    'should retry metadata with retained chats=%s without replacing observation leases',
+    async (retained) => {
+      const retry = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+      const chats = retained ? defaultChatsResult.chats : [];
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats, retry });
+      mockChatStatus.mockReturnValue(status({ state: 'working' }));
+      const { rerender, unmount } = render(<ProjectChatList project={project} isProjectActive />);
+      const registrations = mockObserve.mock.calls.length;
+      const links = screen.queryAllByRole('link');
+      mockUseChatRecords.mockReturnValue({
+        ...defaultChatsResult,
+        chats,
+        retry,
+        error: 'Provider offline\nprivate diagnostic',
+      });
+      rerender(<ProjectChatList project={project} isProjectActive />);
+      expect(document.querySelector('[data-slot=failure-row]')).toHaveTextContent("Couldn't load chats");
+      expect(screen.queryByText(/private diagnostic/u)).not.toBeInTheDocument();
+      expect(screen.queryAllByRole('link')).toEqual(links);
+      fireEvent.click(screen.getByRole('button', { name: 'Retry loading chats' }));
+      await waitFor(() => {
+        expect(retry).toHaveBeenCalledOnce();
+      });
+      expect(mockCloseChat).not.toHaveBeenCalled();
+      expect(mockObserve).toHaveBeenCalledTimes(registrations);
+      expect(mockRelease).not.toHaveBeenCalled();
+      if (retained) {
+        fireEvent.click(screen.getByRole('button', { name: 'Stop Chat 12' }));
+        expect(mockCloseChat).toHaveBeenCalledWith(project.id, 'chat_12');
+      }
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats, retry });
+      rerender(<ProjectChatList project={project} isProjectActive />);
+      expect(screen.queryByRole('button', { name: 'Retry loading chats' })).not.toBeInTheDocument();
+      expect(screen.queryAllByRole('link')).toEqual(links);
+      expect(mockRelease).not.toHaveBeenCalled();
+      unmount();
+      expect(mockRelease).toHaveBeenCalledTimes(chats.length);
+    },
+  );
 
   /* D17: renaming keeps the status column and outlines the whole row. */
   it('outlines the whole row while it is renamed and keeps its status column', () => {

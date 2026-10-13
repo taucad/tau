@@ -402,6 +402,7 @@ export const createChatRunEffects = (
               key: args.key,
               code: answer.code,
               message: answer.message,
+              ...(answer.details === undefined ? {} : { details: answer.details }),
               effect: 'not-applied',
               ...(typeof base === 'string' ? { revisionId: base } : {}),
             });
@@ -418,6 +419,11 @@ export const createChatRunEffects = (
             key: args.key,
             code: refusal.code,
             message: refusal.message,
+            details: {
+              phase: 'placement.admit',
+              code: refusal.code,
+              ...(refusal.details === undefined ? {} : { cause: refusal.details }),
+            },
             effect: 'unknown',
           });
         },

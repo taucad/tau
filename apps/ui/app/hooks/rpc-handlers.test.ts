@@ -14,7 +14,7 @@ import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import { rpcName } from '@taucad/chat/constants';
 import type { RpcHandlerDependencies, RpcCallInput } from '#hooks/rpc-handlers.js';
 import { omittedSectionCutsNotice } from '#services/headless-capture.js';
-import type { SectionCut } from '#components/geometry/graphics/section-cuts.js';
+import type { SectionCut } from '@taucad/viewer/graphics/section-cuts';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 
 type RpcDependencies = ChatRpc.RpcDependencies;

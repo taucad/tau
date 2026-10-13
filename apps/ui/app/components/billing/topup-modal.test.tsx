@@ -294,7 +294,7 @@ describe('TopupModal', () => {
       expect.objectContaining({ amountMinor: '2500', method: 'saved_card' }),
     );
     expect(await screen.findByText('US$27.50')).toBeInTheDocument();
-    expect(screen.getByText('2500')).toBeInTheDocument();
+    expect(screen.getByText('2,500')).toBeInTheDocument();
     expect(screen.getByText('US$25.00')).toBeInTheDocument();
     expect(screen.getByText('US$2.50')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Confirm quote' })).toBeEnabled();

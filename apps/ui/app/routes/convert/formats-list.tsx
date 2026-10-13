@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { FileExtension } from '@taucad/types';
-import { SearchInput } from '#components/search-input.js';
+import { SearchInput } from '@taucad/ui/components/search-input';
 import { formatDisplayName } from '#components/geometry/converter/converter-utils.js';
 
 type FormatsListProps = {

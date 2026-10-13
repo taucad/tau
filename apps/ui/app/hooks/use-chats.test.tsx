@@ -15,6 +15,32 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it('does not expose another project metadata failure on a healthy scoped chat query', async () => {
+  const store = mock<ChatSessionStore>();
+  const manager = mock<ReturnType<typeof useProjectManager>>();
+  manager.metadataObservationError = 'Sibling watch refused';
+  manager.isLoading = false;
+  manager.getChatsForResource.mockResolvedValue([]);
+  vi.mocked(useChatSessionStore).mockReturnValue(store);
+  vi.mocked(useProjectManager).mockReturnValue(manager);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const view = renderHook(() => useChats('healthy-project'), { wrapper });
+  try {
+    await waitFor(() => {
+      expect(view.result.current.isLoading).toBe(false);
+    });
+    expect(manager.getChatsForResource).toHaveBeenCalledWith('healthy-project', { includeDeleted: false });
+    expect(view.result.current.chats).toEqual([]);
+    expect(view.result.current.error).toBeUndefined();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
 it('stops a live writer before purging and invalidates collection and row caches after success', async () => {
   const store = mock<ChatSessionStore>();
   const manager = mock<ReturnType<typeof useProjectManager>>();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { awaitGeometryPresentation } from '#components/geometry/graphics/three/utils/geometry-presentation-admission.js';
+import { awaitGeometryPresentation } from '@taucad/viewer/graphics/three/utils/geometry-presentation-admission';
 import { useActorRef } from '@xstate/react';
 import { asKnownArtifact } from '@taucad/runtime';
 import { useProject } from '#hooks/use-project.js';
@@ -9,7 +9,7 @@ import type { ThumbnailResult } from '#machines/thumbnail.machine.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
-import { isEmptyGlb } from '#utils/inspect-glb.utils.js';
+import { isEmptyGlb } from '@taucad/viewer/utils/inspect-glb';
 
 /** Project-relative path for the generated thumbnail. */
 const thumbnailPath = 'thumbnail.webp';

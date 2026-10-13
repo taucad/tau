@@ -93,7 +93,14 @@ const failLimit = (message: string): never => {
   throw new ShareError('SHARE_ARTIFACT_LIMIT', message);
 };
 
-const isSafePathSegment = (segment: string): boolean =>
+/**
+ * Whether one path segment is free of control characters and backslashes.
+ *
+ * @param segment - One `/`-separated path segment.
+ * @returns True when the segment is safe to write on every supported filesystem.
+ * @public
+ */
+export const isSafePathSegment = (segment: string): boolean =>
   [...segment].every((character) => {
     const code = character.codePointAt(0);
     return code !== undefined && code > 31 && code !== 127 && character !== '\\';
@@ -128,11 +135,17 @@ const validatePath = (path: string): string => {
 
 const collisionKey = (path: string): string => path.normalize('NFC').toLocaleLowerCase('en-US');
 
-const assertUniquePaths = (paths: readonly string[]): void => {
+/**
+ * Refuse paths that collide exactly, by Unicode or case folding, or as a file and a directory.
+ *
+ * @param paths - Already-validated relative paths.
+ * @throws {ShareError} `SHARE_ARTIFACT_INVALID` when two paths would land on the same file.
+ * @public
+ */
+export const assertDistinctPaths = (paths: readonly string[]): void => {
   const exact = new Set<string>();
   const portable = new Set<string>();
-  for (const path of paths) {
-    const canonical = validatePath(path);
+  for (const canonical of paths) {
     const folded = collisionKey(canonical);
     if (exact.has(canonical) || portable.has(folded)) {
       failInvalid('The project archive contains colliding paths.');
@@ -148,6 +161,10 @@ const assertUniquePaths = (paths: readonly string[]): void => {
       }
     }
   }
+};
+
+const assertUniquePaths = (paths: readonly string[]): void => {
+  assertDistinctPaths(paths.map((path) => validatePath(path)));
 };
 
 type OwnedBytes = Uint8Array<ArrayBuffer>;

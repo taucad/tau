@@ -483,11 +483,23 @@ export const remoteRefusalSaid = (reported: string, said: readonly string[]): st
   return sentence !== '' && /hook declined/iu.test(reported) ? sentence : reported;
 };
 
-/** One short sentence naming the class, when the server sent none of its own. */
-const refusalSentence = (code: RevisionPortErrorCode): string => {
+/**
+ * One short sentence naming the class, when the server sent none of its own.
+ *
+ * @param code - The refusal's class.
+ * @param remote - The remote's name in git's config, which says whether a credential was saved for it.
+ * @returns The sentence to show.
+ */
+const refusalSentence = (code: RevisionPortErrorCode, remote: string | undefined): string => {
   switch (code) {
     case 'REMOTE_REAUTHORIZATION_REQUIRED': {
-      return 'The remote rejected the saved credentials.';
+      /* D94: only a connected GitHub repository carries a saved credential;
+       * `writeRemote` (revision-effects) names it `github-<id>`. Every other
+       * Git remote is anonymous, and a host such as GitLab answers a private
+       * or missing repository with 401. */
+      return remote?.startsWith('github-')
+        ? 'The remote rejected the saved credentials.'
+        : 'This remote asked for a sign-in Tau does not have, or has no repository at this address.';
     }
     case 'REMOTE_UNAUTHORIZED': {
       return 'This remote did not accept this device; sign in again.';
@@ -567,7 +579,9 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
     const preserved = held as RevisionPortErrorCode;
     return new RevisionPortError(
       preserved,
-      typeof thrown.message === 'string' && thrown.message !== '' ? thrown.message : refusalSentence(preserved),
+      typeof thrown.message === 'string' && thrown.message !== ''
+        ? thrown.message
+        : refusalSentence(preserved, context.remote),
       { cause: error },
     );
   }
@@ -654,7 +668,11 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
                        retryable, 503 race-lost included. */
                     'REMOTE_DAMAGED'
                   : 'REMOTE_UNAVAILABLE';
-  return new RevisionPortError(code, answered.message ?? refusalSentence(code), {
+  /* D77: a 401 to a minted credential is the grant withdrawn, and GitHub's body
+   * for it ("Invalid username or token. Password authentication is not
+   * supported…") describes a password nobody typed. A 403 keeps its words. */
+  const sentence = code === 'REMOTE_REAUTHORIZATION_REQUIRED' && status === 401 ? undefined : answered.message;
+  return new RevisionPortError(code, sentence ?? refusalSentence(code, context.remote), {
     cause: error,
     ...(status === 429
       ? { retryAfterMilliseconds: retryAfterMilliseconds(context.retryAfter) ?? defaultRateLimitWaitMilliseconds }

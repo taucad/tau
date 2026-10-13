@@ -20,7 +20,7 @@ describe('KCL corpus', () => {
     expect(corpus.metadata).toMatchObject({
       language: 'kcl',
       packageName: 'kcl-std',
-      packageVersion: '0.2.184',
+      packageVersion: '0.2.191',
       totalEntries: 284,
       breakdown: { function: 203, type: 37, constant: 24, module: 20 },
     });
@@ -67,6 +67,19 @@ describe('KCL corpus', () => {
     );
   });
 
+  it('should expose stable KCL 3.0 modeling arguments', () => {
+    for (const name of ['fillet', 'chamfer', 'union', 'intersect', 'subtract', 'split']) {
+      const parameters = byName(name).signatures?.[0]?.parameters.map((parameter) => parameter.name);
+      expect(parameters).not.toContain('legacyMethod');
+    }
+
+    const fillet = byName('fillet').signatures?.[0];
+    expect(fillet?.parameters.map((parameter) => parameter.name)).toContain('tangentChain');
+    const sweep = byName('sweep').signatures?.[0];
+    expect(sweep?.parameters.map((parameter) => parameter.name)).not.toContain('relativeTo');
+    expect(sweep?.parameters.map((parameter) => parameter.name)).toContain('translateProfileToPath');
+  });
+
   it('assigns unique ids', () => {
     expect(new Set(entries.map((entry) => entry.id)).size).toBe(entries.length);
   });
@@ -83,12 +96,11 @@ describe('KCL corpus', () => {
     const experimental = entries.filter(
       (entry) => entry.languageSpecific?.language === 'kcl' && entry.languageSpecific.experimental === true,
     );
-    expect(experimental.filter((entry) => entry.kind === 'function')).toHaveLength(17);
-    expect(experimental.filter((entry) => entry.kind === 'type')).toHaveLength(8);
+    expect(experimental.filter((entry) => entry.kind === 'function')).toHaveLength(12);
+    expect(experimental.filter((entry) => entry.kind === 'type')).toHaveLength(2);
     expect(experimental.filter((entry) => entry.kind === 'module').map((entry) => entry.id)).toEqual([
       'kcl:std.gear',
       'kcl:std.runtime',
-      'kcl:std.view',
     ]);
   });
 

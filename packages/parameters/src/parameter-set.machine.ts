@@ -52,7 +52,7 @@ export type ParameterSetMachineEvent =
   | Readonly<{ type: 'confirm'; requestId: string; fingerprint: string }>
   | Readonly<{ type: 'cancel'; requestId: string }>
   | Readonly<{ type: 'close'; invalidDrafts?: readonly string[] }>;
-/** Why a host's observation of the sidecar failed. @public */
+/** Why a host's observation of the sidecar failed; `WATCH_RESET` (events lost) re-arms and reloads instead of disconnecting. @public */
 export type WatchFailureCode = 'WATCH_FAILED' | 'WATCH_RESET' | 'WATCH_CLOSED';
 /** Native command results remain observable even across immediate state transitions. @public */
 export type ParameterSetEmission =
@@ -384,6 +384,15 @@ const watchFailureCodes: ReadonlySet<string> = new Set<WatchFailureCode>([
   'WATCH_CLOSED',
 ]);
 
+/*
+ * A reset only says sidecar events were lost while the watch went on: re-arm it and reload, keeping any command not
+ * yet written, which is planned again against the fresh record. Every other watch failure disconnects.
+ */
+const isWatchReset = (event: WatchError): boolean => event.code === 'WATCH_RESET';
+const rearm = { target: '#parameter-set.open', reenter: true } as const;
+const watchErrorTo = ({ event }: Readonly<{ event: WatchError }>) =>
+  isWatchReset(event) ? rearm : { target: 'disconnected', context: { diagnostic: watchFailed(event) } };
+
 /* A command not yet written, overtaken by a new semantic context. */
 const staleManifest = (context: ParameterSetMachineContext): ParameterSetPatch => ({
   outcome: rejected(context.active!.requestId, 'STALE_MANIFEST', 'Semantic context changed before commit.'),
@@ -429,10 +438,10 @@ const unwrittenCommandHandlers = {
   }: Readonly<{
     context: ParameterSetMachineContext;
     event: Extract<ParameterSetMachineEvent, { type: 'watch.error' }>;
-  }>) => ({
-    target: 'settled',
-    context: { ...refresh(context), ...disconnectedBeforeCommit(context, event) },
-  }),
+  }>) =>
+    isWatchReset(event)
+      ? rearm
+      : { target: 'settled', context: { ...refresh(context), ...disconnectedBeforeCommit(context, event) } },
 };
 
 const parameterSetMachineDefinition = setup({
@@ -527,10 +536,7 @@ const parameterSetMachineDefinition = setup({
             }),
           },
           on: {
-            'watch.error': {
-              target: 'disconnected',
-              context: ({ event }) => ({ diagnostic: watchFailed(event) }),
-            },
+            'watch.error': watchErrorTo,
             resolve: ({ context, event }) =>
               isSameResolution(context, event) ? {} : { target: 'loading', reenter: true, context: resolve(event) },
             close: closeTo('#parameter-set.closed'),
@@ -562,10 +568,7 @@ const parameterSetMachineDefinition = setup({
             }),
           },
           on: {
-            'watch.error': {
-              target: 'disconnected',
-              context: ({ event }) => ({ diagnostic: watchFailed(event) }),
-            },
+            'watch.error': watchErrorTo,
             resolve: ({ context, event }) =>
               isSameResolution(context, event) ? {} : { target: 'loading', context: resolve(event) },
             close: closeTo('#parameter-set.closed'),
@@ -578,6 +581,10 @@ const parameterSetMachineDefinition = setup({
             }
             if (context.closing) {
               return { target: '#parameter-set.closed' };
+            }
+            /* A reset that arrived while a write was in flight re-arms once the write has settled. */
+            if (context.diagnostic?.code === 'WATCH_RESET') {
+              return { ...rearm, context: { diagnostic: undefined } };
             }
             if (watchFailureCodes.has(context.diagnostic?.code ?? '')) {
               return { target: 'disconnected' };
@@ -613,10 +620,7 @@ const parameterSetMachineDefinition = setup({
                 ? { target: 'refreshing' }
                 : { target: 'loading', context: resolve(event) },
             'watch.changed': { target: 'refreshing' },
-            'watch.error': {
-              target: 'disconnected',
-              context: ({ event }) => ({ diagnostic: watchFailed(event) }),
-            },
+            'watch.error': watchErrorTo,
             close: closeTo('#parameter-set.closed'),
           },
         },
@@ -967,7 +971,8 @@ const openWatch = (
 /**
  * Start the one parameter-set actor for a target over a host's files. The sidecar watch opens
  * before the first read, and every read waits for it, so no change between arming and reading is
- * lost. A watch reset fails the actor with `WATCH_RESET` and an unexpected close with
+ * lost. A watch reset (lost events) re-arms the watch and reloads, planning any command not yet written again; one
+ * that arrives while a write is in flight does so once the write settles. An unexpected close fails the actor with
  * `WATCH_CLOSED`; the next `resolve` re-arms and reloads.
  *
  * @param input - The target, the host's files over its root, and the manifest resolver.

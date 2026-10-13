@@ -8,7 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { ClientOnly } from '#components/ui/utils/client-only.js';
+import { ClientOnly } from '@taucad/ui/components/client-only';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { UserButton } from '#components/auth/user/user-button.js';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
@@ -16,7 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { metaConfig } from '#constants/meta.constants.js';
 import { legalUrl } from '#lib/legal-url.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { NavBillingItem } from '#cloud/nav-billing.js';
+import { NavBillingItem, NavCreditsMeter } from '#cloud/nav-billing.js';
 
 /**
  * Nav user button: delegates avatar, sign-in/up/out chrome to the registry
@@ -86,6 +86,7 @@ export function NavUser(): React.JSX.Element {
             side='top'
             sideOffset={8}
             shouldHideSettings
+            header={<NavCreditsMeter />}
             links={[
               ...(isOnline
                 ? []

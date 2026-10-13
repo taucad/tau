@@ -5,6 +5,7 @@ import { getProjectRootConfigs, setCheckoutRootConfigs } from '#filesystem/handl
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionStatus } from '#hooks/use-revision-status.js';
+import { useRevisionPinMemory } from '#routes/w.$workspace.$project/chat-revisions-pin.js';
 
 /**
  * Give this project's linked checkouts their routes (blueprint S27, W2 review R4).
@@ -71,6 +72,8 @@ export function WorkbenchCheckoutRoot(): undefined {
   const { projectId } = useProject();
   const { fileManagerRef, workspace } = useFileManager();
   const status = useRevisionStatus();
+  /* R22: a *Switch* pin outlives a reload, whether or not the Revisions pane is open. */
+  useRevisionPinMemory();
   const checkoutRoot = status?.checkoutRoot;
   /* The route ids, not the rows: the facet array is rebuilt on every
    * publication, and re-issuing the whole configuration for an unchanged set

@@ -55,7 +55,7 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
   TooltipTrigger: ({ children }: React.PropsWithChildren): React.ReactNode => children,
 }));
 
-vi.mock('#components/ui/utils/client-only.js', () => ({
+vi.mock('@taucad/ui/components/client-only', () => ({
   ClientOnly: () => null,
 }));
 

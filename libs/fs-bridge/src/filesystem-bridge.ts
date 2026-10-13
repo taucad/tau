@@ -1474,7 +1474,8 @@ export function createFileSystemBridgeProxy(
       if (property === 'hello') {
         return hello;
       }
-      if (property === 'then' || property === 'toJSON' || typeof property === 'symbol') {
+      /* `$$typeof` is React's element probe, read off props by its development render log. */
+      if (property === 'then' || property === 'toJSON' || property === '$$typeof' || typeof property === 'symbol') {
         return undefined;
       }
       if (isDisposed && property !== 'writeFileChecked' && property !== 'deleteFileChecked') {

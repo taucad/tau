@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
-import { formatCreditAtoms } from '@taucad/billing';
+import { formatCredits } from '#utils/credits.utils.js';
 import type { WireAutoReloadConsent, WirePaymentAction } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
 import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
@@ -171,7 +171,7 @@ export function AutoReloadSettings({
             <dt>Monthly maximum</dt>
             <dd>{money(consent.terms.monthlyGrossCapMinor)}</dd>
             <dt>Reload threshold</dt>
-            <dd>{formatCreditAtoms(BigInt(consent.terms.thresholdAtoms))} credits</dd>
+            <dd>{formatCredits(BigInt(consent.terms.thresholdAtoms))}</dd>
             <dt>Minimum time between reloads</dt>
             <dd>{formatHours(consent.terms.minimumCadenceSeconds)}</dd>
             <dt>Failure limit</dt>

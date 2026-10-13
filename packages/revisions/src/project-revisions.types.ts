@@ -17,6 +17,11 @@ export type RevisionStatusProjection = Readonly<{
   projectId: string;
   checkoutId: string | undefined;
   /**
+   * The live checkout — the project directory — whichever checkout the
+   * workbench has selected; a branch on any other one is *Linked* (D96).
+   */
+  liveCheckoutId?: string | undefined;
+  /**
    * Where that checkout's files are — the route every consumer re-roots at
    * when *Switch* moves the workbench (S27).
    *
@@ -144,6 +149,12 @@ export type RevisionBranchFacet = Readonly<{
   checkoutRoot: string | undefined;
   /** Chats whose turns are placed on this branch (the row's chips). */
   leaseChatIds: readonly string[];
+  /**
+   * Whether the last fetch found this branch on the remote (D93); absent when
+   * no fetch has said. A row with no checkout reads it as *Remote only*, and
+   * every row as *Rename* refused, since the remote keeps the old name (D91).
+   */
+  onRemote?: boolean;
 }>;
 
 /** One undecided conflicted revision as the *Needs your decision* card renders it (D14). @public */

@@ -24,6 +24,8 @@ export const searchParameterName = {
   /* Dialogs */
   // The open settings dialog section, absent when the dialog is closed.
   settings: 'settings',
+  // The setting to reveal inside the opened settings section, e.g. `credit-balance`.
+  settingsTarget: 'setting',
   // The remote-compute pairing code being redeemed.
   pair: 'pair',
 

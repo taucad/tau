@@ -48,7 +48,7 @@ const repositoryRoot = resolve(conformanceDirectory, '../../../..');
 const applicationDirectory = resolve(conformanceDirectory, 'app');
 const m2ApplicationDirectory = resolve(repositoryRoot, 'packages/geospec/host-tests/m2-browser');
 const corpusPath = resolve(repositoryRoot, 'packages/geospec-engine-native/conformance/early-corpus.json');
-const materialCorpusPath = resolve(repositoryRoot, 'packages/geospec-engine-native/conformance/material-v6.json');
+const materialCorpusPath = resolve(repositoryRoot, 'packages/geospec-engine-native/conformance/material-v6-02.json');
 const profilePath = resolve(
   repositoryRoot,
   'packages/geospec-engine-native/rust/tests/fixtures/current-profile-01/plan-corpus.json',

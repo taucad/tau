@@ -3,10 +3,11 @@
  * shared test facade (agent-host and seam suites).
  */
 import type { FileSystemProvider } from '@taucad/filesystem';
+import { joinRelativePath } from '@taucad/utils/path';
 
 /* oxlint-disable typescript/promise-function-async -- This test facade forwards provider promises unchanged. */
 export const rootedProvider = (source: FileSystemProvider, root: string): FileSystemProvider => {
-  const resolve = (path: string): string => `${root}/${path.replace(/^\/+/, '')}`;
+  const resolve = (path: string): string => joinRelativePath(root, path.replace(/^\/+/, ''));
   function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   function readFile(path: string, encoding: 'utf8'): Promise<string>;
   function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {

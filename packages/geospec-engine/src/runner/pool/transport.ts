@@ -5,11 +5,10 @@
  * enforced here rather than trusted to callers:
  *
  * 1. **Live subjects never cross.** `GeoSpecAssertion.subject` is the value the
- *    spec author handed `expectGeo(...)` — a loaded `GeometrySubject` holding
- *    an Emscripten handle and megabytes of typed arrays. Posting one would
- *    either throw (a handle is not structured-cloneable) or, worse, deep-copy
- *    an entire assembly per assertion. The content-addressed evidence cache is
- *    the channel between workers; the wire carries the subject's *identity*.
+ *    spec author handed `expectGeo(...)`. A geometry subject may hold a native
+ *    handle and megabytes of typed arrays; posting one would either throw (a
+ *    handle is not structured-cloneable) or deep-copy an entire assembly per
+ *    assertion. The wire carries the subject's *identity*.
  * 2. **Code strings are elided.** A bundle's `code` and `sourceMap` are the
  *    whole compiled spec module, posted once per shard for nothing: the host
  *    reports diagnostics, never source.
@@ -31,7 +30,7 @@ import type { GeoSpecAssertion, GeoSpecRunResult, GeoSpecTestCase } from '#runne
  */
 export type SanitizedSubject = {
   kind: 'geometry-subject-ref';
-  /** The subject's content hash — the evidence cache's own address for it. */
+  /** The subject's content hash. */
   contentHash?: string;
   /** Declared source format, when the subject recorded one. */
   format?: string;

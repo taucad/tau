@@ -1304,6 +1304,46 @@ describe.runIf(gitToolchainOnPath)('native-git store isolation (review 4 R2)', (
       await rm(root, { force: true, recursive: true });
     }
   }, 180_000);
+
+  it('refuses a linked worktree as the project path and leaves it and its repository untouched', async () => {
+    /* `tau serve` from a linked worktree adopted it: the open rewrote its index
+     * from the main checkout's HEAD and wrote LFS filters into the shared
+     * config, and the close committed it onto the main checkout's branch. */
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-worktree-'));
+    try {
+      const main = join(root, 'main');
+      const linked = join(root, 'linked');
+      execFileSync('git', ['init', '--quiet', '--initial-branch=main', main], { stdio: 'ignore' });
+      await writeFile(join(main, 'a.txt'), 'a\n');
+      const commit = (message: string): void => {
+        execFileSync('git', ['add', '--all'], { cwd: main, stdio: 'ignore' });
+        execFileSync(
+          'git',
+          ['-c', 'user.name=Ada', '-c', 'user.email=ada@example.com', 'commit', '--quiet', '-m', message],
+          {
+            cwd: main,
+            stdio: 'ignore',
+          },
+        );
+      };
+      commit('A');
+      execFileSync('git', ['worktree', 'add', '--quiet', '-b', 'side', linked], { cwd: main, stdio: 'ignore' });
+      // The main checkout moves on, so an index read from its HEAD would differ.
+      await writeFile(join(main, 'b.txt'), 'b\n');
+      commit('B');
+      const config = await readFile(join(main, '.git', 'config'), 'utf8');
+
+      const port = createNativeGitRevisionPort({ repositoryPath: linked });
+      await expect(port.init({ author })).rejects.toMatchObject({ code: 'INVALID_REPOSITORY' });
+
+      const contents = await readdir(linked);
+      expect(contents.toSorted()).toStrictEqual(['.git', 'a.txt']);
+      expect(await readFile(join(main, '.git', 'config'), 'utf8')).toBe(config);
+      expect(gitExitCode(linked, ['diff', '--cached', '--quiet'])).toBe(0);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 180_000);
 });
 
 /**

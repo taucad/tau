@@ -158,7 +158,7 @@ vi.mock('#hooks/use-file-tree.js', () => ({
     select(new Map([[entryPath, { type: 'file', name: entryPath }]])),
 }));
 vi.mock('#hooks/use-file-content.js', () => ({ useFileContent: () => ({ kind: 'text', text: 'cube();' }) }));
-vi.mock('#hooks/use-graphics.js', async () => {
+vi.mock('@taucad/viewer/hooks/use-graphics', async () => {
   const { useSelector } = await import('@xstate/react');
   return {
     GraphicsProvider: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
@@ -171,8 +171,8 @@ vi.mock('#hooks/use-graphics.js', async () => {
       selector({ context: { unitsById: {} } }),
   };
 });
-vi.mock('#components/geometry/cad/cad-viewer.js', async () => {
-  const { useGraphicsSelector } = await import('#hooks/use-graphics.js');
+vi.mock('@taucad/viewer/cad/cad-viewer', async () => {
+  const { useGraphicsSelector } = await import('@taucad/viewer/hooks/use-graphics');
   const { memo } = await import('react');
   return {
     CadViewer: memo(({ artifactHash }: { readonly artifactHash?: string }) => {
@@ -213,7 +213,10 @@ function renderViewer(): { readonly cad: ActorRefFrom<typeof cadLikeMachine> } {
   actors.graphics = createActor(graphicsLikeMachine).start();
   render(<ChatViewer viewId='view-1' entryPath={entryPath} panelApi={panelApi} />);
   expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
-  expect(renders.canvas).toEqual([{ hash: 'first', revision: 1 }]);
+  expect(renders.canvas).toEqual([
+    { hash: undefined, revision: 0 },
+    { hash: 'first', revision: 1 },
+  ]);
   renders.viewer = 0;
   renders.canvas = [];
   return { cad };

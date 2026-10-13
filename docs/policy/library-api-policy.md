@@ -3,7 +3,7 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, named operation inputs, max 3 params, naming, subpath exports, events, plugins, and lazy init.'
 status: active
 created: '2026-02-23'
-updated: '2026-10-02'
+updated: '2026-10-12'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -571,9 +571,9 @@ Every published plugin package declares `@taucad/runtime` in `peerDependencies`.
 
 Treat the five `Symbol.for('@taucad/runtime/...')` slot names and the shapes reachable through them as a frozen same-realm contract. Bump `runtimePluginAbiVersion` when either changes, and require the exact ABI integer on factory and instance brands. Do not send those brands over structured clone; validate the discriminated `CapabilitiesManifest.registrations` schema at worker and process boundaries.
 
-## 16. Type-Safe Options Constants
+## 16. Type-Safe Options Constants and Authored Config Files
 
-Use TypeScript's native `satisfies` operator for standalone options constants. Do not add identity functions whose only behavior is returning an options object unchanged.
+Use TypeScript's native `satisfies` operator for options constants inside library and application code.
 
 ```typescript
 import type { RuntimeClientOptions } from '@taucad/runtime';
@@ -586,7 +586,35 @@ const transport = inProcessTransport({ runtime });
 const options = { transport } satisfies RuntimeClientOptions<typeof runtime, typeof transport>;
 ```
 
-This keeps inference and excess-property checking without adding a runtime API or a second name for the options type.
+For a config file that users or agents author and a tool loads, such as `geospec.config.ts` or `tau.config.ts`, export a `defineConfig` helper from the package's config subpath. The default export of the file is `defineConfig({...})`. The helper is an identity at runtime. Its value is that `.ts`, `.mts`, `.js` and `.mjs` files are written the same way, and editors type-check all of them without a type-only import, a `satisfies` clause or a JSDoc `@type` annotation.
+
+Type the parameter non-generically as the config type. This gives the same checks as `satisfies`: excess properties, wrong field types, and contextual typing for inline callbacks. Do not write `<const T extends Config>(config: T): T`. A generic parameter accepts unknown keys without an error. Use a generic only for the part of the config that needs literal inference, the way `defineRuntime` infers plugins, and keep the remaining fields checked against the declared type.
+
+CORRECT:
+
+```typescript
+// geospec/config
+export function defineConfig(config: GeoSpecConfig): GeoSpecConfig {
+  return config;
+}
+
+// geospec.config.ts or geospec.config.mjs — identical source
+import { defineConfig } from 'geospec/config';
+export default defineConfig({ include: ['**/*.geospec.ts'], testTimeout: 120_000 });
+```
+
+INCORRECT:
+
+```typescript
+// Silently accepts { includes: [...] } typos: the generic absorbs excess keys
+export function defineConfig<const T extends GeoSpecConfig>(config: T): T {
+  return config;
+}
+```
+
+A config helper is not a plugin definition (§2). It holds no hidden slot and returns no factory, and it is not a second name for the config type. Loaders still validate the exported value at runtime, because a `.js` file or a value built without the helper skips type-checking. Hosts that load config files in sandboxed or bundled environments must resolve the helper's specifier.
+
+**Why**: `satisfies` is TypeScript-only syntax. A typed `defineConfig` (Vite, Vitest, Nuxt, ESLint) gives TS and JS authors one shape that copy-pastes between file extensions.
 
 ## 17. Options Override Patterns
 

@@ -35,7 +35,10 @@ it('qualifies differing actual resource generations across complete modules', as
   vi.mocked(runGeoSpecModule)
     .mockResolvedValueOnce(passing('a'.repeat(64)))
     .mockResolvedValueOnce(passing('b'.repeat(64)));
-  const runner = createSerialGeoSpecRunner({ filesystem: mock<GeoSpecRunnerOptions['filesystem']>() });
+  const runner = createSerialGeoSpecRunner({
+    filesystem: mock<GeoSpecRunnerOptions['filesystem']>(),
+    nativeAssertions: mock<GeoSpecRunnerOptions['nativeAssertions']>(),
+  });
   const result = await runner.run({ files: ['first.geospec.ts', 'second.geospec.ts'] });
   await runner.close();
   expect(result).toMatchObject({ success: false, failed: 0, lineageStatus: 'mixed' });

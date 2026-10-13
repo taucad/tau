@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
@@ -1051,6 +1051,20 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @returns Whether a repository exists here and its top level is this path.
    */
   const ownsStore = async (): Promise<boolean> => {
+    /* A linked worktree or a submodule has a one-line `.git` file naming an
+     * administrative directory inside another repository. Every path this port
+     * derives from `<project>/.git` — the index it heals, the LFS objects it
+     * writes, `worktree list`'s first entry as the live checkout — then names
+     * somebody else's, so a close revision committed the worktree's files onto
+     * the main checkout's branch and the open rewrote this worktree's index
+     * from that checkout's HEAD. */
+    const gitEntry = await stat(join(repositoryPath, gitDirectoryName)).catch(() => undefined);
+    if (gitEntry?.isFile() === true) {
+      throw new RevisionPortError(
+        'INVALID_REPOSITORY',
+        'The project path is a linked Git worktree or submodule; a revision store needs a repository of its own.',
+      );
+    }
     /* Discovery, not the pinned store: the question is what is *already* at
      * this path, so `GIT_DIR` must be absent here rather than pointed at the
      * answer. Every `GIT_*` the caller exported is still stripped. */
@@ -1105,7 +1119,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * rewrite cannot repeat.
      */
     init: async (input: InitRevisionStoreInput): Promise<void> => {
-      /* Asked first, and it throws for a bare repository: a path this port
+      /* Asked first, and it throws for a bare repository or a `.git` file: a path this port
        * refuses is left exactly as it was, ignore file included (review 4 R40).
        * The ordering that matters is the ignore file before `git init`, not
        * before the question of what is already here. */

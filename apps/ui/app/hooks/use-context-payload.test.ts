@@ -1,7 +1,9 @@
 import { contextMemoryMaxBytes, contextMemoryMaxLines } from '@taucad/chat/schemas';
 import { truncateMemoryHead } from '#hooks/use-context-payload.js';
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import type { FileEntry } from '@taucad/types';
 import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
@@ -16,15 +18,34 @@ const mockTreeService = {
   listDirectory: mockListDirectory,
   getEntry: mockGetEntry,
   subscribeTree: mockSubscribeTree,
+  subscribePath: (_path: string, callback: () => void) => mockSubscribeTree(callback),
 };
 
 /** A ready recursive watch that never changes: each hook mount reads the catalog afresh. */
+let catalogClosed = Promise.withResolvers<void>();
+const contentObservations = new Map<string, ObservationService<FileContentResult>>();
 const mockContentService = {
+  observeContent: (path: string) => {
+    let service = contentObservations.get(path);
+    if (!service) {
+      service = new ObservationService<FileContentResult>({
+        resource: path,
+        watch: () => ({ ready: Promise.resolve(), closed: catalogClosed.promise, dispose: () => undefined }),
+        read: async () => {
+          try {
+            return { kind: 'text', content: await mockReadFile(path) };
+          } catch {
+            return { kind: 'orphaned' };
+          }
+        },
+      });
+      contentObservations.set(path, service);
+    }
+    return service;
+  },
   watchReady: () => ({
     ready: Promise.resolve(),
-    closed: new Promise<never>(() => {
-      // Never closes.
-    }),
+    closed: catalogClosed.promise,
     dispose: () => undefined,
   }),
 };
@@ -72,7 +93,9 @@ function makeFileEntry(path: string, type: 'file' | 'dir' = 'file'): FileEntry {
 
 describe('useContextPayload', () => {
   beforeEach(() => {
+    contentObservations.clear();
     vi.clearAllMocks();
+    catalogClosed = Promise.withResolvers<void>();
     mockListDirectory.mockResolvedValue([]);
     mockGetEntry.mockResolvedValue(undefined);
     mockReadFile.mockRejectedValue(new Error('not found'));
@@ -93,6 +116,18 @@ describe('useContextPayload', () => {
         ]),
       );
     });
+  });
+
+  it('should exclude unavailable skill authority from a new prompt after isolated watch closure', async () => {
+    const hook = renderHook(() => useContextPayload());
+    await waitFor(() => {
+      expect(hook.result.current?.skills?.length).toBeGreaterThan(0);
+    });
+    await act(async () => {
+      catalogClosed.resolve();
+    });
+    expect(hook.result.current?.skills).toBeUndefined();
+    hook.unmount();
   });
 
   it('should keep virtual system skills when no user skill directories exist', async () => {

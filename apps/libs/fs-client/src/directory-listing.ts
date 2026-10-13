@@ -33,7 +33,7 @@ export type ListedDirectoryEntry =
 export type DirectoryListing =
   | { kind: 'unready' }
   | { kind: 'loading'; path: string }
-  | { kind: 'ready'; path: string; entries: readonly ListedDirectoryEntry[] }
+  | { kind: 'ready'; path: string; entries: readonly ListedDirectoryEntry[]; pending?: true }
   | { kind: 'error'; path: string; cause: DirectoryListingError };
 
 /**

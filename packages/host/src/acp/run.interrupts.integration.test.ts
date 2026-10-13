@@ -82,8 +82,11 @@ const startHarness = async (
 
 const readLog = async (workspaceRoot: string, chatId: string): Promise<readonly AgentLogEvent[]> => {
   const raw = await readFile(join(workspaceRoot, '.tau', 'chats', chatId, 'events.jsonl'), 'utf8');
+  /* Every row ends with its newline; text after the last one is a row the host is still appending, which a poll
+   * reads on its next turn. */
   return (
     raw
+      .slice(0, raw.lastIndexOf('\n') + 1)
       .split('\n')
       .filter((line) => line.trim() !== '')
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log this test just wrote is the vocabulary by construction.
@@ -299,10 +302,22 @@ describe('an approval nobody answers', () => {
       launcher.execute({ type: 'resume', commandId: 'cmd-resume', payload: { chatId, runId } }),
     ).resolves.toMatchObject({ status: 'applied' });
     /* The vendor session is reattached and told to continue; the agent's next step is the gated write it was
-     * waiting on, so it asks again. */
+     * waiting on, so it asks again. The ask lands as `[requested, paused]`, one durable append per row (W1), so wait
+     * for a lifecycle row after the second request: a read between the two sees the request under a run still
+     * `running`. Any lifecycle row settles the wait, so a resume that fails still reaches the assertion below. */
     await until(
-      async () =>
-        interruptsOf(await readLog(workspaceRoot, chatId)).filter((event) => event.phase === 'requested').length === 2,
+      async () => {
+        const log = await readLog(workspaceRoot, chatId);
+        const asked = log.flatMap((event, index) =>
+          event.type === 'interrupt.recorded' && event.phase === 'requested' ? [index] : [],
+        );
+        const [, again] = asked;
+        return (
+          asked.length === 2 &&
+          again !== undefined &&
+          log.slice(again + 1).some((event) => event.type === 'run.lifecycle')
+        );
+      },
       'the approval asked again',
       async () => readLog(workspaceRoot, chatId),
     );

@@ -1,8 +1,10 @@
 import { createCallbackLogic, setup, types } from 'xstate';
 import type { AnyActorRef, EnqueueObject, SystemRegistry } from 'xstate';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { isReservedBranchName } from '@taucad/revisions';
 import { getGitHubClient } from '#lib/github-api.js';
 import type { ImportWorkerRequest, ImportWorkerResponse } from '#workers/import.worker.js';
+import { normalizeRepositoryFolder, parseGitHubUrl } from '#routes/import.$/import.utils.js';
 
 /**
  * Import GitHub Machine Context
@@ -13,6 +15,8 @@ export type ImportGitHubContext = {
   owner: string;
   repo: string;
   ref: string;
+  /** Repository folder to import, relative to the repository root; empty imports the whole repository. */
+  path: string;
   requestedMainFile: string;
   selectedMainFile: string | undefined;
   repoMetadata:
@@ -54,24 +58,78 @@ export type ImportGitHubContext = {
 };
 
 /**
+ * What the person importing can do about a failed step; the page words its advice from this.
+ * - `notFound`: the address names no public repository.
+ * - `rateLimited`: GitHub refused unauthenticated reads for now.
+ * - `serverNotConfigured`: this Tau server lacks the GitHub token the step needs.
+ * - `tooLarge`: the repository exceeds an import limit.
+ * - `failed`: anything else; trying again may help.
+ */
+export type ImportGitHubFailure = 'notFound' | 'rateLimited' | 'serverNotConfigured' | 'tooLarge' | 'failed';
+
+/** A failed import step, classified so the page can give advice that fits the cause. */
+export class ImportGitHubError extends Error {
+  public readonly failure: ImportGitHubFailure;
+
+  public constructor(failure: ImportGitHubFailure, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'ImportGitHubError';
+    this.failure = failure;
+  }
+}
+
+const statusOf = (error: unknown): number | undefined =>
+  typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
+    ? error.status
+    : undefined;
+
+const codeOf = (error: unknown): string | undefined =>
+  typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : undefined;
+
+/**
  * One sentence for a failed public metadata read. Octokit reports the HTTP
  * status on `status`; its message ("Not Found - https://docs…") is not for users.
  *
  * @param error - What the unauthenticated GitHub read threw.
  * @returns An error whose message is written for the person importing.
  */
-function toMetadataFetchError(error: unknown): Error {
-  const status =
-    typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
-      ? error.status
-      : undefined;
+function toMetadataFetchError(error: unknown): ImportGitHubError {
+  const status = statusOf(error);
   if (status === 404) {
-    return new Error("Tau couldn't find a public repository at this address.");
+    return new ImportGitHubError('notFound', "Tau couldn't find a public repository at this address.", {
+      cause: error,
+    });
   }
   if (status === 403 || status === 429) {
-    return new Error("GitHub's rate limit for public reads was reached. Try again in a few minutes.");
+    return new ImportGitHubError(
+      'rateLimited',
+      "GitHub's rate limit for public reads was reached. Try again in a few minutes.",
+      { cause: error },
+    );
   }
-  return new Error("Tau couldn't read this repository from GitHub. Check the address and try again.");
+  return new ImportGitHubError('failed', "Tau couldn't read this repository from GitHub. Try again shortly.", {
+    cause: error,
+  });
+}
+
+/**
+ * Classify a failed branch listing. The Tau route answers `GITHUB_API_TOKEN_UNAVAILABLE`
+ * when its server has no GitHub token; the import can still proceed on the default branch.
+ *
+ * @param error - What the branch route call threw.
+ * @returns The error to keep under `fetchErrors.branches`.
+ */
+function toBranchesFetchError(error: unknown): Error {
+  if (codeOf(error) === 'GITHUB_API_TOKEN_UNAVAILABLE') {
+    return new ImportGitHubError(
+      'serverNotConfigured',
+      error instanceof Error ? error.message : 'GitHub branch listing is not configured on this server.',
+      { cause: error },
+    );
+  }
+  return error instanceof Error ? error : new Error('Failed to fetch branches');
 }
 
 /**
@@ -82,6 +140,7 @@ type ImportGitHubInput = {
   owner?: string;
   repo?: string;
   ref?: string;
+  path?: string;
   mainFile?: string;
 };
 
@@ -94,11 +153,13 @@ type ImportGitHubEventInternal =
   | { type: 'updateRepoUrl'; url: string }
   | { type: 'selectBranch'; branch: string }
   | { type: 'selectMainFile'; file: string }
+  | { type: 'selectFolder'; path: string }
   | {
       type: 'syncLocation';
       owner: string;
       repo: string;
       ref: string;
+      path: string;
       mainFile: string;
     }
   | { type: 'startImport' }
@@ -124,6 +185,7 @@ type ImportGitHubEventInternal =
       type: 'workerError';
       message: string;
       phase: 'download' | 'extract' | 'write';
+      reason?: 'tooLarge';
     };
 
 /**
@@ -176,11 +238,13 @@ function buildImportUrl({
   owner,
   repo,
   selectedBranch,
+  path,
   selectedMainFile,
 }: {
   owner: string;
   repo: string;
   selectedBranch: string;
+  path: string;
   selectedMainFile: string | undefined;
 }): string {
   if (!owner || !repo) {
@@ -190,12 +254,16 @@ function buildImportUrl({
   // Use github.com/owner/repo without protocol to avoid browser normalizing // to /
   // The full https:// is implied and added when parsing
   const repoUrl = `github.com/${owner}/${repo}`;
-  const path = `/import/${repoUrl}`;
+  const importPath = `/import/${repoUrl}`;
 
   const parameters = new URLSearchParams();
 
   if (selectedBranch && selectedBranch !== 'main') {
     parameters.set('ref', selectedBranch);
+  }
+
+  if (path) {
+    parameters.set('path', path);
   }
 
   if (selectedMainFile) {
@@ -204,7 +272,7 @@ function buildImportUrl({
 
   const queryString = parameters.size > 0 ? `?${parameters.toString()}` : '';
 
-  return `${path}${queryString}`;
+  return `${importPath}${queryString}`;
 }
 
 const getRepoMetadataActor = fromSafeAsync<RepoMetadataResult, { owner: string; repo: string }>(async ({ input }) => {
@@ -229,7 +297,8 @@ const getBranchesActor = fromSafeAsync<BranchesResult, { owner: string; repo: st
 
     return {
       type: 'branchesRetrieved',
-      branches: result.branches,
+      /* A conflict line is a decision, not a branch to copy (D14). */
+      branches: result.branches.filter(({ name }) => !isReservedBranchName(name)),
       hasMore: result.hasMore,
       endCursor: result.endCursor,
     };
@@ -260,6 +329,7 @@ const createProjectActor = fromSafeAsync<
     owner: string;
     repo: string;
     ref: string;
+    path: string;
     mainFile: string;
     files: Map<string, { filename: string; content: Uint8Array<ArrayBuffer> }>;
   }
@@ -270,6 +340,7 @@ const createProjectActor = fromSafeAsync<
 type ImportWorkerCallbackInput = {
   downloadUrl: string;
   headers?: Record<string, string>;
+  root: string;
 };
 
 type ImportWorkerCallbackEvents =
@@ -280,7 +351,7 @@ type ImportWorkerCallbackEvents =
       filePaths: string[];
       files: Array<{ path: string; content: Uint8Array<ArrayBuffer> }>;
     }
-  | { type: 'workerError'; message: string; phase: 'download' | 'extract' | 'write' };
+  | { type: 'workerError'; message: string; phase: 'download' | 'extract' | 'write'; reason?: 'tooLarge' };
 
 const importWorkerActor = createCallbackLogic<ImportWorkerCallbackEvents, ImportWorkerCallbackInput>(
   ({ sendBack, input }) => {
@@ -308,7 +379,12 @@ const importWorkerActor = createCallbackLogic<ImportWorkerCallbackEvents, Import
           break;
         }
         case 'error': {
-          sendBack({ type: 'workerError', message: message.message, phase: message.phase });
+          sendBack({
+            type: 'workerError',
+            message: message.message,
+            phase: message.phase,
+            ...(message.reason === undefined ? {} : { reason: message.reason }),
+          });
           break;
         }
       }
@@ -322,6 +398,7 @@ const importWorkerActor = createCallbackLogic<ImportWorkerCallbackEvents, Import
       type: 'startDownload',
       url: input.downloadUrl,
       headers: input.headers,
+      root: input.root,
     };
     worker.postMessage(startMessage);
 
@@ -365,6 +442,7 @@ const parseRepoUrl = (context: ImportGitHubContext): ImportGitHubPatch => {
       owner: '',
       repo: '',
       ref: 'main',
+      path: '',
       repoMetadata: undefined,
       branches: [],
       selectedBranch: 'main',
@@ -375,44 +453,33 @@ const parseRepoUrl = (context: ImportGitHubContext): ImportGitHubPatch => {
     };
   }
 
-  // Parse GitHub URL and extract owner/repo/ref
-  try {
-    const url = new URL(context.repoUrl);
-    if (url.hostname !== 'github.com') {
-      return { owner: '', repo: '', repoMetadata: undefined, branches: [], repoFiles: [] };
-    }
-
-    const pathParts = url.pathname.split('/').filter(Boolean);
-    if (pathParts.length < 2) {
-      return { owner: '', repo: '', repoMetadata: undefined, branches: [], repoFiles: [] };
-    }
-
-    const [owner, repoRaw] = pathParts;
-    if (!owner || !repoRaw) {
-      return { owner: '', repo: '', repoMetadata: undefined, branches: [] };
-    }
-
-    const repo = repoRaw.replace(/\.git$/, '');
-    const ref = 'main'; // Default to main, could be extended later
-
-    // If the repo changed, clear metadata and branches
-    if (owner !== context.owner || repo !== context.repo) {
-      return {
-        owner,
-        repo,
-        ref,
-        repoMetadata: undefined,
-        branches: [],
-        selectedBranch: 'main',
-        branchesCursor: undefined,
-        hasMoreBranches: false,
-      };
-    }
-
-    return { owner, repo, ref };
-  } catch {
-    return { owner: '', repo: '', repoMetadata: undefined, branches: [] };
+  // Parse GitHub URL and extract owner/repo, plus the ref and folder of a `tree/<ref>/<folder>` URL
+  const parsed = parseGitHubUrl(context.repoUrl);
+  if (parsed === undefined) {
+    return { owner: '', repo: '', path: '', repoMetadata: undefined, branches: [], repoFiles: [] };
   }
+
+  const { owner, repo } = parsed;
+  const ref = parsed.ref ?? 'main';
+
+  // If the repo changed, clear metadata and branches
+  if (owner !== context.owner || repo !== context.repo) {
+    return {
+      owner,
+      repo,
+      ref,
+      path: parsed.path,
+      repoMetadata: undefined,
+      branches: [],
+      selectedBranch: ref,
+      branchesCursor: undefined,
+      hasMoreBranches: false,
+    };
+  }
+
+  return parsed.ref === undefined
+    ? { owner, repo, ref, path: parsed.path }
+    : { owner, repo, ref, selectedBranch: ref, path: parsed.path };
 };
 
 const importUrlOf = (context: ImportGitHubContext): string =>
@@ -420,6 +487,7 @@ const importUrlOf = (context: ImportGitHubContext): string =>
     owner: context.owner,
     repo: context.repo,
     selectedBranch: context.selectedBranch,
+    path: context.path,
     selectedMainFile: context.selectedMainFile,
   });
 
@@ -462,6 +530,17 @@ const selectMainFileAndReplaceUrl = (
   return { context: patch };
 };
 
+/** A new folder changes what every file path is relative to, so the main-file choice starts over. */
+const selectFolder = ({ context, event }: ImportGitHubArgs<'selectFolder'>, enq: ImportGitHubEnqueue) => {
+  const path = normalizeRepositoryFolder(event.path);
+  if (path === context.path) {
+    return undefined;
+  }
+  const patch = { path, selectedMainFile: undefined, requestedMainFile: '' };
+  enq.emit({ type: 'urlReplaced', url: importUrlOf({ ...context, ...patch }) });
+  return { context: patch };
+};
+
 // Sync location from React Router (for back/forward navigation)
 const syncLocationPatch = (event: Extract<ImportGitHubEvent, { type: 'syncLocation' }>): ImportGitHubPatch => {
   // If no owner/repo from location, reset to empty state
@@ -471,6 +550,7 @@ const syncLocationPatch = (event: Extract<ImportGitHubEvent, { type: 'syncLocati
       owner: '',
       repo: '',
       ref: 'main',
+      path: '',
       selectedBranch: 'main',
       repoMetadata: undefined,
       branches: [],
@@ -488,6 +568,7 @@ const syncLocationPatch = (event: Extract<ImportGitHubEvent, { type: 'syncLocati
     repo: event.repo,
     ref: event.ref || 'main',
     selectedBranch: event.ref || 'main',
+    path: normalizeRepositoryFolder(event.path),
     requestedMainFile: event.mainFile || '',
     selectedMainFile: event.mainFile || undefined,
     urlFromNavigation: true, // Mark as navigation-driven
@@ -498,7 +579,11 @@ const syncLocationPatch = (event: Extract<ImportGitHubEvent, { type: 'syncLocati
 const syncLocation = ({ context, event }: ImportGitHubArgs<'syncLocation'>) => {
   const currentRepoUrl = context.owner && context.repo ? `https://github.com/${context.owner}/${context.repo}` : '';
   const newRepoUrl = event.owner && event.repo ? `https://github.com/${event.owner}/${event.repo}` : '';
-  if (currentRepoUrl === newRepoUrl && context.selectedBranch === (event.ref || 'main')) {
+  if (
+    currentRepoUrl === newRepoUrl &&
+    context.selectedBranch === (event.ref || 'main') &&
+    context.path === normalizeRepositoryFolder(event.path)
+  ) {
     return undefined;
   }
   return { target: 'checkingRepo', reenter: true, context: syncLocationPatch(event) };
@@ -566,6 +651,7 @@ export const importGitHubMachine = setup({
     owner: input.owner ?? '',
     repo: input.repo ?? '',
     ref: input.ref ?? 'main',
+    path: normalizeRepositoryFolder(input.path ?? ''),
     requestedMainFile: input.mainFile ?? '',
     // Initialize selectedMainFile from input if provided (for URL loading with ?main=)
     // Empty string means no file selected, so treat as undefined
@@ -602,6 +688,7 @@ export const importGitHubMachine = setup({
         updateRepoUrl: updateRepoUrl({ clearError: true }),
         selectBranch: selectBranch({ reenter: false }),
         selectMainFile: selectMainFileAndReplaceUrl,
+        selectFolder,
         syncLocation,
         startImport,
         loadMoreBranches: ({ context }) =>
@@ -636,6 +723,7 @@ export const importGitHubMachine = setup({
         updateRepoUrl: updateRepoUrl({ clearError: true }),
         selectBranch: selectBranch({ reenter: false }),
         selectMainFile: selectMainFileAndReplaceUrl,
+        selectFolder,
         syncLocation,
       },
     },
@@ -689,16 +777,20 @@ export const importGitHubMachine = setup({
               },
               on: {
                 metadataRetrieved: {
-                  context: ({ context, event }) => ({
-                    repoMetadata: event.metadata,
-                    selectedBranch: event.metadata.defaultBranch,
-                    ref:
+                  context: ({ context, event }) => {
+                    /* A requested ref (`?ref=` or a folder URL) wins; only the `main` default follows the repository. */
+                    const ref =
                       context.ref === 'main' && event.metadata.defaultBranch
                         ? event.metadata.defaultBranch
-                        : context.ref,
-                    fetchErrors: { ...context.fetchErrors, metadata: undefined },
-                    error: undefined,
-                  }),
+                        : context.ref;
+                    return {
+                      repoMetadata: event.metadata,
+                      selectedBranch: ref,
+                      ref,
+                      fetchErrors: { ...context.fetchErrors, metadata: undefined },
+                      error: undefined,
+                    };
+                  },
                 },
               },
             },
@@ -722,11 +814,7 @@ export const importGitHubMachine = setup({
                 onError: ({ context, event }) => ({
                   target: 'error',
                   context: {
-                    ...fetchErrorPatch(context, {
-                      key: 'branches',
-                      error: event.error,
-                      fallback: 'Failed to fetch branches',
-                    }),
+                    fetchErrors: { ...context.fetchErrors, branches: toBranchesFetchError(event.error) },
                     branches: [],
                     hasMoreBranches: false,
                   },
@@ -813,6 +901,7 @@ export const importGitHubMachine = setup({
         filesRetrieved: { context: ({ event }) => ({ repoFiles: event.files, isLoadingFiles: false }) },
         updateRepoUrl: updateRepoUrl({ clearError: false }),
         selectBranch: selectBranch({ reenter: true }),
+        selectFolder,
         syncLocation,
       },
     },
@@ -829,6 +918,7 @@ export const importGitHubMachine = setup({
               ref: context.ref,
             }),
             headers: client.getAuthHeaders(),
+            root: context.path,
           };
         },
       },
@@ -853,7 +943,12 @@ export const importGitHubMachine = setup({
         },
         workerError: {
           target: 'error',
-          context: ({ event }) => ({ error: new Error(`Import failed (${event.phase}): ${event.message}`) }),
+          context: ({ event }) => {
+            const message = `Import failed (${event.phase}): ${event.message}`;
+            return {
+              error: event.reason === 'tooLarge' ? new ImportGitHubError('tooLarge', message) : new Error(message),
+            };
+          },
         },
         cancelDownload: { target: 'enteringDetails', context: { error: undefined, fetchErrors: noFetchErrors } },
       },
@@ -873,6 +968,7 @@ export const importGitHubMachine = setup({
             owner: '',
             repo: '',
             ref: 'main',
+            path: '',
             requestedMainFile: '',
             selectedMainFile: undefined,
             repoMetadata: undefined,
@@ -903,6 +999,7 @@ export const importGitHubMachine = setup({
           owner: context.owner,
           repo: context.repo,
           ref: context.ref,
+          path: context.path,
           mainFile: context.selectedMainFile!,
           files: context.files,
         }),

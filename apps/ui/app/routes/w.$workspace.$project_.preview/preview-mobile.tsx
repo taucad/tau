@@ -1,7 +1,7 @@
 import { memo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { FileCode } from 'lucide-react';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { Button } from '@taucad/ui/components/button';
 import { Tabs, TabsContent } from '@taucad/ui/components/tabs';
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';

@@ -1,4 +1,4 @@
-import { partPose } from '#www/story-kinematics.js';
+import { agentLane, assemblyStep, assemblySteps, explodeLift, partPose } from '@taucad/planetary-gearbox';
 
 /** Chapter ids, in reading order. Copy lives in content.mjs; this module owns motion only. */
 export const chapterIds = /** @type {const} */ ([
@@ -23,80 +23,8 @@ export const ease = (value) => {
 /** @type {(from: number, to: number, progress: number) => number} */
 const blend = (from, to, progress) => from + (to - from) * progress;
 
-/**
- * The order an engineer builds the gearbox in. Every part travels only along the gearbox axis,
- * onto the parts already seated, so nothing passes through anything else: spacers onto the rear
- * carrier, pins through them, washers and the bushed planets down the pins, the sun down between
- * the planets, front spacers, the ring over the planets, the front carrier onto the pins and its
- * screws; then the rear screws come up from underneath. `z` is each step's assembled extent along
- * the axis in millimetres, measured from the frozen geometry in public/planetary.json.
- * @type {ReadonlyArray<{match: RegExp, z: readonly [number, number], below?: boolean}>}
- */
-const assemblyOrder = [
-  { match: /^Carrier Rear$/u, z: [-8, -3] },
-  { match: /^Rear Thrust Spacer/u, z: [-3, -1.7] },
-  { match: /^Planet Pin/u, z: [-7.9, 21.9] },
-  { match: /^Thrust Washer/u, z: [-1.5, 0] },
-  { match: /^(?:Flanged Bushing|Planet Gear)/u, z: [0, 15.5] },
-  { match: /^Sun/u, z: [-28, 16] },
-  { match: /^Front Thrust Spacer/u, z: [15.7, 17] },
-  { match: /^Internal Ring/u, z: [-1, 15] },
-  { match: /^Carrier Front/u, z: [17, 40] },
-  { match: /^Front Screw Washer/u, z: [22, 23] },
-  { match: /^Front Socket Screw/u, z: [11, 28] },
-  { match: /^Rear Screw Washer/u, z: [-9, -8], below: true },
-  { match: /^Rear Socket Screw/u, z: [-14, 3], below: true },
-];
-export const assemblySteps = assemblyOrder.length;
-
-/**
- * Exploded offsets: each step waits one clear gap beyond the previous one along its own path,
- * so the exploded parts never overlap, whichever lane they start in.
- */
-const explodeGap = 6;
-const lifts = (() => {
-  let top = -3;
-  let bottom = -8;
-  return assemblyOrder.map(({ z: [low, high], below }, step) => {
-    if (step === 0) {
-      return 0;
-    }
-    if (below) {
-      const lift = bottom - explodeGap - high;
-      bottom = low + lift;
-      return lift;
-    }
-    const lift = top + explodeGap - low;
-    top = high + lift;
-    return lift;
-  });
-})();
 /** Height the camera looks at while the exploded stack is in view. */
 const stackCentre = 85;
-
-/**
- * Zero-based assembly step of an authored part.
- * @param name - Authored part name.
- * @returns Step index into the assembly order.
- * @type {(name: string) => number}
- */
-export const assemblyStep = (name) => {
-  const step = assemblyOrder.findIndex(({ match }) => match.test(name));
-  return step === -1 ? assemblySteps - 1 : step;
-};
-
-/**
- * Which illustrative agent task produced a part: ring, gear train, or carrier and hardware.
- * @type {(name: string) => -1 | 0 | 1}
- */
-export const agentLane = (name) =>
-  name.startsWith('Internal Ring') ? -1 : /^(Sun|Planet Gear|Flanged Bushing)/u.test(name) ? 0 : 1;
-
-/**
- * Axial explode offset in millimetres: front parts above, rear screws below.
- * @type {(name: string) => number}
- */
-export const explodeLift = (name) => lifts[assemblyStep(name)] ?? 0;
 
 /** @typedef {{x: number, y: number, z: number, rotation: number, scale: number, solid: number, cloud: number}} PartState */
 /** @typedef {{chapter: number, sunAngle: number, variant: number, print: number, plate: number, device: number, distance: number, elevation: number, azimuth: number, targetY: number, layer: number}} FrameState */

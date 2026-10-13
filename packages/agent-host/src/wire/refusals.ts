@@ -240,6 +240,9 @@ export const refusals = {
   BRANCH_NEEDS_REVISION: { owner: 'revisions', retry: 'never' },
   /** A branch name under a namespace Tau keeps for itself (`conflicts/`, D14). */
   BRANCH_NAME_RESERVED: { owner: 'revisions', retry: 'never' },
+  /** A rename of a branch something else knows by its name: a linked checkout or a remote (D91). */
+  BRANCH_RENAME_LINKED: { owner: 'revisions', retry: 'never' },
+  BRANCH_RENAME_PUSHED: { owner: 'revisions', retry: 'never' },
   CHECKOUT_CONFLICT: { owner: 'revisions', retry: 'never' },
   ENGINE_FAILED: { owner: 'revisions', retry: 'never' },
   ENGINE_UNAVAILABLE: { owner: 'revisions', retry: 'never' },

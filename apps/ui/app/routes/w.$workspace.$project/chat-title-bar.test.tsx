@@ -40,7 +40,7 @@ vi.mock('#routes/w.$workspace.$project/use-active-chat-naming.js', () => ({
 vi.mock('#hooks/use-project-slug-route.js', () => ({
   useProjectSlugs: () => ({ status: 'resolved', value: { workspaceSlug: 'home', projectSlug: 'bracket' } }),
 }));
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: (_keys: unknown, handler: () => Promise<void>) => {
     keybindingHandler = handler;
     return { formattedKeyCombination: 'Ctrl+Shift+C' };

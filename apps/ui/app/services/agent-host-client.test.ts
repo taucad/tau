@@ -5,13 +5,15 @@
  * stream with `serveAgentChannel` over a scripted launcher.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import { writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
-import type { AgentLiveEvent, AgentLogEvent, ChannelServerHandle, HostRunSnapshot } from '@taucad/agent-host';
+import type { SourceLiveEvent, AgentLogEvent, ChannelServerHandle, HostRunSnapshot } from '@taucad/agent-host';
 import { serveAgentWorkerChannel } from '@taucad/agent-host/channel-client';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import { agentWireVersion } from '@taucad/agent-host/wire';
-import type { CommandAnswer, HostCommand, ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
+import type { CatchUpFrame, CommandAnswer, HostCommand, ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
 import {
   createBrowserAgentHostClient,
   getBrowserAgentHostCapability,
@@ -21,6 +23,29 @@ import {
 } from '#services/agent-host-client.js';
 import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
 import { agentHostWorkerProtocolSchemas, parseAgentHostWorkerConnect } from '#workers/agent-host.contract.js';
+
+/* R21: the session the default principal reads, as the auth client answers it; `$sessionSignal` is the atom it toggles
+ * on a sign-in, a sign-out or a session change. */
+const auth = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  return {
+    getSession: vi.fn<() => Promise<unknown>>(),
+    signal: {
+      listen: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    },
+    changeSession: () => {
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+  };
+});
+vi.mock('#lib/auth-client.js', () => ({
+  authClient: { getSession: auth.getSession, $store: { atoms: { $sessionSignal: auth.signal } } },
+}));
 
 type FakeRequest = { readonly name: string; readonly args: Record<string, unknown> };
 type ErrorListener = (event: ErrorEvent) => void;
@@ -100,6 +125,8 @@ class FakeResidentWorker {
     });
   });
 
+  public holdNextProvide: Promise<void> | undefined;
+
   private frozen = false;
   private readonly held: Array<() => void> = [];
   private control: ChannelServerHandle<AgentHostWorkerProtocol> | undefined;
@@ -112,10 +139,10 @@ class FakeResidentWorker {
   private readonly waiters = new Set<() => void>();
   private readonly liveControllers = new Set<{
     readonly chatId: string;
-    readonly controller: ReadableStreamDefaultController<AgentLiveEvent>;
+    readonly controller: ReadableStreamDefaultController<SourceLiveEvent>;
   }>();
 
-  private readonly pendingLive: AgentLiveEvent[] = [];
+  private readonly pendingLive: SourceLiveEvent[] = [];
   private readonly snapshots = new Map<string, HostRunSnapshot>();
 
   public addEventListener(_type: 'error', listener: ErrorListener): void {
@@ -149,7 +176,7 @@ class FakeResidentWorker {
     }
   }
 
-  public emitLive(event: AgentLiveEvent): void {
+  public emitLive(event: SourceLiveEvent): void {
     const listening = [...this.liveControllers].filter((entry) => entry.chatId === event.chatId);
     if (listening.length === 0) {
       this.pendingLive.push(event);
@@ -197,7 +224,15 @@ class FakeResidentWorker {
       case 'provide': {
         const previous = this.hosts.get(args['projectId'] as string);
         this.hosts.set(args['projectId'] as string, args['hostId'] as string);
-        return previous === undefined ? {} : { replaced: previous };
+        const answer = previous === undefined ? {} : { replaced: previous };
+        const held = this.holdNextProvide;
+        this.holdNextProvide = undefined;
+        return held === undefined
+          ? answer
+          : (async () => {
+              await held;
+              return answer;
+            })();
       }
       case 'release': {
         if (this.hosts.get(args['projectId'] as string) === args['hostId']) {
@@ -252,12 +287,13 @@ class FakeResidentWorker {
 
   /** The scripted host each stream is served from. */
   private launcher(): AgentLauncher {
-    const scripted: Pick<AgentLauncher, 'execute' | 'read' | 'liveEvents'> = {
+    const scripted: Pick<AgentLauncher, 'execute' | 'read' | 'catchUp' | 'liveEvents'> = {
       execute: async (command: HostCommand) => this.command(command),
       read: async (input: ReadInput) => this.read(input),
+      catchUp: writerOwnedCatchUp,
       liveEvents: ({ chatId, signal }) => this.listenLive(chatId, signal),
     };
-    return scripted as AgentLauncher;
+    return mock<AgentLauncher>(scripted);
   }
 
   private append(chatId: string, runId: string, state: HostRunSnapshot['state']): number {
@@ -329,6 +365,8 @@ class FakeResidentWorker {
     return {
       status: 'batch',
       chatId: request.chatId,
+      sourceGeneration: 'fixture-source',
+      sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
       cursor: request.cursor,
       nextCursor: request.cursor + events.length,
       endCursor: rows.length,
@@ -336,8 +374,8 @@ class FakeResidentWorker {
     };
   }
 
-  private listenLive(chatId: string, signal: AbortSignal): AsyncIterable<AgentLiveEvent> {
-    return new ReadableStream<AgentLiveEvent>({
+  private listenLive(chatId: string, signal: AbortSignal): AsyncIterable<SourceLiveEvent> {
+    return new ReadableStream<SourceLiveEvent>({
       start: (controller) => {
         const entry = { chatId, controller };
         this.liveControllers.add(entry);
@@ -355,7 +393,7 @@ class FakeResidentWorker {
         );
       },
       cancel: () => undefined,
-    }) as unknown as AsyncIterable<AgentLiveEvent>;
+    }) as unknown as AsyncIterable<SourceLiveEvent>;
   }
 }
 
@@ -449,24 +487,55 @@ const workerOf =
     worker as unknown as Worker;
 
 describe('createBrowserAgentHostClient', () => {
+  it('forwards the required catch-up stream through the real resident channel and transport', async () => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker));
+    try {
+      const frames: CatchUpFrame[] = [];
+      for await (const frame of client.catchUp({ chatId: 'chat-catch-up', limit: 2, maxBytes: 1024 })) {
+        frames.push(frame);
+      }
+      expect(frames).toEqual([
+        {
+          type: 'refused',
+          answer: {
+            status: 'refused',
+            chatId: 'chat-catch-up',
+            reason: 'writer-owned',
+          },
+        },
+      ]);
+    } finally {
+      await client.close();
+    }
+  });
+
   it('exposes only keyed commands and durable reads, with no page run map', async () => {
     const client = createTestClient(workerOf(new FakeResidentWorker()));
-    expect(Object.keys(client).sort()).toEqual(['close', 'hostCommand', 'read', 'subscribe', 'subscribeLive']);
+    expect(Object.keys(client).sort()).toEqual([
+      'catchUp',
+      'close',
+      'hostCommand',
+      'read',
+      'subscribe',
+      'subscribeLive',
+    ]);
     await client.close();
   });
 
   it('forwards read-only live deltas without sending another host command', async () => {
     const worker = new FakeResidentWorker();
     const client = createTestClient(workerOf(worker));
-    const seen: AgentLiveEvent[] = [];
+    const seen: SourceLiveEvent[] = [];
     const stop = client.subscribeLive('chat-preview', (_chatId, event) => seen.push(event));
-    const delta: AgentLiveEvent = {
+    const delta: SourceLiveEvent = {
       type: 'text-delta',
       chatId: 'chat-preview',
       runId: 'run-preview',
       messageId: 'assistant-1',
       contentIndex: 0,
       delta: 'Partial',
+      sourceGeneration: 'writer-preview',
     };
     worker.emitLive(delta);
     await vi.waitFor(() => {
@@ -727,6 +796,8 @@ describe('createBrowserAgentHostClient', () => {
         chatId: 'chat-identity',
         cursor: 1,
         last,
+        sourceGeneration: 'fixture-source',
+        sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
       });
     });
     unsubscribe();
@@ -868,6 +939,7 @@ describe('re-brokering project hosts', () => {
     expect(rebridges[0]?.args).toMatchObject({ projectId: 'project-one', hostId: provides[0]?.args['hostId'] });
     expect(rebridges[0]?.args['fileSystemPort']).toBeInstanceOf(MessagePort);
     expect(rebridges[0]?.args['projectRootPort']).toBeInstanceOf(MessagePort);
+    expect(rebridges[0]?.args['placementPort']).toBeInstanceOf(MessagePort);
     expect(bridges.counts()).toEqual([1, 1, 0, 0]);
     /* The same stream still reaches the same host. */
     await expect(cancelRun(client, 'chat-reprovide', 'run-1')).resolves.toMatchObject({ status: 'applied' });
@@ -896,11 +968,64 @@ describe('re-brokering project hosts', () => {
     await residentAgentWorker(createWorker).reprovide();
 
     expect(requestsNamed(worker, 'rebridge').map(({ args }) => args['hostId'])).toEqual([hostId]);
+    expect(requestsNamed(worker, 'rebridge')[0]?.args['placementPort']).toBeInstanceOf(MessagePort);
     expect(bridges.counts()).toEqual([1, 1, 0, 0]);
     drained.resolve();
     await vi.waitFor(() => {
       expect(bridges.counts()).toEqual([1, 1, 1, 1]);
     });
+  });
+
+  it('should renew only the successor placement when an older host is draining', async () => {
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    const first = createTestClient(createWorker);
+    await startRun(first, 'chat-old', 'run-old', 'Build.');
+    const drained = Promise.withResolvers<void>();
+    worker.holdRelease = drained.promise;
+    await first.close();
+    await vi.waitFor(() => {
+      expect(requestsNamed(worker, 'release')).toHaveLength(1);
+    });
+    const second = createTestClient(createWorker);
+    await startRun(second, 'chat-new', 'run-new', 'Build.');
+    await residentAgentWorker(createWorker).reprovide();
+    const currentHost = requestsNamed(worker, 'provide')[1]?.args['hostId'];
+    const refreshed = requestsNamed(worker, 'rebridge');
+    expect(refreshed).toHaveLength(2);
+    expect(
+      refreshed.filter(({ args }) => args['placementPort'] !== undefined).map(({ args }) => args['hostId']),
+    ).toEqual([currentHost]);
+    drained.resolve();
+    await second.close();
+  });
+
+  it('should not let a pending released provide fence a successor during reprovide', async () => {
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    const pending = Promise.withResolvers<void>();
+    worker.holdNextProvide = pending.promise;
+    const first = createTestClient(createWorker);
+    const starting = startRun(first, 'chat-pending', 'run-pending', 'Build.');
+    const settled = Promise.allSettled([starting]);
+    await vi.waitFor(() => {
+      expect(requestsNamed(worker, 'provide')).toHaveLength(1);
+    });
+    const originalHost = requestsNamed(worker, 'provide')[0]?.args['hostId'];
+    const rebrokering = residentAgentWorker(createWorker).reprovide();
+    await first.close();
+    const second = createTestClient(createWorker);
+    await startRun(second, 'chat-successor', 'run-successor', 'Build.');
+    pending.resolve();
+    await rebrokering;
+    await settled;
+    expect(
+      requestsNamed(worker, 'rebridge').filter(
+        ({ args }) => args['hostId'] === originalHost && args['placementPort'] !== undefined,
+      ),
+    ).toEqual([]);
+    await expect(cancelRun(second, 'chat-successor', 'run-successor')).resolves.toMatchObject({ status: 'applied' });
+    await second.close();
   });
 
   it('should dispose the fresh bridges when the host they name is gone', async () => {
@@ -1083,5 +1208,102 @@ describe('the funding principal', () => {
 
     expect(requestsNamed(worker, 'provide')[0]?.args).not.toHaveProperty('principal');
     await client.close();
+  });
+});
+
+/* R21: the default principal reads the session once per worker, not once per provide, and again once it changed. */
+describe('the session read', () => {
+  const signedIn = (id: string) => ({ data: { user: { id } }, error: null });
+  const otherProject = (createWorker: () => Worker) =>
+    createTestClient(createWorker, {
+      authority: { projectId: 'project-two', workspaceId: 'workspace-one' },
+      principal: undefined,
+    });
+
+  it('should read the session once for every provide in one worker', async () => {
+    auth.getSession.mockReset().mockResolvedValue(signedIn('user-one'));
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    /* The revision root opens after the first provide was refused, as it does while a project is still opening. */
+    let placements = 0;
+    const openPlacementPort = (): MessagePort | undefined => {
+      placements += 1;
+      return placements === 1 ? undefined : new MessageChannel().port1;
+    };
+    const first = createTestClient(createWorker, { principal: undefined, openPlacementPort });
+    const second = otherProject(createWorker);
+
+    await expect(startRun(first, 'chat-a', 'run-a', 'A.')).rejects.toMatchObject({ code: 'REVISIONS_UNAVAILABLE' });
+    await startRun(first, 'chat-a', 'run-a', 'A.');
+    await startRun(second, 'chat-b', 'run-b', 'B.');
+
+    expect(auth.getSession).toHaveBeenCalledTimes(1);
+    expect(requestsNamed(worker, 'provide').map((provide) => provide.args['principal'])).toEqual([
+      'user-one',
+      'user-one',
+    ]);
+    await first.close();
+    await second.close();
+  });
+
+  it('should read the session again once the auth client heard it change', async () => {
+    auth.getSession.mockReset().mockResolvedValue(signedIn('user-one'));
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    const first = createTestClient(createWorker, { principal: undefined });
+    await startRun(first, 'chat-a', 'run-a', 'A.');
+
+    auth.getSession.mockResolvedValue(signedIn('user-two'));
+    auth.changeSession();
+    const second = otherProject(createWorker);
+    await startRun(second, 'chat-b', 'run-b', 'B.');
+
+    expect(auth.getSession).toHaveBeenCalledTimes(2);
+    expect(requestsNamed(worker, 'provide')[1]?.args).toMatchObject({ principal: 'user-two' });
+    await first.close();
+    await second.close();
+  });
+
+  it('should read the session again once the page is shown again, as another tab may have changed it', async () => {
+    auth.getSession.mockReset().mockResolvedValue(signedIn('user-one'));
+    const page = Object.assign(new EventTarget(), { visibilityState: 'visible' as DocumentVisibilityState });
+    vi.stubGlobal('document', page);
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    const first = createTestClient(createWorker, { principal: undefined });
+    await startRun(first, 'chat-a', 'run-a', 'A.');
+
+    auth.getSession.mockResolvedValue(signedIn('user-two'));
+    page.visibilityState = 'hidden';
+    page.dispatchEvent(new Event('visibilitychange'));
+    page.visibilityState = 'visible';
+    page.dispatchEvent(new Event('visibilitychange'));
+    const second = otherProject(createWorker);
+    await startRun(second, 'chat-b', 'run-b', 'B.');
+
+    expect(auth.getSession).toHaveBeenCalledTimes(2);
+    expect(requestsNamed(worker, 'provide')[1]?.args).toMatchObject({ principal: 'user-two' });
+    await first.close();
+    await second.close();
+  });
+
+  it('should not keep a session read the auth server refused', async () => {
+    auth.getSession
+      .mockReset()
+      .mockResolvedValueOnce({ data: null, error: { status: 429 } })
+      .mockResolvedValue(signedIn('user-one'));
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    const first = createTestClient(createWorker, { principal: undefined });
+    await startRun(first, 'chat-a', 'run-a', 'A.');
+
+    const second = otherProject(createWorker);
+    await startRun(second, 'chat-b', 'run-b', 'B.');
+
+    expect(auth.getSession).toHaveBeenCalledTimes(2);
+    expect(requestsNamed(worker, 'provide')[0]?.args).not.toHaveProperty('principal');
+    expect(requestsNamed(worker, 'provide')[1]?.args).toMatchObject({ principal: 'user-one' });
+    await first.close();
+    await second.close();
   });
 });

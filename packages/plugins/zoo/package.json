@@ -1,6 +1,6 @@
 {
   "name": "@taucad/zoo",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Zoo KCL kernel plugin for Tau",
   "type": "module",
   "sideEffects": false,
@@ -41,6 +41,7 @@
     },
     "./agent/*": "./agent/*",
     "./engine-connection": "./src/engine-connection.ts",
+    "./proxy": "./src/proxy.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -60,6 +61,11 @@
         "types": "./dist/engine-connection.d.mts",
         "import": "./dist/engine-connection.mjs",
         "default": "./dist/engine-connection.mjs"
+      },
+      "./proxy": {
+        "types": "./dist/proxy.d.mts",
+        "import": "./dist/proxy.mjs",
+        "default": "./dist/proxy.mjs"
       },
       "./package.json": "./package.json"
     },

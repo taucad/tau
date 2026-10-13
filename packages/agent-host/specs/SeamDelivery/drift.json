@@ -9,6 +9,7 @@
     "effect:unknown",
     "frame:lh",
     "frame:lk",
+    "listen:catchUp",
     "listen:liveEvents",
     "listen:revisionEvents",
     "status:applied",
@@ -24,7 +25,7 @@
     "verb:steer"
   ],
   "specs": {
-    "SeamDelivery.tla": "4d49dfa690668b3c6b54d537139378f5212619b9335d60a2f5de149c7d63463f",
+    "SeamDelivery.tla": "c718e5ae93e8bfb972086b7194db754d8ff050b4297bd9dfa0dfd197f9cb5dab",
     "SeamDeliveryTrace.tla": "1b068abdf2b34904b4a35c4b94f1f67577e90fc91bd69d4385d568c7ee5fbcba"
   },
   "tables": {}

@@ -15,7 +15,7 @@ import type { LeadershipFrame } from '#launchers/leadership/frames.js';
 import { firedLate, leadershipMachine } from '#launchers/leadership/leadership.machine.js';
 import type { LeadershipEffectArgs, LockMode } from '#launchers/leadership/leadership.machine.js';
 import { chatLeadershipNames } from '#launchers/leadership/names.js';
-import type { AgentLiveEvent } from '#waist/ports.js';
+import type { SourceLiveEvent } from '#waist/ports.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
 import { agentWireVersion } from '#wire/frames.schema.js';
 import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
@@ -76,12 +76,15 @@ type Lock = {
 
 type Actor = ReturnType<typeof createActor<typeof leadershipMachine>>;
 
+/** A read this worker owes its launcher; an aborted one is answered with its rejection. */
+type PendingRead = Readonly<{ input: ReadInput; resolve: (answer: ReadAnswer | Promise<ReadAnswer>) => void }>;
+
 type Chat = Readonly<{
   actor: Actor;
   channel: BroadcastChannel;
   locks: Map<string, Lock>;
   writes: Map<string, (answer: CommandAnswer) => void>;
-  reads: Map<string, Readonly<{ input: ReadInput; resolve: (answer: ReadAnswer) => void }>>;
+  reads: Map<string, PendingRead>;
   /** The per-chat order of writer effects. */
   chain: { current: Promise<void> };
   /** Aborts the reads this worker serves for other tabs when it stops leading. */
@@ -154,7 +157,7 @@ export const createBrowserLeadership =
       };
       const locks = new Map<string, Lock>();
       const writes = new Map<string, (answer: CommandAnswer) => void>();
-      const reads = new Map<string, Readonly<{ input: ReadInput; resolve: (answer: ReadAnswer) => void }>>();
+      const reads = new Map<string, PendingRead>();
       /* A replacement's effects, its first lock request included, run after its predecessor's releases. */
       const chain = { current: existing === undefined ? Promise.resolve() : retire(existing) };
       const serving = { current: new AbortController() };
@@ -316,6 +319,16 @@ export const createBrowserLeadership =
               try {
                 read.resolve(await host.read(read.input));
               } catch (error) {
+                if (read.input.signal?.aborted === true) {
+                  /* The reader let go: its read ends with its own abort, as one served locally does. */
+                  console.debug('[agent-host leadership] a read was aborted', chatId);
+                  read.resolve(
+                    Promise.reject(
+                      error instanceof Error ? error : new DOMException('The read was aborted.', 'AbortError'),
+                    ),
+                  );
+                  return;
+                }
                 console.error('[agent-host leadership] a read failed', chatId, error);
                 read.resolve({ status: 'refused', chatId, reason: 'owner-fenced' });
               }
@@ -329,6 +342,11 @@ export const createBrowserLeadership =
             try {
               post('en', epoch, { to, corr, answer: await host.read({ ...request, signal }) });
             } catch (error) {
+              if (signal.aborted) {
+                /* This worker stopped leading, or the forward's bound passed: not a failure. */
+                console.debug('[agent-host leadership] a forwarded read was aborted', chatId);
+                return;
+              }
               console.error('[agent-host leadership] a forwarded read failed', chatId, error);
             }
           })();
@@ -424,12 +442,8 @@ export const createBrowserLeadership =
           () => {
             const read = chat.reads.get(id);
             chat.reads.delete(id);
-            if (read !== undefined) {
-              // async-iife: bootstrap -- the local answer goes to the reader that let go of the forward.
-              void (async (): Promise<void> => {
-                read.resolve(await local());
-              })();
-            }
+            /* The local read sees the abort too: its rejection is the reader's answer, never an unhandled one. */
+            read?.resolve(local());
           },
           { once: true },
         );
@@ -465,7 +479,7 @@ export const createBrowserLeadership =
       quiescent: (chatId, quiescent) => {
         chats.get(chatId)?.actor.send({ type: 'quiescent', quiescent });
       },
-      liveEvent: (event: AgentLiveEvent) => {
+      liveEvent: (event: SourceLiveEvent) => {
         const chat = chats.get(event.chatId);
         const snapshot = chat?.actor.getSnapshot();
         if (chat !== undefined && snapshot?.hasTag('leading') === true) {

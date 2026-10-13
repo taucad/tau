@@ -1,11 +1,11 @@
 /* oxlint-disable typescript/no-restricted-types -- Entry path is nullable in the workbench record schema. */
 import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
-import { defaultGraphicsSettings } from '#constants/editor.constants.js';
-import type { GraphicsViewSettings } from '#constants/editor.constants.js';
+import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
+import type { GraphicsViewSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { canonicalCaptureViews } from '@taucad/agent-tools/capture';
 import * as THREE from 'three';
-import { resolveCameraUp } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
+import { resolveCameraUp } from '@taucad/viewer/graphics/three/utils/camera-controls-adapter';
 
 /** Translate a portable view into the existing graphics owner's create-only seed. */
 export const graphicsSettingsForView = (record: WorkbenchView): GraphicsViewSettings => ({

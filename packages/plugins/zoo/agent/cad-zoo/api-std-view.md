@@ -5,7 +5,6 @@
 // Category: std.view
 // Create a camera view that looks at the model from a standard orientation
 // Remarks: The returned value stores intent, not resolved numbers: an argument you omit stays absent, and the consumer that activates the view resolves it against the model it is showing, so one view value is valid for any model. Every argument you do pass must be a finite number; an infinite or undefined value, such as one produced by dividing by zero, is an error rather than a stored value no consumer could use. Lengths are recorded in millimeters whatever unit you write them in, so `distance = 2inch` is stored as 50.8mm. The view means the same thing either way; a tool that reads the view back reports millimeters. A `distance` is a separation, so it must be greater than zero. Zero would put the camera on the point it looks at, and a negative value would put it behind that point; both are errors rather than a camera nobody can resolve. A `target` is a point, so its coordinates may be negative.
-// EXPERIMENTAL
 // std.view.view::oriented (function)
 view::oriented(
   @orientation: Orientation,
@@ -18,7 +17,7 @@ view::oriented(
 //   distance: The distance from the camera to the target
 //   projection: The camera projection
 // Example:
-//   @settings(experimentalFeatures = allow)
+//   @settings(kclVersion = 3.0)
 //   
 //   isoView = view::oriented(view::Orientation::Isometric)
 //   
@@ -32,7 +31,6 @@ view::oriented(
 // Category: std.view
 // Create a camera view that looks along a custom direction
 // Remarks: The returned value stores intent, not resolved numbers: an argument you omit stays absent, and the consumer that activates the view resolves it against the model it is showing, so one view value is valid for any model. `direction` and `up` set only directions: both are normalized when the view is constructed, so their magnitudes carry no information and zoom comes from `distance`. Each must be a non-zero vector, and they must not be parallel or nearly parallel to each other; such arguments are errors. Any angle above roughly 0.00006 degrees between the two is accepted, so only vectors that are parallel to within a rounding error are rejected. When that happens, choose an `up` that does not lie along `direction`. Every argument you pass must be a finite number; an infinite or undefined value, such as one produced by dividing by zero, is an error rather than a stored value no consumer could use. Lengths are recorded in millimeters whatever unit you write them in, so `distance = 2inch` is stored as 50.8mm, and a `target` coordinate is converted the same way. The view means the same thing either way; a tool that reads the view back reports millimeters. `direction` and `up` carry no unit at all, because only their ratio matters. A `distance` is a separation, so it must be greater than zero. Zero would put the camera on the point it looks at, and a negative value would put it behind that point; both are errors rather than a camera nobody can resolve. A `target` is a point, so its coordinates may be negative.
-// EXPERIMENTAL
 // std.view.view::directed (function)
 view::directed(
   @direction: Point3d,
@@ -47,7 +45,7 @@ view::directed(
 //   distance: The distance from the camera to the target
 //   projection: The camera projection
 // Example:
-//   @settings(experimentalFeatures = allow)
+//   @settings(kclVersion = 3.0)
 //   
 //   overheadView = view::directed([0, 1, -2])
 //   
@@ -61,21 +59,20 @@ view::directed(
 
 // Category: std.view
 // Create a named view
-// Remarks: A view is data, not an action. Creating one moves no camera and changes nothing about what is visible; a consumer such as the modeling app or a STEP export activates it later, which is why the same file yields the same views on every machine. The name is display text, so it may contain spaces and punctuation. It is required, because a view is identified by the name you give it and not by the variable you bind it to, so renaming a variable never renames a view. Names are unique within one file and compared exactly, which makes `Front` and `front` two different views. Four names are rejected: - the empty string, which identifies nothing; - a name of nothing but whitespace, which displays as nothing; - a name that starts or ends with whitespace, which a reader cannot see but the exact comparison above counts; - `Default View`, which is reserved for the view of the scene generated on successful execution of the program. `baseline` and `except` together decide what the view shows. You start from a clean state: `baseline` sets the visibility every object takes, and `except` lists the objects that depart from it. Every view writes its baseline out, so what a view shows can be read from the call alone: - `baseline = Visibility::Show` alone: everything is visible; - `baseline = Visibility::Show` with `except = [a, b]`: everything is visible except `a` and `b`; - `baseline = Visibility::Hide` with `except = [a, b]`: only `a` and `b` are visible; - `baseline = Visibility::Hide` alone: nothing is visible. Duplicates in `except` are dropped, so listing an object twice does the same as listing it once.
-// EXPERIMENTAL
+// Remarks: A view is data, not an action. Creating one moves no camera and changes nothing about what is visible; a consumer such as the modeling app or a STEP export activates it later, which is why the same file yields the same views on every machine. The name is display text, so it may contain spaces and punctuation. It is required, because a view is identified by the name you give it and not by the variable you bind it to, so renaming a variable never renames a view. Names are unique within one file and compared exactly, which makes `Front` and `front` two different views. Four names are rejected: - the empty string, which identifies nothing; - a name of nothing but whitespace, which displays as nothing; - a name that starts or ends with whitespace, which a reader cannot see but the exact comparison above counts; - `Default View`, which is reserved for the view of the scene generated on successful execution of the program. `baseline` and `except` together decide what the view shows. You start from a clean state: `baseline` sets the visibility every object takes, and `except` lists the objects that depart from it. Every view writes its baseline out, so what a view shows can be read from the call alone: - `baseline = Visibility::Show` alone: everything is visible; - `baseline = Visibility::Show` with `except = [a, b]`: everything is visible except `a` and `b`; - `baseline = Visibility::Hide` with `except = [a, b]`: only `a` and `b` are visible; - `baseline = Visibility::Hide` alone: nothing is visible. Duplicates in `except` are dropped, so listing an object twice does the same as listing it once. ## Plane support A named view can control only an independently visible plane. Supported planes: - A plane returned by `offsetPlane()` that has not been used as the support plane for a sketch. Unsupported planes: - The default planes: - `XY`. - `-XY`. - `XZ`. - `-XZ`. - `YZ`. - `-YZ`. - A plane returned by `offsetPlane()` after it has been used as the support plane for a sketch. The executor hides that plane as sketch support. - A plane returned by `planeOf()`, whether it remains unused or is used as sketch support. The engine creates it as hidden construction geometry. - An object coerced to `Plane`. It describes a plane but does not have the internal properties of a plane object that can be used by a named view. Unsupported planes are handled in two ways: - Passing a default plane or an object coerced to `Plane` causes `view::named()` to return an error. - Passing a `planeOf()` result or an offset plane used as sketch support still creates the named view. That plane is omitted when the view is activated, so listing it in `except` has no effect and does not reveal the construction geometry that the executor hid. Passing a `planeOf()` result to `offsetPlane()` creates a new plane. That new result is supported if it is not subsequently used as sketch support; the original `planeOf()` result remains unsupported.
 // std.view.view::named (function)
 view::named(
   @name: string,
   camera: CameraView,
   baseline: Visibility,
-  except?: [Solid | Sketch | GdtAnnotation; 1+],
+  except?: [Solid | Sketch | GdtAnnotation | Helix | Plane | ImportedGeometry; 1+],
 ): NamedView
 //   @name: The name of the view, as a reader should see it
 //   camera: The camera the view activates
 //   baseline: The default visibility of every object the program creates
 //   except: The objects the baseline does not apply to
 // Example:
-//   @settings(kclVersion = 2.0, experimentalFeatures = allow)
+//   @settings(kclVersion = 3.0)
 //   
 //   // Two bodies to look at: a plate, and a boss standing on it. Declaring a
 //   // view never changes what a program builds, so this part is ordinary KCL.
@@ -142,7 +139,6 @@ view::named(
 // Category: std.view
 // A standard camera orientation for a named view
 // Remarks: The six axis-aligned orientations name the side of the model the camera looks at; `Isometric` is the standard three-quarter view.
-// EXPERIMENTAL
 view::Orientation: type Orientation {
   | Front
   | Back
@@ -156,7 +152,6 @@ view::Orientation: type Orientation {
 // Category: std.view
 // Whether the objects of a named view start visible or hidden
 // Remarks: This is the view's baseline: it applies to every object, and the view's `except` list names the objects it does not apply to.
-// EXPERIMENTAL
 view::Visibility: type Visibility {
   | Show
   | Hide
@@ -164,7 +159,6 @@ view::Visibility: type Visibility {
 
 // Category: std.view
 // The camera projection of a named view
-// EXPERIMENTAL
 view::Projection: type Projection {
   | Orthographic
   | Perspective
@@ -173,17 +167,14 @@ view::Projection: type Projection {
 // Category: std.view
 // A camera viewpoint, stored as intent
 // Remarks: Values of this type are opaque. Call [`view::oriented()`](/docs/kcl-std/functions/std-view-oriented) or [`view::directed()`](/docs/kcl-std/functions/std-view-directed) to produce one.
-// EXPERIMENTAL
 view::CameraView
 
 // Category: std.view
 // A named view
 // Remarks: Values of this type are opaque. Call [`view::named()`](/docs/kcl-std/functions/std-view-named) to produce one.
-// EXPERIMENTAL
 view::NamedView
 
 // Category: std.view
 // Named views
-// Remarks: A named view pairs a camera with a set of visible objects, so consumers such as the modeling app and STEP export can reproduce it. Build a camera by calling `view::oriented()` or `view::directed()`, then name a view by calling `view::named()`.
-// EXPERIMENTAL
+// Remarks: This module requires KCL 3.0 or later. A named view pairs a camera with a set of visible objects, so consumers such as the modeling app and STEP export can reproduce it. Build a camera by calling `view::oriented()` or `view::directed()`, then name a view by calling `view::named()`.
 view

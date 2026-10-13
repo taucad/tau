@@ -3,7 +3,7 @@ import { NewProjectChatComposer } from '#components/chat/new-project-chat-compos
 import { HomeNewProjectComposerProvider } from '#hooks/active-chat-provider.js';
 import { Separator } from '@taucad/ui/components/separator';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 
 /**
  * The homepage chat hero: "What can I help you build?" over the real chat

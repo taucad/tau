@@ -46,6 +46,17 @@ export type NodeWorkerHostOptions = {
  * @param options - Host options; see {@link NodeWorkerHostOptions}.
  * @returns The {@link RuntimeTransportHost} fat handle for the node-worker wire.
  * @public
+ *
+ * @example <caption>An application-owned worker entry</caption>
+ * ```typescript
+ * import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
+ * import { createRuntimeWorker } from '@taucad/runtime/worker';
+ * import { nodeWorkerHost } from '@taucad/runtime/transport/node';
+ *
+ * declare const runtime: AnyRuntimeDefinition;
+ *
+ * await nodeWorkerHost({ worker: createRuntimeWorker({ runtime }) }).open();
+ * ```
  */
 export const nodeWorkerHost = (
   options: NodeWorkerHostOptions,

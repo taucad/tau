@@ -37,6 +37,10 @@ export type {
 } from '#types/runtime-kernel-v2.types.js';
 export type {
   KernelFileSystem,
+  RealmGroup,
+  RealmHold,
+  RealmHoldInput,
+  RealmResources,
   RuntimeFileSystemBase,
   RuntimeLogger,
   RuntimeLogOptions,
@@ -59,19 +63,17 @@ export { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.
 export {
   convertRawIssuesToKernelIssues,
   createKernelParameterDeclaration,
-  createKernelModuleRegistryExpression,
   createKernelModuleShim,
   enrichIssueLocation,
   extractDefaultParameters,
-  getModuleRegistry,
   isRecordObject,
-  KERNEL_MODULES_KEY,
   loadBinaryFile,
   registerKernelModule,
   toVmEntryPath,
 } from '#kernels/kernel-module-helpers.js';
 export type { RuntimeModuleExports } from '#kernels/kernel-module-helpers.js';
 export { checkAbort } from '#framework/cooperative-abort.js';
+export { createRealmGroup } from '#framework/realm-resources.js';
 export { named } from '#framework/named.js';
 export { getWebAssemblyExceptionConstructor, isWebAssemblyException } from '#framework/wasm-exception.js';
 export type { WebAssemblyException } from '#framework/wasm-exception.js';

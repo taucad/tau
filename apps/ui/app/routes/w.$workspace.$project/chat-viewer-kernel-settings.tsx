@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import { workbenchRecords } from '@taucad/workbench';
-import { KernelSettings, kernelSettingsGroups } from '#components/geometry/cad/kernel-settings.js';
+import { KernelSettings, kernelSettingsGroups } from '@taucad/viewer/cad/kernel-settings';
 import { useProject } from '#hooks/use-project.js';
 import { selectCadEvaluation } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';

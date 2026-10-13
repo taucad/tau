@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { Bot, Check, Server } from 'lucide-react';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { Badge } from '@taucad/ui/components/badge';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import type { ChatAgentActivity } from '#hooks/active-chat-provider.js';

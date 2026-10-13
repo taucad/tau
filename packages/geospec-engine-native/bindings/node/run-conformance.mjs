@@ -13,7 +13,7 @@ import { joinCurrentCorpus, loadMaterialCorpus, selectCorpusRecords } from '../.
 /** @typedef {{ passed: number, failed: number, results: CorpusResult[], mismatches: CorpusResult[] }} CorpusReport */
 
 const corpusUrl = new URL('../../conformance/early-corpus.json', import.meta.url);
-const materialCorpusUrl = new URL('../../conformance/material-v6.json', import.meta.url);
+const materialCorpusUrl = new URL('../../conformance/material-v6-02.json', import.meta.url);
 const profileUrl = new URL('../../rust/tests/fixtures/current-profile-01/plan-corpus.json', import.meta.url);
 const successorUrl = new URL('../../rust/tests/fixtures/current-profile-v6/numeric-profile.txt', import.meta.url);
 

@@ -1,0 +1,7 @@
+[
+  {
+    "name": "@taucad/viewer runtime",
+    "path": "dist/**/*.mjs",
+    "limit": "1 MB"
+  }
+]

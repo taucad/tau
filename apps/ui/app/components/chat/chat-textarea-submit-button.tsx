@@ -2,10 +2,10 @@ import { memo } from 'react';
 import { ArrowUp, Play, Square } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
-import { ariaKeyShortcuts, formatKeyCombination } from '#utils/keys.utils.js';
-import { Loader } from '#components/ui/loader.js';
+import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
+import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
 
 const chatComposerActionButtonClassName =

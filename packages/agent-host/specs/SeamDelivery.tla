@@ -23,6 +23,8 @@
 (* timeout table is not an input (RV3-F4). `SeamDeliveryTrace.tla` checks  *)
 (* implementation traces against the target switches.                     *)
 (***************************************************************************)
+\* T6 catchUp refines atomic Read only after final validation. SeamCatchUp
+\* models provisional pages, immutable capture and replacement/writer/abort refusal.
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANTS Keys, MaxGen, Keyed, Replay, CheckCursor, Floor

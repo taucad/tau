@@ -1,12 +1,11 @@
 # geospec API index
 
-geospec 0.1.0-beta.1 · 370 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.1 · 345 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 
 ## Functions — `api-functions.md`
 
-createGeoSpec (function) — Create a GeoSpec instance
 describe (function) [1 members] — GeoSpec suite helper used inside VM-executed test modules
   describe.skip (method)
 expectGeo (function) — Start a geometry assertion chain
@@ -14,7 +13,7 @@ it (function) [1 members] — GeoSpec test helper used inside VM-executed test m
   it.skip (method)
 test (function) [1 members] — Alias for {@link it}
   test.skip (method)
-createModelLoader (function) — Create a {@link loadModel} function with shared defaults
+createModelLoader (function) — Create a {@link loadModel} function over a host-supplied compiled engine
 loadModel (function) — Load a CAD model into GeoSpec evidence
 resolveRuntimeExportIntent (function)
 
@@ -24,9 +23,6 @@ geoSpecMatcherNames (constant) — Every matcher name exposed by {@link expectGe
 
 ## Types — `api-types.md`
 
-GeoSpec (type) [2 members] — Stateful GeoSpec API created by {@link createGeoSpec}
-  GeoSpec.loadMesh (method)
-  GeoSpec.analyzeMesh (method)
 GeoSpecSubject (type) [1 members] — A model admitted by one live GeoSpec host scope
   GeoSpecSubject.[subjectBrand] (property)
 GeoSpecUnit (type) — Geometry units accepted at GeoSpec evidence-loading boundaries
@@ -279,27 +275,6 @@ StepEvidence (type) [6 members] — STEP/XDE evidence extracted while loading a 
   StepEvidence.capabilities (property)
   StepEvidence.xde (property) — Structured AP242 XDE read result (occurrences, subshape names, datum placements)
 Vec3 (type) — Numeric 3D vector
-AnalyzeMeshOptions (type) [8 members] — Analyze source bytes or an already retained subject, never both
-  AnalyzeMeshOptions.source (property)
-  AnalyzeMeshOptions.format (property)
-  AnalyzeMeshOptions.path (property)
-  AnalyzeMeshOptions.name (property)
-  AnalyzeMeshOptions.unit (property) — Unit exposed by the returned GeoSpec subject
-  AnalyzeMeshOptions.sourceUnit (property) — Coordinate unit of the supplied mesh data before normalization
-  AnalyzeMeshOptions.parameters (property)
-  AnalyzeMeshOptions.subject (property)
-AnalyzeMeshResult (type) [1 members] — Mesh analysis result
-  AnalyzeMeshResult.success (property)
-LoadMeshOptions (type) [7 members] — Options for loading mesh evidence
-  LoadMeshOptions.source (property)
-  LoadMeshOptions.format (property)
-  LoadMeshOptions.path (property)
-  LoadMeshOptions.name (property)
-  LoadMeshOptions.unit (property) — Unit exposed by the returned GeoSpec subject
-  LoadMeshOptions.sourceUnit (property) — Coordinate unit of the supplied mesh data before normalization
-  LoadMeshOptions.parameters (property)
-LoadMeshResult (type) [1 members] — Result of loading mesh evidence into a GeoSpec geometry subject
-  LoadMeshResult.success (property)
 GeoSpecVec3 (type) — Numeric 3D vector
 GeoSpecExportRoute (type) — Runtime route metadata used to decide whether a runtime export…
 RuntimeBackedModelFormat (type)

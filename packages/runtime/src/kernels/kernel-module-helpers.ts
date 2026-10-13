@@ -10,7 +10,7 @@
 import type { KernelIssue } from '#types/runtime.types.js';
 import type { KernelServices } from '#types/runtime-kernel-v2.types.js';
 import type { BuiltinModule } from '#types/runtime-bundler-service.types.js';
-import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
+import { toKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
 import { assertRootedPath } from '@taucad/utils/path';
@@ -18,9 +18,8 @@ import { projectJsonSchemaToParameterDeclaration } from '@taucad/parameters';
 import type { ParameterDeclaration } from '@taucad/parameters';
 import type { JSONSchema7 } from '@taucad/json-schema';
 
-/** @public */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- protocol global key mirrors its host name
-export const KERNEL_MODULES_KEY = '__KERNEL_MODULES__';
+const KERNEL_MODULES_KEY = '__KERNEL_MODULES__';
 
 /**
  * Common shape for runtime module exports returned by `runtime.execute()`.
@@ -43,11 +42,12 @@ export function isRecordObject(value: unknown): value is Record<string, unknown>
 }
 
 /**
- * Get or create the global kernel module registry.
+ * Get or create the realm's kernel module registry.
  *
- * The registry holds built-in module exports so that bundled user code
- * can import kernel-provided modules (e.g. `replicad`, `@jscad/modeling`).
- * @public
+ * The registry holds built-in module exports, keyed by kernel worker scope, so that bundled user code
+ * can import kernel-provided modules (e.g. `replicad`, `@jscad/modeling`). Only
+ * {@link registerKernelModule} and its shims read or write it.
+ * @internal
  */
 export function getModuleRegistry(): Map<string, Record<string, unknown>> {
   let registry = (globalThis as Record<string, unknown>)[KERNEL_MODULES_KEY] as
@@ -80,6 +80,11 @@ export type RegisterKernelModuleOptions = {
   exports: Record<string, unknown>;
   globalName?: string;
   exportPrefix?: string;
+  /**
+   * Expose one property of `exports` as the module instead of the whole object, for subpath
+   * modules such as `@jscad/modeling/booleans` (`exportPath: 'booleans'`).
+   */
+  exportPath?: string;
 } & (
   | {
       /**
@@ -130,30 +135,57 @@ export function createKernelModuleShim({
   return `const __mod = ${moduleExpression};\n${namedExports}\nexport default __mod;\n`;
 }
 
-/** Builds the JavaScript expression used by shims to read a module from the global registry. @public */
-export function createKernelModuleRegistryExpression(name: string): string {
+/** Builds the JavaScript expression shims use to read one registry entry. */
+function createKernelModuleRegistryExpression(name: string): string {
   return `globalThis.${KERNEL_MODULES_KEY}.get(${JSON.stringify(name)})`;
 }
 
-/** Registers a registry-backed built-in module with the runtime bundler. @public */
+/**
+ * Registers a registry-backed built-in module with the runtime bundler.
+ *
+ * The entry is scoped to the bundler's kernel worker (`bundler.registryScope`), so two workers in
+ * one realm that register the same name each resolve their own exports.
+ * @public
+ */
 export function registerKernelModule(
   runtime: Pick<KernelServices, 'bundler'>,
   options: RegisterKernelModuleOptions,
 ): void {
-  const registry = getModuleRegistry();
-  registry.set(options.name, options.exports);
+  const exports = options.exportPath === undefined ? options.exports : options.exports[options.exportPath];
+  if (!isRecordObject(exports)) {
+    throw new TypeError(`Kernel module "${options.name}" export path "${options.exportPath}" is not an object.`);
+  }
+  const { registryScope } = runtime.bundler;
+  const key = registryScope === undefined ? options.name : `${registryScope}:${options.name}`;
+  getModuleRegistry().set(key, exports);
 
+  const registryExpression = createKernelModuleRegistryExpression(key);
   runtime.bundler.registerModule(options.name, {
     code: createKernelModuleShim({
-      moduleExpression: createKernelModuleRegistryExpression(options.name),
-      exports: options.exports,
+      moduleExpression: registryExpression,
+      exports,
       exportPrefix: options.exportPrefix,
     }),
     globalName: options.globalName,
     ...(options.package
       ? { version: options.package.version, package: toBuiltinModulePackage(options.name, options.package) }
       : { version: options.version }),
+    registryExpression,
   });
+}
+
+/**
+ * Drop every built-in module a kernel worker registered under `registryScope`.
+ * @param registryScope - The worker's scope, as carried by its bundler facade.
+ * @internal
+ */
+export function releaseKernelModuleScope(registryScope: string): void {
+  const registry = getModuleRegistry();
+  for (const key of registry.keys()) {
+    if (key.startsWith(`${registryScope}:`)) {
+      registry.delete(key);
+    }
+  }
 }
 
 function isValidJavaScriptIdentifier(value: string): boolean {
@@ -274,7 +306,7 @@ export function convertRawIssuesToKernelIssues(
   return issues.map((issue) => ({
     ...issue,
     message: issue.message,
-    code: isKernelIssueCode(issue.code) ? issue.code : 'UNKNOWN',
+    code: toKernelIssueCode(issue.code),
     type: 'runtime',
     severity: issue.severity === 'warning' ? 'warning' : 'error',
     location: (issue.location as KernelIssue['location']) ?? {

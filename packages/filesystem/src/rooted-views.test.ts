@@ -518,6 +518,134 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       }
     });
 
+    it.each([false, true])(
+      'shares a concurrent cold search and statTree scan while fencing mutation=%s',
+      async (mutate) => {
+        await service.writeFile('/entry.txt', 'first');
+        const rooted = service.createRootedFileSystem('/');
+        const captured = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        const original = rootProvider.readdirWithStats!.bind(rootProvider);
+        const scans = { started: 0 };
+        const listing = vi.spyOn(rootProvider, 'readdirWithStats').mockImplementation(async (path) => {
+          scans.started += 1;
+          const hold = !mutate || scans.started === 1;
+          // Capture real metadata before holding delivery, so a write can overtake an old scan.
+          const entries = await original(path);
+          captured.resolve();
+          if (hold) {
+            await release.promise;
+          }
+          return entries;
+        });
+
+        const matches = rooted.search!('entry');
+        await captured.promise;
+        let tree: Promise<FileStatEntry[]>;
+        try {
+          if (mutate) {
+            await service.writeFile('/entry.txt', 'first\nsecond\nthird');
+            await service.writeFile('/added.txt', 'new');
+          }
+          tree = rooted.statTree!('');
+          if (mutate) {
+            // A post-invalidation caller starts fresh work, without releasing the obsolete scan.
+            expect(listing).toHaveBeenCalledTimes(2);
+            await expect(tree).resolves.toEqual(
+              expect.arrayContaining([
+                expect.objectContaining({ path: 'entry.txt', lineCount: 3 }),
+                expect.objectContaining({ path: 'added.txt', lineCount: 1 }),
+              ]),
+            );
+          }
+        } finally {
+          release.resolve();
+        }
+
+        const expectedEntry = {
+          path: 'entry.txt',
+          type: 'file',
+          lineCount: mutate ? 3 : 1,
+        };
+        await expect(matches).resolves.toMatchObject([expectedEntry]);
+        const rows = await tree;
+        expect(rows).toEqual(expect.arrayContaining([expect.objectContaining(expectedEntry)]));
+        expect(rows.map((row) => row.path).sort()).toEqual(mutate ? ['added.txt', 'entry.txt'] : ['entry.txt']);
+        // The stale generation may finish, but only current metadata may stay warm.
+        await expect(rooted.search!('entry')).resolves.toMatchObject([expectedEntry]);
+        await expect(rooted.statTree!('')).resolves.toEqual(rows);
+        expect(listing).toHaveBeenCalledTimes(mutate ? 2 : 1);
+      },
+    );
+
+    it('keeps a newer pending scan when an obsolete scan fails', async () => {
+      await service.writeFile('/entry.txt', 'old');
+      const rooted = service.createRootedFileSystem('/');
+      const oldCaptured = Promise.withResolvers<void>();
+      const newCaptured = Promise.withResolvers<void>();
+      const oldDelivery = Promise.withResolvers<void>();
+      const newDelivery = Promise.withResolvers<void>();
+      const original = rootProvider.readdirWithStats!.bind(rootProvider);
+      const scans = { started: 0 };
+      const listing = vi.spyOn(rootProvider, 'readdirWithStats').mockImplementation(async (path) => {
+        scans.started += 1;
+        const first = scans.started === 1;
+        const entries = await original(path);
+        if (first) {
+          oldCaptured.resolve();
+          await oldDelivery.promise;
+        } else {
+          newCaptured.resolve();
+          await newDelivery.promise;
+        }
+        return entries;
+      });
+      const oldRead = rooted.search!('entry');
+      const oldFailure = expect(oldRead).rejects.toThrow('obsolete scan failed');
+      await oldCaptured.promise;
+      await service.writeFile('/entry.txt', 'new\ncontents');
+      const newRead = rooted.statTree!('');
+      await newCaptured.promise;
+      try {
+        oldDelivery.reject(new Error('obsolete scan failed'));
+        // Public rejection proves the old owner's finally has run while new delivery is held.
+        await oldFailure;
+        const thirdRead = rooted.search!('entry');
+        expect(listing).toHaveBeenCalledTimes(2);
+        newDelivery.resolve();
+        await expect(thirdRead).resolves.toMatchObject([{ path: 'entry.txt', lineCount: 2 }]);
+        await expect(newRead).resolves.toMatchObject([{ path: 'entry.txt', lineCount: 2 }]);
+        expect(listing).toHaveBeenCalledTimes(2);
+      } finally {
+        oldDelivery.resolve();
+        newDelivery.resolve();
+      }
+    });
+
+    it('retries a cold scan after shared provider failure', async () => {
+      await service.writeFile('/entry.txt', 'first\nsecond');
+      const rooted = service.createRootedFileSystem('/');
+      const captured = Promise.withResolvers<void>();
+      const delivery = Promise.withResolvers<void>();
+      const original = rootProvider.readdirWithStats!.bind(rootProvider);
+      const listing = vi.spyOn(rootProvider, 'readdirWithStats').mockImplementationOnce(async (path) => {
+        const entries = await original(path);
+        captured.resolve();
+        await delivery.promise;
+        return entries;
+      });
+      const matches = rooted.search!('entry');
+      const matchFailure = expect(matches).rejects.toThrow('listing failed');
+      await captured.promise;
+      const tree = rooted.statTree!('');
+      const treeFailure = expect(tree).rejects.toThrow('listing failed');
+      delivery.reject(new Error('listing failed'));
+      await Promise.all([matchFailure, treeFailure]);
+      expect(listing).toHaveBeenCalledTimes(1);
+      await expect(rooted.statTree!('')).resolves.toMatchObject([{ path: 'entry.txt', lineCount: 2 }]);
+      expect(listing).toHaveBeenCalledTimes(2);
+    });
+
     it('returns concurrent root scans from their local trees independent of completion order', async () => {
       const aProvider = await mountMemory('/a', 'memory:concurrent-a');
       const bProvider = await mountMemory('/b', 'memory:concurrent-b');

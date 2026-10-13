@@ -43,7 +43,7 @@ import type {
 import type { ExportOffer, ViewOffer } from '#client/runtime-document.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
-import { KernelWorker } from '#framework/kernel-worker.js';
+import { carriedKernelIssues, KernelWorker } from '#framework/kernel-worker.js';
 import type { EvaluationSlot, KernelBinding, NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
 import { isRenderAbortedError } from '#framework/runtime-operation-errors.js';
 import { preserveMethodNames } from '#framework/named.js';
@@ -483,8 +483,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         throw error;
       }
 
-      if (error instanceof Error && 'issues' in error && Array.isArray(error.issues)) {
-        return { success: false, issues: error.issues as KernelIssue[] };
+      const carried = carriedKernelIssues(error);
+      if (carried) {
+        return { success: false, issues: carried };
       }
 
       let message: string;
@@ -787,8 +788,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       if (isRenderAbortedError(error)) {
         throw error;
       }
-      if (error instanceof Error && 'issues' in error && Array.isArray(error.issues)) {
-        return { success: false, issues: error.issues as KernelIssue[] };
+      const carried = carriedKernelIssues(error);
+      if (carried) {
+        return { success: false, issues: carried };
       }
       return createKernelError([
         {
@@ -1184,7 +1186,21 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     this.logger.trace(`Initializing kernel: ${kernel.entry.id}`);
 
-    kernel.ctx = await kernel.definition.initialize(kernel.options, runtime);
+    try {
+      kernel.ctx = await kernel.definition.initialize(kernel.options, runtime);
+    } catch (error) {
+      // A typed refusal (e.g. KERNEL_REALM_CONFLICT) reaches the client as is; name the refusing kernel on a copy,
+      // since one rejected realm creation may reach several kernels.
+      const carried = carriedKernelIssues(error);
+      if (carried) {
+        const [issue, ...rest] = carried;
+        const details = typeof issue.details === 'object' && issue.details !== null ? issue.details : {};
+        throw Object.assign(new Error(error instanceof Error ? error.message : issue.message, { cause: error }), {
+          issues: [{ ...issue, details: { producer: kernel.entry.id, ...details } }, ...rest],
+        });
+      }
+      throw error;
+    }
     kernel.initialized = true;
   }
 
@@ -1373,6 +1389,11 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   }
 
   private createKernelBindingIssue(error: unknown): KernelIssue {
+    // A typed initialisation refusal (e.g. KERNEL_REALM_CONFLICT) keeps its own issue.
+    const carried = carriedKernelIssues(error);
+    if (carried) {
+      return carried[0];
+    }
     let message: string;
     if (error instanceof Error) {
       message = error.message;

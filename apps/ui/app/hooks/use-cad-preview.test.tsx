@@ -91,7 +91,7 @@ vi.mock('#machines/cad.machine.js', async () => {
   };
 });
 
-vi.mock('#machines/graphics.machine.js', async () => {
+vi.mock('@taucad/viewer/machines/graphics.machine', async () => {
   const xstate = await import('xstate');
   const graphicsMachine = xstate.setup({}).createMachine({
     id: 'graphics',

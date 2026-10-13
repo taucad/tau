@@ -944,6 +944,7 @@ describe('placement and settlement per attempt (RA-S13)', () => {
         status: 'refused',
         code: 'BASE_CUT_FAILED',
         message: 'The files already in checkout live could not be saved before the agent started.',
+        details: { phase: 'placement.admit', close: { origin: 'remote', code: 'PEER_GONE', reason: 'port-closed' } },
       }),
     };
     const host = placedHost(file, port, 'place-refused');
@@ -961,7 +962,10 @@ describe('placement and settlement per attempt (RA-S13)', () => {
         type: 'run.lifecycle',
         runId: 'run-1',
         state: 'failed',
-        detail: expect.objectContaining({ code: 'BASE_CUT_FAILED' }) as unknown,
+        detail: expect.objectContaining({
+          code: 'BASE_CUT_FAILED',
+          details: { phase: 'placement.admit', close: { origin: 'remote', code: 'PEER_GONE', reason: 'port-closed' } },
+        }) as unknown,
       }),
     );
     await host.close();

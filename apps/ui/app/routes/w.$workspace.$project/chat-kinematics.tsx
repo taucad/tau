@@ -13,7 +13,7 @@ import { ChevronDown, CircleAlert, CopyMinus, CopyPlus, OctagonAlert, Pause, Pla
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { DockviewPanelApi, PaneviewApi, PaneviewPanelApi } from 'dockview-react';
-import { PaneVirtualList } from '#components/panes/pane-virtual-list.js';
+import { PaneVirtualList } from '@taucad/ui/components/pane-virtual-list';
 import { Paneview } from '#components/panes/paneview.js';
 import { convert, createQuantity, quantityKinds } from '@taucad/units/quantity';
 import type { DegreeOfFreedom, Mechanism } from '@taucad/kinematics';
@@ -23,18 +23,18 @@ import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
 import { useProject } from '#hooks/use-project.js';
-import { SearchInput } from '#components/search-input.js';
-import { HighlightText } from '#components/highlight-text.js';
-import { Loader } from '#components/ui/loader.js';
-import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
+import { SearchInput } from '@taucad/ui/components/search-input';
+import { HighlightText } from '@taucad/ui/components/highlight-text';
+import { Loader } from '@taucad/ui/components/loader';
+import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
 import { PaneButton } from '#components/ui/pane-button.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
-import { SliderInput } from '#components/ui/slider-input.js';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { ParameterGroupCard } from '#components/geometry/parameters/parameter-group-card.js';
-import { ParametersNumberField } from '#components/geometry/parameters/parameters-number-field.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
+import { SliderInput } from '@taucad/ui/components/slider-input';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
+import { ParameterGroupCard } from '@taucad/viewer/parameters/parameter-group-card';
+import { ParametersNumberField } from '@taucad/viewer/parameters/parameters-number-field';
 import { useReducedMotion } from '#components/geometry/loader/metal-morph-playback-gates.js';
-import { disclosureMotion } from '#components/revisions/revision-actions.js';
+import { disclosureMotion } from '@taucad/ui/components/actions';
 import {
   PaneviewHeader,
   PaneviewHeaderAction,
@@ -46,16 +46,23 @@ import {
   paneviewHeaderSize,
 } from '#components/panes/paneview-header.js';
 import type { cadMachine } from '#machines/cad.machine.js';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
-import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import {
+  deriveModelInteractionUnitId,
+  getModelInteractionUnitState,
+} from '@taucad/viewer/machines/model-interaction.machine';
 import {
   getKinematicsAnimation,
   getKinematicsClipTime,
   getKinematicsDragNotice,
   getKinematicsUnitState,
   sweepAnimationId,
-} from '#machines/kinematics.machine.js';
-import type { KinematicsDragNotice, KinematicsUnitState, kinematicsMachine } from '#machines/kinematics.machine.js';
+} from '@taucad/viewer/machines/kinematics.machine';
+import type {
+  KinematicsDragNotice,
+  KinematicsUnitState,
+  kinematicsMachine,
+} from '@taucad/viewer/machines/kinematics.machine';
 import {
   findKinematicsJointByComponent,
   getKinematicsRootDriver,

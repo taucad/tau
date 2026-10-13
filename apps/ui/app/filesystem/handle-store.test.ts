@@ -520,11 +520,55 @@ describe('createWorkspace persistent storage', () => {
 
   it('tolerates a browser without the Storage Manager API', async () => {
     stubStorage(undefined);
-    const { createWorkspace } = await loadStore();
+    const { createWorkspace, isPersistentStorageRefused } = await loadStore();
 
     const workspace = await createWorkspace(makeHandle('tau-workspace'));
 
     expect(workspace.storagePersisted).toBeUndefined();
+    expect(isPersistentStorageRefused()).toBe(false);
+  });
+
+  /* R14: the refusal was recorded on the workspace row and read by nothing. */
+  it('reports a refused request to its subscribers once', async () => {
+    stubStorage({ persist: async () => false, persisted: async () => false });
+    const { createWorkspace, isPersistentStorageRefused, subscribePersistentStorageRefusal } = await loadStore();
+    const listener = vi.fn();
+    subscribePersistentStorageRefusal(listener);
+
+    await createWorkspace(makeHandle('tau-workspace'));
+    await createWorkspace(makeHandle('second-workspace'));
+
+    expect(isPersistentStorageRefused()).toBe(true);
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it('reports a refusal from the boot-time request too', async () => {
+    stubStorage({ persist: async () => false, persisted: async () => false });
+    const { getProjectRootConfigs, isPersistentStorageRefused, subscribePersistentStorageRefusal } = await loadStore();
+    const refused = new Promise<void>((resolve) => {
+      subscribePersistentStorageRefusal(resolve);
+    });
+
+    await getProjectRootConfigs();
+    await refused;
+
+    expect(isPersistentStorageRefused()).toBe(true);
+  });
+
+  it('does not report a granted request', async () => {
+    stubStorage({ persist: async () => true, persisted: async () => false });
+    const { createWorkspace, isPersistentStorageRefused } = await loadStore();
+
+    await createWorkspace(makeHandle('tau-workspace'));
+
+    expect(isPersistentStorageRefused()).toBe(false);
+  });
+
+  it('lets a profile claim the refusal warning only once', async () => {
+    const { claimPersistentStorageWarning } = await loadStore();
+
+    await expect(claimPersistentStorageWarning()).resolves.toBe(true);
+    await expect(claimPersistentStorageWarning()).resolves.toBe(false);
   });
 });
 
@@ -795,6 +839,57 @@ describe('getProjectRootConfigs', () => {
 
     expect(configuration.projects.filter(({ backend }) => backend === 'webaccess')).toHaveLength(500);
     expect(queryPermission).toHaveBeenCalledOnce();
+  });
+
+  it('rechecks permission without a durable config mutation on the next root snapshot', async () => {
+    let permission: PermissionState = 'granted';
+    const queryPermission = vi.fn(async (): Promise<PermissionState> => permission);
+    const { createWorkspace, getProjectRootConfigs, setProjectFileSystemConfig } = await loadStore();
+    const workspace = await createWorkspace(makeHandle('Permission changes', { queryPermission }));
+    const projectId = 'proj_000000000000000000010';
+    await setProjectFileSystemConfig({
+      projectId,
+      backend: 'webaccess',
+      workspaceId: workspace.workspaceId,
+      providerBasePath: 'project',
+    });
+    const granted = await getProjectRootConfigs();
+    expect(granted.projects.some((project) => project.projectId === projectId)).toBe(true);
+    queryPermission.mockClear();
+    permission = 'denied';
+    const denied = await getProjectRootConfigs();
+    expect(denied.projects.some((project) => project.projectId === projectId)).toBe(false);
+    expect(queryPermission).toHaveBeenCalledOnce();
+    permission = 'granted';
+    const regranted = await getProjectRootConfigs();
+    expect(regranted.projects.some((project) => project.projectId === projectId)).toBe(true);
+  });
+
+  it('reads the newly committed replacement handle in the next root snapshot', async () => {
+    const {
+      createWorkspace,
+      getProjectRootConfigs,
+      disconnectWorkspace,
+      updateWorkspaceHandle,
+      setProjectFileSystemConfig,
+    } = await loadStore();
+    const original = makeHandle('Original snapshot');
+    const replacement = makeHandle('Replacement snapshot');
+    const workspace = await createWorkspace(original);
+    await setProjectFileSystemConfig({
+      projectId: 'proj_000000000000000000011',
+      backend: 'webaccess',
+      workspaceId: workspace.workspaceId,
+      providerBasePath: 'project',
+    });
+    const before = await getProjectRootConfigs();
+    await disconnectWorkspace(workspace.workspaceId);
+    await updateWorkspaceHandle(workspace.workspaceId, replacement);
+    const after = await getProjectRootConfigs();
+    const beforeRoot = before.roots.find((root) => root.backend === 'webaccess');
+    const afterRoot = after.roots.find((root) => root.backend === 'webaccess');
+    expect(beforeRoot).toMatchObject({ workspaceId: workspace.workspaceId, directoryHandle: original });
+    expect(afterRoot).toMatchObject({ workspaceId: workspace.workspaceId, directoryHandle: replacement });
   });
 
   // R13 — a workspace dropped from the topology used to vanish in silence.

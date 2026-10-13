@@ -20,6 +20,7 @@ export type ExecuteResult<T = unknown> =
 export type BuiltinModule = {
   code: string;
   version: string;
+  /** Script global that bundles bind to this module; bound only when `registryExpression` is set. */
   globalName?: string;
   /**
    * The npm package this module comes from, as a project declares it in `package.json`.
@@ -31,10 +32,17 @@ export type BuiltinModule = {
    * the identity of the package that owns it. Absent for a module with no npm package.
    */
   package?: { readonly name: string; readonly spec: string };
+  /** JavaScript expression evaluating to the module's exports, which a bundle binds to `globalName`. */
+  registryExpression?: string;
 };
 
 /** Bundler service exposed to kernels. @public */
 export type KernelBundler = {
+  /**
+   * Identity of the kernel worker this bundler serves. `registerKernelModule` keys built-in
+   * modules by it, so workers sharing a realm never resolve each other's modules.
+   */
+  readonly registryScope?: string;
   bundle(entryPath: string): Promise<BundleResult>;
   resolveDependencies(entryPath: string): Promise<GetDependenciesResult>;
   registerModule(name: string, entry: BuiltinModule): void;

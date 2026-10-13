@@ -17,17 +17,20 @@ The catalogs are source-investigation tooling. Tau install, build, test, and run
 
 Public contributors need no setup beyond cloning Tau. Commands read the public catalog when Tau Brain is absent.
 
-Authorized team members clone the optional overlay once:
+Authorized team members get the optional overlay from the committed bootstrap, which the Claude Code session hook also runs. It mounts Tau Brain at `repos/tau-brain` per checkout: a detached worktree of the main checkout's Brain, or a blobless clone, sparse without `research/artifacts/<subject>/` trees, with LFS objects left as pointers:
 
 ```bash
-GIT_LFS_SKIP_SMUDGE=1 gh repo clone taucad/tau-brain repos/tau-brain
+pnpm agent-env brain
 ```
 
-Run `git lfs install` before cloning if reference PDFs are needed. Tau Brain defaults to lightweight LFS pointers; fetch a specific PDF with:
+Materialise one artifact subject, or fetch an LFS file such as a reference PDF, when a task needs it:
 
 ```bash
-git -C repos/tau-brain lfs pull --include="reference/pdf/<slug>.pdf"
+pnpm agent-env widen <subject>
+pnpm agent-env fetch reference/pdf/<slug>.pdf
 ```
+
+Do not clone Tau Brain with `pnpm repos clone`; the catalogs forbid it.
 
 ## Catalog Semantics
 
@@ -119,7 +122,8 @@ Repo fields:
 - `commit`: optional reproducible commit pin; disables shallow clone.
 - `path`: optional path relative to `<tau-root>/repos`.
 - `description`: human-readable provenance.
-- `shallow`: clone at depth one when no commit pin exists.
+- `shallow`: clone at depth one when no commit pin exists. Other clones are blobless (`--filter=blob:none`): full history, file contents on demand.
+- `sparse`: optional non-cone sparse-checkout patterns (for example `/src/**`) for a large source; absent checks out the whole tree.
 
 ## Source Investigation Workflow
 

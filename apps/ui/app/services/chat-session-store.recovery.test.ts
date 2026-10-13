@@ -10,7 +10,13 @@ import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-a
 import { serializeTranscript } from '#utils/chat.utils.js';
 import * as Projection from '#machines/chat-projection.logic.js';
 import * as HostCommands from '#chat-clients/_internal/host-command.js';
-import { lifecycleRow, logRow, publishLogRows, publishLogPage } from '#machines/chat-projection.fixture.js';
+import {
+  lifecycleRow,
+  logRow,
+  publishLogRows,
+  publishLogPage,
+  writerOwnedCatchUp,
+} from '#machines/chat-projection.fixture.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import {
@@ -480,6 +486,100 @@ describe('ChatSessionStore real SDK presentation recovery', () => {
     stores.splice(stores.indexOf(store), 1);
   });
 
+  it.each(['source-replacement', 'rewind-retirement'] as const)(
+    'should fence held Resume materialization after %s',
+    async (invalidation) => {
+      const { store } = acquire();
+      stores.push(store);
+      publishLogRows(store, 'chat_1', [
+        ...runningRows(),
+        replyRow(2, 'Retired paragraph'),
+        lifecycleRow(3, 'cancelled'),
+      ]);
+      const text = (): string =>
+        store
+          .get('chat_1')!
+          .messages.flatMap((message) => message.parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])))
+          .join('|');
+      await vi.waitFor(() => {
+        expect(text()).toContain('Retired paragraph');
+      });
+      const materialize = Projection.materializeTranscript;
+      const pending = Promise.withResolvers<MyUIMessage[]>();
+      let held = false;
+      vi.spyOn(Projection, 'materializeTranscript').mockImplementation(async (...parameters) => {
+        if (!held && parameters[1] === 'run_1') {
+          held = true;
+          return pending.promise;
+        }
+        return materialize(...parameters);
+      });
+      publishLogRows(store, 'chat_1', [logRow(4, { type: 'run.lifecycle', state: 'running', attempt: 2 })], 4);
+      await vi.waitFor(() => {
+        expect(held).toBe(true);
+      });
+      expect(text()).toContain('Retired paragraph');
+      if (invalidation === 'source-replacement') {
+        store.receiveHostReadAnswer('chat_1', {
+          status: 'refused',
+          reason: 'identity-mismatch',
+        });
+        publishLogRows(store, 'chat_1', [
+          ...runningRows('replacement'),
+          logRow(2, {
+            runId: 'replacement',
+            type: 'message.appended',
+            message: {
+              id: 'replacement-answer',
+              role: 'assistant',
+              content: [{ type: 'text', text: 'Authoritative replacement' }],
+            },
+          }),
+          lifecycleRow(3, 'completed', 'replacement'),
+        ]);
+      } else {
+        publishLogRows(
+          store,
+          'chat_1',
+          [
+            {
+              ...admittedRow(5, 'replacement'),
+              admission: {
+                kind: 'tau',
+                turnId: 'user_replacement',
+                message: { id: 'user_replacement', role: 'user', content: 'Replacement prompt' },
+                rewind: { trigger: 'edit', retainedMessageIds: [] },
+              },
+            },
+            logRow(6, { runId: 'replacement', type: 'history.rewound', trigger: 'edit', retainedMessageIds: [] }),
+            lifecycleRow(7, 'running', 'replacement'),
+            logRow(8, {
+              runId: 'replacement',
+              type: 'message.appended',
+              message: {
+                id: 'replacement-answer',
+                role: 'assistant',
+                content: [{ type: 'text', text: 'Authoritative replacement' }],
+              },
+            }),
+            lifecycleRow(9, 'completed', 'replacement'),
+          ],
+          5,
+        );
+      }
+      await vi.waitFor(() => {
+        expect(text()).toContain('Authoritative replacement');
+      });
+      expect(text()).not.toContain('Retired paragraph');
+      pending.resolve([]);
+      await vi.waitFor(() => {
+        expect(store.get('chat_1')!.chat.status).toBe('ready');
+      });
+      expect(text()).toContain('Authoritative replacement');
+      expect(text()).not.toContain('Retired paragraph');
+    },
+  );
+
   it('should reset the bounded watch budget for a deliberately admitted Resume of the same run', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const reconnect = vi
@@ -511,7 +611,7 @@ describe('ChatSessionStore real SDK presentation recovery', () => {
       cursor: 3,
     }));
     const unpublish = store.publishProjectHostConnector('project_1', async () =>
-      mock<AgentHostClient>({ hostCommand, close: vi.fn(async () => undefined) }),
+      mock<AgentHostClient>({ catchUp: writerOwnedCatchUp, hostCommand, close: vi.fn(async () => undefined) }),
     );
     const unadmit = publishChatTurnAdmission('chat_1', async () => ({
       runId: 'run_1',

@@ -4,7 +4,10 @@ type RuntimeToolkitCapabilityKind = 'kernel' | 'middleware' | 'bundler' | 'trans
  * Same-realm plugin ABI shared by duplicate copies of `@taucad/runtime`.
  *
  * These registry keys and every shape reachable through them are frozen public
- * contracts. Bump this integer whenever any attached shape changes.
+ * contracts. Bump this integer whenever any attached shape changes. It also
+ * stamps the realm keys (`@taucad/runtime/realm-resources` on `globalThis` and
+ * `@taucad/runtime/realm-group` on group tokens), so bump it with any change to
+ * the realm directory or group state shapes too.
  *
  * @public
  */

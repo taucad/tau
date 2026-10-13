@@ -39,8 +39,8 @@ import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/f
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, omittedSectionCutsNotice } from '#services/headless-capture.js';
-import { useGraphicsCameraRigQuery } from '#hooks/use-graphics.js';
-import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
+import { useGraphicsCameraRigQuery } from '@taucad/viewer/hooks/use-graphics';
+import { getGraphicsCameraState } from '@taucad/viewer/services/graphics-camera-registry';
 
 export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): React.JSX.Element | undefined {
   const project = useProject({ enableNoContext: true });

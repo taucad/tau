@@ -43,7 +43,7 @@ vi.mock('#components/files/export-selector.js', () => ({
   ExportFormatComboboxLabel: () => null,
   getExportFormatValue: (item: { format: string }) => item.format,
 }));
-vi.mock('#components/ui/combobox-responsive.js', () => ({
+vi.mock('@taucad/ui/components/combobox-responsive', () => ({
   ComboBoxResponsive: ({ onSelect, children }: { onSelect: (value: string) => void; children: React.ReactNode }) => (
     <>
       {children}

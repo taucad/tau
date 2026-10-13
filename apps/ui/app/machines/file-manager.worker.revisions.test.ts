@@ -33,6 +33,7 @@ import type {
 import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { createFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
+import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
 
 type Harness = {
   readonly service: WorkspaceFileService;
@@ -1480,6 +1481,48 @@ describe('the revisions reader port (W6.r1 finding 9)', () => {
     expect(agent.frames).toContainEqual({ type: 'result', id: 4, result: { kind: 'closed' } });
     expect(root.inspect().status).toBe('active');
     expect(page.frames.some((frame) => frame.type === 'status')).toBe(true);
+  });
+
+  /* D84: a chat asked to resolve a conflict runs on a checkout that holds only
+   * one side; the agent's `revisions` tool must read the other side's text. */
+  it("should read both sides of the branch's waiting conflict through the agent's revisions client", async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const page = await fixture.open('alpha');
+    page.send({ command: 'setDeviceId', deviceId: 'tab:one' });
+    page.send({ command: 'saveRevision', id: 1, trigger: 'save' });
+    await vi.waitFor(() => {
+      expect(page.frames.some((frame) => 'id' in frame && frame.id === 1)).toBe(true);
+    });
+    await project.writeFile('main.scad', 'cube(30);');
+    fixture.announce('alpha', ['main.scad']);
+    page.send({ command: 'saveRevision', id: 2, trigger: 'save' });
+    await vi.waitFor(() => {
+      expect(page.frames.some((frame) => 'id' in frame && frame.id === 2)).toBe(true);
+    });
+    page.send({ command: 'recordEditorConflict', id: 3, path: 'main.scad', base: 'cube(10);', mine: 'cube(20);' });
+    const root = await fixture.root('alpha');
+    await vi.waitFor(
+      () => {
+        expect(root.status().conflicts).toHaveLength(1);
+      },
+      { timeout: 10_000 },
+    );
+    const channel = new MessageChannel();
+    fixture.registry.connectReader(channel.port1, 'alpha');
+    const client = createPortRevisionsClient(channel.port2);
+
+    const conflict = await client.conflict(undefined);
+
+    /* Ours is the editor's side, labelled by this host's record device. */
+    const recorder: unknown = expect.any(String);
+    expect(conflict).toEqual({
+      revisionId: root.status().conflicts[0]?.revisionId,
+      labels: { ours: recorder, theirs: 'main' },
+      files: [{ path: 'main.scad', chooseOne: false, base: 'cube(10);', ours: 'cube(20);', theirs: 'cube(30);' }],
+    });
+    client.close();
   });
 });
 

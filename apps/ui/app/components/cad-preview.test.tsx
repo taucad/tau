@@ -38,15 +38,16 @@ vi.mock('#hooks/use-cad-preview.js', () => ({
   }),
 }));
 
-vi.mock('#components/geometry/cad/cad-viewer.js', () => ({
+vi.mock('@taucad/viewer/cad/cad-viewer', () => ({
   CadViewer: () => <div data-testid='cad-viewer' />,
 }));
 
-vi.mock('#hooks/use-graphics.js', () => ({
+vi.mock('@taucad/viewer/hooks/use-graphics', () => ({
   GraphicsProvider: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
+  useModelInteractionRef: () => ({ current: undefined }),
 }));
 
-vi.mock('#components/ui/loader.js', () => ({
+vi.mock('@taucad/ui/components/loader', () => ({
   Loader: () => <div data-testid='loader' />,
 }));
 

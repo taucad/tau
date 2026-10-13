@@ -2061,3 +2061,97 @@ describe('v2 kernel boundary with the current client', () => {
     }
   });
 });
+
+describe('issues carried by a throwing evaluate or render', () => {
+  const zodFailure = (): Error =>
+    z.object({ wasmUrl: z.string() }).safeParse({}).error ?? new Error('The fixture schema accepted its input.');
+
+  const createThrowingKernel = (phase: 'evaluate' | 'render') =>
+    defineKernelV2({
+      id: `throwing-${phase}`,
+      extensions: ['circuit'] as const,
+      name: 'Throwing kernel',
+      version: '1.0.0',
+      views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        if (phase === 'evaluate') {
+          throw zodFailure();
+        }
+        return { handle: {}, views: ['model'] as const, exports: [] as const };
+      },
+      async render() {
+        throw zodFailure();
+      },
+    })();
+
+  it('should not forward a ZodError thrown by evaluate as kernel issues', async () => {
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [createThrowingKernel('evaluate')] }) });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 0,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      expect(evaluated[0]?.success).toBe(false);
+      expect(evaluated[0]?.issues).toEqual([
+        expect.objectContaining({ severity: 'error', message: zodFailure().message }),
+      ]);
+      const decoded = msgpackCodec.decode(msgpackCodec.encode(evaluated[0]));
+      expect(runtimeDocumentProtocolSchemas.notifies.evaluated.safeParse(decoded).success).toBe(true);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('should not forward a ZodError thrown by render as kernel issues', async () => {
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [createThrowingKernel('render')] }) });
+    await initializeWorkerForTesting(worker);
+    const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+    worker.onRendered = (event) => {
+      rendered.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 0,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      worker.handleOpenView({ documentId: 'doc', subscriptionId: 'view', requestId: 'request', view: 'model' });
+      await vi.waitFor(() => {
+        expect(rendered).toHaveLength(1);
+      });
+      expect(rendered[0]?.success).toBe(false);
+      expect(rendered[0]?.issues).toEqual([
+        expect.objectContaining({ code: 'KERNEL_BINDING_FAILED', severity: 'error', message: zodFailure().message }),
+      ]);
+      const decoded = msgpackCodec.decode(msgpackCodec.encode(rendered[0]));
+      expect(runtimeDocumentProtocolSchemas.notifies.rendered.safeParse(decoded).success).toBe(true);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+});

@@ -3,23 +3,23 @@ import { useRef, useState } from 'react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { CreditCard, ExternalLink, Plus } from 'lucide-react';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party settings surface owns the direct billing client contract
-import { formatCreditAtoms, tauPlanCatalog } from '@taucad/billing';
-import type { Entitlements } from '@taucad/billing';
+import { monthlyCreditsFromBalance, tauPlanCatalog } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { createPaymentRequestId, createPortalAction, followPaymentRedirect } from '#lib/billing-payment-client.js';
+import { formatCredits } from '#utils/credits.utils.js';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
-import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import { TierBadge } from '#components/tier-badge.js';
+import { CardContent } from '@taucad/ui/components/card';
+import { MonthlyCreditsMeter } from '#components/billing/monthly-credits-meter.js';
 import { TopupModal } from '#components/billing/topup-modal.js';
 import { PlanCards } from '#components/billing/plan-cards.js';
 import { AutoReloadSettings } from '#components/billing/auto-reload-settings.js';
 import { AccountClosureSettings } from '#components/billing/account-closure-settings.js';
 
 const proPlan = tauPlanCatalog.find((entry) => entry.id === 'pro');
-const proMonthlyPriceLabel = `${proPlan?.priceLabel ?? ''}${proPlan?.priceSubLabel ?? ''}`;
+const proMonthlyPriceLabel = `${proPlan?.priceLabel ?? ''} per month USD`;
 
 const formatRenewalDate = (date: Date): string =>
   date.toLocaleDateString(undefined, {
@@ -28,73 +28,7 @@ const formatRenewalDate = (date: Date): string =>
     day: 'numeric',
   });
 
-const formatMonthlyLimit = (limit: number): string =>
-  Number.isFinite(limit) ? `${limit.toLocaleString()}/mo` : 'Custom';
-
-/**
- * One entitlement/quota row (T10/T14): quotas render with a Coming Soon badge
- * until their surfaces ship — the numbers are contractual copy, not live caps.
- */
-function QuotaRow({
-  label,
-  value,
-  isComingSoon,
-}: {
-  readonly label: string;
-  readonly value: string;
-  readonly isComingSoon?: boolean;
-}): React.JSX.Element {
-  return (
-    <div className='flex items-center justify-between gap-2 text-sm'>
-      <span className='text-muted-foreground'>{label}</span>
-      <span className='flex items-center gap-2'>
-        {value}
-        {isComingSoon ? (
-          <Badge variant='outline' className='text-xs'>
-            Coming Soon
-          </Badge>
-        ) : undefined}
-      </span>
-    </div>
-  );
-}
-
-/** Paid-tier quota + verification entitlement list (T10/T14). */
-function PaidTierQuotas({ entitlements }: { readonly entitlements: Entitlements }): React.JSX.Element {
-  return (
-    <div className='flex flex-col gap-1.5 border-t pt-3'>
-      <QuotaRow
-        label='API CAD Gateway'
-        value={formatMonthlyLimit(entitlements.apiCadGatewayMonthlyLimit)}
-        isComingSoon
-      />
-      <QuotaRow
-        label='3D Conversion API'
-        value={formatMonthlyLimit(entitlements.conversionApiMonthlyLimit)}
-        isComingSoon
-      />
-      <QuotaRow
-        label='Hosted GeoSpec validation'
-        value={formatMonthlyLimit(entitlements.geospecValidationMonthlyLimit)}
-        isComingSoon
-      />
-      {entitlements.canCreateGeoSpecEvidenceReports ? (
-        <QuotaRow
-          label='Signed evidence reports'
-          value={`${entitlements.geospecEvidenceRetentionDays.toLocaleString()}-day retention`}
-          isComingSoon
-        />
-      ) : undefined}
-    </div>
-  );
-}
-
-/**
- * Billing tab of the Settings dialog (ui-patterns doc Sections A–C, B1 slice):
- * current plan + status, renewal date, Stripe-hosted management surfaces via
- * the Better Auth stripe client plugin. The credit-balance card and top-up
- * affordance land with the B2/B3 phases.
- */
+/** Billing overview with separate monthly allowance and purchased credits. */
 export function BillingSettings(): React.JSX.Element {
   const entitlements = useEntitlements();
   const credits = useCredits();
@@ -156,10 +90,19 @@ export function BillingSettings(): React.JSX.Element {
     }
   };
 
-  const isPaidTier = entitlements.tier !== 'free';
+  const isPaidTier = entitlements.isResolved && entitlements.tier !== 'free';
+  const monthly =
+    availableBalance && entitlements.isResolved
+      ? monthlyCreditsFromBalance(availableBalance, entitlements.tier)
+      : undefined;
+  const purchased = availableBalance
+    ? BigInt(availableBalance.purchasedCreditAtoms) - BigInt(availableBalance.purchasedHeldCreditAtoms)
+    : 0n;
+  const availablePurchased =
+    availableBalance && BigInt(availableBalance.debtCreditAtoms) === 0n && purchased > 0n ? purchased : 0n;
 
   return (
-    <div className='flex flex-col gap-4 py-4'>
+    <div className='flex flex-col gap-8 pb-4'>
       {entitlements.status === 'past_due' ? (
         <div className='rounded-md border border-warning/20 bg-warning/10 px-3 py-2 text-sm'>
           Payment failed — update your card to restore Pro. Your credits are safe.
@@ -171,43 +114,61 @@ export function BillingSettings(): React.JSX.Element {
         </div>
       ) : undefined}
 
+      {availableBalance && BigInt(availableBalance.debtCreditAtoms) > 0n ? (
+        <p role='alert' className='rounded-md border border-warning/20 bg-warning/10 px-3 py-2 text-sm'>
+          {formatCredits(BigInt(availableBalance.debtCreditAtoms))} outstanding. Add credits to resume AI usage. Your
+          projects are unaffected.
+        </p>
+      ) : undefined}
+      {availableBalance && BigInt(availableBalance.pendingIssuanceCreditAtoms) > 0n ? (
+        <p role='status' className='text-sm text-muted-foreground'>
+          {formatCredits(BigInt(availableBalance.pendingIssuanceCreditAtoms))} pending issuance.
+        </p>
+      ) : undefined}
       <SettingsItem settingId='plan'>
+        <h2 className='mb-3 text-sm font-medium'>Your plan</h2>
         <SettingsSectionCard>
-          <CardHeader className='flex flex-row items-center justify-between space-y-0'>
-            <CardTitle className='flex items-center gap-2 text-base'>
-              Current plan
-              {entitlements.isResolved ? <TierBadge tier={entitlements.tier} /> : undefined}
-              {entitlements.status === 'past_due' ? <Badge variant='outline'>Past due</Badge> : undefined}
-            </CardTitle>
-            {isPaidTier ? (
-              <Button
-                variant='outline'
-                size='sm'
-                disabled={stateIsCurrent && isRedirecting}
-                onClick={async () => {
-                  await openPortal();
-                }}
-              >
-                <CreditCard className='size-4' />
-                Manage Subscription
-                <ExternalLink className='size-3' />
-              </Button>
-            ) : undefined}
-            {stateIsCurrent && portalError ? <span className='text-xs text-warning'>{portalError}</span> : undefined}
-          </CardHeader>
-          <CardContent className='flex flex-col gap-2 text-sm text-muted-foreground'>
-            {entitlements.isResolved ? undefined : (
-              <span role='status' aria-busy='true'>
-                Loading plan…
+          <CardContent className='flex flex-col gap-3 text-sm'>
+            <div className='flex flex-wrap items-center justify-between gap-4'>
+              <div className='flex flex-col gap-1'>
+                {entitlements.isResolved ? (
+                  <span className='font-medium'>
+                    Tau{' '}
+                    {entitlements.tier === 'pro' ? 'Pro' : entitlements.tier === 'enterprise' ? 'Enterprise' : 'Free'}
+                  </span>
+                ) : (
+                  <span role='status' aria-busy='true'>
+                    Loading plan…
+                  </span>
+                )}
+                {entitlements.tier === 'pro' ? (
+                  <span className='text-muted-foreground'>{proMonthlyPriceLabel}</span>
+                ) : undefined}
+                {entitlements.status === 'past_due' ? <Badge variant='outline'>Past due</Badge> : undefined}
+              </div>
+              {isPaidTier ? (
+                <Button
+                  variant='outline'
+                  size='sm'
+                  disabled={stateIsCurrent && isRedirecting}
+                  onClick={async () => {
+                    await openPortal();
+                  }}
+                >
+                  <CreditCard className='size-4' />
+                  Manage subscription
+                  <ExternalLink className='size-3' />
+                </Button>
+              ) : undefined}
+            </div>
+            {stateIsCurrent && portalError ? (
+              <span role='alert' className='text-xs text-warning'>
+                {portalError}
               </span>
-            )}
-            {entitlements.tier === 'pro' ? <span>{proMonthlyPriceLabel}</span> : undefined}
+            ) : undefined}
             {entitlements.tier === 'enterprise' ? (
               <>
                 <span>Custom plan — contact enterprise@tau.new for changes.</span>
-                {availableBalance && BigInt(availableBalance.planGrantCreditAtoms) > 0n ? (
-                  <span>Plan credits: {formatCreditAtoms(BigInt(availableBalance.planGrantCreditAtoms))}</span>
-                ) : undefined}
                 <div>
                   <Button asChild variant='outline' size='sm'>
                     <a href='mailto:enterprise@tau.new'>Contact your Tau team</a>
@@ -216,9 +177,10 @@ export function BillingSettings(): React.JSX.Element {
               </>
             ) : undefined}
             {isPaidTier && entitlements.paidThrough && !entitlements.cancelAtPeriodEnd ? (
-              <span>Renews on {formatRenewalDate(entitlements.paidThrough)}</span>
+              <span className='text-xs text-muted-foreground'>
+                Renews on {formatRenewalDate(entitlements.paidThrough)}
+              </span>
             ) : undefined}
-            {isPaidTier ? <PaidTierQuotas entitlements={entitlements} /> : undefined}
             {entitlements.isResolved && entitlements.tier === 'free' ? (
               // U2/T7: the free state shows the full plan grid — same catalogue
               // as the landing pricing section, "Current plan" pinned to Free.
@@ -228,11 +190,71 @@ export function BillingSettings(): React.JSX.Element {
         </SettingsSectionCard>
       </SettingsItem>
 
+      {monthly !== undefined || (entitlements.isResolved && entitlements.tier !== 'free') ? (
+        <SettingsItem settingId='plan-limits'>
+          <h2 className='mb-3 text-sm font-medium'>Plan limits</h2>
+          <SettingsSectionCard>
+            <CardContent className='flex flex-col gap-3'>
+              <MonthlyCreditsMeter
+                className='p-0 text-sm'
+                monthlyHeldCreditAtoms={BigInt(availableBalance?.planHeldCreditAtoms ?? '0')}
+                state={
+                  monthly ? { status: 'ready', monthly } : { status: isBalanceLoading ? 'loading' : 'unavailable' }
+                }
+              />
+              <p className='text-xs text-muted-foreground'>
+                Monthly credits are used first, before your purchased credits.
+              </p>
+            </CardContent>
+          </SettingsSectionCard>
+        </SettingsItem>
+      ) : undefined}
+
+      {availableBalance && BigInt(availableBalance.promoGrantCreditAtoms) > 0n ? (
+        <div>
+          <h2 className='mb-3 text-sm font-medium'>Promotional credits</h2>
+          <SettingsSectionCard>
+            <CardContent className='space-y-2 text-sm'>
+              <p>
+                {formatCredits(
+                  BigInt(availableBalance.debtCreditAtoms) > 0n
+                    ? 0n
+                    : BigInt(availableBalance.promoGrantCreditAtoms) - BigInt(availableBalance.promoHeldCreditAtoms),
+                )}{' '}
+                available
+              </p>
+              {BigInt(availableBalance.promoHeldCreditAtoms) > 0n ? (
+                <p className='text-xs text-muted-foreground'>
+                  {formatCredits(BigInt(availableBalance.promoHeldCreditAtoms))} reserved for active work.
+                </p>
+              ) : undefined}
+            </CardContent>
+          </SettingsSectionCard>
+        </div>
+      ) : undefined}
       <SettingsItem settingId='credit-balance'>
+        <h2 className='mb-3 text-sm font-medium'>Credits</h2>
         <SettingsSectionCard>
-          <CardHeader className='flex flex-row items-center justify-between space-y-0'>
-            <CardTitle className='text-base'>Credit balance</CardTitle>
-            <div className='flex items-center gap-3'>
+          <CardContent className='flex flex-col gap-3 text-sm'>
+            <div className='flex flex-wrap items-center justify-between gap-4'>
+              <div className='flex flex-col gap-1'>
+                {availableBalance ? (
+                  <>
+                    <span className='font-medium tabular-nums' data-testid='credit-balance'>
+                      {formatCredits(availablePurchased)} available
+                    </span>
+                    <span className='text-xs text-muted-foreground'>Purchased credits · Never expire</span>
+                  </>
+                ) : isBalanceLoading ? (
+                  <span role='status' aria-busy='true' className='text-muted-foreground'>
+                    Loading balance…
+                  </span>
+                ) : (
+                  <span role='alert' className='text-muted-foreground'>
+                    Balance unavailable.
+                  </span>
+                )}
+              </div>
               <Button
                 variant='outline'
                 size='sm'
@@ -241,60 +263,29 @@ export function BillingSettings(): React.JSX.Element {
                   setIsTopupOpen(true);
                 }}
               >
-                <Plus className='size-3.5' />
-                Add credits
+                <Plus className='size-4' />
+                Add more
               </Button>
-              {availableBalance ? (
-                <span className='font-mono text-lg' data-testid='credit-balance'>
-                  {formatCreditAtoms(BigInt(availableBalance.eligibleAvailableCreditAtoms))}
-                </span>
-              ) : undefined}
             </div>
-          </CardHeader>
-          {availableBalance ? (
-            <CardContent className='flex flex-col gap-1 text-sm text-muted-foreground'>
-              {BigInt(availableBalance.netBalanceCreditAtoms) < 0n ? (
-                <span className='text-warning'>
-                  Your balance is negative — add credits to resume AI usage. Your projects are unaffected.
-                </span>
-              ) : undefined}
-              {BigInt(availableBalance.purchasedCreditAtoms) > 0n ? (
-                <span>
-                  {formatCreditAtoms(BigInt(availableBalance.planGrantCreditAtoms))} from your plan +{' '}
-                  {formatCreditAtoms(BigInt(availableBalance.purchasedCreditAtoms))} purchased (never expire)
-                </span>
-              ) : undefined}
-              {BigInt(availableBalance.planHeldCreditAtoms) + BigInt(availableBalance.purchasedHeldCreditAtoms) > 0n ? (
-                <span>
-                  {formatCreditAtoms(
-                    BigInt(availableBalance.planHeldCreditAtoms) + BigInt(availableBalance.purchasedHeldCreditAtoms),
-                  )}{' '}
-                  held for active work
-                </span>
-              ) : undefined}
-              {BigInt(availableBalance.netBalanceCreditAtoms) >= 0n &&
-              BigInt(availableBalance.eligibleAvailableCreditAtoms) === 0n ? (
-                <span>No credits yet. Add credits to start using AI.</span>
-              ) : undefined}
-            </CardContent>
-          ) : isBalanceLoading ? (
-            <CardContent className='text-sm text-muted-foreground' role='status' aria-busy='true'>
-              Loading balance…
-            </CardContent>
-          ) : (
-            <CardContent className='flex items-center justify-between gap-2 text-sm text-muted-foreground'>
-              <span role='alert'>Balance unavailable.</span>
+            {availableBalance ? (
+              BigInt(availableBalance.purchasedHeldCreditAtoms) > 0n ? (
+                <p className='text-xs text-muted-foreground'>
+                  {formatCredits(BigInt(availableBalance.purchasedHeldCreditAtoms))} reserved for active work.
+                </p>
+              ) : undefined
+            ) : isBalanceLoading ? undefined : (
               <Button
-                variant='ghost'
+                variant='outline'
                 size='sm'
+                className='self-start'
                 onClick={() => {
                   void queryClient.invalidateQueries({ queryKey: ['billing', 'credits'] });
                 }}
               >
                 Retry
               </Button>
-            </CardContent>
-          )}
+            )}
+          </CardContent>
         </SettingsSectionCard>
       </SettingsItem>
 

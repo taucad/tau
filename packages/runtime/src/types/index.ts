@@ -158,6 +158,10 @@ export type {
   KernelFileSystem,
   GetDependenciesInput,
   InitializeInput,
+  RealmGroup,
+  RealmHold,
+  RealmHoldInput,
+  RealmResources,
 } from '#types/runtime-kernel.types.js';
 export type {
   Artifact,

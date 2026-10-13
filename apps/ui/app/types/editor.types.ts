@@ -1,6 +1,7 @@
 import type { WorkbenchLayout, WorkbenchView } from '@taucad/workbench';
 
-import type { MobilePanelId, GraphicsBackendPreference } from '#constants/editor.constants.js';
+import type { MobilePanelId } from '#constants/editor.constants.js';
+import type { GraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-settings';
 
 /** Device-local Restore payload; view seeds recreate only records deleted with a closed tab. */
 export type PreviousWorkbenchLayout = Readonly<{

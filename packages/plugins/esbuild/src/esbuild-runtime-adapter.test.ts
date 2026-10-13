@@ -189,6 +189,7 @@ describe('Esbuild runtime adapter', () => {
           version: '0.0.0-test',
           globalName: 'GeoSpec',
           package: { name: 'geospec', spec: '0.0.0-test' },
+          registryExpression: 'globalThis.__geospecBuiltin',
         },
       },
       { vm },
@@ -200,6 +201,7 @@ describe('Esbuild runtime adapter', () => {
       version: '0.0.0-test',
       globalName: 'GeoSpec',
       package: { name: 'geospec', spec: '0.0.0-test' },
+      registryExpression: 'globalThis.__geospecBuiltin',
     });
     expect(vm.dispose).toHaveBeenCalledOnce();
   });

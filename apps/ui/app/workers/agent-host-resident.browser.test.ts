@@ -4,7 +4,7 @@ import { toolName } from '@taucad/chat/constants';
 import { createMemoryComputeEngine, exposeComputeStoreChannel } from '@taucad/runtime/host';
 import type { HostRunSnapshot, TurnPlacementFact } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
-import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
+import { serveTurnPlacementChannel, createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import { createBrowserAgentHostClient, residentAgentWorker } from '#services/agent-host-client.js';
 import { openBrowserProjectHost } from '#workers/agent-host.impl.js';
 import {
@@ -145,13 +145,20 @@ it('should answer needs to a rebridge that names a host that is no longer open',
     await control.call('release', { projectId, hostId: 'host-1' });
     const fileSystem = options.openFileSystemBridge();
     const projectRoot = options.openProjectRootBridge();
+    const placementPort = options.openPlacementPort();
 
     /* Closed in the worker, which this Chromium does not report to the page (no MessagePort `close` event); the
      * registry's test asserts the close. */
     await expect(
       control.call('rebridge', {
-        value: { projectId, hostId: 'host-1', fileSystemPort: fileSystem.port, projectRootPort: projectRoot.port },
-        transferables: [fileSystem.port, projectRoot.port],
+        value: {
+          projectId,
+          hostId: 'host-1',
+          fileSystemPort: fileSystem.port,
+          projectRootPort: projectRoot.port,
+          placementPort,
+        },
+        transferables: [fileSystem.port, projectRoot.port, placementPort],
       }),
     ).resolves.toEqual({ status: 'needs' });
     await expect(streamOn(control, projectId, 'host-1')).resolves.toMatchObject({ answer: { status: 'needs' } });
@@ -430,6 +437,7 @@ it('should use registered durable compute before and after a project-host rebrid
       fileSystemPort: reboundFileSystem.port,
       projectRootPort: reboundProjectRoot.port,
       computeStorePort: reboundPorts.port2,
+      placementPort: options.openPlacementPort(),
     });
     await opfsProvider().writeFile(`${options.projectStorage.providerBasePath}/main.scad`, 'cube(20);\n');
     await runKernelTurn('run-durable-after', 'call-durable-compute-2');
@@ -450,3 +458,107 @@ it('should use registered durable compute before and after a project-host rebrid
     reboundPorts?.port2.close();
   }
 });
+
+it.each(['rebridge', 'isolated'] as const)(
+  'should complete a turn after a %s placement closure in the resident host',
+  async (recovery) => {
+    const options = await opfsProject('placement-recovery');
+    const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
+    const root = rootedProvider(opfsProvider(), options.projectStorage.providerBasePath);
+    const servers: MessagePort[] = [];
+    const facts: TurnPlacementFact[] = [];
+    const wakes = new Topic<void>();
+    const admitted: string[] = [];
+    const completed: string[] = [];
+    const openPlacementPort = (): MessagePort => {
+      const { port1, port2 } = new MessageChannel();
+      servers.push(port2);
+      serveTurnPlacementChannel({
+        port: port2,
+        projectId: options.authority.projectId,
+        session: {
+          admit: async ({ requestId }) => {
+            admitted.push(requestId);
+            return {
+              requestId,
+              status: 'applied',
+              placement: {
+                checkoutId: 'live',
+                mode: 'direct',
+                root: '/',
+                tools: { port: createFileSystemBridgePort(root).port },
+              },
+            };
+          },
+          complete: async ({ requestId, key }) => {
+            completed.push(requestId);
+            facts.push({
+              kind: 'settled',
+              key,
+              row: {
+                type: 'turn.finalized',
+                ...key,
+                projectId: options.authority.projectId,
+                changedPaths: [],
+                trigger: 'turn',
+                runIds: [key.runId],
+              },
+            });
+            wakes.emit();
+            return { requestId, status: 'applied' };
+          },
+          abandon: async ({ requestId }) => ({ requestId, status: 'applied' }),
+          acknowledge: async ({ requestId }) => ({ requestId, status: 'applied' }),
+          reconcile: async ({ requestId }) => ({ requestId, status: 'applied', held: [] }),
+          settlements: ({ signal }) => placementFacts(facts, wakes, signal),
+        },
+      });
+      return port1;
+    };
+    const worker = new Worker(new URL('agent-host.worker.ts', import.meta.url), { type: 'module' });
+    const createWorker = (): Worker => worker;
+    const client = createBrowserAgentHostClient({ ...options, openPlacementPort, createWorker });
+    try {
+      await client.hostCommand({ type: 'attach', commandId: 'attach-recovery', payload: { chatId: 'chat-recovery' } });
+      servers[0]!.close();
+      if (recovery === 'rebridge') {
+        await residentAgentWorker(createWorker).reprovide();
+      }
+      const command = {
+        type: 'start',
+        commandId: 'start-recovery',
+        payload: {
+          chatId: 'chat-recovery',
+          runId: 'run-recovery',
+          trigger: 'submit',
+          message: { id: 'user-recovery', role: 'user', content: 'Hello.' },
+        },
+      } as const;
+      await expect(client.hostCommand(command)).resolves.toMatchObject({ status: 'applied' });
+      await vi.waitFor(
+        async () => {
+          const answer = await client.hostCommand({
+            type: 'attach',
+            commandId: crypto.randomUUID(),
+            payload: { chatId: 'chat-recovery' },
+          });
+          expect(answer).toMatchObject({
+            status: 'applied',
+            details: { snapshot: { runId: 'run-recovery', state: 'completed' } },
+          });
+          expect(completed).toEqual(['complete:run-recovery:1']);
+        },
+        { timeout: 12_000 },
+      );
+      await expect(client.hostCommand(command)).resolves.toMatchObject({ status: 'replayed' });
+      expect(admitted).toEqual(['admit:run-recovery:1']);
+    } finally {
+      await client.close();
+      await retireWorkers(worker);
+      for (const port of servers) {
+        port.close();
+      }
+    }
+  },
+  25_000,
+);

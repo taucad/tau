@@ -135,7 +135,7 @@ export const isTrustedSender = (frame: SenderFrame | undefined, origins: readonl
  * `base-uri`/`form-action`/`frame-ancestors 'none'` close the three
  * redirect-style escapes a CSP is usually forgotten on.
  *
- * @param connectOrigins - API and WebSocket origins the renderer must reach.
+ * @param connectOrigins - API and WebSocket origins the renderer must reach, beside GitHub's public API.
  * @returns The header value.
  */
 export const contentSecurityPolicy = (connectOrigins: readonly string[]): string =>
@@ -143,10 +143,13 @@ export const contentSecurityPolicy = (connectOrigins: readonly string[]): string
     "default-src 'none'",
     "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    /* GitHub's avatar host: the repository owner's picture on Import and GitHub connections. */
+    "img-src 'self' data: blob: https://avatars.githubusercontent.com",
     "font-src 'self' data:",
     "media-src 'self' blob:",
-    `connect-src 'self' data: blob: https://registry.npmjs.org${connectOrigins.map((origin) => ` ${origin}`).join('')}`,
+    /* GitHub's public API: the Import page's unauthenticated public reads (repository metadata and tree), as on the web.
+     * The npm registry: packuments and tarballs for project package installs. */
+    `connect-src 'self' data: blob: https://api.github.com https://registry.npmjs.org${connectOrigins.map((origin) => ` ${origin}`).join('')}`,
     "worker-src 'self' blob:",
     "child-src 'self' blob:",
     "object-src 'none'",

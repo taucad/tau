@@ -18,8 +18,15 @@ import type { Channel, CloseInfo } from '@taucad/rpc';
 import { agentChannelPort } from '#channel/endpoint.js';
 import type { AgentChannelEndpoint } from '#channel/endpoint.js';
 import type { JsonValue } from '#log/event-types.js';
-import type { AgentLiveEvent } from '#waist/ports.js';
-import type { AgentChannelRevisionEvent, ReadAnswer, ReadInput } from '#wire/frames.schema.js';
+import type { SourceLiveEvent } from '#waist/ports.js';
+import { agentWireVersion, sourceLiveEventSchema, catchUpFrameSchema } from '#wire/frames.schema.js';
+import type {
+  CatchUpFrame,
+  CatchUpInput,
+  AgentChannelRevisionEvent,
+  ReadAnswer,
+  ReadInput,
+} from '#wire/frames.schema.js';
 import { agentWireCompatSchemas, helloWire, v1RequestFor } from '#channel/wire-v1.js';
 import type { AgentWireCompatProtocol, V1Response } from '#channel/wire-v1.js';
 import type { CommandAnswer, CommandInput, CommandVerb, HostCommand } from '#wire/commands.schema.js';
@@ -48,8 +55,10 @@ export type AgentChannelClient = {
   execute(input: CommandInput): Promise<CommandAnswer>;
   /** One long-poll read of a chat's durable rows; a batch, or a refusal the reader resets on (SC-R12). */
   read(input: ReadInput): Promise<ReadAnswer>;
+  /** Provisional immutable catch-up pages; publish only after their validated marker. */
+  catchUp(input: CatchUpInput): AsyncIterable<CatchUpFrame>;
   /** Ephemeral model deltas for one chat. */
-  liveEvents(input: Readonly<{ chatId: string; signal?: AbortSignal | undefined }>): AsyncIterable<AgentLiveEvent>;
+  liveEvents(input: Readonly<{ chatId: string; signal?: AbortSignal | undefined }>): AsyncIterable<SourceLiveEvent>;
   /** One request to the owner's revision root. */
   revision(request: JsonValue, signal?: AbortSignal): Promise<Readonly<{ result: JsonValue; status: JsonValue }>>;
   /** Host-authoritative revision projections and outcomes for this workspace. */
@@ -94,7 +103,7 @@ const aborted = async (signal: AbortSignal): Promise<never> =>
   });
 
 /** One open connection and the wire its owner's hello named (I32). */
-type Connection = Readonly<{ channel: Channel<AgentWireCompatProtocol>; wire: 1 | 2 }>;
+type Connection = Readonly<{ channel: Channel<AgentWireCompatProtocol>; wire: 1 | typeof agentWireVersion }>;
 
 const unexpected = (answer: V1Response): never => {
   throw Object.assign(new Error(`The v1 agent host answered with ${answer.type}.`), {
@@ -159,51 +168,6 @@ const v1Execute = async (channel: Channel<AgentWireCompatProtocol>, command: Hos
     effect: 'durable',
     cursor: before.endCursor,
   };
-};
-
-/**
- * The long-poll `read`, over a v1 owner: `tail`, and when it holds nothing new, wait for the chat's next row on the v1
- * `events` stream, then `tail` again. The stream is opened before the `tail`, so a row that lands between them wakes it.
- */
-const v1Read = async (
-  channel: Channel<AgentWireCompatProtocol>,
-  request: Omit<ReadInput, 'signal'>,
-  signal: AbortSignal | undefined,
-): Promise<ReadAnswer> => {
-  const { chatId, cursor, limit, maxBytes } = request;
-  for (;;) {
-    const watching = new AbortController();
-    const stop = (): void => {
-      watching.abort();
-    };
-    signal?.addEventListener('abort', stop, { once: true });
-    const rows = channel.listen('events', null, watching.signal)[Symbol.asyncIterator]();
-    const nextRow = (async (): Promise<void> => {
-      try {
-        for (;;) {
-          // oxlint-disable-next-line no-await-in-loop -- rows arrive one at a time.
-          const next = await rows.next();
-          if (next.done === true || next.value.chatId === chatId) {
-            return;
-          }
-        }
-      } catch {
-        // The wait ended with its signal or its connection; the loop re-reads or returns.
-      }
-    })();
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- a long poll re-reads after each wake.
-      const batch = await v1Tail(channel, { chatId, cursor, limit, maxBytes });
-      if (batch.events.length > 0 || batch.cursor !== cursor || signal?.aborted === true) {
-        return { status: 'batch', chatId, ...batch, events: [...batch.events] };
-      }
-      // oxlint-disable-next-line no-await-in-loop -- one wait per empty read.
-      await nextRow;
-    } finally {
-      stop();
-      signal?.removeEventListener('abort', stop);
-    }
-  }
 };
 
 /**
@@ -379,7 +343,12 @@ export const createAgentChannelClient = (options: AgentChannelClientOptions): Ag
       } catch (error) {
         /* ponytail: kept; the redial re-sends it with the same key (SC-R6). A v1 owner has no applied set, so a
          * command lost with its connection is not re-sent: it rejects, effect unknown, and only reads replay. */
-        if (error instanceof ChannelClosedError && current.wire === 2 && fatal === undefined && !closedHere) {
+        if (
+          error instanceof ChannelClosedError &&
+          current.wire === agentWireVersion &&
+          fatal === undefined &&
+          !closedHere
+        ) {
           return;
         }
         const code = codeOf(error);
@@ -417,28 +386,47 @@ export const createAgentChannelClient = (options: AgentChannelClientOptions): Ag
       }
       return signal === undefined ? pending.settle.promise : Promise.race([pending.settle.promise, aborted(signal)]);
     },
-    read: async ({ signal, ...request }) => {
+    read: async ({ signal, sourceGeneration, ...request }) => {
+      const input = { ...request, ...(sourceGeneration === undefined ? {} : { sourceGeneration }) };
       const current = await connection();
-      return current.wire === 1
-        ? v1Read(current.channel, request, signal)
-        : current.channel.call('read', request, signal);
+      if (current.wire !== agentWireVersion) {
+        throw Object.assign(new Error('This host cannot provide authoritative source health. Update the agent host.'), {
+          code: 'WIRE_VERSION_UNSUPPORTED' satisfies RefusalCode,
+        });
+      }
+      return current.channel.call('read', input, signal);
     },
+    catchUp: ({ signal, ...input }) =>
+      guarded(signal, async function* () {
+        const current = await connection();
+        if (current.wire !== agentWireVersion) {
+          throw Object.assign(new Error('Legacy hosts do not support immutable catch-up.'), {
+            code: 'WIRE_VERSION_UNSUPPORTED' satisfies RefusalCode,
+          });
+        }
+        for await (const frame of current.channel.listen('catchUp', input, signal)) {
+          yield catchUpFrameSchema.parse(frame);
+        }
+      }),
     liveEvents: ({ chatId, signal }) =>
       guarded(signal, async function* () {
         const current = await connection();
-        if (current.wire === 2) {
-          yield* current.channel.listen('liveEvents', { chatId }, signal) as AsyncIterable<AgentLiveEvent>;
+        if (current.wire === agentWireVersion) {
+          for await (const event of current.channel.listen('liveEvents', { chatId }, signal)) {
+            yield sourceLiveEventSchema.parse(event);
+          }
           return;
         }
-        for await (const frame of current.channel.listen('liveEvents', null, signal)) {
-          if ('event' in frame && frame.chatId === chatId) {
-            yield frame.event;
-          }
-        }
+        throw Object.assign(
+          new Error('Legacy v1 live events have no authoritative writer generation; update Tau on that host.'),
+          {
+            code: 'WIRE_VERSION_UNSUPPORTED' satisfies RefusalCode,
+          },
+        );
       }),
     revision: async (request, signal) => {
       const current = await connection();
-      if (current.wire === 2) {
+      if (current.wire === agentWireVersion) {
         return current.channel.call('revision', { request }, signal);
       }
       const answer = await current.channel.call('request', { type: 'revision', request }, signal);

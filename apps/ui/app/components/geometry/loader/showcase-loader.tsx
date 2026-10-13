@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Ref, RefCallback, RefObject } from 'react';
-import {
-  probeWebGpuSupport,
-  readGraphicsBackendQueryOverride,
-  resolveGraphicsBackendPreference,
-} from '#components/geometry/graphics/graphics-backend.js';
+import { probeWebGpuSupport, resolveGraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-backend';
+import { readGraphicsBackendQueryOverride } from '#utils/graphics-backend-override.js';
 import {
   useDocumentHidden,
   useIsIntersecting,
   useReducedMotion,
 } from '#components/geometry/loader/metal-morph-playback-gates.js';
-import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
+import type { ResolvedGraphicsBackend } from '@taucad/viewer/graphics/graphics-settings';
 import { useTheme } from '#hooks/use-theme.js';
 
 /**

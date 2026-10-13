@@ -69,7 +69,7 @@ GeoSpecSubject: {
 }
 
 // Load a CAD model into GeoSpec evidence
-export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
+export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(_options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
 
 // Options accepted by {@link import ('./load-model.js').loadModel}
 LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadModelFileOptions
@@ -88,9 +88,6 @@ LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadMode
 
 // Geometry formats accepted by {@link import ('./load-model.js').loadModel}
 GeoSpecModelFormat: MeshFileFormat | 'step' | 'stp'
-
-// STEP reader strategy used by GeoSpec
-StepStreamingMode: 'auto' | 'native-stream' | 'filesystem'
 ```
 
 ### Types
@@ -477,16 +474,19 @@ GeoSpecNumericExpectation: number | {
     lessThanOrEqual?: number;
 }
 
-// Point expectation accepted by center and feature matchers
-GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation
-
-// Point expectation accepted by center and feature matchers
-GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation
+// Shared scalar expectation used by geometry measurements
+GeoSpecNumericExpectation: number | {
+    value?: number;
+    greaterThan?: number;
+    greaterThanOrEqual?: number;
+    lessThan?: number;
+    lessThanOrEqual?: number;
+}
 ```
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 370 symbols by file.
+To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 345 symbols by file.
 
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants

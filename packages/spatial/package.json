@@ -1,6 +1,6 @@
 {
   "name": "@taucad/spatial",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.1",
   "description": "Renderer-neutral coordinate conventions and render-space transforms",
   "type": "module",
   "sideEffects": false,

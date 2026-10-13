@@ -1,3 +1,5 @@
+import { cadReferencesSchema } from '@taucad/chat/references';
+import type { CadReference } from '@taucad/chat/references';
 import type { UIMessage } from 'ai';
 import type { MyUIMessage } from '@taucad/chat';
 import type { AgentLogEvent, UserProviderMessage } from '@taucad/agent-host';
@@ -194,12 +196,34 @@ export const userProviderMessageOf = <Message extends UIMessage>(messages: reado
   }
   const first = content[0];
   const textOnly = content.length === 1 && isRecord(first) && first['type'] === 'text';
+  const references = referencesOf(message.metadata);
   return {
     id: message.id,
     role: 'user',
     content: textOnly && typeof first['text'] === 'string' ? first['text'] : content,
+    ...(references === undefined ? {} : { metadata: { references } }),
   };
 };
+
+/** The geometry references a composed message carries (blueprint D6), as the host log records them. */
+const referencesOf = (metadata: unknown): CadReference[] | undefined => {
+  if (!isRecord(metadata)) {
+    return undefined;
+  }
+  const parsed = cadReferencesSchema.safeParse(metadata['references']);
+  return parsed.success && parsed.data.length > 0 ? parsed.data : undefined;
+};
+
+/**
+ * The geometry references of the turn's own user message (the last in the transcript), which the turn's context
+ * renders for the model.
+ *
+ * @param messages - The turn's transcript.
+ * @returns Its valid references, or `undefined` when it carries none.
+ * @public
+ */
+export const turnReferencesOf = (messages: readonly UIMessage[]): CadReference[] | undefined =>
+  referencesOf(messages.findLast((message) => message.role === 'user')?.metadata);
 
 /** The sender's command key and the page's current admission/selection. @public */
 export type CommandContext = Readonly<{

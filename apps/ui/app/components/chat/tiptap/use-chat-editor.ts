@@ -10,6 +10,13 @@ import type { Editor, JSONContent } from '@tiptap/core';
 import { Slice } from '@tiptap/pm/model';
 import type { EditorView } from '@tiptap/pm/view';
 import type { ChatRecord } from '@taucad/chat/schemas';
+import {
+  cadReferenceFromGeometryComponent,
+  cadReferenceToken,
+  geometryComponentReferenceSchema,
+  maxCadReferences,
+} from '@taucad/chat/references';
+import type { CadReference } from '@taucad/chat/references';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { ChipType } from '#components/chat/context-chip.js';
@@ -106,6 +113,32 @@ function walkChildren(node: JSONContent, visitor: (child: JSONContent) => void):
       visitor(child);
     }
   }
+}
+
+/**
+ * The structured references the composer's geometry chips hold (blueprint D6), in document order, without duplicates.
+ * A chip whose stored reference does not parse contributes nothing; its token still names it in the text.
+ */
+export function cadReferencesOfChips(chips: readonly ContextChip[]): CadReference[] {
+  const references = new Map<string, CadReference>();
+  for (const chip of chips) {
+    if (chip.geometryReference === undefined || references.size >= maxCadReferences) {
+      continue;
+    }
+    let stored: unknown;
+    try {
+      stored = JSON.parse(chip.geometryReference);
+    } catch {
+      continue;
+    }
+    const parsed = geometryComponentReferenceSchema.safeParse(stored);
+    if (!parsed.success) {
+      continue;
+    }
+    const reference = cadReferenceFromGeometryComponent(parsed.data);
+    references.set(cadReferenceToken(reference), reference);
+  }
+  return [...references.values()];
 }
 
 export function extractContent(editor: Editor): ChatInputContent {
@@ -386,10 +419,22 @@ export function useChatEditor({
     editor.commands.clearContent();
   }, [editor]);
 
+  // Catalog settlement is external to Tiptap transactions; derive the open menu without mirroring it in state.
+  const popupItems = slashCommandState === undefined ? [] : getSlashCommandItems(slashCommandState.query);
+  const triggerPosition = editor.state.selection.from - (slashCommandState?.query.length ?? 0) - 1;
+  const trigger = triggerPosition < 0 ? '' : editor.state.doc.textBetween(triggerPosition, triggerPosition + 1);
+  const currentSlashCommandState =
+    slashCommandState === undefined
+      ? undefined
+      : {
+          ...slashCommandState,
+          items: trigger === '$' ? popupItems.filter((item) => item.label.startsWith('$')) : popupItems,
+        };
+
   return {
     editor,
     contextSuggestionState,
-    slashCommandState,
+    slashCommandState: currentSlashCommandState,
     contextKeydownRef,
     slashKeydownRef,
     clearEditor,

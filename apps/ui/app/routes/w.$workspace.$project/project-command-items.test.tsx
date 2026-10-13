@@ -81,13 +81,13 @@ vi.mock('#hooks/use-project.js', () => ({
 
 vi.mock('#services/headless-capture.js', () => ({ captureCadImages, omittedSectionCutsNotice }));
 
-vi.mock('#hooks/use-graphics.js', () => ({
+vi.mock('@taucad/viewer/hooks/use-graphics', () => ({
   useGraphicsCameraRigQuery: () => {
     const _version = cameraRegistryVersion;
     return () => Boolean(cameraState) && _version >= 0;
   },
 }));
-vi.mock('#services/graphics-camera-registry.js', () => ({
+vi.mock('@taucad/viewer/services/graphics-camera-registry', () => ({
   hasGraphicsCameraRig: () => Boolean(cameraState),
   getGraphicsCameraState: () => cameraState,
 }));

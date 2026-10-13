@@ -15,6 +15,7 @@ describe('the chat-ledger exports', () => {
     expectTypeOf(foldReadAnswer).parameter(0).toEqualTypeOf<ChatLedger>();
     expectTypeOf(foldReadAnswer).returns.toEqualTypeOf<ReadFold>();
     expectTypeOf<ReadFold['kind']>().toEqualTypeOf<'folded' | 'stale' | 'reset' | 'refused'>();
+    expectTypeOf<Extract<ReadFold, { kind: 'folded' }>['semanticRowIndices']>().toEqualTypeOf<readonly number[]>();
   });
 
   it('should take merge options with a conflict report', () => {

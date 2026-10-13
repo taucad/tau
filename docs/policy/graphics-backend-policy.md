@@ -23,7 +23,7 @@ Tau maintains WebGL and WebGPU Three.js paths in `apps/ui`. WebGL is the default
 
 ### 1. Resolve the backend once
 
-Resolve interactive viewers through `resolveViewerGraphicsBackend` in `apps/ui/app/components/geometry/graphics/graphics-backend.ts`: the `webGpu` feature flag requests WebGPU only when an adapter is available, otherwise WebGL. Keep persisted per-view preferences normalized to WebGL; the experimental flag is the public opt-in. The internal `?graphicsBackend=` override takes precedence for manual and e2e evidence.
+Resolve interactive viewers through `resolveViewerGraphicsBackend` in `apps/ui/app/utils/graphics-backend-override.ts`: the `webGpu` feature flag requests WebGPU only when an adapter is available, otherwise WebGL. Keep persisted per-view preferences normalized to WebGL; the experimental flag is the public opt-in. The internal `?graphicsBackend=` override takes precedence for manual and e2e evidence.
 
 Key `ThreeCanvasInstance` by backend as `ThreeProvider` does. A backend switch must recreate renderer-owned state rather than reusing an incompatible canvas, material graph, controls instance, or post-processing pipeline.
 
@@ -113,10 +113,10 @@ Per-frame work returns early when its inputs are unchanged. A `useFrame` callbac
 
 ## Ownership
 
-- Backend resolution: `apps/ui/app/components/geometry/graphics/graphics-backend.ts`
-- Canvas lifecycle: `apps/ui/app/components/geometry/graphics/three/three-context.tsx`
-- Renderer presets: `apps/ui/app/components/geometry/graphics/three/renderer.ts`
-- Transparent ordering: `apps/ui/app/components/geometry/graphics/three/reversed-depth-transparent-sort.ts`
-- Materials: `apps/ui/app/components/geometry/graphics/three/materials`
-- Picking and scheduling: `apps/ui/app/components/geometry/graphics/three/utils`
-- Graphics state: `apps/ui/app/machines/graphics.machine.ts`
+- Backend resolution: `packages/viewer/src/graphics/graphics-backend.ts`
+- Canvas lifecycle: `packages/viewer/src/graphics/three/three-context.tsx`
+- Renderer presets: `packages/viewer/src/graphics/three/renderer.ts`
+- Transparent ordering: `packages/viewer/src/graphics/three/reversed-depth-transparent-sort.ts`
+- Materials: `packages/viewer/src/graphics/three/materials`
+- Picking and scheduling: `packages/viewer/src/graphics/three/utils`
+- Graphics state: `packages/viewer/src/machines/graphics.machine.ts`

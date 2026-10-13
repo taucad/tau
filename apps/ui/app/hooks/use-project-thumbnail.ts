@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { ObservationService } from '@taucad/fs-client/observation-service';
-import { useObservationValue } from '@taucad/fs-client/react/use-observation';
+import { useObservation } from '@taucad/fs-client/react/use-observation';
 import { isNotFound } from '#db/attachment-store.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 
@@ -64,11 +64,18 @@ function thumbnailFor(files: Files, watch: Watch, path: string): ObservationServ
 }
 
 /** Resolve one shared URL lease for the canonical project thumbnail and its actual source. */
-export function useProjectThumbnail(projectId: string | undefined): string | undefined {
+export function useProjectThumbnail(projectId: string | undefined): {
+  readonly url: string | undefined;
+  readonly status: 'registering' | 'pending' | 'ready' | 'error' | 'closed';
+  readonly error: string | undefined;
+  refresh(): void;
+} {
   const { recordFiles, watchRecordFile } = useFileManager();
   const service = useMemo(
     () => (projectId ? thumbnailFor(recordFiles, watchRecordFile, `/projects/${projectId}/thumbnail.webp`) : undefined),
     [projectId, recordFiles, watchRecordFile],
   );
-  return useObservationValue(service)?.url;
+  const snapshot = useObservation(service);
+  const refresh = useCallback(() => service?.refresh(), [service]);
+  return { url: snapshot.value?.url, status: snapshot.status, error: snapshot.error, refresh };
 }

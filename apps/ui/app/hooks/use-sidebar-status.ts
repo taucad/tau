@@ -642,15 +642,14 @@ const keep = <T>(cache: { current: { key: string; value: T } | undefined }, key:
 const projectRowKey = (row: ProjectSidebarRow): string => Object.values(row).join(keySeparator);
 
 /*
- * Ponytail: one binder, rebound only when the chat set changes.
+ * One binder, rebound only when its captured owners or chat set change.
  *
  * A sidebar row wakes on its own actors — the registry (a project opened or
  * closed), the project session (its failures), the chat store (a chat joined
  * or left) and the chat machines it draws. Rebinding on every notification
  * would unsubscribe listeners from inside an emit, so the id list is compared
- * first and the churn happens only when a chat actually appears or goes. The
- * chat machines are the store's roots, so a chat's machine never swaps under a
- * row (PV-S5).
+ * first. Captured session, revision-client and chat-root identities also keep
+ * live replacements current when their public ids stay the same.
  */
 const bindProject = ({
   sessions,
@@ -667,9 +666,11 @@ const bindProject = ({
 }): (() => void) => {
   let bound: Array<() => void> = [];
   let boundKey: string | undefined;
-  let sessionScan: { unsubscribe: () => void } | undefined;
+  let boundSession: ProjectSessionActorRef | undefined;
+  let boundClient: ReturnType<typeof peekRevisionClient>;
   const rebind = (): void => {
     const session = projectSessionOf(sessions, projectId);
+    const client = peekRevisionClient(projectId);
     const references = chatReferencesOf(sessions, chats, projectId);
     const ids = chatIds?.() ?? [...new Set([...chats.observedChatIdsOf(projectId), ...references.keys()])];
     /* R3: the revision client is created by the project's route subtree, later
@@ -677,17 +678,19 @@ const bindProject = ({
      * never subscribes to the projection it draws its branch and sync from. */
     const key = [
       session === undefined ? 'closed' : 'live',
-      peekRevisionClient(projectId) === undefined ? 'no-client' : 'client',
+      client === undefined ? 'no-client' : 'client',
       /* R4: a chat released and acquired again gets a fresh root under the same id, so the actor is the identity. */
       ...ids.map((id) => {
         const reference = references.get(id);
         return reference === undefined ? id : actorSessionIdOf(reference);
       }),
     ].join(keySeparator);
-    if (key === boundKey) {
+    if (key === boundKey && session === boundSession && client === boundClient) {
       return;
     }
     boundKey = key;
+    boundSession = session;
+    boundClient = client;
     const previous = bound;
     bound = [];
     if (session !== undefined) {
@@ -706,7 +709,6 @@ const bindProject = ({
         bound.push(chats.subscribeProjection(id, listener));
       }
     }
-    const client = peekRevisionClient(projectId);
     if (client !== undefined) {
       bound.push(client.subscribe(listener));
     }
@@ -714,16 +716,9 @@ const bindProject = ({
       off();
     }
   };
-  /* The session's failures move its own snapshot, not the registry's (R4). */
-  const watchSession = (): void => {
-    sessionScan?.unsubscribe();
-    sessionScan = projectSessionOf(sessions, projectId)?.subscribe(listener);
-  };
   rebind();
-  watchSession();
   const registry = sessions.subscribe(() => {
     rebind();
-    watchSession();
     listener();
   });
   /* Membership is coalesced onto a microtask by the store, so this never rebinds inside an emit. */
@@ -736,7 +731,6 @@ const bindProject = ({
   return () => {
     unsubscribeSettings();
     registry.unsubscribe();
-    sessionScan?.unsubscribe();
     unsubscribeMembership();
     unsubscribeUnread();
     for (const off of bound) {

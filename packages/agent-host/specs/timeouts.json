@@ -579,8 +579,8 @@
     },
     {
       "id": "D16",
-      "bound": "A parameter actor's last write when its desktop or daemon project host closes (10 s)",
-      "site": "packages/host/src/project-host.ts",
+      "bound": "A parameter actor's last write when its desktop, daemon or tau mcp host closes (10 s)",
+      "site": "packages/host/src/parameter-actors.ts",
       "token": "parameterCloseBound",
       "class": "External edge",
       "owner": "W6"
@@ -589,7 +589,7 @@
       "id": "D17",
       "bound": "Observed chat attachment retry after loss (250 ms doubling to a 30 s delay ceiling)",
       "site": "apps/ui/app/services/chat-session-store.ts",
-      "token": "observed.retry = setTimeout",
+      "token": "const retry = setTimeout",
       "class": "Backoff",
       "owner": "W9"
     },
@@ -786,6 +786,46 @@
       "token": "abandonAfter",
       "class": "External edge (backstop)",
       "owner": "W36"
+    },
+    {
+      "id": "E32",
+      "bound": "tau mcp idle release: a project's worker thread closes after --idle-release seconds (default 900) with no tool call in flight",
+      "site": "packages/cli/src/commands/mcp.ts",
+      "token": "idleRelease",
+      "class": "Debounce",
+      "owner": "tau mcp"
+    },
+    {
+      "id": "D25",
+      "bound": "Charter D17: read-only oversized replay retirement after 2 s idle; cancelled by active reads/acquisition, never source freshness authority",
+      "site": "packages/agent-host/src/launchers/agent-launcher.ts",
+      "token": "retirements.get(chatId)",
+      "class": "Debounce",
+      "owner": "filesystem-projection-performance-charter / N2 N3"
+    },
+    {
+      "id": "D26",
+      "bound": "Viewer page long poll: a held app_sync answers unchanged after 20 s",
+      "site": "packages/host/src/mcp-viewer-sessions.ts",
+      "token": "setTimeout(finish, hold)",
+      "class": "Liveness",
+      "owner": "agent-plugin-ui-blueprint W6"
+    },
+    {
+      "id": "D27",
+      "bound": "view_state live capture: the page's answer, 20 s",
+      "site": "packages/host/src/mcp-viewer-sessions.ts",
+      "token": "captureTimeout",
+      "class": "External edge",
+      "owner": "agent-plugin-ui-blueprint W6"
+    },
+    {
+      "id": "D28",
+      "bound": "Viewer page view kept in .tau/workbench 1.5 s after the person's last change",
+      "site": "packages/host/src/mcp-viewer-workbench.ts",
+      "token": "void flush();",
+      "class": "Debounce",
+      "owner": "agent-plugin-ui-blueprint W10"
     }
   ]
 }

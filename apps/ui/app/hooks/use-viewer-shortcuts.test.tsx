@@ -5,10 +5,10 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
-import { GraphicsProvider, useCameraSelector } from '#hooks/use-graphics.js';
-import { KeyboardProvider } from '#hooks/use-keyboard.js';
+import { GraphicsProvider, useCameraSelector } from '@taucad/viewer/hooks/use-graphics';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { useViewerShortcuts } from '#hooks/use-viewer-shortcuts.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
+import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 
 type GraphicsActor = Actor<typeof graphicsMachine>;
 
@@ -310,5 +310,18 @@ describe('useViewerShortcuts', () => {
 
       expect(send.mock.calls.map(([event]) => event.type)).toEqual(['fitView', 'setGridVisibility']);
     });
+  });
+  it('should keep empty viewport shortcuts without starting model tools', async () => {
+    const actor = startGraphics();
+    actor.send({ type: 'sceneRadiusUpdated', radius: 0, centerMeters: [0, 0, 0] });
+    const send = recordSends(actor);
+    renderViewers(['Viewer', actor]);
+    hoverViewer('Viewer');
+    await userEvent.keyboard('fsm');
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fitView' }));
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setSectionViewActive' }));
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setMeasureActive' }));
+    await userEvent.keyboard('g');
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'setGridVisibility' }));
   });
 });

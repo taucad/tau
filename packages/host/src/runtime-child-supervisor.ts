@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { fork } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { z } from 'zod';
@@ -28,7 +29,13 @@ export type RuntimeChildHandle = {
   readonly url: URL;
   readonly runtimeVersion: string;
   readonly authorizationToken: string;
+  /** Settles when the process exits, before its temp directory is removed: the signal that attributes a crash. */
+  readonly exited: Promise<{ readonly exitCode?: number; readonly signal?: NodeJS.Signals }>;
+  /** Settles once the process has exited and its temp directory is removed. */
   readonly closed: Promise<{ readonly exitCode?: number; readonly signal?: NodeJS.Signals }>;
+  /** Send a control frame (for example a Zoo-scoped token) to the ready child; dropped once it has exited. */
+  post<Frame extends { readonly type: string }>(frame: Frame): void;
+  /** Stop the child; settles once `closed` has. */
   close(): Promise<void>;
 };
 
@@ -60,8 +67,10 @@ const developmentLoaderArguments = (modulePath: string): string[] => {
  * Node's permission grants for the child.
  *
  * A **built** `.mjs` child runs under `--permission`, read-scoped to the
- * project and its own directory and write-scoped to the temp directory. That is
- * the shipped sandbox and it is unchanged.
+ * project, its own directory and its private temp directory, and write-scoped
+ * to the temp directory. The private directory is the child's `os.tmpdir()`:
+ * a bundling kernel runs a model by writing its bundle there and importing it,
+ * and the import reads the file back.
  *
  * A **TypeScript** child gets none, and the honest reason is that it cannot
  * have one: the development loader transpiles by *spawning the esbuild service
@@ -74,16 +83,19 @@ const developmentLoaderArguments = (modulePath: string): string[] => {
  * distributed daemon runs the built child and keeps the real sandbox.
  *
  * @param modulePath - The child module being forked.
+ * @param temporaryDirectory - The child's private temp directory.
  * @returns The child's permission flags, or none for a development child.
  */
-const permissionArguments = (modulePath: string): string[] =>
+const permissionArguments = (modulePath: string, temporaryDirectory: string): string[] =>
   modulePath.endsWith('.ts')
     ? []
     : [
         '--permission',
         `--allow-fs-read=${process.cwd()}`,
         `--allow-fs-read=${dirname(modulePath)}`,
+        `--allow-fs-read=${temporaryDirectory}`,
         `--allow-fs-write=${tmpdir()}`,
+        `--allow-fs-write=${temporaryDirectory}`,
       ];
 
 // Node 24 does not gate network access. Node 26 requires the experimental
@@ -97,7 +109,11 @@ const killChild = async (child: ChildProcess): Promise<void> => {
   if (child.exitCode !== null || child.signalCode !== null) {
     return;
   }
-  child.send({ type: 'close' });
+  /* A send on a disconnected channel emits an `'error'` nothing listens for, which would end the daemon; a child
+   * that cannot hear `close` still exits at the signals below. */
+  if (child.connected) {
+    child.send({ type: 'close' });
+  }
   const exited = new Promise<void>((resolve) => {
     child.once('exit', () => {
       resolve();
@@ -126,17 +142,28 @@ export const startRuntimeChild = async (options: {
   readonly args?: readonly string[];
 }): Promise<RuntimeChildHandle> => {
   const authorizationToken = randomBytes(32).toString('base64url');
+  /* The real path: importing a module resolves symlinks component by component (macOS's `/var` is a link to
+   * `/private/var`), and the grants cover only this directory, not its symlinked ancestors. */
+  const temporaryDirectory = await realpath(await mkdtemp(join(tmpdir(), 'tau-runtime-child-')));
   const child = fork(options.modulePath, [...(options.args ?? [])], {
     cwd: process.cwd(),
-    env: minimalEnvironment(),
+    env: {
+      ...minimalEnvironment(),
+      // `os.tmpdir()` reads TMPDIR on POSIX and TEMP or TMP on Windows.
+      /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
+      TMPDIR: temporaryDirectory,
+      TEMP: temporaryDirectory,
+      TMP: temporaryDirectory,
+      /* eslint-enable @typescript-eslint/naming-convention -- end of the environment variables */
+    },
     execArgv: [
       ...developmentLoaderArguments(options.modulePath),
-      ...permissionArguments(options.modulePath),
+      ...permissionArguments(options.modulePath, temporaryDirectory),
       ...runtimeNetworkArguments(options.modulePath),
     ],
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
-  const closed = new Promise<{ exitCode?: number; signal?: NodeJS.Signals }>((resolve) => {
+  const exited = new Promise<{ exitCode?: number; signal?: NodeJS.Signals }>((resolve) => {
     child.once('exit', (exitCode, signal) => {
       resolve({
         ...(exitCode === null ? {} : { exitCode }),
@@ -144,6 +171,22 @@ export const startRuntimeChild = async (options: {
       });
     });
   });
+  /* The directory is the child's alone, so it goes with the child; a failed removal leaves only temp files. */
+  const removeTemporaryDirectoryOnExit = async (): Promise<Awaited<typeof exited>> => {
+    const exit = await exited;
+    try {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    } catch {
+      // The OS reclaims the temp directory.
+    }
+    return exit;
+  };
+  const closed = removeTemporaryDirectoryOnExit();
+  /* Stopped means exited *and* its directory removed, so a caller that awaits a stop never sees `closed` pending. */
+  const stop = async (): Promise<void> => {
+    await killChild(child);
+    await closed;
+  };
   const ready = Promise.withResolvers<z.infer<typeof readyMessageSchema>>();
   const onMessage = (message: unknown): void => {
     const parsed = readyMessageSchema.safeParse(message);
@@ -173,23 +216,29 @@ export const startRuntimeChild = async (options: {
       throw new Error('Tau Host runtime child did not become ready within 30 seconds.');
     }),
   ]).catch(async (error: unknown) => {
-    await killChild(child);
+    await stop();
     throw error;
   });
   child.off('message', onMessage);
 
   const url = new URL(message.url);
   if (url.protocol !== 'ws:' || (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost')) {
-    await killChild(child);
+    await stop();
     throw new Error('Tau Host runtime child reported a non-loopback WebSocket URL.');
   }
   return {
     url,
     runtimeVersion: message.runtimeVersion,
     authorizationToken,
+    exited,
     closed,
+    post(frame): void {
+      if (child.connected) {
+        child.send(frame);
+      }
+    },
     async close(): Promise<void> {
-      await killChild(child);
+      await stop();
     },
   };
 };

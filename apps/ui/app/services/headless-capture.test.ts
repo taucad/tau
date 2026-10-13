@@ -15,18 +15,14 @@ import {
 } from '#services/headless-capture.js';
 import type { HeadlessImageJob } from '#services/headless-image.service.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
-import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
+import { getGraphicsCameraState } from '@taucad/viewer/services/graphics-camera-registry';
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
-import { parseGltfBytes } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
-import {
-  isSectionRemoved,
-  maxSectionPieces,
-  resolveSectionPieces,
-} from '#components/geometry/graphics/section-cuts.js';
-import type { SectionAxis, SectionCut, SectionPlane } from '#components/geometry/graphics/section-cuts.js';
+import { parseGltfBytes } from '@taucad/viewer/graphics/metadata/gltf-component-manifest';
+import { isSectionRemoved, maxSectionPieces, resolveSectionPieces } from '@taucad/viewer/graphics/section-cuts';
+import type { SectionAxis, SectionCut, SectionPlane } from '@taucad/viewer/graphics/section-cuts';
 
 vi.mock('#machines/await-fresh-render.js', () => ({ awaitFreshRender: vi.fn() }));
-vi.mock('#services/graphics-camera-registry.js', () => ({ getGraphicsCameraState: vi.fn() }));
+vi.mock('@taucad/viewer/services/graphics-camera-registry', () => ({ getGraphicsCameraState: vi.fn() }));
 vi.mock('#services/headless-image-debug.js', () => ({ recordHeadlessImageTiming: vi.fn() }));
 
 type ExportImage = (job: HeadlessImageJob) => Promise<ExportFile[] | undefined>;

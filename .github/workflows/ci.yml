@@ -15,12 +15,16 @@ env:
   TAU_WEBSOCKET_URL: ws://localhost:4001
   TAU_FRONTEND_URL: http://localhost:3000
 
-# Cancel in-progress runs when a new workflow with the same group name is triggered
-# This can save 10-50% on CI compute costs.
-# For pull requests, include the head ref to allow different PRs to run concurrently
-# while still canceling outdated runs on the same PR
+# A newer push to a pull request cancels its outdated run; different PRs run side by
+# side. Each push to `main` gets a group of its own, so it neither waits for nor
+# cancels another: in one shared group a run held the group until its last job ended,
+# including a Darwin job waiting hours for a macOS runner, and each newer push was
+# cancelled while pending, staging deploy and release commit included (2026-10-11,
+# runs 38179340616 and 38183401821). The staging deploys keep their own queues
+# (`deploy-api-staging`, `deploy-ui-staging`) and skip a commit that a newer deploy
+# has already superseded.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' }}
 
 jobs:
@@ -41,6 +45,7 @@ jobs:
       formal: ${{ steps.plan.outputs.formal }}
       geospec-required: ${{ steps.geospec.outputs.geospec-required }}
       geospec-darwin-tests: ${{ steps.geospec.outputs.geospec-darwin-tests }}
+      geospec-darwin-projects: ${{ steps.geospec.outputs.geospec-darwin-projects }}
       geospec-key: ${{ steps.geospec-key.outputs.key }}
       geospec-cached: ${{ steps.geospec-cache.outputs.cache-hit == 'true' }}
     steps:
@@ -50,16 +55,29 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Nx Environment
-        id: setup
         uses: ./.github/actions/setup-nx
+
+      - name: Select the apps with a staging deploy
+        id: deployables
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          set -o pipefail
+          echo "apps=$(pnpm nx show projects --projects tag:deploy:staging --json | tail -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Find each app's last staging deploy
+        id: deployed
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: ./.github/actions/staging-deploy-history
+        with:
+          mode: base
+          apps: ${{ steps.deployables.outputs.apps }}
+          github-token: ${{ github.token }}
 
       - name: Compute affected lanes
         id: plan
         env:
-          # With no earlier successful `main` run, nx-set-shas diffs against HEAD~1, so
-          # an app changed by an earlier, failed push would never be deployed. The
-          # staging deploys then take every app; the test lanes keep the affected set.
-          NO_PREVIOUS_BUILD: ${{ steps.setup.outputs.no-previous-build == 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          DEPLOYABLES: ${{ steps.deployables.outputs.apps || '[]' }}
+          DEPLOYED: ${{ steps.deployed.outputs.bases || '{}' }}
         run: |
           # `pipefail` so a failing `nx show projects` fails the step instead of
           # leaving an empty output behind `tail`. `tail -1` keeps the JSON array
@@ -73,11 +91,20 @@ jobs:
           echo "Affected tag:scope:api: $api"
           echo "Affected with a size target: $size"
           echo "Affected with a formal target: $formal"
-          deploy_apps=$apps
-          if [ "$NO_PREVIOUS_BUILD" = 'true' ]; then
-            deploy_apps=$(pnpm nx show projects --type=app --json | tail -1)
-            echo "No earlier successful main run: deploying every app: $deploy_apps"
-          fi
+          # Each staging app is diffed against the commit staging serves, not against
+          # the last green run that NX_BASE names: while `main` is red that base stays
+          # put and every push would redeploy everything changed since. An app with no
+          # usable record deploys. Only pushes to `main` select any.
+          deploy_apps='[]'
+          for app in $(jq -r '.[]' <<< "$DEPLOYABLES"); do
+            base=$(jq -r --arg app "$app" '.[$app] // empty' <<< "$DEPLOYED")
+            if [ -n "$base" ]; then
+              affected=$(pnpm nx show projects --affected --base="$base" --head=HEAD --projects "$app" --json | tail -1)
+              [ "$affected" != '[]' ] || continue
+            fi
+            deploy_apps=$(jq -c --arg app "$app" '. + [$app]' <<< "$deploy_apps")
+          done
+          echo "Staging deploys: $deploy_apps"
           {
             echo "apps<<EOF"
             echo "$apps"
@@ -176,21 +203,27 @@ jobs:
         name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      # Restore-only: a lockfile change would otherwise save the 1.1 GB macOS store after
+      # the job (148-155 s on runs 37869646536 and 37878016418), delaying the jobs that wait
+      # on this one. `pnpm-store-darwin` saves it from `main` once they are done.
       - &setup-nx-darwin
         name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
           node-version: '24.10.0'
+          save-pnpm-store: 'false'
 
       - &prepare-geospec
         name: Prepare GeoSpec engine products
         id: prepare
         uses: ./.github/actions/geospec-producer
 
+      # Named per run, not per attempt: "Re-run failed jobs" keeps this job's attempt-1 result
+      # and the rerun lanes download it, while `overwrite` lets a full rerun replace it.
       - name: Upload complete current-source transport
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          name: geospec-ci-${{ github.sha }}
           path: |
             packages/geospec-engine-native/bindings/node/generated/index.d.ts
             packages/geospec-engine-native/bindings/node/generated/index.js
@@ -199,6 +232,7 @@ jobs:
             packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm
             out/artifacts/geospec-native-engine/ci
           if-no-files-found: error
+          overwrite: true
           retention-days: 7
 
       - name: Keep the products for later runs of this closure
@@ -259,14 +293,37 @@ jobs:
           pnpm nx run scripts:prepare-geospec-test-consumer
           node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
 
-      # Projects tagged `ci:quarantined` (runtime-e2e) run in the nightly Darwin job in
+      # Runs the affected Darwin host suites the plan job selected from its own affected
+      # base and head, so this job needs no history. The planner leaves out projects
+      # tagged `ci:quarantined` (runtime-e2e), which run in the nightly Darwin job in
       # e2e-nightly.yml instead, until their failing tests pass there:
       # https://github.com/taucad/tau/issues/342
-      - name: Run complete affected Darwin host suites
+      # The cache bypass stays, narrowed to that selection: a `test` hash covers the
+      # source but neither the gitignored engine products nor the host toolchain that
+      # `ci-artifacts.mjs cache-key` digests, so a cached pass could stand for products
+      # this run did not test.
+      - name: Run affected Darwin host suites
         if: needs.plan.outputs.geospec-darwin-tests == 'true'
-        run: pnpm nx run-many -t test --projects tag:host:darwin-arm64 --exclude tag:scope:api,tag:ci:quarantined --skip-nx-cache
+        env:
+          DARWIN_PROJECTS: ${{ needs.plan.outputs.geospec-darwin-projects }}
+        run: pnpm nx run-many -t test --projects "$DARWIN_PROJECTS" --exclude tag:scope:api,tag:ci:quarantined --skip-nx-cache
 
       - *retain-geospec-preparation
+
+  # Saves the macOS pnpm store that the Darwin jobs above only restore, after them so
+  # the save delays nothing. actions/cache saves only from a successful job, and nothing
+  # needs this one. On a cache hit, the save is skipped.
+  pnpm-store-darwin:
+    name: Save the macOS pnpm store
+    needs: [geospec-producer, geospec-darwin]
+    if: ${{ !cancelled() && github.event_name == 'push' }}
+    runs-on: macos-15
+    steps:
+      - *checkout-darwin
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
   # typecheck, build and its checks, and three test shards. One runner running every
@@ -307,7 +364,7 @@ jobs:
         if: needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached != 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          name: geospec-ci-${{ github.sha }}
           path: .
 
       - &restore-geospec
@@ -946,7 +1003,7 @@ jobs:
         if: steps.gate.outputs.enabled == 'true' && needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached != 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          name: geospec-ci-${{ github.sha }}
           path: .
 
       - name: Restore GeoSpec engine products from an earlier run
@@ -988,8 +1045,13 @@ jobs:
 
   # Staging deployments — deploy after builds pass so the Nx Cloud cache is populated.
   # The API ships to Fly here (`tau-api-staging`); the UI is built here and published
-  # to Netlify (`taucad` site, `taucad.dev`) by `deploy-ui-staging` below. Netlify
-  # no longer builds from Git and there are no PR deploy previews.
+  # to Netlify (`taucad` site, `taucad.dev`) by `deploy-ui-staging` below, and docs
+  # and the marketing review site by `deploy-docs-staging` and `deploy-www-staging`.
+  # Netlify no longer builds from Git and there are no PR deploy previews. Each
+  # Netlify production deploy spends credits from a monthly plan (the 2026-10-11
+  # outage paused every deploy), so each job runs only when `plan` lists its app:
+  # affected since the commit staging last recorded for it. Every deploy job skips a
+  # commit a newer run has deployed or is about to (`staging-deploy-superseded`).
   # `api` is in `needs` because the API's own suites left the `affected` lane: since
   # the git storage substrate landed, `test` for `tag:scope:api` — the repository
   # store, the commit protocol, the git transport, the lifecycle jobs and the git
@@ -1003,14 +1065,23 @@ jobs:
   # Keep `needs.plan.result` before `fromJSON` here and in `deploy-ui-staging`:
   # with no implicit `success()`, a `plan` that failed before its output step
   # leaves `deploy-apps` empty and `fromJSON('')` errors.
+  # Both staging deploys wait for `affected-lane`, not the `affected` gate, because
+  # that gate also waits for the Darwin host suites, which the pull request already
+  # passed before merging and which wait hours for a macOS runner when the pool is
+  # busy (run 38193503592 held #486 off staging that way). The suites still turn
+  # this run red and still gate releases (`geospec-artifact-from-main`).
   deploy-api-staging:
     name: Deploy API (Staging)
-    needs: [workspace, affected, plan, api]
+    needs: [workspace, affected-lane, plan, api]
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
       needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') &&
-      needs.workspace.result == 'success' && needs.affected.result == 'success' &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
       needs.api.result == 'success'
+    # `actions: read` lets the deploy see whether a newer run already deployed.
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/deploy.yml
     with:
       environment: staging
@@ -1019,15 +1090,16 @@ jobs:
 
   # The staging UI: built in Actions with this run's GeoSpec products (Netlify
   # cannot produce them), from the producer's artifact or, when the native source
-  # matched an earlier build, from the products cache, and published by the Netlify CLI. It waits for the same
-  # gates as a merge. `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  # matched an earlier build, from the products cache, and published by the Netlify CLI. It waits for the
+  # Linux lanes and the producer, not the Darwin suites; see `deploy-api-staging`.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
   deploy-ui-staging:
     name: Deploy UI (Staging)
-    needs: [workspace, affected, plan, geospec-producer]
+    needs: [workspace, affected-lane, plan, geospec-producer]
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
       needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'ui') &&
-      needs.workspace.result == 'success' && needs.affected.result == 'success' &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
       (needs.geospec-producer.result == 'success' || needs.plan.outputs.geospec-cached == 'true')
     permissions:
       contents: read
@@ -1037,4 +1109,36 @@ jobs:
       environment: staging
       transport: ${{ needs.plan.outputs.geospec-cached == 'true' && 'cache' || 'this-run' }}
       geospec-key: ${{ needs.plan.outputs.geospec-key }}
+    secrets: inherit
+
+  # Docs (`docs.taucad.dev`) and the marketing review site wait for the same checks
+  # as the staging UI rather than the whole run, which a red Darwin suite or an
+  # unrelated deploy would otherwise hold back.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-docs-staging:
+    name: Deploy docs (Staging)
+    needs: [workspace, affected-lane, plan]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'docs') &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy-docs.yml
+    with:
+      environment: staging
+    secrets: inherit
+
+  deploy-www-staging:
+    name: Deploy www (Staging)
+    needs: [workspace, affected-lane, plan]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'www') &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy-www-review.yml
     secrets: inherit

@@ -2,7 +2,7 @@ import { SettingsItem, SettingsSectionCard } from '#components/settings/settings
 import { FlaskConical } from 'lucide-react';
 import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Switch } from '@taucad/ui/components/switch';
-import { flagRegistry, featureFlagNames } from '#flags/flag.constants.js';
+import { flagRegistry, experimentalFeatureFlagNames } from '#flags/flag.constants.js';
 import type { FeatureFlagName } from '#flags/flag.constants.js';
 import { useFeatureFlags, useSetFeatureFlag } from '#flags/use-feature.js';
 
@@ -39,7 +39,7 @@ export function ExperimentalSettings(): React.JSX.Element {
           </CardTitle>
         </CardHeader>
         <CardContent className='flex flex-col gap-4'>
-          {featureFlagNames.map((flag) => (
+          {experimentalFeatureFlagNames.map((flag) => (
             <FlagRow key={flag} flag={flag} />
           ))}
         </CardContent>

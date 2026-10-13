@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { ActorRefFrom } from 'xstate';
 import type * as ReactModule from 'react';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { useMainGraphics } from '#hooks/use-project.js';
 
 const context = vi.hoisted(() => ({

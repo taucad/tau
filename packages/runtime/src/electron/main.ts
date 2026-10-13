@@ -193,6 +193,20 @@ export type ElectronRuntimeMainHandle = {
   /** Unregister IPC listeners and terminate every utility host owned by this broker. */
   dispose(): void;
   /**
+   * Send an application control frame to every utility this broker has booted.
+   *
+   * The latest frame of each `type` is kept and replayed right after a later
+   * utility's boot frame, so a fork, a crash replacement or an adopted spare
+   * never misses state the application already published, and a refresh
+   * replaces rather than accumulates. An idle spare receives nothing: its
+   * first parent message must be the boot frame. The frame is the utility
+   * entry's business; the broker never logs or inspects it beyond `type`.
+   *
+   * @throws TypeError When `type` is not a string.
+   * @throws Error After {@link ElectronRuntimeMainHandle.dispose}.
+   */
+  post<Frame extends { readonly type: string }>(frame: Frame): void;
+  /**
    * Fork the idle spare for the statically configured entry and environment,
    * so the first request that resolves to them is served by a process that is
    * already past its module graph. A no-op once a spare exists or the cap is
@@ -487,6 +501,7 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
    * environment — a thumbnail's ephemeral fork — does not spend the pool for good. */
   let spareFork: { readonly entry: string; readonly env: ForkOptions['env']; readonly key: string } | undefined;
   let disposed = false;
+  const controlFrames = new Map<string, { readonly type: string }>();
 
   const reportError = (error: unknown): void => {
     options.onError?.(toError(error));
@@ -730,6 +745,9 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
         },
         transferred,
       );
+      for (const frame of controlFrames.values()) {
+        spawnedUtility.postMessage(frame);
+      }
       /* Only where a pool was asked for: a broker that never prewarmed wants no
        * spare, and one that did gets its spare back whether this request adopted
        * it or resolved to an environment that could not use it. */
@@ -862,6 +880,23 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       releaseSpare();
       for (const hostId of liveUtilities.keys()) {
         releaseUtility(hostId);
+      }
+    },
+    post(frame): void {
+      if (disposed) {
+        throw new Error('registerElectronRuntimeMain: broker is disposed');
+      }
+      const { type } = frame as { readonly type?: unknown };
+      if (typeof type !== 'string') {
+        throw new TypeError('registerElectronRuntimeMain: a control frame must carry a string `type`');
+      }
+      controlFrames.set(type, frame);
+      for (const record of liveUtilities.values()) {
+        try {
+          record.utility.postMessage(frame);
+        } catch (error) {
+          reportError(error);
+        }
       }
     },
     prewarm(): void {

@@ -243,6 +243,7 @@ describe('replayChat', () => {
   });
   const batch = (cursor: number, events: readonly AgentLogEvent[], endCursor: number): ReadAnswer => ({
     status: 'batch',
+    sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
     chatId: 'chat-1',
     cursor,
     nextCursor: cursor + events.length,
@@ -308,6 +309,11 @@ describe('replayChat', () => {
       parked.resolve();
 
       await expect(replay).resolves.toMatchObject({ cursor: 3, state: 'completed' });
+      expect(read.mock.calls[1]?.[0].sourceHealth).toEqual({
+        historyIntact: true,
+        newerHistory: false,
+        quarantined: false,
+      });
       expect(read).toHaveBeenCalledTimes(2);
       expect(read).toHaveBeenLastCalledWith(
         expect.objectContaining({ cursor: 2, last: { leaderEpoch: 'leader-1', sequence: 1 } }),

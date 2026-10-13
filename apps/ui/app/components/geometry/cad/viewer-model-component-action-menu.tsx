@@ -4,7 +4,7 @@ import { ModelComponentViewerMenuItems } from '#components/geometry/cad/model-co
 import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
 import { Popover, PopoverAnchor, PopoverContent } from '@taucad/ui/components/popover';
 import { menuContentVariants } from '@taucad/ui/components/menu.variants';
-import { preventMenuSliderEscapeDismissal } from '#components/ui/menu-slider-item.js';
+import { preventMenuSliderEscapeDismissal } from '@taucad/ui/components/menu-slider-item';
 import { cn } from '@taucad/ui/utils/cn';
 
 export type ViewerModelComponentActionMenuPoint = {

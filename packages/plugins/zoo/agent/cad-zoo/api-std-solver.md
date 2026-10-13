@@ -288,7 +288,7 @@ solver::equalLength(@lines: [Segment; 2+])
 solver::equalRadius(@input: [Segment; 2+])
 //   @input: Two or more arc or circle segments that should share the same radius
 // Example:
-//   @settings(kclVersion = 2.0)
+//   @settings(kclVersion = 3.0)
 //   
 //   sketch1 = sketch(on = XY) {
 //     circle1 = circle(start = [var -2mm, var 0mm], center = [var -6mm, var 0mm])

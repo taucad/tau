@@ -3,7 +3,7 @@ import type React from 'react';
 import { LogIn, UserPlus } from 'lucide-react';
 import { NavLink, useLocation, useNavigate } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useChatActions } from '#hooks/use-chat.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';

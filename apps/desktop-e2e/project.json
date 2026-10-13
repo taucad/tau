@@ -343,6 +343,18 @@
       "metadata": {
         "description": "Offline production Electron profile CRUD, shared type settings, restart recovery, external record admission and limit/focus/performance checks. Build desktop and prepare its resources first; TAU_E2E_COMPLETED_ARTIFACT also runs this against a selected packaged executable."
       }
+    },
+    "test:e2e:print-failure": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "cache": false,
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "command": "../../node_modules/.bin/vitest run --config vitest.machine-profiles.config.ts src/desktop-print-failure.spec.ts"
+      },
+      "metadata": {
+        "description": "Offline simulator storage failure and automatically decoded camera still in a built desktop; accepts the completed-artifact executable to verify an unsigned package."
+      }
     }
   }
 }

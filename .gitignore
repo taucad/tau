@@ -26,7 +26,6 @@ apps/desktop/macos/generated/runtime
 out-tsc
 *.tsbuildinfo
 
-packages/geospec-engine/e2e/dist-fixture
 packages/plugins/openrscad/e2e/dist-fixture
 
 # Python bytecode (skills scripts, build123d plugin, tau-examples kernels)
@@ -99,6 +98,7 @@ packages/geospec-engine/provenance.json
 
 # Machine-local dev server config (names gitignored repos/ paths)
 .claude/launch.json
+.claude/worktrees/
 
 # Vite dep-optimizer caches in mocker fixtures
 fixtures/mocker/*/.cache/

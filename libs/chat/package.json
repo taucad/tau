@@ -21,6 +21,11 @@
       "import": "./src/utils/index.ts",
       "default": "./src/utils/index.ts"
     },
+    "./references": {
+      "types": "./src/references/index.ts",
+      "import": "./src/references/index.ts",
+      "default": "./src/references/index.ts"
+    },
     "./prompts": {
       "types": "./src/prompts/index.ts",
       "import": "./src/prompts/index.ts",

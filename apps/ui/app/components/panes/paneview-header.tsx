@@ -2,7 +2,7 @@ import { ChevronDown } from 'lucide-react';
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { PaneviewPanelApi } from 'dockview-react';
 import { cn } from '@taucad/ui/utils/cn';
-import { paneSpacingClassName } from '#components/panes/pane-spacing.styles.js';
+import { paneSpacingClassName } from '@taucad/ui/components/pane-spacing.variants';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 

@@ -189,6 +189,18 @@ it('keeps a confirmation across a same-mode read and rejects it on a mode change
   fixture.actor.stop();
 });
 
+it('should re-plan a pending confirmation, not reject it, when the watch resets', async () => {
+  const fixture = await start();
+  const { outcome } = await confirming(fixture);
+  fixture.actor.send({ type: 'watch.error', code: 'WATCH_RESET', message: 'Parameter watch reset.' });
+  await waitFor(fixture.actor, (snapshot) => snapshot.matches({ open: 'confirmation' }));
+  expect(fixture.emitted.filter((item) => item.type === 'confirmation-required')).toHaveLength(2);
+  fixture.actor.send({ type: 'confirm', requestId: 'unit', fingerprint: planFingerprint(fixture) });
+  await expect(outcome).resolves.toMatchObject({ status: 'committed', write: 'applied' });
+  expect(fixture.counts()).toEqual({ loads: 2, writes: 1 });
+  fixture.actor.stop();
+});
+
 it.each([
   {
     label: 'cancel',

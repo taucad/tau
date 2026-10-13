@@ -27,7 +27,7 @@ import { isWorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from 
 import type { Workspace } from '#filesystem/handle-store.js';
 import { webAccessDirectoryPicker } from '#constants/browser.constants.js';
 import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { toast } from '#components/ui/sonner.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';

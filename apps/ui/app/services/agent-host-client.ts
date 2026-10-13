@@ -1,10 +1,13 @@
+import { recordChannelDiagnostic } from '#db/channel-diagnostics.js';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
-import type { AgentLiveEvent, AgentLogEvent, Channel, StorageDurabilityClass } from '@taucad/agent-host';
+import type { SourceLiveEvent, AgentLogEvent, Channel, StorageDurabilityClass } from '@taucad/agent-host';
 import { isGatewayProviderKind } from '@taucad/agent-host';
 import { connectAgentWorkerChannel, createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import { agentWireLimits } from '@taucad/agent-host/wire';
 import type {
   AgentChannelAdmissionConfig,
+  CatchUpFrame,
+  CatchUpInput,
   CommandAnswer,
   HostCommand,
   ReadAnswer,
@@ -144,20 +147,51 @@ export type AgentHostClientOptions = {
   /** The worker factory, for tests; the document's resident worker otherwise. */
   readonly createWorker?: (() => Worker) | undefined;
   /**
-   * The signed-in account the session cookie funds, read at every provide (W11 GI-Q6). The session's user by default;
-   * `undefined` when nobody is signed in or the session cannot be read.
+   * The signed-in account the session cookie funds, read at every provide (W11 GI-Q6). By default the session's user,
+   * read once per worker (R21); `undefined` when nobody is signed in or the session cannot be read.
    */
   readonly principal?: (() => Promise<string | undefined>) | undefined;
 };
 
-/** The signed-in user, as the auth client reads the session; `undefined` when there is none or it cannot be read. */
-const sessionPrincipal = async (): Promise<string | undefined> => {
+/** One read of the session: its user, and whether the auth server answered (a failed read is not kept). */
+type SessionRead = Readonly<{ principal: string | undefined; answered: boolean }>;
+
+/**
+ * Counts the session changes this document heard: the auth client signing in, signing out or changing the session, and
+ * the page shown again (when another tab may have). A worker's session read from an earlier count is read again.
+ */
+let sessionChanges = 0;
+let watchingSignal = false;
+let watchingPage = false;
+
+/** Count the session changes from the first read on: the triggers Better Auth's own session refetch listens to. */
+const watchSession = (signal: { listen: (listener: () => void) => unknown } | undefined): void => {
+  if (!watchingSignal && signal !== undefined) {
+    watchingSignal = true;
+    signal.listen(() => {
+      sessionChanges += 1;
+    });
+  }
+  if (!watchingPage && typeof document !== 'undefined') {
+    watchingPage = true;
+    const page = document;
+    page.addEventListener('visibilitychange', () => {
+      if (page.visibilityState === 'visible') {
+        sessionChanges += 1;
+      }
+    });
+  }
+};
+
+/** The signed-in user, as the auth client reads the session; no user when there is none or it cannot be read. */
+const readSession = async (): Promise<SessionRead> => {
   try {
     const { authClient } = await import('#lib/auth-client.js');
-    const { data } = await authClient.getSession();
-    return data?.user.id;
+    watchSession(authClient.$store.atoms['$sessionSignal']);
+    const { data, error } = await authClient.getSession();
+    return { principal: data?.user.id, answered: error === null };
   } catch {
-    return undefined;
+    return { principal: undefined, answered: false };
   }
 };
 
@@ -167,6 +201,10 @@ export type AgentHostReadInput = {
   readonly cursor: number;
   /** The key of the row at `cursor - 1`, so an owner can refuse a reader on another history. */
   readonly last?: ReadRequest['last'] | undefined;
+  /** Opaque incarnation of the authoritative bytes returned by the preceding batch. */
+  readonly sourceGeneration?: ReadRequest['sourceGeneration'] | undefined;
+  /** Exact host health observed with the preceding source and position. */
+  readonly sourceHealth?: ReadRequest['sourceHealth'] | undefined;
 };
 
 /**
@@ -180,6 +218,8 @@ export type AgentHostClient = {
   hostCommand(command: HostCommand): Promise<CommandAnswer>;
   /** One read of the chat's durable rows; a refusal means the reader resets to cursor 0, never a clamp. */
   read(input: AgentHostReadInput): Promise<ReadAnswer>;
+  /** One immutable capture; pages remain provisional until its final validation marker. */
+  catchUp(input: CatchUpInput): AsyncIterable<CatchUpFrame>;
   /**
    * Follow one chat's durable rows from `cursor`: one outstanding long-poll read at a time (SC-R14).
    * ponytail: rows are handed over one by one, in the push shape the page projection folds; W9 replaces it.
@@ -197,7 +237,7 @@ export type AgentHostClient = {
   /** Read-only, non-durable preview for one chat; it never admits, retries, or settles a run. */
   subscribeLive(
     chatId: string,
-    listener: (chatId: string, event: AgentLiveEvent) => void,
+    listener: (chatId: string, event: SourceLiveEvent) => void,
     onEnded?: () => void,
   ): () => void;
   close(): Promise<void>;
@@ -310,6 +350,8 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
           chatId: input.chatId,
           cursor: input.cursor,
           ...(input.last === undefined ? {} : { last: input.last }),
+          ...(input.sourceGeneration === undefined ? {} : { sourceGeneration: input.sourceGeneration }),
+          ...(input.sourceHealth === undefined ? {} : { sourceHealth: input.sourceHealth }),
           limit: agentWireLimits.batchRows,
           maxBytes: agentWireLimits.batchBytes,
           ...(signal === undefined ? {} : { signal }),
@@ -326,7 +368,7 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
         await transport.ready;
         await run(operation.signal);
       } catch (error) {
-        if (!operation.signal.aborted) {
+        if (!operation.signal.aborted && !(error instanceof AgentHostWorkerError && error.code === 'LEADERSHIP_LOST')) {
           transportFailure ??= toWorkerError(error, 'WORKER_STREAM_FAILED');
         }
       } finally {
@@ -343,13 +385,20 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
   };
 
   const follow: AgentHostClient['subscribe'] = (...parameters) => {
-    const [{ chatId, cursor: from, last: initialLast }, listener, onEnded, onAnswer] = parameters;
+    const [
+      { chatId, cursor: from, last: initialLast, sourceGeneration: initialGeneration, sourceHealth: initialHealth },
+      listener,
+      onEnded,
+      onAnswer,
+    ] = parameters;
     return consume(async (signal) => {
       let cursor = from;
       let last = initialLast;
+      let sourceGeneration = initialGeneration;
+      let sourceHealth = initialHealth;
       while (!signal.aborted) {
         // oxlint-disable-next-line no-await-in-loop -- one outstanding long-poll read per chat (SC-R14).
-        const answer = await read({ chatId, cursor, last }, signal);
+        const answer = await read({ chatId, cursor, last, sourceGeneration, sourceHealth }, signal);
         if (isAborted(signal)) {
           return;
         }
@@ -359,6 +408,8 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
             // SC-R12: never a clamp; the reader starts over, and the projection drops rows it already holds.
             cursor = 0;
             last = undefined;
+            sourceGeneration = undefined;
+            sourceHealth = undefined;
             continue;
           }
           throw new AgentHostWorkerError(
@@ -376,6 +427,8 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
         }
         cursor = answer.nextCursor;
         last = projectedLast ?? last;
+        sourceGeneration = answer.sourceGeneration;
+        sourceHealth = answer.sourceHealth;
       }
     }, onEnded);
   };
@@ -391,6 +444,30 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
   return {
     hostCommand: async (command) => guarded(async () => transport.execute(command), 'WORKER_PROTOCOL_FAILED'),
     read: async (input) => read(input),
+    catchUp: async function* catchUp(input) {
+      const operation = new AbortController();
+      const signal = input.signal === undefined ? operation.signal : AbortSignal.any([operation.signal, input.signal]);
+      streamSubscriptions.add(operation);
+      const release = (): void => {
+        streamSubscriptions.delete(operation);
+      };
+      signal.addEventListener('abort', release, { once: true });
+      try {
+        await guarded(async () => transport.ready, 'WORKER_PROTOCOL_FAILED');
+        signal.throwIfAborted();
+        for await (const frame of transport.catchUp({ ...input, signal })) {
+          signal.throwIfAborted();
+          yield frame;
+        }
+      } catch (error) {
+        if (!signal.aborted) {
+          throw toWorkerError(error, 'WORKER_STREAM_FAILED');
+        }
+      } finally {
+        signal.removeEventListener('abort', release);
+        release();
+      }
+    },
     subscribe: follow,
     subscribeLive: (chatId, listener, onEnded) =>
       consume(async (signal) => {
@@ -424,6 +501,8 @@ type Incarnation = {
    * and take fresh ones on a rebridge, until their release answers.
    */
   readonly retiring: Map<string, Readonly<{ projectId: string; options: AgentHostClientOptions }>>;
+  /** This worker's session read, shared by its provides until the session changes (R21). */
+  session?: Readonly<{ changes: number; read: Promise<SessionRead> }> | undefined;
   dead: boolean;
 };
 
@@ -447,6 +526,7 @@ export type ResidentAgentWorker = Readonly<{
   acquire: (options: AgentHostClientOptions) => () => void;
   /** Swap fresh bridges into every open project host, as after a file-manager restart; no host closes (RV1-F1). */
   reprovide: () => Promise<void>;
+  recover: (projectId: string) => Promise<void>;
 }>;
 
 /**
@@ -462,6 +542,8 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   const tabId = randomUuid();
   const projects = new Map<string, ProjectRegistration>();
   let current: Incarnation | undefined;
+  const recovering = new Map<string, Promise<void>>();
+  const recoveryWanted = new Set<string>();
 
   const retire = (live: Incarnation, reason: string): void => {
     if (live.dead) {
@@ -506,11 +588,40 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       retiring: new Map(),
       dead: false,
     };
+    channel.onNotify('rebridgeRequested', ({ projectId, hostId }) => {
+      if (current !== live || live.dead) {
+        return;
+      }
+      recoveryWanted.add(projectId);
+      // async-iife: bootstrap -- worker notifications have no caller; recovery is tracked by rebridgeIn.
+      void (async () => {
+        try {
+          await recoverProject(live, { projectId, hostId });
+        } catch (error) {
+          recordChannelDiagnostic({
+            event: 'placement.recovery-failed',
+            tabId,
+            workerId: sessionId,
+            projectId,
+            hostId,
+          });
+          console.warn('[agent-host] Project connection recovery failed', { projectId, hostId, error });
+        }
+      })();
+    });
+    recordChannelDiagnostic({ event: 'worker.opened', tabId, workerId: sessionId });
     channel.onClose((info) => {
+      recordChannelDiagnostic({ event: 'worker.closed', tabId, workerId: sessionId, ...info });
       retire(live, info.code);
     });
     if (typeof document !== 'undefined') {
       const report = (): void => {
+        recordChannelDiagnostic({
+          event: 'page.visibility',
+          tabId,
+          workerId: sessionId,
+          visible: document.visibilityState === 'visible',
+        });
         if (!live.dead) {
           // async-iife: bootstrap -- a visibility report is best effort; a dead worker is retired by its channel.
           void (async (): Promise<void> => {
@@ -522,9 +633,23 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
           })();
         }
       };
+      const hidden = (): void => {
+        recordChannelDiagnostic({ event: 'page.hidden', tabId, workerId: sessionId });
+      };
+      const shown = (): void => {
+        recordChannelDiagnostic({ event: 'page.shown', tabId, workerId: sessionId });
+      };
+      if ('window' in globalThis) {
+        globalThis.addEventListener('pagehide', hidden);
+        globalThis.addEventListener('pageshow', shown);
+      }
       document.addEventListener('visibilitychange', report);
       channel.onClose(() => {
         document.removeEventListener('visibilitychange', report);
+        if ('window' in globalThis) {
+          globalThis.removeEventListener('pagehide', hidden);
+          globalThis.removeEventListener('pageshow', shown);
+        }
       });
       report();
     }
@@ -552,7 +677,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   };
 
   /** Open the bridges one host incarnation is given: both filesystems, and the compute store when durable. */
-  const openBridges = (options: AgentHostClientOptions) => {
+  const openBridges = (options: AgentHostClientOptions, renewPlacement = true) => {
     const computeMode = options.computeMode ?? 'memory';
     const bridge = options.openFileSystemBridge();
     let projectRootBridge: FileSystemBridgeConnection;
@@ -566,9 +691,27 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       bridge.dispose();
       projectRootBridge.dispose();
     };
-    const computeStorePort = computeMode === 'durable' ? options.openComputeStorePort?.() : undefined;
+    let computeStorePort: MessagePort | undefined;
+    let placementPort: MessagePort | undefined;
+    let revisionsPort: MessagePort | undefined;
+    try {
+      computeStorePort = computeMode === 'durable' ? options.openComputeStorePort?.() : undefined;
+      revisionsPort = options.openRevisionsPort?.();
+      placementPort = renewPlacement ? options.openPlacementPort() : undefined;
+      if (renewPlacement && placementPort === undefined) {
+        throw Object.assign(new Error('The project revision root is not open.'), { code: 'REVISIONS_UNAVAILABLE' });
+      }
+    } catch (error) {
+      dispose();
+      computeStorePort?.close();
+      placementPort?.close();
+      revisionsPort?.close();
+      throw error;
+    }
     if (computeMode === 'durable' && !computeStorePort) {
       dispose();
+      placementPort?.close();
+      revisionsPort?.close();
       throw new AgentHostWorkerError(
         'COMPUTE_AUTHORITY_UNAVAILABLE',
         'Durable compute requires the project authority.',
@@ -579,27 +722,55 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       fileSystemPort: bridge.port,
       projectRootPort: projectRootBridge.port,
       computeStorePort,
-      transferables: [bridge.port, projectRootBridge.port, ...(computeStorePort ? [computeStorePort] : [])],
+      placementPort,
+      revisionsPort,
+      transferables: [
+        bridge.port,
+        projectRootBridge.port,
+        ...(computeStorePort ? [computeStorePort] : []),
+        ...(placementPort ? [placementPort] : []),
+        ...(revisionsPort ? [revisionsPort] : []),
+      ],
       dispose,
     };
+  };
+
+  /**
+   * The session's user for a provide in `live`: one read per worker, which every provide in it shares, read again once
+   * the session changed (R21). A read the auth server did not answer is not kept, so the next provide reads again.
+   */
+  const sessionPrincipalIn = async (live: Incarnation): Promise<string | undefined> => {
+    const cached = live.session;
+    if (cached?.changes === sessionChanges) {
+      const { principal } = await cached.read;
+      return principal;
+    }
+    const session = { changes: sessionChanges, read: readSession() };
+    live.session = session;
+    const { principal, answered } = await session.read;
+    if (!answered && live.session === session) {
+      live.session = undefined;
+    }
+    return principal;
   };
 
   /** Give the live worker a new host incarnation for the project, with fresh bridges (RH-R4). */
   const provideTo = async (live: Incarnation, projectId: string): Promise<string> => {
     const options = registrationOf(projectId);
-    const principal = await (options.principal ?? sessionPrincipal)();
-    const placementPort = options.openPlacementPort();
+    const principal = await (options.principal === undefined ? sessionPrincipalIn(live) : options.principal());
+    const {
+      computeMode,
+      fileSystemPort,
+      projectRootPort,
+      computeStorePort,
+      placementPort,
+      revisionsPort,
+      transferables,
+      dispose,
+    } = openBridges(options);
     if (placementPort === undefined) {
-      throw Object.assign(
-        new Error(
-          "This project's revision root is not open, so the agent host cannot place turns. Reopen the project.",
-        ),
-        { code: 'REVISIONS_UNAVAILABLE' },
-      );
+      throw new Error('Placement bridge was not opened.');
     }
-    const { computeMode, fileSystemPort, projectRootPort, computeStorePort, transferables, dispose } =
-      openBridges(options);
-    const revisionsPort = options.openRevisionsPort?.();
     const hostId = randomUuid();
     live.bridges.set(hostId, dispose);
     try {
@@ -623,7 +794,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
           testingEnabled: options.testingEnabled,
           ...(principal === undefined ? {} : { principal }),
         },
-        transferables: [...transferables, ...(revisionsPort ? [revisionsPort] : []), placementPort],
+        transferables,
       });
       /* The replaced incarnation drains its runs on its own bridges (T3); only its bridges go, once it has closed, so a
        * late close never takes the new host's (I31, RH-A26). */
@@ -687,26 +858,91 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
    */
   const rebridgeIn = async (
     live: Incarnation,
-    { projectId, hostId }: Readonly<{ projectId: string; hostId: string }>,
+    target: Readonly<{ projectId: string; hostId: string; onlyIfNeeded?: boolean }>,
     options: AgentHostClientOptions,
   ): Promise<void> => {
-    const { fileSystemPort, projectRootPort, computeStorePort, transferables, dispose } = openBridges(options);
-    try {
-      const answer = await live.channel.call('rebridge', {
-        value: { projectId, hostId, fileSystemPort, projectRootPort, computeStorePort },
-        transferables,
-      });
-      if (answer.status === 'rebridged') {
-        const previous = live.bridges.get(hostId);
-        live.bridges.set(hostId, dispose);
-        previous?.();
+    const { projectId, hostId } = target;
+    const existing = recovering.get(hostId);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const perform = async (): Promise<void> => {
+      if (target.onlyIfNeeded) {
+        const status = await live.channel.call('status', { projectId });
+        if (status.hostId !== hostId || status.needsRebridge !== true) {
+          return;
+        }
+      }
+      if (live.dead) {
         return;
       }
-    } catch (error) {
+      const active = live.provided.get(projectId);
+      const renewPlacement = active === undefined ? live.retiring.has(hostId) : (await active) === hostId;
+      // A pending provide may have been released while we waited; it must not fence its successor.
+      if (live.provided.get(projectId) !== active) {
+        return;
+      }
+      const bridges = openBridges(options, renewPlacement);
+      const {
+        fileSystemPort,
+        projectRootPort,
+        computeStorePort,
+        placementPort,
+        revisionsPort,
+        transferables,
+        dispose,
+      } = bridges;
+      try {
+        const answer = await live.channel.call('rebridge', {
+          value: { projectId, hostId, fileSystemPort, projectRootPort, computeStorePort, placementPort, revisionsPort },
+          transferables,
+        });
+        if (answer.status === 'rebridged') {
+          const previous = live.bridges.get(hostId);
+          live.bridges.set(hostId, dispose);
+          previous?.();
+          recoveryWanted.delete(projectId);
+          return;
+        }
+      } catch (error) {
+        dispose();
+        computeStorePort?.close();
+        placementPort?.close();
+        revisionsPort?.close();
+        throw toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
+      }
       dispose();
-      throw toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
+    };
+    const pending = perform();
+    recovering.set(hostId, pending);
+    try {
+      await pending;
+    } finally {
+      if (recovering.get(hostId) === pending) {
+        recovering.delete(hostId);
+      }
     }
-    dispose();
+  };
+
+  const recoverProject = async (
+    live: Incarnation,
+    { projectId, hostId }: Readonly<{ projectId: string; hostId: string }>,
+  ): Promise<void> => {
+    const opening = live.provided.get(projectId);
+    if (live.dead) {
+      return;
+    }
+    if (opening === undefined) {
+      const retiring = live.retiring.get(hostId);
+      if (retiring !== undefined) {
+        await rebridgeIn(live, { projectId, hostId }, retiring.options);
+      }
+      return;
+    }
+    if ((await opening) !== hostId || !projects.has(projectId)) {
+      return;
+    }
+    await rebridgeIn(live, { projectId, hostId, onlyIfNeeded: true }, registrationOf(projectId));
   };
 
   /** Release the project's host in the live worker, by incarnation, then dispose that host's bridges (T3, I31). */
@@ -800,6 +1036,14 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       }
       await live.ready;
       return live.channel.call('runStoppability', { projectId, chatId });
+    },
+    recover: async (projectId) => {
+      const live = current;
+      const opening = live?.provided.get(projectId);
+      if (!recoveryWanted.has(projectId) || live === undefined || opening === undefined || live.dead) {
+        return;
+      }
+      await recoverProject(live, { projectId, hostId: await opening });
     },
     reprovide: async () => {
       const live = current;
@@ -900,6 +1144,10 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
   const transport = createDaemonAgentHostTransport(client);
   return {
     ...transport,
+    execute: async (command) => {
+      await resident.recover(projectId);
+      return transport.execute(command);
+    },
     close: () => {
       closed = true;
       transport.close();

@@ -565,7 +565,7 @@
     "clipper2-ts": "catalog:",
     "clipper2-wasm": "catalog:",
     "clsx": "catalog:",
-    "dompurify": "^3.4.11",
+    "dompurify": "catalog:",
     "lucide-react": "catalog:",
     "n8ao": "catalog:",
     "nanoid": "catalog:",
@@ -611,7 +611,7 @@
     "react-virtuoso": "^4.18.7",
     "three": "^0.184.0",
     "type-fest": "catalog:",
-    "vitest-mock-extended": "^3.1.1",
+    "vitest-mock-extended": "catalog:",
     "xstate": "catalog:",
     "zod": "catalog:"
   }

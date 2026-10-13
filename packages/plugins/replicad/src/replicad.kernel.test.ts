@@ -176,7 +176,7 @@ function assertExportSuccess(result: ExportResult): asserts result is Extract<Ex
   }
 }
 
-const expectStandardReplicadSvgPaths = (svg: string, { minPathCount = 1 } = {}): Array<string | undefined> => {
+const expectStandardReplicadSvgPaths = (svg: string, { minPathCount = 1 } = {}): Array<string | null> => {
   const window = new Window();
   const document_ = new window.DOMParser().parseFromString(svg, 'image/svg+xml');
   const root = document_.documentElement;

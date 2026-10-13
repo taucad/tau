@@ -71,7 +71,7 @@ const sdk = new NodeSDK({
   // otherwise hand dashboards and alerts series their `service_name` selectors cannot see (OBS-13).
   metricReader: new PrometheusExporter({ port: metricsPort, withResourceConstantLabels: /^service\.name$/u }),
 
-  logRecordProcessor: hasOtlpEndpoint ? new BatchLogRecordProcessor(new OTLPLogExporter()) : undefined,
+  logRecordProcessor: hasOtlpEndpoint ? new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() }) : undefined,
 
   instrumentations: [
     new LangChainInstrumentation(),
@@ -79,7 +79,6 @@ const sdk = new NodeSDK({
       '@opentelemetry/instrumentation-fs': { enabled: false },
       '@opentelemetry/instrumentation-dns': { enabled: false },
       '@opentelemetry/instrumentation-net': { enabled: false },
-      '@opentelemetry/instrumentation-fastify': { enabled: false },
       '@opentelemetry/instrumentation-http': {
         ignoreIncomingRequestHook: (request) => {
           const host = request.headers.host ?? '';

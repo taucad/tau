@@ -19,7 +19,7 @@ distributions** that include them:
 
 By using Tau, you agree to comply with the license terms of all included dependencies.
 
-*Generated on 2026-10-02*
+*Generated on 2026-10-13*
 
 ## Summary
 
@@ -40,7 +40,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 
 > This package is dual-licensed. Tau uses it under the **MIT License** terms.
 
-- **jszip** v3.10.1 — [Repository](https://github.com/Stuk/jszip)
+- **jszip** v3.10.2 — [Repository](https://github.com/Stuk/jszip)
 
 ## Apache-2.0
 
@@ -67,7 +67,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 
 - **csv-stringify** v1.1.2 — [Repository](http://www.github.com/adaltas/node-csv-stringify)
 - **ieee754** v1.2.1 — [Repository](https://github.com/feross/ieee754)
-- **source-map-js** v1.2.1 — [Repository](https://github.com/7rulnik/source-map-js)
+- **source-map-js** v1.2.2 — [Repository](https://github.com/7rulnik/source-map-js)
 - **stream-transform** v0.1.2 — [Repository](http://www.github.com/wdavidw/node-stream-transform)
 
 ## ISC
@@ -81,7 +81,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 
 ## SEE LICENSE IN LICENSE.md
 
-- **@lhncbc/ucum-lhc** v7.1.9 — [Repository](https://github.com/lhncbc/ucum-lhc)
+- **@lhncbc/ucum-lhc** v7.1.10 — [Repository](https://github.com/lhncbc/ucum-lhc)
 
 ## WTFPL OR ISC
 
@@ -104,7 +104,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **cdn-resolve** v2.1.2 — [Repository](https://github.com/luxass/cdn-resolve)
 - **coffeescript** v2.7.0 — [Repository](https://github.com/jashkenas/coffeescript)
 - **core-util-is** v1.0.3 — [Repository](https://github.com/isaacs/core-util-is)
-- **csv-parse** v4.16.3 — [Repository](https://github.com/wdavidw/node-csv-parse)
+- **csv-parse** v7.0.3 — [Repository](https://github.com/adaltas/node-csv)
 - **decompress-response** v6.0.0 — [Repository](https://github.com/sindresorhus/decompress-response)
 - **deepmerge** v4.3.1 — [Repository](https://github.com/TehShrike/deepmerge)
 - **define-data-property** v1.1.4 — [Repository](https://github.com/ljharb/define-data-property)
@@ -112,7 +112,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **dunder-proto** v1.0.1 — [Repository](https://github.com/es-shims/dunder-proto)
 - **es-define-property** v1.0.1 — [Repository](https://github.com/ljharb/es-define-property)
 - **es-errors** v1.3.0 — [Repository](https://github.com/ljharb/es-errors)
-- **es-object-atoms** v1.1.2 — [Repository](https://github.com/ljharb/es-object-atoms)
+- **es-object-atoms** v1.1.1 — [Repository](https://github.com/ljharb/es-object-atoms)
 - **escape-html** v1.0.3 — [Repository](https://github.com/component/escape-html)
 - **event-target-shim** v5.0.1 — [Repository](https://github.com/mysticatea/event-target-shim)
 - **events** v3.3.0 — [Repository](https://github.com/Gozala/events)
@@ -141,13 +141,13 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **mimic-response** v3.1.0 — [Repository](https://github.com/sindresorhus/mimic-response)
 - **minimist** v1.2.8 — [Repository](https://github.com/minimistjs/minimist)
 - **minimisted** v2.0.1 — [Repository](https://github.com/kt3k/minimisted)
-- **nanoid** v5.1.14 — [Repository](https://github.com/ai/nanoid)
+- **nanoid** v5.1.16 — [Repository](https://github.com/ai/nanoid)
 - **pify** v4.0.1 — [Repository](https://github.com/sindresorhus/pify)
 - **possible-typed-array-names** v1.1.0 — [Repository](https://github.com/ljharb/possible-typed-array-names)
 - **process** v0.11.10 — [Repository](https://github.com/shtylman/node-process)
 - **process-nextick-args** v2.0.1 — [Repository](https://github.com/calvinmetcalf/process-nextick-args)
 - **readable-stream** v2.3.8 — [Repository](https://github.com/nodejs/readable-stream)
-- **readable-stream** v4.7.0 — [Repository](https://github.com/nodejs/readable-stream)
+- **readable-stream** v4.8.0 — [Repository](https://github.com/nodejs/readable-stream)
 - **safe-buffer** v5.1.2 — [Repository](https://github.com/feross/safe-buffer)
 - **safe-buffer** v5.2.1 — [Repository](https://github.com/feross/safe-buffer)
 - **set-function-length** v1.2.2 — [Repository](https://github.com/ljharb/set-function-length)
@@ -161,8 +161,8 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **to-buffer** v1.2.2 — [Repository](https://github.com/browserify/to-buffer)
 - **typed-array-buffer** v1.0.3 — [Repository](https://github.com/inspect-js/typed-array-buffer)
 - **util-deprecate** v1.0.2 — [Repository](https://github.com/TooTallNate/util-deprecate)
-- **which-typed-array** v1.1.22 — [Repository](https://github.com/inspect-js/which-typed-array)
-- **ws** v8.21.3 — [Repository](https://github.com/websockets/ws)
+- **which-typed-array** v1.1.24 — [Repository](https://github.com/inspect-js/which-typed-array)
+- **ws** v8.22.0 — [Repository](https://github.com/websockets/ws)
 - **xmldoc** v0.4.0 — [Repository](https://github.com/nfarina/xmldoc)
 
 ---

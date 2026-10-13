@@ -6,7 +6,7 @@ import { Link } from 'react-router';
 import { AlertTriangle } from 'lucide-react';
 import type { ProjectManifest } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';

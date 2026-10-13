@@ -1,8 +1,8 @@
 import { memo, useCallback } from 'react';
 import { XIcon } from 'lucide-react';
 import { FloatingPanel, FloatingPanelClose } from '#components/ui/floating-panel.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { ChatEditorFileTree } from '#routes/w.$workspace.$project/chat-editor-file-tree.js';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 

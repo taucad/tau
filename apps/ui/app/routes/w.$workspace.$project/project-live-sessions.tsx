@@ -51,7 +51,7 @@ import { RevisionSaveShortcut } from '#routes/w.$workspace.$project/revision-sav
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project
 // route only needs to flush its own project + editor machine state below.
-import { WebglContextTrackerProvider } from '#hooks/use-webgl-context-tracker.js';
+import { WebglContextTrackerProvider } from '@taucad/viewer/hooks/use-webgl-context-tracker';
 import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
 import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';

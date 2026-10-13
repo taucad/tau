@@ -13,6 +13,7 @@ import { consola } from 'consola';
 
 import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
+import { machineProviders } from '#machine-providers.js';
 import { exitCodes } from '#output.js';
 import type { ComputeStoreWorkerData } from '#compute-store.worker.js';
 
@@ -39,18 +40,6 @@ const computeStoreWorkerModulePath = (): string =>
       import.meta.url,
     ),
   );
-
-/**
- * The machine providers `--machines` serves: the Bambu Lab X1C and its
- * socket-free simulator, the operator's dry-run device. Loaded on demand so a
- * daemon without the flag never touches the vendor package.
- *
- * @returns The daemon's machines option.
- */
-const machineProviders = async (): Promise<NonNullable<HostDaemonAgentOptions['machines']>> => {
-  const { bambuA1MiniMachine, bambuMachine, bambuSimulatorMachine } = await import('@taucad/bambu');
-  return { providers: [bambuMachine(), bambuA1MiniMachine(), bambuSimulatorMachine()] };
-};
 
 const childArguments = (options: {
   readonly plugin: unknown;

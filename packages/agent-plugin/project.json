@@ -11,7 +11,18 @@
   },
   "targets": {
     "build": {
-      "dependsOn": ["assemble"]
+      "dependsOn": ["assemble", "build-app"]
+    },
+    "build-app": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/app/**/*", "{projectRoot}/vite.app.config.ts", "^production"],
+      "outputs": ["{projectRoot}/dist-app"],
+      "dependsOn": ["^build"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vite build -c vite.app.config.ts"
+      }
     },
     "assemble": {
       "executor": "nx:run-commands",
@@ -28,6 +39,20 @@
     },
     "test": {
       "dependsOn": ["build"]
+    },
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "build-app",
+        { "projects": ["brep", "esbuild", "image", "replicad", "rhino"], "target": "copy-assets" }
+      ],
+      "metadata": {
+        "description": "The built viewer page in Chromium: the ext-apps basic-host harness (AppBridge, sandboxed frame, declared CSP) and the loopback page, against a real tau mcp. The tau mcp it spawns runs the CLI from source, so the plugins' copied wasm (STEP import's occt-import-js among them) is staged first. Named test:e2e so the nightly lane that installs Chromium selects it."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run -c vitest.hosts.config.ts"
+      }
     }
   }
 }

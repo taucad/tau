@@ -245,7 +245,7 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
   ),
 }));
 
-vi.mock('#components/copy-button.js', () => ({
+vi.mock('@taucad/ui/components/copy-button', () => ({
   CopyButton: () => <div data-testid='copy-button' />,
 }));
 

@@ -17,7 +17,7 @@ vi.doMock('#hooks/active-chat-provider.js', () => ({
     contextUsage: undefined,
   }),
 }));
-vi.doMock('#hooks/use-keyboard.js', () => ({
+vi.doMock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: '⌘.' }),
 }));
 vi.doMock('#hooks/use-skills-catalog.js', async (importOriginal) => ({

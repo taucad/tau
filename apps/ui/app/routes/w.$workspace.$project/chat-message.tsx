@@ -37,7 +37,7 @@ import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
 import { ChatMessageText } from '#routes/w.$workspace.$project/chat-message-text.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
-import { CopyButton } from '#components/copy-button.js';
+import { CopyButton } from '@taucad/ui/components/copy-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -75,10 +75,11 @@ import { useChatAttachmentDirectories } from '#components/chat/attachment-previe
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatStreamingStopButton } from '#components/chat/chat-textarea-submit-button.js';
 import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
+import { formatKeyCombination } from '@taucad/ui/utils/keys';
 import { FileLink } from '#components/files/file-link.js';
 import { isSafeRelativePath } from '@taucad/utils/path';
 import { isRecord } from '@taucad/utils/schema';
+import { CadReferenceChip } from '#components/chat/cad-reference-chip.js';
 
 /**
  * Split a line into chunks of `maxLen` characters without breaking `@path` or `/command` references.
@@ -131,6 +132,9 @@ function segmentKey(segment: ReturnType<typeof parseInlineReferences>[number], i
   if (segment.type === 'invocation') {
     return `invocation-${segment.token}`;
   }
+  if (segment.type === 'cadReference') {
+    return `cad-${segment.token}`;
+  }
   return `text-${index}`;
 }
 
@@ -152,6 +156,9 @@ function TextWithAtReferences({ text }: { readonly text: string }): React.JSX.El
         }
         if (segment.type === 'atReference') {
           return <AtReferenceChip key={key} data-at-reference={segment.path} />;
+        }
+        if (segment.type === 'cadReference') {
+          return <CadReferenceChip key={key} target={segment.target} />;
         }
         if (knownTokens.has(segment.token)) {
           return <ContextChip key={key} label={segment.token} chipType='skill' />;
@@ -947,7 +954,11 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
                 // the wire body's `agent` block is composed from the live
                 // `useCadAgentConfig` snapshot — no model/metadata stamping
                 // on the persisted user row.
-                cadChat.edit(messageId, { text: event.content, attachments: event.attachments });
+                cadChat.edit(messageId, {
+                  text: event.content,
+                  attachments: event.attachments,
+                  ...(event.references === undefined ? {} : { references: event.references }),
+                });
                 exitEditMode();
                 setIsEditing(false);
               }}

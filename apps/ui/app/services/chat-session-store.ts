@@ -74,7 +74,7 @@ import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store
 import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { clearLedger } from '#services/rpc-ledger.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
-import { buildUserMessage } from '#utils/chat.utils.js';
+import { buildEditedUserMessage } from '#utils/chat.utils.js';
 import { createChatInstance } from '#chat-clients/_internal/shared-chat-transport.js';
 import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
@@ -421,12 +421,16 @@ const missingClient = async (): Promise<never> => {
 
 /**
  * The user message being edited, rebuilt by the one builder. It keeps the
- * original's id and metadata and refreshes only `createdAt` and `status`; the
- * turn's agent config travels in `body.agent`, never in message metadata.
+ * original's id and metadata, refreshes `createdAt` and `status` and re-derives
+ * its references from the edited text; the turn's agent config travels in
+ * `body.agent`, never in message metadata.
  */
 function editedMessage(original: MyUIMessage, request: Extract<ChatRequest, { kind: 'edit' }>): MyUIMessage {
-  const built = buildUserMessage({ text: request.content, attachments: request.attachments });
-  return { ...built, id: request.messageId, metadata: { ...original.metadata, ...built.metadata } };
+  return buildEditedUserMessage(original, {
+    text: request.content,
+    ...(request.attachments === undefined ? {} : { attachments: request.attachments }),
+    ...(request.references === undefined ? {} : { references: request.references }),
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -8,10 +8,10 @@ import { toNanorasterCamera } from '@taucad/image/camera';
 import { normalizeImageLabel } from '@taucad/image/label';
 import { selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
-import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
-import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
-import { getKinematicsUnitState } from '#machines/kinematics.machine.js';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import { getGraphicsCameraState } from '@taucad/viewer/services/graphics-camera-registry';
+import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
+import { getKinematicsUnitState } from '@taucad/viewer/machines/kinematics.machine';
 import { prepareCapturePresentation } from '#services/headless-capture-presentation.js';
 import type { CaptureModelPresentation } from '#services/headless-capture-presentation.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
@@ -20,10 +20,10 @@ import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 import {
   buildGltfComponentManifest,
   listReachableGltfPrimitiveReferences,
-} from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
-import { filterVisibleGltfPrimitives } from '#components/geometry/graphics/metadata/gltf-component-visibility.js';
-import { resolveSectionFaces, resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
-import type { SectionCut, SectionVector } from '#components/geometry/graphics/section-cuts.js';
+} from '@taucad/viewer/graphics/metadata/gltf-component-manifest';
+import { filterVisibleGltfPrimitives } from '@taucad/viewer/graphics/metadata/gltf-component-visibility';
+import { resolveSectionFaces, resolveSectionPieces } from '@taucad/viewer/graphics/section-cuts';
+import type { SectionCut, SectionVector } from '@taucad/viewer/graphics/section-cuts';
 
 /* The canonical views live with the agent capture recipe so a browser-placed
  * and a daemon-placed `screenshot` cannot drift. Re-exported rather than

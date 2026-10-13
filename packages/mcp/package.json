@@ -34,6 +34,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./viewer-protocol": "./src/viewer-protocol.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -43,6 +44,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./viewer-protocol": {
+        "types": "./dist/viewer-protocol.d.mts",
+        "import": "./dist/viewer-protocol.mjs",
+        "default": "./dist/viewer-protocol.mjs"
       },
       "./package.json": "./package.json"
     },

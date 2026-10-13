@@ -9,9 +9,9 @@ import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.
 import { useChats } from '#hooks/use-chats.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useChatSelector } from '#hooks/use-chat.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useProject } from '#hooks/use-project.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
+import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { sidebarRowEditorClass } from '#components/nav/sidebar-row.js';
 import { FloatingPanelButtonGroup, FloatingPanelContentHeaderActions } from '#components/ui/floating-panel.js';

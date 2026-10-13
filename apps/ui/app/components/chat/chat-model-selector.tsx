@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Check, Plus } from 'lucide-react';
 // oxlint-disable-next-line import/consistent-type-specifier-style -- A separate type import trips import/no-duplicates.
 import { useModels, type Model, type ResolvedModel } from '#hooks/use-models.js';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { Badge } from '@taucad/ui/components/badge';
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { SvgIcon } from '#components/icons/svg-icon.js';

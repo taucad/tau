@@ -4,7 +4,7 @@ import { mock } from 'vitest-mock-extended';
 import type { WebGLProgramParametersWithUniforms, WebGLRenderer } from 'three';
 import { createFilamentMaterial, createFilamentUniforms } from '#components/printer/printer-filament-material.js';
 import { createFilamentNodeMaterial } from '#components/printer/printer-filament-material.node.js';
-import { serialiseStrippedTslGraph } from '#components/geometry/graphics/three/utils/tsl-node-graph-snapshot.js';
+import { serialiseStrippedTslGraph } from '@taucad/viewer/graphics/three/utils/tsl-node-graph-snapshot';
 import { beadJoin, beadProfilePoint, createBeadData } from '#components/printer/printer-bead-data.js';
 import { groupToolpath } from '#components/printer/printer-toolpath-groups.js';
 import { fixtureProgram } from '#components/printer/testing/toolpath-fixture.js';

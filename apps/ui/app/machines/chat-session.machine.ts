@@ -1,6 +1,7 @@
 import { setup, types } from 'xstate';
 import type { ActorRefFrom, EnqueueObject, SystemRegistry } from 'xstate';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
+import type { CadReference } from '@taucad/chat/references';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import type { HostCommand } from '@taucad/agent-host/wire';
@@ -51,6 +52,8 @@ export type ChatRequest = Readonly<{ command?: HostCommand }> &
         content: string;
         /** The edit's attachments, already promoted into the chat's directory. */
         attachments?: readonly StoredAttachmentRef[];
+        /** The edit composer's structured geometry references (blueprint D6). */
+        references?: readonly CadReference[];
       }
     | { kind: 'continue' }
   );
@@ -66,7 +69,13 @@ export type ChatRequest = Readonly<{ command?: HostCommand }> &
  */
 export type ChatTurnGesture =
   | Readonly<{ kind: 'send'; message: MyUIMessage; attachments?: readonly StoredAttachmentRef[] }>
-  | Readonly<{ kind: 'edit'; messageId: string; text: string; attachments?: readonly StoredAttachmentRef[] }>
+  | Readonly<{
+      kind: 'edit';
+      messageId: string;
+      text: string;
+      attachments?: readonly StoredAttachmentRef[];
+      references?: readonly CadReference[];
+    }>
   | Readonly<{ kind: 'regenerate'; execution?: CadAgentExecution; requestId?: string }>
   /**
    * Resume the saved run only. Admission refuses if the host cannot continue

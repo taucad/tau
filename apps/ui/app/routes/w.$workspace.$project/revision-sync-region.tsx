@@ -50,7 +50,7 @@ import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
 import { SwitchRow } from '@taucad/ui/components/switch';
 import { RevisionCollaborators } from '#routes/w.$workspace.$project/revision-collaborators.js';
-import { ActionButton, DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
+import { ActionButton, DetailsToggle, disclosureMotion } from '@taucad/ui/components/actions';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
 import { timelineRow } from '#components/revisions/revision-timeline.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';

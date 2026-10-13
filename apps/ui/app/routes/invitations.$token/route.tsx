@@ -17,7 +17,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@better-auth-ui/react';
 import { Users } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { ENV } from '#environment.config.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';

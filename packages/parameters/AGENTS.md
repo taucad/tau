@@ -60,4 +60,4 @@ Record durable project-specific facts here after verifying them in current sourc
 - Every `settled` emission carries its request. Unmatched confirm or cancel commands emit `command-rejected`, so adapters listen for both.
 - `requireParameterRecord` is the only invalid-record policy. Kernels, middleware, routes and the loader call it rather than branching on `readParameterRecord` themselves.
 - `ParameterAuthority` is bytes only (`path`, `read`, `writeChecked`). Test manifests used with `loadParameterSnapshot` need no source-file pinning.
-- Hosts start actors with `createParameterSetActor`: reads wait for the sidecar watch; a reset fails it `WATCH_RESET`, a close `WATCH_CLOSED`.
+- Hosts start actors with `createParameterSetActor`: reads wait for the sidecar watch; a reset reloads after any write, a close fails `WATCH_CLOSED`.

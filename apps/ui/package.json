@@ -71,6 +71,7 @@
     "@taucad/ui": "workspace:*",
     "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
+    "@taucad/viewer": "workspace:*",
     "@taucad/warehouse": "workspace:*",
     "@taucad/workbench": "workspace:*",
     "@taucad/zoo": "workspace:*",

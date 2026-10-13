@@ -5,10 +5,10 @@ import type { MachineDirectoryEntry, MachineManifest } from '@taucad/runtime/mac
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
-import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
-import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
+import { MaterialSwatch } from '@taucad/viewer/cad/material-swatch';
+import { ParameterSelect } from '@taucad/viewer/parameters/parameter-select';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
-import { StringColorPicker } from '#components/ui/string-color-picker.js';
+import { StringColorPicker } from '@taucad/ui/components/string-color-picker';
 import {
   actionAvailability,
   describeWaits,

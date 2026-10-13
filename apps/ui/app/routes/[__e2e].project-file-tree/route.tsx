@@ -4,7 +4,7 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 import type { FileSystemBridgeRootedProxy } from '@taucad/fs-bridge';
 import type { ProjectManifest } from '@taucad/types';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { projectUrl } from '#utils/project-url.utils.js';

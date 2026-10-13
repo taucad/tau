@@ -41,6 +41,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./components/accordion": "./src/components/accordion.tsx",
+    "./components/actions": "./src/components/actions.tsx",
     "./components/alert-dialog": "./src/components/alert-dialog.tsx",
     "./components/avatar": "./src/components/avatar.tsx",
     "./components/badge": "./src/components/badge.tsx",
@@ -52,20 +53,35 @@
     "./components/carousel": "./src/components/carousel.tsx",
     "./components/chart": "./src/components/chart.tsx",
     "./components/checkbox": "./src/components/checkbox.tsx",
+    "./components/client-only": "./src/components/client-only.tsx",
     "./components/collapsible": "./src/components/collapsible.tsx",
+    "./components/combobox-responsive": "./src/components/combobox-responsive.tsx",
     "./components/command": "./src/components/command.tsx",
     "./components/context-menu": "./src/components/context-menu.tsx",
+    "./components/copy-button": "./src/components/copy-button.tsx",
     "./components/dialog": "./src/components/dialog.tsx",
     "./components/drawer": "./src/components/drawer.tsx",
     "./components/dropdown-menu": "./src/components/dropdown-menu.tsx",
     "./components/field": "./src/components/field.tsx",
+    "./components/highlight-text": "./src/components/highlight-text.tsx",
     "./components/hover-card": "./src/components/hover-card.tsx",
+    "./components/info-tooltip": "./src/components/info-tooltip.tsx",
+    "./components/inline-code": "./src/components/inline-code.tsx",
     "./components/input": "./src/components/input.tsx",
     "./components/input-group": "./src/components/input-group.tsx",
+    "./components/key-shortcut": "./src/components/key-shortcut.tsx",
+    "./components/keyboard": "./src/components/keyboard.tsx",
     "./components/label": "./src/components/label.tsx",
+    "./components/loader": "./src/components/loader.tsx",
+    "./components/menu-disclosure-item": "./src/components/menu-disclosure-item.tsx",
+    "./components/menu-slider-item": "./src/components/menu-slider-item.tsx",
     "./components/menu.variants": "./src/components/menu.variants.ts",
-    "./components/nested-action.variants": "./src/components/nested-action.variants.ts",
+    "./components/modified-indicator": "./src/components/modified-indicator.tsx",
     "./components/navigation-menu": "./src/components/navigation-menu.tsx",
+    "./components/nested-action.variants": "./src/components/nested-action.variants.ts",
+    "./components/pane-spacing.variants": "./src/components/pane-spacing.variants.ts",
+    "./components/pane-virtual-list": "./src/components/pane-virtual-list.tsx",
+    "./components/panel-empty-state": "./src/components/panel-empty-state.tsx",
     "./components/password-input": "./src/components/password-input.tsx",
     "./components/popover": "./src/components/popover.tsx",
     "./components/popover.variants": "./src/components/popover.variants.ts",
@@ -73,13 +89,16 @@
     "./components/radio-group": "./src/components/radio-group.tsx",
     "./components/resizable": "./src/components/resizable.tsx",
     "./components/scroll-area": "./src/components/scroll-area.tsx",
+    "./components/search-input": "./src/components/search-input.tsx",
     "./components/select": "./src/components/select.tsx",
     "./components/separator": "./src/components/separator.tsx",
     "./components/sheet": "./src/components/sheet.tsx",
     "./components/sidebar": "./src/components/sidebar.tsx",
     "./components/skeleton": "./src/components/skeleton.tsx",
     "./components/slider": "./src/components/slider.tsx",
+    "./components/slider-input": "./src/components/slider-input.tsx",
     "./components/sonner": "./src/components/sonner.tsx",
+    "./components/string-color-picker": "./src/components/string-color-picker.tsx",
     "./components/switch": "./src/components/switch.tsx",
     "./components/table": "./src/components/table.tsx",
     "./components/tabs": "./src/components/tabs.tsx",
@@ -88,11 +107,17 @@
     "./components/toggle-group": "./src/components/toggle-group.tsx",
     "./components/tooltip": "./src/components/tooltip.tsx",
     "./hooks/use-mobile": "./src/hooks/use-mobile.ts",
+    "./hooks/use-tick-animation": "./src/hooks/use-tick-animation.ts",
     "./styles/tokens.css": {
       "types": "./src/styles/tokens.css.d.ts",
       "default": "./src/styles/tokens.css"
     },
     "./utils/cn": "./src/utils/cn.ts",
+    "./utils/keys": "./src/utils/keys.ts",
+    "./utils/label": "./src/utils/label.ts",
+    "./utils/number": "./src/utils/number.ts",
+    "./utils/platform": "./src/utils/platform.ts",
+    "./utils/pointer-capture": "./src/utils/pointer-capture.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -107,6 +132,11 @@
         "types": "./dist/components/accordion.d.mts",
         "import": "./dist/components/accordion.mjs",
         "default": "./dist/components/accordion.mjs"
+      },
+      "./components/actions": {
+        "types": "./dist/components/actions.d.mts",
+        "import": "./dist/components/actions.mjs",
+        "default": "./dist/components/actions.mjs"
       },
       "./components/alert-dialog": {
         "types": "./dist/components/alert-dialog.d.mts",
@@ -163,10 +193,20 @@
         "import": "./dist/components/checkbox.mjs",
         "default": "./dist/components/checkbox.mjs"
       },
+      "./components/client-only": {
+        "types": "./dist/components/client-only.d.mts",
+        "import": "./dist/components/client-only.mjs",
+        "default": "./dist/components/client-only.mjs"
+      },
       "./components/collapsible": {
         "types": "./dist/components/collapsible.d.mts",
         "import": "./dist/components/collapsible.mjs",
         "default": "./dist/components/collapsible.mjs"
+      },
+      "./components/combobox-responsive": {
+        "types": "./dist/components/combobox-responsive.d.mts",
+        "import": "./dist/components/combobox-responsive.mjs",
+        "default": "./dist/components/combobox-responsive.mjs"
       },
       "./components/command": {
         "types": "./dist/components/command.d.mts",
@@ -177,6 +217,11 @@
         "types": "./dist/components/context-menu.d.mts",
         "import": "./dist/components/context-menu.mjs",
         "default": "./dist/components/context-menu.mjs"
+      },
+      "./components/copy-button": {
+        "types": "./dist/components/copy-button.d.mts",
+        "import": "./dist/components/copy-button.mjs",
+        "default": "./dist/components/copy-button.mjs"
       },
       "./components/dialog": {
         "types": "./dist/components/dialog.d.mts",
@@ -198,10 +243,25 @@
         "import": "./dist/components/field.mjs",
         "default": "./dist/components/field.mjs"
       },
+      "./components/highlight-text": {
+        "types": "./dist/components/highlight-text.d.mts",
+        "import": "./dist/components/highlight-text.mjs",
+        "default": "./dist/components/highlight-text.mjs"
+      },
       "./components/hover-card": {
         "types": "./dist/components/hover-card.d.mts",
         "import": "./dist/components/hover-card.mjs",
         "default": "./dist/components/hover-card.mjs"
+      },
+      "./components/info-tooltip": {
+        "types": "./dist/components/info-tooltip.d.mts",
+        "import": "./dist/components/info-tooltip.mjs",
+        "default": "./dist/components/info-tooltip.mjs"
+      },
+      "./components/inline-code": {
+        "types": "./dist/components/inline-code.d.mts",
+        "import": "./dist/components/inline-code.mjs",
+        "default": "./dist/components/inline-code.mjs"
       },
       "./components/input": {
         "types": "./dist/components/input.d.mts",
@@ -213,25 +273,70 @@
         "import": "./dist/components/input-group.mjs",
         "default": "./dist/components/input-group.mjs"
       },
+      "./components/key-shortcut": {
+        "types": "./dist/components/key-shortcut.d.mts",
+        "import": "./dist/components/key-shortcut.mjs",
+        "default": "./dist/components/key-shortcut.mjs"
+      },
+      "./components/keyboard": {
+        "types": "./dist/components/keyboard.d.mts",
+        "import": "./dist/components/keyboard.mjs",
+        "default": "./dist/components/keyboard.mjs"
+      },
       "./components/label": {
         "types": "./dist/components/label.d.mts",
         "import": "./dist/components/label.mjs",
         "default": "./dist/components/label.mjs"
+      },
+      "./components/loader": {
+        "types": "./dist/components/loader.d.mts",
+        "import": "./dist/components/loader.mjs",
+        "default": "./dist/components/loader.mjs"
+      },
+      "./components/menu-disclosure-item": {
+        "types": "./dist/components/menu-disclosure-item.d.mts",
+        "import": "./dist/components/menu-disclosure-item.mjs",
+        "default": "./dist/components/menu-disclosure-item.mjs"
+      },
+      "./components/menu-slider-item": {
+        "types": "./dist/components/menu-slider-item.d.mts",
+        "import": "./dist/components/menu-slider-item.mjs",
+        "default": "./dist/components/menu-slider-item.mjs"
       },
       "./components/menu.variants": {
         "types": "./dist/components/menu.variants.d.mts",
         "import": "./dist/components/menu.variants.mjs",
         "default": "./dist/components/menu.variants.mjs"
       },
-      "./components/nested-action.variants": {
-        "types": "./dist/components/nested-action.variants.d.mts",
-        "import": "./dist/components/nested-action.variants.mjs",
-        "default": "./dist/components/nested-action.variants.mjs"
+      "./components/modified-indicator": {
+        "types": "./dist/components/modified-indicator.d.mts",
+        "import": "./dist/components/modified-indicator.mjs",
+        "default": "./dist/components/modified-indicator.mjs"
       },
       "./components/navigation-menu": {
         "types": "./dist/components/navigation-menu.d.mts",
         "import": "./dist/components/navigation-menu.mjs",
         "default": "./dist/components/navigation-menu.mjs"
+      },
+      "./components/nested-action.variants": {
+        "types": "./dist/components/nested-action.variants.d.mts",
+        "import": "./dist/components/nested-action.variants.mjs",
+        "default": "./dist/components/nested-action.variants.mjs"
+      },
+      "./components/pane-spacing.variants": {
+        "types": "./dist/components/pane-spacing.variants.d.mts",
+        "import": "./dist/components/pane-spacing.variants.mjs",
+        "default": "./dist/components/pane-spacing.variants.mjs"
+      },
+      "./components/pane-virtual-list": {
+        "types": "./dist/components/pane-virtual-list.d.mts",
+        "import": "./dist/components/pane-virtual-list.mjs",
+        "default": "./dist/components/pane-virtual-list.mjs"
+      },
+      "./components/panel-empty-state": {
+        "types": "./dist/components/panel-empty-state.d.mts",
+        "import": "./dist/components/panel-empty-state.mjs",
+        "default": "./dist/components/panel-empty-state.mjs"
       },
       "./components/password-input": {
         "types": "./dist/components/password-input.d.mts",
@@ -268,6 +373,11 @@
         "import": "./dist/components/scroll-area.mjs",
         "default": "./dist/components/scroll-area.mjs"
       },
+      "./components/search-input": {
+        "types": "./dist/components/search-input.d.mts",
+        "import": "./dist/components/search-input.mjs",
+        "default": "./dist/components/search-input.mjs"
+      },
       "./components/select": {
         "types": "./dist/components/select.d.mts",
         "import": "./dist/components/select.mjs",
@@ -298,10 +408,20 @@
         "import": "./dist/components/slider.mjs",
         "default": "./dist/components/slider.mjs"
       },
+      "./components/slider-input": {
+        "types": "./dist/components/slider-input.d.mts",
+        "import": "./dist/components/slider-input.mjs",
+        "default": "./dist/components/slider-input.mjs"
+      },
       "./components/sonner": {
         "types": "./dist/components/sonner.d.mts",
         "import": "./dist/components/sonner.mjs",
         "default": "./dist/components/sonner.mjs"
+      },
+      "./components/string-color-picker": {
+        "types": "./dist/components/string-color-picker.d.mts",
+        "import": "./dist/components/string-color-picker.mjs",
+        "default": "./dist/components/string-color-picker.mjs"
       },
       "./components/switch": {
         "types": "./dist/components/switch.d.mts",
@@ -343,6 +463,11 @@
         "import": "./dist/hooks/use-mobile.mjs",
         "default": "./dist/hooks/use-mobile.mjs"
       },
+      "./hooks/use-tick-animation": {
+        "types": "./dist/hooks/use-tick-animation.d.mts",
+        "import": "./dist/hooks/use-tick-animation.mjs",
+        "default": "./dist/hooks/use-tick-animation.mjs"
+      },
       "./styles/tokens.css": {
         "types": "./dist/styles/tokens.css.d.ts",
         "default": "./dist/styles/tokens.css"
@@ -351,6 +476,31 @@
         "types": "./dist/utils/cn.d.mts",
         "import": "./dist/utils/cn.mjs",
         "default": "./dist/utils/cn.mjs"
+      },
+      "./utils/keys": {
+        "types": "./dist/utils/keys.d.mts",
+        "import": "./dist/utils/keys.mjs",
+        "default": "./dist/utils/keys.mjs"
+      },
+      "./utils/label": {
+        "types": "./dist/utils/label.d.mts",
+        "import": "./dist/utils/label.mjs",
+        "default": "./dist/utils/label.mjs"
+      },
+      "./utils/number": {
+        "types": "./dist/utils/number.d.mts",
+        "import": "./dist/utils/number.mjs",
+        "default": "./dist/utils/number.mjs"
+      },
+      "./utils/platform": {
+        "types": "./dist/utils/platform.d.mts",
+        "import": "./dist/utils/platform.mjs",
+        "default": "./dist/utils/platform.mjs"
+      },
+      "./utils/pointer-capture": {
+        "types": "./dist/utils/pointer-capture.d.mts",
+        "import": "./dist/utils/pointer-capture.mjs",
+        "default": "./dist/utils/pointer-capture.mjs"
       },
       "./package.json": "./package.json"
     },
@@ -370,11 +520,14 @@
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
     "cmdk": "1.0.4",
+    "culori": "catalog:",
     "embla-carousel-react": "^8.6.0",
     "lucide-react": "catalog:",
     "radix-ui": "catalog:",
+    "react-colorful": "^5.7.0",
     "react-day-picker": "catalog:",
     "react-resizable-panels": "^2.1.9",
+    "react-virtuoso": "^4.18.7",
     "recharts": "^3.8.1",
     "sonner": "catalog:",
     "tailwind-merge": "catalog:",
@@ -383,6 +536,7 @@
   "devDependencies": {
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
+    "@types/culori": "^4.0.1",
     "@types/react": "catalog:",
     "axe-core": "catalog:",
     "react": "catalog:",

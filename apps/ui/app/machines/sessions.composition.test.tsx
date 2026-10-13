@@ -44,7 +44,7 @@ import type { SessionsMachineEmitted } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds, projectSessionMachine } from '#machines/project-session.machine.js';
 import { useChatSidebarStatus, useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
+import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 
 const {
@@ -422,7 +422,7 @@ vi.mock('#hooks/use-flush-on-close.js', () => ({
 vi.mock('#hooks/use-monaco-model-service.js', () => ({
   MonacoModelServiceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock('#hooks/use-webgl-context-tracker.js', () => ({
+vi.mock('@taucad/viewer/hooks/use-webgl-context-tracker', () => ({
   WebglContextTrackerProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({ RevisionSaveShortcut: () => null }));

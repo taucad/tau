@@ -8,7 +8,7 @@ import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 // route only needs to flush its own project + editor machine state below.
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import {
   deriveProjectRouteState,
   ProjectRouteRetryContext,

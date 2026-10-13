@@ -34,7 +34,7 @@ import {
 import { cn } from '@taucad/ui/utils/cn';
 import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisions';
 import { DiffViewer } from '#components/code/diff-viewer.js';
-import { ActionButton } from '#components/revisions/revision-actions.js';
+import { ActionButton } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';

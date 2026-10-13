@@ -696,6 +696,63 @@ describe('createHostToolRegistry', () => {
     expect(withdrawPrintRequest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: 'call-1' }));
   });
 
+  it('names the project of the root each print is called in, when the host resolves projects per call', async () => {
+    /* `tau mcp` under Codex: started in a folder with no project, each call naming the thread's folder. */
+    const startFolder = await makeWorkspace();
+    const project = await makeWorkspace();
+    const unnamed = await makeWorkspace();
+    const { runtimeClient, requestPrint, machines } = printFixture();
+    const projectId = 'proj_000000000000000000002';
+    const projectIdOf = vi.fn(async (root: string) => (root === project ? projectId : undefined));
+    const checkouts = new Map([
+      ['mcp:project', { cwd: project }],
+      ['mcp:unnamed', { cwd: unnamed }],
+    ]);
+    const registry = createHostToolRegistry({
+      workspaceRoot: startFolder,
+      runtimeClient,
+      machines,
+      checkouts,
+      projectIdOf,
+    });
+    expect(registry.list().map((tool) => tool.name)).toContain('request_print');
+
+    const printed = await registry.invoke({
+      toolCallId: 'call-1',
+      toolName: 'request_print',
+      input: { targetFile: 'main.ts' },
+      runId: 'mcp:project',
+      signal: new AbortController().signal,
+    });
+    expect(printed).toMatchObject({ isError: false, content: { request: { state: 'awaiting-approval' } } });
+    const { artifact } = requestPrint.mock.calls[0]![0];
+    expect(artifact.projectId).toBe(projectId);
+    /* The slice lands in the calling root, where the machine host reads it by that root's id. */
+    await expect(readFile(join(project, artifact.path))).resolves.toBeDefined();
+
+    const refused = await registry.invoke({
+      toolCallId: 'call-2',
+      toolName: 'request_print',
+      input: { targetFile: 'main.ts' },
+      runId: 'mcp:unnamed',
+      signal: new AbortController().signal,
+    });
+    expect(refused).toMatchObject({
+      isError: true,
+      content: { errorCode: 'PROJECT_NOT_NAMED', message: expect.stringContaining(unnamed) as string },
+    });
+    expect(requestPrint).toHaveBeenCalledOnce();
+    /* Only a print asks which project a root is. */
+    await registry.invoke({
+      toolCallId: 'call-3',
+      toolName: 'list_print_requests',
+      input: {},
+      runId: 'mcp:unnamed',
+      signal: new AbortController().signal,
+    });
+    expect(projectIdOf.mock.calls.map(([root]) => root)).toEqual([project, unnamed]);
+  });
+
   it("reads the project's print intent through the filesystem authority a project host opens its roots with", async () => {
     const workspaceRoot = await makeWorkspace();
     /* The double's own intent (2026-10-03): the high-temperature plate and the external spool. */

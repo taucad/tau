@@ -13,7 +13,7 @@ import {
 } from '@taucad/ui/components/alert-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Skeleton } from '@taucad/ui/components/skeleton';
-import { SearchInput } from '#components/search-input.js';
+import { SearchInput } from '@taucad/ui/components/search-input';
 
 type ArchivedChatsViewProps = {
   readonly chats: readonly ChatRecord[];

@@ -136,6 +136,9 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/react-e2e/scripts/benchmark-bundler-products.mts',
       'apps/ui-e2e/src/support/open-to-frame.ts',
       'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
+      // The agent plugin's host suite serves the viewer page in a sandboxed host frame and drives `tau mcp` over
+      // stdio beside it, which Browser Mode cannot host.
+      'packages/agent-plugin/e2e/viewer-page.hosts.test.ts',
       'packages/geospec-engine-native/bindings/browser-conformance/qualify-mt-product.mjs',
       'packages/geospec-engine-native/bindings/browser-conformance/run-browser-conformance.ts',
       'scripts/src/canvas-vite.config.test.ts',
@@ -215,9 +218,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui-e2e/vitest.config.ts',
         'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',
         'apps/ui/app/components/code/code-editor.vitest.browser.config.ts',
-        'apps/ui/app/components/geometry/graphics/svg/svg-viewer.vitest.browser.config.ts',
-        'apps/ui/app/components/geometry/graphics/three/utils/gltf-batches.vitest.browser.config.ts',
-        'apps/ui/app/components/geometry/graphics/three/viewer-resize.vitest.browser.config.ts',
+        'apps/ui/app/components/geometry/viewer-resize.vitest.browser.config.ts',
         'apps/ui/app/components/panes/editor-layout.vitest.browser.config.ts',
         'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
@@ -232,6 +233,9 @@ describe('Vitest Browser test-runner ownership', () => {
         'packages/plugins/rolldown/vitest.browser.config.ts',
         'packages/plugins/rolldown/vitest.browser.nonisolated.config.ts',
         'packages/ui/vitest.browser.config.ts',
+        'packages/viewer/src/graphics/svg/svg-viewer.vitest.browser.config.ts',
+        'packages/viewer/src/graphics/three/utils/gltf-batches.vitest.browser.config.ts',
+        'packages/viewer/src/graphics/three/viewer-resize.vitest.browser.config.ts',
       ].sort(),
     );
 

@@ -1,0 +1,127 @@
+import { createContext, useContext } from 'react';
+import type { LengthSymbol } from '#constants/length-units.js';
+import type { JSONValue, ParameterGroup } from '@taucad/types';
+import type {
+  ParameterManifest,
+  ParameterSetOutcome,
+  ParameterSetRequest,
+  ParameterSetTarget,
+} from '@taucad/parameters';
+import type { ParameterDraft, ParameterValueEdit } from '#parameters/parameter-edit.js';
+
+/**
+ * The units parameter fields display.
+ * @public
+ */
+export type Units = {
+  length: {
+    displaySymbol: LengthSymbol;
+  };
+};
+
+/**
+ * A request to reset one parameter field to its default value.
+ * @public
+ */
+export type RjsfFieldResetInput = {
+  readonly fieldPath: readonly string[];
+  readonly defaultValue: unknown;
+};
+
+/**
+ * Identity-stable handle for one authoritative parameter editor. It deliberately carries no value
+ * and no revision: rows read their own field, so an edit to one field cannot invalidate every row.
+ * @public
+ */
+export type ParameterCommit = Readonly<{
+  target: ParameterSetTarget;
+  group: string;
+  /** The draft a row left behind when it last unmounted, if it has one. */
+  draft(pointer: string): ParameterDraft | undefined;
+  /** Retain or clear one row's draft; `undefined` clears it. */
+  setDraft(pointer: string, draft: Pick<ParameterDraft, 'text' | 'valid'> | undefined): void;
+  /** Observe final settlement and drafts discarded elsewhere, such as by the unsaved-drafts dialog. */
+  subscribeDrafts(listener: () => void): () => void;
+  /**
+   * Commit one field of the active group. `base` scopes the conflict to this field, and `transient`
+   * pressure lets a newer value from the same drag displace an older queued one.
+   */
+  commit(field: ParameterValueEdit): Promise<ParameterSetOutcome | undefined>;
+  /** Commit one field of the active group; non-numeric widgets never rewrite the whole group. */
+  setValue(
+    field: Readonly<{ pointer: string; value: JSONValue; base: NonNullable<ParameterSetRequest['base']> }>,
+  ): Promise<void>;
+  /**
+   * Show one field's in-flight drag value without persisting it (D2). Absent when the active kernel
+   * did not declare that it can serve the drag lane, in which case the row previews the value alone
+   * and the model re-renders on release.
+   */
+  scrub?(field: Readonly<{ pointer: string; value: JSONValue }>): void;
+  /** End a drag. Its final resolves `true` only when the authoritative value no longer needs restoring. */
+  endScrub?(final?: Promise<boolean>): Promise<void>;
+}>;
+
+/**
+ * How parameter edits apply: transiently, or committed through an authoritative editor.
+ * @public
+ */
+export type ParameterEdit =
+  | Readonly<{ kind: 'transient' }>
+  | Readonly<{ kind: 'authoritative'; commit: ParameterCommit }>;
+
+/**
+ * The form context every parameter field and template receives from RJSF.
+ * @public
+ */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for formContext
+export type RJSFContext = {
+  idPrefix: string;
+  rootPresentation: 'catalog' | 'embedded';
+  searchTerm: string;
+  allExpanded: boolean;
+  /** Disclosure choices survive virtual row remounts; replaced when Expand/Collapse all changes. */
+  disclosure?: { readonly choices: Map<string, boolean> };
+  resetSingleParameter: (input: RjsfFieldResetInput) => void;
+  shouldShowField: (prettyLabel: string) => boolean;
+  defaultParameters?: Record<string, unknown>;
+  units: Units;
+  parameterManifest: ParameterManifest;
+  /** The stored group, whose authored units refine each field's admitted binding. */
+  parameterGroup?: ParameterGroup;
+  parameterEdit: ParameterEdit;
+};
+
+/**
+ * Layout details a parent parameter template passes to the fields nested inside it.
+ * @public
+ */
+export type RjsfLayoutContextValue = {
+  readonly embeddedDiscriminator?: string;
+  readonly arrayItemAction?: {
+    readonly label: string;
+    readonly onRemove: () => void;
+  };
+  readonly objectArrayItem?: boolean;
+  /** RJSF array identity and parent depth keep disclosure choices attached through removal/reorder. */
+  readonly arrayDisclosure?: { readonly key: string; readonly parentDepth: number };
+};
+
+/**
+ * The layout context of a field with no enclosing template.
+ * @public
+ */
+export const emptyRjsfLayoutContext: RjsfLayoutContextValue = {};
+
+/**
+ * React context carrying layout details from a parameter template to its nested fields.
+ * @public
+ */
+export const rjsfLayoutContext = createContext<RjsfLayoutContextValue>(emptyRjsfLayoutContext);
+
+/**
+ * Reads the layout context of the nearest enclosing parameter template.
+ *
+ * @returns The layout context value.
+ * @public
+ */
+export const useRjsfLayoutContext = (): RjsfLayoutContextValue => useContext(rjsfLayoutContext);

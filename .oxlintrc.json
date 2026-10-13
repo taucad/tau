@@ -1443,9 +1443,6 @@
     {
       // Current graphics inversions. -- W3
       "files": [
-        "apps/ui/app/machines/controls-listener.machine.test.ts",
-        "apps/ui/app/machines/controls-listener.machine.ts",
-        "apps/ui/app/machines/graphics.machine.ts",
         "apps/ui/app/machines/resolve-screenshot-overlay.ts",
         "apps/ui/app/machines/screenshot-capability.machine.test.ts",
         "apps/ui/app/machines/screenshot-capability.machine.ts",

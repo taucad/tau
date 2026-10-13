@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { findBuiltinExample } from '@taucad/tau-examples/builtin';
 import { findTestFixture } from '@taucad/tau-examples/test-fixtures';
 import { isKernelId } from '@taucad/types/constants';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';

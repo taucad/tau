@@ -5,8 +5,11 @@ import { projectToManifest } from '@taucad/types';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { GeometryComponentManifest, ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine, selectProjectKernelRefusal } from '#machines/project.machine.js';
-import { defaultGraphicsSettings } from '#constants/editor.constants.js';
-import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
+import {
+  deriveModelInteractionUnitId,
+  getModelInteractionUnitState,
+} from '@taucad/viewer/machines/model-interaction.machine';
 import type { ProjectContext, ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';

@@ -14,7 +14,7 @@ import { Matrix4 } from 'three';
 import { resolveCoordinateTransform } from '@taucad/spatial';
 import { bambuA1MiniHotend, bambuA1MiniPlates, bambuX1cHotend, bambuX1cPlates } from '@taucad/bambu/plate';
 import type { BambuPlateModel } from '@taucad/bambu/plate';
-import { canonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
+import { canonicalGltfWorld } from '@taucad/viewer/graphics/three/gltf-world';
 
 /** One Bambu build plate id, as Tau's slicers name it. */
 export type PrinterPlateId = BambuPlateModel['id'];

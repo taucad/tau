@@ -10,6 +10,13 @@ import type {
 } from '@taucad/chat';
 import { getToolPartName, isAnyToolPart, isToolPart, modelSupportsInput } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
+import {
+  cadReferenceFromToken,
+  cadReferenceToken,
+  maxCadReferences,
+  parseCadReferenceTokens,
+} from '@taucad/chat/references';
+import type { CadReference } from '@taucad/chat/references';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { metaConfig } from '#constants/meta.constants.js';
@@ -700,15 +707,19 @@ export function stampMessageCreatedAt(messages: MyUIMessage[]): MyUIMessage[] {
  * relative to the chat's own directory (providers read attachments best ahead
  * of the text about them), then the text, trimmed and omitted when empty. A part carries `providerMetadata.common.byteLength` only when the
  * reference knows its size (P29); nothing is invented for one that does not.
+ * The metadata carries the message's geometry references when its text holds `@cad[...]` tokens.
  *
- * @param input - The composed text and the chat's attachment references.
+ * @param input - The composed text, the chat's attachment references and the chips' structured references.
  * @returns A pending user message with a fresh id.
  */
 export function buildUserMessage(input: {
   readonly text: string;
   readonly attachments?: readonly StoredAttachmentRef[];
+  /** Structured references the composer's chips held; matched to the text's `@cad[...]` tokens. */
+  readonly references?: readonly CadReference[];
 }): MyUIMessage {
   const text = input.text.trim();
+  const references = messageReferences(text, input.references ?? []);
   return {
     id: generatePrefixedId(idPrefix.message),
     role: 'user',
@@ -727,8 +738,51 @@ export function buildUserMessage(input: {
       ),
       ...(text.length > 0 ? [{ type: 'text', text } as const] : []),
     ],
-    metadata: { createdAt: Date.now(), status: 'pending' },
+    metadata: { createdAt: Date.now(), status: 'pending', ...(references.length === 0 ? {} : { references }) },
   };
+}
+
+/**
+ * The user message an edit produces: the original's id and metadata around the edited text, attachments and
+ * references. References are re-derived from the edited text, so a token the edit removed drops its reference; the
+ * edit composer's chips, then the original's references, supply the detail for each token that remains.
+ *
+ * @param original - The message being edited.
+ * @param input - The edited text, attachments and the edit composer's structured references.
+ * @returns The edited message under the original's id.
+ */
+export function buildEditedUserMessage(
+  original: MyUIMessage,
+  input: {
+    readonly text: string;
+    readonly attachments?: readonly StoredAttachmentRef[];
+    readonly references?: readonly CadReference[];
+  },
+): MyUIMessage {
+  const { references: previous = [], ...metadata } = original.metadata ?? {};
+  const built = buildUserMessage({
+    text: input.text,
+    ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
+    // A later reference wins its token, so the edit composer's chips go last.
+    references: [...previous, ...(input.references ?? [])],
+  });
+  return { ...built, id: original.id, metadata: { ...metadata, ...built.metadata } };
+}
+
+/**
+ * The references a message carries (blueprint D6): one per distinct `@cad[...]` token in its text, the composer's
+ * structured reference when one matches the token, else what the token itself names. A reference whose token the
+ * text no longer holds (the chip was deleted) is dropped.
+ */
+function messageReferences(text: string, supplied: readonly CadReference[]): CadReference[] {
+  const byToken = new Map(supplied.map((reference) => [cadReferenceToken(reference), reference]));
+  const references = new Map<string, CadReference>();
+  for (const segment of parseCadReferenceTokens(text)) {
+    if (segment.type === 'cadReference' && !references.has(segment.token) && references.size < maxCadReferences) {
+      references.set(segment.token, byToken.get(segment.token) ?? cadReferenceFromToken(segment.target));
+    }
+  }
+  return [...references.values()];
 }
 
 // ACP transports both media kinds; the local agent's prompt capabilities decide what it can read.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseLogEvent } from '@taucad/agent-host';
+import { parseLogEvent, userProviderMessageSchema } from '@taucad/agent-host';
 import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 import { getReasoningEndedAtMs } from '@taucad/chat';
@@ -18,6 +18,8 @@ import {
   projectTurnSettlement,
 } from '#services/agent-host-event-projection.js';
 import { chatTooLongMessage, parseErrorForPersistence } from '#utils/error.utils.js';
+import { buildUserMessage } from '#utils/chat.utils.js';
+import { userProviderMessageOf } from '#chat-clients/turn-intent.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
 import hexagonalNutFourRunLog from '#services/__fixtures__/daemon-reattach-hexnut-4runs.jsonl?raw';
 
@@ -1645,6 +1647,20 @@ describe('external attribution', () => {
    inlines them (the legacy `image` arm, D14). */
 describe('projectAgentHostUserMessage attachments', () => {
   const attachmentHash = 'd'.repeat(64);
+
+  it("should round-trip a composed message's geometry references through the host log", () => {
+    const reference = {
+      resource: { kind: 'workspace-file', path: 'gears/main.ts' },
+      target: { kind: 'component', componentId: 'component:sun_gear', label: 'Sun gear', componentKind: 'part' },
+    } as const;
+    const recorded = userProviderMessageOf([
+      buildUserMessage({ text: 'Widen @cad[gears/main.ts#component:sun_gear]', references: [reference] }),
+    ]);
+    expect(recorded.metadata).toEqual({ references: [reference] });
+    expect(projectAgentHostUserMessage(userProviderMessageSchema.parse(recorded)).metadata?.references).toEqual([
+      reference,
+    ]);
+  });
 
   it('should round-trip a file-ref image block to its attachment file part', () => {
     const message = projectAgentHostUserMessage({

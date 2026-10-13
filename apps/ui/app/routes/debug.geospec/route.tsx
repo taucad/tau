@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Artifact } from '@taucad/runtime';
 import { Button } from '@taucad/ui/components/button';
-import { ModelViewer } from '#components/model-viewer.js';
+import { ModelViewer } from '@taucad/viewer/model-viewer';
 import { pairedCaseVerdict } from '#routes/debug.geospec/paired-result.js';
 import { ENV } from '#environment.config.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';

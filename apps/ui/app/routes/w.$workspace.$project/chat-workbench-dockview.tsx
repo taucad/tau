@@ -64,7 +64,7 @@ import type { DockviewTabIconRenderer } from '#components/panes/dockview-tab.js'
 import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
 import { DockviewSplitAction } from '#components/panes/dockview-split-action.js';
 import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes/dockview-empty-action.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { isPrinterFileName } from '#components/printer/printer-file.js';
 import { WorkbenchTabContextMenu } from '#components/panes/editor-tab-context-menu.js';
 import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
@@ -113,7 +113,7 @@ import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import type { OpenFile } from '#types/editor.types.js';
 import { PaneButton } from '#components/ui/pane-button.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -123,8 +123,8 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { Separator } from '@taucad/ui/components/separator';
-import { formatKeyCombination } from '#utils/keys.utils.js';
-import { capturePointer, releasePointer } from '#utils/pointer-capture.utils.js';
+import { formatKeyCombination } from '@taucad/ui/utils/keys';
+import { capturePointer, releasePointer } from '@taucad/ui/utils/pointer-capture';
 import type {
   FileViewerPaneContent,
   FileViewerPresentation,

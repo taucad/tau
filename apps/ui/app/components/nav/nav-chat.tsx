@@ -1,9 +1,9 @@
 import { PackagePlus } from 'lucide-react';
 import { NavLink, useMatch, useNavigate } from 'react-router';
 import { SidebarGroup, SidebarMenuButton } from '#components/ui/sidebar.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
-import { Loader } from '#components/ui/loader.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
+import { Loader } from '@taucad/ui/components/loader';
 
 export function NavChat(): React.JSX.Element {
   const navigate = useNavigate();

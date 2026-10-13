@@ -16,10 +16,10 @@ import { SettingsAuthGate } from '#components/settings/settings-auth-gate.js';
 import { RemoteComputeSettings } from '#components/settings/remote-compute-settings.js';
 import { ComputeReuseSettings } from '#components/settings/compute-reuse-settings.js';
 import { MachinesSettings } from '#components/settings/machines-settings.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
 
 import { Button } from '@taucad/ui/components/button';
-import { SearchInput } from '#components/search-input.js';
+import { SearchInput } from '@taucad/ui/components/search-input';
 import {
   SidebarGroup,
   SidebarGroupLabel,

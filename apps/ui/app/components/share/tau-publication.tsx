@@ -6,14 +6,14 @@ import { authClient } from '#lib/auth-client.js';
 import { ENV, getEnvironment } from '#environment.config.js';
 import { cacheTag, cdnBackedSsrRouteHeaders } from '#lib/react-router.lib.js';
 import { SharedWorkerGate } from '#hooks/use-file-manager.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { ErrorPage } from '#components/error-page.js';
 import { PublicationLockScreen, parsePublicationLockPayload } from '#components/share/publication-lock-screen.js';
 import type { PublicationLockReason, PublicationLockScreenVariant } from '#components/share/publication-lock-screen.js';
 import { parsePublicationRecord, publicationFileFetchInit } from '#components/share/parsed-publication.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
 import { useViewPing } from '#components/share/use-view-ping.js';
-import { ClientOnly } from '#components/ui/utils/client-only.js';
+import { ClientOnly } from '@taucad/ui/components/client-only';
 
 const SharedProjectWorkbench = lazy(async () => {
   const module = await import('#components/share/shared-project-workbench.js');

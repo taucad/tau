@@ -38,7 +38,7 @@ import { Link, useParams } from 'react-router';
 import { CircleAlert, Link2, LogIn } from 'lucide-react';
 import { parseShareSlug } from '@taucad/share/locator';
 import { Button } from '@taucad/ui/components/button';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { PublicationLockScreen } from '#components/share/publication-lock-screen.js';
 import type { PublicationLockScreenVariant } from '#components/share/publication-lock-screen.js';
 import { parsePublicationRecord } from '#components/share/parsed-publication.js';

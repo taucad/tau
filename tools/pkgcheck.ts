@@ -51,6 +51,7 @@ import {
   strictConsumerCompilerOptions,
   vendoredAssetIssues,
   vendoredNodeModulesIssues,
+  workerUrlIssues,
   workspaceRangeIssues,
 } from './pkgcheck-metadata.js';
 import type { AssetFile, CopyEntry, UpstreamExport } from './pkgcheck-metadata.js';
@@ -507,6 +508,19 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
     '#components/*.variants.js': 'variant modules are .ts and share components/ with the .tsx components',
     '#components/*.js': 'components are .tsx, which the canonical #*.js -> ./src/*.ts target cannot reach',
   },
+  // React components and hooks sit beside .ts modules in every viewer directory, so a per-directory key
+  // like the design system's cannot reach them; `.jsx` names the .tsx module as `.js` names the .ts one.
+  '@taucad/viewer': {
+    '#*.jsx': '.tsx components and hooks share every directory with .ts modules; the canonical #*.js reaches only .ts',
+  },
+  // The viewer page builds from app/ into one HTML file (not the plugin's src/ launcher), and its
+  // basic-host harness sits in e2e/; relative imports are banned workspace-wide.
+  '@taucad/agent-plugin': {
+    '#app/*.jsx': 'viewer page .tsx components outside src/, built into dist-app/app.html',
+    '#app/*.js': 'viewer page .ts modules outside src/, built into dist-app/app.html',
+    '#app/*': 'viewer page stylesheet outside src/, imported by its entry',
+    '#e2e/*.js': 'MCP Apps basic-host harness outside src/; relative imports are banned workspace-wide',
+  },
 };
 
 /** Projects whose sources live under `src/`; `type:app` layouts are deliberately outside the rule. */
@@ -794,6 +808,17 @@ async function validateDistributionAssets(): Promise<CheckResult> {
         status: 'fail',
         details: [`${String(issues.length)} distribution asset issue(s) found`, ...issues],
       };
+}
+
+/** Every `new Worker(new URL(…, import.meta.url))` in `dist` names a file the build emitted beside its module. */
+function validateWorkerUrls(): CheckResult {
+  const distributionRoot = join(absoluteRoot, 'dist');
+  const emitted = walkDirectory(distributionRoot).map((path) => relative(distributionRoot, path).split(sep).join('/'));
+  const modules = emitted
+    .filter((path) => path.endsWith('.mjs') || path.endsWith('.js'))
+    .map((path) => ({ path, source: readFileSync(join(distributionRoot, path), 'utf8') }));
+  const issues = workerUrlIssues(modules, new Set(emitted));
+  return checkResult('tau-worker-urls', issues, 'every emitted worker URL names an emitted file');
 }
 
 /** `react` -> `@types/react`, `@scope/name` -> `@types/scope__name`. */
@@ -1625,6 +1650,9 @@ async function main(): Promise<void> {
   printResult(results.at(-1)!);
 
   results.push(await validateDistributionAssets());
+  printResult(results.at(-1)!);
+
+  results.push(validateWorkerUrls());
   printResult(results.at(-1)!);
 
   results.push(validateBundledArtifact());

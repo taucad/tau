@@ -1,7 +1,7 @@
 import gearJscad from '#components/geometry/splash/gear.jscad.js?raw';
 import { KernelDemo } from '#routes/_index/demo/kernel-demo.js';
 import { VerificationOverlay } from '#routes/_index/demo/verification-overlay.js';
-import type { Units } from '#components/geometry/parameters/rjsf-context.js';
+import type { Units } from '@taucad/viewer/parameters/rjsf-context';
 import { gearClientOptions } from '#runtime/demo-client-options.js';
 
 const gearMainFile = 'main.js';

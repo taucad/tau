@@ -24,7 +24,7 @@ import { ViewerLink } from '#components/files/viewer-link.js';
 import { ExportFormatComboboxLabel, getExportFormatValue } from '#components/files/export-selector.js';
 import { groupExportFormatsByFidelity } from '#components/files/export-format-groups.js';
 import { buttonVariants } from '@taucad/ui/components/button';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { useFileManager } from '#hooks/use-file-manager.js';

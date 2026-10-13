@@ -4,8 +4,8 @@ import { asKnownArtifact } from '@taucad/runtime';
 import type { ActorRefFrom } from 'xstate';
 import { Separator } from '@taucad/ui/components/separator';
 import type { cadMachine } from '#machines/cad.machine.js';
-import { inspectGlb } from '#utils/inspect-glb.utils.js';
-import type { GltfInspection } from '#utils/inspect-glb.utils.js';
+import { inspectGlb } from '@taucad/viewer/utils/inspect-glb';
+import type { GltfInspection } from '@taucad/viewer/utils/inspect-glb';
 
 /**
  * `TAU_DEBUG`-gated diagnostic panel below the preview "Downloads" section.

@@ -38,7 +38,7 @@ import { ImportErrorView } from '#routes/import.$/import-error-view.js';
 import { ImportProcessingView } from '#routes/import.$/import-processing-view.js';
 import { ImportMainFileView } from '#routes/import.$/import-main-file-view.js';
 import { inspect } from '#machines/inspector.js';
-import { CopyButton } from '#components/copy-button.js';
+import { CopyButton } from '@taucad/ui/components/copy-button';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { createImportedProjectFiles } from '#utils/file-reader.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';

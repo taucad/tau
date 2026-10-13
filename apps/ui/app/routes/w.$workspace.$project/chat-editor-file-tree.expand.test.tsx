@@ -53,7 +53,7 @@ const actorStub = vi.hoisted(() => {
   };
 });
 
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Enter' }),
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));

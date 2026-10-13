@@ -34,9 +34,9 @@ import {
   FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { Spinner } from '#components/ui/spinner.js';
-import { ActionButton, DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
+import { ActionButton, DetailsToggle, disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
 import {

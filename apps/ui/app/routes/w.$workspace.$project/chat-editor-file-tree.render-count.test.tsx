@@ -14,7 +14,7 @@ import type { ComponentProps } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
-import type * as HighlightTextModule from '#components/highlight-text.js';
+import type * as HighlightTextModule from '@taucad/ui/components/highlight-text';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 
 /** Row renders, counted where each file or folder row draws its name. */
@@ -49,7 +49,7 @@ const actorStub = vi.hoisted(() => {
   };
 });
 
-vi.mock('#components/highlight-text.js', async (importOriginal) => {
+vi.mock('@taucad/ui/components/highlight-text', async (importOriginal) => {
   const actual = await importOriginal<typeof HighlightTextModule>();
   return {
     ...actual,
@@ -59,7 +59,7 @@ vi.mock('#components/highlight-text.js', async (importOriginal) => {
     },
   };
 });
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Enter' }),
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));

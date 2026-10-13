@@ -41,7 +41,16 @@ const launch = (): void => {
 
   /* Windows runs `.cmd` shims (npx.cmd, an npm-installed tau.cmd) only through a shell. */
   const shell = process.platform === 'win32' && /\.(?:bat|cmd)$/iu.test(cli.command);
-  const child = spawn(shell ? `"${cli.command}"` : cli.command, cli.args, { stdio: 'inherit', shell });
+  /* The viewer page ships in the plugin (blueprint D2); the environment, not a
+   * flag, names it so a CLI that predates the viewer ignores it. */
+  const viewerPage = fileURLToPath(new URL('../dist-app/app.html', import.meta.url));
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (existsSync(viewerPage)) {
+    env['TAU_VIEWER_PAGE'] = viewerPage;
+  }
+  /* Arguments after the launcher reach `tau mcp`: a Claude Desktop config names `--project` there. */
+  const args = [...cli.args, ...process.argv.slice(2)];
+  const child = spawn(shell ? `"${cli.command}"` : cli.command, args, { stdio: 'inherit', shell, env });
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {

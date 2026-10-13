@@ -8,13 +8,13 @@ import type {
   PersistedSectionCut,
   PersistedSectionView,
   PinnedMeasurement,
-} from '#constants/editor.constants.js';
-import { areSectionCutsEqual } from '#components/geometry/graphics/section-cuts.js';
-import type { SectionCut } from '#components/geometry/graphics/section-cuts.js';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
+} from '@taucad/viewer/graphics/graphics-settings';
+import { areSectionCutsEqual } from '@taucad/viewer/graphics/section-cuts';
+import type { SectionCut } from '@taucad/viewer/graphics/section-cuts';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
-import { useViewCameraSession } from '#hooks/use-graphics.js';
+import { useViewCameraSession } from '@taucad/viewer/hooks/use-graphics';
 import { lengthUnits, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import { viewCameraOrientation } from '#workbench-records/projection.js';

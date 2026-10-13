@@ -14,7 +14,7 @@ import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { toast } from '#components/ui/sonner.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
-import { useTickAnimation } from '#hooks/use-tick-animation.js';
+import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 import type { PublishDraft, PublishFacet, PublishVisibility } from '@taucad/revisions';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#components/publish/publication-email-tags.js';
@@ -23,7 +23,7 @@ import type { PublicationAccessGrant } from '#components/publish/publication-acc
 import { ENV } from '#environment.config.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { CommercialUpgradeLabel, useCommercialFeatures } from '#cloud/commercial-features.js';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import {
   awaitGithubGistConnection,
   connectGithubGist,

@@ -1,6 +1,6 @@
 import { KeyRound } from 'lucide-react';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
-import { CopyButton } from '#components/copy-button.js';
+import { CopyButton } from '@taucad/ui/components/copy-button';
 import type { AgentHostLogin } from '#services/agent-host-event-projection.js';
 
 /**

@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { InlineCode } from '#components/code/code-block.js';
+import { InlineCode } from '@taucad/ui/components/inline-code';
 import { extractTextFromChildren } from '#utils/react.utils.js';
 import { CollapsibleCodeBlock } from '#components/ui/collapsible-code-block.js';
 import { extractLanguageFromClassName } from '#lib/code-language-resolution.js';

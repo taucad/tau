@@ -97,7 +97,7 @@ vi.mock('#components/chat/chat-tool-file-operation.js', () => ({
   },
 }));
 
-vi.mock('#components/copy-button.js', () => ({
+vi.mock('@taucad/ui/components/copy-button', () => ({
   CopyButton(): React.JSX.Element {
     return <button data-testid='copy-button' type='button' />;
   },

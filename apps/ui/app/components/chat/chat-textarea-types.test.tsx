@@ -120,7 +120,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
     }) as unknown as ChatComposerContextValue,
 }));
 
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: (_combination: unknown, callback: () => void) => {
     cancelShortcut = callback;
     return { formattedKeyCombination: 'Ctrl+Backspace' };

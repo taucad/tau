@@ -189,7 +189,7 @@ vi.mock('#hooks/use-project.js', () => ({
   useMainGraphics: () => undefined,
 }));
 
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Ctrl+D' }),
 }));
 
@@ -294,11 +294,11 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanelClose: () => null,
 }));
 
-vi.mock('#components/ui/key-shortcut.js', () => ({
+vi.mock('@taucad/ui/components/key-shortcut', () => ({
   KeyShortcut: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
 
-vi.mock('#utils/keys.utils.js', () => ({
+vi.mock('@taucad/ui/utils/keys', () => ({
   formatKeyCombination: () => 'Ctrl+D',
 }));
 
@@ -354,7 +354,7 @@ vi.mock('@rjsf/core', async (importOriginal) => ({
   ),
 }));
 
-vi.mock('#components/geometry/parameters/rjsf-theme.js', () => ({
+vi.mock('@taucad/viewer/parameters/rjsf-theme', () => ({
   widgets: {},
   templates: {},
 }));

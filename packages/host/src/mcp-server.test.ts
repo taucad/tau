@@ -250,6 +250,8 @@ describe('createHostMcpEndpoint capability', () => {
       'screenshot',
       'export_model',
       'arrange_workbench',
+      'get_parameters',
+      'apply_parameter_operation',
       'get_print_profiles',
       'request_print',
       'get_print_request',

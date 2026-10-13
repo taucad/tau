@@ -1,0 +1,478 @@
+import type { ReactNode } from 'react';
+import React from 'react';
+import type { ClassValue } from 'clsx';
+import { Virtuoso } from 'react-virtuoso';
+import { useIsMobile } from '#hooks/use-mobile.js';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '#components/command.js';
+import {
+  Drawer,
+  DrawerNestedRoot,
+  DrawerContent,
+  DrawerDescription,
+  DrawerTitle,
+  DrawerTrigger,
+} from '#components/drawer.js';
+import { Popover, PopoverContent, PopoverTrigger } from '#components/popover.js';
+import { cn } from '#utils/cn.js';
+import { menuGroupHeadingClass } from '#components/menu.variants.js';
+import { Loader } from '#components/loader.js';
+
+type GroupedItems<T> = {
+  name: string;
+  items: T[];
+};
+
+type ComboBoxResponsiveProperties<T> = Omit<
+  React.HTMLAttributes<HTMLDivElement>,
+  'defaultValue' | 'onSelect' | 'value'
+> & {
+  readonly groupedItems: Array<GroupedItems<T>>;
+  readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
+  readonly children: ReactNode;
+  readonly getValue: (item: T) => string;
+  /** Additional human-readable search terms that are distinct from the stable item value. */
+  readonly getKeywords?: (item: T) => readonly string[];
+  /** Controlled selection (`selectedItem` in `renderLabel` + checkmark alignment). Mirrors parent source of truth — no internal snapshot stalemate. */
+  readonly value?: T | undefined;
+  readonly onSelect?: (value: string) => void;
+  readonly onClose?: () => void;
+  /** Controlled open state. When provided, parent owns open/close. */
+  readonly isOpen?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
+  /**
+   * The className for the popover/drawer content.
+   */
+  readonly className?: string;
+  readonly popoverProperties?: React.ComponentProps<typeof PopoverContent>;
+  readonly drawerProperties?: React.ComponentProps<typeof DrawerContent>;
+  readonly placeholder?: string;
+  readonly searchPlaceHolder?: string;
+  readonly asChildLabel?: boolean;
+  readonly labelClassName?: string;
+  readonly isDisabled?: (item: T) => boolean;
+  readonly emptyListMessage?: ReactNode;
+  readonly title: string;
+  readonly description: string;
+  readonly isSearchEnabled?: boolean;
+  readonly withVirtualization?: boolean;
+  readonly virtualizationHeight?: number;
+  readonly isLoadingMore?: boolean;
+  readonly onLoadMore?: () => void;
+  /**
+   * Use DrawerNestedRoot instead of Drawer when inside another drawer.
+   * This enables proper nested drawer behavior with Vaul.
+   */
+  readonly isNested?: boolean;
+  /**
+   * Callback to determine if the combobox should close after selecting an item.
+   * Receives the selected item value. Return true to close, false to keep open.
+   * Defaults to always closing.
+   */
+  readonly shouldCloseOnSelect?: (value: string) => boolean;
+  /** Rendered below the command list (outside keyboard navigation). */
+  readonly footer?: ReactNode;
+};
+
+/**
+ * A searchable single-choice list: a popover above the trigger on wide screens and a drawer on mobile.
+ *
+ * @param props - Items, the selected value, labels and the trigger.
+ * @returns The responsive combobox.
+ *
+ * @public
+ */
+export function ComboBoxResponsive<T>({
+  groupedItems,
+  renderLabel,
+  children,
+  getValue,
+  getKeywords,
+  value,
+  onSelect,
+  onClose,
+  isOpen: isOpenProperty,
+  onOpenChange,
+  className,
+  popoverProperties,
+  drawerProperties,
+  placeholder = 'Set item',
+  searchPlaceHolder = 'Filter items…',
+  asChildLabel = false,
+  labelClassName,
+  isDisabled,
+  emptyListMessage = 'No results found.',
+  title,
+  description,
+  isSearchEnabled = true,
+  withVirtualization = false,
+  virtualizationHeight = 300,
+  isLoadingMore = false,
+  onLoadMore,
+  isNested = false,
+  shouldCloseOnSelect,
+  footer,
+  ...properties
+}: ComboBoxResponsiveProperties<T>): React.JSX.Element {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
+  const isControlled = isOpenProperty !== undefined;
+  const open = isControlled ? isOpenProperty : uncontrolledOpen;
+  const isMobile = useIsMobile();
+  const selectionMadeReference = React.useRef(false);
+  const pointerDismissedReference = React.useRef(false);
+  const closeFocusReference = React.useRef(false);
+  /* `onClose` runs where the surface hands focus back: called on the close
+     itself, the popover or drawer would move focus to its trigger right after. */
+  const handleCloseAutoFocus = (event: Event): void => {
+    if (closeFocusReference.current) {
+      closeFocusReference.current = false;
+      event.preventDefault();
+      onClose?.();
+    }
+  };
+
+  const setOpen = React.useCallback(
+    (next: boolean) => {
+      if (!isControlled) {
+        setUncontrolledOpen(next);
+      }
+
+      onOpenChange?.(next);
+    },
+    [isControlled, onOpenChange],
+  );
+
+  const handleSelect = (item: T) => {
+    const resolved = getValue(item);
+    const shouldClose = shouldCloseOnSelect?.(resolved) ?? true;
+
+    if (shouldClose) {
+      selectionMadeReference.current = true;
+      setOpen(false);
+    }
+
+    onSelect?.(resolved);
+  };
+
+  const handleOpenChange = (isOpen: boolean) => {
+    // Pointer dismissal owns the next focus target. Refocusing the composer here
+    // races a sibling picker opening from the same click and closes it again.
+    if (!isOpen && !selectionMadeReference.current && !pointerDismissedReference.current && open) {
+      closeFocusReference.current = onClose !== undefined;
+    }
+
+    // Reset the selection flag when opening
+    if (isOpen) {
+      selectionMadeReference.current = false;
+      pointerDismissedReference.current = false;
+    }
+
+    setOpen(isOpen);
+  };
+
+  if (isMobile) {
+    const DrawerRoot = isNested ? DrawerNestedRoot : Drawer;
+
+    return (
+      <DrawerRoot open={open} onOpenChange={handleOpenChange}>
+        <DrawerTrigger asChild>{children}</DrawerTrigger>
+        <DrawerContent
+          aria-labelledby='drawer-title'
+          aria-describedby='drawer-description'
+          {...properties}
+          {...drawerProperties}
+          className={cn('[&_[data-slot=command]]:bg-transparent', className, drawerProperties?.className)}
+          onCloseAutoFocus={(event) => {
+            drawerProperties?.onCloseAutoFocus?.(event);
+            handleCloseAutoFocus(event);
+          }}
+        >
+          <DrawerTitle className='sr-only' id='drawer-title'>
+            {title}
+          </DrawerTitle>
+          <DrawerDescription className='sr-only' id='drawer-description'>
+            {description}
+          </DrawerDescription>
+          <>
+            <ItemList
+              groupedItems={groupedItems}
+              onPick={handleSelect}
+              selectedItem={value}
+              renderLabel={renderLabel}
+              getValue={getValue}
+              getKeywords={getKeywords}
+              searchPlaceHolder={searchPlaceHolder}
+              asChildLabel={asChildLabel}
+              labelClassName={labelClassName}
+              isDisabled={isDisabled}
+              emptyListMessage={emptyListMessage}
+              isSearchEnabled={isSearchEnabled}
+              withVirtualization={withVirtualization}
+              virtualizationHeight={virtualizationHeight}
+              isLoadingMore={isLoadingMore}
+              onLoadMore={onLoadMore}
+            />
+            {footer}
+          </>
+        </DrawerContent>
+      </DrawerRoot>
+    );
+  }
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverContent
+        {...properties}
+        {...popoverProperties}
+        className={cn('w-50 overflow-hidden p-0', className, popoverProperties?.className)}
+        onPointerDownOutside={(event) => {
+          popoverProperties?.onPointerDownOutside?.(event);
+          pointerDismissedReference.current = !event.defaultPrevented;
+        }}
+        onCloseAutoFocus={(event) => {
+          popoverProperties?.onCloseAutoFocus?.(event);
+          handleCloseAutoFocus(event);
+        }}
+      >
+        <>
+          <ItemList
+            groupedItems={groupedItems}
+            onPick={handleSelect}
+            selectedItem={value}
+            renderLabel={renderLabel}
+            getValue={getValue}
+            getKeywords={getKeywords}
+            searchPlaceHolder={searchPlaceHolder}
+            asChildLabel={asChildLabel}
+            labelClassName={labelClassName}
+            isDisabled={isDisabled}
+            emptyListMessage={emptyListMessage}
+            isSearchEnabled={isSearchEnabled}
+            withVirtualization={withVirtualization}
+            virtualizationHeight={virtualizationHeight}
+            isLoadingMore={isLoadingMore}
+            onLoadMore={onLoadMore}
+          />
+          {footer}
+        </>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function ItemList<T>({
+  groupedItems,
+  onPick,
+  selectedItem,
+  renderLabel,
+  getValue,
+  getKeywords,
+  searchPlaceHolder,
+  asChildLabel: labelAsChild,
+  labelClassName,
+  isDisabled,
+  emptyListMessage,
+  isSearchEnabled = true,
+  withVirtualization = false,
+  virtualizationHeight = 300,
+  isLoadingMore = false,
+  onLoadMore,
+}: {
+  readonly groupedItems: Array<GroupedItems<T>>;
+  readonly onPick: (item: T) => void;
+  readonly selectedItem: T | undefined;
+  readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
+  readonly getValue: (item: T) => string;
+  readonly getKeywords?: (item: T) => readonly string[];
+  readonly searchPlaceHolder: string;
+  readonly asChildLabel?: boolean;
+  readonly labelClassName?: ClassValue;
+  readonly isDisabled?: (item: T) => boolean;
+  readonly emptyListMessage?: ReactNode;
+  readonly isSearchEnabled?: boolean;
+  readonly withVirtualization?: boolean;
+  readonly virtualizationHeight?: number;
+  readonly isLoadingMore?: boolean;
+  readonly onLoadMore?: () => void;
+}) {
+  const [search, setSearch] = React.useState('');
+  const lastSearchLoad = React.useRef('');
+  const nonEmptyGroups = React.useMemo(() => groupedItems.filter((group) => group.items.length > 0), [groupedItems]);
+
+  type FlatItem =
+    | { type: 'item'; item: T; groupName: string; value: string; keywords: readonly string[] }
+    | { type: 'header'; groupName: string };
+
+  // Flatten all items from all groups for virtualization, including group headers
+  const flattenedItems = React.useMemo((): FlatItem[] => {
+    return nonEmptyGroups.flatMap((group) => [
+      { type: 'header', groupName: group.name } as const,
+      ...group.items.map(
+        (item) =>
+          ({
+            type: 'item',
+            item,
+            groupName: group.name,
+            value: getValue(item),
+            keywords: getKeywords?.(item) ?? [],
+          }) as const,
+      ),
+    ]);
+  }, [nonEmptyGroups, getKeywords, getValue]);
+
+  // Filter items based on search
+  const filteredItems = React.useMemo((): FlatItem[] => {
+    if (!search || !withVirtualization) {
+      return flattenedItems;
+    }
+
+    const searchLower = search.toLowerCase();
+
+    // Filter items and track which groups still have items
+    const filteredItemEntries = flattenedItems.filter(
+      (entry) =>
+        entry.type === 'item' &&
+        (entry.value.toLowerCase().includes(searchLower) ||
+          entry.groupName.toLowerCase().includes(searchLower) ||
+          entry.keywords.some((keyword) => keyword.toLowerCase().includes(searchLower))),
+    );
+
+    // Get unique group names that have matching items
+    const groupsWithItems = new Set(filteredItemEntries.map((entry) => (entry as { groupName: string }).groupName));
+
+    // Include headers only for groups that have matching items
+    return flattenedItems.filter(
+      (entry) =>
+        (entry.type === 'header' && groupsWithItems.has(entry.groupName)) ||
+        (entry.type === 'item' &&
+          (entry.value.toLowerCase().includes(searchLower) ||
+            entry.groupName.toLowerCase().includes(searchLower) ||
+            entry.keywords.some((keyword) => keyword.toLowerCase().includes(searchLower)))),
+    );
+  }, [flattenedItems, search, withVirtualization]);
+
+  React.useEffect(() => {
+    const key = `${search}\0${String(flattenedItems.length)}`;
+    if (
+      withVirtualization &&
+      search !== '' &&
+      filteredItems.length === 0 &&
+      onLoadMore !== undefined &&
+      !isLoadingMore &&
+      lastSearchLoad.current !== key
+    ) {
+      lastSearchLoad.current = key;
+      const searchLoadTimeout = globalThis.setTimeout(onLoadMore, 150);
+      return () => {
+        globalThis.clearTimeout(searchLoadTimeout);
+      };
+    }
+    return undefined;
+  }, [filteredItems.length, flattenedItems.length, isLoadingMore, onLoadMore, search, withVirtualization]);
+
+  // Render individual item or group header
+  const renderItem = React.useCallback(
+    (index: number) => {
+      const itemData = filteredItems[index];
+      if (!itemData) {
+        return undefined;
+      }
+
+      // Render group header
+      if (itemData.type === 'header') {
+        return (
+          <div key={`header-${itemData.groupName}`} className={menuGroupHeadingClass}>
+            {itemData.groupName}
+          </div>
+        );
+      }
+
+      const { item, value, keywords } = itemData;
+
+      return (
+        <CommandItem
+          key={value}
+          asChild={labelAsChild}
+          value={value}
+          keywords={[itemData.groupName, ...keywords]}
+          className={cn(labelClassName)}
+          disabled={isDisabled?.(item)}
+          onSelect={() => {
+            onPick(item);
+          }}
+        >
+          {renderLabel(item, selectedItem)}
+        </CommandItem>
+      );
+    },
+    [filteredItems, labelAsChild, labelClassName, isDisabled, renderLabel, selectedItem, onPick],
+  );
+
+  if (withVirtualization) {
+    return (
+      <Command shouldFilter={false}>
+        {isSearchEnabled ? (
+          <CommandInput placeholder={searchPlaceHolder} value={search} onValueChange={setSearch} />
+        ) : null}
+        <CommandList>
+          {filteredItems.length === 0 ? (
+            <CommandEmpty className='mx-2'>{emptyListMessage}</CommandEmpty>
+          ) : (
+            <Virtuoso
+              style={{ height: `${virtualizationHeight}px` }}
+              totalCount={filteredItems.length}
+              itemContent={renderItem}
+              endReached={onLoadMore}
+              // Virtuoso's List component doesn't handle vertical padding correctly due to
+              // absolute positioning used for virtualization. Use Header/Footer for vertical
+              // spacing instead.
+              components={{
+                List: (properties) => <div {...properties} className='flex flex-col gap-0.5 px-1' />,
+                Header: () => <div className='h-1' />,
+                Footer: isLoadingMore
+                  ? () => (
+                      <div className='flex items-center gap-2 p-2 text-sm text-muted-foreground'>
+                        <Loader />
+                        <span>Loading more…</span>
+                      </div>
+                    )
+                  : () => <div className='h-1' />,
+              }}
+            />
+          )}
+        </CommandList>
+      </Command>
+    );
+  }
+
+  return (
+    <Command>
+      {isSearchEnabled ? <CommandInput placeholder={searchPlaceHolder} /> : null}
+      <CommandList>
+        <CommandEmpty className='mx-2'>{emptyListMessage}</CommandEmpty>
+        {nonEmptyGroups.map((group) => (
+          <CommandGroup key={group.name} heading={group.name}>
+            {group.items.map((item) => {
+              const value = getValue(item);
+              return (
+                <CommandItem
+                  key={value}
+                  asChild={labelAsChild}
+                  value={value}
+                  keywords={[group.name, ...(getKeywords?.(item) ?? [])]}
+                  className={cn(labelClassName)}
+                  disabled={isDisabled?.(item)}
+                  onSelect={() => {
+                    onPick(item);
+                  }}
+                >
+                  {renderLabel(item, selectedItem)}
+                </CommandItem>
+              );
+            })}
+          </CommandGroup>
+        ))}
+      </CommandList>
+    </Command>
+  );
+}

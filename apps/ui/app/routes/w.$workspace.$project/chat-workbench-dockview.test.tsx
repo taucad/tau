@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { isValidElement, useEffect, useState, StrictMode, Fragment } from 'react';
 import { MemoryRouter } from 'react-router';
-import { KeyboardProvider } from '#hooks/use-keyboard.js';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { createPortal } from 'react-dom';
 import { Printer } from 'lucide-react';
 import type {

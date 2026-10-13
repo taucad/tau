@@ -8,7 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { ClientOnly } from '#components/ui/utils/client-only.js';
+import { ClientOnly } from '@taucad/ui/components/client-only';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { UserButton } from '#components/auth/user/user-button.js';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';

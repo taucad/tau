@@ -5,13 +5,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { cn } from '@taucad/ui/utils/cn';
 import { PanelLeft } from 'lucide-react';
 import { useLocation } from 'react-router';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { cookieName } from '#constants/cookie.constants.js';
 import { sidebarDefaultOpen } from '#constants/sidebar.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
+import { formatKeyCombination } from '@taucad/ui/utils/keys';
+import type { KeyCombination } from '@taucad/ui/utils/keys';
 
 const {
   Sidebar,

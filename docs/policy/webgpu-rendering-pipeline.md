@@ -24,7 +24,7 @@ The interactive viewport runs **`frameloop='demand'`** — temporal anti-aliasin
 
 Implementations **must** follow this shape (identifiers may differ only in variable names):
 
-- **Renderer**: `WebGPURenderer` from `three/webgpu` with **`reversedDepthBuffer: true`**, **`antialias: true`** (hardware MSAA — viewport preset), **`logarithmicDepthBuffer: false`** (factory: **`createTauR3fGlProp('webgpu')`** in **`apps/ui/app/components/geometry/graphics/three/canvas-three-gl.ts`**, which delegates to **`createTauRenderer('viewport', 'webgpu', …)`**).
+- **Renderer**: `WebGPURenderer` from `three/webgpu` with **`reversedDepthBuffer: true`**, **`antialias: true`** (hardware MSAA — viewport preset), **`logarithmicDepthBuffer: false`** (factory: **`createTauR3fGlProp('webgpu')`** in **`packages/viewer/src/graphics/three/canvas-three-gl.ts`**, which delegates to **`createTauRenderer('viewport', 'webgpu', …)`**).
 
 - **Pre-pass**: `pass(scene, camera)`, **`transparent = false`**, **`setMRT(mrt({ output: directionToColor(normalView) }))`** (no velocity MRT — not used without temporal AA), **`prePass.getTexture('output').type = UnsignedByteType`**.
 
@@ -34,7 +34,7 @@ Implementations **must** follow this shape (identifiers may differ only in varia
 
 - **Output**: **`scenePass`** wired as **`RenderPipeline.outputNode`** (no **`traa`** in the on-demand viewport).
 
-CORRECT (`apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.tsx`)
+CORRECT (`packages/viewer/src/graphics/three/post-processing-webgpu.tsx`)
 
 ```tsx
 scenePass.contextNode = builtinAOContext(aoNode.getTextureNode().sample(screenUV).r);
@@ -56,7 +56,7 @@ post.outputNode = vec4(sceneColor.rgb.mul(aoTex.r), sceneColor.a);
 
 The viewer setting **`enablePostProcessing`** (**`graphics.machine`**) fully **unmounts** the post-processing subtree on **both** WebGL (`EffectComposer` + `N8AO`) **and** WebGPU (`PostProcessingWebGPU` / `RenderPipeline`). No partial “AO-only” graph while the toggle is **off**.
 
-**Why**: Predictable parity between backends and the simplest teardown path (`apps/ui/app/components/geometry/graphics/three/post-processing.tsx`).
+**Why**: Predictable parity between backends and the simplest teardown path (`packages/viewer/src/graphics/three/post-processing.tsx`).
 
 ### 3. WebGL path stays frozen for parity ambition
 
@@ -64,7 +64,7 @@ Tau does **not** extend the **`EffectComposer` + multisampled `N8AO`** fallback 
 
 ### 4. Debug Inspector overlay
 
-three.js **`Inspector`** mounts only when **`useFeature('tauDebug')`** is **true**. The bulky bundle MUST stay behind **`React.lazy`** (`apps/ui/app/components/geometry/graphics/three/webgpu-inspector-overlay.tsx` importing **`three-webgpu-inspector-bootstrap.tsx`**). **`Inspector` MUST NOT** be statically imported inside that bootstrap module: load it only from **`useLayoutEffect`** via **`await import('three/addons/inspector/Inspector.js')`** so SSR never evaluates **`examples/jsm/inspector/tabs/Settings.js`**, whose top-level **`_loadState()`** reads **`localStorage`** and crashes Netlify SSR.
+three.js **`Inspector`** mounts only when the viewer switch **`useViewerFeature('webGpuInspector')`** is **true**. The bulky bundle MUST stay behind **`React.lazy`** (`packages/viewer/src/graphics/three/webgpu-inspector-overlay.tsx` importing **`three-webgpu-inspector-bootstrap.tsx`**). **`Inspector` MUST NOT** be statically imported inside that bootstrap module: load it only from **`useLayoutEffect`** via **`await import('three/addons/inspector/Inspector.js')`** so SSR never evaluates **`examples/jsm/inspector/tabs/Settings.js`**, whose top-level **`_loadState()`** reads **`localStorage`** and crashes Netlify SSR.
 
 **Why**: Production bundles stay slim; WGSL/timeline triage stays opt-in (`apps/ui/app/flags/flag.constants.ts`). Dynamic import keeps Node out of **`localStorage`**-touching evaluator side effects.
 

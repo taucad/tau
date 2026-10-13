@@ -32,6 +32,7 @@ import { z } from 'zod';
 
 import { createTauMcpHttpHandler, serveTauMcpStdio } from '@taucad/mcp';
 import type {
+  TauMcpConfirm,
   TauMcpDispatch,
   TauMcpHostCall,
   TauMcpHostTool,
@@ -46,6 +47,7 @@ import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 
 import type { JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
 import { saveChatAttachment } from '#acp/media.js';
+import { createLocalMcpViewer } from '#mcp-viewer.js';
 
 /**
  * Milliseconds a host-minted capability may live.
@@ -81,10 +83,13 @@ export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
 /**
  * The exact tool grant a host capability carries.
  *
- * The four CAD tools, the workbench record tool, and the print tools (blueprint D5, Bambu Studio D13): an
+ * The four CAD tools, the workbench record tool, the parameter tools (agent plugin UI blueprint G22), and the print
+ * tools (blueprint D5, Bambu Studio D13): an
  * external agent may read the slicing profiles a machine offers, and open,
  * read, list and stop a print request through the same ledger a Tau turn
- * uses, and is told to wait for the person — nothing here starts a print. Every name is dispatched into the daemon's own registry by tool name.
+ * uses. A print starts only on the person's answer: in the client's own approval form when it declares form
+ * elicitation (`tau mcp`), otherwise in Tau, while the agent is told to wait. Every name is dispatched into the
+ * daemon's own registry by tool name.
  *
  * @public
  */
@@ -94,6 +99,8 @@ export const hostMcpAllowedTools = [
   toolName.screenshot,
   toolName.exportModel,
   toolName.arrangeWorkbench,
+  toolName.getParameters,
+  toolName.applyParameterOperation,
   toolName.getPrintProfiles,
   toolName.requestPrint,
   toolName.getPrintRequest,
@@ -113,6 +120,8 @@ export type HostMcpAllowedTool = (typeof hostMcpAllowedTools)[number];
  */
 const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAllowedTool>([
   toolName.arrangeWorkbench,
+  toolName.getParameters,
+  toolName.applyParameterOperation,
   toolName.askQuestions,
   toolName.getPrintProfiles,
   toolName.requestPrint,
@@ -123,6 +132,7 @@ const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAll
 
 /** The registry tools that change nothing, here or on a machine. */
 const readOnlyRegistryTools: ReadonlySet<string> = new Set<string>([
+  toolName.getParameters,
   toolName.getPrintProfiles,
   toolName.getPrintRequest,
   toolName.listPrintRequests,
@@ -132,6 +142,19 @@ const readOnlyRegistryTools: ReadonlySet<string> = new Set<string>([
 const hostMcpAnnotationOverrides: Readonly<Partial<Record<string, NonNullable<TauMcpHostTool['annotations']>>>> = {
   [toolName.arrangeWorkbench]: {
     readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  /* Writes the entry's parameter sidecar in the project, through a checked write. */
+  [toolName.applyParameterOperation]: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  },
+  [toolName.getParameters]: {
+    readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
     openWorldHint: false,
@@ -735,6 +758,12 @@ export type LocalHostMcpOptions = {
    * is recorded here under its own run id, so the registry works in that folder.
    */
   readonly checkouts: Map<string, { readonly cwd: string }>;
+  /**
+   * The single-file viewer page and its SHA-256. With it, the server serves the
+   * page, `show_model` and the page's tools (blueprint W4); without it, the CAD
+   * tools alone.
+   */
+  readonly viewerPage?: Readonly<{ html: string; sha256: string }> | undefined;
 };
 
 /** A local MCP server serving one agent. @public */
@@ -815,8 +844,93 @@ export const serveLocalHostMcp = async (
     await writeFile(absolutePath, bytes);
     return { path, absolutePath, byteLength: bytes.length, sha256 };
   };
+  const rootOf = (meta: Readonly<Record<string, unknown>> | undefined): string =>
+    (options.pinned ? undefined : callerRoot(meta)) ?? options.workspaceRoot;
+  const invokeIn = async ({
+    workspaceRoot,
+    tool,
+    args,
+    call,
+  }: {
+    readonly workspaceRoot: string;
+    readonly tool: HostMcpAllowedTool;
+    readonly args: Readonly<Record<string, unknown>>;
+    readonly call: {
+      readonly toolCallId: string;
+      readonly signal?: AbortSignal | undefined;
+      readonly confirm?: TauMcpConfirm | undefined;
+    };
+  }): Promise<Awaited<ReturnType<ToolRegistry['invoke']>>> => {
+    const runId = `mcp:${workspaceRoot}`;
+    options.checkouts.set(runId, { cwd: workspaceRoot });
+    const { confirm } = call;
+    return options.registry.invoke({
+      toolCallId: call.toolCallId,
+      toolName: tool,
+      runId,
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the args were validated against the tool's own schema.
+      input: args as unknown as JsonValue,
+      signal: call.signal ?? new AbortController().signal,
+      /* A client that draws forms asks the person inside this call, so a print starts only on their answer (E9,
+       * W11). Without one the tool leaves its request awaiting approval in Tau. Nothing pauses here, so there is
+       * no later attempt to recall an answer. */
+      ...(confirm === undefined
+        ? {}
+        : {
+            approve: async ({ prompt }: { readonly prompt: string }) => {
+              const outcome = await confirm({ message: prompt, label: 'Approve' }).catch((error: unknown) => {
+                /* Not the person's answer: the tool leaves its request for them in Tau, and the operator learns why. */
+                process.stderr.write(
+                  `tau mcp: the agent app could not ask the person to approve ${tool}, so it waits for them in Tau: ${String(error)}\n`,
+                );
+                throw Object.assign(new Error('The agent app could not ask the person.', { cause: error }), {
+                  code: 'APPROVAL_UNAVAILABLE',
+                });
+              });
+              return { interruptId: call.toolCallId, outcome };
+            },
+          }),
+    });
+  };
+  const viewer =
+    options.viewerPage === undefined
+      ? undefined
+      : createLocalMcpViewer({
+          page: options.viewerPage,
+          rootOf,
+          /* Stdout carries the protocol; a view the page could not keep is said on stderr, and the page works on. */
+          workbench: {
+            onError: (error) => {
+              process.stderr.write(`tau mcp: the viewer's view was not kept in .tau/workbench: ${String(error)}\n`);
+            },
+          },
+          renderGlb: async ({ root, targetFile, toolCallId, signal }) => {
+            const result = await invokeIn({
+              workspaceRoot: root,
+              tool: toolName.exportModel,
+              args: { targetFile, to: 'glb' },
+              call: { toolCallId, signal },
+            });
+            const content: JsonObject = isJsonObject(result.content) ? result.content : {};
+            const { files } = content;
+            const listed: readonly JsonValue[] = Array.isArray(files) ? (files as readonly JsonValue[]) : [];
+            const [first] = listed;
+            const artifactPath = first !== undefined && isJsonObject(first) ? first['artifactPath'] : undefined;
+            if (result.isError || content['success'] === false || typeof artifactPath !== 'string') {
+              return {
+                errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'RENDER_FAILED',
+                message:
+                  typeof content['message'] === 'string'
+                    ? content['message']
+                    : `${targetFile} could not be rendered to GLB.`,
+              };
+            }
+            return artifactPath;
+          },
+        });
   const server = await serveTauMcpStdio(
     {
+      ...(viewer === undefined ? {} : { viewer }),
       hostTools: options.registry
         .list()
         .filter(
@@ -831,16 +945,11 @@ export const serveLocalHostMcp = async (
         if ('errorCode' in route) {
           return route;
         }
-        const workspaceRoot = (options.pinned ? undefined : callerRoot(dispatchOptions.meta)) ?? options.workspaceRoot;
-        const runId = `mcp:${workspaceRoot}`;
-        options.checkouts.set(runId, { cwd: workspaceRoot });
-        const result = await options.registry.invoke({
-          toolCallId: dispatchOptions.toolCallId,
-          toolName: route.tool,
-          runId,
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `@taucad/mcp` validated these args against the tool's own schema.
-          input: route.args as unknown as JsonValue,
-          signal: dispatchOptions.signal ?? new AbortController().signal,
+        const result = await invokeIn({
+          workspaceRoot: rootOf(dispatchOptions.meta),
+          tool: route.tool,
+          args: route.args,
+          call: dispatchOptions,
         });
         return present({ save, signals: [dispatchOptions.signal] }, route.tool, result).catch((error: unknown) =>
           hostFault(route.tool, error),
@@ -853,6 +962,7 @@ export const serveLocalHostMcp = async (
     server,
     close: async () => {
       await server.close();
+      await viewer?.close();
       await rm(directory, { recursive: true, force: true });
     },
   };

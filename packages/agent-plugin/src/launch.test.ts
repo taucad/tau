@@ -14,9 +14,13 @@ type Run = { readonly stdout: string; readonly stderr: string; readonly code: nu
  * Run the launcher with `TAU_CLI` set, as a host would: stdin a pipe the host
  * closes, stdout the protocol channel.
  */
-const launch = async (tauCli: string, stopWhen?: (stdout: string) => boolean): Promise<Run> =>
+const launch = async (
+  tauCli: string,
+  stopWhen?: (stdout: string) => boolean,
+  args: readonly string[] = [],
+): Promise<Run> =>
   new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [launcher], {
+    const child = spawn(process.execPath, [launcher, ...args], {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
       env: { ...process.env, TAU_CLI: tauCli },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -66,6 +70,18 @@ describe.skipIf(process.platform === 'win32')('launch', () => {
     );
 
     await expect(launch(cli)).resolves.toEqual({ stdout: '["mcp"]', stderr: '', code: 7 });
+  });
+
+  it('should pass its own arguments on after `mcp`', async () => {
+    const cli = await fakeCli(
+      "process.stdin.resume().on('end', () => { process.stdout.write(JSON.stringify(process.argv.slice(2))); process.exit(0); });",
+    );
+
+    await expect(launch(cli, undefined, ['--project', '/work/bracket'])).resolves.toEqual({
+      stdout: '["mcp","--project","/work/bracket"]',
+      stderr: '',
+      code: 0,
+    });
   });
 
   it('should forward SIGTERM to the CLI and exit once it has stopped', async () => {

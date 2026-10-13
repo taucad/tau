@@ -56,8 +56,8 @@ vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionCommands: () => ({ saveRevision }),
 }));
 
-const { KeyboardProvider } = await import('#hooks/use-keyboard.js');
-const { setPlatform } = await import('#utils/keys.utils.js');
+const { KeyboardProvider } = await import('@taucad/ui/components/keyboard');
+const { setPlatform } = await import('@taucad/ui/utils/keys');
 /* `modKey` is Cmd on a Mac and Ctrl everywhere else; the suite pins one so the
  * assertion is about the binding, not about the runner's platform. */
 setPlatform('other');

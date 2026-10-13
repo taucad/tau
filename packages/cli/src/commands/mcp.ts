@@ -1,13 +1,17 @@
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import { Writable } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { keyedResource, serveLocalHostMcp } from '@taucad/host';
+import { keyedResource, openLocalMachines, openLocalParameterActors, serveLocalHostMcp } from '@taucad/host';
+import type { LocalMachines } from '@taucad/host';
 import { createHostToolRegistry } from '@taucad/host/agent-tools';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import type { AnyRuntimeDefinition, RuntimeClient } from '@taucad/runtime';
 import { defineCommand } from 'citty';
 
+import { machineProviders } from '#machine-providers.js';
 import type { RuntimeWorkerData } from '#runtime.worker.js';
 
 /** Milliseconds a stopping server waits for its kernels before it exits anyway. */
@@ -42,8 +46,8 @@ const seconds = (name: string, value: string | undefined, fallback: number): num
 /**
  * `tau mcp` command.
  *
- * Serves Tau's CAD tools — evaluate, test, screenshot, export and the
- * workbench record — over stdio (MCP) to the agent that launched it. The
+ * Serves Tau's CAD tools — evaluate, test, screenshot, export, parameters
+ * and the workbench record — over stdio (MCP) to the agent that launched it. The
  * `@taucad/agent-plugin` launcher runs it for Codex and Claude Code; any MCP
  * client may run `tau mcp` itself.
  *
@@ -61,11 +65,39 @@ const seconds = (name: string, value: string | undefined, fallback: number): num
  * its thread, which its next call replaces, and a thread with no tool call
  * in flight for `--idle-release` is released.
  *
+ * With `--machines` it also serves the print tools over the printers this computer's Tau apps share
+ * (`<config>/machines`). A print starts only after the person approves it in the agent app's own form; an app that
+ * cannot show one leaves the request for Tau's Print pane. Each print names the project of the folder its call works
+ * in. The store has one writer, so the flag is off by default: a server holding it keeps the desktop app from its
+ * printers until the agent closes, and a server whose one folder holds no `tau.json` does not take it.
+ *
  * @example <caption>Serve one project to an MCP client</caption>
  * ```text
  * tau mcp --project ./bracket
  * ```
  */
+/**
+ * The viewer page a launcher named, with the digest that names its `ui://` URI.
+ *
+ * A page that cannot be read leaves the CAD tools serving without the viewer,
+ * and says why on stderr: the agent keeps working either way.
+ *
+ * @param path - The page's path, if any.
+ * @returns The page, or `undefined`.
+ */
+const readViewerPage = async (path: string | undefined): Promise<{ html: string; sha256: string } | undefined> => {
+  if (path === undefined || path === '') {
+    return undefined;
+  }
+  try {
+    const html = await readFile(resolvePath(path), 'utf8');
+    return { html, sha256: createHash('sha256').update(html).digest('hex') };
+  } catch (error) {
+    process.stderr.write(`tau mcp: serving without the viewer; ${path} could not be read: ${String(error)}\n`);
+    return undefined;
+  }
+};
+
 export const mcpCommand = defineCommand({
   meta: {
     name: 'mcp',
@@ -91,6 +123,17 @@ export const mcpCommand = defineCommand({
     'idle-release': {
       type: 'string',
       description: `Seconds an unused project's thread is kept (default: ${String(defaultIdleRelease)})`,
+    },
+    machines: {
+      type: 'boolean',
+      description:
+        "Offer the print tools over this computer's Tau printers; a print starts only after the person approves it in the agent app (TAU_HOST_MACHINES=true)",
+      default: process.env['TAU_HOST_MACHINES'] === 'true',
+    },
+    'viewer-page': {
+      type: 'string',
+      description:
+        'Single-file viewer page to serve with show_model (default: TAU_VIEWER_PAGE; none disables the viewer)',
     },
   },
   async run({ args }) {
@@ -216,12 +259,39 @@ export const mcpCommand = defineCommand({
         });
       return track(value);
     };
+    /* The printers this computer's Tau apps share, before the tools: the print tools are offered only over a store
+     * this process holds. Another Tau app holding it leaves the CAD tools serving without printers. A server whose
+     * calls all work in one folder (`--project`, or Claude Code's project) holds the store only when that folder is a
+     * Tau project; Codex names each call's folder, so a server it starts names the project per call. */
+    const opened = args.machines
+      ? await openLocalMachines({
+          workspaceRoot,
+          requireProject: args.project !== undefined || process.env['CLAUDE_PROJECT_DIR'] !== undefined,
+          ...(await machineProviders()),
+          actorId: 'tau-mcp',
+          onWarning: ({ message }) => {
+            process.stderr.write(`tau mcp: ${message}\n`);
+          },
+        })
+      : undefined;
+    const machines: LocalMachines | undefined = opened === undefined || 'refused' in opened ? undefined : opened;
+    if (opened !== undefined && 'refused' in opened) {
+      process.stderr.write(
+        opened.refused === 'in-use'
+          ? 'tau mcp: printers are in use by another Tau app on this computer, so this server offers no print tools. Quit it and restart the agent to print from here.\n'
+          : `tau mcp: ${workspaceRoot} holds no tau.json, so this server offers no print tools and leaves the printers to Tau's other apps. Restart the agent in a Tau project to print from here.\n`,
+      );
+    }
     const checkouts = new Map<string, { readonly cwd: string }>();
+    /* `get_parameters` and `apply_parameter_operation`: one actor per entry, writing its sidecar. */
+    const parameters = openLocalParameterActors({ runtimeClient: clientFor });
     const tools = createHostToolRegistry({
       workspaceRoot,
       checkouts,
       runtimeClient: clientFor,
+      parameterActor: parameters.parameterActor,
       systemSkillBundles,
+      ...(machines === undefined ? {} : { machines: machines.facet, projectIdOf: machines.projectOf }),
     });
     /* The idle release waits for a project's last tool call to settle, not its last operation: a call may work
      * between two operations (GeoSpec checks between a test's exports) for longer than the release. The project is
@@ -244,8 +314,9 @@ export const mcpCommand = defineCommand({
         }
       },
     };
+    const viewerPage = await readViewerPage(args['viewer-page'] ?? process.env['TAU_VIEWER_PAGE']);
     const local = await serveLocalHostMcp(
-      { workspaceRoot, pinned: args.project !== undefined, registry, checkouts },
+      { workspaceRoot, pinned: args.project !== undefined, registry, checkouts, viewerPage },
       { stdout },
     );
     // oxlint-disable-next-line unicorn/prefer-add-event-listener -- The SDK server exposes an onclose callback, not EventTarget.
@@ -259,6 +330,14 @@ export const mcpCommand = defineCommand({
       for (const timer of idleTimers.values()) {
         clearTimeout(timer);
       }
+      try {
+        await parameters.close();
+      } catch (error) {
+        process.stderr.write(`tau mcp: a parameter write did not close: ${String(error)}\n`);
+      }
+      await machines?.close().catch((error: unknown) => {
+        process.stderr.write(`tau mcp: the printer store did not close: ${String(error)}\n`);
+      });
       await clients.closeAll();
     };
     await Promise.race([close().catch(() => undefined), sleep(shutdownGrace)]);

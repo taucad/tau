@@ -86,7 +86,7 @@ vi.mock('#hooks/use-cad-agent-config.js', () => ({
 }));
 
 const keybindings = vi.hoisted(() => new Map<string, () => void>());
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: (combination: { key: string }, callback: () => void) => {
     keybindings.set(combination.key, callback);
     return { formattedKeyCombination: '⌘/' };

@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { GraphicsProvider } from '#hooks/use-graphics.js';
-import { KeyboardProvider } from '#hooks/use-keyboard.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
+import { GraphicsProvider } from '@taucad/viewer/hooks/use-graphics';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
+import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
 
 const mocks = vi.hoisted(() => ({ hasGridReadout: true }));
@@ -15,12 +15,12 @@ const mocks = vi.hoisted(() => ({ hasGridReadout: true }));
 vi.mock('#components/geometry/cad/capture-view-control.js', () => ({
   CaptureViewControl: () => <button type='button' aria-label='Capture view to chat' />,
 }));
-vi.mock('#components/geometry/cad/grid-control.js', () => ({
+vi.mock('@taucad/viewer/cad/grid-control', () => ({
   // The readout renders nothing until the grid has a size.
   GridSizeIndicator: () =>
     mocks.hasGridReadout ? <button type='button' aria-label='Grid 10 mm, units and grid' /> : null,
 }));
-vi.mock('#components/geometry/cad/viewer-settings.js', () => ({
+vi.mock('@taucad/viewer/cad/viewer-settings', () => ({
   ViewerSettings: ({ side, align }: { readonly side?: string; readonly align?: string }) => (
     <button type='button' aria-label='Viewer settings' data-side={side} data-align={align} />
   ),

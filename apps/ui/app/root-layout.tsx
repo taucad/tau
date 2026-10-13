@@ -14,12 +14,13 @@ import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { Toaster } from '#components/ui/sonner.js';
 import { ColorProvider, useColor } from '#hooks/use-color.js';
+import { AppViewerEnvironment } from '#components/geometry/app-viewer-environment.js';
 import { useFavicon } from '#hooks/use-favicon.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ErrorPage } from '#components/error-page.js';
 import { ProjectManagerProvider } from '#hooks/use-project-manager.js';
 import { HomeFileManagerProvider } from '#hooks/use-file-manager.js';
-import { KeyboardProvider } from '#hooks/use-keyboard.js';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { RevisionActorIdentity } from '#components/revision-actor-identity.js';
 import { ChatSessionStoreProvider } from '#hooks/chat-session-store-provider.js';
@@ -173,9 +174,11 @@ export function RootLayout({
         <AnalyticsBoundary>
           <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
             <ColorProvider>
-              <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
-                {application}
-              </LayoutDocument>
+              <AppViewerEnvironment>
+                <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
+                  {application}
+                </LayoutDocument>
+              </AppViewerEnvironment>
             </ColorProvider>
           </ThemeProvider>
         </AnalyticsBoundary>

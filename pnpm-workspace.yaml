@@ -74,6 +74,7 @@ catalog:
   '@langchain/ollama': ^1.3.0
   '@langchain/openai': ^1.5.1
   '@langchain/xai': ^1.4.3
+  '@modelcontextprotocol/ext-apps': 1.7.5
   '@modelcontextprotocol/sdk': ^1.29.0
   '@msgpack/msgpack': ^3.1.3
   '@nestjs/common': ^11.1.27
@@ -285,6 +286,7 @@ catalog:
   unist-util-visit: ^5.1.0
   vite: 8.0.10
   vite-plugin-mkcert: 2.0.0
+  vite-plugin-singlefile: 2.3.3
   vite-plugin-static-copy: ^4.1.1
   vitest: 4.1.11
   vitest-mock-extended: ^3.1.1

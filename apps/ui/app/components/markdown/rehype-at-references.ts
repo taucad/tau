@@ -9,6 +9,7 @@ const skipParentTags = new Set(['code', 'pre', 'a']);
  *
  * - `@path` produces `<mark data-at-reference="path">`
  * - `/skill`, `$skill` produce `<mark data-invocation="token">`; the chip renders text unless the chat knows the token
+ * - `@cad[<file>#<component>]` produces `<mark data-cad-reference="token">`
  *
  * `<mark>` is used instead of `<span>` because markdown rendering produces
  * hundreds of `<span>` elements (especially in code blocks). Using `<mark>`
@@ -44,22 +45,38 @@ function visitTextNodes(children: Array<RootContent | ElementContent>, parentTag
 
     const replacementNodes: ElementContent[] = [];
     for (const segment of segments) {
-      if (segment.type === 'text') {
-        replacementNodes.push({ type: 'text', value: segment.value });
-      } else if (segment.type === 'atReference') {
-        replacementNodes.push({
-          type: 'element',
-          tagName: 'mark',
-          properties: { 'data-at-reference': segment.path },
-          children: [{ type: 'text', value: `@${segment.path}` }],
-        } satisfies Element);
-      } else {
-        replacementNodes.push({
-          type: 'element',
-          tagName: 'mark',
-          properties: { 'data-invocation': segment.token },
-          children: [{ type: 'text', value: segment.token }],
-        } satisfies Element);
+      switch (segment.type) {
+        case 'text': {
+          replacementNodes.push({ type: 'text', value: segment.value });
+          break;
+        }
+        case 'cadReference': {
+          replacementNodes.push({
+            type: 'element',
+            tagName: 'mark',
+            properties: { 'data-cad-reference': segment.token },
+            children: [{ type: 'text', value: segment.token }],
+          } satisfies Element);
+          break;
+        }
+        case 'atReference': {
+          replacementNodes.push({
+            type: 'element',
+            tagName: 'mark',
+            properties: { 'data-at-reference': segment.path },
+            children: [{ type: 'text', value: `@${segment.path}` }],
+          } satisfies Element);
+          break;
+        }
+        case 'invocation': {
+          replacementNodes.push({
+            type: 'element',
+            tagName: 'mark',
+            properties: { 'data-invocation': segment.token },
+            children: [{ type: 'text', value: segment.token }],
+          } satisfies Element);
+          break;
+        }
       }
     }
 

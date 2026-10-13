@@ -9,7 +9,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { access, readFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -110,6 +110,58 @@ describe('serveLocalHostMcp', () => {
     }
   });
 
+  it("should ask the person through the client's form only when the client can draw one", async () => {
+    const { dispatch, invocations, local } = await serve(ready);
+    try {
+      const asked: string[] = [];
+      await dispatch(
+        { toolName: toolName.requestPrint, args: { targetFile: 'plate.ts' } },
+        {
+          toolCallId: 'print-1',
+          confirm: async ({ message }) => {
+            asked.push(message);
+            return 'denied';
+          },
+        },
+      );
+      await dispatch({ toolName: toolName.requestPrint, args: { targetFile: 'plate.ts' } }, { toolCallId: 'print-2' });
+
+      const [withForm, withoutForm] = invocations;
+      expect(await withForm?.approve?.({ prompt: 'Print plate.3mf on X1C?' })).toEqual({
+        interruptId: 'print-1',
+        outcome: 'denied',
+      });
+      expect(asked).toEqual(['Print plate.3mf on X1C?']);
+      expect(withForm?.approve?.recall).toBeUndefined();
+      expect(withoutForm?.approve).toBeUndefined();
+    } finally {
+      await local.close();
+    }
+  });
+
+  it('should tell the tool, and the operator on stderr, when the client could not ask the person', async () => {
+    const { dispatch, invocations, local } = await serve(ready);
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await dispatch(
+        { toolName: toolName.requestPrint, args: { targetFile: 'plate.ts' } },
+        {
+          toolCallId: 'print-1',
+          confirm: async () => {
+            throw new Error('Method not found');
+          },
+        },
+      );
+      await expect(invocations[0]?.approve?.({ prompt: 'Print plate.3mf on X1C?' })).rejects.toMatchObject({
+        code: 'APPROVAL_UNAVAILABLE',
+      });
+      expect(String(stderr.mock.calls.at(-1)?.[0])).toContain('Method not found');
+    } finally {
+      stderr.mockRestore();
+      await local.close();
+    }
+  });
+
   it('should keep a pinned project even when a call names another folder', async () => {
     const { dispatch, invocations, local } = await serve(ready, { workspaceRoot: '/pinned', pinned: true });
     try {
@@ -188,6 +240,50 @@ describe('serveLocalHostMcp', () => {
       expect(JSON.parse(await readFile(absolutePath, 'utf8'))).toEqual(verdict);
     } finally {
       await local.close();
+    }
+  });
+
+  it('should serve the viewer only with a page, rendering a shown source through export_model', async () => {
+    const { local: withoutPage } = await serve(ready);
+    expect(served.options?.viewer).toBeUndefined();
+    await withoutPage.close();
+
+    const root = await mkdtemp(join(tmpdir(), 'tau-viewer-local-'));
+    await writeFile(join(root, 'main.ts'), '');
+    const invocations: HostToolInvocation[] = [];
+    const registry: ToolRegistry = {
+      list: () => [],
+      invoke: async (invocation) => {
+        invocations.push(invocation);
+        await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });
+        await writeFile(join(root, '.tau', 'artifacts', 'main.glb'), 'glb');
+        return {
+          content: {
+            success: true,
+            files: [{ artifactPath: '.tau/artifacts/main.glb', mimeType: 'model/gltf-binary' }],
+          },
+          isError: false,
+        };
+      },
+    };
+    const local = await serveLocalHostMcp({
+      workspaceRoot: root,
+      registry,
+      checkouts: new Map(),
+      viewerPage: { html: '<!doctype html>', sha256: 'd'.repeat(64) },
+    });
+    try {
+      const shown = await served.options?.viewer?.show(
+        { targetFile: 'main.ts' },
+        { toolCallId: 'show-1', presentation: 'inline' },
+      );
+      expect(invocations).toEqual([
+        expect.objectContaining({ toolName: 'export_model', input: { targetFile: 'main.ts', to: 'glb' } }),
+      ]);
+      expect(shown).toMatchObject({ model: { path: '.tau/artifacts/main.glb', sourceFile: 'main.ts' } });
+    } finally {
+      await local.close();
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

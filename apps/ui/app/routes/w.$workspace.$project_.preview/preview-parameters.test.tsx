@@ -19,7 +19,7 @@ vi.mock('#hooks/use-cad-preview.js', () => ({
   }),
 }));
 
-vi.mock('#components/geometry/parameters/parameters.js', () => ({
+vi.mock('@taucad/viewer/parameters/parameters', () => ({
   Parameters: ({ units }: { units: { length: { displaySymbol: string } } }) => (
     <div data-testid='preview-parameters' data-display-symbol={units.length.displaySymbol} />
   ),

@@ -1,4 +1,4 @@
-import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
+import type { ModelComponentSecondaryPointerTarget } from '@taucad/viewer/graphics/three/react/gltf-mesh';
 
 export const viewerSecondaryGestureThresholdPx = 4;
 

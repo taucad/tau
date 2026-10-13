@@ -11,7 +11,7 @@ import { parseShareSlug, parseShareUrl } from '@taucad/share/locator';
 import { isShareError, ShareError } from '@taucad/share/provider';
 import type { ShareProtection } from '@taucad/share/provider';
 import type { ShareProjectSnapshot, ShareSnapshotFileRole } from '@taucad/share/snapshot';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';

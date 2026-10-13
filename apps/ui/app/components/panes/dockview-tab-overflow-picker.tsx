@@ -4,7 +4,7 @@ import type { IDockviewHeaderActionsProps, IDockviewPanel } from 'dockview-react
 import { Check, ChevronDown } from 'lucide-react';
 import { DockviewTabIcon } from '#components/panes/dockview-tab.js';
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 

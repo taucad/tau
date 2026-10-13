@@ -13,9 +13,9 @@ import type { ChatRequest, ChatTurn, ChatTurnGesture } from '#machines/chat-sess
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { hostAdmission } from '#chat-clients/_internal/turn-body.js';
-import { commandOf, turnIntentOf, turnTriggerOf } from '#chat-clients/turn-intent.js';
+import { commandOf, turnIntentOf, turnReferencesOf, turnTriggerOf } from '#chat-clients/turn-intent.js';
 import { externalAdmissionConfig, wireAdmissionConfig } from '#services/agent-host-client.js';
-import { buildUserMessage } from '#utils/chat.utils.js';
+import { buildEditedUserMessage } from '#utils/chat.utils.js';
 import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
 import { createAgentUsageTelemetry } from '#chat-clients/_internal/agent-usage-telemetry.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
@@ -112,12 +112,6 @@ export function ChatTurnHost(): ReactNode {
           gesture.kind === 'regenerate' && gesture.requestId !== undefined
             ? gesture.requestId
             : generatePrefixedId(idPrefix.request);
-        const browserHost = hostAdmission({
-          agent: turnAgent,
-          chatId: activeChatId,
-          resolveModel: resolveModelRef.current,
-          trigger: turnTriggerOf(intent),
-        })!(runId);
         const transcript =
           gesture.kind === 'send'
             ? [...messages, gesture.message]
@@ -127,14 +121,24 @@ export function ChatTurnHost(): ReactNode {
                   if (index === -1) {
                     throw new Error('That message is no longer in this chat, so it cannot be edited.');
                   }
-                  const original = messages[index]!;
-                  const rebuilt = buildUserMessage({ text: gesture.text, attachments: gesture.attachments });
                   return [
                     ...messages.slice(0, index),
-                    { ...rebuilt, id: original.id, metadata: { ...original.metadata, ...rebuilt.metadata } },
+                    buildEditedUserMessage(messages[index]!, {
+                      text: gesture.text,
+                      ...(gesture.attachments === undefined ? {} : { attachments: gesture.attachments }),
+                      ...(gesture.references === undefined ? {} : { references: gesture.references }),
+                    }),
                   ];
                 })()
               : messages;
+        const browserHost = hostAdmission({
+          agent: turnAgent,
+          chatId: activeChatId,
+          resolveModel: resolveModelRef.current,
+          trigger: turnTriggerOf(intent),
+          /* The turn's own message: the sent one, the edited one, or the one a regenerate re-runs. */
+          references: turnReferencesOf(transcript),
+        })!(runId);
         const command = commandOf(
           gesture.kind === 'send'
             ? { kind: 'send', messageId: gesture.message.id }
@@ -160,6 +164,7 @@ export function ChatTurnHost(): ReactNode {
                   messageId: gesture.messageId,
                   content: gesture.text,
                   ...(gesture.attachments === undefined ? {} : { attachments: gesture.attachments }),
+                  ...(gesture.references === undefined ? {} : { references: gesture.references }),
                   command,
                 }
               : { kind: 'regenerate', command };

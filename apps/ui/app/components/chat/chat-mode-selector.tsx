@@ -6,13 +6,13 @@ import { Command, CommandGroup, CommandItem, CommandList } from '@taucad/ui/comp
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { ghostPillClass } from '#components/chat/chat-agent-sheet.js';
 import { configOptionOf, configValues } from '#components/chat/use-agent-config.js';
 import type { AgentConfig } from '#components/chat/use-agent-config.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
-import { ariaKeyShortcuts, formatKeyCombination } from '#utils/keys.utils.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
+import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
+import type { KeyCombination } from '@taucad/ui/utils/keys';
 
 export const toggleModeKeyCombination = {
   key: '.',

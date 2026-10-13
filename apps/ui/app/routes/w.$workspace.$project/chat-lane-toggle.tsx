@@ -5,15 +5,15 @@ import { useSelector } from '@xstate/react';
 import { Separator } from '@taucad/ui/components/separator';
 import { cn } from '@taucad/ui/utils/cn';
 import { StatusMark } from '#components/nav/status-mark.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { useSidebar } from '#components/ui/sidebar.js';
 import { useIsTopLeftGroup } from '#components/panes/use-is-top-right-group.js';
 import { selectChatFacts, useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useProject } from '#hooks/use-project.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
+import { formatKeyCombination } from '@taucad/ui/utils/keys';
+import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { useProjectWorkspace, useWorkspaceLanes } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 type Place = 'lane' | 'viewer';

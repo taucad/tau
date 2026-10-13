@@ -19,11 +19,13 @@ import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { CallToolResultSchema, JSONRPCMessageSchema } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolResultSchema, ElicitRequestSchema, JSONRPCMessageSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { openSharedMachineHost } from '@taucad/host';
+import { connectMachineChannel } from '@taucad/runtime/machine';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolvePath(here, '../../../..');
@@ -99,6 +101,16 @@ export default function main() {
 
 export default function main() {
   return drawCircle(5).sketchOnPlane('XY').extrude(2);
+}
+`,
+  },
+  plate: {
+    'plate.ts': `import { drawRectangle } from 'replicad';
+
+export const defaultParams = { width: 20 };
+
+export default function main(params: typeof defaultParams) {
+  return drawRectangle(params.width, 10).sketchOnPlane('XY').extrude(2);
 }
 `,
   },
@@ -184,22 +196,43 @@ let launches = 0;
 /**
  * Launch `tau mcp` as a plugin host would, keeping every byte it writes.
  *
- * @param projectDirectory - The `CLAUDE_PROJECT_DIR` Claude Code would set, if any.
- * @param options - `tau mcp` options after the command.
+ * @param projectDirectory - The `CLAUDE_PROJECT_DIR` Claude Code would set; none, as Codex sets none.
+ * @param viewerPage - The viewer page `launch.ts` hands over (`TAU_VIEWER_PAGE`), if any.
+ * @param extra - Further environment (`env`), such as the printer store a test isolates, and `tau mcp` options
+ *   after the command (`args`).
  * @returns The child, a transport the SDK client connects over, and its output.
  */
-const launch = (projectDirectory?: string, options: readonly string[] = []): Served => {
+const launch = (
+  projectDirectory?: string,
+  viewerPage?: string,
+  extra: { readonly env?: Record<string, string>; readonly args?: readonly string[] } = {},
+): Served => {
   launches += 1;
   const resolveLog = join(scratch, `resolved-${String(launches)}.log`);
   /* Built by assignment so no environment key is a source literal. */
   const env: NodeJS.ProcessEnv = { ...process.env };
   env['TAU_TEST_RESOLVE_LOG'] = resolveLog;
-  if (projectDirectory !== undefined) {
+  /* Without one the server starts as Codex starts it, naming no project, even when this test runs under Claude Code. */
+  if (projectDirectory === undefined) {
+    delete env['CLAUDE_PROJECT_DIR'];
+  } else {
     env['CLAUDE_PROJECT_DIR'] = projectDirectory;
   }
+  if (viewerPage !== undefined) {
+    env['TAU_VIEWER_PAGE'] = viewerPage;
+  }
+  Object.assign(env, extra.env);
   const child = spawn(
     process.execPath,
-    ['--import', 'tsx', '--import', pathToFileURL(join(scratch, 'register.mjs')).href, binPath, 'mcp', ...options],
+    [
+      '--import',
+      'tsx',
+      '--import',
+      pathToFileURL(join(scratch, 'register.mjs')).href,
+      binPath,
+      'mcp',
+      ...(extra.args ?? []),
+    ],
     { cwd: repoRoot, env, stdio: ['pipe', 'pipe', 'pipe'] },
   );
   let stdout = '';
@@ -449,6 +482,44 @@ describe('tau mcp over stdio', () => {
   );
 
   it(
+    "should read a model's parameters and write an edit to its sidecar",
+    async () => {
+      const meta = { 'codex/sandbox-state-meta': { sandboxCwd: pathToFileURL(join(scratch, 'plate')).href } };
+      const read = await call({ name: 'get_parameters', arguments: { targetFile: 'plate.ts' }, _meta: meta });
+      expect(read.isError ?? false, textOf(read)).toBe(false);
+      const parameters = JSON.parse(textOf(read)) as {
+        status: string;
+        current?: { identity: { manifestRevision: string }; entry: { activeGroup: string } };
+      };
+      expect(parameters, textOf(read)).toMatchObject({
+        status: 'resolved',
+        current: { entry: { activeGroup: 'default' } },
+      });
+
+      const proposed = await call({
+        name: 'apply_parameter_operation',
+        arguments: {
+          action: 'propose',
+          targetFile: 'plate.ts',
+          requestId: 'widen-1',
+          expected: { manifestRevision: parameters.current?.identity.manifestRevision },
+          pressure: 'final',
+          operation: { kind: 'native-value', group: 'default', pointer: '/width', value: 30 },
+        },
+        _meta: meta,
+      });
+      expect(proposed.isError ?? false, textOf(proposed)).toBe(false);
+      expect(JSON.parse(textOf(proposed))).toMatchObject({ outcome: { status: 'committed', write: 'applied' } });
+      const after = await call({ name: 'get_parameters', arguments: { targetFile: 'plate.ts' }, _meta: meta });
+      expect(JSON.parse(textOf(after))).toMatchObject({
+        current: { entry: { groups: { default: { values: { width: 30 } } } } },
+      });
+      expect(await readFile(join(scratch, 'plate', '.tau/parameters/plate.ts.json'), 'utf8')).toContain('30');
+    },
+    kernelCallLimit,
+  );
+
+  it(
     'should export the first project as STEP after the second project rendered',
     async () => {
       const result = await call({ name: 'export_model', arguments: { targetFile: 'main.ts', to: 'step' } });
@@ -514,6 +585,348 @@ describe('tau mcp on SIGTERM', () => {
 
       const { code } = await exitWithin(served, 5000);
       expect(code).toBe(0);
+    },
+    kernelCallLimit,
+  );
+});
+
+/**
+ * The `initialize` each host sends, as probed from the hosts (blueprint D5).
+ * The standard capability decides whether a host gets the page; the client
+ * name only picks Codex's entrypoints.
+ */
+const hostShapes = {
+  claudeCode: {
+    clientInfo: { name: 'claude-code', version: '2.1.296' },
+    capabilities: { roots: { listChanged: true }, elicitation: { form: {}, url: {} } },
+  },
+  codexCli: {
+    clientInfo: { name: 'codex-mcp-client', version: '0.157.1' },
+    capabilities: { experimental: { 'codex/auth-change': {} }, elicitation: { form: {}, url: {} } },
+  },
+  claudeDesktop: {
+    clientInfo: { name: 'claude-ai', version: '0.1.0' },
+    capabilities: {
+      roots: { listChanged: true },
+      extensions: { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } },
+    },
+  },
+  codexDesktop: {
+    clientInfo: { name: 'codex-mcp-client', version: '26.1007.21159' },
+    capabilities: {
+      experimental: { 'codex/auth-change': {} },
+      elicitation: { form: {}, url: {} },
+      extensions: { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } },
+    },
+  },
+} as const;
+
+describe('tau mcp viewer presentation', () => {
+  const page = '<!doctype html><title>Tau viewer fixture</title>';
+  let pagePath = '';
+
+  beforeAll(async () => {
+    pagePath = join(scratch, 'viewer-page.html');
+    await writeFile(pagePath, page);
+  });
+
+  /**
+   * Initialize one server as a host does and list what it offers, without loading a kernel.
+   *
+   * @param shape - The host's `initialize`.
+   * @returns The tools by name and the server's resources.
+   */
+  const offered = async (shape: (typeof hostShapes)[keyof typeof hostShapes]) => {
+    const served = launch(join(scratch, 'viewer-host'), pagePath);
+    disposers.push(stopIfRunning(served));
+    await mkdir(join(scratch, 'viewer-host'), { recursive: true });
+    const client = new Client(shape.clientInfo, { capabilities: shape.capabilities });
+    await connect(client, served);
+    const { tools } = await client.listTools();
+    const { resources } = await client.listResources();
+    const result = { tools: new Map(tools.map((tool) => [tool.name, tool])), resources, client, served };
+    return result;
+  };
+
+  it(
+    'should give a text host the show_model link tool and no page',
+    async () => {
+      for (const shape of [hostShapes.claudeCode, hostShapes.codexCli]) {
+        // oxlint-disable-next-line no-await-in-loop -- one server per host shape.
+        const { tools, client, served } = await offered(shape);
+        expect(tools.get('show_model')?._meta).toEqual({ 'anthropic/alwaysLoad': true });
+        expect([...tools.keys()]).not.toEqual(expect.arrayContaining(['app_read']));
+        expect(tools.has('open_model_file') || tools.has('browse_models')).toBe(false);
+        // oxlint-disable-next-line no-await-in-loop -- ditto.
+        expect(await served.kernelModules()).toEqual([]);
+        // oxlint-disable-next-line no-await-in-loop -- ditto.
+        await client.close();
+      }
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should give Claude Desktop the ui:// page on show_model and the app-only ranged read',
+    async () => {
+      const { tools, resources, client } = await offered(hostShapes.claudeDesktop);
+      const ui = tools.get('show_model')?._meta?.['ui'] as { resourceUri: string } | undefined;
+      expect(ui?.resourceUri).toMatch(/^ui:\/\/tau\/[\da-f]{16}\/app\.html$/u);
+      expect(tools.get('show_model')?._meta).not.toHaveProperty(['openai/ui']);
+      expect(tools.get('app_read')?._meta?.['ui']).toEqual({ resourceUri: ui?.resourceUri, visibility: ['app'] });
+      expect(tools.has('open_model_file') || tools.has('browse_models')).toBe(false);
+
+      const resource = resources.find(({ uri }) => uri === ui?.resourceUri);
+      expect(resource?.mimeType).toBe('text/html;profile=mcp-app');
+      expect(resource?._meta?.['ui']).toMatchObject({ csp: { connectDomains: ['data:', 'blob:'] } });
+      const { contents } = await client.readResource({ uri: ui?.resourceUri ?? '' });
+      expect(contents).toEqual([expect.objectContaining({ text: page, mimeType: 'text/html;profile=mcp-app' })]);
+      await client.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should give Codex desktop the thread, sidebar and file entrypoints',
+    async () => {
+      const { tools, client } = await offered(hostShapes.codexDesktop);
+      const meta = (name: string) => tools.get(name)?._meta ?? {};
+      const { resourceUri } = meta('show_model')['ui'] as { resourceUri: string };
+
+      expect(meta('show_model')).toMatchObject({
+        'openai/outputTemplate': resourceUri,
+        'openai/ui': { entrypoints: [{ type: 'thread' }] },
+      });
+      expect(meta('browse_models')).toMatchObject({ 'openai/ui': { entrypoints: [{ type: 'global' }] } });
+      expect(meta('open_model_file')).toMatchObject({
+        'openai/ui': { entrypoints: [{ type: 'file', extensions: expect.arrayContaining(['glb']) as unknown }] },
+      });
+      expect(meta('app_read')['ui']).toEqual({ resourceUri, visibility: ['app'] });
+      await client.close();
+    },
+    kernelCallLimit,
+  );
+});
+
+describe("tau mcp with this computer's printers (blueprint W11)", () => {
+  const printTools = [
+    'get_print_profiles',
+    'request_print',
+    'get_print_request',
+    'list_print_requests',
+    'cancel_print',
+  ];
+  const projectId = 'proj_abcdefghijklmnopqrstu';
+
+  /**
+   * A printer store of its own, and the environment that points a server at it.
+   *
+   * @param name - The store's folder under the scratch directory.
+   * @returns The config directory and the server environment.
+   */
+  const isolatedStore = async (name: string) => {
+    const configDirectory = join(scratch, name);
+    await mkdir(configDirectory, { recursive: true });
+    /* Built by assignment so no environment key is a source literal. */
+    const environment: Record<string, string> = {};
+    environment['TAU_CONFIG_DIR'] = configDirectory;
+    environment['TAU_HOST_MACHINES'] = 'true';
+    /* No test may touch a person's keychain. */
+    environment['TAU_SECRET_VAULT'] = 'memory';
+    return { configDirectory, environment };
+  };
+
+  /**
+   * A Tau project folder with a model to print.
+   *
+   * @param name - The folder under the scratch directory.
+   * @returns Its path.
+   */
+  const printProject = async (name: string): Promise<string> => {
+    const folder = join(scratch, name);
+    await mkdir(folder, { recursive: true });
+    await writeFile(join(folder, 'tau.json'), JSON.stringify({ id: projectId }));
+    await writeFile(join(folder, 'plate.ts'), files.plate['plate.ts']);
+    return folder;
+  };
+
+  const namesOf = async (client: Client): Promise<string[]> => {
+    const { tools } = await client.listTools();
+    return tools.map(({ name }) => name);
+  };
+
+  const printToolsOf = async (client: Client): Promise<string[]> => {
+    const names = await namesOf(client);
+    return names.filter((name) => printTools.includes(name));
+  };
+
+  it(
+    'should offer the print tools over the shared store, and none from a second server while the first holds it',
+    async () => {
+      const { environment } = await isolatedStore('config-held');
+      const project = await printProject('printing');
+      const first = launch(project, undefined, { env: environment });
+      disposers.push(stopIfRunning(first));
+      const holder = new Client({ name: 'tau-mcp-printers', version: '1' });
+      await connect(holder, first);
+      expect(await namesOf(holder)).toEqual(expect.arrayContaining(printTools));
+      const listed = CallToolResultSchema.parse(await holder.callTool({ name: 'list_print_requests', arguments: {} }));
+      expect(listed.isError ?? false, textOf(listed)).toBe(false);
+
+      const second = launch(project, undefined, { env: environment });
+      disposers.push(stopIfRunning(second));
+      const other = new Client({ name: 'tau-mcp-printers-2', version: '1' });
+      await connect(other, second);
+      expect(await printToolsOf(other)).toEqual([]);
+      await vi.waitFor(() => {
+        expect(second.stderr()).toContain('printers are in use by another Tau app');
+      });
+      await other.close();
+      await holder.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should leave the printers to other apps while its one folder holds no project',
+    async () => {
+      const { environment } = await isolatedStore('config-unnamed');
+      await mkdir(join(scratch, 'not-a-project'), { recursive: true });
+      const unnamed = launch(join(scratch, 'not-a-project'), undefined, { env: environment });
+      disposers.push(stopIfRunning(unnamed));
+      const client = new Client({ name: 'tau-mcp-unnamed', version: '1' });
+      await connect(client, unnamed);
+      expect(await printToolsOf(client)).toEqual([]);
+      await vi.waitFor(() => {
+        expect(unnamed.stderr()).toContain('holds no tau.json');
+      });
+
+      /* It holds no lock, so a server in a project prints while it runs. */
+      const named = launch(await printProject('printing-beside'), undefined, { env: environment });
+      disposers.push(stopIfRunning(named));
+      const other = new Client({ name: 'tau-mcp-named', version: '1' });
+      await connect(other, named);
+      expect(await namesOf(other)).toEqual(expect.arrayContaining(printTools));
+      await other.close();
+      await client.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    "should print from the folder Codex names with each call, only on the person's answer in its form",
+    async () => {
+      const { configDirectory, environment } = await isolatedStore('config-codex');
+      /* The simulator, bound in the store before the server starts, as the person binds a printer in Tau. */
+      /* Loaded on demand, as the CLI loads the vendor package. */
+      const { bambuSimulatorMachine } = await import('@taucad/bambu');
+      const vault = process.env['TAU_SECRET_VAULT'];
+      process.env['TAU_SECRET_VAULT'] = 'memory';
+      const store = await openSharedMachineHost({
+        providers: [bambuSimulatorMachine()],
+        readArtifact: async () => {
+          throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
+        },
+        onWarning: () => undefined,
+        actorId: 'test',
+        storeRoot: join(configDirectory, 'machines'),
+      });
+      if (vault === undefined) {
+        delete process.env['TAU_SECRET_VAULT'];
+      } else {
+        process.env['TAU_SECRET_VAULT'] = vault;
+      }
+      if (store === undefined) {
+        throw new Error('The isolated printer store was held.');
+      }
+      const { port1, port2 } = new MessageChannel();
+      const served = store.host.serve({ port: port1, session: store.session });
+      const machines = connectMachineChannel(port2);
+      try {
+        let candidate: Parameters<typeof machines.beginBinding>[0]['candidate'] | undefined;
+        for await (const event of machines.discover({
+          providerId: 'bambu-simulator',
+          configuration: { logicalId: 'simulated-x1c' },
+        })) {
+          if (event.type === 'found') {
+            candidate = event.candidate;
+            break;
+          }
+        }
+        if (candidate === undefined) {
+          throw new Error('The simulator reported no candidate.');
+        }
+        const ceremony = await machines.beginBinding({ candidate, name: 'simulated-x1c' });
+        if (ceremony.status === 'operator-action-required') {
+          await store.host.completeBinding({
+            ceremonyId: ceremony.ceremonyId,
+            secretRef: 'simulator',
+            serviceTrust: {},
+          });
+        }
+      } finally {
+        machines.close();
+        served.dispose();
+        await store.host.close();
+      }
+
+      const project = await printProject('codex-project');
+      await mkdir(join(scratch, 'codex-unnamed'), { recursive: true });
+      /* As Codex starts it: in the plugin's folder (here the repository, which holds no tau.json), naming no project. */
+      const server = launch(undefined, undefined, { env: environment });
+      disposers.push(stopIfRunning(server));
+      const asked: string[] = [];
+      let approve = false;
+      const client = new Client(hostShapes.codexCli.clientInfo, { capabilities: { elicitation: { form: {} } } });
+      client.setRequestHandler(ElicitRequestSchema, async (request) => {
+        asked.push(request.params.message);
+        return { action: 'accept', content: { approve } };
+      });
+      await connect(client, server);
+      expect(await namesOf(client)).toEqual(expect.arrayContaining(printTools));
+
+      const requestIn = async (folder: string): Promise<CallToolResult> =>
+        CallToolResultSchema.parse(
+          await client.callTool(
+            {
+              name: 'request_print',
+              arguments: { targetFile: 'plate.ts' },
+              _meta: { 'codex/sandbox-state-meta': { sandboxCwd: pathToFileURL(folder).href } },
+            },
+            undefined,
+            { timeout: kernelCallLimit },
+          ),
+        );
+      type Answer = {
+        approval?: string;
+        machineName?: string;
+        request?: { state: string; artifact: { path: string } };
+      };
+
+      const unnamedFolder = await requestIn(join(scratch, 'codex-unnamed'));
+      expect(unnamedFolder.isError).toBe(true);
+      expect(textOf(unnamedFolder)).toContain('holds no tau.json');
+
+      const denied = await requestIn(project);
+      expect(denied.isError ?? false, textOf(denied)).toBe(false);
+      const deniedAnswer = JSON.parse(textOf(denied)) as Answer;
+      expect(deniedAnswer).toMatchObject({ approval: 'denied', request: { state: 'denied' } });
+      expect(asked).toHaveLength(1);
+      /* The form names the sliced file and the machine it would print on. */
+      expect(asked[0]).toContain(deniedAnswer.request?.artifact.path.split('/').at(-1));
+      expect(asked[0]).toContain(deniedAnswer.machineName);
+
+      /* Approved, the machine host reads the slice back from the folder the call named, by that folder's project. */
+      approve = true;
+      const approved = await requestIn(project);
+      expect(approved.isError ?? false, textOf(approved)).toBe(false);
+      const approvedAnswer = JSON.parse(textOf(approved)) as Answer;
+      expect(approvedAnswer, textOf(approved)).toMatchObject({
+        approval: 'approved',
+        request: { state: expect.stringMatching(/^(?:uploading|starting|confirming|started)$/u) as string },
+      });
+      await expect(access(join(project, approvedAnswer.request?.artifact.path ?? 'missing'))).resolves.toBeUndefined();
+      await client.close();
     },
     kernelCallLimit,
   );
@@ -612,7 +1025,7 @@ describe('tau mcp with one thread per project', () => {
     await mkdir(beta);
     await writeFile(join(alpha, 'main.ts'), boxModel);
     await writeFile(join(beta, 'main.ts'), boxModel);
-    served = launch(alpha, ['--operation-timeout', String(operationTimeoutSeconds)]);
+    served = launch(alpha, undefined, { args: ['--operation-timeout', String(operationTimeoutSeconds)] });
     disposers.push(stopIfRunning(served));
     client = new Client({ name: 'tau-mcp-integration-threads', version: '1' });
     await connect(client, served);
@@ -747,7 +1160,7 @@ describe('tau mcp idle release', () => {
       await mkdir(project);
       await writeFile(join(project, 'main.ts'), boxModel);
       await writeFile(join(project, 'slow.ts'), timedModel(join(scratch, 'idle-busy.jsonl'), 'idle-busy', 5000));
-      const served = launch(project, ['--idle-release', '2']);
+      const served = launch(project, undefined, { args: ['--idle-release', '2'] });
       disposers.push(stopIfRunning(served));
       const client = new Client({ name: 'tau-mcp-integration-idle-busy', version: '1' });
       await connect(client, served);
@@ -776,7 +1189,7 @@ describe('tau mcp idle release', () => {
       const project = join(scratch, 'idle');
       await mkdir(project);
       await writeFile(join(project, 'main.ts'), boxModel);
-      const served = launch(project, ['--idle-release', '2']);
+      const served = launch(project, undefined, { args: ['--idle-release', '2'] });
       disposers.push(stopIfRunning(served));
       const client = new Client({ name: 'tau-mcp-integration-idle', version: '1' });
       await connect(client, served);

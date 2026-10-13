@@ -2,7 +2,8 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./out-tsc/spec",
-    "types": ["node", "vitest/importMeta", "vitest"],
+    "types": ["node", "vite/client", "vitest/importMeta", "vitest"],
+    "jsx": "react-jsx",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
@@ -12,6 +13,8 @@
     "vitest.config.ts",
     "vitest.setup.ts",
     "tsdown.config.ts",
+    "vite.app.config.ts",
+    "vitest.hosts.config.ts",
     "scripts/**/*.ts",
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
@@ -20,6 +23,9 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "src/**/*.js",
-    "src/**/*.jsx"
+    "src/**/*.jsx",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "e2e/**/*.ts"
   ]
 }

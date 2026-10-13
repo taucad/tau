@@ -14,7 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { useUsageSnapshot } from '@taucad/billing/hooks/use-usage-snapshot';
 import type { UsageSnapshotResult } from '@taucad/billing/hooks/use-usage-snapshot';

@@ -15,7 +15,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 vi.mock('#hooks/use-kernel.js', () => ({
   useKernel: () => ({ kernel: 'openscad', setKernel: vi.fn() }),
 }));
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: '↵' }),
 }));
 vi.mock('#hooks/use-project-creation-location.js', () => ({

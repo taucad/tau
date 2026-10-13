@@ -2,6 +2,8 @@ import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import type { ElicitRequest, ElicitResult } from '@modelcontextprotocol/sdk/types.js';
 import {
   exportModelInputSchema,
   evaluateModelInputSchema,
@@ -16,7 +18,7 @@ import {
   tauMcpToolDefinitions,
   tauMcpToolNames,
 } from '#tau-mcp.js';
-import type { TauMcpDispatch, TauMcpServerOptions } from '#tau-mcp.js';
+import type { TauMcpConfirm, TauMcpDispatch, TauMcpServerOptions } from '#tau-mcp.js';
 // oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load this package's own package.json.
 import packageJson from '../package.json' with { type: 'json' };
 
@@ -376,5 +378,73 @@ describe('@taucad/mcp', () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+describe('approval through the client (blueprint E9, W11)', () => {
+  /**
+   * Call one host tool whose dispatch asks the person, with a client that declares `capabilities`.
+   *
+   * @param capabilities - What the client declares at `initialize`.
+   * @param answer - The client's reply to the form, if it is asked.
+   * @returns What the dispatch heard, and the form the client was shown.
+   */
+  const ask = async (capabilities: Record<string, unknown>, answer?: ElicitResult | (() => never)) => {
+    let outcome: Awaited<ReturnType<TauMcpConfirm>> | 'no form' | 'failed' = 'no form';
+    const shown: Array<ElicitRequest['params']> = [];
+    const server = createTauMcpServer({
+      hostTools: [{ name: 'request_print', description: 'Print.', inputSchema: { type: 'object' } }],
+      dispatch: async (_call, options) => {
+        if (options.confirm !== undefined) {
+          outcome = await options
+            .confirm({ message: 'Print plate.3mf on X1C?', label: 'Approve' })
+            .catch((): 'failed' => 'failed');
+        }
+        return { success: true };
+      },
+    });
+    const client = new Client({ name: 'tau-mcp-test', version: '1' }, { capabilities });
+    if (answer !== undefined) {
+      client.setRequestHandler(ElicitRequestSchema, async (request) => {
+        shown.push(request.params);
+        return typeof answer === 'function' ? answer() : answer;
+      });
+    }
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      await client.callTool({ name: 'request_print', arguments: {} });
+      return { outcome, shown };
+    } finally {
+      await client.close();
+    }
+  };
+
+  it('should ask a client that draws forms, and approve only a ticked box', async () => {
+    const approved = await ask({ elicitation: { form: {} } }, { action: 'accept', content: { approve: true } });
+    expect(approved.outcome).toBe('approved');
+    expect(approved.shown.map(({ message }) => message)).toEqual(['Print plate.3mf on X1C?']);
+    const [form] = approved.shown;
+    expect(form !== undefined && 'requestedSchema' in form ? form.requestedSchema.required : undefined).toEqual([
+      'approve',
+    ]);
+    const unticked = await ask({ elicitation: {} }, { action: 'accept', content: { approve: false } });
+    const declined = await ask({ elicitation: {} }, { action: 'decline' });
+    const dismissed = await ask({ elicitation: {} }, { action: 'cancel' });
+    expect([unticked.outcome, declined.outcome, dismissed.outcome]).toEqual(['denied', 'denied', 'cancelled']);
+  });
+
+  it('should reject, not report the person cancelling, when the client fails to ask', async () => {
+    const failed = await ask({ elicitation: { form: {} } }, () => {
+      throw new Error('elicitation is broken in this client');
+    });
+    expect(failed.shown).toHaveLength(1);
+    expect(failed.outcome).toBe('failed');
+  });
+
+  it('should not ask a client that cannot draw a form', async () => {
+    const silent = await ask({});
+    const urlOnly = await ask({ elicitation: { url: {} } });
+    expect([silent.outcome, urlOnly.outcome]).toEqual(['no form', 'no form']);
   });
 });

@@ -1,0 +1,24 @@
+{
+  "name": "viewer",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/viewer",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "Chromium suites for the viewer's SVG presentation, glTF batch pixels, section clipping and resize continuation. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "commands": [
+          "../../node_modules/.bin/vitest run --config src/graphics/svg/svg-viewer.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config src/graphics/three/utils/gltf-batches.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-resize.vitest.browser.config.ts"
+        ],
+        "parallel": false
+      }
+    }
+  }
+}

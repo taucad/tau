@@ -17,9 +17,7 @@ import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeClient } from '@taucad/runtime';
-import { createHostAdmissionAuthority } from '@taucad/runtime/host';
-import { createNodeMachineHost } from '@taucad/runtime/host/node';
-import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
+import type { CreateNodeMachineHostInput } from '@taucad/runtime/host/node';
 import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
 import type { RuntimeClient } from '@taucad/runtime/client';
@@ -40,16 +38,9 @@ import {
   writeHostCredential,
 } from '#credential-store.js';
 import type { HostCredential } from '#credential-store.js';
-import {
-  createMachineSecretStore,
-  createNodeMachineRuntime,
-  localMachineFacet,
-  machineRouteGrants,
-  openMachineHostIdentity,
-  readProjectId,
-} from '#machine-host.js';
+import { localMachineFacet, readProjectId } from '#machine-host.js';
 import type { CreateNodeMachineRuntimeOptions } from '#machine-host.js';
-import { openSecretVault } from '#secret-vault.js';
+import { openSharedMachineHost } from '#local-machines.js';
 import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
 import type { HostJobWorkerFactory, HostJobWorkerHandle } from '#job-worker.js';
@@ -750,13 +741,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   };
 
   /**
-   * Open the per-user machine store, `<config>/machines`: the one store the
-   * desktop app and every other Tau host on this computer share.
-   *
-   * One identity beside it, the host's secret vault (`TAU_SECRET_VAULT`
-   * overrides its kind), and one trusted session for the route and the tools.
-   * While another Tau app holds the store's writer lock, this host warns and
-   * serves without machines instead of exiting.
+   * Open the per-user machine store, `<config>/machines`, shared with the desktop app and every other Tau host here.
+   * While another Tau app holds the store's writer lock, this host warns and serves without machines instead of
+   * exiting.
    *
    * @param providers - The providers `--machines` admitted.
    * @param readArtifact - Finds a print request's file in the served project.
@@ -766,48 +753,23 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     providers: CreateNodeMachineHostInput['providers'],
     readArtifact: CreateNodeMachineRuntimeOptions['readArtifact'],
   ): Promise<NonNullable<AgentServerOptions['machines']> | undefined> => {
-    const storeRoot = join(defaultConfigDirectory(), 'machines');
-    const identity = await openMachineHostIdentity(storeRoot);
-    let host: NodeMachineHost;
-    try {
-      host = await createNodeMachineHost({
-        storeRoot,
-        ...identity,
-        admission: createHostAdmissionAuthority({ hostId: identity.hostId }),
-        providers,
-        runtime: createNodeMachineRuntime({
-          secrets: createMachineSecretStore({
-            vault: openSecretVault({ directory: storeRoot, env: process.env }),
-            legacyDirectory: storeRoot,
-          }),
-          readArtifact,
-          log: (entry) => {
-            if (entry.level === 'error' || entry.level === 'warning') {
-              emit({ type: 'warning', code: 'MACHINE_PROVIDER', message: entry.message });
-            }
-          },
-        }),
-        onError: (error) => {
-          emit({
-            type: 'warning',
-            code: 'MACHINE_HOST',
-            message: error instanceof Error ? error.message : String(error),
-          });
-        },
-      });
-    } catch (error) {
-      if ((error as { readonly code?: unknown }).code !== 'AUTHORITY_ALREADY_OWNED') {
-        throw error;
-      }
+    const shared = await openSharedMachineHost({
+      providers,
+      readArtifact,
+      actorId: 'daemon',
+      onWarning: ({ code, message }) => {
+        emit({ type: 'warning', code, message });
+      },
+    });
+    if (shared === undefined) {
       emit({
         type: 'warning',
         code: 'MACHINE_STORE_OWNED_ELSEWHERE',
         message:
           'machines.unavailable (owned-elsewhere): printers are in use by another Tau app on this computer, so this host serves without them. Quit it and restart `tau serve --machines` to use them here.',
       });
-      return undefined;
     }
-    return { host, session: host.issueSession({ actor: { kind: 'user', id: 'daemon' }, grants: machineRouteGrants }) };
+    return shared;
   };
 
   /**

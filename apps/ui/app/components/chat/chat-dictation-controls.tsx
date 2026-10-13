@@ -2,7 +2,7 @@ import { memo, useCallback } from 'react';
 import { Mic, Square, X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { dictationLabels } from '#components/chat/use-dictation.js';
 import type { DictationPhase } from '#components/chat/use-dictation.js';
 

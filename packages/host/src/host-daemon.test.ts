@@ -745,6 +745,83 @@ describe('startHostDaemon', () => {
     }
   }, 30_000);
 
+  it('should let the process exit while it keeps a project whose close was refused', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-refused-close-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    revisionsSpy.mockImplementationOnce((options) => {
+      const tree = realCreateProjectRevisions(options);
+      return {
+        ...tree,
+        release: async (): Promise<void> => {
+          await tree.release();
+          throw new Error('revision close refused');
+        },
+      };
+    });
+    const messagePorts = (): number =>
+      process.getActiveResourcesInfo().filter((resource) => resource === 'MessagePort').length;
+    const before = messagePorts();
+    const relay = await startRelay();
+    const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
+    try {
+      await daemon.ready;
+
+      await expect(daemon.close()).rejects.toThrow('revision close refused');
+
+      /* R5: the kept authority's channel no longer holds the event loop, so a
+       * `tau serve` that closes once and reports the refusal exits. */
+      expect(messagePorts()).toBe(before);
+    } finally {
+      await daemon.close().catch(() => undefined);
+    }
+  }, 30_000);
+
+  it('should fail to start when the workspace store refuses to open', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-refused-open-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const main = join(temporaryDirectory, 'main');
+    const linked = join(temporaryDirectory, 'linked');
+    execFileSync('git', ['init', '--quiet', '--initial-branch=main', main]);
+    await writeFile(join(main, 'a.txt'), 'a\n');
+    execFileSync('git', ['-C', main, 'add', 'a.txt']);
+    execFileSync('git', [
+      '-C',
+      main,
+      '-c',
+      'user.name=Ada',
+      '-c',
+      'user.email=ada@example.com',
+      'commit',
+      '--quiet',
+      '-m',
+      'A',
+    ]);
+    execFileSync('git', ['-C', main, 'worktree', 'add', '--quiet', '-b', 'side', linked]);
+    const events: HostDaemonEvent[] = [];
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), workspaceRoot: linked },
+      onEvent: (event) => events.push(event),
+    });
+    try {
+      /* R3: refused at start, never served and then refused at close. */
+      await expect(daemon.ready).rejects.toMatchObject({ code: 'INVALID_REPOSITORY' });
+      expect(events).not.toContainEqual(expect.objectContaining({ type: 'agent', state: 'ready' }));
+      await expect(daemon.close()).resolves.toBeUndefined();
+    } finally {
+      await daemon.close().catch(() => undefined);
+    }
+  }, 30_000);
+
   /*
    * The agent channel is not a client of the compute child: it needs one only
    * for the geometry tools, which answer a typed refusal without it. A child

@@ -9,7 +9,7 @@ import type { toolName } from '@taucad/chat/constants';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { randomUuid } from '@taucad/utils/id';
-import { CopyButton } from '#components/copy-button.js';
+import { CopyButton } from '@taucad/ui/components/copy-button';
 import { useFileContent } from '#hooks/use-file-content.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { createRpcHandlers } from '#hooks/rpc-handlers.js';

@@ -100,7 +100,7 @@ Copy [prompt.template.md](prompt.template.md) to `docs/research/artifacts/<chart
 
 The operator does these; the coordinator tells them in the final message, with the prompt inline:
 
-1. Create the cloud project and connect every repository the resumption file names (the program's repositories, the IaC repository, Tau Brain).
+1. Create the cloud project and connect every repository the resumption file names (the program's repositories, the IaC repository, Tau Brain). The project picker attaches Brain without sparse patterns, so each thread clones its full tree (about 64 s and 2.3 GB, measured 2026-10-13); the executor's routines attach it sparsely instead.
 2. Set the project's environment to `tau`, the one Claude cloud environment for every repository set; its setup script (`scripts/cloud-env-setup.sh`) installs a session-start hook that installs the workspace's Node, pnpm and dependencies and links an attached Tau Brain at `repos/tau-brain` so `docs/research` and `docs/handbooks` resolve. Routines the executor creates name the same environment and attach Brain with its sparse exclude patterns. The handbook page `docs/handbooks/cloud/operate/agent-environments.md` holds the fields. No operator credential goes into the environment.
 3. Paste the prompt.
 

@@ -5,8 +5,8 @@ Replace every `<…>`. Keep it under 20 lines; the resumption file carries the d
 ```text
 You are the orchestrating agent for the <program name> program. Resume it from the resumption file in Tau Brain:
 
-  repos/tau-brain/research/artifacts/<charter-slug>/handoff/resume.md
-  (reachable as docs/research/artifacts/<charter-slug>/handoff/resume.md from the Tau root)
+  tau-brain/research/artifacts/<charter-slug>/handoff/resume.md
+  (from /home/user, where the project's threads start; from the Tau root it is docs/research/artifacts/<charter-slug>/handoff/resume.md once the session hook has linked Brain at repos/tau-brain)
 
 Read it end to end first, then the charter it points to (research/<charter-slug>.md). The charter holds the decisions; the resumption file holds the state, the sequence, the hard rules, the worker brief and the operator-ping templates.
 

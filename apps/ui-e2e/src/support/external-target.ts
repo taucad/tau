@@ -5,6 +5,19 @@ import type { Locator } from 'vitest/browser';
 import { locators, server as vitestServer } from 'vitest/browser';
 import type { ProjectionFixtureProof, ProjectionDirectoryReceipt } from '#support/projection-fixture-validation.js';
 import type { GatewayScriptTurn, GatewayTurnCount } from '#support/agent-host-gateway-script.js';
+import type { LinkedGithubFixtureDescription, LinkedGithubFixtureState } from '#support/linked-github-fixture.js';
+
+/** The GitHub-linked project's far side, as a spec names it (R15). */
+export type TargetLinkedGithub = LinkedGithubFixtureDescription;
+/** What reached the linked repository, for the assertions a page cannot make. */
+export type TargetLinkedGithubState = LinkedGithubFixtureState;
+/** A GitHub test identity: the first is connected first, the second is the one *Add account* adds. */
+export type TargetGithubIdentity = 'first' | 'second';
+/** What GitHub's authorize request carried, read off the wire rather than the page. */
+export type TargetGithubAuthorization = {
+  /** The authorize request's `prompt`, when it carried one. */
+  readonly prompt?: string;
+};
 
 export type TargetSurface = 'primary' | 'secondary';
 /** Bounded actual byte work for the fixture import's single opaque control file. */
@@ -198,6 +211,11 @@ declare module 'vitest' {
     crossOriginIsolation: boolean;
     /** DP18: the exact STL and GLB of `picovoxel.sphere-minus-beams` every host exports (tau-examples `exact-pins.json`). */
     picovoxelExactPins: Readonly<Record<'stl' | 'glb', { readonly sha256: string; readonly bytes: number }>>;
+    /**
+     * The variable names each live GitHub row still needs (C10, A4; R17), never
+     * a value; an empty list means the row runs (`#support/github-identity.js`).
+     */
+    liveGithubMissing: Readonly<Record<'c10' | 'a4', readonly string[]>>;
   }
 }
 
@@ -209,6 +227,7 @@ declare module 'vitest/browser' {
 
 export type UiBrowserCommands = {
   uiAuthenticateTauTestUser(account: TargetTauTestAccount): Promise<void>;
+  uiAuthorizeGithub(identity: TargetGithubIdentity, trigger: string): Promise<TargetGithubAuthorization>;
   uiAddCookies(cookies: readonly TargetCookie[]): Promise<void>;
   uiAddContextInitScript(source: string, argument?: unknown): Promise<void>;
   uiAddInitScript(source: string, argument?: unknown): Promise<void>;
@@ -287,6 +306,7 @@ export type UiBrowserCommands = {
   uiReadTarget(selector: string, options?: TargetReadOptions, surface?: TargetSurface): Promise<TargetState>;
   uiReadTauVertexOperations(email: string): Promise<TargetTauBillingOperation[]>;
   uiReadAgentHostApiRequests(): Promise<string[]>;
+  uiReadLinkedGithubFixture(): Promise<TargetLinkedGithubState>;
   uiReadPostHogSummary(sentinels: readonly string[]): Promise<{
     readonly events: string[];
     readonly requests: string[];
@@ -322,6 +342,7 @@ export type UiBrowserCommands = {
   uiSetTargetOffline(offline: boolean): Promise<void>;
   uiSetViewport(viewport: TargetViewport, surface?: TargetSurface): Promise<void>;
   uiStartHostFixture(): Promise<string>;
+  uiStartLinkedGithubFixture(): Promise<TargetLinkedGithub>;
   uiStartTauServeFixture(options?: { readonly externalAgents?: boolean | 'codex' }): Promise<TargetTauServeFixture>;
   uiStopTauServeFixture(): Promise<void>;
   uiReleaseTauServeGateway(): Promise<void>;

@@ -766,8 +766,8 @@ catalogs:
       specifier: ^3.1.0
       version: 3.1.0
     stripe:
-      specifier: 22.5.0
-      version: 22.5.0
+      specifier: 22.6.2
+      version: 22.6.2
     tailwind-merge:
       specifier: ^3.6.0
       version: 3.7.0
@@ -1373,7 +1373,7 @@ importers:
         version: 2.7.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       stripe:
         specifier: 'catalog:'
-        version: 22.5.0(@types/node@24.0.15)
+        version: 22.6.2(@types/node@24.0.15)
       three:
         specifier: ^0.184.0
         version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
@@ -23794,8 +23794,8 @@ packages:
   strip-literal@3.1.0:
     resolution: {integrity: sha512-8r3mkIM/2+PpjHoOtiAW8Rg3jJLHaV7xPwG+YRGrv6FP0wwk/toTpATxWYOW0BKdWwl82VT2tFYi5DlROa0Mxg==}
 
-  stripe@22.5.0:
-    resolution: {integrity: sha512-QVwMwriC0bbySx6R4dpsvJ0W//GojC1kwWVS6rPSoVqDUIZX4Hy3TaUrd2AZeXEAaKbfWIjQjvo3vKAReHZ0vQ==}
+  stripe@22.6.2:
+    resolution: {integrity: sha512-PwRE2scocvXqDKPiskMa5vRJEAEkq46W69XyUYmAwrNSLr675lQnfqLwnsndAWizwgihOWw/irLmoFRo3ez7ew==}
     engines: {node: '>=18'}
     peerDependencies:
       '@types/node': '>=18'
@@ -46731,7 +46731,7 @@ snapshots:
     dependencies:
       js-tokens: 9.0.1
 
-  stripe@22.5.0(@types/node@24.0.15):
+  stripe@22.6.2(@types/node@24.0.15):
     optionalDependencies:
       '@types/node': 24.0.15
 

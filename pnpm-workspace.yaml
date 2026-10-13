@@ -270,7 +270,7 @@ catalog:
   source-map-explorer: ^2.5.3
   source-map-js: ^1.2.2
   strip-literal: ^3.1.0
-  stripe: 22.5.0
+  stripe: 22.6.2
   shiki: ^3.23.0
   tailwind-merge: ^3.6.0
   tailwindcss: ^4.3.3

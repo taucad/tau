@@ -7,6 +7,7 @@ import { InputGroup, InputGroupTextarea } from '@taucad/ui/components/input-grou
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { DictationButton, DictationFeedback, DictationRecording } from '#components/dictation/dictation-controls.js';
 import { useDictation } from '#components/dictation/use-dictation.js';
+import { chatComposerActionButtonClassName } from '#components/chat/chat-textarea-submit-button.js';
 
 /** Own-words reply. Stop reviews the transcript; Send finishes dictation and submits the final answer. */
 export function QuestionTextAnswer({
@@ -127,35 +128,38 @@ export function QuestionTextAnswer({
             }}
           />
         )}
-        {dictation.available === true && isOpen ? (
-          <DictationButton phase={dictation.phase} onStart={start} onStop={dictation.stop} />
-        ) : null}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type='button'
-              size='icon-sm'
-              aria-label='Send answer'
-              className={cn(
-                'shrink-0 rounded-full aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
-                !isDictating && 'self-end',
-              )}
-              aria-disabled={!canSend}
-              onClick={() => {
-                void send();
-              }}
-            >
-              <ArrowUp aria-hidden='true' />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {dictation.phase === 'recording'
-              ? 'Stop dictation and send answer'
-              : isDictating
-                ? 'Wait for dictation to finish'
-                : 'Send answer'}
-          </TooltipContent>
-        </Tooltip>
+        <div className='flex min-h-8 shrink-0 items-center gap-1'>
+          {dictation.available === true && isOpen ? (
+            <DictationButton phase={dictation.phase} onStart={start} onStop={dictation.stop} />
+          ) : null}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type='button'
+                variant='ghost'
+                size='icon-sm'
+                aria-label='Send answer'
+                className={cn(
+                  chatComposerActionButtonClassName,
+                  'shrink-0 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
+                )}
+                aria-disabled={!canSend}
+                onClick={() => {
+                  void send();
+                }}
+              >
+                <ArrowUp aria-hidden='true' />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {dictation.phase === 'recording'
+                ? 'Stop dictation and send answer'
+                : isDictating
+                  ? 'Wait for dictation to finish'
+                  : 'Send answer'}
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </InputGroup>
       <DictationFeedback transcript={dictation.transcript} error={dictation.error} />
     </div>

@@ -166,7 +166,7 @@ afterEach(() => {
   transcription = undefined;
   recordLevel = undefined;
   microphonePermission = undefined;
-  globalThis.document.documentElement.classList.remove('dark');
+  globalThis.document.documentElement.classList.remove('light', 'dark', 'black', 'high-contrast');
 });
 
 for (const width of [320, 600]) {
@@ -399,20 +399,24 @@ describe('dictation recording and transcription', () => {
 });
 
 describe('question dictation', () => {
-  it.each([
-    { width: 800, theme: 'light', variant: 'text', sendWhileRecording: true },
-    { width: 800, theme: 'dark', variant: 'text', sendWhileRecording: false },
-    { width: 320, theme: 'light', variant: 'text', sendWhileRecording: true },
-    { width: 320, theme: 'dark', variant: 'text', sendWhileRecording: false },
-    { width: 320, theme: 'dark', variant: 'options', sendWhileRecording: true },
-    { width: 800, theme: 'light', variant: 'options', sendWhileRecording: false },
-    { width: 320, theme: 'light', variant: 'tray', sendWhileRecording: true },
-    { width: 320, theme: 'light', variant: 'multiline', sendWhileRecording: true },
-  ])(
+  it.each(
+    ['light', 'dark', 'black', 'high-contrast'].flatMap((theme) =>
+      [320, 800].flatMap((width) =>
+        ['text', 'options', 'tray', 'multiline'].map((variant) => ({
+          theme,
+          width,
+          variant,
+          sendWhileRecording: variant !== 'options',
+        })),
+      ),
+    ),
+  )(
     'should finish dictation at $width in $theme mode with $variant (send: $sendWhileRecording)',
     async ({ width, theme, variant, sendWhileRecording }) => {
       await page.viewport(width, 600);
-      document.documentElement.classList.toggle('dark', theme === 'dark');
+      document.documentElement.classList.remove('light', 'dark', 'black', 'high-contrast');
+      document.documentElement.classList.add(theme);
+      document.documentElement.classList.toggle('dark', theme !== 'light');
       dictationAvailable = true;
       transcription = Promise.withResolvers<string>();
       microphonePermission = Promise.withResolvers<void>();
@@ -460,6 +464,19 @@ describe('question dictation', () => {
       await box.fill(draft);
       const reply = screen.getByRole('group', { name: 'Answer input' });
       const idleHeight = reply.getBoundingClientRect().height;
+      const expectAlignedActions = (label: string): void => {
+        const action = screen.getByRole('button', { name: label }).getBoundingClientRect();
+        const send = screen.getByRole('button', { name: 'Send answer' }).getBoundingClientRect();
+        expect(action.top).toBe(send.top);
+        expect(action.bottom).toBe(send.bottom);
+        expect(action.right).toBeLessThanOrEqual(send.left);
+      };
+      const idleSend = screen.getByRole('button', { name: 'Send answer' }).getBoundingClientRect();
+      expectAlignedActions('Dictate');
+      if (variant !== 'multiline') {
+        const bounds = reply.getBoundingClientRect();
+        expect(idleSend.top + idleSend.height / 2).toBe(bounds.top + bounds.height / 2);
+      }
       await page.screenshot({
         element: region,
         path: `../../../../../out/test-results/composer/question-idle-${width}-${theme}-${variant}.png`,
@@ -468,6 +485,7 @@ describe('question dictation', () => {
       expect(onHold).toHaveBeenCalled();
       await expect.element(page.getByRole('status', { name: 'Requesting microphone…' })).toBeVisible();
       await expect.element(page.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'true');
+      expectAlignedActions('Requesting microphone…');
       const requesting = screen.getByRole('status', { name: 'Requesting microphone…' });
       expect(requesting.scrollHeight).toBeLessThanOrEqual(requesting.clientHeight);
       expect(reply.getBoundingClientRect().height).toBe(idleHeight);
@@ -509,6 +527,7 @@ describe('question dictation', () => {
       expect(region.scrollWidth).toBe(region.clientWidth);
       await expect.element(page.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'true');
       expect(onAnswer).not.toHaveBeenCalled();
+      expectAlignedActions('Transcribing');
       const progress = screen.getByRole('status', { name: 'Transcribing' });
       const microphone = screen.getByRole('button', { name: 'Transcribing' });
       expect(progress.getBoundingClientRect().right).toBeLessThanOrEqual(microphone.getBoundingClientRect().left);
@@ -521,6 +540,7 @@ describe('question dictation', () => {
       }
       await expect.element(box).toHaveValue(`${draft} Use a brushed finish.`);
       expect(onAnswer).not.toHaveBeenCalled();
+      expectAlignedActions('Dictate');
       await box.fill('Aluminium. Use a brushed finish on both sides.');
       await page.getByRole('button', { name: 'Send answer' }).click();
       expect(onAnswer).toHaveBeenCalledExactlyOnceWith('material', {

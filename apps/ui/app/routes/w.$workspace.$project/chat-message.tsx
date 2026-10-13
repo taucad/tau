@@ -74,7 +74,6 @@ import {
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 import { useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
-import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatStreamingStopButton } from '#components/chat/chat-textarea-submit-button.js';
 import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
 import { formatKeyCombination } from '@taucad/ui/utils/keys';
@@ -957,7 +956,6 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
                 <AssistantParts parts={inlineParts} messageId={displayMessage.id} />
               )}
               {/* Flush under the activity rows, so the indicator keeps their pitch. */}
-              {isUser ? null : <ChatMessagePlanning messageId={messageId} />}
               {showUserBubbleStopShortcut ? (
                 <div
                   className={cn(
@@ -1010,7 +1008,6 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
           <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />
         </div>
         {/* A trailing request's indicator sits below its revision card, aligned with the activity rows. */}
-        {isUser ? <ChatMessagePlanning messageId={messageId} className='-mt-1 ml-0' /> : null}
       </div>
     </article>
   );

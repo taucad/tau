@@ -1,56 +1,98 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 import { selectChatActivityCue } from '#utils/chat-activity-cue.js';
-import type { ChatActivityFacts } from '#utils/chat-activity-cue.js';
 
-describe('selectChatActivityCue — the bottom activity indicator (chat activity indicator closeout R1)', () => {
-  const runStates: ReadonlyArray<ChatSidebarState | undefined> = [
-    undefined,
-    'idle',
-    'queued',
-    'working',
-    'tool',
-    'approval',
-    'question',
-    'reconnecting',
-    'done',
-    'failed',
-    'stopped',
-  ];
-  const chatStatuses: ReadonlyArray<ChatActivityFacts['chatStatus']> = ['submitted', 'streaming', 'ready', 'error'];
-  const expected = (runState: ChatSidebarState | undefined, chatStatus: ChatActivityFacts['chatStatus']): string => {
-    switch (runState) {
-      case 'reconnecting': {
-        return 'reconnecting:Reconnecting…';
-      }
-      case 'approval':
-      case 'question': {
-        return 'waiting:Planning next moves…';
-      }
-      case 'queued':
-      case 'working':
-      case 'tool': {
-        return 'working:Planning next moves…';
-      }
-      default: {
-        return chatStatus === 'submitted' || chatStatus === 'streaming' ? 'working:Planning next moves…' : 'none';
-      }
-    }
-  };
-
-  it.each(runStates.flatMap((runState) => chatStatuses.map((chatStatus) => [runState, chatStatus] as const)))(
-    'run %s with chat %s',
-    (runState, chatStatus) => {
-      const cue = selectChatActivityCue({ runState, chatStatus });
-      expect(cue === undefined ? 'none' : `${cue.kind}:${cue.sentence}`).toBe(expected(runState, chatStatus));
+describe('selectChatActivityCue', () => {
+  it.each(['done', 'failed', 'stopped'] as const)(
+    'should honor terminal %s despite stale streaming state',
+    (runState) => {
+      expect(selectChatActivityCue({ runState, chatStatus: 'streaming' })).toBeUndefined();
     },
   );
+  it.each([
+    ['queued', 'Queued…'],
+    ['working', 'Planning next moves…'],
+    ['tool', 'Planning next moves…'],
+    ['approval', 'Waiting for approval'],
+    ['question', 'Waiting for your answer'],
+    ['reconnecting', 'Reconnecting…'],
+  ] as const)('should describe host state %s while the SDK is ready', (runState, sentence) => {
+    expect(selectChatActivityCue({ runState, chatStatus: 'ready' })?.sentence).toBe(sentence);
+  });
+  it('should cover admission before the run exists', () => {
+    expect(selectChatActivityCue({ runState: undefined, chatStatus: 'submitted' })?.sentence).toBe(
+      'Planning next moves…',
+    );
+    expect(selectChatActivityCue({ runState: undefined, chatStatus: 'ready' })).toBeUndefined();
+  });
+  it('should show a newly submitted request before the previous terminal host state catches up', () => {
+    expect(selectChatActivityCue({ runState: 'done', chatStatus: 'submitted' })?.sentence).toBe('Planning next moves…');
+  });
 
-  /* V5 B3: the attempt count ("n/5") goes; only host attachment can say reconnecting. */
-  it('says Reconnecting without an attempt count for a reconnecting run', () => {
-    expect(selectChatActivityCue({ runState: 'reconnecting', chatStatus: 'error' })).toEqual({
-      kind: 'reconnecting',
-      sentence: 'Reconnecting…',
-    });
+  it('should name the running command over an earlier open thought', () => {
+    expect(
+      selectChatActivityCue({
+        runState: 'tool',
+        chatStatus: 'streaming',
+        parts: [
+          { type: 'reasoning', text: 'Old thought', state: 'streaming' },
+          {
+            type: 'dynamic-tool',
+            toolName: 'exec',
+            toolCallId: 'cmd',
+            state: 'input-available',
+            input: {},
+            toolMetadata: { tau: { kind: 'execute' } },
+          },
+        ],
+      })?.sentence,
+    ).toBe('Running commands');
+  });
+  it('should stop describing a settled tool as running', () => {
+    expect(
+      selectChatActivityCue({
+        runState: 'working',
+        chatStatus: 'streaming',
+        parts: [
+          {
+            type: 'dynamic-tool',
+            toolName: 'exec',
+            toolCallId: 'cmd',
+            state: 'output-available',
+            input: {},
+            output: 'done',
+          },
+        ],
+      })?.sentence,
+    ).toBe('Planning next moves…');
+  });
+  it('should show the latest thought and distinguish writing from a resting checkpoint', () => {
+    expect(
+      selectChatActivityCue({
+        runState: 'working',
+        chatStatus: 'streaming',
+        parts: [{ type: 'reasoning', text: 'Earlier\n**Checking the wall thickness**', state: 'streaming' }],
+      })?.sentence,
+    ).toBe('Checking the wall thickness');
+    expect(
+      selectChatActivityCue({
+        runState: 'working',
+        chatStatus: 'streaming',
+        parts: [{ type: 'text', text: 'Result', state: 'streaming' }],
+      })?.sentence,
+    ).toBe('Writing response…');
+    expect(
+      selectChatActivityCue({
+        runState: 'working',
+        chatStatus: 'streaming',
+        parts: [
+          {
+            type: 'text',
+            text: 'Result',
+            state: 'streaming',
+            providerMetadata: { common: { streamState: 'checkpoint' } },
+          },
+        ],
+      })?.sentence,
+    ).toBe('Planning next moves…');
   });
 });

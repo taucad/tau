@@ -8,7 +8,8 @@ import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
 
-const chatComposerActionButtonClassName =
+/** Monochrome action treatment shared by the composer and question replies. */
+export const chatComposerActionButtonClassName =
   'rounded-full bg-foreground text-background shadow-xs hover:bg-foreground/85 hover:text-background dark:bg-foreground dark:text-background dark:hover:bg-foreground/85 dark:hover:text-background';
 
 type ChatStreamingStopButtonProperties = {

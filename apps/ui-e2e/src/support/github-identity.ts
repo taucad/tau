@@ -14,7 +14,10 @@
 
 import { createHmac } from 'node:crypto';
 import process from 'node:process';
-import type { Page } from 'playwright';
+import type { BrowserCommandContext } from 'vitest/node';
+
+/** The driver page, typed from the command context so the spec never imports the driver. */
+type Page = Awaited<ReturnType<BrowserCommandContext['context']['newPage']>>;
 
 /** Which test identity: the first is connected first; the second is the one *Add account* adds. */
 export type GithubIdentity = 'first' | 'second';

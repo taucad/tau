@@ -26,7 +26,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
-import type { BrowserContext, Request, Route } from 'playwright';
+import type { BrowserCommandContext } from 'vitest/node';
+
+/* The driver types come from the command context, so this support file never imports the driver. */
+type BrowserContext = BrowserCommandContext['context'];
+type Route = Parameters<Parameters<BrowserContext['route']>[1]>[0];
+type Request = ReturnType<Route['request']>;
 
 /** What a spec needs to pick the fixture's repository in the picker. */
 export type LinkedGithubFixtureDescription = Readonly<{

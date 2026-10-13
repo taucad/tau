@@ -3647,15 +3647,19 @@ describe('ChatSessionStore', () => {
       expect(client.readFile).toHaveBeenCalledOnce();
     });
     client.files.set(path, bytes('Current input'));
-    for (let index = 0; index < 100; index++) {
+    // Deliver separate microtasks while the first read remains held.
+    const deliverChangeAfter = async (previous: Promise<void>): Promise<void> => {
+      await previous;
       listener?.({
         type: 'change',
         path: '.tau/chats/chat_foreign/events/peer.jsonl',
       });
-      // Deliver separate event-loop ticks while the first read remains held.
-
-      await Promise.resolve();
+    };
+    let burst = Promise.resolve();
+    for (let index = 0; index < 100; index++) {
+      burst = deliverChangeAfter(burst);
     }
+    await burst;
     held.resolve(bytes('Old input'));
     await vi.waitFor(() => {
       expect(published).toEqual(['Current input']);

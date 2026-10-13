@@ -187,14 +187,17 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
     if (document.fonts && loadedFont !== style.font && !document.fonts.check(font)) {
       // Canvas text does not repaint when a web font arrives. Rebuild both face and
       // axis labels once it loads, keeping system-font labels usable in the meantime.
-      void document.fonts.load(font).then(
-        () => {
-          if (!warmupCancellation.cancelled) {
-            setLoadedFont(style.font);
-          }
-        },
-        () => undefined, // A failed font request keeps the system-font fallback.
-      );
+      // async-iife: bootstrap — font readiness is asynchronous; teardown cancels the rebuild.
+      void (async () => {
+        try {
+          await document.fonts.load(font);
+        } catch {
+          return; // A failed font request keeps the system-font fallback.
+        }
+        if (!warmupCancellation.cancelled) {
+          setLoadedFont(style.font);
+        }
+      })();
     }
     const renderer = gl as unknown as {
       compileAsync?: (scene: Object3D, camera: Camera) => Promise<unknown>;

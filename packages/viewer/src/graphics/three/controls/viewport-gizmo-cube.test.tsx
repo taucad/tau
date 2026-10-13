@@ -254,7 +254,7 @@ describe('ViewportGizmoCube camera retention', () => {
 
   it('should repaint loaded fonts without reverting a camera retarget', async () => {
     const loaded = Promise.withResolvers<FontFace[]>();
-    const fonts = { check: () => false, load: vi.fn(() => loaded.promise) };
+    const fonts = { check: () => false, load: vi.fn(async () => loaded.promise) };
     const previousFonts = document.fonts;
     Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
     try {

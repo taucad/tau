@@ -11,6 +11,7 @@ on:
     paths:
       - '.github/workflows/spike-s25.yml'
       - 'scripts/spikes/s25/**'
+      - 'scripts/spikes/native-deps/linux/annotate.sh'
   workflow_dispatch:
 
 permissions:
@@ -55,6 +56,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/evidence"
           node scripts/spikes/s25/run.ts "$RUNNER_TEMP/clients/node_modules/.bin/codex" "$CLAUDE_BIN" "$RUNNER_TEMP/evidence" | tee "$RUNNER_TEMP/evidence/s25-summary.txt"
           { echo '```'; cat "$RUNNER_TEMP/evidence/s25-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the summary as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S25 ${{ matrix.os }}' "$RUNNER_TEMP/evidence/s25-summary.txt"
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

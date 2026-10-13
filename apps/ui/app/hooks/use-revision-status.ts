@@ -15,6 +15,7 @@ import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import type {
   GitRemoteCredential,
   PublishDraft,
+  RemoteFacet,
   RevisionDiffEntry,
   RevisionDivergence,
   RevisionLogRequest,
@@ -50,6 +51,7 @@ import { useProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import { GithubRequestError, githubConnections, githubErrorMessage } from '#lib/github-connections.js';
 import { githubNoreplyAuthor, githubProjectBinding } from '#lib/github-project-binding.js';
+import type { GithubProjectBinding } from '#lib/github-project-binding.js';
 import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
@@ -770,6 +772,184 @@ function scheduleGithubCredential(client: RevisionClient, projectId: string, ren
 }
 
 /**
+ * Each project's *Change backup* that is waiting for the new remote's answer (R2).
+ *
+ * Kept by project rather than by the surface that asked: the answer can
+ * arrive after the Sync region that sent the pick has unmounted.
+ */
+const pendingReplacements = new Map<string, () => void>();
+
+/**
+ * Stop waiting for a replacement's answer; a newer pick or a disconnect supersedes it.
+ *
+ * @param projectId - The project.
+ */
+const stopPendingReplacement = (projectId: string): void => {
+  pendingReplacements.get(projectId)?.();
+  pendingReplacements.delete(projectId);
+};
+
+/**
+ * Hand the remote that stayed this project's backup its own credential again (R2).
+ *
+ * The probe of the new remote needed the new remote's credential, so the
+ * worker was sent it before the probe. The binding was never touched, so a
+ * GitHub-bound project re-mints from it, the way an open does; any other
+ * remote gets the frame `connectRemote` sends it, which carries no credential.
+ *
+ * @param client - The project's revision client.
+ * @param projectId - The project.
+ * @param kept - The remote that stayed.
+ */
+const restoreKeptRemote = async (client: RevisionClient, projectId: string, kept: RemoteFacet): Promise<void> => {
+  if (githubProjectBinding.get(projectId) === undefined) {
+    const origin = kept.kind === 'git' ? remoteOrigin(kept.url) : undefined;
+    client.remoteCredential({
+      apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
+      ...(origin === undefined ? {} : { origin }),
+    });
+    return;
+  }
+  /* A queue the probe paused may have met the refused repository's credential: push it again with this one. */
+  if ((await mintGithubCredential(client, projectId, 'unavailable')) && client.status()?.remote.phase === 'connected') {
+    client.send({ command: 'syncNow' });
+  }
+};
+
+/**
+ * The binding a GitHub repository pick records (D33).
+ *
+ * @param url - The resolved remote address.
+ * @param options - The pick's GitHub fields.
+ * @returns The binding; `undefined` for a pick that is not a GitHub repository,
+ *   whose binding is removed; `unchanged` for an id GitHub never issues.
+ */
+const githubBindingOf = async (
+  url: string | undefined,
+  options:
+    | Readonly<{ provider?: 'github'; repositoryId?: string; connectionId?: string; generation?: number }>
+    | undefined,
+): Promise<GithubProjectBinding | 'unchanged' | undefined> => {
+  if (
+    options?.provider !== 'github' ||
+    url === undefined ||
+    options.repositoryId === undefined ||
+    options.connectionId === undefined ||
+    options.generation === undefined
+  ) {
+    return undefined;
+  }
+  const repositoryId = Number(options.repositoryId);
+  if (!Number.isSafeInteger(repositoryId) || repositoryId <= 0) {
+    return 'unchanged';
+  }
+  const { connectionId, generation } = options;
+  const connections = await githubConnections.list();
+  const connection = connections.find((candidate) => candidate.id === connectionId);
+  return {
+    connectionId,
+    repositoryId,
+    repositoryUrl: url,
+    generation,
+    ...(connection === undefined ? {} : { author: githubNoreplyAuthor(connection.subject, connection.login) }),
+  };
+};
+
+/** A remote pick, in the terms `remote.machine` compares destinations in. */
+type RemotePick = Readonly<{
+  kind: 'none' | 'tau' | 'git';
+  url: string | undefined;
+  provider: 'github' | undefined;
+  repositoryId: string | undefined;
+}>;
+
+/**
+ * Whether `remote` is the pick's destination, as `remote.machine`'s `isSameDestination` decides it.
+ *
+ * @param remote - A recorded remote.
+ * @param pick - The pick.
+ * @returns Whether they are the same destination.
+ */
+const isSameDestination = (remote: RemoteFacet, pick: RemotePick): boolean =>
+  remote.kind === pick.kind &&
+  (pick.kind === 'tau' ||
+    (remote.url === pick.url && remote.provider === pick.provider && remote.repositoryId === pick.repositoryId));
+
+/**
+ * Whether a pick replaces a remote that backs this project up, which `remote.machine` probes first (R2).
+ *
+ * @param recorded - What the projection records now.
+ * @param pick - The pick.
+ * @returns Whether the pick waits on the new remote's answer.
+ */
+const replacesRecordedRemote = (recorded: RemoteFacet | undefined, pick: RemotePick): recorded is RemoteFacet =>
+  pick.kind !== 'none' &&
+  recorded !== undefined &&
+  recorded.kind !== 'none' &&
+  (recorded.phase === 'connected' || recorded.phase === 'reconnectRequired') &&
+  !isSameDestination(recorded, pick);
+
+/**
+ * Rebind the project only once the new remote has answered (R2).
+ *
+ * `remote.machine` asks a replacing remote for its advertisement before it
+ * records it. Until then the old remote is the backup, so the binding (which
+ * decides the credential every open mints and who the next revision is
+ * authored as) stays the old one. A refusal, or a cancel, settles back to the
+ * old remote and hands it its credential again; the new remote recorded and
+ * answering settles to `bind`.
+ *
+ * @param input - The client, the project, what was recorded when the pick was sent, the pick, and its binding.
+ */
+const awaitReplacementAnswer = (
+  input: Readonly<{
+    client: RevisionClient;
+    projectId: string;
+    previous: RemoteFacet;
+    isReplacement: (remote: RemoteFacet) => boolean;
+    bind: () => Promise<void>;
+  }>,
+): void => {
+  const { client, projectId, previous, isReplacement, bind } = input;
+  /* A projection posted before the worker took the pick still shows the old
+   * remote and its last refusal: only a new refusal, or a return after the
+   * probe was seen, is this pick's answer. */
+  const previousAttempt = previous.refusedReplacement?.attempt;
+  let probed = false;
+  const settle = (): void => {
+    const remote = client.status()?.remote;
+    if (remote === undefined) {
+      return;
+    }
+    const refused = remote.refusedReplacement !== undefined && remote.refusedReplacement.attempt !== previousAttempt;
+    const settled = remote.phase === 'connected' || remote.phase === 'reconnectRequired';
+    const kept = probed && settled && remote.kind === previous.kind && remote.url === previous.url;
+    if (refused || kept) {
+      stopPendingReplacement(projectId);
+      // async-iife: bootstrap -- a failed re-mint reports through the `unavailable` frame it sends.
+      void restoreKeptRemote(client, projectId, remote);
+      return;
+    }
+    if (settled && isReplacement(remote)) {
+      stopPendingReplacement(projectId);
+      // async-iife: bootstrap -- a failed account lookup already rejected the `connectRemote` that started this wait.
+      void (async (): Promise<void> => {
+        try {
+          await bind();
+        } catch {
+          /* Reported to the surface that picked. */
+        }
+      })();
+      return;
+    }
+    probed ||= remote.phase === 'connecting';
+  };
+  const unsubscribe = client.subscribe(settle);
+  pendingReplacements.set(projectId, unsubscribe);
+  settle();
+};
+
+/**
  * Open (or reuse) this project's connection to the worker revision root.
  *
  * @param input - The project and the worker serving it.
@@ -1099,6 +1279,9 @@ export const revisionClientTestApi = {
       stopGithubCredential(projectId);
     }
     githubCredentialLeases.clear();
+    for (const projectId of pendingReplacements.keys()) {
+      stopPendingReplacement(projectId);
+    }
   },
 };
 
@@ -1509,8 +1692,10 @@ export const useRevisionCommands = (): RevisionCommands => {
          * anonymous read, the Advanced form's own promise. It is linked
          * read-only, because a push without the App credential is refused. */
         const fetchOnly = options?.fetchOnly === true || (github && options?.authorization === undefined);
-        /* The last remote's renewals stop here: they would re-send its frame. */
+        /* The last remote's renewals stop here: they would re-send its frame. A
+         * newer pick supersedes a replacement still waiting for its answer. */
         stopGithubCredential(projectId);
+        stopPendingReplacement(projectId);
         /* One frame on *every* connect, including *No remote* and Tau Cloud: the
          * frame is how a credential minted for the last remote stops being
          * offered to the next one (review R1). A host with no credential gets an
@@ -1545,38 +1730,48 @@ export const useRevisionCommands = (): RevisionCommands => {
             ...(fetchOnly ? { fetchOnly: true } : {}),
           });
         }
-        if (
-          options?.provider === 'github' &&
-          resolved !== undefined &&
-          options.repositoryId !== undefined &&
-          options.connectionId !== undefined &&
-          options.generation !== undefined
-        ) {
-          const repositoryId = Number(options.repositoryId);
-          if (Number.isSafeInteger(repositoryId) && repositoryId > 0) {
-            const { connectionId } = options;
-            const connections = await githubConnections.list();
-            const connection = connections.find((candidate) => candidate.id === connectionId);
-            githubProjectBinding.set(projectId, {
-              connectionId,
-              repositoryId,
-              repositoryUrl: resolved,
-              generation: options.generation,
-              ...(connection === undefined
-                ? {}
-                : { author: githubNoreplyAuthor(connection.subject, connection.login) }),
-            });
-            if (client !== undefined && options.expiresAt !== undefined) {
-              scheduleGithubCredential(client, projectId, githubCredentialRenewDelay(options.expiresAt, Date.now()));
-            }
+        /* Looked up now, so a failed lookup still rejects this call; recorded by `bind`. */
+        const binding = githubBindingOf(resolved, options);
+        const bind = async (): Promise<void> => {
+          const value = await binding;
+          if (value === 'unchanged') {
+            return;
           }
-        } else {
-          githubProjectBinding.remove(projectId);
+          if (value === undefined) {
+            githubProjectBinding.remove(projectId);
+            return;
+          }
+          githubProjectBinding.set(projectId, value);
+          if (client !== undefined && options?.expiresAt !== undefined) {
+            scheduleGithubCredential(client, projectId, githubCredentialRenewDelay(options.expiresAt, Date.now()));
+          }
+        };
+        /*
+         * R2: a different destination picked while a remote backs this project
+         * up is probed before it replaces anything (`remote.machine`'s
+         * `replaceOrReconnect`). The binding moves only once the new remote is
+         * recorded and answering; a refusal leaves the old binding as it was
+         * and hands the old remote its credential back. Waited on here, not in
+         * the Sync region, so the answer is kept when that region unmounts.
+         */
+        const pick = { kind, url: resolved, provider: options?.provider, repositoryId: options?.repositoryId };
+        if (client !== undefined && !regranted && replacesRecordedRemote(recorded, pick)) {
+          awaitReplacementAnswer({
+            client,
+            projectId,
+            previous: recorded,
+            isReplacement: (remote) => isSameDestination(remote, pick),
+            bind,
+          });
+          await binding;
+          return;
         }
+        await bind();
       },
       disconnectRemote: () => {
         /* The credential goes with the remote it was minted for (review R1). */
         stopGithubCredential(projectId);
+        stopPendingReplacement(projectId);
         client?.remoteCredential({
           apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
         });

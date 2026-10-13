@@ -45,7 +45,6 @@ import {
 } from '#lib/github-connections.js';
 import type { GithubRepository } from '#lib/github-connections.js';
 import { githubProjectBinding } from '#lib/github-project-binding.js';
-import type { GithubProjectBinding } from '#lib/github-project-binding.js';
 import { formatStorageLimit } from '@taucad/billing';
 import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
@@ -67,15 +66,6 @@ import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
 /** Which remote a person can pick. @public */
 export type RemoteChoice = 'none' | 'tau' | 'git';
-
-/** What a replacement in flight would cost if the new remote refused it (R2). */
-type KeptBackup = Readonly<{
-  projectId: string;
-  /** The project's GitHub binding before the replacement rebound it. */
-  binding: GithubProjectBinding | undefined;
-  /** The replacement's own send, which writes the new binding. */
-  sent: Promise<void>;
-}>;
 
 type PendingConnection =
   | Readonly<{ kind: 'tau' }>
@@ -566,7 +556,7 @@ export function RevisionSyncRegion({
   const [pendingConnection, setPendingConnection] = useState<PendingConnection>();
   const [changingBackup, setChangingBackup] = useState(remote.phase !== 'connected');
   const [reconnecting, setReconnecting] = useState(false);
-  /* A connect in flight from this region, the R2 probe included: *Replace backup* waits for it. */
+  /* A connect in flight from this region: *Replace backup* waits for it. */
   const [committing, setCommitting] = useState(false);
   const [shouldConnect, setShouldConnect] = useState(false);
   const handleConnectRequest = (): void => {
@@ -683,87 +673,31 @@ export function RevisionSyncRegion({
   /*
    * R2: the platform asks a replacing remote for its advertisement before it
    * records it, and a refusal leaves the old remote recorded and backing the
-   * project up (`remote.refusedReplacement`). The page has already rebound the
-   * project to the new remote by then (the binding, and the credential the
-   * worker holds), so a refusal puts the old binding back; a connected GitHub
-   * repository is granted its own credential again, the way the D3 re-grant does.
+   * project up (`remote.refusedReplacement`). The hook's `connectRemote` owns
+   * the binding and credential across that answer, so it survives this region
+   * unmounting mid-probe; the region only sends the pick.
    */
-  const keptBackup = useRef<KeptBackup>(undefined);
-  const replacesBackup = (pending: PendingConnection): boolean => remote.kind !== 'none' && !isSameDestination(pending);
-
-  const restoreKeptBackup = async (kept: KeptBackup): Promise<void> => {
-    /* The replacement's own binding write finishes first, so this one is the last word. */
-    await kept.sent.catch(() => undefined);
-    const { binding } = kept;
-    if (binding === undefined) {
-      githubProjectBinding.remove(kept.projectId);
-      return;
-    }
-    if (!(remote.phase === 'connected' && remote.provider === 'github' && remote.url === binding.repositoryUrl)) {
-      githubProjectBinding.set(kept.projectId, binding);
-      return;
-    }
-    const token = await githubConnections.token(binding.connectionId);
-    await onConnect('git', binding.repositoryUrl, {
-      authorization: `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`,
-      provider: 'github',
-      repositoryId: String(binding.repositoryId),
-      connectionId: binding.connectionId,
-      generation: token.generation,
-      expiresAt: token.expiresAt,
-      fetchOnly: remote.fetchOnly,
-    });
-  };
-
-  /* Keyed on the attempt, not the object: every projection is a new object, and a
-   * projection posted before the worker took the replacement still carries the last refusal. */
-  const refusedAttempt = remote.refusedReplacement?.attempt;
-  useEffect(() => {
-    const kept = keptBackup.current;
-    if (refusedAttempt === undefined || kept === undefined) {
-      return;
-    }
-    keptBackup.current = undefined;
-    // oxlint-disable-next-line promise/prefer-await-to-then -- a refused re-grant is the next push's *Reconnect GitHub*, not this effect's.
-    restoreKeptBackup(kept).catch(() => undefined);
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- R2: once per refusal; the ref carries what to restore.
-  }, [refusedAttempt]);
-
-  const sendConnection = async (pending: PendingConnection, send: () => Promise<void>): Promise<void> => {
-    /* Only these two phases probe a replacement; any other connect records over nothing. */
-    const keeps =
-      projectId !== undefined &&
-      (remote.phase === 'connected' || remote.phase === 'reconnectRequired') &&
-      replacesBackup(pending);
-    const binding = projectId === undefined ? undefined : githubProjectBinding.get(projectId);
-    const sent = send();
-    keptBackup.current = keeps ? { projectId, binding, sent } : undefined;
-    await sent;
-  };
-
   const commitConnection = async (pending: PendingConnection): Promise<void> => {
     setConnectionError(undefined);
     setCommitting(true);
     try {
       if (pending.kind === 'tau') {
-        await sendConnection(pending, async () => onConnect('tau'));
+        await onConnect('tau');
       } else if (pending.kind === 'git') {
-        await sendConnection(pending, async () => onConnect('git', pending.url));
+        await onConnect('git', pending.url);
       } else {
         const { connectionId, repository } = pending;
         const token = await githubConnections.token(connectionId);
         const authorization = `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`;
-        await sendConnection(pending, async () =>
-          onConnect('git', repository.cloneUrl, {
-            authorization,
-            provider: 'github',
-            repositoryId: String(repository.id),
-            connectionId,
-            generation: token.generation,
-            expiresAt: token.expiresAt,
-            fetchOnly: repository.access !== 'write',
-          }),
-        );
+        await onConnect('git', repository.cloneUrl, {
+          authorization,
+          provider: 'github',
+          repositoryId: String(repository.id),
+          connectionId,
+          generation: token.generation,
+          expiresAt: token.expiresAt,
+          fetchOnly: repository.access !== 'write',
+        });
       }
       setPendingConnection(undefined);
       setChangingBackup(false);

@@ -3,6 +3,7 @@ import type { ActorRefFrom, EnqueueObject, SystemRegistry } from 'xstate';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import type { CadReference } from '@taucad/chat/references';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import type { ChatMessageQueueIntent } from '#db/chat-message-queue-store.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import type { HostCommand } from '@taucad/agent-host/wire';
 
@@ -76,6 +77,7 @@ export type ChatTurnGesture =
       execution?: CadAgentExecution;
       command?: Extract<HostCommand, { type: 'start' }>;
       queueId?: string;
+      queueIntent?: ChatMessageQueueIntent;
     }>
   | Readonly<{
       kind: 'edit';
@@ -325,7 +327,7 @@ export const chatSessionMachine = setup({
   actors: chatSessionActors,
 }).createMachine({
   id: 'chat-session',
-  version: '2',
+  version: '3',
   /* A fault no transition modelled is recorded and the chat keeps answering, so a render never throws (MC-R12). */
   onError: ({ event }) => ({ context: { fault: failureMessage(event.error, 'chat-session fault') } }),
   context: ({ input }) => ({

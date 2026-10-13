@@ -11,6 +11,7 @@ import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import type { ActiveChatSessionContextValue } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
+import type { ChatMessageQueueIntent } from '#db/chat-message-queue-store.js';
 import type { AgentHostClientOptions, AgentHostClient } from '#services/agent-host-client.js';
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
@@ -333,6 +334,7 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
     requestTurn: vi.fn(),
     startPendingSeed: vi.fn(),
     refreshMessageQueue: vi.fn(),
+    captureMessageQueueIntent: vi.fn(() => ({})),
     setTurnPlacement: vi.fn(),
     respondToProjectedApproval: browserHostHarness.resolveInterrupt,
     getProjection: () => {
@@ -786,6 +788,68 @@ describe('useCadChatClient', () => {
       reason: undefined,
       optionId: 'allow-always',
     });
+  });
+
+  it.each(['stopped', 'failed'])(
+    'should retain pre-%s queue intent while attachment promotion is pending',
+    async (terminal) => {
+      useActiveChatInstanceMock.mockReturnValue(mock<Chat<MyUIMessage>>());
+      useChatSelectorMock.mockReturnValue('streaming');
+      const actions = buildActions();
+      installActions(actions);
+      let intent: ChatMessageQueueIntent = {};
+      const captureMessageQueueIntent = vi.fn(() => intent);
+      installSessionStore({ captureMessageQueueIntent, promoteDraftAttachments });
+      const saved = Promise.withResolvers<void>();
+      promoteDraftAttachments.mockImplementation(async () => saved.promise);
+      const view = renderClient();
+      let sending: Promise<void> | undefined;
+      act(() => {
+        sending = view.result.current.submit({ text: 'Wait for the current turn', attachments: [imageAttachment] });
+      });
+      expect(actions.sendMessage).not.toHaveBeenCalled();
+      intent = { afterTerminalRunId: `run-${terminal}` };
+      useChatSelectorMock.mockReturnValue('ready');
+      view.rerender();
+      await act(async () => {
+        saved.resolve();
+        await sending;
+      });
+      expect(actions.sendMessage).toHaveBeenCalledOnce();
+      expect(actions.sendMessage.mock.calls[0]?.[1]).toHaveProperty('queueIntent', {});
+      expect(captureMessageQueueIntent).toHaveBeenCalledExactlyOnceWith('chat_test');
+      expect(captureMessageQueueIntent.mock.invocationCallOrder[0]).toBeLessThan(
+        promoteDraftAttachments.mock.invocationCallOrder[0]!,
+      );
+    },
+  );
+
+  it('should retain the exact terminal intent captured before attachment promotion', async () => {
+    useActiveChatInstanceMock.mockReturnValue(mock<Chat<MyUIMessage>>());
+    const actions = buildActions();
+    installActions(actions);
+    let intent: ChatMessageQueueIntent = { afterTerminalRunId: 'run-stopped' };
+    const captureMessageQueueIntent = vi.fn(() => intent);
+    installSessionStore({ captureMessageQueueIntent, promoteDraftAttachments });
+    const saved = Promise.withResolvers<void>();
+    promoteDraftAttachments.mockImplementation(async () => saved.promise);
+    const view = renderClient();
+    let sending: Promise<void> | undefined;
+    act(() => {
+      sending = view.result.current.submit({ text: 'Continue after Stop', attachments: [imageAttachment] });
+    });
+    intent = { afterTerminalRunId: 'another-run' };
+    await act(async () => {
+      saved.resolve();
+      await sending;
+    });
+    expect(actions.sendMessage.mock.calls[0]?.[1]).toMatchObject({
+      queueIntent: { afterTerminalRunId: 'run-stopped' },
+    });
+    expect(captureMessageQueueIntent).toHaveBeenCalledExactlyOnceWith('chat_test');
+    expect(captureMessageQueueIntent.mock.invocationCallOrder[0]).toBeLessThan(
+      promoteDraftAttachments.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('should capture the selected execution before an attachment save yields', async () => {

@@ -1,30 +1,50 @@
 {
   "actions": {},
-  "alphabet": ["loaded", "refresh", "retry", "watchFailed"],
+  "alphabet": [
+    "adoptRun",
+    "close",
+    "dirtyChanged",
+    "interruptRecorded",
+    "loaded",
+    "refresh",
+    "requestTurn",
+    "retry",
+    "runLifecycle",
+    "syncState",
+    "toolParts",
+    "turnAdmitted",
+    "turnFinalized",
+    "watchFailed"
+  ],
   "sources": {
     "apps/ui/app/chat-clients/chat-turn-host.tsx": "71115cd738aa95c0ac83204cc9d73e98c5121cb69f49cb13dfcdd45f2495fe1d",
+    "apps/ui/app/chat-clients/use-cad-chat-client.ts": "4d984b47c72c18d5ec693ac050f9d1e431c3966904933dae1436cc51c306ee0f",
     "apps/ui/app/components/chat/chat-message-queue-view.tsx": "c8b147b1a215eb4ac172fddf26afbafeb370492faf7632315483d08bc3a3b337",
     "apps/ui/app/components/chat/chat-message-queue.tsx": "6cada6cbb8e507a2982518277c87930dd27071ef80b802ca22c55a4e972683c8",
     "apps/ui/app/components/chat/chat-textarea.tsx": "468b807ff29437061694aa575d5b0d791fd5c174a7c1625dd7e670788fa91875",
-    "apps/ui/app/db/chat-message-queue-store.ts": "fe987ef86779b50c72fa3e9addd7f4970849d04aba57020fa178cc82c8da2830",
-    "apps/ui/app/hooks/use-chat.tsx": "9b449e73d341192fd2ba8dce04c98cb9c4ac9ef5a7cf0a64e4aca8ca56eed7af",
+    "apps/ui/app/db/chat-message-queue-store.ts": "c50a61f017e5b7076e531d3380db9cf5b24db700ed9c6b583b7c8a52def62cfc",
+    "apps/ui/app/hooks/use-chat.tsx": "6de4bf1438424a5c885cd0df851ed1656ab66d877f2903d2ef0da0fb22768fff",
     "apps/ui/app/machines/chat-message-queue.machine.ts": "044716f3d08abfe25150f6026c8d03df271cce6b9d30fd489476a3c50a0f04dd",
-    "apps/ui/app/services/chat-session-store.ts": "08b29c40486a520f4424aeb65fcad510f22fa08680be8eeb7d886f3ab9d0f8e9"
+    "apps/ui/app/machines/chat-session.machine.ts": "9d3180fe7082223fddcc7ff798bad3cd522c0d1b70cf77d91cd34ba7cffa221d",
+    "apps/ui/app/services/chat-session-store.ts": "20e302aba75b5a524495a64c85de97c7164373b57c1853ecf9431f09c7c9923c"
   },
   "specs": {
-    "MessageQueue.tla": "5d9e1255e86d2c32c8b73a0eb0d60b3d55cc9a731b5c6916289c6dc880f5df2d"
+    "MessageQueue.tla": "7e39c1ba07146c9b75e337fe64739158e937b4e74b10d16301044e263d9504af"
   },
   "tables": {
-    "MessageQueue.duplicate.cfg": "da73aad5e64711713646a5630244b2d4abcbcb06798c5acdf97ec1ad74c52d1a",
-    "MessageQueue.early-steer.cfg": "95459ac3c7876f3871a57b924e21c46fa99877264abe94363ad6ebc62fcd197a",
-    "MessageQueue.follower-lag.cfg": "e0697902af74a86d0ffcd681108a35fa84e3a108b139cf7a9084a13e3085711e",
-    "MessageQueue.lost-payload.cfg": "539015ca3a8ef64737a8c8f634d7e822b8a6f772d8c7c7443ff661e77dd9636e",
-    "MessageQueue.target.cfg": "4d914efe4469a88ae0b6cbeb4f980e2cb432c60016b6bcee93a9235aae250556",
-    "MessageQueue.today.cfg": "eb16c9ddac4cce671c4573d9a5a6c91208cb1fc2d23329e02153372c25ad261f",
-    "MessageQueue.wrong-cancel.cfg": "c07e307a95d0d7744bbdd033096c678e546704c5fa8925f4467c8c69b5c1b622",
-    "expected.json": "d94c6cf379bdef83a4d0c9ba9f70fad54cafcfcb004ba361c71abd4243f8419c"
+    "MessageQueue.duplicate.cfg": "9d566ac1a0f357cd7744cdf8594fbaa4554d7c262a0fadf921c45b66b9ffb9da",
+    "MessageQueue.early-steer.cfg": "c3238fc4bfcecd7fa9444fb891f8c668dd50a23aaaf20e3418a4e009f39f091e",
+    "MessageQueue.follower-lag.cfg": "0f72287763bb81ba6288212735b42dc601031938e69c52159ae87597deabf83c",
+    "MessageQueue.late-terminal-capture.cfg": "eee38a8dd8754540aba9144e65be9a21a5539a3d21816bdeb58879042062ffb8",
+    "MessageQueue.lost-payload.cfg": "3f5b7905e927a25bacd64b50c2d348a381aa922cec7210dd02e9639c257d37b9",
+    "MessageQueue.release-stopped.cfg": "12cbfa5d0b5b62bc8200e44b3b50003caa9afd9b29f69b095f20d590f6a2dbdd",
+    "MessageQueue.target.cfg": "681dc3b351dc087568c31dbc5c487d124323485706fb94483bbb67c19b4a28e3",
+    "MessageQueue.today.cfg": "f185e5b96916ae1a6ffc9e93296bf3bf70f0474617a782f86a1866e46bd9078f",
+    "MessageQueue.wrong-cancel.cfg": "821eae120126639dc7baa965d46abc6cd06880964a2f16debfa4415521de4c65",
+    "expected.json": "ee254f6ec45e0e79b9683c27c8fc8c475e56aa2d3f2b59fa3a5f5774fa567a35"
   },
   "versions": {
-    "chat-message-queue": "1"
+    "chat-message-queue": "1",
+    "chat-session": "3"
   }
 }

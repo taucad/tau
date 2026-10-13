@@ -1,14 +1,16 @@
 -------------------------- MODULE MessageQueue --------------------------
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
-          ObserveBarrier, TargetedCancel, TerminalBeforeSend
+          ObserveBarrier, TargetedCancel, TerminalBeforeSend,
+          RequireTerminalIntent, CaptureTerminalAtSubmit
 VARIABLE s
 vars == <<s>>
 None == "none"
 Original == "original"
 Runs == Messages \cup {Original}
 Live(p) == p \in {"running", "paused"}
-Terminal(p) == p \in {"completed", "cancelled"}
+Stopped(p) == p \in {"cancelled", "failed"}
+Terminal(p) == p = "completed" \/ Stopped(p)
 Members(q) == {q[i] : i \in 1..Len(q)}
 Remove(q, m) == SelectSeq(q, LAMBDA x : x # m)
 Accepted == {key[1] : key \in s.accepted}
@@ -17,20 +19,36 @@ BarrierSeen(t) == ~ObserveBarrier \/ s.after = None \/ s.after \in s.observed[t]
 Ready(t) == /\ BarrierSeen(t)
             /\ IF s.steerItem = None
                   THEN s.observed[t].phase = "completed"
+                       \/ (Stopped(s.observed[t].phase) /\
+                           (~RequireTerminalIntent \/ s.afterTerminal[Chosen] = s.observed[t].run))
                   ELSE ~TerminalBeforeSend \/ Terminal(s.observed[t].phase)
 Init == s = [queue |-> <<>>, saved |-> <<>>, submitted |-> {}, prepared |-> None,
              owner |-> None, alive |-> Tabs, after |-> None, active |-> Original,
+             pending |-> None, pendingTab |-> None,
+             capturedTerminal |-> [m \in Messages |-> None],
+             afterTerminal |-> [m \in Messages |-> None],
              phase |-> [r \in Runs |-> IF r = Original THEN "running" ELSE "absent"],
              known |-> {Original}, accepted |-> {}, counts |-> [m \in Messages |-> 0],
              observed |-> [t \in Tabs |-> [run |-> Original, phase |-> "running", known |-> {Original}]],
-             sends |-> <<>>, steerItem |-> None, target |-> None,
-             cancelPending |-> {}, cancellations |-> {}, submitInterrupted |-> FALSE]
-Submit(m) == /\ m \notin s.submitted
-             /\ s' = [s EXCEPT !.queue = Append(@, m),
-                       !.saved = IF Durable THEN Append(@, m) ELSE @,
-                       !.submitted = @ \cup {m},
-                       !.submitInterrupted = @ \/ (~QuietSubmit /\ Live(s.phase[s.active])),
-                       !.phase[s.active] = IF QuietSubmit THEN @ ELSE "cancelled"]
+             earlyDelivery |-> FALSE, earlySteer |-> FALSE, outOfOrder |-> FALSE,
+             steerItem |-> None, target |-> None,
+             cancelPending |-> {}, wrongCancellation |-> FALSE, submitInterrupted |-> FALSE]
+\* Capture authorization at UI submit entry before attachment promotion, then
+\* forward the same intent through execution lookup and storage lock awaits.
+Submit(t, m) == /\ t \in s.alive /\ m \notin s.submitted /\ s.pending = None
+                /\ s' = [s EXCEPT !.pending = m, !.pendingTab = t,
+                    !.capturedTerminal[m] = IF Stopped(s.observed[t].phase)
+                                             THEN s.observed[t].run ELSE None,
+                    !.submitInterrupted = @ \/ (~QuietSubmit /\ Live(s.phase[s.active])),
+                    !.phase[s.active] = IF QuietSubmit THEN @ ELSE "cancelled"]
+Persist == LET m == s.pending IN
+           /\ m # None
+           /\ s' = [s EXCEPT !.queue = Append(@, m),
+                     !.saved = IF Durable THEN Append(@, m) ELSE @,
+                     !.submitted = @ \cup {m}, !.pending = None, !.pendingTab = None,
+                     !.afterTerminal[m] = IF CaptureTerminalAtSubmit THEN s.capturedTerminal[m]
+                       ELSE IF Stopped(s.observed[s.pendingTab].phase)
+                              THEN s.observed[s.pendingTab].run ELSE None]
 Observe(t) == /\ t \in s.alive
               /\ s.observed[t] # [run |-> s.active, phase |-> s.phase[s.active], known |-> s.known]
               /\ s' = [s EXCEPT !.observed[t] = [run |-> s.active, phase |-> s.phase[s.active], known |-> s.known]]
@@ -40,6 +58,8 @@ Pause == /\ s.phase[s.active] = "running"
          /\ s' = [s EXCEPT !.phase[s.active] = "paused"]
 Resume == /\ s.phase[s.active] = "paused"
           /\ s' = [s EXCEPT !.phase[s.active] = "running"]
+Fail == /\ Live(s.phase[s.active])
+        /\ s' = [s EXCEPT !.phase[s.active] = "failed"]
 Stop == /\ Live(s.phase[s.active])
         /\ s' = [s EXCEPT !.phase[s.active] = "cancelled"]
 Steer(t, m) == /\ t \in s.alive /\ m \in Members(s.queue)
@@ -51,7 +71,7 @@ Cancel(t) == LET victim == IF TargetedCancel THEN s.target ELSE s.observed[t].ru
              /\ (~TargetedCancel \/ s.observed[t].run = s.target)
              /\ victim \notin s.cancelPending
              /\ s' = [s EXCEPT !.cancelPending = @ \cup {victim},
-                       !.cancellations = @ \cup {[target |-> s.target, victim |-> victim]}]
+                       !.wrongCancellation = @ \/ (victim # s.target)]
 FinishCancel(r) == /\ r \in s.cancelPending /\ Live(s.phase[r])
                    /\ s' = [s EXCEPT !.phase[r] = "cancelled"]
 Prepare(t) == /\ t \in s.alive /\ s.owner = None /\ Len(s.queue) > 0
@@ -66,10 +86,13 @@ Deliver(t) == LET m == s.prepared
               IN /\ t = s.owner /\ m # None /\ s.counts[m] < 2
                  /\ s' = [s EXCEPT
                     !.counts[m] = @ + 1,
-                    !.sends = Append(@, [item |-> m, first |-> m \notin Accepted,
-                       phase |-> s.phase[s.active], steered |-> s.steerItem = m,
-                       targetPhase |-> IF s.target = None THEN "completed" ELSE s.phase[s.target],
-                       head |-> Head(s.queue)]),
+                    !.earlyDelivery = @ \/ (m \notin Accepted /\
+                      IF s.steerItem = m THEN ~Terminal(s.phase[s.active])
+                      ELSE ~(s.phase[s.active] = "completed" \/
+                        (Stopped(s.phase[s.active]) /\ s.capturedTerminal[m] = s.active))),
+                    !.earlySteer = @ \/ (m \notin Accepted /\ s.steerItem = m /\
+                      s.target # None /\ ~Terminal(s.phase[s.target])),
+                    !.outOfOrder = @ \/ (m \notin Accepted /\ s.steerItem # m /\ m # Head(s.queue)),
                     !.accepted = IF accept THEN @ \cup {key} ELSE @,
                     !.active = IF accept THEN m ELSE @,
                     !.phase[m] = IF accept THEN "running" ELSE @,
@@ -83,40 +106,48 @@ Acknowledge(t) == /\ t = s.owner /\ s.prepared # None /\ s.prepared \in Accepted
                   /\ s' = [s EXCEPT !.queue = Remove(@, s.prepared),
                      !.saved = IF Durable THEN Remove(@, s.prepared) ELSE @,
                      !.after = s.prepared, !.prepared = None, !.owner = None,
+                     !.capturedTerminal[s.prepared] = None, !.afterTerminal[s.prepared] = None,
+                     !.counts[s.prepared] = 0,
                      !.target = IF s.steerItem = s.prepared THEN None ELSE @,
                      !.steerItem = IF s.steerItem = s.prepared THEN None ELSE @]
 LoseAck(t) == /\ t = s.owner /\ s.prepared \in Accepted
               /\ s' = [s EXCEPT !.owner = None]
-Crash(t) == /\ t \in s.alive
+\* The finite crash scenario begins only after a queue save has answered.
+Crash(t) == /\ t \in s.alive /\ s.pending = None
             /\ s' = [s EXCEPT !.alive = @ \ {t},
                  !.owner = IF @ = t THEN None ELSE @,
                  !.queue = IF Durable THEN @ ELSE s.saved,
                  !.prepared = IF Durable THEN @ ELSE None]
 Reopen(t) == /\ t \notin s.alive /\ s' = [s EXCEPT !.alive = @ \cup {t}]
-Next == (\E m \in Messages : Submit(m)) \/ Complete \/ Pause \/ Resume \/ Stop
+Next == Persist \/ Complete \/ Pause \/ Resume \/ Stop \/ Fail
         \/ (\E t \in Tabs : Observe(t) \/ Prepare(t) \/ Recover(t) \/ Deliver(t)
              \/ Acknowledge(t) \/ LoseAck(t) \/ Crash(t) \/ Reopen(t) \/ Cancel(t)
-             \/ (\E m \in Messages : Steer(t, m)))
+             \/ (\E m \in Messages : Submit(t, m) \/ Steer(t, m)))
         \/ (\E r \in Runs : FinishCancel(r))
 Spec == Init /\ [][Next]_vars
 TypeOK == /\ s.queue \in Seq(Messages) /\ s.saved \in Seq(Messages)
           /\ s.submitted \subseteq Messages /\ s.active \in Runs
           /\ s.owner \in Tabs \cup {None} /\ s.prepared \in Messages \cup {None}
           /\ s.after \in Runs \cup {None} /\ s.alive \subseteq Tabs
-          /\ s.phase \in [Runs -> {"absent", "running", "paused", "completed", "cancelled"}]
+          /\ s.phase \in [Runs -> {"absent", "running", "paused", "completed", "cancelled", "failed"}]
           /\ s.counts \in [Messages -> 0..2]
+          /\ s.pending \in Messages \cup {None}
+          /\ s.pendingTab \in Tabs \cup {None}
+          /\ s.capturedTerminal \in [Messages -> Runs \cup {None}]
+          /\ s.afterTerminal \in [Messages -> Runs \cup {None}]
           /\ Len(s.queue) = Cardinality(Members(s.queue))
 PayloadSurvives == s.submitted \subseteq Members(s.queue) \cup Accepted
 PreparedPayloadSurvives == s.prepared = None \/ s.prepared \in Members(s.queue)
 AtMostOnceCharge == \A m \in Messages : Cardinality({key \in s.accepted : key[1] = m}) <= 1
 SubmitPreservesRun == ~s.submitInterrupted
-NoEarlyDelivery == \A i \in 1..Len(s.sends) : s.sends[i].first =>
-                     IF s.sends[i].steered THEN Terminal(s.sends[i].phase)
-                     ELSE s.sends[i].phase = "completed"
-SteerWaitsForTerminal == \A i \in 1..Len(s.sends) :
-  s.sends[i].first /\ s.sends[i].steered => Terminal(s.sends[i].targetPhase)
-CancelTargetsObservedRun == \A c \in s.cancellations : c.victim = c.target
-FIFOExceptExplicitSteer == \A i \in 1..Len(s.sends) :
-  s.sends[i].first /\ ~s.sends[i].steered => s.sends[i].item = s.sends[i].head
-Quiescent == s.queue = <<>> /\ s.prepared = None /\ s.owner = None
+\* Permission is the immutable gesture-time observation, not a fact learned later.
+\* Monotone monitors are equivalent to requiring the predicate of every prior
+\* first delivery. They merge histories with identical safety outcomes without
+\* restricting any protocol action, including accepted-command retransmission.
+NoEarlyDelivery == ~s.earlyDelivery
+SteerWaitsForTerminal == ~s.earlySteer
+CancelTargetsObservedRun == ~s.wrongCancellation
+FIFOExceptExplicitSteer == ~s.outOfOrder
+Quiescent == s.pending = None /\ s.queue = <<>> /\ s.prepared = None /\ s.owner = None
+Symmetry == {messages @@ tabs : messages \in Permutations(Messages), tabs \in Permutations(Tabs)}
 =============================================================================

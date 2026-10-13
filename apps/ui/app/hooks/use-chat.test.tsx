@@ -407,6 +407,21 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
 
   // Host-command routing is exercised by chat-session-store and turn-host tests.
 
+  it.each([{}, { afterTerminalRunId: 'run-stopped' }])(
+    'preserves captured queue intent %j through send actions',
+    async (queueIntent) => {
+      const { result } = renderHook(() => ({ actions: useChatActions(), store: useChatSessionStore() }), {
+        wrapper: createWrapper(defaultTestChatId),
+      });
+      const request = vi.spyOn(result.current.store, 'requestTurn').mockResolvedValue(undefined);
+      const message = makeUserMessage('queued-with-intent', 'Preserve my original intent');
+      await act(async () => {
+        await result.current.actions.sendMessage(message, { queueIntent });
+      });
+      expect(request).toHaveBeenCalledExactlyOnceWith(defaultTestChatId, { kind: 'send', message, queueIntent });
+    },
+  );
+
   it('records an accepted send once and ignores invalid targets and stop', async () => {
     const { result } = renderHook(() => ({ actions: useChatActions(), store: useChatSessionStore() }), {
       wrapper: createWrapper(defaultTestChatId),

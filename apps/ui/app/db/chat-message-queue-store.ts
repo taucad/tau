@@ -13,11 +13,14 @@ import type { ComposerRecordClient } from '#db/composer-record-store.js';
 import { isNotFound } from '#db/attachment-store.js';
 import { attachmentReferenceOf } from '#utils/attachment.utils.js';
 
+export type ChatMessageQueueIntent = Readonly<{ afterTerminalRunId?: string }>;
+
 export type QueuedStartCommand = Extract<HostCommand, { type: 'start' }>;
 export type QueuedCancelCommand = Extract<HostCommand, { type: 'cancel' }>;
 export type QueuedChatMessage = Readonly<{
   id: string;
   requestId: string;
+  afterTerminalRunId?: string;
   message: MyUIMessage;
   execution?: CadAgentExecution;
   command?: QueuedStartCommand;
@@ -40,6 +43,7 @@ export const chatMessageQueuePath = (projectId: string, chatId: string): string 
 const itemSchema = z.strictObject({
   id: z.string().min(1),
   requestId: z.string().min(1),
+  afterTerminalRunId: z.string().min(1).optional(),
   message: z.unknown(),
   execution: cadAgentExecutionSchema.optional(),
   command: z

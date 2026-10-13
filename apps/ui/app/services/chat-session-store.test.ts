@@ -4328,11 +4328,270 @@ describe('ChatSessionStore', () => {
           request: { kind: 'send', message: gesture.message, command, queueId: gesture.queueId },
         };
       });
-    const queuedGesture = (id: string): ChatTurnGesture => ({
+    const queuedGesture = (id: string): Extract<ChatTurnGesture, { kind: 'send' }> => ({
       kind: 'send',
       requestId: `req_${id}`,
       message: { id, role: 'user', parts: [{ type: 'text', text: id }] },
     });
+
+    it('should wake a persisted queue once when draft attachment cleanup fails', async () => {
+      const chatId = 'queue_cleanup_failure';
+      const projectId = 'queue_project';
+      const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+      const unadmit = queueAdmission(chatId);
+      const failure = new Error('Draft cleanup failed');
+      const release = vi.spyOn(store, 'releaseDraftAttachments').mockImplementation(async () => {
+        expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+          items: [{ id: 'cleanup', requestId: 'req_cleanup' }],
+        });
+        throw failure;
+      });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        publishLogRows(store, chatId, []);
+        await vi.waitFor(() => {
+          expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+        });
+        await expect(store.requestTurn(chatId, queuedGesture('cleanup'))).resolves.toBeUndefined();
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledTimes(1);
+          expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+        });
+        expect(hostCommand.mock.calls[0]?.[0]).toMatchObject({
+          type: 'start',
+          commandId: 'req_cleanup',
+          payload: { runId: 'req_cleanup', message: { id: 'cleanup' } },
+        });
+        expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+        expect(warn).toHaveBeenCalledWith('[ChatSessionStore] draft attachments could not be released', failure);
+        await settle();
+        expect(hostCommand).toHaveBeenCalledTimes(1);
+      } finally {
+        release.mockRestore();
+        warn.mockRestore();
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it.each(['cancelled', 'failed'] as const)('should send a new message after observing %s', async (phase) => {
+      const chatId = `queue_after_${phase}`;
+      const { store, hostCommand, unpublish } = await open(chatId, 'queue_project');
+      const unadmit = queueAdmission(chatId);
+      try {
+        publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, phase, 'old')]);
+        await store.requestTurn(chatId, queuedGesture('new'));
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledTimes(1);
+        });
+        expect(hostCommand.mock.calls[0]?.[0]).toMatchObject({
+          type: 'start',
+          commandId: 'req_new',
+          payload: { runId: 'req_new', message: { id: 'new' } },
+        });
+      } finally {
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it.each(['cancelled', 'failed'] as const)(
+      'should keep pre-terminal messages ahead of new messages after %s and reopen',
+      async (phase) => {
+        const chatId = `queue_hold_${phase}`;
+        const projectId = 'queue_project';
+        const first = await open(chatId, projectId);
+        const terminal = [...runningRows('old'), lifecycleRow(2, phase, 'old')];
+        publishLogRows(first.store, chatId, runningRows('old'));
+        await first.store.requestTurn(chatId, queuedGesture('before'));
+        publishLogRows(first.store, chatId, terminal);
+        await first.store.requestTurn(chatId, queuedGesture('after'));
+        first.unpublish();
+        first.store.release(chatId);
+        const reopened = new ChatSessionStore({ chatSession });
+        reopened.setDependencies(first.deps);
+        const session = reopened.acquire(chatId, projectId);
+        const unadmit = queueAdmission(chatId);
+        const disconnect = reopened.publishProjectHostConnector(projectId, async () =>
+          mock<AgentHostClient>({
+            hostCommand: first.hostCommand,
+            catchUp: writerOwnedCatchUp,
+            close: async () => undefined,
+          }),
+        );
+        try {
+          publishLogRows(reopened, chatId, terminal);
+          reopened.refreshMessageQueue(chatId);
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+            expect(session.messageQueueRef.getSnapshot().context.items.map((item) => item.id)).toEqual([
+              'before',
+              'after',
+            ]);
+          });
+          expect(first.hostCommand).not.toHaveBeenCalled();
+          await reopened.editQueuedMessage(chatId, 'before', undefined);
+          await vi.waitFor(() => {
+            expect(first.hostCommand).toHaveBeenCalledTimes(1);
+          });
+          expect(first.hostCommand.mock.calls[0]?.[0]).toMatchObject({
+            commandId: 'req_after',
+            payload: { runId: 'req_after' },
+          });
+        } finally {
+          disconnect();
+          unadmit();
+          reopened.release(chatId);
+        }
+      },
+    );
+
+    it.each(['running', 'cancelled', 'failed'] as const)(
+      'should not authorize delivery through a different %s run',
+      async (phase) => {
+        const chatId = `queue_changed_${phase}`;
+        const projectId = 'queue_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const terminal = [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')];
+        publishLogRows(store, chatId, terminal);
+        await store.requestTurn(chatId, queuedGesture('new'));
+        expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+          items: [{ id: 'new', requestId: 'req_new', afterTerminalRunId: 'old' }],
+        });
+        publishLogRows(store, chatId, [
+          ...terminal,
+          lifecycleRow(3, 'admitted', 'different'),
+          lifecycleRow(4, phase, 'different'),
+        ]);
+        const unadmit = queueAdmission(chatId);
+        try {
+          store.refreshMessageQueue(chatId);
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+            expect(session.messageQueueRef.getSnapshot().context.items.map((item) => item.id)).toEqual(['new']);
+          });
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      },
+    );
+
+    it('should not authorize a pre-stop submission when terminal arrives during execution lookup', async () => {
+      const chatId = 'queue_lookup_terminal';
+      const projectId = 'queue_project';
+      const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+      const gate = Promise.withResolvers<ChatEntity | undefined>();
+      const unadmit = queueAdmission(chatId);
+      try {
+        publishLogRows(store, chatId, runningRows('old'));
+        deps.getChat.mockReturnValueOnce(gate.promise);
+        const pending = store.requestTurn(chatId, queuedGesture('before'));
+        publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')]);
+        gate.resolve(chatRow(chatId, projectId));
+        await pending;
+        await vi.waitFor(() => {
+          expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+          expect(session.messageQueueRef.getSnapshot().context.items.map((item) => item.id)).toEqual(['before']);
+        });
+        expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+          items: [{ id: 'before', requestId: 'req_before' }],
+        });
+        expect(session.messageQueueRef.getSnapshot().context.items[0]).not.toHaveProperty('afterTerminalRunId');
+        expect(hostCommand).not.toHaveBeenCalled();
+      } finally {
+        gate.resolve(chatRow(chatId, projectId));
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it('should retain the empty intent captured before asynchronous attachment preparation', async () => {
+      const chatId = 'queue_captured_before_stop';
+      const { store, session, hostCommand, unpublish } = await open(chatId, 'queue_project');
+      const unadmit = queueAdmission(chatId);
+      try {
+        publishLogRows(store, chatId, runningRows('old'));
+        const queueIntent = store.captureMessageQueueIntent(chatId);
+        expect(queueIntent).toEqual({});
+        publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')]);
+        expect(store.captureMessageQueueIntent(chatId)).toEqual({ afterTerminalRunId: 'old' });
+        await store.requestTurn(chatId, { ...queuedGesture('before'), queueIntent });
+        await vi.waitFor(() => {
+          expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+          expect(session.messageQueueRef.getSnapshot().context.items.map((item) => item.id)).toEqual(['before']);
+        });
+        expect(session.messageQueueRef.getSnapshot().context.items[0]).not.toHaveProperty('afterTerminalRunId');
+        expect(hostCommand).not.toHaveBeenCalled();
+      } finally {
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it.each(['running', 'paused'] as const)(
+      'should not bypass a resumed %s run with matching terminal authorization',
+      async (phase) => {
+        const chatId = 'queue_resumed_terminal';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'queue_project');
+        const terminal = [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')];
+        publishLogRows(store, chatId, terminal);
+        await store.requestTurn(chatId, queuedGesture('after'));
+        publishLogRows(store, chatId, [...terminal, { ...lifecycleRow(3, phase, 'old'), attempt: 2 }]);
+        const unadmit = queueAdmission(chatId);
+        try {
+          store.refreshMessageQueue(chatId);
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+            expect(session.messageQueueRef.getSnapshot().context.items).toMatchObject([
+              { id: 'after', afterTerminalRunId: 'old' },
+            ]);
+          });
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      },
+    );
+
+    it.each(['incomplete', 'faulted'] as const)(
+      'should not authorize a message from a %s terminal projection',
+      async (state) => {
+        const chatId = `queue_unhealthy_${state}`;
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'queue_project');
+        const terminal = [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')];
+        const unadmit = queueAdmission(chatId);
+        try {
+          if (state === 'incomplete') {
+            publishLogPage(store, chatId, terminal, { cursor: 0, endCursor: 4 });
+          } else {
+            publishLogRows(store, chatId, terminal);
+            store.receiveHostReadAnswer(chatId, { status: 'refused', chatId, reason: 'unreadable' });
+          }
+          await store.requestTurn(chatId, queuedGesture('unknown'));
+          publishLogRows(store, chatId, terminal);
+          store.refreshMessageQueue(chatId);
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+            expect(session.messageQueueRef.getSnapshot().context.items.map((item) => item.id)).toEqual(['unknown']);
+          });
+          expect(session.messageQueueRef.getSnapshot().context.items[0]).not.toHaveProperty('afterTerminalRunId');
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      },
+    );
 
     it('should wait for full completion and preserve FIFO through a fast acknowledgement and delayed projection', async () => {
       const chatId = 'queue_fifo';

@@ -40,6 +40,16 @@ describe('durable chat message queue', () => {
     expect(saved1.items).toEqual([item('one'), item('two')]);
     expect(f.path).toBe('/.tau/composers/chats/project/chat/queue.json');
   });
+  it('should preserve terminal authorization and original message identity across reopen', async () => {
+    const f = fixture();
+    const authorized = { ...item('after-stop'), afterTerminalRunId: 'stopped-run' };
+    await f.open().enqueue(authorized);
+    const reopened = await f.open().read();
+    expect(reopened.items).toEqual([authorized]);
+    await f.open().enqueue({ ...authorized, afterTerminalRunId: 'different-run' });
+    const duplicate = await f.open().read();
+    expect(duplicate.items).toEqual([authorized]);
+  });
   it('should keep saved items when a write fails and allow retry', async () => {
     const f = fixture();
     const q = f.open();

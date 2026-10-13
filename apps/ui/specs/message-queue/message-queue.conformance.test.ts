@@ -5,6 +5,7 @@ import { createChatMessageQueueStore, chatMessageQueuePath } from '#db/chat-mess
 import type { QueuedChatMessage } from '#db/chat-message-queue-store.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
 import { chatMessageQueueMachine } from '#machines/chat-message-queue.machine.js';
+import { chatSessionMachine } from '#machines/chat-session.machine.js';
 
 const specs = import.meta.dirname;
 const workspace = path.resolve(specs, '../../../..');
@@ -14,13 +15,39 @@ const item = (id: string): QueuedChatMessage => ({
   message: { id, role: 'user', parts: [{ type: 'text', text: id }] },
 });
 
+const queueFixture = () => {
+  const files = new Map<string, Uint8Array<ArrayBuffer>>();
+  const client = {
+    readFile: async (file: string) => {
+      const bytes = files.get(file);
+      if (bytes === undefined) {
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      }
+      return bytes;
+    },
+    writeFile: async (file: string, bytes: Uint8Array<ArrayBuffer>) => {
+      files.set(file, bytes);
+    },
+    unlink: async (file: string) => {
+      files.delete(file);
+    },
+  };
+  const mutex = new KeyedMutex<string>();
+  const open = () =>
+    createChatMessageQueueStore(client, chatMessageQueuePath('project', 'chat'), mutex.run.bind(mutex));
+  return { open };
+};
+
 describe('MessageQueue.tla implementation correspondence', () => {
   it('should require review of the model when the delivery or persistence seam changes', () => {
     expect(
       driftManifestProblems(path.join(specs, 'MessageQueue/drift.json'), {
-        alphabet: machineAlphabet([chatMessageQueueMachine]),
-        versions: { [chatMessageQueueMachine.id]: chatMessageQueueMachine.version },
-        actions: machineActions([chatMessageQueueMachine]),
+        alphabet: machineAlphabet([chatMessageQueueMachine, chatSessionMachine]),
+        versions: {
+          [chatMessageQueueMachine.id]: chatMessageQueueMachine.version,
+          [chatSessionMachine.id]: chatSessionMachine.version,
+        },
+        actions: machineActions([chatMessageQueueMachine, chatSessionMachine]),
         tables: hashFiles(specs, [
           'expected.json',
           'MessageQueue.target.cfg',
@@ -30,12 +57,16 @@ describe('MessageQueue.tla implementation correspondence', () => {
           'MessageQueue.follower-lag.cfg',
           'MessageQueue.wrong-cancel.cfg',
           'MessageQueue.early-steer.cfg',
+          'MessageQueue.release-stopped.cfg',
+          'MessageQueue.late-terminal-capture.cfg',
         ]),
         sources: hashFiles(workspace, [
           'apps/ui/app/db/chat-message-queue-store.ts',
           'apps/ui/app/machines/chat-message-queue.machine.ts',
+          'apps/ui/app/machines/chat-session.machine.ts',
           'apps/ui/app/services/chat-session-store.ts',
           'apps/ui/app/chat-clients/chat-turn-host.tsx',
+          'apps/ui/app/chat-clients/use-cad-chat-client.ts',
           'apps/ui/app/components/chat/chat-message-queue.tsx',
           'apps/ui/app/components/chat/chat-message-queue-view.tsx',
           'apps/ui/app/components/chat/chat-textarea.tsx',
@@ -46,26 +77,28 @@ describe('MessageQueue.tla implementation correspondence', () => {
     ).toEqual([]);
   });
 
+  it('should preserve gesture-time terminal permission without granting it to an older queued head on reopen', async () => {
+    const { open } = queueFixture();
+    const beforeStop = item('before-stop');
+    const afterStop = { ...item('after-stop'), afterTerminalRunId: 'stopped-run' };
+    const first = open();
+    await first.enqueue(beforeStop);
+    await first.enqueue(afterStop);
+    const reopened = await open().read();
+    expect(reopened.items).toEqual([beforeStop, afterStop]);
+    // Persistence preserves intent and FIFO; the service, not this store, decides eligibility.
+    await open().change(afterStop.id, (entry) => ({
+      ...entry,
+      message: { ...entry.message, parts: [{ type: 'text', text: 'edited' }] },
+    }));
+    const edited = await open().read();
+    expect(edited.items.map((entry) => entry.id)).toEqual([beforeStop.id, afterStop.id]);
+    expect(edited.items[0]).toEqual(beforeStop);
+    expect(edited.items[1]).toMatchObject({ afterTerminalRunId: 'stopped-run' });
+  });
+
   it('should retain the prepared command through lost acknowledgement and publish the run barrier to another tab', async () => {
-    const files = new Map<string, Uint8Array<ArrayBuffer>>();
-    const client = {
-      readFile: async (file: string) => {
-        const bytes = files.get(file);
-        if (bytes === undefined) {
-          throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-        }
-        return bytes;
-      },
-      writeFile: async (file: string, bytes: Uint8Array<ArrayBuffer>) => {
-        files.set(file, bytes);
-      },
-      unlink: async (file: string) => {
-        files.delete(file);
-      },
-    };
-    const mutex = new KeyedMutex<string>();
-    const open = () =>
-      createChatMessageQueueStore(client, chatMessageQueuePath('project', 'chat'), mutex.run.bind(mutex));
+    const { open } = queueFixture();
     const first = open();
     const follower = open();
     const one = item('one');

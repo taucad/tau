@@ -174,15 +174,17 @@ export const useCadChatClient = (): CadChatClient => {
 
   const submit = useCallback(
     async (input: CadChatSubmitInput): Promise<void> => {
+      const queueIntent = store.captureMessageQueueIntent(activeChatId);
       const userMessage = buildUserMessage(input);
       await withAttachments(input.attachments ?? [], async () =>
         actions.sendMessage(userMessage, {
           execution: agent.execution,
+          queueIntent,
           ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
         }),
       );
     },
-    [actions, agent.execution, withAttachments],
+    [actions, activeChatId, agent.execution, store, withAttachments],
   );
 
   const edit = useCallback(

@@ -106,7 +106,7 @@ import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
 import type { SdkWatchInput } from '#chat-clients/_internal/sdk-watch.js';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { createChatMessageQueueStore, chatMessageQueuePath } from '#db/chat-message-queue-store.js';
-import type { ChatMessageQueueStore, QueueLock } from '#db/chat-message-queue-store.js';
+import type { ChatMessageQueueIntent, ChatMessageQueueStore, QueueLock } from '#db/chat-message-queue-store.js';
 import { createChatMessageQueueActor } from '#machines/chat-message-queue.machine.js';
 import type { ChatMessageQueueActor, QueueAdvanceResult } from '#machines/chat-message-queue.machine.js';
 import { commandInvocation } from '#utils/at-reference.utils.js';
@@ -1460,6 +1460,16 @@ export class ChatSessionStore {
     return this.#addPerChatListener({ bucket: this.#projectionTopics, namePrefix: 'projection', chatId, listener });
   }
 
+  /** Capture the observed terminal run before asynchronous message preparation begins. */
+  public captureMessageQueueIntent(chatId: string): ChatMessageQueueIntent {
+    const projection = this.#projectionContext(chatId);
+    if (projection === undefined || projection.fault !== undefined || !selectCaughtUp(projection)) {
+      return {};
+    }
+    const run = selectCurrentRun(projection);
+    return run?.lifecycle === 'cancelled' || run?.lifecycle === 'failed' ? { afterTerminalRunId: run.runId } : {};
+  }
+
   /**
    * Ask this chat's session actor for a turn.
    *
@@ -1482,11 +1492,13 @@ export class ChatSessionStore {
       await this.#requestTurn(session, gesture);
       return;
     }
+    const { afterTerminalRunId } = gesture.queueIntent ?? this.captureMessageQueueIntent(chatId);
     const execution = gesture.execution ?? (await this.getChatExecution(chatId));
     const item = {
       id: gesture.message.id,
       requestId: gesture.requestId ?? generatePrefixedId(idPrefix.request),
       message: gesture.message,
+      ...(afterTerminalRunId === undefined ? {} : { afterTerminalRunId }),
       ...(execution === undefined ? {} : { execution }),
     };
     await session.messageQueueStore.update((record) => {
@@ -1500,7 +1512,11 @@ export class ChatSessionStore {
     const draft = session.draftActorRef.getSnapshot().context;
     if (draft.draftText === '' || draft.draftText === composedText(gesture.message)) {
       session.draftActorRef.send({ type: 'clearDraft' });
-      await this.releaseDraftAttachments(chatId);
+      try {
+        await this.releaseDraftAttachments(chatId);
+      } catch (error) {
+        console.warn('[ChatSessionStore] draft attachments could not be released', error);
+      }
     }
     session.messageQueueRef.send({ type: 'retry' });
   }
@@ -2093,7 +2109,12 @@ export class ChatSessionStore {
           }
           return { items: record.items, status: 'waiting' };
         }
-        if (run !== undefined && (retainsLiveRun(phase) || (phase !== 'completed' && item.steer === undefined))) {
+        const authorizedTerminal =
+          (phase === 'cancelled' || phase === 'failed') && item.afterTerminalRunId === run?.runId;
+        if (
+          run !== undefined &&
+          (retainsLiveRun(phase) || (phase !== 'completed' && item.steer === undefined && !authorizedTerminal))
+        ) {
           return { items: record.items, status: 'waiting' };
         }
       }

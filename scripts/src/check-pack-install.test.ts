@@ -12,8 +12,10 @@ import {
   importableSpecifiers,
   isToleratedImportFailure,
   manifestViolations,
+  previewPackages,
   requiredArtifactPaths,
   probeSource,
+  unrewrittenSiblings,
 } from '#check-pack-install.js';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -182,6 +184,69 @@ describe('manifestViolations', () => {
           dependencies: { '@taucad/runtime': '0.1.0-beta.1', zod: '^4.4.3' },
         },
         bundledLibraryNames,
+      ),
+    ).toStrictEqual([]);
+  });
+});
+
+describe('previewPackages', () => {
+  const runtimeUrl = 'https://pkg.pr.new/taucad/tau/@taucad/runtime@1f80f46';
+
+  it('returns the name and URL of every package a pkg-pr-new run listed', () => {
+    expect(
+      previewPackages({
+        packages: [{ name: '@taucad/runtime', url: runtimeUrl, shasum: 'abc' }],
+        templates: [],
+      }),
+    ).toStrictEqual([{ name: '@taucad/runtime', url: runtimeUrl }]);
+  });
+
+  it('rejects a file with no packages', () => {
+    expect(() => previewPackages({ packages: [] })).toThrow('The preview file lists no packages.');
+    expect(() => previewPackages(null)).toThrow('The preview file lists no packages.');
+  });
+
+  it('rejects an entry whose URL is not a pkg.pr.new URL', () => {
+    expect(() =>
+      previewPackages({ packages: [{ name: '@taucad/runtime', url: 'https://registry.npmjs.org/x.tgz' }] }),
+    ).toThrow('not a pkg.pr.new package');
+  });
+});
+
+describe('unrewrittenSiblings', () => {
+  const published = new Set(['@taucad/runtime', '@taucad/units']);
+  const previewVersion = '0.0.0-preview-1f80f46';
+
+  it('rejects a registry version, a dependency kept at a registry range and a peer not on the run version', () => {
+    expect(
+      unrewrittenSiblings(
+        {
+          name: '@taucad/replicad',
+          version: '0.1.0-beta.0',
+          dependencies: { '@taucad/units': '0.1.0-beta.0', zod: '^4.4.3' },
+          peerDependencies: { '@taucad/runtime': '^0.1.0-beta.0' },
+        },
+        published,
+      ),
+    ).toStrictEqual([
+      '@taucad/replicad carries version 0.1.0-beta.0, not a 0.0.0-preview-<sha> version.',
+      '@taucad/replicad declares @taucad/units as 0.1.0-beta.0, not a pkg.pr.new URL.',
+      "@taucad/replicad declares peer @taucad/runtime as ^0.1.0-beta.0, not the run's 0.1.0-beta.0.",
+    ]);
+  });
+
+  it('accepts dependencies on run URLs and peers on the run version, and leaves other names alone', () => {
+    expect(
+      unrewrittenSiblings(
+        {
+          name: '@taucad/host',
+          version: previewVersion,
+          dependencies: {
+            '@taucad/units': 'https://pkg.pr.new/taucad/tau/@taucad/units@1f80f46a34135790d19f791e8c305c044d1518fd',
+          },
+          peerDependencies: { '@taucad/runtime': previewVersion, '@taucad/geospec-engine': '^0.1.0-beta.0' },
+        },
+        published,
       ),
     ).toStrictEqual([]);
   });

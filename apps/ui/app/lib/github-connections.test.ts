@@ -114,6 +114,16 @@ describe('a removed GitHub account (R23)', () => {
     expect(githubErrorMessage(error)).toBe('Reconnect GitHub to back up this project.');
   });
 
+  it('should send a linked import to the account list, not to the backup', async () => {
+    fetch.mockResolvedValueOnce(Response.json({ code: 'GITHUB_CONNECTION_NOT_FOUND' }, { status: 401 }));
+    const error: unknown = await githubConnections.token('connection-1', 'import').catch((error: unknown) => error);
+
+    expect(error).toMatchObject({ status: 401, code: 'GITHUB_CONNECTION_NOT_FOUND' });
+    expect(githubErrorMessage(error)).toBe(
+      'This GitHub account is no longer connected. Refresh and choose another account.',
+    );
+  });
+
   it('should send the repository picker to its own account list', async () => {
     fetch.mockResolvedValueOnce(Response.json({ code: 'GITHUB_CONNECTION_NOT_FOUND' }, { status: 401 }));
     const error: unknown = await githubConnections.installations('connection-1').catch((error: unknown) => error);

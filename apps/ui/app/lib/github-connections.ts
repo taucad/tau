@@ -174,9 +174,9 @@ export const githubErrorMessage = (error: unknown): string => {
 
 /**
  * The sentences a minted backup credential answers with where the code table's
- * would mislead (R23). The token is minted for a project's GitHub backup, so a
- * removed account names what reconnecting restores; the table's "Refresh and
- * choose another account" belongs to the repository picker.
+ * would mislead (R23). A backup's token is minted for a project, so a removed
+ * account names what reconnecting restores; the table's "Refresh and choose
+ * another account" belongs to the repository picker and the linked import.
  */
 const backupCredentialMessages: ReadonlyMap<string, string> = new Map([
   ['GITHUB_CONNECTION_NOT_FOUND', 'Reconnect GitHub to back up this project.'],
@@ -273,8 +273,15 @@ export const githubConnections = Object.freeze({
       `/repositories/${String(repositoryId)}/tree?connectionId=${encodeURIComponent(connectionId)}&head=${encodeURIComponent(head)}`,
       z.object({ files: z.array(treeFileSchema), manifestBase64: z.string().optional() }),
     ),
-  /* Minted for a project's GitHub backup, so its refusals name the backup (R23). */
-  token: async (connectionId: string): Promise<{ accessToken: string; expiresAt: string; generation: number }> => {
+  /*
+   * Minted for a project's GitHub backup unless named otherwise, so its refusals
+   * name the backup (R23). A linked import's mint keeps the code table's
+   * sentences: its page is where another account is chosen.
+   */
+  token: async (
+    connectionId: string,
+    purpose: 'backup' | 'import' = 'backup',
+  ): Promise<{ accessToken: string; expiresAt: string; generation: number }> => {
     try {
       return await request(
         `/connections/${encodeURIComponent(connectionId)}/token`,
@@ -286,7 +293,7 @@ export const githubConnections = Object.freeze({
         { method: 'POST' },
       );
     } catch (error) {
-      throw backupCredentialRefusal(error);
+      throw purpose === 'backup' ? backupCredentialRefusal(error) : error;
     }
   },
 });

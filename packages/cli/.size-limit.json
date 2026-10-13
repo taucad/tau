@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 48.52 kB brotli on 2026-10-12, with `tau mcp` and its thread per project, the built-in Zoo kernel, the runtime-worker entry and the machine providers",
+    "name": "total (ESM JS) — measured 50.61 kB brotli on 2026-10-13, with `tau mcp` and its thread per project, `tau install` and the npm lock installer, the built-in Zoo kernel, the runtime-worker entry and the machine providers",
     "path": "dist/**/*.mjs",
-    "limit": "49 kB"
+    "limit": "51 kB"
   }
 ]

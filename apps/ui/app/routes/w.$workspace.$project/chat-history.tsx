@@ -79,7 +79,12 @@ const TurnGroup = memo(function ({
   readonly isLast: boolean;
 }) {
   return (
-    <div className={cn('py-1 gap-1 flex flex-col', isLast && 'min-h-(--chat-live-turn-min-h)')}>
+    <div
+      className={cn(
+        'mx-auto flex w-[calc(100%_-_1rem)] max-w-xl flex-col gap-1 py-1',
+        isLast && 'min-h-(--chat-live-turn-min-h)',
+      )}
+    >
       {messageIds.map((id, index) => (
         <ChatMessage
           key={id}
@@ -119,7 +124,7 @@ const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: st
 
 const ChatHistoryHeader = (): undefined => undefined;
 const ChatHistoryEmptyPlaceholder = (): React.JSX.Element => (
-  <div className='flex h-full px-3 py-6'>
+  <div className='mx-auto flex h-full w-[calc(100%_-_1rem)] max-w-xl px-3 py-6'>
     <ChatHistoryEmpty />
   </div>
 );
@@ -339,7 +344,7 @@ const ExpandedChatHistory = memo(function ({
                 itemContent={renderItem}
                 computeItemKey={computeItemKey}
                 followOutput={followOutput}
-                className='mx-auto mt-1 min-h-0 w-[calc(100%_-_1rem)] max-w-xl min-w-0 flex-1'
+                className='mt-1 min-h-0 min-w-0 flex-1'
                 atBottomStateChange={handleAtBottomStateChange}
                 components={virtuosoComponents}
               />

@@ -99,8 +99,9 @@ describe('OTEL log export configuration', () => {
     try {
       await import('#telemetry/otel.js');
 
-      const processor = sdkConfigs.at(-1)?.logRecordProcessor;
-      expect(processor).toBeInstanceOf(BatchLogRecordProcessor);
+      const processors = sdkConfigs.at(-1)?.logRecordProcessors;
+      expect(processors).toHaveLength(1);
+      expect(processors?.[0]).toBeInstanceOf(BatchLogRecordProcessor);
       const options = vi.mocked(BatchLogRecordProcessor).mock.calls.at(-1)?.[0];
       expect(options?.exporter).toBeInstanceOf(OTLPLogExporter);
     } finally {
@@ -115,7 +116,7 @@ describe('OTEL log export configuration', () => {
     try {
       await import('#telemetry/otel.js');
 
-      expect(sdkConfigs.at(-1)?.logRecordProcessor).toBeUndefined();
+      expect(sdkConfigs.at(-1)?.logRecordProcessors).toBeUndefined();
     } finally {
       vi.unstubAllEnvs();
       vi.resetModules();

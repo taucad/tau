@@ -317,7 +317,14 @@ describe('ChatTextareaDesktop draft rehydration', () => {
   const renderComposer = (
     inputText: string,
     acpSessionData: AcpSessionData,
-    options: { canResume?: boolean; handleSubmit?: (text?: string) => Promise<void>; useTauSkills?: boolean } = {},
+    options: {
+      canResume?: boolean;
+      handleSubmit?: (text?: string) => Promise<void>;
+      useTauSkills?: boolean;
+      status?: 'ready' | 'submitted' | 'streaming';
+      isSubmitting?: boolean;
+      handleCancelClick?: () => void;
+    } = {},
   ) => {
     const { canResume = false, handleSubmit = asyncNoop } = options;
     const element = (session: AcpSessionData): React.JSX.Element => (
@@ -325,7 +332,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
         <ChatTextareaDesktop
           enableAutoFocus={false}
           dragKind={undefined}
-          isSubmitting={false}
+          isSubmitting={options.isSubmitting ?? false}
           isAttaching={false}
           canResume={canResume}
           inputText={inputText}
@@ -334,7 +341,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           sendBlockReason={undefined}
           attachmentAccept='image/png'
           attachmentInputSupported
-          status='ready'
+          status={options.status ?? 'ready'}
           formattedCancelKeyCombination='⇧⌘⌫'
           treeService={undefined}
           chats={[]}
@@ -347,7 +354,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           addContextChipsRef={{ current: undefined }}
           addContextReferencesRef={{ current: undefined }}
           handleSubmit={handleSubmit}
-          handleCancelClick={noop}
+          handleCancelClick={options.handleCancelClick ?? noop}
           handleDragOver={noop}
           handleDragLeave={noop}
           handleDrop={asyncNoop}
@@ -416,6 +423,44 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     });
     expect(view.container.querySelector('.ProseMirror')).toHaveTextContent('Make a render of this using $imagegen');
   });
+  it.each(['submitted', 'streaming'] as const)(
+    'should dictate into the draft while a chat is %s without sending or stopping it',
+    async (status) => {
+      const createRange = document.createRange.bind(document);
+      vi.spyOn(document, 'createRange').mockImplementation(() =>
+        Object.assign(createRange(), {
+          getClientRects: () => [],
+          getBoundingClientRect: () => new DOMRect(),
+        }),
+      );
+      dictationDependencies.available = true;
+      dictationDependencies.capture.mockResolvedValue({
+        finish: async () => new Blob([], { type: 'audio/wav' }),
+        cancel: noop,
+      });
+      dictationDependencies.transcribe.mockResolvedValue('Make the corners round.');
+      const submit = vi.fn().mockResolvedValue(undefined);
+      const cancelChat = vi.fn();
+      renderComposer('Existing draft.', codexSession, {
+        status,
+        isSubmitting: status === 'submitted',
+        handleSubmit: submit,
+        handleCancelClick: cancelChat,
+      });
+      const dictate = await screen.findByRole('button', { name: 'Dictate' });
+      expect(dictate).toHaveAttribute('aria-disabled', 'false');
+      await userEvent.click(dictate);
+      await userEvent.click(await screen.findByRole('button', { name: 'Stop dictation' }));
+      await waitFor(() => {
+        expect(screen.getByRole('textbox')).toHaveTextContent('Existing draft. Make the corners round.');
+      });
+      expect(submit).not.toHaveBeenCalled();
+      expect(cancelChat).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      expect(cancelChat).toHaveBeenCalledOnce();
+    },
+  );
+
   it('should place the microphone beside Send and send the final transcript exactly once after recording', async () => {
     const createRange = document.createRange.bind(document);
     vi.spyOn(document, 'createRange').mockImplementation(() =>

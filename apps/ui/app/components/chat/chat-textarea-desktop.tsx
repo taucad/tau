@@ -467,14 +467,9 @@ export const ChatTextareaDesktop = memo(function ({
   const dictationButton = useMemo(
     () =>
       dictation.available === true ? (
-        <ChatDictationButton
-          phase={dictation.phase}
-          disabled={isSubmitting || status === 'streaming' || status === 'submitted'}
-          onStart={dictation.start}
-          onStop={dictation.stop}
-        />
+        <ChatDictationButton phase={dictation.phase} onStart={dictation.start} onStop={dictation.stop} />
       ) : undefined,
-    [dictation.available, dictation.phase, dictation.start, dictation.stop, isSubmitting, status],
+    [dictation.available, dictation.phase, dictation.start, dictation.stop],
   );
   const dictationRecording = useMemo(
     () =>

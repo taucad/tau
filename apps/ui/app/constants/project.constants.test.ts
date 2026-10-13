@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { KernelProvider } from '@taucad/runtime';
 import { createInitialProject } from '#constants/project.constants.js';
+import type { CreateInitialProjectResult } from '#constants/project.constants.js';
+import { getEmptyCode, getKernelOption, getMainFile } from '#utils/kernel.utils.js';
 
 describe('createInitialProject', () => {
   it('should return fresh file buffers and a minimal module manifest', () => {
@@ -10,11 +13,13 @@ describe('createInitialProject', () => {
       projectName: 'First',
       mainFileName: 'main.ts',
       emptyCodeContent: firstInput,
+      language: 'typescript',
     });
     const second = createInitialProject({
       projectName: 'First',
       mainFileName: 'main.ts',
       emptyCodeContent: secondInput,
+      language: 'typescript',
     });
 
     const firstMain = first.files['main.ts']?.content;
@@ -47,6 +52,7 @@ describe('createInitialProject', () => {
       ...options,
       mainFileName: 'main.ts',
       emptyCodeContent: new TextEncoder().encode(''),
+      language: 'typescript',
     });
     return JSON.parse(new TextDecoder().decode(files['package.json']?.content));
   };
@@ -86,10 +92,41 @@ describe('createInitialProject', () => {
       projectName: 'Plate',
       mainFileName: 'main.ts',
       emptyCodeContent: new TextEncoder().encode(''),
+      language: 'typescript',
       dependencies: { replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.0' },
     });
 
     expect(Object.keys(files).sort()).toEqual(['main.ts', 'package.json']);
     expect(packageJsonOf({ projectName: 'Plate' })).not.toHaveProperty('scripts');
+  });
+
+  const createForKernel = (kernel: KernelProvider): CreateInitialProjectResult =>
+    createInitialProject({
+      projectName: 'Plate',
+      mainFileName: getMainFile(kernel),
+      emptyCodeContent: new TextEncoder().encode(getEmptyCode(kernel)),
+      language: getKernelOption(kernel).language,
+      dependencies: kernel === 'replicad' ? { replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.0' } : {},
+    });
+
+  it.each<[KernelProvider, string]>([
+    ['openscad', 'main.scad'],
+    ['picogk', 'main.cs'],
+    ['build123d', 'main.py'],
+    ['zoo', 'main.kcl'],
+  ])('should write no package.json for the %s kernel, whose language npm does not serve', (kernel, mainFile) => {
+    expect(Object.keys(createForKernel(kernel).files)).toEqual([mainFile]);
+  });
+
+  it('should keep the replicad project unchanged: its main file and a package.json declaring replicad', () => {
+    const { files } = createForKernel('replicad');
+
+    expect(Object.keys(files).sort()).toEqual(['main.ts', 'package.json']);
+    expect(JSON.parse(new TextDecoder().decode(files['package.json']?.content))).toEqual({
+      name: 'plate',
+      private: true,
+      type: 'module',
+      dependencies: { replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.0' },
+    });
   });
 });

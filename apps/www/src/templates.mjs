@@ -110,7 +110,7 @@ const planCards = (compact = false) =>
   `<div class="plans">${plans
     .map(
       (plan) =>
-        `<article class="cell plan${plan.id === 'pro' ? ' featured' : ''}"><div class="plan-head"><h3>${plan.name}</h3>${plan.id === 'pro' ? '<span class="badge">Most chosen</span>' : ''}</div><p>${plan.tagline}</p><p class="price">${plan.price}<span>${plan.period}</span></p>${
+        `<article class="cell plan${plan.id === 'pro' ? ' featured' : ''}"><div class="plan-head"><h3>${plan.name}</h3>${plan.id === 'pro' ? '<span class="badge">Most Popular</span>' : ''}</div><p>${plan.tagline}</p><p class="price">${plan.price}<span>${plan.period}</span></p>${
           compact
             ? ''
             : `<ul>${plan.features.map(([label, flag]) => `<li${flag ? ' class="soon"' : ''}><span class="mark" aria-hidden="true">${flag ? '○' : '✓'}</span><span>${label}${flag ? ' <span class="soon-label">· Coming soon</span>' : ''}</span></li>`).join('')}</ul>`

@@ -267,7 +267,6 @@ export const plans = [
       ['Zoo KCL cloud kernel, metered'],
       ['Private and unlisted share links'],
       ['No training on your designs'],
-      ['Hosted design verification', 'soon'],
     ],
     cta: ['Choose Pro in Tau', '/?settings=billing'],
   },
@@ -284,7 +283,6 @@ export const plans = [
       ['Contractual no-train guarantee (DPA)'],
       ['Dedicated technical contact'],
       ['Invoicing and PO support'],
-      ['Signed evidence reports', 'soon'],
       ['Verification CI and org dashboards', 'soon'],
     ],
     cta: ['Talk to us', `mailto:${salesEmail}`],
@@ -312,9 +310,5 @@ export const pricingFaq = [
   [
     'What happens to unused Pro credits?',
     'Unused plan credits roll over up to 4,000. Purchased credits are separate and never expire. Review subscription and cancellation terms in the app before purchasing.',
-  ],
-  [
-    'Is hosted verification included?',
-    'GeoSpec checks run locally on every plan. Hosted design verification is in development and not part of any plan today.',
   ],
 ];

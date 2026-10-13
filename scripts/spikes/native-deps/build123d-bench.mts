@@ -51,12 +51,16 @@ class Params:
 def main(params: Params):
     return Box(params.width, params.depth, params.height)
 `;
+// Worker stderr arrives as debug output; keep it on stderr so a failed launch explains itself.
+const toStderr = (message: string): void => {
+  process.stderr.write(`${message}\n`);
+};
 const logger: RuntimeLogger = {
   log: () => undefined,
-  debug: () => undefined,
+  debug: toStderr,
   trace: () => undefined,
-  warn: () => undefined,
-  error: () => undefined,
+  warn: toStderr,
+  error: toStderr,
   custom: () => undefined,
 };
 

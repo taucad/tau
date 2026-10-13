@@ -42,12 +42,16 @@ Library.Go(1f, () =>
     Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 12f), 0);
 });
 `;
+// Worker stderr arrives as debug output; keep it on stderr so a failed launch explains itself.
+const toStderr = (message: string): void => {
+  process.stderr.write(`${message}\n`);
+};
 const logger: RuntimeLogger = {
   log: () => undefined,
-  debug: () => undefined,
+  debug: toStderr,
   trace: () => undefined,
-  warn: () => undefined,
-  error: () => undefined,
+  warn: toStderr,
+  error: toStderr,
   custom: () => undefined,
 };
 

@@ -87,6 +87,36 @@ describe('githubConnections', () => {
   });
 });
 
+describe('a removed GitHub account (R23)', () => {
+  let fetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("should say what reconnecting does where a project's backup credential is minted", async () => {
+    fetch.mockResolvedValueOnce(Response.json({ code: 'GITHUB_CONNECTION_NOT_FOUND' }, { status: 401 }));
+    const error: unknown = await githubConnections.token('connection-1').catch((error: unknown) => error);
+
+    expect(error).toMatchObject({ status: 401, code: 'GITHUB_CONNECTION_NOT_FOUND' });
+    expect(githubErrorMessage(error)).toBe('Reconnect GitHub to back up this project.');
+  });
+
+  it('should send the repository picker to its own account list', async () => {
+    fetch.mockResolvedValueOnce(Response.json({ code: 'GITHUB_CONNECTION_NOT_FOUND' }, { status: 401 }));
+    const error: unknown = await githubConnections.installations('connection-1').catch((error: unknown) => error);
+
+    expect(githubErrorMessage(error)).toBe(
+      'This GitHub account is no longer connected. Refresh and choose another account.',
+    );
+  });
+});
+
 describe('githubErrorMessage', () => {
   it('should fall back by status for an unknown code', () => {
     expect(githubErrorMessage(new GithubRequestError(429, 'SOMETHING_NEW'))).toMatch(/rate limit/u);

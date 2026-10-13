@@ -131,8 +131,13 @@ export class GithubRequestError extends Error {
   public readonly status: number;
   public readonly code: string | undefined;
 
-  public constructor(status: number, code: string | undefined) {
-    super(codeMessage(code) ?? statusMessage(status));
+  /**
+   * @param status - The HTTP status the API answered.
+   * @param code - The API's refusal code, when it sent one.
+   * @param message - The sentence for this surface, when the request knows better than the code table.
+   */
+  public constructor(status: number, code: string | undefined, message?: string) {
+    super(message ?? codeMessage(code) ?? statusMessage(status));
     this.name = 'GithubRequestError';
     this.status = status;
     this.code = code;
@@ -165,6 +170,30 @@ export const githubErrorMessage = (error: unknown): string => {
     return "Tau couldn't reach its server. Check your connection and try again.";
   }
   return 'The GitHub request failed. Try again.';
+};
+
+/**
+ * The sentences a minted backup credential answers with where the code table's
+ * would mislead (R23). The token is minted for a project's GitHub backup, so a
+ * removed account names what reconnecting restores; the table's "Refresh and
+ * choose another account" belongs to the repository picker.
+ */
+const backupCredentialMessages: ReadonlyMap<string, string> = new Map([
+  ['GITHUB_CONNECTION_NOT_FOUND', 'Reconnect GitHub to back up this project.'],
+]);
+
+/**
+ * A refused backup credential mint, worded for the backup it stopped (R23).
+ *
+ * @param error - What the mint threw.
+ * @returns The same refusal with the backup sentence, or `error` unchanged.
+ */
+const backupCredentialRefusal = (error: unknown): unknown => {
+  if (!(error instanceof GithubRequestError) || error.code === undefined) {
+    return error;
+  }
+  const message = backupCredentialMessages.get(error.code);
+  return message === undefined ? error : new GithubRequestError(error.status, error.code, message);
 };
 
 async function request<Output>(path: string, schema: z.ZodType<Output>, init?: RequestInit): Promise<Output> {
@@ -238,16 +267,22 @@ export const githubConnections = Object.freeze({
       `/repositories/${String(repositoryId)}/tree?connectionId=${encodeURIComponent(connectionId)}&head=${encodeURIComponent(head)}`,
       z.object({ files: z.array(treeFileSchema), manifestBase64: z.string().optional() }),
     ),
-  token: async (connectionId: string): Promise<{ accessToken: string; expiresAt: string; generation: number }> =>
-    request(
-      `/connections/${encodeURIComponent(connectionId)}/token`,
-      z.object({
-        accessToken: z.string().min(1),
-        expiresAt: z.iso.datetime(),
-        generation: z.number().int().positive(),
-      }),
-      { method: 'POST' },
-    ),
+  /* Minted for a project's GitHub backup, so its refusals name the backup (R23). */
+  token: async (connectionId: string): Promise<{ accessToken: string; expiresAt: string; generation: number }> => {
+    try {
+      return await request(
+        `/connections/${encodeURIComponent(connectionId)}/token`,
+        z.object({
+          accessToken: z.string().min(1),
+          expiresAt: z.iso.datetime(),
+          generation: z.number().int().positive(),
+        }),
+        { method: 'POST' },
+      );
+    } catch (error) {
+      throw backupCredentialRefusal(error);
+    }
+  },
 });
 
 /*

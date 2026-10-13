@@ -766,7 +766,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       providerKind: 'tau-hosted',
       name: 'Gemini 4 Argon',
       slug: 'gemini-4-argon',
-      recommended: false,
+      recommended: true,
       description: 'Deep reasoning for complex CAD code, multi-step geometry planning, and large project edits.',
       provider: {
         id: 'vertexai',

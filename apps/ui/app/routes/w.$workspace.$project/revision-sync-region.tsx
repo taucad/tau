@@ -30,7 +30,7 @@ import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { cn } from '@taucad/ui/utils/cn';
-import { gitRemoteUrlProblem, isCeilingRefusal } from '@taucad/revisions';
+import { gitRemoteUrlProblem, isCeilingRefusal, isGithubRemoteUrl } from '@taucad/revisions';
 import type { RemoteFacet, SyncFacet, SyncFailureReason } from '@taucad/revisions';
 /* The machine's own subpath: `SyncFailureReason` is not on the package barrel,
    and a second copy of the union here would be exactly the dual vocabulary the
@@ -61,6 +61,7 @@ import {
   isGithubRemote,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionWhere } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import type { RemoteProbeTarget } from '#routes/w.$workspace.$project/revision-sync-region-probe.js';
 import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
@@ -251,6 +252,17 @@ const connectingCopy = (remote: RemoteFacet): string =>
       ? 'Connecting to Tau Cloud…'
       : 'Connecting…';
 
+/**
+ * The most specific true name for a Git remote (R3).
+ *
+ * A GitHub repository is its `owner/name`; any other host is named with its
+ * path too (`gitlab.example.com/o/r`), because two repositories on one host
+ * would otherwise read as the same backup in a *Replace* confirmation.
+ *
+ * @param url - The remote's address.
+ * @param github - Whether the address is a GitHub repository.
+ * @returns The name to show.
+ */
 const gitRemoteLabel = (url: string | undefined, github = false): string => {
   if (url === undefined) {
     return github ? 'GitHub repository' : 'Git remote';
@@ -258,7 +270,7 @@ const gitRemoteLabel = (url: string | undefined, github = false): string => {
   try {
     const parsed = new URL(url);
     const path = parsed.pathname.replaceAll(/^\/+|\/+$/gu, '').replace(/\.git$/u, '');
-    return github && path !== '' ? path : parsed.host;
+    return path === '' ? parsed.host : github ? path : `${parsed.host}/${path}`;
   } catch {
     return github ? 'GitHub repository' : 'Git remote';
   }
@@ -526,6 +538,8 @@ export function RevisionSyncRegion({
   const [pendingConnection, setPendingConnection] = useState<PendingConnection>();
   const [changingBackup, setChangingBackup] = useState(remote.phase !== 'connected');
   const [reconnecting, setReconnecting] = useState(false);
+  /* A connect in flight from this region, the R2 probe included: *Replace backup* waits for it. */
+  const [committing, setCommitting] = useState(false);
   const [shouldConnect, setShouldConnect] = useState(false);
   const handleConnectRequest = (): void => {
     setShouldConnect(false);
@@ -618,31 +632,76 @@ export function RevisionSyncRegion({
           .split('/')
           .map((segment) => encodeURIComponent(segment))
           .join('/')}`;
-  const connectedLabel = remote.kind === 'tau' ? 'Tau Cloud' : gitRemoteLabel(remote.url, remote.provider === 'github');
-  const pendingLabel =
-    pendingConnection?.kind === 'tau'
+  const connectedLabel = remote.kind === 'tau' ? 'Tau Cloud' : gitRemoteLabel(remote.url, isGithubRemote(remote));
+  const labelOf = (pending: PendingConnection): string =>
+    pending.kind === 'tau'
       ? 'Tau Cloud'
-      : pendingConnection?.kind === 'github'
-        ? pendingConnection.repository.fullName
-        : pendingConnection?.kind === 'git'
-          ? gitRemoteLabel(pendingConnection.url)
-          : undefined;
+      : pending.kind === 'github'
+        ? pending.repository.fullName
+        : gitRemoteLabel(pending.url, isGithubRemoteUrl(pending.url));
+  const pendingLabel = pendingConnection === undefined ? undefined : labelOf(pendingConnection);
+
+  /* D11: a moved repository keeps its id, so the address decides sameness too. */
+  const isSameDestination = (pending: PendingConnection): boolean =>
+    pending.kind === 'tau'
+      ? remote.kind === 'tau'
+      : pending.kind === 'github'
+        ? remote.kind === 'git' &&
+          remote.provider === 'github' &&
+          remote.repositoryId === String(pending.repository.id) &&
+          remote.url === pending.repository.cloneUrl
+        : remote.kind === 'git' && remote.provider === undefined && remote.url === pending.url;
+
+  /*
+   * R2: the project's store records a new remote, dropping the old one, before
+   * it asks the new one anything, so a refused address used to cost the
+   * backup that worked. A Git remote that would replace one is asked for its
+   * advertisement first; on a refusal the old one stays, with the refusal
+   * beside it. Tau Cloud is not probed: its repository only answers once
+   * connecting has registered the project (P51).
+   */
+  const replacesBackup = (pending: PendingConnection): boolean =>
+    pending.kind !== 'tau' && remote.kind !== 'none' && !isSameDestination(pending);
+
+  const isRefusedByProbe = async (target: RemoteProbeTarget): Promise<boolean> => {
+    try {
+      const { probeRemote } = await import('#routes/w.$workspace.$project/revision-sync-region-probe.js');
+      await probeRemote(target, ENV.TAU_API_URL);
+      return false;
+    } catch (error) {
+      const refusal = error instanceof Error ? error.message : 'The remote could not be reached.';
+      setPendingConnection(undefined);
+      setConnectionError(`${refusal} ${connectedLabel} is still this project’s backup.`);
+      return true;
+    }
+  };
 
   const commitConnection = async (pending: PendingConnection): Promise<void> => {
     setConnectionError(undefined);
+    setCommitting(true);
     try {
       if (pending.kind === 'tau') {
         await onConnect('tau');
       } else if (pending.kind === 'git') {
+        if (replacesBackup(pending) && (await isRefusedByProbe({ url: pending.url }))) {
+          return;
+        }
         await onConnect('git', pending.url);
       } else {
         const { connectionId, repository } = pending;
         const token = await githubConnections.token(connectionId);
         const authorization = `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`;
+        const repositoryId = String(repository.id);
+        if (
+          replacesBackup(pending) &&
+          (await isRefusedByProbe({ url: repository.cloneUrl, authorization, provider: 'github', repositoryId }))
+        ) {
+          return;
+        }
         await onConnect('git', repository.cloneUrl, {
           authorization,
           provider: 'github',
-          repositoryId: String(repository.id),
+          repositoryId,
           connectionId,
           generation: token.generation,
           expiresAt: token.expiresAt,
@@ -654,6 +713,8 @@ export function RevisionSyncRegion({
       setChoice(undefined);
     } catch (error) {
       setConnectionError(error instanceof Error ? error.message : 'The backup could not be connected.');
+    } finally {
+      setCommitting(false);
     }
   };
 
@@ -665,16 +726,7 @@ export function RevisionSyncRegion({
       onUpgrade?.();
       return;
     }
-    /* D11: a moved repository keeps its id, so the address decides sameness too. */
-    const same =
-      pending.kind === 'tau'
-        ? remote.kind === 'tau'
-        : pending.kind === 'github'
-          ? remote.kind === 'git' &&
-            remote.provider === 'github' &&
-            remote.repositoryId === String(pending.repository.id) &&
-            remote.url === pending.repository.cloneUrl
-          : remote.kind === 'git' && remote.provider === undefined && remote.url === pending.url;
+    const same = isSameDestination(pending);
     /* R-U6: the same repository with changed access is re-sent with it. */
     const accessChanged = pending.kind === 'github' && remote.fetchOnly !== (pending.repository.access !== 'write');
     /* D3: the same remote picked while its credential is refused is the
@@ -1197,6 +1249,7 @@ export function RevisionSyncRegion({
             <Button
               autoFocus
               size='sm'
+              disabled={committing}
               onClick={() => {
                 void commitConnection(pendingConnection);
               }}
@@ -1226,7 +1279,8 @@ export function RevisionSyncRegion({
         <div className='flex flex-col gap-2'>
           <p
             role='alert'
-            aria-label={isGithubRemote(remote) ? 'GitHub connection' : 'Remote credentials'}
+            /* R11: named by what it asks for. An anonymous remote holds no credentials (D94). */
+            aria-label={isGithubRemote(remote) ? 'GitHub connection' : 'Remote sign-in'}
             className='flex items-center gap-2 text-sm'
           >
             <CloudAlert aria-hidden className='size-4 shrink-0 text-warning' />

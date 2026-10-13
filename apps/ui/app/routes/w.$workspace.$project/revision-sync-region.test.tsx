@@ -17,6 +17,7 @@ import type { RevisionSyncRegionProps } from '#routes/w.$workspace.$project/revi
 import { GithubRequestError } from '#lib/github-connections.js';
 import type * as GithubConnectionsModule from '#lib/github-connections.js';
 import { githubProjectBinding } from '#lib/github-project-binding.js';
+import type { RemoteProbeTarget } from '#routes/w.$workspace.$project/revision-sync-region-probe.js';
 
 const githubToken = vi.hoisted(() =>
   vi.fn(async () => ({
@@ -29,6 +30,10 @@ const githubToken = vi.hoisted(() =>
 const githubRepository = vi.hoisted(() => vi.fn());
 /* No connected account unless a test lists one. */
 const githubList = vi.hoisted(() => vi.fn(async (): Promise<ReadonlyArray<{ id: string }>> => []));
+
+/* R2: every new remote answers unless a test says it refused. */
+const probeRemote = vi.hoisted(() => vi.fn(async (_target: RemoteProbeTarget, _apiBaseUrl: string) => undefined));
+vi.mock('#routes/w.$workspace.$project/revision-sync-region-probe.js', () => ({ probeRemote }));
 
 const configureAccess = vi.hoisted(() => vi.fn((_installUrl: string, _returnTo: string) => undefined));
 
@@ -331,6 +336,60 @@ describe('RevisionSyncRegion', () => {
         expect.objectContaining({ provider: 'github', repositoryId: '99' }),
       );
     });
+  });
+
+  /* R2: a new repository that refuses its advertisement leaves the old backup in place. */
+  it('should keep the current backup and show the refusal when the new repository does not answer (R2)', async () => {
+    probeRemote.mockRejectedValueOnce(new Error('This remote has no repository at this address for your account.'));
+    const user = userEvent.setup();
+    const { connect, disconnect } = renderRegion(
+      facet({ kind: 'git', phase: 'connected', url: 'https://github.com/o/design.git', provider: 'github' }),
+    );
+
+    await chooseChangeBackup(user);
+    await user.click(screen.getByRole('button', { name: 'Pick GitHub repository' }));
+    expect(probeRemote).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Replace backup' }));
+
+    expect(await screen.findByRole('alert', { name: 'Backup connection error' })).toHaveTextContent(
+      'This remote has no repository at this address for your account. o/design is still this project’s backup.',
+    );
+    expect(probeRemote).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://github.com/o/r.git', provider: 'github', repositoryId: '99' }),
+      'https://api.test',
+    );
+    expect(probeRemote.mock.calls[0]?.[0].authorization).toMatch(/^Basic /u);
+    expect(connect).not.toHaveBeenCalled();
+    expect(disconnect).not.toHaveBeenCalled();
+    /* One action per refusal: the alert's *Retry*, not a second *Replace backup*. */
+    expect(screen.queryByRole('button', { name: 'Replace backup' })).not.toBeInTheDocument();
+  });
+
+  /* R3: the confirmation names the repository on both sides, never the bare host. */
+  it.each([
+    { from: 'https://github.com/o/old.git', to: 'https://github.com/o/new.git', names: 'o/old with o/new' },
+    {
+      from: 'https://gitlab.example.com/o/old.git',
+      to: 'https://gitlab.example.com/o/new.git',
+      names: 'gitlab.example.com/o/old with gitlab.example.com/o/new',
+    },
+  ])('should name both repositories when an address replaces $from (R3)', async ({ from, to, names }) => {
+    const user = userEvent.setup();
+    const { connect } = renderRegion(facet({ kind: 'git', phase: 'connected', url: from }));
+
+    await chooseChangeBackup(user);
+    await user.click(screen.getByText('Advanced HTTPS remote'));
+    const address = screen.getByRole('textbox', { name: 'Repository address' });
+    await user.clear(address);
+    await user.type(address, to);
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+
+    expect(screen.getByText(`Replace ${names}? Every revision stays on this device.`)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Replace backup' }));
+    /* R2: an anonymous address is probed, with no credential, before it replaces the backup. */
+    expect(probeRemote).toHaveBeenCalledWith({ url: to }, 'https://api.test');
+    expect(connect).toHaveBeenCalledWith('git', to);
+    expect(probeRemote.mock.invocationCallOrder[0]).toBeLessThan(connect.mock.invocationCallOrder[0] ?? 0);
   });
 
   it('asks before disconnecting, and says what disconnecting costs', async () => {
@@ -704,14 +763,15 @@ describe('RevisionSyncRegion', () => {
   });
 
   /* D18: a host that is not GitHub is offered neither GitHub nor Tau copy.
-   * D94: and, being anonymous, is never told it had saved credentials. */
+   * D94: and, being anonymous, is never told it had saved credentials.
+   * R11: nor is the alert named for credentials it does not hold. */
   it('should say the remote asked for a sign-in Tau does not have, and retry, for a host that is not GitHub', async () => {
     const user = userEvent.setup();
     const region = renderRegion(
       facet({ kind: 'git', phase: 'reconnectRequired', url: 'https://gitlab.example.com/o/r.git' }),
     );
 
-    const alert = screen.getByRole('alert', { name: 'Remote credentials' });
+    const alert = screen.getByRole('alert', { name: 'Remote sign-in' });
     expect(alert).toHaveTextContent(
       'This remote asked for a sign-in Tau does not have, or has no repository at this address.',
     );

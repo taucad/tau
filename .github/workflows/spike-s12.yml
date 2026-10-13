@@ -1,0 +1,50 @@
+# Spike S12 (native-dependency-resolution charter, wave 0): serve UI layer size and serving from a digest store path (W18)
+# Spike code under scripts/spikes/native-deps/linux/s12; the run's evidence is the uploaded artifact
+# and the job summary. Downloaded bytes are inspected as data and never executed.
+name: Spike S12 (serve UI layer)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/spike-s12.yml'
+      - 'scripts/spikes/native-deps/linux/s12/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-s12-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s12:
+    name: S12 serve UI gzip size and store-path serving
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Build the serve UI
+        run: pnpm nx run ui:build:serve --outputStyle=stream
+      - name: Measure the layer and serve it from the store
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          scripts/spikes/native-deps/linux/s12/measure-and-serve.sh "$RUNNER_TEMP/evidence" "$RUNNER_TEMP/store"
+      - name: Summarise
+        if: always()
+        run: |
+          { echo '```'; cat "$RUNNER_TEMP/evidence/measure.txt" 2>/dev/null; grep -hE 'Test Files|Tests ' "$RUNNER_TEMP"/evidence/serve-ui-build.*.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          rm -f "$RUNNER_TEMP/evidence/serve-ui-client.tar.gz"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s12-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

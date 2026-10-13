@@ -10,6 +10,10 @@
 # dispatched commit, dry-runs on that tag's checkout, the way `publish.yml` runs on a release tag,
 # and deletes the tag afterwards.
 #
+# S24 (`cli-pack-install`, on a pull request and when the `s24` input is on): pack `packages/cli` and
+# its publishable closure without the GeoSpec engine (D36), install the tarballs into a clean npm
+# application under the OS temp dir and run the installed `tau` there (`check-pack-install.ts`).
+#
 # Differences from `publish.yml`, each a finding for W16: the producer uses the shared
 # `geospec-producer` action (the inline copy in `publish.yml` lacks the retained OCCT preparation
 # and the Nx Cloud token, so it compiles OCCT twice), and installs Chromium before the gate
@@ -32,6 +36,10 @@ on:
         description: 'Without the gate: dry-run on the checkout of a throwaway spike-publish-<run id> tag, deleted afterwards'
         type: boolean
         default: false
+      s24:
+        description: 'Also run S24: pack the CLI closure and run the installed tau on ubuntu-latest and macos-15'
+        type: boolean
+        default: true
       products-sha:
         description: 'Without the gate: the main commit whose green ci.yml run supplies the GeoSpec products (default: the newest)'
         required: false
@@ -40,6 +48,7 @@ on:
     paths:
       - '.github/workflows/spike-publish-dry-run.yml'
       - 'scripts/src/check-pack-install.ts'
+      - 'scripts/src/check-pack-install-cli.ts'
 
 permissions:
   contents: read
@@ -246,6 +255,9 @@ jobs:
           git symbolic-ref -q HEAD || echo 'HEAD is detached'
           git describe --tags --exact-match 2>/dev/null || echo "no tag at HEAD"
           git status --short | head -20
+          branch=$(git symbolic-ref -q --short HEAD || echo detached)
+          tag=$(git describe --tags --exact-match 2>/dev/null || echo none)
+          echo "::notice title=Checkout::ref $GITHUB_REF; HEAD $branch; tag at HEAD $tag; dirty files $(git status --short | wc -l)"
 
       # The only step `publish.yml` runs that this keeps; `publish.yml`'s real publish step is gone.
       - name: Dry-run the dependency-ordered publish
@@ -256,7 +268,8 @@ jobs:
           status=0
           pnpm nx release publish --dry-run --tag=beta 2>&1 | tee "$RUNNER_TEMP/dry-run.log" || status=$?
           git_errors=$(grep -Eo 'ERR_PNPM_GIT_[A-Z_]+' "$RUNNER_TEMP/dry-run.log" | sort | uniq -c | tr '\n' ' ' || true)
-          echo "::notice title=Dry-run publish (git-checks $SPIKE_GIT_CHECKS)::exit $status; ${git_errors:-no ERR_PNPM_GIT_* errors}"
+          would=$(grep -c 'Would publish to' "$RUNNER_TEMP/dry-run.log" || true)
+          echo "::notice title=Dry-run publish (git-checks $SPIKE_GIT_CHECKS)::exit $status; $would packages would publish; ${git_errors:-no ERR_PNPM_GIT_* errors}"
           exit "$status"
 
       - name: Upload the dry-run log
@@ -280,3 +293,61 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$SPIKE_TAG"
+
+  cli-pack-install:
+    name: S24 CLI closure pack-install (${{ matrix.os }})
+    if: github.event_name == 'pull_request' || inputs.s24
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # `@taucad/host` builds against the GeoSpec engine it peers optionally, so the build needs the products.
+      - name: Find the newest green main CI run
+        id: products
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCTS_SHA: ${{ inputs.products-sha }}
+        run: |
+          sha=${PRODUCTS_SHA:-$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" --jq '.workflow_runs[0].head_sha')}
+          echo "GeoSpec products from main $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: GeoSpec products from main
+        uses: ./.github/actions/geospec-artifact-from-main
+        with:
+          sha: ${{ steps.products.outputs.sha }}
+          github-token: ${{ github.token }}
+
+      - name: Build the CLI closure
+        run: pnpm nx run-many -t build --projects=cli
+
+      - name: Install Chromium for the pack-install check
+        run: pnpm exec playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+
+      - name: Pack, install and run the CLI closure
+        run: |
+          set -o pipefail
+          started=$(date +%s)
+          node scripts/src/check-pack-install.ts packages/cli 2>&1 | tee "$RUNNER_TEMP/s24-${{ matrix.os }}.log"
+          seconds=$(( $(date +%s) - started ))
+          lines=$(grep -E '^(Elapsed|tau |CLI checks|npm install:|README quick start)' "$RUNNER_TEMP/s24-${{ matrix.os }}.log" | tr '\n' ';')
+          echo "::notice title=S24 ${{ matrix.os }}::${seconds} s (limit 300 s); ${lines}"
+
+      - name: Upload the S24 log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s24-${{ matrix.os }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/s24-${{ matrix.os }}.log
+          if-no-files-found: ignore

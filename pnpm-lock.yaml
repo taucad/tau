@@ -3671,6 +3671,9 @@ importers:
       jszip:
         specifier: ^3.10.1
         version: 3.10.2
+      nanoid:
+        specifier: 'catalog:'
+        version: 5.1.16
       type-fest:
         specifier: 'catalog:'
         version: 4.41.0
@@ -4281,6 +4284,9 @@ importers:
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../../parameters
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../../core/project
       '@taucad/units':
         specifier: workspace:*
         version: link:../../units
@@ -4890,6 +4896,9 @@ importers:
       electron:
         specifier: '>=37.0.0'
         version: 43.7.9
+      nanoid:
+        specifier: 'catalog:'
+        version: 5.1.16
       source-map-js:
         specifier: 'catalog:'
         version: 1.2.2

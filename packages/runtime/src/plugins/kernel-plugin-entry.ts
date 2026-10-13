@@ -37,7 +37,9 @@ export type {
 } from '#types/runtime-kernel-v2.types.js';
 export type {
   KernelFileSystem,
+  RealmGroup,
   RealmHold,
+  RealmHoldInput,
   RealmResources,
   RuntimeFileSystemBase,
   RuntimeLogger,
@@ -71,6 +73,7 @@ export {
 } from '#kernels/kernel-module-helpers.js';
 export type { RuntimeModuleExports } from '#kernels/kernel-module-helpers.js';
 export { checkAbort } from '#framework/cooperative-abort.js';
+export { createRealmGroup } from '#framework/realm-resources.js';
 export { named } from '#framework/named.js';
 export { getWebAssemblyExceptionConstructor, isWebAssemblyException } from '#framework/wasm-exception.js';
 export type { WebAssemblyException } from '#framework/wasm-exception.js';

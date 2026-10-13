@@ -20,7 +20,9 @@ declare const loadEngine: () => Promise<Engine>;
 describe('services.realm', () => {
   it('exposes the realm resource seam on kernel services', () => {
     expectTypeOf(services.realm).toEqualTypeOf<RealmResources>();
-    expectTypeOf(services.realm.hold<Heap>).parameter(0).toEqualTypeOf<RealmHoldInput<Heap>>();
+    expectTypeOf(services.realm.hold<Heap>)
+      .parameter(0)
+      .toEqualTypeOf<RealmHoldInput<Heap>>();
   });
 
   it('declares a group whose token fixes the value type', () => {
@@ -52,7 +54,11 @@ describe('services.realm', () => {
 
   it('rejects a string group', async () => {
     // @ts-expect-error -- a bare string is not a group: declare the backend once with createRealmGroup.
-    await services.realm.hold({ group: 'test-heap', key: 'single:', create: async () => ({ heap: new Uint8Array(1) }) });
+    await services.realm.hold({
+      group: 'test-heap',
+      key: 'single:',
+      create: async () => ({ heap: new Uint8Array(1) }),
+    });
   });
 
   it('rejects a create of another type than the token', async () => {
@@ -65,8 +71,10 @@ describe('services.realm', () => {
       group: heapGroup,
       key: 'single:',
       create: async () => ({ heap: new Uint8Array(1) }),
-      // @ts-expect-error -- dispose receives the token's value: a heap has no `tessellate`.
-      dispose: (value) => value.tessellate(0),
+      dispose: (value) => {
+        // @ts-expect-error -- dispose receives the token's value: a heap has no `tessellate`.
+        value.tessellate(0);
+      },
     });
   });
 
@@ -97,7 +105,11 @@ describe('services.realm', () => {
   });
 
   it('keeps the held value read-only', async () => {
-    const hold = await services.realm.hold({ group: heapGroup, key: 'k', create: async () => ({ heap: new Uint8Array(1) }) });
+    const hold = await services.realm.hold({
+      group: heapGroup,
+      key: 'k',
+      create: async () => ({ heap: new Uint8Array(1) }),
+    });
     // @ts-expect-error -- holders share one value and cannot replace it.
     hold.value = { heap: new Uint8Array(2) };
   });

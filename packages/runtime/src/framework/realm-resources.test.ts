@@ -24,7 +24,7 @@ const createTestGroup = <Value>(): RealmGroup<Value> => createRealmGroup<Value>(
 const refusalIssue = async (hold: Promise<unknown>): Promise<KernelIssue> => {
   const error: unknown = await hold.then(
     () => undefined,
-    (reason: unknown) => reason,
+    (error: unknown) => error,
   );
   expect(error).toBeInstanceOf(Error);
   expect(error).toHaveProperty('issues');
@@ -191,7 +191,11 @@ describe('realmResources', () => {
     const replicadGroup = createTestGroup<string>();
     const libcascadeGroup = createTestGroup<string>();
     const replicad = await realmResources.hold({ group: replicadGroup, key: 'single', create: async () => 'replicad' });
-    const libcascade = await realmResources.hold({ group: libcascadeGroup, key: 'full', create: async () => 'libcascade' });
+    const libcascade = await realmResources.hold({
+      group: libcascadeGroup,
+      key: 'full',
+      create: async () => 'libcascade',
+    });
     replicad.release();
     libcascade.release();
 
@@ -257,7 +261,9 @@ describe('realmResources', () => {
       Reflect.set(globalThis, directoryKey, { abi: foreignAbi, holders: new Map() });
       const create = vi.fn(async () => 'heap');
 
-      const issue = await refusalIssue(realmResources.hold({ group: createTestGroup<string>(), key: 'single', create }));
+      const issue = await refusalIssue(
+        realmResources.hold({ group: createTestGroup<string>(), key: 'single', create }),
+      );
 
       expect(issue).toMatchObject({
         code: 'KERNEL_REALM_CONFLICT',
@@ -272,7 +278,9 @@ describe('realmResources', () => {
       Reflect.set(globalThis, directoryKey, { hold: async () => undefined });
       const create = vi.fn(async () => 'heap');
 
-      const issue = await refusalIssue(realmResources.hold({ group: createTestGroup<string>(), key: 'single', create }));
+      const issue = await refusalIssue(
+        realmResources.hold({ group: createTestGroup<string>(), key: 'single', create }),
+      );
 
       expect(issue).toEqual({
         code: 'KERNEL_REALM_CONFLICT',
@@ -285,7 +293,7 @@ describe('realmResources', () => {
     });
   });
 
-  it('should share one token\'s instance between two copies of the runtime module in one realm', async () => {
+  it("should share one token's instance between two copies of the runtime module in one realm", async () => {
     const create = vi.fn(async () => 'heap');
     const first = await import('#framework/realm-resources.js');
     vi.resetModules();

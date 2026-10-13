@@ -1089,10 +1089,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
       refuse('services.unknown-concern');
       return;
     }
-    if (concern === 'geospecPerformance' && !/^(1|true)$/iu.test(environment['TAU_DEBUG'] ?? '')) {
-      refuse('GeoSpec performance tools require TAU_DEBUG.');
-      return;
-    }
     try {
       const resolved = sanitizeServicesContext(context);
       /* Launcher 2 is scoped to one workspace root, and the renderer names it —
@@ -1119,9 +1115,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       const port =
         concern === 'exactMeasurement'
           ? geometry.connectMeasurement()
-          : concern === 'geospecPerformance'
-            ? geometry.connectPerformance()
-            : services.connect(concern as ServicesConcern, resolved);
+          : services.connect(concern as ServicesConcern, resolved);
       event.senderFrame?.postMessage(servicesPortRelayTag, { requestId }, [port]);
     } catch (error) {
       /* Quit and reload refuse new concerns by design: an expected answer the

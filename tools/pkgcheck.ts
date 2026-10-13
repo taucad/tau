@@ -482,12 +482,6 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
     '#bambu-studio/engine.js':
       'node/default platform swap for the Bambu Studio engine, pinned by src/slicer.plugin.test.ts',
   },
-  '@taucad/geospec-engine': {
-    // The canonical map reaches `src/` only, and `.oxlintrc.json` ("no-restricted-imports",
-    // regex `^\.`) bans the relative import that would replace it workspace-wide — so a
-    // directory outside `src/` can only be reached through a key of its own.
-    '#experiments/*.js': 'performance-lab experiments outside src/; relative imports are banned workspace-wide',
-  },
   '@taucad/geospec-engine-native': {
     '#native-binding':
       'workspace NAPI-RS generated types/Node loader and published copied dist loader select a private platform addon outside src',

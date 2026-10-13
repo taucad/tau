@@ -41,13 +41,12 @@ type SuiteRequest = Readonly<{
     bail?: boolean;
   }>;
 }>;
-type PerformanceRequest = Readonly<{ type: 'run'; id: number; input: unknown }>;
 
 type Job = {
   readonly id: number;
-  readonly kind: 'measurement' | 'suite' | 'performance';
+  readonly kind: 'measurement' | 'suite';
   readonly port: MessagePortMain;
-  readonly input: MeasurementRequest | SuiteRequest | PerformanceRequest;
+  readonly input: MeasurementRequest | SuiteRequest;
   readonly context?: Readonly<Record<string, string>>;
   readonly root?: string;
   readonly stillAuthorized?: () => boolean;
@@ -78,7 +77,6 @@ export type GeometryBrokerOptions = {
 /** A scoped port is only a request channel; it does not grant a root by itself. */
 export type GeometryBroker = {
   connectMeasurement(): MessagePortMain;
-  connectPerformance(): MessagePortMain;
   connectSuite(
     input: Readonly<{
       root: string;
@@ -190,23 +188,6 @@ const suiteRequest = (value: unknown): value is SuiteRequest => {
   );
 };
 
-const performanceRequest = (value: unknown): value is PerformanceRequest => {
-  const frame = record(value);
-  if (
-    frame?.['type'] !== 'run' ||
-    !Number.isSafeInteger(frame['id']) ||
-    (frame['id'] as number) < 0 ||
-    Object.keys(frame).sort().join(',') !== 'id,input,type'
-  ) {
-    return false;
-  }
-  try {
-    return Buffer.byteLength(JSON.stringify(frame['input'])) <= 2 * 1024 * 1024;
-  } catch {
-    return false;
-  }
-};
-
 const finitePoint = (value: unknown): boolean =>
   Array.isArray(value) &&
   value.length === 3 &&
@@ -314,14 +295,7 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
       job,
       job.kind === 'measurement'
         ? { id: (job.input as MeasurementRequest).id, result: { status: 'interrupted', code, message: reason } }
-        : job.kind === 'performance'
-          ? {
-              id: (job.input as PerformanceRequest).id,
-              type: 'error',
-              message: reason,
-              ...(transport === undefined ? {} : { transport }),
-            }
-          : { type: 'error', message: reason, ...(transport === undefined ? {} : { transport }) },
+        : { type: 'error', message: reason, ...(transport === undefined ? {} : { transport }) },
     );
   };
   const release = (job: Job): void => {
@@ -610,13 +584,9 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
           ? measurementRequest(event.data)
             ? event.data
             : undefined
-          : kind === 'performance'
-            ? performanceRequest(event.data)
-              ? event.data
-              : undefined
-            : suiteRequest(event.data)
-              ? event.data
-              : undefined;
+          : suiteRequest(event.data)
+            ? event.data
+            : undefined;
       if (!input || queue.length >= maxQueue) {
         try {
           port.postMessage(
@@ -629,13 +599,7 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
                     message: input ? 'The geometry queue is full.' : 'Invalid or oversized exact measurement request.',
                   },
                 }
-              : kind === 'performance'
-                ? {
-                    id: record(event.data)?.['id'],
-                    type: 'error',
-                    message: input ? 'The geometry queue is full.' : 'Invalid GeoSpec performance request.',
-                  }
-                : { type: 'error', message: input ? 'The geometry queue is full.' : 'Invalid GeoSpec suite request.' },
+              : { type: 'error', message: input ? 'The geometry queue is full.' : 'Invalid GeoSpec suite request.' },
           );
         } catch {
           /* Caller has gone. */
@@ -676,7 +640,6 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
   };
   return {
     connectMeasurement: () => connect('measurement'),
-    connectPerformance: () => connect('performance'),
     connectSuite: (input) => connect('suite', input),
     revokeUnauthorized() {
       for (const job of queue.toReversed()) {

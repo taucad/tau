@@ -61,7 +61,6 @@
     }
   },
   "imports": {
-    "#experiments/*.js": "./experiments/*.ts",
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
@@ -69,7 +68,6 @@
     "@taucad/assimp": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/esbuild": "workspace:*",
-    "@taucad/geospec-engine-native": "workspace:*",
     "@taucad/gltf": "workspace:*",
     "@taucad/image": "workspace:*",
     "@taucad/jscad": "workspace:*",
@@ -82,7 +80,8 @@
     "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/tscircuit": "workspace:*",
-    "geospec": "workspace:*"
+    "geospec": "workspace:*",
+    "geospec-engine": "catalog:"
   },
   "devDependencies": {
     "@taucad/picogk": "workspace:*",

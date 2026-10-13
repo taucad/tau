@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/geospec",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package", "host:darwin-arm64"],
+  "tags": ["scope:shared", "type:package"],
   "targets": {
     "test": {
       "dependsOn": [

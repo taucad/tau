@@ -8,7 +8,6 @@ import type { HostGeoSpecRuntimeClient } from '@taucad/host/agent-tools';
 import type { UtilityPort } from '#tau/services-host.impl.js';
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
 import { createGeometryHost } from '#tau/geometry-host.impl.js';
-import { runGeoSpecPerformanceInput } from '#tau/geospec-performance.js';
 
 type DesktopRuntime = ReturnType<typeof createDesktopRuntime>;
 type ParentPort = {
@@ -39,7 +38,6 @@ const host = createGeometryHost({
       engine.close();
     }
   },
-  performance: runGeoSpecPerformanceInput,
   createRunner: async ({ root, runtimePort, runtimeConfig }) => {
     const client = createRuntimeClient<DesktopRuntime>({
       transport: electronUtilityMainTransport({ port: runtimePort, release: () => undefined }),

@@ -21,7 +21,6 @@
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
     "@taucad/gltf": "workspace:*",
-    "@taucad/geospec-engine-native": "workspace:*",
     "@taucad/host": "workspace:*",
     "@taucad/image": "workspace:*",
     "@taucad/kinematics": "workspace:*",
@@ -42,6 +41,7 @@
     "@types/ws": "^8.18.1",
     "geospec": "workspace:*",
     "ws": "catalog:",
-    "xstate": "catalog:"
+    "xstate": "catalog:",
+    "geospec-engine": "catalog:"
   }
 }

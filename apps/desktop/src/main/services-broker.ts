@@ -29,10 +29,9 @@ export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'ma
 export type ServicesConcern = (typeof servicesConcerns)[number];
 
 /** Concerns a renderer may request directly. */
-export const rendererServicesConcerns: ReadonlyArray<ServicesConcern | 'exactMeasurement' | 'geospecPerformance'> = [
+export const rendererServicesConcerns: ReadonlyArray<ServicesConcern | 'exactMeasurement'> = [
   'nodeFs',
   'agentHost',
-  'geospecPerformance',
   'exactMeasurement',
   'machines',
 ];

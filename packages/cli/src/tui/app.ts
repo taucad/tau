@@ -282,7 +282,17 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
   const [session, setSession] = useState<Session>(emptySession);
   const sessionRef = useRef(session);
   sessionRef.current = session;
-  const [draft, setDraft] = useState('');
+  const [draft, setDraftState] = useState('');
+  /*
+   * R18: Ink re-subscribes the keyboard handler only after a render's effects run, so a keystroke that lands between
+   * a frame and those effects (as on a loaded machine) reaches the handler of the render before. Every edit and read
+   * of the draft goes through this ref, which each keystroke updates at once, so no handler acts on a stale draft.
+   */
+  const draftRef = useRef(draft);
+  const setDraft = useCallback((next: string | ((current: string) => string)): void => {
+    draftRef.current = typeof next === 'function' ? next(draftRef.current) : next;
+    setDraftState(draftRef.current);
+  }, []);
   const [notice, setNotice] = useState(`Connecting to ${origin}…`);
   const [rows, setRows] = useState(stdout.rows > 0 ? stdout.rows : fallbackRows);
   const pendingAdmission = useRef<PendingAdmission | undefined>(undefined);
@@ -384,7 +394,7 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
   }, []);
 
   const submit = useCallback((): void => {
-    const prompt = draft.trim();
+    const prompt = draftRef.current.trim();
     if (prompt === '' || client === undefined) {
       return;
     }
@@ -392,13 +402,14 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
       setNotice('Waiting for the previous command to be admitted. The prompt is kept.');
       return;
     }
-    const running = isSettled(session.state) ? undefined : session.runId;
+    const following = sessionRef.current;
+    const running = isSettled(following.state) ? undefined : following.runId;
     /* No external protocol Tau speaks has a steering frame, so the host refuses
      * `steer` on an external run outright. Sending it anyway to be told so would
      * lose the prompt; the draft is kept, and the host's own code is the answer. */
-    if (running !== undefined && session.agent !== undefined) {
+    if (running !== undefined && following.agent !== undefined) {
       setNotice(
-        `EXTERNAL_AGENT_UNSUPPORTED: ${session.agent.agentId} cannot be steered mid-turn. The prompt is kept — send it once this run settles.`,
+        `EXTERNAL_AGENT_UNSUPPORTED: ${following.agent.agentId} cannot be steered mid-turn. The prompt is kept — send it once this run settles.`,
       );
       return;
     }
@@ -494,7 +505,7 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
         }
       }
     });
-  }, [act, agent, chatId, client, draft, session.agent, session.runId, session.state]);
+  }, [act, agent, chatId, client, setDraft]);
 
   const cancel = useCallback((): void => {
     const pending = pendingAdmission.current;
@@ -599,7 +610,7 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
     // ponytail: the command letters are live only on an empty prompt, so a prompt
     // cannot begin with `q` or `c` — press space first, or add a leading `/`
     // command line if that ever grates.
-    if (draft === '' && (input === 'q' || input === 'c')) {
+    if (draftRef.current === '' && (input === 'q' || input === 'c')) {
       if (input === 'q') {
         exit();
       } else {

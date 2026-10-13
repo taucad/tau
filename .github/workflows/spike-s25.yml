@@ -45,12 +45,15 @@ jobs:
           cd "$RUNNER_TEMP/clients"
           npm init -y > /dev/null
           npm install --no-audit --no-fund --ignore-scripts "@openai/codex@$CODEX_VERSION" "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+          # With install scripts off, claude-code's bin stays a placeholder; run the platform package's binary.
+          claude_bin="$(ls "$RUNNER_TEMP"/clients/node_modules/@anthropic-ai/claude-code-*/claude | head -n 1)"
+          echo "CLAUDE_BIN=$claude_bin" >> "$GITHUB_ENV"
           ./node_modules/.bin/codex --version
-          ./node_modules/.bin/claude --version
+          "$claude_bin" --version
       - name: Run the scenarios
         run: |
           mkdir -p "$RUNNER_TEMP/evidence"
-          node scripts/spikes/s25/run.ts "$RUNNER_TEMP/clients/node_modules/.bin/codex" "$RUNNER_TEMP/clients/node_modules/.bin/claude" "$RUNNER_TEMP/evidence" | tee "$RUNNER_TEMP/evidence/s25-summary.txt"
+          node scripts/spikes/s25/run.ts "$RUNNER_TEMP/clients/node_modules/.bin/codex" "$CLAUDE_BIN" "$RUNNER_TEMP/evidence" | tee "$RUNNER_TEMP/evidence/s25-summary.txt"
           { echo '```'; cat "$RUNNER_TEMP/evidence/s25-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload evidence
         if: always()

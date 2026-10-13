@@ -2,6 +2,9 @@
 \* Presentation review: compact responsive rows and muted/loading styles do not
 \* change admission, cancellation, persisted command identity or queue transitions.
 \* Enlarged-text reflow and readable busy labels retain the same disabled guards.
+\* Pending view actions remain serialized until settlement.
+\* Failed steering retains its durable cancel identity; a removed item's view-only
+\* action error cannot offer a retry. Admission bridge hashing fences Prepare inputs.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

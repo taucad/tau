@@ -19,6 +19,35 @@ const fixture = (overrides: Partial<ChatMessageQueueProps> = {}): ChatMessageQue
   ...overrides,
 });
 describe('queued message adornment', () => {
+  it('should discard an action retry when another tab removes its item', async () => {
+    const user = userEvent.setup();
+    const props = fixture({
+      onEdit: vi.fn(async () => {
+        throw new Error('Storage unavailable');
+      }),
+    });
+    const { rerender } = render(<ChatMessageQueueView {...props} />);
+    await user.click(screen.getByRole('button', { name: 'Delete queued message 1' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Storage unavailable');
+    rerender(<ChatMessageQueueView {...props} items={[]} />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Queued messages' })).not.toBeInTheDocument();
+  });
+  it('should label a failed durable steer and retry its existing command', async () => {
+    const user = userEvent.setup();
+    const props = fixture({ error: 'Connection lost. Retry to confirm the interruption.' });
+    const items = props.items.map<ChatMessageQueueProps['items'][number]>((item) => ({
+      ...item,
+      steer: { type: 'cancel', commandId: 'same_cancel', payload: { chatId: 'chat', runId: 'original' } },
+    }));
+    render(<ChatMessageQueueView {...props} items={items} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Steer failed');
+    expect(screen.getByRole('button', { name: 'Steer' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(props.onRetry).toHaveBeenCalledOnce();
+    expect(props.onSteer).not.toHaveBeenCalled();
+  });
   it('should retain text and show a spinner while Steer is pending, then report a failed save', async () => {
     const user = userEvent.setup();
     const operation = Promise.withResolvers<void>();

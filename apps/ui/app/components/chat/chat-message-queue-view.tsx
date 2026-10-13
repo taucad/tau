@@ -41,7 +41,8 @@ export function ChatMessageQueueView({
     label: string;
     operation: () => Promise<void>;
   }>();
-  if (items.length === 0 && error === undefined && actionError === undefined) {
+  const visibleError = items.some((item) => item.id === actionError?.id) ? actionError : undefined;
+  if (items.length === 0 && error === undefined && visibleError === undefined) {
     return undefined;
   }
   const act = (id: string, label: string, operation: () => Promise<void>): void => {
@@ -75,6 +76,8 @@ export function ChatMessageQueueView({
             sendingId === item.id || pending?.id === item.id || (item.steer !== undefined && error === undefined);
           const busyLabel =
             pending?.id === item.id ? pending.label : item.steer === undefined ? 'Sending…' : 'Steering…';
+          const statusLabel =
+            item.steer !== undefined && error !== undefined ? 'Steer failed' : busy ? busyLabel : undefined;
           const locked = busy || pending !== undefined || item.command !== undefined || item.steer !== undefined;
           return (
             <li key={item.id} aria-busy={busy} className='min-w-0 px-2 py-1'>
@@ -100,7 +103,7 @@ export function ChatMessageQueueView({
                   <Button
                     variant='ghost'
                     size='xs'
-                    className={cn('rounded-full font-normal', busy && 'disabled:opacity-100')}
+                    className={cn('rounded-full font-normal', statusLabel !== undefined && 'disabled:opacity-100')}
                     aria-label='Steer'
                     disabled={locked}
                     title='Interrupt the current turn and send this message'
@@ -108,13 +111,13 @@ export function ChatMessageQueueView({
                       act(item.id, 'Steering…', async () => onSteer(item.id));
                     }}
                   >
-                    {busy ? (
-                      <span role='status'>{busyLabel}</span>
-                    ) : (
+                    {statusLabel === undefined ? (
                       <>
                         <CornerDownRight aria-hidden='true' className='size-4' />
                         Steer
                       </>
+                    ) : (
+                      <span role='status'>{statusLabel}</span>
                     )}
                   </Button>
                   <Button
@@ -207,17 +210,17 @@ export function ChatMessageQueueView({
           );
         })}
       </ul>
-      {actionError !== undefined || error !== undefined ? (
+      {visibleError !== undefined || error !== undefined ? (
         <div role='alert' className='flex items-start gap-2 px-2 py-2 text-xs text-muted-foreground'>
-          <span className='min-w-0 flex-1 self-center wrap-anywhere'>{actionError?.message ?? error}</span>
+          <span className='min-w-0 flex-1 self-center wrap-anywhere'>{visibleError?.message ?? error}</span>
           <Button
             variant='ghost'
             size='sm'
             onClick={() => {
-              if (actionError === undefined) {
+              if (visibleError === undefined) {
                 onRetry();
               } else {
-                act(actionError.id, actionError.label, actionError.operation);
+                act(visibleError.id, visibleError.label, visibleError.operation);
               }
             }}
           >

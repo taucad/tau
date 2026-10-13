@@ -17,4 +17,4 @@ geospec-engine-native-runtime = { path = "../../native/runtime", default-feature
   "binding-python",
 ] }
 geospec-engine-native-core = { path = "../../rust" }
-pyo3 = "=0.26.0"
+pyo3 = "=0.29.0"

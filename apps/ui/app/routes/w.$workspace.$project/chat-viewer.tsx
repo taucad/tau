@@ -1139,8 +1139,7 @@ const ViewerContent = memo(function ({
           bar starts at the left edge, keeping the grid readout and Section in view. */}
       <div
         ref={bottomControlsRef}
-        data-viewer-bottom-controls
-        className='pointer-events-none absolute inset-x-2 bottom-2 z-10 flex [transform:translate(var(--share-desktop-offer-x,0px),var(--share-desktop-offer-y,0px))] flex-col items-center-safe gap-2 transition-transform duration-200 ease-out motion-reduce:transition-none data-[desktop-offer-compact]:[&_[data-tool]]:size-7 data-[desktop-offer-compact]:[&_[data-tool]]:p-0 data-[desktop-offer-compact]:[&_[data-tool]>span]:hidden'
+        className='pointer-events-none absolute inset-x-2 bottom-2 z-10 flex flex-col items-center-safe gap-2'
       >
         <div className='flex w-full items-end gap-2 [&>*]:pointer-events-auto'>
           <ArButton artifact={artifact} runtimeDocument={runtimeDocument} className='ml-auto shrink-0' />

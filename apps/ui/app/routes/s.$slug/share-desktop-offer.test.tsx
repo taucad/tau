@@ -8,19 +8,12 @@
  * shell's parser would refuse.
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('#components/share/tau-publication.js', () => ({
-  default: () => (
-    <div data-viewer-frame>
-      publication workbench
-      <div data-viewer-bottom-controls style={{ bottom: 8 }}>
-        <div data-slot='viewer-controls'>Viewer menu</div>
-      </div>
-    </div>
-  ),
+  default: () => <div>publication workbench</div>,
   PublicationInteractiveSurface: () => null,
   ErrorBoundary: () => null,
   loadPublication: async () => ({}),
@@ -47,18 +40,17 @@ vi.mock('#lib/share-providers.js', () => ({
 
 const { default: ShareRoute } = await import('#routes/s.$slug/route.js');
 
-const mountAt = (slug: string, loaderData: unknown): ReturnType<typeof render> => {
+const mountAt = (slug: string, loaderData: unknown): void => {
   const router = createMemoryRouter([{ path: '/s/:slug', Component: ShareRoute, loader: () => loaderData }], {
     initialEntries: [`/s/${slug}`],
   });
-  return render(<RouterProvider router={router} />);
+  render(<RouterProvider router={router} />);
 };
 
 describe('web /s/:slug desktop offer', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.clearAllMocks();
-    vi.restoreAllMocks();
   });
 
   it('offers the app beside the publication the page is already showing', async () => {
@@ -74,7 +66,7 @@ describe('web /s/:slug desktop offer', () => {
     expect(await screen.findByRole('button', { name: 'Open in Tau Desktop' })).toBeInTheDocument();
   });
 
-  it('should keep the offer at the bottom-left with the browser continuation action', async () => {
+  it('should keep the offer at the bottom-right with the browser continuation action', async () => {
     mountAt('tau~pub_123', { publication: {}, viewerRole: 'public' });
 
     const openInDesktop = await screen.findByRole('button', { name: 'Open in Tau Desktop' });
@@ -83,108 +75,9 @@ describe('web /s/:slug desktop offer', () => {
       'hidden',
       'lg:block',
       'bottom-[calc(var(--spacing)*4+1px)]',
-      'left-[calc(var(--spacing)*4+1px)]',
+      'right-[calc(var(--spacing)*4+1px)]',
     );
     expect(screen.getByRole('button', { name: 'Continue in the browser' })).toBeInTheDocument();
-  });
-
-  it('should center beside the offer, compact before moving above, and restore on dismissal', async () => {
-    let resize = (): void => undefined;
-    const observer = { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
-    vi.spyOn(globalThis, 'ResizeObserver').mockImplementation(function (callback) {
-      resize = () => {
-        callback([], observer);
-      };
-      return observer;
-    });
-    const { unmount } = mountAt('tau~pub_123', { publication: {}, viewerRole: 'public' });
-    const open = await screen.findByRole('button', { name: 'Open in Tau Desktop' });
-    const offer = open.closest<HTMLElement>('.fixed')!;
-    offer.style.left = '17px';
-    const menu = screen.getByText('Viewer menu');
-    const controls = menu.parentElement!;
-    const frame = controls.parentElement!;
-    const x = () => controls.style.getPropertyValue('--share-desktop-offer-x');
-    const y = () => controls.style.getPropertyValue('--share-desktop-offer-y');
-    const offerX = () => offer.style.getPropertyValue('--share-desktop-offer-center-x');
-    let viewerWidth = 1000;
-    vi.spyOn(offer, 'getBoundingClientRect').mockImplementation(() =>
-      DOMRect.fromRect({
-        x: 17 + Number.parseFloat(offerX() || '0'),
-        y: 650,
-        width: offer.contains(open) ? 320 : 0,
-        height: offer.contains(open) ? 133 : 0,
-      }),
-    );
-    vi.spyOn(frame, 'getBoundingClientRect').mockImplementation(() =>
-      DOMRect.fromRect({ x: 9, y: 90, width: viewerWidth, height: 701 }),
-    );
-    vi.spyOn(menu, 'getBoundingClientRect').mockImplementation(() => {
-      const width = Object.hasOwn(controls.dataset, 'desktopOfferCompact') ? 248 : 352;
-      return DOMRect.fromRect({
-        x: 9 + (viewerWidth - width) / 2 + Number.parseFloat(x() || '0'),
-        y: 743 + Number.parseFloat(y() || '0'),
-        width,
-        height: 40,
-      });
-    });
-    globalThis.dispatchEvent(new Event('resize'));
-    await waitFor(() => {
-      expect(x()).toBe('164px');
-    });
-    expect(y()).toBe('0px');
-    expect(offerX()).toBe('0px');
-    expect(controls).not.toHaveAttribute('data-desktop-offer-compact');
-
-    viewerWidth = 620;
-    resize();
-    await waitFor(() => {
-      expect(controls).toHaveAttribute('data-desktop-offer-compact');
-    });
-    expect(x()).toBe('164px');
-    expect(y()).toBe('0px');
-    expect(offerX()).toBe('0px');
-
-    viewerWidth = 550;
-    resize();
-    await waitFor(() => {
-      expect(y()).toBe('-141px');
-    });
-    expect(x()).toBe('0px');
-    expect(offerX()).toBe('107px');
-    const offerBounds = offer.getBoundingClientRect();
-    const menuBounds = menu.getBoundingClientRect();
-    expect(offerBounds.left + offerBounds.width / 2).toBe(menuBounds.left + menuBounds.width / 2);
-
-    // Re-measuring either transformed element must not make the layout oscillate between positions.
-    globalThis.dispatchEvent(new Event('resize'));
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => {
-        resolve();
-      });
-    });
-    expect(y()).toBe('-141px');
-    expect(offerX()).toBe('107px');
-
-    viewerWidth = 1000;
-    resize();
-    await waitFor(() => {
-      expect(y()).toBe('0px');
-    });
-    expect(x()).toBe('164px');
-    expect(offerX()).toBe('0px');
-    expect(controls).not.toHaveAttribute('data-desktop-offer-compact');
-    fireEvent.click(screen.getByRole('button', { name: 'Continue in the browser' }));
-    await waitFor(() => {
-      expect(x()).toBe('0px');
-    });
-    expect(y()).toBe('0px');
-    expect(offerX()).toBe('0px');
-    unmount();
-    expect(observer.disconnect).toHaveBeenCalledOnce();
-    expect(x()).toBe('');
-    expect(y()).toBe('');
-    expect(offerX()).toBe('');
   });
 
   /* The desktop route announces the same wait (`desktop-route.tsx`). */

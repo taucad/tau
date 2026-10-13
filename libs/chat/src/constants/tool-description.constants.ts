@@ -154,7 +154,7 @@ Ask early, before investing in a direction. Put your recommendation first: it is
 Returns each answer and who settled it. Unless status is "answered", proceed with the recommended option and say once which you assumed; a later answer arrives as a message. Never repeat a question or write a multiple-choice question as prose.`,
   [toolName.installPackages]: `Install the project's npm packages: edit package.json dependencies, write package-lock.json, and unpack each package into node_modules.
 
-Call it when a model imports a package that package.json does not list (pass it in add), when an import fails with package-not-locked or package-not-installed, or when the person asks to add, remove or upgrade a package. Until it runs, those imports fail or fall back to a CDN bundle; building never installs.
+Call it when a JavaScript or TypeScript model imports an npm package that package.json does not list (pass it in add), when an import fails with package-not-locked or package-not-installed, or when the person asks to add, remove or upgrade a package. Until it runs, those imports fail or fall back to a CDN bundle; building never installs.
 
 add sets dependencies[name] to a range ("^4.0.3"), as \`npm install name@range\`; remove deletes names, as \`npm uninstall\`; upgrade re-resolves the named packages to the newest version their ranges allow. With none of them it installs what package.json and the lock already say. Only the npm registry is used, and package scripts never run.
 

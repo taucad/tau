@@ -159,6 +159,9 @@ describe('provider-facing tool schema compatibility', () => {
     expect(schema.required ?? []).toEqual([]);
     expect(collectKeywordPaths(schema)).toEqual(emptyKeywordPaths());
     expect(toolDescriptions[toolName.installPackages]).toContain('package-not-locked');
+    expect(toolDescriptions[toolName.installPackages]).toContain(
+      'when a JavaScript or TypeScript model imports an npm package that package.json does not list',
+    );
     expect(installPackagesInputSchema.parse({})).toEqual({});
     expect(installPackagesInputSchema.parse({ add: { 'simplex-noise': '^4.0.3' } })).toEqual({
       add: { 'simplex-noise': '^4.0.3' },

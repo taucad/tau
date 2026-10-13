@@ -329,8 +329,9 @@ jobs:
           sha: ${{ steps.products.outputs.sha }}
           github-token: ${{ github.token }}
 
-      - name: Build the CLI closure
-        run: pnpm nx run-many -t build --projects=cli
+      # The CLI's build graph omits packages it reaches only through peers (`@taucad/camera`), so build them all.
+      - name: Build every publishable package
+        run: pnpm nx run-many -t build --projects=tag:type:package
 
       - name: Install Chromium for the pack-install check
         run: pnpm exec playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium

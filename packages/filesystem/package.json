@@ -97,7 +97,6 @@
     "@taucad/kinematics": "workspace:*",
     "@taucad/project-core": "workspace:*",
     "jszip": "^3.10.1",
-    "nanoid": "catalog:",
     "type-fest": "catalog:"
   },
   "devDependencies": {

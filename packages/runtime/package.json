@@ -299,7 +299,6 @@
     "@types/json-schema": "catalog:",
     "cdn-resolve": "catalog:",
     "deepmerge": "catalog:",
-    "nanoid": "catalog:",
     "source-map-js": "catalog:",
     "strip-literal": "catalog:",
     "type-fest": "catalog:",

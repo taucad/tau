@@ -65,7 +65,6 @@
     "@taucad/cache-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/parameters": "workspace:*",
-    "@taucad/project-core": "workspace:*",
     "@taucad/units": "workspace:*",
     "deepmerge": "catalog:"
   },

@@ -130,7 +130,7 @@ const settingsCatalog = [
       {
         id: 'credit-balance',
         label: 'Purchased credits',
-        description: 'View your purchased credits and add more',
+        description: 'View your purchased credit balance and add more',
         keywords: ['top up', 'purchase'],
       },
       {

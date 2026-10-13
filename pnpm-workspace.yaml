@@ -226,7 +226,7 @@ catalog:
   katex: ^0.16.47
   knip: ^6.17.1
   libassimp: ^0.3.0
-  libcascade: 3.0.3
+  libcascade: 3.1.0
   lighthouse: ^13.4.0
   lint-staged: ^16.4.0
   lucide-react: ^0.552.0

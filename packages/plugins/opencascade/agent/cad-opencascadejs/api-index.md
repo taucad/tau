@@ -1,6 +1,6 @@
 # libcascade API index
 
-libcascade 3.0.3 · 77875 symbols · extracted by TypeScript 5.9.3.
+libcascade 3.1.0 · 77875 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 

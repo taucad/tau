@@ -1308,6 +1308,9 @@ const main = async (): Promise<void> => {
             'react-dom': '19.2.7',
             zod: '4.0.0',
             ...(plan.names.includes('@taucad/middleware') ? { xstate: '6.0.0-alpha.59' } : {}),
+            // `@taucad/viewer` peers `@xstate/react@^7.0.0-alpha.3`, whose newest alpha (alpha.4) requires
+            // xstate ^6.0.0-alpha.61, so a consumer on the xstate Tau tests pins the release Tau tests.
+            ...(plan.names.includes('@taucad/viewer') ? { '@xstate/react': '7.0.0-alpha.3' } : {}),
           },
         },
         undefined,

@@ -188,6 +188,7 @@ describe('Esbuild runtime adapter', () => {
           code: 'export const describe = () => {};',
           version: '0.0.0-test',
           globalName: 'GeoSpec',
+          registryExpression: 'globalThis.__geospecBuiltin',
         },
       },
       { vm },
@@ -198,6 +199,7 @@ describe('Esbuild runtime adapter', () => {
       code: 'export const describe = () => {};',
       version: '0.0.0-test',
       globalName: 'GeoSpec',
+      registryExpression: 'globalThis.__geospecBuiltin',
     });
     expect(vm.dispose).toHaveBeenCalledOnce();
   });

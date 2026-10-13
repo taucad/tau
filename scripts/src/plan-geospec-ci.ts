@@ -2,8 +2,10 @@
  * Read expanded Nx task graphs to select the existing GeoSpec artifact producer.
  * No task execution or dependency traversal: Nx owns the expanded graph.
  * Usage: node scripts/src/plan-geospec-ci.ts <graph.json> [<graph.json> ...]
- * Optional GITHUB_OUTPUT receives boolean job outputs; stdout records selected tasks.
+ * Optional GITHUB_OUTPUT receives the job outputs; stdout records selected tasks.
  * Exit 1 on missing/invalid graph input. Host tests are reported for routing; no suite is executed or omitted.
+ * Tests of a project tagged `ci:quarantined` run only in the nightly workflow, so they
+ * select neither the Darwin lane nor the artifact products here.
  */
 import assert from 'node:assert/strict';
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -19,6 +21,9 @@ export type TaskGraphExport = {
   tasks?: { tasks?: Record<string, { target?: { project?: string; target?: string } }> };
 };
 
+const darwinHostTag = 'host:darwin-arm64';
+const quarantinedTag = 'ci:quarantined';
+
 /** Select prerequisites from all expanded tasks, including unaffected dependencies. */
 export const planGeospecCi = (
   graphs: readonly TaskGraphExport[],
@@ -26,10 +31,12 @@ export const planGeospecCi = (
   required: boolean;
   artifactTasks: string[];
   darwinTests: string[];
+  darwinProjects: string[];
   consumerTests: string[];
 } => {
   const artifactTasks = new Set<string>();
   const darwinTests = new Set<string>();
+  const darwinProjects = new Set<string>();
   const consumerTests = new Set<string>();
   for (const graph of graphs) {
     assert.ok(graph.graph?.nodes && graph.tasks?.tasks, 'Expected an expanded Nx task graph');
@@ -45,15 +52,21 @@ export const planGeospecCi = (
         artifactTasks.add(id);
       }
 
-      if (owner.data.tags?.includes('host:darwin-arm64') && task.target.target === 'test') {
+      // Only tests select a host lane or products, and CI never runs a quarantined one.
+      const tags = owner.data.tags ?? [];
+      if (task.target.target !== 'test' || tags.includes(quarantinedTag)) {
+        continue;
+      }
+
+      if (tags.includes(darwinHostTag)) {
         darwinTests.add(id);
+        darwinProjects.add(task.target.project);
       }
 
       // A test that imports a GeoSpec engine package directly loads its generated
       // bindings, so it needs the products even when no build task asks for them.
       const { nodes, dependencies } = graph.graph;
       if (
-        task.target.target === 'test' &&
         dependencies?.[task.target.project]?.some(
           (dependency) => nodes[dependency.target]?.data.targets?.['prepare-geospec-ci-artifacts'],
         )
@@ -67,6 +80,7 @@ export const planGeospecCi = (
     required: artifactTasks.size > 0 || darwinTests.size > 0 || consumerTests.size > 0,
     artifactTasks: [...artifactTasks].sort(),
     darwinTests: [...darwinTests].sort(),
+    darwinProjects: [...darwinProjects].sort(),
     consumerTests: [...consumerTests].sort(),
   };
 };
@@ -80,7 +94,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (process.env['GITHUB_OUTPUT']) {
       appendFileSync(
         process.env['GITHUB_OUTPUT'],
-        `geospec-required=${result.required}\ngeospec-darwin-tests=${result.darwinTests.length > 0}\n`,
+        [
+          `geospec-required=${result.required}`,
+          `geospec-darwin-tests=${result.darwinTests.length > 0}`,
+          `geospec-darwin-projects=${result.darwinProjects.join(',')}`,
+          '',
+        ].join('\n'),
       );
     }
   } catch (error) {

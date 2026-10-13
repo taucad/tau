@@ -392,6 +392,41 @@ describe('native model loader ownership', () => {
     expect(terminate).not.toHaveBeenCalled();
   });
 
+  it('should keep each load result and report a failed owned Runtime shutdown from releaseAll', async () => {
+    const { engine } = testEngine();
+    const shutdownFailure = new Error('shutdown failed');
+    const exportModel = vi
+      .fn<RuntimeDocument['export']>()
+      .mockResolvedValueOnce({
+        success: true,
+        exportId: 'glb',
+        evaluationId: 'evaluation-1',
+        files: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: Uint8Array.of(9) }],
+        issues: [],
+      })
+      .mockRejectedValueOnce(new Error('export failed'));
+    const document = mock<RuntimeDocument>({ export: exportModel });
+    const runtime: GeoSpecRuntimeClient = {
+      connect: vi.fn(async () => undefined),
+      open: vi.fn(() => document),
+      terminate: vi.fn(),
+      shutdown: vi.fn(async () => {
+        throw shutdownFailure;
+      }),
+    };
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime: async () => runtime });
+
+    const loaded = await loader({ code: { 'main.ts': 'model A' }, file: 'main.ts', format: 'glb' });
+    expect(loaded.load?.artifacts).toMatchObject([{ name: 'model.glb', byteLength: 1 }]);
+    await expect(loader({ code: { 'main.ts': 'model B' }, file: 'main.ts', format: 'glb' })).rejects.toThrow(
+      'export failed',
+    );
+    await expect(loader.releaseAll()).rejects.toMatchObject({
+      message: 'Native GeoSpec model cleanup failed.',
+      errors: [shutdownFailure],
+    });
+  });
+
   it('should settle an in-flight admission before releasing its subject', async () => {
     const hash = 'a'.repeat(64);
     const source = Promise.withResolvers<Uint8Array<ArrayBuffer>>();

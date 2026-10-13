@@ -1,8 +1,5 @@
-import {
-  probeWebGpuSupport,
-  readGraphicsBackendQueryOverride,
-  resolveGraphicsBackendPreference,
-} from '#components/geometry/graphics/graphics-backend.js';
+import { probeWebGpuSupport, resolveGraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-backend';
+import { readGraphicsBackendQueryOverride } from '#utils/graphics-backend-override.js';
 import { createMetalMorphLoader } from '#components/geometry/loader/metal-morph-controller.js';
 import type {
   MetalMorphBackendInUse,

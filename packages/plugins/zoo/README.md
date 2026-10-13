@@ -53,6 +53,7 @@ One preset, `default`, selecting `kernels.default`.
 | ------------------------------- | -------------------------------------------------------------------------------------- |
 | `@taucad/zoo`                   | the toolkit, alias, and kernel factory                                                 |
 | `@taucad/zoo/engine-connection` | `EngineConnection` and `MockEngineConnection`, for hosts driving the socket themselves |
+| `@taucad/zoo/proxy`             | upgrade-header credentials for hosts behind Tau's Zoo proxy; loads no kernel or WASM   |
 
 ## Environment
 
@@ -63,6 +64,11 @@ One preset, `default`, selecting `kernels.default`.
 
 A token embedded in a browser bundle is visible to the browser: proxy the engine, or mint
 short-lived tokens, rather than shipping a long-lived one.
+
+Node and Electron hosts behind Tau's Zoo proxy keep the credential out of kernel options: the
+parent mints a Zoo-scoped token with `createZooProxyTokenSource` and posts it as a frame; the
+process that runs the kernel calls `installZooProxyCredential`, which adds the token as an upgrade
+header on connections to that proxy URL only.
 
 ## Versioning and stability
 

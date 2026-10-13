@@ -11,6 +11,7 @@
     "dev": "node scripts/serve.mjs"
   },
   "dependencies": {
+    "@taucad/planetary-gearbox": "workspace:*",
     "@taucad/utils": "workspace:*",
     "three": "catalog:"
   },

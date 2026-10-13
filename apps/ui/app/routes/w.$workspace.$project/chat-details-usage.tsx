@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { InfoTooltip } from '#components/ui/info-tooltip.js';
+import { InfoTooltip } from '@taucad/ui/components/info-tooltip';
 import {
   TableHeader,
   TableRow,

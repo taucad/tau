@@ -89,7 +89,7 @@ type ProjectRevisionsMachineContextFields = Readonly<{
   /** Every conflicted revision no decision has landed yet, from the registry's last listing (D14). */
   conflicts: readonly ConflictRecord[];
   /** Local branch refs learned from fetch that do not need a checkout yet. */
-  availableBranches: ReadonlyArray<Readonly<{ name: string; head: string }>>;
+  availableBranches: ReadonlyArray<Readonly<{ name: string; head: string; onRemote?: boolean }>>;
   checkoutStatus: Readonly<Record<string, CheckoutStatusEntry>>;
   liveCheckoutId: string | undefined;
   selectedCheckoutId: string | undefined;
@@ -143,7 +143,7 @@ export type ProjectRevisionsMachineEvent =
   | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[]; conflicts: readonly ConflictRecord[] }>
   | Readonly<{
       type: 'branchesFetched';
-      branches: ReadonlyArray<Readonly<{ name: string; head: string }>>;
+      branches: ReadonlyArray<Readonly<{ name: string; head: string; onRemote?: boolean }>>;
     }>
   | Readonly<{
       type: 'checkoutStatusChanged';
@@ -1012,6 +1012,17 @@ const projectRevisionsMachineDefinition = setup({
           ) {
             enq.sendTo('sync', { type: 'branchChanged', branch: event.branch });
           }
+          /* D88: a card reads its files once; a head that moves under it (a chat's turn, a save) re-reads them, or
+           * every choice is refused against files that no longer fight. */
+          const priorHead = context.checkoutStatus[event.checkoutId]?.headRevisionId;
+          if (priorHead !== undefined && priorHead !== event.headRevisionId) {
+            for (const conflict of context.conflicts) {
+              const ref = context.resolutionRefs[conflict.revisionId];
+              if (ref !== undefined && conflict.into === event.branch) {
+                enq.sendTo(ref, { type: 'reload' });
+              }
+            }
+          }
           return { context: { checkoutStatus: next.checkoutStatus } };
         },
         admitTurn: (
@@ -1631,6 +1642,7 @@ export const selectRevisionStatus = (
   return {
     projectId: context.projectId,
     checkoutId: context.selectedCheckoutId,
+    liveCheckoutId: context.liveCheckoutId,
     checkoutRoot: selected?.root,
     line: lineOf(selected?.branch, headRevisionId),
     registrySettled: context.registrySettled,
@@ -1725,7 +1737,7 @@ const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>):
     ...context.availableBranches.filter((branch) => !isConflictLine(branch.name) || undecided.has(branch.name)),
     ...[...undecided]
       .filter(([line]) => !context.availableBranches.some((branch) => branch.name === line))
-      .map(([name, head]) => ({ name, head })),
+      .map(([name, head]) => ({ name, head, onRemote: undefined })),
   ];
   return [
     ...checkedOut,
@@ -1737,6 +1749,7 @@ const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>):
         checkoutId: undefined,
         checkoutRoot: undefined,
         leaseChatIds: [],
+        onRemote: branch.onRemote,
       })),
   ];
 };
@@ -1797,7 +1810,11 @@ const selectSyncFacetOf = (snapshot: SnapshotFrom<typeof projectRevisionsMachine
   const sync = snapshot.children.sync?.getSnapshot();
   return sync === undefined
     ? { state: 'noRemote', pendingCount: 0, online: true, conflictRef: undefined, error: undefined, reason: undefined }
-    : selectSyncFacet(sync);
+    : selectSyncFacet(
+        sync,
+        /* A lost lease on a branch whose conflict waits is the person's to clear (D90). */
+        snapshot.context.conflicts.map((conflict) => conflict.into),
+      );
 };
 
 /**

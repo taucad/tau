@@ -136,6 +136,7 @@ describe('RepositoriesService.listBranches', () => {
 
     await expect(service.listBranches({ owner: 'o', repo: 'r', pageSize: 100 }, '203.0.113.7')).rejects.toMatchObject({
       status: 429,
+      response: { code: 'REPOSITORY_RATE_LIMITED' },
     });
     expect(octokitHarness.graphql).not.toHaveBeenCalled();
   });

@@ -261,33 +261,35 @@ describe('GitProxyController', () => {
     vi.unstubAllGlobals();
   });
 
-  it('refuses a target that is not an https git endpoint', async () => {
-    const controller = proxyController();
-    const refusals = [
-      'http://github.com/tau/x.git/info/refs',
-      'https://user:token@github.com/tau/x.git/info/refs',
-      'https://github.com/tau/x.git/info/refs?token=secret',
-      'https://127.0.0.1/x.git/info/refs',
-      'https://10.0.0.4/x.git/info/refs',
-      'https://metadata.internal/x.git/info/refs',
-      'https://github.com/tau/x.git/objects/info/packs',
-      // Host forms that a string-prefix test on `URL.hostname` misses. The
-      // WHATWG parser already folds the decimal, hex and octal IPv4 spellings
-      // to dotted-quad; the IPv4-mapped IPv6 form and these ranges do not.
-      'https://[::ffff:127.0.0.1]/x.git/info/refs',
-      'https://[::1]/x.git/info/refs',
-      'https://[fdaa:0:1::3]/x.git/info/refs',
-      'https://0.0.0.0/x.git/info/refs',
-      'https://100.64.0.1/x.git/info/refs',
-      'https://169.254.169.254/latest/x.git/info/refs',
-      'https://2130706433/x.git/info/refs',
-      'https://0x7f.0.0.1/x.git/info/refs',
-    ];
+  it.each([
+    ['http://github.com/tau/x.git/info/refs', 'GIT_PROXY_URL_INVALID'],
+    ['https://user:token@github.com/tau/x.git/info/refs', 'GIT_PROXY_CREDENTIAL_IN_URL'],
+    ['https://user:token@github.com/o/r.git/info/refs?service=git-upload-pack', 'GIT_PROXY_CREDENTIAL_IN_URL'],
+    ['https://github.com/tau/x.git/info/refs?token=secret', 'GIT_PROXY_CREDENTIAL_IN_URL'],
+    ['https://127.0.0.1/x.git/info/refs', 'GIT_PROXY_HOST_REFUSED'],
+    ['https://10.0.0.4/x.git/info/refs', 'GIT_PROXY_HOST_REFUSED'],
+    ['https://metadata.internal/x.git/info/refs', 'GIT_PROXY_HOST_REFUSED'],
+    ['https://github.com/tau/x.git/objects/info/packs', 'GIT_PROXY_PATH_REFUSED'],
+    // Host forms that a string-prefix test on `URL.hostname` misses. The
+    // WHATWG parser already folds the decimal, hex and octal IPv4 spellings
+    // to dotted-quad; the IPv4-mapped IPv6 form and these ranges do not.
+    ['https://[::ffff:127.0.0.1]/x.git/info/refs', 'GIT_PROXY_HOST_REFUSED'],
+    ['https://[::1]/x.git/info/refs', 'GIT_PROXY_HOST_REFUSED'],
+    ['https://[fdaa:0:1::3]/x.git/info/refs', 'GIT_PROXY_HOST_REFUSED'],
+    ['https://0.0.0.0/x.git/info/refs', 'GIT_PROXY_HOST_REFUSED'],
+    ['https://100.64.0.1/x.git/info/refs', 'GIT_PROXY_HOST_REFUSED'],
+    ['https://169.254.169.254/latest/x.git/info/refs', 'GIT_PROXY_HOST_REFUSED'],
+    ['https://2130706433/x.git/info/refs', 'GIT_PROXY_HOST_REFUSED'],
+    ['https://0x7f.0.0.1/x.git/info/refs', 'GIT_PROXY_HOST_REFUSED'],
+  ])('refuses %s, which is not a public https git endpoint, with 400 %s', async (url, code) => {
+    const upstream = vi.fn();
+    vi.stubGlobal('fetch', upstream);
 
-    for (const url of refusals) {
-      // oxlint-disable-next-line no-await-in-loop -- one refusal at a time, by design
-      await expect(controller.proxyGet('user-1', { url }, request({}), reply()), url).rejects.toThrow();
-    }
+    await expect(proxyController().proxyGet('user-1', { url }, request({}), reply())).rejects.toMatchObject({
+      status: 400,
+      response: { code },
+    });
+    expect(upstream).not.toHaveBeenCalled();
   });
 
   /**

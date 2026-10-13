@@ -366,12 +366,19 @@ export type SyncFetchActorOutput = Readonly<{
    * to *Backed up* and push nothing (C15).
    */
   integration: 'upToDate' | 'ahead' | 'fastForward' | 'diverged';
-  /** Local branch refs after remote branch reconciliation, including ref-only branches. */
-  branches?: ReadonlyArray<Readonly<{ name: string; head: string }>>;
+  /**
+   * Local branch refs after remote branch reconciliation, including ref-only branches.
+   * `onRemote` is whether this fetch found the branch on the remote (D93).
+   */
+  branches?: ReadonlyArray<Readonly<{ name: string; head: string; onRemote?: boolean }>>;
   /** Independent record projections attempted after the fetch. */
   records?: readonly SyncRefOutcome[];
-  /** Other checkouts this pull moved onto their remote heads (D60). */
+  /** Other checkouts this pull moved onto their remote heads (D60), or onto a merge with them (D87). */
   advanced?: ReadonlyArray<SyncMovedCheckout & Readonly<{ branch: string }>>;
+  /** Other checkouts' branches this pull merged with their remote heads: unsent merge revisions (D87). */
+  merged?: readonly string[];
+  /** Conflicts this pull newly recorded for other checkouts' branches, each announced once (D87). */
+  conflicts?: ReadonlyArray<Readonly<{ branch: string; into: string; paths: readonly string[] }>>;
 }>;
 
 /** What applying the fetched head is asked for. @public */
@@ -625,6 +632,31 @@ const owedPushes = (context: SyncMachineContext): readonly SyncQueueEntry[] =>
   );
 
 /**
+ * Whether a revision minted since the last push is missing from what this remote is owed (D98).
+ *
+ * `mintedSincePushAt` is set by a mint alone, never by a record change, and
+ * cleared when a push carries it; a push that then fails records its own entry.
+ *
+ * @param context - Current context.
+ * @returns `true` when this branch's owed entry is absent or names an older head.
+ */
+const owesUnrecordedMint = (context: SyncMachineContext): boolean => {
+  if (context.mintedSincePushAt === undefined) {
+    return false;
+  }
+  const owed = owedPushes(context).find((entry) => entry.ref === historyRefOf(context.branch));
+  return owed === undefined || (context.localHead !== undefined && owed.head !== context.localHead);
+};
+
+/**
+ * A queue write inside `failed` did not land; what is owed stays in context (D98, MC-R8: a named effect).
+ * @param error - Why the write failed.
+ */
+const reportQueueWriteFailure = (error: unknown): void => {
+  console.error('[revisions] sync queue write', error);
+};
+
+/**
  * Whether a ref is in the history set rather than the record set (policy rule 10).
  *
  * @param ref - A fully-qualified ref name.
@@ -640,14 +672,17 @@ const isHistoryRef = (ref: string): boolean => ref.startsWith('refs/heads/') || 
  * set. An owed *record* ref never narrows: offering it alone left every new
  * revision of this branch unpushed for as long as the remote refused it, and a
  * record's refusal never blocks history (rule 10, W13c). A queued history ref
- * is the synthetic marker for a thrown full-set push, so it cannot narrow.
+ * is the synthetic marker for a thrown full-set push, so it cannot narrow. Nor
+ * does a lost lease, for the same reason as a record: the push itself keeps a
+ * branch that has not integrated its lease out of the atomic set (D54), and
+ * narrowing to it held every other branch's revisions back (D87).
  *
  * @param context - Current context.
  * @returns The narrowed ref list, or `undefined` when both sets are offered.
  */
 const narrowedOffer = (context: SyncMachineContext): readonly string[] | undefined => {
   const owed = owedPushes(context);
-  const history = owed.filter((entry) => isHistoryRef(entry.ref));
+  const history = owed.filter((entry) => isHistoryRef(entry.ref) && entry.reason !== 'leaseLost');
   return history.length > 0 &&
     context.failure !== 'none' &&
     history.every((entry) => entry.ref !== historyRefOf(context.branch))
@@ -868,7 +903,15 @@ const rememberFetch = (
       enq.sendTo(context.parentRef, { type: 'checkoutChanged', ...moved });
     }
   }
+  /* Another checkout's conflict is that branch's decision: this branch still syncs (D87). */
+  for (const conflict of output.conflicts ?? []) {
+    if (context.parentRef !== undefined) {
+      enq.sendTo(context.parentRef, { type: 'mergeConflicted', ...conflict });
+    }
+  }
   return {
+    /* A merge on another checkout's branch is this device's own and unsent, as `merging`'s is. */
+    pendingMint: context.pendingMint || output.merged !== undefined,
     leases: output.leases,
     pending,
     retryAfterMilliseconds: undefined,
@@ -1969,6 +2012,52 @@ const syncMachineDefinition = setup({
         syncNow: { target: 'opening', context: ({ context, event }) => carry(context, event) },
         remoteConnected: { target: 'opening', context: ({ event }) => ({ remote: event.remote }) },
       },
+      /* D98: that remembered mint is still owed, so it is recorded as owed — or
+       * the row read *Backed up* over a revision that never left (D68 holds
+       * only with nothing minted since). Recorded inside `failed`, never pushed:
+       * the state stays terminal and *Sync now* still leaves it at once. */
+      initial: 'settled',
+      states: {
+        settled: {
+          always: ({ context }) =>
+            owesUnrecordedMint(context)
+              ? {
+                  target: 'recording',
+                  context: {
+                    pending: nextPending({
+                      pending: context.pending,
+                      outcomes: [
+                        {
+                          name: historyRefOf(context.branch),
+                          status: 'rejected',
+                          head: context.localHead,
+                          ...(context.error === undefined ? {} : { reason: context.error }),
+                        },
+                      ],
+                      leases: context.leases,
+                      remote: context.remote,
+                      now: Date.now(),
+                    }),
+                  },
+                }
+              : undefined,
+        },
+        recording: {
+          invoke: {
+            src: 'writePending',
+            input: ({ context }) => ({
+              projectId: context.projectId,
+              record: { version: 1, entries: context.pending },
+            }),
+            onDone: { target: 'settled' },
+            /* The refusal stays the row's reason; the next settle that records rewrites the queue. */
+            onError: ({ event }, enq) => {
+              enq(reportQueueWriteFailure, event.error);
+              return { target: 'settled' };
+            },
+          },
+        },
+      },
     },
   },
 });
@@ -2029,13 +2118,39 @@ const facetStateOf = (value: string, withinPullWindow: boolean): SyncFacet['stat
 };
 
 /**
+ * The row's sentence while its lost lease is on a branch whose conflict waits (D90).
+ *
+ * A lost lease is caught up by the next pull's merge, except on a branch whose
+ * merge recorded a conflict: that branch moves only once the person decides,
+ * so "will catch up and try again" would be false. The conflicts are the
+ * root's (read from the conflict lines, so they survive a reload); this
+ * machine keeps no copy.
+ *
+ * @param context - Current sync context.
+ * @param undecided - Branches with a conflict waiting on the person.
+ * @returns The waiting sentence, or `undefined` when the row says no lost lease on one of them.
+ */
+const waitingSaid = (context: SyncMachineContext, undecided: readonly string[]): string | undefined => {
+  const waiting = undecided.find(
+    (into) => context.error === refusalSaid({ ref: historyRefOf(into), reason: 'leaseLost' }, context.branch),
+  );
+  return waiting === undefined
+    ? undefined
+    : `${waiting === context.branch ? 'This branch' : waiting} waits on your decision; its revisions back up once you choose.`;
+};
+
+/**
  * The Sync row's whole input, read where it lives.
  *
  * @param snapshot - Current sync snapshot.
+ * @param undecided - Branches whose conflict waits on the person, the root's `conflicts` (D90).
  * @returns The facet the pane, the chip and the projection carry.
  * @public
  */
-export const selectSyncFacet = (snapshot: SnapshotFrom<typeof syncMachine>): SyncFacet => {
+export const selectSyncFacet = (
+  snapshot: SnapshotFrom<typeof syncMachine>,
+  undecided: readonly string[] = [],
+): SyncFacet => {
   const value = typeof snapshot.value === 'string' ? snapshot.value : (Object.keys(snapshot.value)[0] ?? '');
   /* Only while parked: once the pull applies it, it is simply the head. */
   const arrived = value === 'awaitingLease' ? snapshot.context.arrived : undefined;
@@ -2053,7 +2168,7 @@ export const selectSyncFacet = (snapshot: SnapshotFrom<typeof syncMachine>): Syn
     pendingCount: owedPushes(snapshot.context).length,
     online: snapshot.context.online,
     conflictRef: snapshot.context.conflictRef,
-    error: snapshot.context.error,
+    error: waitingSaid(snapshot.context, undecided) ?? snapshot.context.error,
     reason: snapshot.context.reason,
     ...(arrived === undefined ? {} : { arrived }),
   };

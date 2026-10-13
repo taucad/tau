@@ -24,7 +24,7 @@
  */
 
 export { nodeWorkerTransport } from '#transport/node-worker-transport.js';
-export type { NodeWorkerLike, NodeWorkerClientOptions } from '#transport/node-worker-client.js';
+export type { NodeWorkerLike, NodeWorkerClientOptions, NodeWorkerData } from '#transport/node-worker-client.js';
 export type { NodeWorkerHostOptions } from '#transport/node-worker-host.js';
 export { nodeWorkerHost } from '#transport/node-worker-host.js';
 export { nodeWorkerClient } from '#transport/node-worker-client.js';

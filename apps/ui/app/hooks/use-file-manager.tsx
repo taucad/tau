@@ -7,7 +7,7 @@ import { createContext, useContext, useMemo, useCallback, useEffect, useLayoutEf
 import { useActorRef, useSelector } from '@xstate/react';
 import { OctagonAlert, RefreshCw } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { waitFor } from 'xstate';
 import type { SnapshotFrom } from 'xstate';
 import type { FileSystemBackend, FileStatEntry, FileStat } from '@taucad/types';

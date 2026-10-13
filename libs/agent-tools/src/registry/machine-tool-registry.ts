@@ -606,17 +606,28 @@ const requestPrint = async (
      * or no person can answer here: the record and its next step say which. */
     return asJson({ request, machineName, ...nextStepOf(request, machine), ...reported });
   }
-  const resolution = await invocation.approve({
-    key: approvalKey,
-    prompt: approvalPrompt(request, machine),
-    payload: {
-      kind: 'print-request',
-      requestId,
-      machineId: machine.machineId,
-      fileName: request.summary.fileName,
-      artifactDigest: plan.artifact.digest,
-    },
-  });
+  const resolution = await invocation
+    .approve({
+      key: approvalKey,
+      prompt: approvalPrompt(request, machine),
+      payload: {
+        kind: 'print-request',
+        requestId,
+        machineId: machine.machineId,
+        fileName: request.summary.fileName,
+        artifactDigest: plan.artifact.digest,
+      },
+    })
+    .catch((error: unknown) => {
+      /* The host could not ask (an MCP client's form failed): no person answered, so the request waits in Tau. */
+      if ((error as { readonly code?: unknown } | undefined)?.code === 'APPROVAL_UNAVAILABLE') {
+        return undefined;
+      }
+      throw error;
+    });
+  if (resolution === undefined) {
+    return asJson({ request, machineName, ...nextStepOf(request, machine), ...reported });
+  }
   const settled = await settleApproval(client, { requestId, resolution, signal });
   return asJson({
     request: settled,

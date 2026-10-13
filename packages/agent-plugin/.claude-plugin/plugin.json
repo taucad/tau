@@ -1,0 +1,15 @@
+{
+  "name": "tau",
+  "displayName": "Tau",
+  "version": "0.1.0-beta.1",
+  "description": "Evaluate, test, screenshot and export code-CAD models with Tau.",
+  "author": {
+    "name": "Tau",
+    "url": "https://tau.new"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/agent-plugin#readme",
+  "repository": "https://github.com/taucad/tau",
+  "license": "Apache-2.0",
+  "keywords": ["cad", "3d", "replicad", "openscad", "geospec", "3d-printing"],
+  "mcpServers": "./mcp/claude.json"
+}

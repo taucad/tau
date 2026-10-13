@@ -5,3 +5,7 @@ export const billingNavRoutes: NavRoute[] = [];
 export function NavBillingItem(): React.JSX.Element | undefined {
   return undefined;
 }
+
+export function NavCreditsMeter(): React.JSX.Element | undefined {
+  return undefined;
+}

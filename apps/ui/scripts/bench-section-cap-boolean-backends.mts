@@ -15,29 +15,29 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import polygonClipping from 'polygon-clipping';
 import type { MultiPolygon as PolygonClippingMultiPolygon, Pair as PolygonClippingPair } from 'polygon-clipping';
-import { createClipper2TsBackend } from '#components/geometry/graphics/three/utils/section-cap-polygon-boolean-clipper2-ts.js';
-import { createClipper2WasmBackend } from '#components/geometry/graphics/three/utils/section-cap-polygon-boolean-clipper2-wasm.js';
+import { createClipper2TsBackend } from '@taucad/viewer/graphics/three/utils/section-cap-polygon-boolean-clipper2-ts';
+import { createClipper2WasmBackend } from '@taucad/viewer/graphics/three/utils/section-cap-polygon-boolean-clipper2-wasm';
 import {
   createSectionCapBooleanOperations,
   sectionCapPolygonBooleanError,
-} from '#components/geometry/graphics/three/utils/section-cap-polygon-boolean-backend.js';
+} from '@taucad/viewer/graphics/three/utils/section-cap-polygon-boolean-backend';
 import {
   boundsForCapMultiPolygon,
   measureCapMultiPolygonArea,
-} from '#components/geometry/graphics/three/utils/section-cap-region.js';
-import { classifySectionCapOverlaps } from '#components/geometry/graphics/three/utils/section-cap-overlap.js';
-import { buildSectionCapRenderParts } from '#components/geometry/graphics/three/utils/section-cap-render-parts.js';
-import { createSectionCapBooleanOperationStats } from '#components/geometry/graphics/three/utils/section-cap-performance-debug.js';
+} from '@taucad/viewer/graphics/three/utils/section-cap-region';
+import { classifySectionCapOverlaps } from '@taucad/viewer/graphics/three/utils/section-cap-overlap';
+import { buildSectionCapRenderParts } from '@taucad/viewer/graphics/three/utils/section-cap-render-parts';
+import { createSectionCapBooleanOperationStats } from '@taucad/viewer/graphics/three/utils/section-cap-performance-debug';
 import type {
   CapPolygonBooleanBackend,
   SectionCapBooleanResult,
-} from '#components/geometry/graphics/three/utils/section-cap-polygon-boolean-backend.js';
-import type { SectionCapPolygon } from '#components/geometry/graphics/three/utils/section-cap-region.js';
+} from '@taucad/viewer/graphics/three/utils/section-cap-polygon-boolean-backend';
+import type { SectionCapPolygon } from '@taucad/viewer/graphics/three/utils/section-cap-region';
 import type {
   CapMultiPolygon,
   CapPoint2,
   CapRing,
-} from '#components/geometry/graphics/three/utils/section-cap-polygon-types.js';
+} from '@taucad/viewer/graphics/three/utils/section-cap-polygon-types';
 
 type BenchmarkFixtureSource = Readonly<{
   sourceKey: string;

@@ -12,12 +12,7 @@ import {
 } from 'lucide-react';
 import { findLinkByComponent } from '@taucad/kinematics';
 import type { ActorRefFrom } from 'xstate';
-import type {
-  GeometryComponentAppearance,
-  GeometryComponentManifest,
-  GeometryComponentNode,
-  GeometryComponentReference,
-} from '@taucad/types';
+import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import { geometryReferenceToToken, useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@taucad/ui/components/context-menu';
 import {
@@ -27,35 +22,30 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
-import type { ModelInteractionSource } from '#machines/model-interaction.machine.js';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import type { ModelInteractionSource } from '@taucad/viewer/machines/model-interaction.machine';
 import { useProject } from '#hooks/use-project.js';
 import {
   ContextMenuSliderItem,
   DropdownMenuSliderItem,
   MenuSliderItem,
   preventMenuSliderEscapeDismissal,
-} from '#components/ui/menu-slider-item.js';
+} from '@taucad/ui/components/menu-slider-item';
 import {
   ContextMenuDisclosureItem,
   DropdownMenuDisclosureItem,
   MenuDisclosureItem,
-} from '#components/ui/menu-disclosure-item.js';
-import type { MenuDisclosureItemProperties } from '#components/ui/menu-disclosure-item.js';
+} from '@taucad/ui/components/menu-disclosure-item';
+import type { MenuDisclosureItemProperties } from '@taucad/ui/components/menu-disclosure-item';
 import { menuItemVariants, menuSeparatorVariants } from '@taucad/ui/components/menu.variants';
 import { cn } from '@taucad/ui/utils/cn';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { MaterialSwatch, gltfDefaultBaseColorLabel } from '#components/geometry/cad/material-swatch.js';
-import {
-  appearanceLabel,
-  statusOf,
-  summaryLabel,
-  volumeLabel,
-  weightLabel,
-} from '#components/geometry/cad/part-quantities.js';
-import type { PartQuantity } from '#components/geometry/cad/part-quantities.js';
+import { MaterialSwatch, gltfDefaultBaseColorLabel } from '@taucad/viewer/cad/material-swatch';
+import { appearanceLabel, statusOf, summaryLabel, volumeLabel, weightLabel } from '@taucad/viewer/cad/part-quantities';
+import type { PartQuantity } from '@taucad/viewer/cad/part-quantities';
 import { isPreviewablePart, useOpenPartGallery } from '#components/geometry/cad/part-gallery.js';
-import type { PartThumbnailState } from '#services/part-thumbnail.service.js';
+import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
+import { buildGeometryComponentReference } from '@taucad/viewer/graphics/metadata/geometry-component-reference';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 
@@ -138,27 +128,6 @@ type ViewerModelComponentActionItemProperties = {
   readonly descriptor: ModelComponentActionItemDescriptor;
   readonly onRequestClose: () => void;
 };
-
-export function buildModelComponentGeometryReference(
-  manifest: GeometryComponentManifest,
-  node: GeometryComponentNode,
-): GeometryComponentReference | undefined {
-  if (node.reference) {
-    return node.reference;
-  }
-  if (!manifest.sourceFile) {
-    return undefined;
-  }
-  return {
-    scheme: 'tau-cad',
-    filePath: manifest.sourceFile,
-    componentId: node.id,
-    selector: node.selector,
-    geometryHash: manifest.geometryHash,
-    label: node.name,
-    kind: node.kind,
-  };
-}
 
 /**
  * The part, or the first part inside it, that belongs to a link of the unit's mechanism: what "Show kinematics"
@@ -652,7 +621,7 @@ function useModelComponentActions({
 
   return {
     addToChat: () => {
-      const reference = buildModelComponentGeometryReference(manifest, node);
+      const reference = buildGeometryComponentReference(manifest, node);
       if (!reference) {
         return;
       }

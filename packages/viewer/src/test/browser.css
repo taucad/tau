@@ -1,0 +1,6 @@
+/* Browser-suite styles: Tailwind with the design-system tokens, scanning the viewer and the design system. */
+@import 'tailwindcss' source(none);
+@import '@taucad/ui/styles/tokens.css';
+
+@source '..';
+@source '../../../ui/src';

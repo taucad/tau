@@ -1,0 +1,58 @@
+{
+  "name": "agent-plugin",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/agent-plugin",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "release": {
+    "version": {
+      "versionActions": "packages/agent-plugin/scripts/version-actions.ts"
+    }
+  },
+  "targets": {
+    "build": {
+      "dependsOn": ["assemble", "build-app"]
+    },
+    "build-app": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/app/**/*", "{projectRoot}/vite.app.config.ts", "^production"],
+      "outputs": ["{projectRoot}/dist-app"],
+      "dependsOn": ["^build"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vite build -c vite.app.config.ts"
+      }
+    },
+    "assemble": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "commands": [
+          "node -e \"const { readdirSync, rmSync } = require('node:fs'); for (const entry of readdirSync('packages/agent-plugin/skills')) if (entry !== 'tau') rmSync('packages/agent-plugin/skills/' + entry, { recursive: true, force: true })\"",
+          "tsx packages/skills/src/cli.ts packages/agent-plugin/skills @taucad/jscad @taucad/manifold @taucad/openrscad @taucad/picovoxel @taucad/replicad @taucad/tscircuit @taucad/workbench geospec",
+          "node -e \"const { mkdirSync, writeFileSync } = require('node:fs'); const { resolve } = require('node:path'); mkdirSync('packages/agent-plugin/.dev', { recursive: true }); writeFileSync('packages/agent-plugin/.dev/cli.json', JSON.stringify({ argv: [resolve('node_modules/tsx/dist/cli.mjs'), resolve('packages/cli/src/bin.ts')] }, null, 2) + '\\n')\""
+        ],
+        "parallel": false
+      }
+    },
+    "test": {
+      "dependsOn": ["build"]
+    },
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "build-app",
+        { "projects": ["brep", "esbuild", "image", "replicad", "rhino"], "target": "copy-assets" }
+      ],
+      "metadata": {
+        "description": "The built viewer page in Chromium: the ext-apps basic-host harness (AppBridge, sandboxed frame, declared CSP) and the loopback page, against a real tau mcp. The tau mcp it spawns runs the CLI from source, so the plugins' copied wasm (STEP import's occt-import-js among them) is staged first. Named test:e2e so the nightly lane that installs Chromium selects it."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run -c vitest.hosts.config.ts"
+      }
+    }
+  }
+}

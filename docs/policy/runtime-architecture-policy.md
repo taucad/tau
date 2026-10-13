@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-10-02'
+updated: '2026-10-12'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -20,6 +20,7 @@ related:
   - docs/research/runtime-rooted-filesystem-residual-migration.md
   - docs/research/language-kernel-selection-architecture.md
   - docs/research/native-language-kernel-process-blueprint.md
+  - docs/research/kernel-realm-shared-state-blueprint.md
 ---
 
 # Runtime Architecture Policy
@@ -251,6 +252,8 @@ Agent invocation cancellation travels as local call context through the shared d
 
 When a newer selected preview arrives while a public render is in-flight, the previous preview is cooperatively superseded via the abort signal slot. The successor may be a public `render`/`updateParameters`/`setOptions` command or an autonomous watched-filesystem rerender. The prior outcome resolves as `{ superseded: true }` — never as a thrown exception — and only the selected preview publishes to the `geometry` event. Autonomous successors have no public Promise of their own, so consumers must not assume a newer `RenderOutcome` carries their geometry. Pull consumers such as the CLI use request-scoped export and do not enter this preview race.
 
+Supersession is per document. A document's evaluation is superseded only by its own command (`update`, `close`), by a change to one of its own watched paths, or by worker termination. Another document's admission, update, close or file change never supersedes or restarts it, and the worker never reschedules an evaluation on its own behalf: `open`, `update` and exact-path routing are the only admissions.
+
 ### Render Timeout Ownership
 
 Keep render timeout enforcement on the main-thread runtime client. Configure the initial value through `createRuntimeClient({ renderTimeout })`; configure a connected client through synchronous `client.setRenderTimeout(renderTimeout)`.
@@ -296,6 +299,15 @@ Every wire is carried by `@taucad/rpc`'s callback-shaped `Port<T>` (`postMessage
 **Remote wire (shipped):** `webSocketTransport` (client, browser-safe — `@taucad/runtime/transport/websocket`) and `webSocketHost` (Node `ws` server — `@taucad/runtime/transport/websocket-host`) carry the runtime wire to a kernel host in another process or on another machine: `wire: 'remote'`, `copy` delivery, `wire-notify` abort, one kernel worker per connection, msgpack on the wire (`wrapWebSocket` + the codec in `@taucad/rpc`), and an exact-match origin allowlist that default-denies browsers. The consumer's own filesystem is served to the remote kernel over a **second socket** (`/fs`), never multiplexed onto the runtime socket — no multiplexer exists and `sessionKey` never crosses the wire, so two channels on one port would consume each other's frames. Remote hosts are bound to the same build (`docs/policy/runtime-compatibility-policy.md:74`); `TransportProtocolVersionError` is the enforced arm and a cross-version compatibility matrix is the add-when. See `docs/research/runtime-websocket-transport-blueprint.md`.
 
 **Future transports:** HTTP + SSE (serverless endpoints).
+
+## Realms
+
+A realm is one JavaScript global environment: one ESM graph and one `globalThis`. The in-process transport (`createNodeClient`, `createTestRuntimeClient`) and `webSocketHost` in factory mode (`worker: () => KernelWorker`) build every kernel worker in the caller's realm, so several clients can share module-level library state. Web Worker, `nodeWorkerTransport` and Electron utility clients each get their own realm.
+
+- **Realm-shared backends go through `services.realm`.** A library that binds its backend at module scope (replicad's `setOC`) holds one instance per realm with `services.realm.hold({ group, key, create, dispose })` from `initialize` and releases it from `onDispose`. `create` runs once behind a promise guard, holders are refcounted, the last release disposes, and a different `key` for a held `group` fails initialise with `KERNEL_REALM_CONFLICT` (`details.producer` names the refusing kernel) once the held creation has succeeded; a failed creation frees the group. The registry lives on `globalThis`, so duplicate runtime copies in one realm share it. Per-client state (tracers, compute-reuse scopes, OC tracing wrappers) stays in per-kernel wrappers over the shared instance. A library binding installed once at creation (replicad's `setOC`) attributes library-internal calls to the creating kernel; with one realm per client that attribution is exact.
+- **Built-in modules are worker-scoped.** `registerKernelModule` stores exports under the registering worker's scope and emits a shim that reads that entry; bundlers bind a `globalName` only from `BuiltinModule.registryExpression`. Worker cleanup drops its scope. A kernel passes its own registered exports to `main` and never reads the registry; no code outside `kernel-module-helpers.ts` spells the registry key.
+- **Realm-global working state is serialised.** A library whose working state is realm-global and wiped between runs serialises its operations per realm. manifold-3d tracks live objects and glTF nodes in realm-global lists that its cleanup empties, so the Manifold kernel runs `describe`, `evaluate` and `onDispose` one at a time per realm; its handles are GLB bytes, so `render` and `export` run freely.
+- **Long-lived multi-project Node hosts use one realm per client.** A host that serves several projects or connections for a long time (`tau mcp`, the Tau Host runtime child) gives each its own worker thread, so a hung or crashed model can be terminated and replaced without touching the others. One-shot and single-client paths stay in-process and are correct by the rules above.
 
 ## Data Flow: File Edit to Geometry Display
 
@@ -683,7 +695,7 @@ Every admitted preview has a total lifecycle. `KernelWorker` emits a terminal `i
 
 The current preview generation, not retained cache membership and not the last successful artifact, owns autonomous rerender paths. Opening an entry first installs and acknowledges an entry-only watch. Dependency discovery accumulates a complete candidate containing the entry plus resolved, unresolved, and middleware-declared paths, even when materialization later fails.
 
-Reconciliation opens one complete multi-path replacement subscription while the old request remains live, awaits its acknowledgement, batch rereads and hashes newly added paths, rejects a candidate dirtied or superseded during validation, and atomically swaps only a clean candidate. The old handle is disposed after commitment. This keeps one steady-state bridge stream and closes the subscribe-versus-read window without per-path subscriptions.
+Reconciliation opens one complete multi-path replacement subscription while the old request remains live, awaits its acknowledgement, rereads and hashes newly added paths, and atomically swaps the candidate in. A reconciliation observes; it never judges the evaluation that invoked it. Added paths that moved before the subscription covered them enter the exact-path route, and an event or reset touching them during validation rereads them again before the swap. A candidate is dropped only when admission has closed. The old handle is disposed after commitment. This keeps one steady-state bridge stream and closes the subscribe-versus-read window without per-path subscriptions.
 
 All invalidation work remains serialized, but event truth determines the route. Explicit `fileChanged` notifications, staging writes, concrete watch events, and concrete handoff-validation mismatches enter the exact-path route. Only explicit reset, overflow, stale-root, backend-replacement, or summarized-loss signals enter conservative reset recovery. Exact routing invalidates and schedules only when a changed path intersects the active preview dependency set; unrelated project writes cannot supersede or rerender it. Runtime identity is never lowercased or otherwise folded. Concrete `.tau/cache/**` events are excluded, while `node_modules/**` stays observable because package files can be live bundle inputs; genuine loss signals cannot be excluded by path.
 

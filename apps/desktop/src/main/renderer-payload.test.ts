@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promis
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPackage } from '@electron/asar';
 import { build } from 'vite';
@@ -208,6 +209,24 @@ describe('Desktop renderer ownership', () => {
     expect(report.violations).toEqual(['Unclassified binary in renderer: hidden.png']);
   });
 
+  it('should admit gzipped geometry data but reject gzipped WASM and native code', async () => {
+    const paths = await fixture();
+    const wasm = Uint8Array.from(await readFile(clipperSource));
+    await mkdir(join(paths.renderer, 'assets'));
+    await Promise.all([
+      writeFile(join(paths.renderer, 'assets/planetary.bin-123.gz'), gzipSync(new Float32Array([0, 1.5, -2]))),
+      writeFile(join(paths.renderer, 'assets/kernel.bin.gz'), gzipSync(gzipSync(wasm))),
+      writeFile(join(paths.renderer, 'assets/engine.bin.gz'), gzipSync(Buffer.from('7f454c4602010100', 'hex'))),
+      writeFile(join(paths.renderer, 'assets/truncated.bin.gz'), Buffer.from('1f8b0800', 'hex')),
+    ]);
+    const report = await inspectDesktopPayload(paths);
+    expect(report.violations).toEqual([
+      'Compressed executable or archive in renderer: assets/engine.bin.gz',
+      'Compressed executable or archive in renderer: assets/kernel.bin.gz',
+      'Unreadable compressed payload in renderer: assets/truncated.bin.gz',
+    ]);
+  });
+
   it('should reject empty, stale, duplicate, and incomplete graph coverage', async () => {
     const paths = await fixture();
     await writeFile(join(paths.renderer, 'worker.js'), 'export {};');
@@ -378,6 +397,25 @@ describe('Desktop renderer ownership', () => {
     const report = await inspectDesktopPayload(paths);
 
     expect(report.violations).toContain('Web-only metadata in desktop HTML: manifest.webmanifest');
+  });
+
+  it('should admit the KCL WASM in both the editor and the Zoo kernel host', async () => {
+    const paths = await fixture();
+    const kclSource = require.resolve('@taucad/kcl-wasm-lib/kcl.wasm').replaceAll('\\', '/');
+    const kcl = Uint8Array.from(await readFile(kclSource));
+    await writeFile(join(paths.renderer, 'kcl_wasm_lib_bg-123.wasm'), kcl);
+    await writeFile(join(paths.host, 'kcl_wasm_lib_bg-456.wasm'), kcl);
+    await writeFile(
+      join(paths.renderer, 'tau-module-graph-123.json'),
+      JSON.stringify({
+        chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root-layout.tsx'] }],
+        assets: [{ ...asset('kcl_wasm_lib_bg-123.wasm', kcl), sourcePath: kclSource }],
+      }),
+    );
+
+    const report = await inspectDesktopPayload(paths);
+
+    expect(report.violations).toEqual([]);
   });
 
   it('should detect disguised retained WASM and FAT64 binaries', async () => {

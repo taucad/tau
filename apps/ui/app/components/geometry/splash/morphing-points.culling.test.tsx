@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { createRoot, extend, useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
-import { ThreeGraphicsBackendProvider } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
+import { ThreeGraphicsBackendProvider } from '@taucad/viewer/graphics/three/three-graphics-backend-context';
 import { MorphingPoints } from '#components/geometry/splash/morphing-points.js';
 import type { SampledPoints } from '#components/geometry/splash/point-sampler.js';
 

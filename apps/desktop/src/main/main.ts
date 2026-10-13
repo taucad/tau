@@ -29,6 +29,7 @@ import {
 } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
+import { createZooProxyTokenSource } from '@taucad/zoo/proxy';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import {
@@ -786,6 +787,29 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const publishCredential = (): void => {
     services.post({ type: 'authToken', token: auth.token(), principal: auth.principal() });
   };
+  /* Kernel utilities run project code, so they get a Zoo-scoped token rather
+   * than the session: it opens Tau's Zoo proxy as this user and nothing else. */
+  const zooProxyToken = createZooProxyTokenSource({
+    apiUrl: environment['TAU_API_URL']!.replace(/\/$/u, ''),
+    proxyUrl: `${environment['TAU_WEBSOCKET_URL']!}/v1/kernels/zoo`,
+    sessionToken: () => auth.token(),
+    publish: (frame) => {
+      runtimeMain.post(frame);
+    },
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  });
+  const publishZooProxyToken = (): void => {
+    // async-iife: bootstrap -- the source logs its own failures and keeps the last good token.
+    void (async (): Promise<void> => {
+      try {
+        await zooProxyToken.update();
+      } catch (error) {
+        log.log('warn', 'zoo-token.update-failed', { message: error instanceof Error ? error.message : String(error) });
+      }
+    })();
+  };
   /* `get-session` names the user; a restored or fresh sign-in asks once rather than waiting for the hourly probe. */
   const identify = (): void => {
     if (auth.token() === undefined || auth.principal() !== undefined) {
@@ -804,6 +828,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   await auth.restore();
   publishRoots();
   publishCredential();
+  publishZooProxyToken();
   identify();
 
   /* E7's daemon-capability half: launcher 2 runs in the services utility with a
@@ -869,6 +894,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   auth.onChange(() => {
     publishCredential();
+    publishZooProxyToken();
     identify();
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('tau:auth-changed');
@@ -1392,6 +1418,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
         } catch (error) {
           log.log('error', 'main.shutdown', error);
         }
+        zooProxyToken.dispose();
         try {
           runtimeMain.dispose();
         } catch (error) {

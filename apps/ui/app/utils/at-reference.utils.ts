@@ -1,5 +1,7 @@
 import type { FileEntry } from '@taucad/types';
 import type { ChatRecord } from '@taucad/chat/schemas';
+import { cadReferenceTokenLabel, parseCadReferenceTokens } from '@taucad/chat/references';
+import type { CadReferenceTokenTarget } from '@taucad/chat/references';
 import type { ChipType } from '#components/chat/context-chip.js';
 
 /**
@@ -117,14 +119,27 @@ export const invocationTokenRegex = /(?:^|(?<=\s))[$/][\w-]+(?::[\w-]+)*(?![\w$/
 export type InlineReferenceSegment =
   | { type: 'text'; value: string }
   | { type: 'atReference'; path: string }
-  | { type: 'invocation'; token: string };
+  | { type: 'invocation'; token: string }
+  | { type: 'cadReference'; token: string; target: CadReferenceTokenTarget };
 
 /**
- * Split text into `@path` references, invocation tokens and plain text.
- * Runs `@path` parsing first, then scans remaining text for invocation tokens.
+ * Split text into `@cad[...]` geometry references, `@path` references, invocation tokens and plain text.
+ * Runs `@cad[...]` parsing first, then `@path` parsing, then scans remaining text for invocation tokens.
  * Whether a token is a real skill or command is the caller's decision.
  */
 export function parseInlineReferences(text: string): InlineReferenceSegment[] {
+  const result: InlineReferenceSegment[] = [];
+  for (const segment of parseCadReferenceTokens(text)) {
+    if (segment.type === 'cadReference') {
+      result.push(segment);
+    } else {
+      result.push(...parsePathAndInvocationReferences(segment.value));
+    }
+  }
+  return result;
+}
+
+function parsePathAndInvocationReferences(text: string): InlineReferenceSegment[] {
   const result: InlineReferenceSegment[] = [];
 
   for (const segment of parseAtReferences(text)) {
@@ -203,7 +218,7 @@ export type BuildPastedContentOptions = {
 };
 
 /**
- * Parse pasted text and resolve `@path` references and known invocation tokens.
+ * Parse pasted text and resolve `@cad[...]` geometry references, `@path` references and known invocation tokens.
  * Returns segments ready for insertion into the Tiptap editor.
  * Invalid references are kept as plain text.
  */
@@ -233,6 +248,18 @@ export function buildPastedContent(
         label: resolved.displayName,
         chipType: resolved.chipType,
         path: resolved.path,
+      });
+      continue;
+    }
+
+    if (segment.type === 'cadReference') {
+      result.push({
+        type: 'chip',
+        id: segment.token,
+        label: cadReferenceTokenLabel(segment.target),
+        chipType: 'geometry',
+        path: segment.target.path,
+        referenceToken: segment.token,
       });
       continue;
     }

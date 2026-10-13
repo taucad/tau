@@ -1,6 +1,6 @@
 {
   "name": "@taucad/host",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.1",
   "description": "Tau Host daemon for pairing browsers with supervised remote CAD runtimes",
   "type": "module",
   "sideEffects": false,
@@ -75,6 +75,7 @@
     "@taucad/slicer": "workspace:*",
     "@taucad/units": "workspace:*",
     "@taucad/workbench": "workspace:*",
+    "@taucad/zoo": "workspace:*",
     "basic-ftp": "catalog:",
     "diff": "^8.0.4",
     "fflate": "catalog:",
@@ -86,7 +87,7 @@
   },
   "peerDependencies": {
     "@taucad/geospec-engine": "^0.1.0-beta.0",
-    "@taucad/geospec-engine-native": "^0.0.1",
+    "@taucad/geospec-engine-native": "^0.1.0-beta.0",
     "@taucad/revisions": "^0.1.0-beta.0",
     "@taucad/runtime": "^0.1.0-beta.0",
     "geospec": "^0.1.0-beta.0",

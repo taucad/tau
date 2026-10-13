@@ -38,9 +38,7 @@ vi.doMock('#hooks/use-file-manager.js', async (importOriginal) => ({
 vi.doMock('#routes/w.$workspace.$project/chat-converter.js', async (importOriginal) =>
   converterMock(await importOriginal()),
 );
-vi.doMock('#components/geometry/parameters/parameters.js', async (importOriginal) =>
-  parametersMock(await importOriginal()),
-);
+vi.doMock('@taucad/viewer/parameters/parameters', async (importOriginal) => parametersMock(await importOriginal()));
 vi.doMock('#components/printer/printer-preparation.js', () => ({
   printerPreparation: {
     prepare: async ({ signal }: { bytes: Uint8Array<ArrayBuffer>; signal: AbortSignal }) => {

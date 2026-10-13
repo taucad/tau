@@ -3,12 +3,12 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { FilterCondition } from '#components/kernel/trace-condition-picker.js';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { Button } from '@taucad/ui/components/button';
 import { downloadBlob } from '@taucad/utils/file';
 import type { TelemetrySpanRecord } from '@taucad/runtime';
-import { rendererSpans, telemetryJsonl } from '#lib/renderer-telemetry.js';
+import { rendererSpans, telemetryJsonl } from '@taucad/viewer/lib/renderer-telemetry';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type {
   DisplaySettings,

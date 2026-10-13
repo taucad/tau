@@ -42,6 +42,7 @@ import {
 import type {
   CheckoutFileSystems,
   ProjectRevisionsActor,
+  RevisionConflictRead,
   UseCheckoutFileSystem,
   TurnConflictedEvent as SettlementConflicted,
   TurnFailedEvent as SettlementFailed,
@@ -277,7 +278,7 @@ export type ProjectRevisions = {
   /**
    * This project's history, read-only (S28).
    *
-   * The same three functions `tau revisions` and the Revisions pane read, over
+   * The same functions `tau revisions` and the Revisions pane read, over
    * this project's own port — handed to `createHostToolRegistry` so the agent's
    * `revisions` tool cannot answer from a second reading of the graph. Nothing
    * here writes: an agent has no branch, merge, restore, discard or sync (I10).
@@ -286,6 +287,8 @@ export type ProjectRevisions = {
     log(request?: RevisionLogRequest): Promise<readonly RevisionRow[]>;
     diff(from: string | undefined, to: string): Promise<readonly RevisionDiffEntry[]>;
     describe(): Promise<RevisionPlace>;
+    /** Both sides of a conflicted revision as text; absent `revision` reads the one waiting on this branch. */
+    conflict(revision: string | undefined): Promise<RevisionConflictRead | undefined>;
   }>;
   /**
    * Open this project's turn-placement session over its revision tree (W8 TS-S4, D9). The host process is the session,
@@ -1685,6 +1688,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       log: async (request?: RevisionLogRequest) => readRevisionLog(port, request),
       diff: async (from: string | undefined, to: string) => readRevisionDiff(port, from, to),
       describe: async () => readRevisionPlace(port),
+      conflict: async (revision: string | undefined) => {
+        const { line, conflicts } = selectRevisionStatus(actor.getSnapshot());
+        const id =
+          revision ?? conflicts.find((conflict) => line.kind === 'branch' && conflict.into === line.name)?.revisionId;
+        return id === undefined ? undefined : tree.readConflict(id);
+      },
     }),
     changed: (checkoutId, paths) => {
       /* One increment per content-change event, whatever its path count: the

@@ -37,7 +37,7 @@ import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
 import { ChatMessageText } from '#routes/w.$workspace.$project/chat-message-text.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
-import { CopyButton } from '#components/copy-button.js';
+import { CopyButton } from '@taucad/ui/components/copy-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -75,10 +75,11 @@ import { useChatAttachmentDirectories } from '#components/chat/attachment-previe
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatStreamingStopButton } from '#components/chat/chat-textarea-submit-button.js';
 import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
+import { formatKeyCombination } from '@taucad/ui/utils/keys';
 import { FileLink } from '#components/files/file-link.js';
 import { isSafeRelativePath } from '@taucad/utils/path';
 import { isRecord } from '@taucad/utils/schema';
+import { CadReferenceChip } from '#components/chat/cad-reference-chip.js';
 
 /**
  * Split a line into chunks of `maxLen` characters without breaking `@path` or `/command` references.
@@ -131,6 +132,9 @@ function segmentKey(segment: ReturnType<typeof parseInlineReferences>[number], i
   if (segment.type === 'invocation') {
     return `invocation-${segment.token}`;
   }
+  if (segment.type === 'cadReference') {
+    return `cad-${segment.token}`;
+  }
   return `text-${index}`;
 }
 
@@ -152,6 +156,9 @@ function TextWithAtReferences({ text }: { readonly text: string }): React.JSX.El
         }
         if (segment.type === 'atReference') {
           return <AtReferenceChip key={key} data-at-reference={segment.path} />;
+        }
+        if (segment.type === 'cadReference') {
+          return <CadReferenceChip key={key} target={segment.target} />;
         }
         if (knownTokens.has(segment.token)) {
           return <ContextChip key={key} label={segment.token} chipType='skill' />;
@@ -733,7 +740,7 @@ function ChatMessageTimestamp({
           dateTime={date.toISOString()}
           // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- keyboard users reach the absolute-time tooltip through focus
           tabIndex={0}
-          className='mx-1 flex h-7 items-center rounded-md px-1 text-xs outline-none focus-visible:focus-outline'
+          className='mx-1 flex h-6 items-center rounded-md px-1 text-xs outline-none focus-visible:focus-outline'
         >
           {formatRelativeTime(date)}
         </time>
@@ -923,14 +930,17 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
     >
       <div
         className={cn(
-          'flex flex-col space-y-2 min-w-0',
+          'flex flex-col min-w-0',
           'w-full',
           // Vary left margin for user and assistant messages to achieve visual
           // differentiation. Right side is intentionally flush — the parent
           // ChatScroller reserves a fixed scrollbar gutter, so dropping the
           // right margin here lets bubbles use that space when the scrollbar
           // is hidden, and the gutter doubles as the right margin when shown.
-          isUser ? 'mx-2' : 'mx-4',
+          // A request's hover-only row sits 4px under its bubble, so the turn
+          // reads as one exchange rather than two islands; an answer keeps 8px,
+          // which its row's `-mt-2` cancels.
+          isUser ? 'mx-2 space-y-1' : 'mx-4 space-y-2',
         )}
       >
         {/* The bubble and its attached footer (the turn's revision card) read as one surface. */}
@@ -944,7 +954,11 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
                 // the wire body's `agent` block is composed from the live
                 // `useCadAgentConfig` snapshot — no model/metadata stamping
                 // on the persisted user row.
-                cadChat.edit(messageId, { text: event.content, attachments: event.attachments });
+                cadChat.edit(messageId, {
+                  text: event.content,
+                  attachments: event.attachments,
+                  ...(event.references === undefined ? {} : { references: event.references }),
+                });
                 exitEditMode();
                 setIsEditing(false);
               }}
@@ -1036,10 +1050,9 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
         >
           <CopyButton
             tooltipContentProperties={{ side: 'bottom' }}
-            size='icon'
+            size='icon-xs'
             getText={() => serializeMessage(displayMessage)}
             tooltip='Copy message'
-            className='size-7'
           />
           {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
           <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />

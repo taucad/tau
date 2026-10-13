@@ -7,7 +7,7 @@ import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { Button } from '@taucad/ui/components/button';
-import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
+import { CadViewer } from '@taucad/viewer/cad/cad-viewer';
 import {
   FloatingPanel,
   FloatingPanelContent,
@@ -17,7 +17,7 @@ import {
 } from '#components/ui/floating-panel.js';
 import { Dropzone, DropzoneEmptyState } from '#components/ui/dropzone.js';
 import { FormatsList } from '#routes/convert/formats-list.js';
-import { InfoTooltip } from '#components/ui/info-tooltip.js';
+import { InfoTooltip } from '@taucad/ui/components/info-tooltip';
 import {
   getFormatFromFilename,
   formatDisplayName,
@@ -29,9 +29,9 @@ import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-co
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
-import { GraphicsProvider, useGraphicsSelector } from '#hooks/use-graphics.js';
+import { GraphicsProvider, useGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { PageNotice } from '#components/layout/page-notice.js';

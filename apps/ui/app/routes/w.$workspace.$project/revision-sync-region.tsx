@@ -50,15 +50,17 @@ import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
 import { SwitchRow } from '@taucad/ui/components/switch';
 import { RevisionCollaborators } from '#routes/w.$workspace.$project/revision-collaborators.js';
-import { ActionButton, DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
+import { ActionButton, DetailsToggle, disclosureMotion } from '@taucad/ui/components/actions';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
 import { timelineRow } from '#components/revisions/revision-timeline.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import {
   accessRemovedSentence,
+  asksTauSignIn,
   backupCopy,
   isGithubRemote,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import type { RevisionWhere } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
@@ -141,6 +143,11 @@ export type RevisionSyncRegionProps = {
    */
   readonly role?: ProjectAccessRole;
   /**
+   * The viewer is signed out of Tau, so this device withholds its GitHub
+   * credential and a refusal asks for *Sign in*, not GitHub (D100).
+   */
+  readonly isSignedOut?: boolean;
+  /**
    * The project id: the owner's collaborator surface needs it, and so does a
    * moved GitHub repository, whose binding it keys (D11).
    */
@@ -151,6 +158,8 @@ export type RevisionSyncRegionProps = {
    * only fail after the gesture.
    */
   readonly isLineKnown?: boolean;
+  /** The branch the pane is on, which *Open on GitHub* opens; the repository root when absent (D92). */
+  readonly branch?: string;
   readonly className?: string;
 };
 
@@ -171,7 +180,8 @@ const reconnectCopy = (remote: RemoteFacet): string => {
   if (isGithubRemote(remote)) {
     return 'GitHub needs a connected account to reach this repository. Reconnect GitHub, then pick it from your repositories.';
   }
-  return remote.error ?? 'The remote rejected the saved credentials.';
+  /* D94: every other Git remote is anonymous, so it had no saved credentials to reject. */
+  return remote.error ?? 'This remote asked for a sign-in Tau does not have, or has no repository at this address.';
 };
 
 /**
@@ -183,18 +193,23 @@ const reconnectCopy = (remote: RemoteFacet): string => {
  *
  * @param reason - The failure class the sync machine recorded.
  * @param remote - The connection, so a credential problem names its provider.
- * @param role - The viewer's relationship to the project, which decides whether a plan action is theirs.
+ * @param viewer - The viewer's relationship to the project, which decides whether a plan action is
+ *   theirs, and whether they are signed out of Tau, which makes a GitHub refusal a sign-in (D100).
  * @returns Which action to render, or `undefined` when there is nothing to do.
  */
 const syncFailureAction = (
   { reason, error }: Readonly<{ reason?: SyncFailureReason | undefined; error?: string | undefined }>,
   remote: RemoteFacet,
-  role?: ProjectAccessRole,
+  { role, isSignedOut }: Pick<RevisionWhere, 'role' | 'isSignedOut'> = {},
 ): 'signIn' | 'upgrade' | 'reconnectGithub' | 'moved' | 'syncNow' | 'retry' | undefined => {
   switch (reason) {
     case 'unauthorized': {
-      /* Only Tau Cloud is reached with this device's own session (D18). */
-      return remote.kind === 'tau' ? 'signIn' : isGithubRemote(remote) ? 'reconnectGithub' : 'retry';
+      /* Only Tau Cloud is reached with this device's own session, and GitHub only once signed in (D18, D100). */
+      return asksTauSignIn({ reason }, remote, isSignedOut)
+        ? 'signIn'
+        : isGithubRemote(remote)
+          ? 'reconnectGithub'
+          : 'retry';
     }
     /* D17: a plan is the owner's to change. A collaborator's refusal is the
        owner-directed sentence alone; an owner with no larger plan gets none
@@ -363,9 +378,14 @@ function GitRemoteForm({
  * id on the connection it was picked from. A new address is offered, and the
  * remote is re-pointed only once the person confirms it (policy rule 11).
  *
- * @param props - The project, the remote's own sentence, the re-point verb and
- *   the fallback action for when there is no new address to offer.
- * @returns The row.
+ * D99: GitHub serves a renamed repository's old address to an authorized git
+ * client without redirecting, so a rename never fails a sync. A healthy GitHub
+ * row asks too, with no sentence, and says nothing until the address differs.
+ *
+ * @param props - The project, the remote's own sentence (none on a healthy
+ *   row), the re-point verb and the fallback action for when there is no new
+ *   address to offer.
+ * @returns The row, or nothing on a healthy row whose address still holds.
  */
 function MovedRepository({
   projectId,
@@ -374,10 +394,10 @@ function MovedRepository({
   fallback,
 }: {
   readonly projectId: string | undefined;
-  readonly sentence: string;
+  readonly sentence: string | undefined;
   readonly onUpdate: (connectionId: string, repository: GithubRepository) => void;
   readonly fallback: ReactNode;
-}): React.JSX.Element {
+}): React.JSX.Element | undefined {
   const binding = projectId === undefined ? undefined : githubProjectBinding.get(projectId);
   const lookup = useQuery({
     queryKey: ['github', 'repository', binding?.connectionId, binding?.repositoryId],
@@ -391,6 +411,9 @@ function MovedRepository({
   const [kept, setKept] = useState(false);
   const moved = lookup.data !== undefined && lookup.data.cloneUrl !== binding?.repositoryUrl ? lookup.data : undefined;
   if (binding === undefined || moved === undefined) {
+    if (sentence === undefined) {
+      return undefined;
+    }
     return (
       <span className='flex flex-wrap items-center gap-2 text-xs'>
         <span className='min-w-0 flex-1'>{lookup.isError ? githubErrorMessage(lookup.error) : sentence}</span>
@@ -479,8 +502,10 @@ export function RevisionSyncRegion({
   storageLimitBytes,
   signInHref,
   role,
+  isSignedOut,
   projectId,
   isLineKnown = true,
+  branch,
   className,
 }: RevisionSyncRegionProps): React.JSX.Element {
   const busy = remote.phase === 'connecting' || remote.phase === 'disconnecting';
@@ -505,8 +530,9 @@ export function RevisionSyncRegion({
   const handleConnectRequest = (): void => {
     setShouldConnect(false);
   };
-  const syncState = backupCopy(sync, role, remote);
-  const failureAction = syncFailureAction(sync, remote, role);
+  const viewer = { role, isSignedOut };
+  const syncState = backupCopy(sync, viewer, remote);
+  const failureAction = syncFailureAction(sync, remote, viewer);
   /* W2a: a damaged cloud copy is terminal; the client has nothing to offer but the truth (I12). */
   const failureSentence =
     sync.reason === 'damaged' ? describeRevisionFailure('backup', 'REMOTE_DAMAGED').description : sync.error;
@@ -584,6 +610,14 @@ export function RevisionSyncRegion({
     }
   }, [remote.phase]);
 
+  /* D92: *Open on GitHub* opens the branch, each segment encoded and its separators kept. */
+  const branchPath =
+    branch === undefined
+      ? ''
+      : `/tree/${branch
+          .split('/')
+          .map((segment) => encodeURIComponent(segment))
+          .join('/')}`;
   const connectedLabel = remote.kind === 'tau' ? 'Tau Cloud' : gitRemoteLabel(remote.url, remote.provider === 'github');
   const pendingLabel =
     pendingConnection?.kind === 'tau'
@@ -810,7 +844,18 @@ export function RevisionSyncRegion({
         </span>
         {role === 'revoked' ? (
           <span className='text-muted-foreground'>{accessRemovedSentence}</span>
-        ) : failureSentence === undefined ? undefined : failureAction === 'moved' ? (
+        ) : failureSentence === undefined ? (
+          remote.provider === 'github' ? (
+            <MovedRepository
+              projectId={projectId}
+              sentence={undefined}
+              fallback={undefined}
+              onUpdate={(connectionId, repository) => {
+                void commitConnection({ kind: 'github', connectionId, repository });
+              }}
+            />
+          ) : undefined
+        ) : failureAction === 'moved' ? (
           <MovedRepository
             projectId={projectId}
             sentence={failureSentence}
@@ -878,7 +923,11 @@ export function RevisionSyncRegion({
                         <DropdownMenuLabel>{connectedLabel}</DropdownMenuLabel>
                         {remote.provider === 'github' && remote.url !== undefined ? (
                           <DropdownMenuItem asChild>
-                            <a href={remote.url.replace(/\.git$/u, '')} target='_blank' rel='noreferrer'>
+                            <a
+                              href={`${remote.url.replace(/\.git$/u, '')}${branchPath}`}
+                              target='_blank'
+                              rel='noreferrer'
+                            >
                               <ExternalLink aria-hidden />
                               Open on GitHub
                             </a>
@@ -1281,7 +1330,7 @@ export function RevisionSyncRegion({
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
           <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
           <span className='min-w-0 flex-1'>{remote.error}</span>
-          {renderFailureAction(syncFailureAction(remote, remote, role) ?? 'retry', () => {
+          {renderFailureAction(syncFailureAction(remote, remote, viewer) ?? 'retry', () => {
             setChangingBackup(true);
           })}
         </div>

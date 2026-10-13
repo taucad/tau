@@ -13,7 +13,7 @@ import type {
   PanelState,
   PreviousWorkbenchLayout,
 } from '#types/editor.types.js';
-import type { GraphicsBackendPreference } from '#constants/editor.constants.js';
+import type { GraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-settings';
 import { defaultPanelState } from '#constants/editor.constants.js';
 import { mergePanelState } from '#utils/panel-state.utils.js';
 

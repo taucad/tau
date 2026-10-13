@@ -34,7 +34,7 @@ import {
 import { cn } from '@taucad/ui/utils/cn';
 import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisions';
 import { DiffViewer } from '#components/code/diff-viewer.js';
-import { ActionButton } from '#components/revisions/revision-actions.js';
+import { ActionButton } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
@@ -659,9 +659,12 @@ export function RevisionBranches({
               {counts.length === 0 ? null : <span className='tabular-nums'>{counts.join(', ')}</span>}
               {/* Checkout identity, not a path prefix (I2, C40). */}
               {branch.checkoutId === undefined ? (
-                <Badge variant='outline' className='font-normal'>
-                  Remote only
-                </Badge>
+                /* A branch only this device has, with no checkout, is not *Remote only* (D93). */
+                branch.onRemote === true ? (
+                  <Badge variant='outline' className='font-normal'>
+                    Remote only
+                  </Badge>
+                ) : null
               ) : branch.checkoutId === liveCheckoutId ? null : (
                 <Badge variant='outline' className='font-normal'>
                   Linked

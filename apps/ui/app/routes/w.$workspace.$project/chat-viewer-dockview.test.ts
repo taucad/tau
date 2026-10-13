@@ -18,7 +18,7 @@ import {
   adoptViewerRecordNode,
   ViewerEmptyFilePicker,
 } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
-import { defaultGraphicsSettings } from '#constants/editor.constants.js';
+import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 import { deleteViewFile } from '#workbench-records/view-actions.js';
 

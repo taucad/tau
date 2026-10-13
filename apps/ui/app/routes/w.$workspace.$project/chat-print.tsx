@@ -13,8 +13,8 @@ import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Progress } from '@taucad/ui/components/progress';
 import { cn } from '@taucad/ui/utils/cn';
-import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { ParameterSelect } from '@taucad/viewer/parameters/parameter-select';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 import { usePrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
@@ -22,7 +22,7 @@ import { isOpenPrintRequest, useMachinesPrintRequests } from '#hooks/use-machine
 import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
-import { ControlCenterStage } from '#routes/w.$workspace.$project/chat-print-controls.js';
+import { ControlCenterStage, FailureEvidence } from '#routes/w.$workspace.$project/chat-print-controls.js';
 import { MaterialChangeCard, materialChange } from '#routes/w.$workspace.$project/chat-print-materials.js';
 import type { ApplyMachineAction } from '#routes/w.$workspace.$project/chat-print-controls.js';
 import {
@@ -520,6 +520,7 @@ function MachinePrintPanel({
             {/* What needs the person stays outside the stages: a decision is never folded away. */}
             <ObservationNotice entry={selected} />
             <PrinterAlerts entry={selected} />
+            <FailureEvidence client={client} entry={selected} />
             <SendSection
               client={client}
               entry={selected}

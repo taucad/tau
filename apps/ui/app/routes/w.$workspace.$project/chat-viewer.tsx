@@ -8,14 +8,15 @@ import type { Evaluation, Rendering, RuntimeDocument, ViewSubscription } from '@
 import { canonicalJson } from '@taucad/utils/hash';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { FileX, FolderOpen, PlayCircle } from 'lucide-react';
-import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
-import { RuntimeErrorOverlay } from '#components/model-viewer.js';
+import { CadViewer } from '@taucad/viewer/cad/cad-viewer';
+import { RuntimeErrorOverlay } from '@taucad/viewer/model-viewer';
 import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
 import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-model-component-action-menu.js';
 import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
 import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';
-import type { PartThumbnailRequest, PartThumbnailState } from '#services/part-thumbnail.service.js';
-import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
+import type { PartThumbnailRequest } from '#services/part-thumbnail.service.js';
+import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
+import type { ModelComponentSecondaryPointerTarget } from '@taucad/viewer/graphics/three/react/gltf-mesh';
 import { FileSelector } from '#components/files/file-selector.js';
 import { Button } from '@taucad/ui/components/button';
 import { popoverSurfaceVariants } from '@taucad/ui/components/popover.variants';
@@ -23,7 +24,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
 import { useRevisionStatus } from '#hooks/use-revision-status.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { useLiveViewOptions } from '#workbench-records/live-view-options.js';
 import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-records/local-instance.js';
@@ -35,18 +36,21 @@ import {
   useGraphicsSelector,
   useKinematicsSelector,
   useModelInteractionSelector,
-} from '#hooks/use-graphics.js';
-import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
+} from '@taucad/viewer/hooks/use-graphics';
+import type { ViewCameraSeed } from '@taucad/viewer/services/graphics-camera-registry';
 import { ViewerIssues } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
 import { ViewerKernelSettings } from '#routes/w.$workspace.$project/chat-viewer-kernel-settings.js';
 import { ViewerProjectionPicker } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { isEmptyGlb } from '#utils/inspect-glb.utils.js';
+import { isEmptyGlb } from '@taucad/viewer/utils/inspect-glb';
 import { ArButton } from '#components/cad/ar-button.js';
-import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
-import { describeKinematicsHover, getKinematicsUnitState } from '#machines/kinematics.machine.js';
+import {
+  deriveModelInteractionUnitId,
+  getModelInteractionUnitState,
+} from '@taucad/viewer/machines/model-interaction.machine';
+import { describeKinematicsHover, getKinematicsUnitState } from '@taucad/viewer/machines/kinematics.machine';
 import {
   selectCadEvaluation,
   selectCadCapabilities,
@@ -69,6 +73,9 @@ import type {
   ViewerSecondaryGesturePoint,
   ViewerSecondaryGestureState,
 } from '#routes/w.$workspace.$project/chat-viewer-secondary-gesture.js';
+import { ExactMeasurementProvider } from '@taucad/viewer/graphics/three/react/exact-measurement';
+import type { ExactOccurrenceDistanceRequest } from '@taucad/viewer/graphics/three/react/exact-measurement';
+import { measureExactOccurrenceDistance } from '#workers/measurement-exact.client.js';
 
 const emptyViewerPreviewSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map();
 
@@ -342,6 +349,14 @@ export const ChatViewer = memo(function ({
 
   // Get the geometry unit for this view's entry path
   const cadActor = entryPath ? geometryUnits.get(entryPath) : undefined;
+  const measureExact = useMemo(
+    () =>
+      cadActor
+        ? async (request: ExactOccurrenceDistanceRequest) =>
+            measureExactOccurrenceDistance({ ...request, cadRef: cadActor })
+        : undefined,
+    [cadActor],
+  );
 
   // Detect if the entry path is a directory: a listed directory entry, or a
   // prefix of a listed path when its directory has not been listed itself.
@@ -526,9 +541,11 @@ export const ChatViewer = memo(function ({
 
   return (
     <CadProvider cadRef={cadActor}>
-      <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
-        <ViewerContent viewId={viewId} entryPath={entryPath} profile={profile} />
-      </GraphicsProvider>
+      <ExactMeasurementProvider measure={measureExact}>
+        <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
+          <ViewerContent viewId={viewId} entryPath={entryPath} profile={profile} />
+        </GraphicsProvider>
+      </ExactMeasurementProvider>
     </CadProvider>
   );
 });

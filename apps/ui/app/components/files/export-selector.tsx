@@ -5,7 +5,7 @@ import type { FileExtension } from '@taucad/types';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import { Button } from '@taucad/ui/components/button';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { cn } from '@taucad/ui/utils/cn';

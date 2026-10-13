@@ -9,7 +9,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { configureMonaco, registerCompletions } from '#lib/monaco.lib.client.js';
 import { useMonacoConfiguration } from '#hooks/use-monaco-configuration.js';
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { Theme, useTheme } from '#hooks/use-theme.js';
 import { useCookie } from '#hooks/use-cookie.js';

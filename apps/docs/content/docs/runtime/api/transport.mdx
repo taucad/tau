@@ -25,7 +25,21 @@ import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
 
 const transport = nodeWorkerTransport({
   url: new URL('./runtime.worker.ts', import.meta.url),
+  workerData: { projectRoot: '/srv/projects/demo' },
 });
+```
+
+`workerData` is structured-cloned into the worker as `workerData` from `node:worker_threads`, so one entry can compose the runtime each client needs. Its type, `NodeWorkerData`, admits only values that survive the clone; a function is a type error. The entry reads it and hosts its runtime with `nodeWorkerHost`:
+
+```typescript
+import { workerData } from 'node:worker_threads';
+import { createRuntimeWorker } from '@taucad/runtime/worker';
+import { nodeWorkerHost } from '@taucad/runtime/transport/node';
+
+import { runtimeFor } from './runtime-for.js'; // Your composition: the plugins and configuration one project needs.
+
+const { projectRoot } = workerData as { readonly projectRoot: string };
+await nodeWorkerHost({ worker: createRuntimeWorker({ runtime: await runtimeFor(projectRoot) }) }).open();
 ```
 
 ## Exports by Subpath
@@ -36,7 +50,7 @@ Concrete topology imports stay isolated per environment:
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/transport/in-process`     | `inProcessTransport`                                                                                                                                           |
 | `/transport/web`            | `webWorkerTransport`, `webWorkerHost`, `webWorkerClient`, `createWebWorkerClientOptions`, `WebWorkerLike`, `WebWorkerTransportOptions`, `WebWorkerHostOptions` |
-| `/transport/node`           | `nodeWorkerTransport`, `nodeWorkerHost`, `nodeWorkerClient`, `NodeWorkerLike`, `NodeWorkerClientOptions`, `NodeWorkerHostOptions`                              |
+| `/transport/node`           | `nodeWorkerTransport`, `nodeWorkerHost`, `nodeWorkerClient`, `NodeWorkerLike`, `NodeWorkerClientOptions`, `NodeWorkerData`, `NodeWorkerHostOptions`            |
 | `/transport/websocket`      | `webSocketTransport`, `webSocketClient`, `webSocketClientDescribe`, `WebSocketTransportOptions`                                                                |
 | `/transport/websocket-host` | `webSocketHost`, `WebSocketHostOptions`, `WebSocketHostHandle`, `closeCauseFor`, `isOriginAllowed`                                                             |
 

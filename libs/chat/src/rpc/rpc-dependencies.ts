@@ -237,7 +237,7 @@ export type RpcSkillResolver = {
 /**
  * The read half of a project's revision graph (S28).
  *
- * Read-only on purpose: an agent sees where it is and what changed, and every
+ * Read-only on purpose: an agent sees where it is, what changed and both sides of a conflict, and every
  * verb that *moves* anything — branch, merge, restore, discard, sync — belongs
  * to a person (I10). The host satisfies this with the same functions the
  * Revisions pane and `tau revisions` call, so the three cannot disagree.
@@ -260,6 +260,29 @@ export type RpcRevisionsClient = {
       branches: ReadonlyArray<Readonly<{ name: string; revisionNumber: number; revisionId: string }>>;
       line: string;
     }>
+  >;
+  /**
+   * One conflicted revision's files as text (rule 8): the side the turn's checkout does not hold is otherwise
+   * unreadable, because no tree ever holds conflict markers.
+   *
+   * @param revision - The conflicted revision; absent for the one waiting on the current branch.
+   * @returns Its files, or `undefined` when no revision is named and none is waiting.
+   */
+  conflict(revision: string | undefined): Promise<
+    | Readonly<{
+        revisionId: string;
+        labels: Readonly<{ ours: string; theirs: string }>;
+        files: ReadonlyArray<
+          Readonly<{
+            path: string;
+            chooseOne: boolean;
+            base: string | undefined;
+            ours: string | undefined;
+            theirs: string | undefined;
+          }>
+        >;
+      }>
+    | undefined
   >;
 };
 

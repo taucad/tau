@@ -6,11 +6,11 @@ import { mock } from 'vitest-mock-extended';
 import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
 import type * as KinematicsModule from '@taucad/kinematics';
-import type * as NumberFieldModule from '#components/geometry/parameters/parameters-number-field.js';
+import type * as NumberFieldModule from '@taucad/viewer/parameters/parameters-number-field';
 import type { Mechanism } from '@taucad/kinematics';
 import type { KernelIssue } from '@taucad/runtime';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { getKinematicsUnitState, kinematicsMachine } from '#machines/kinematics.machine.js';
+import { getKinematicsUnitState, kinematicsMachine } from '@taucad/viewer/machines/kinematics.machine';
 import { KinematicsPanelBody } from '#routes/w.$workspace.$project/chat-kinematics.js';
 import { WorkspaceLanesContext } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
@@ -23,7 +23,7 @@ vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: (): boolean => fals
 
 // Counts each field's renders by name, so a test can show which rows a pose change re-renders.
 const fieldRenders = vi.hoisted(() => new Map<string, number>());
-vi.mock('#components/geometry/parameters/parameters-number-field.js', async (importOriginal) => {
+vi.mock('@taucad/viewer/parameters/parameters-number-field', async (importOriginal) => {
   const actual = await importOriginal<typeof NumberFieldModule>();
   return {
     ...actual,

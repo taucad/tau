@@ -68,6 +68,10 @@ const subCommands: Record<string, CommandDef> = {
     const { publishCommand } = await import('./commands/publish.js');
     return publishCommand as CommandDef;
   }),
+  mcp: lazyCommand('mcp', 'Serve Tau CAD tools to a local agent over stdio (MCP)', async () => {
+    const { mcpCommand } = await import('./commands/mcp.js');
+    return mcpCommand as CommandDef;
+  }),
   host: lazyCommand('host', 'Inspect a Tau Host', async () => {
     const { hostCommand } = await import('./commands/host.js');
     return hostCommand as CommandDef;

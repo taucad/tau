@@ -42,7 +42,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
 }));
 
 const keybindings = vi.hoisted(() => new Map<string, { callback: () => void; enabled: () => boolean }>());
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: (
     combination: { key: string },
     callback: () => void,

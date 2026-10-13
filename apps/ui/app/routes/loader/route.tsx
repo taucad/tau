@@ -23,7 +23,7 @@ import { metalMorphShapeIds, metalMorphShapeLabels } from '#components/geometry/
 import type { MetalMorphShapeId } from '#components/geometry/loader/metal-morph-shapes.js';
 import { LazySection } from '#components/ui/lazy-section.js';
 import { ChatActivitySpinner } from '#components/chat/chat-activity-spinner.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { useFeature } from '#flags/use-feature.js';
 import type { Handle } from '#types/matches.types.js';
 

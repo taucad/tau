@@ -1,11 +1,10 @@
 import { describe, expectTypeOf, it } from 'vitest';
+import type { CadOwnedSettings, PersistedUnitSettings } from '#constants/editor.constants.js';
 import type {
-  CadOwnedSettings,
   CameraOwnedSettings,
   GraphicsOwnedSettings,
   GraphicsViewSettings,
-  PersistedUnitSettings,
-} from '#constants/editor.constants.js';
+} from '@taucad/viewer/graphics/graphics-settings';
 
 /**
  * Law 1 of the persisted view settings ownership blueprint: every persisted field has exactly one

@@ -421,24 +421,29 @@ const withRefLock = async <T>(name: string, operation: () => Promise<T>): Promis
  * A removed checkout must leave nothing behind: its id is a pure function of
  * its branch, so files kept past the record union two revisions' trees the next
  * time that branch is checked out (review 4 R3). Native Git's
- * `worktree remove --force` already does exactly this.
+ * `worktree remove --force` already does exactly this. One entry at a time, so
+ * the first refusal stops the walk with nothing still deleting behind it and a
+ * retry resumes from what is left.
  *
  * @param provider - The route's provider.
  * @param path - The directory being emptied; the root by default.
  */
 const clearProvider = async (provider: FileSystemProvider, path = ''): Promise<void> => {
   const names = await provider.readdir(path).catch((): readonly string[] => []);
-  await Promise.all(
-    names.map(async (name) => {
-      const child = path === '' ? name : `${path}/${name}`;
-      const stat = await provider.stat(child);
-      if (stat.type !== 'dir') {
-        return provider.unlink(child);
-      }
+  for (const name of names) {
+    const child = path === '' ? name : `${path}/${name}`;
+    // oxlint-disable-next-line no-await-in-loop -- sequential traversal: nothing deletes after a refusal.
+    const stat = await provider.stat(child);
+    if (stat.type === 'dir') {
+      // oxlint-disable-next-line no-await-in-loop -- the children go before their directory.
       await clearProvider(provider, child);
-      return provider.rmdir(child);
-    }),
-  );
+      // oxlint-disable-next-line no-await-in-loop -- the directory goes once it is empty.
+      await provider.rmdir(child);
+    } else {
+      // oxlint-disable-next-line no-await-in-loop -- one deletion at a time.
+      await provider.unlink(child);
+    }
+  }
 };
 
 /**

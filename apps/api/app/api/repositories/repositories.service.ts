@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Octokit } from '@octokit/rest';
-import { normalizeRepositoryArchive } from '@taucad/share/repository-archive';
+import { normalizeRepositoryArchive, repositoryImportLimits } from '@taucad/share/repository-archive';
 import { shareArtifactLimits } from '@taucad/share/artifact';
 import { isShareError } from '@taucad/share/provider';
 import { parseRepositoryTarget } from '@taucad/share/repository-target';
@@ -24,7 +24,12 @@ import type { Environment } from '#config/environment.config.js';
 import { RedisService } from '#redis/redis.service.js';
 import type { ArchiveQueryDto, BranchesQueryDto, GithubBranchesResponse } from '#api/repositories/repositories.dto.js';
 
+/** Until the provider answers with headers; a share request also reads its whole body within it. */
 const requestTimeoutMilliseconds = 20_000;
+/** A streamed import body that delivers nothing for this long has stalled. */
+const importBodyIdleMilliseconds = 30_000;
+/** The longest a streamed import body may take, however steadily it arrives. */
+const importBodyDeadlineMilliseconds = 10 * 60_000;
 const maximumMetadataBytes = 1024 * 1024;
 const maximumRedirects = 3;
 const archiveContentTypes = new Set(['application/zip', 'application/x-zip-compressed', 'application/octet-stream']);
@@ -41,6 +46,16 @@ const providerPaths: Readonly<Record<RepositoryProviderId, Readonly<Record<strin
     'bitbucket.org': [/^\/[^/]+\/[^/]+\/get\/[0-9a-f]{40}\.zip$/u],
   },
 };
+
+/* The code travels as `code` and the sentence as `error` (E14). */
+const repositoryRateLimited = (): HttpException =>
+  new HttpException(
+    {
+      code: 'REPOSITORY_RATE_LIMITED',
+      message: 'Too many GitHub repository requests from this network in the last hour. Try again later.',
+    },
+    HttpStatus.TOO_MANY_REQUESTS,
+  );
 
 class GatewayError extends Error {
   public readonly status: number;
@@ -140,7 +155,7 @@ const fetchProvider = async ({
 const readBounded = async (response: Response, maximumBytes: number): Promise<Uint8Array<ArrayBuffer>> => {
   const declared = Number(response.headers.get('content-length') ?? 0);
   if (Number.isFinite(declared) && declared > maximumBytes) {
-    throw new GatewayError(413, 'The repository response exceeds the portable-share limit.');
+    throw new GatewayError(413, 'The repository response exceeds the size limit.');
   }
   const reader = response.body?.getReader();
   if (!reader) {
@@ -160,7 +175,7 @@ const readBounded = async (response: Response, maximumBytes: number): Promise<Ui
       if (length > maximumBytes) {
         // oxlint-disable-next-line no-await-in-loop -- cancellation must settle before the stream lock is released.
         await reader.cancel();
-        throw new GatewayError(413, 'The repository response exceeds the portable-share limit.');
+        throw new GatewayError(413, 'The repository response exceeds the size limit.');
       }
       chunks.push(new Uint8Array(value));
     }
@@ -332,6 +347,99 @@ const contentTypeIsArchive = (response: Response): boolean => {
   return contentType !== undefined && archiveContentTypes.has(contentType);
 };
 
+const timeoutError = (): DOMException => new DOMException('The repository provider timed out.', 'TimeoutError');
+
+/**
+ * Pass an import archive through without holding it, counting its bytes.
+ *
+ * The 200 and its headers are already sent when a body without a usable
+ * `Content-Length` passes the import limit, so a 413 is no longer possible.
+ * The chunk that crosses the limit is forwarded and the body ends: the import
+ * worker applies the same limit and refuses what it received as too large.
+ * A body that stalls or outlasts its deadline aborts the upstream request.
+ *
+ * @param source - The provider's archive body.
+ * @param abortUpstream - Aborts the provider request with a reason.
+ * @returns The bounded body to send.
+ */
+const boundedImportBody = (
+  source: ReadableStream<Uint8Array<ArrayBuffer>>,
+  abortUpstream: (reason: DOMException) => void,
+): ReadableStream<Uint8Array<ArrayBuffer>> => {
+  const reader = source.getReader();
+  let received = 0;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const deadlineTimer = setTimeout(() => {
+    abortUpstream(timeoutError());
+  }, importBodyDeadlineMilliseconds);
+  const stopTimers = (): void => {
+    clearTimeout(idleTimer);
+    clearTimeout(deadlineTimer);
+  };
+  const restartIdleTimer = (): void => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      abortUpstream(timeoutError());
+    }, importBodyIdleMilliseconds);
+  };
+  restartIdleTimer();
+  return new ReadableStream<Uint8Array<ArrayBuffer>>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          stopTimers();
+          controller.close();
+          return;
+        }
+        restartIdleTimer();
+        received += value.byteLength;
+        controller.enqueue(value);
+        if (received > repositoryImportLimits.maxArchiveBytes) {
+          stopTimers();
+          controller.close();
+          await reader.cancel();
+        }
+      } catch (error) {
+        stopTimers();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      stopTimers();
+      await reader.cancel(reason);
+    },
+  });
+};
+
+/**
+ * Stream an import archive to the caller under {@link repositoryImportLimits}.
+ *
+ * @param response - The provider's archive response.
+ * @param abortUpstream - Aborts the provider request with a reason.
+ * @returns The streamed, uncached response.
+ */
+const streamImportArchive = (response: Response, abortUpstream: (reason: DOMException) => void): Response => {
+  const declared = Number(response.headers.get('content-length') ?? Number.NaN);
+  if (Number.isFinite(declared) && declared > repositoryImportLimits.maxArchiveBytes) {
+    void response.body?.cancel();
+    throw new GatewayError(413, 'The repository archive exceeds the import size limit.');
+  }
+  if (!response.body) {
+    throw new GatewayError(502, 'The repository provider returned an unreadable response.');
+  }
+  const headers = new Headers({
+    'Content-Type': 'application/zip',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  /* A decoded body no longer matches an encoded length, so only an unencoded length is forwarded. */
+  if (Number.isSafeInteger(declared) && declared > 0 && !response.headers.has('content-encoding')) {
+    headers.set('Content-Length', String(declared));
+  }
+  return new Response(boundedImportBody(response.body, abortUpstream), { headers });
+};
+
 type BranchNode = {
   readonly name: string;
   readonly target: {
@@ -432,8 +540,14 @@ export class RepositoriesService {
     if (!isProviderId(providerId)) {
       return new Response('Unsupported repository provider', { status: 400 });
     }
-    const providerTimeout = AbortSignal.timeout(requestTimeoutMilliseconds);
-    const signal = AbortSignal.any([requestSignal, providerTimeout]);
+    const upstream = new AbortController();
+    const abortUpstream = (reason: DOMException): void => {
+      upstream.abort(reason);
+    };
+    const responseTimer = setTimeout(() => {
+      abortUpstream(timeoutError());
+    }, requestTimeoutMilliseconds);
+    const signal = AbortSignal.any([requestSignal, upstream.signal]);
     try {
       const githubToken = this.configService.get('GITHUB_API_TOKEN', { infer: true });
       const reference = query.target ?? null;
@@ -459,14 +573,18 @@ export class RepositoriesService {
       if (!contentTypeIsArchive(response)) {
         throw new GatewayError(502, 'The repository provider returned an unexpected content type.');
       }
+      if (!isShareRequest) {
+        /* The provider has answered; from here the body has its own idle and overall bounds. */
+        clearTimeout(responseTimer);
+        return streamImportArchive(response, abortUpstream);
+      }
       const archive = await readBounded(response, shareArtifactLimits.maxArchiveBytes);
-      const normalized = isShareRequest ? await normalizeRepositoryArchive(archive, root) : undefined;
-      const body = normalized?.archive ?? archive;
+      const { archive: body } = await normalizeRepositoryArchive(archive, root);
       return new Response(body, {
         headers: {
           'Content-Type': 'application/zip',
           'Content-Length': String(body.byteLength),
-          'Cache-Control': isShareRequest ? 'public, max-age=31536000, immutable' : 'no-store',
+          'Cache-Control': 'public, max-age=31536000, immutable',
           'X-Content-Type-Options': 'nosniff',
         },
       });
@@ -498,6 +616,8 @@ export class RepositoriesService {
         status: 502,
         headers: { 'Cache-Control': 'no-store' },
       });
+    } finally {
+      clearTimeout(responseTimer);
     }
   }
 
@@ -561,7 +681,7 @@ export class RepositoriesService {
     const key = `tau:repositories:branches:${hourBucket()}:${ip}`;
     const raw = await this.redisService.client.eval(incrByExpireLua, 1, key, String(rateLimitWindowSeconds));
     if (Number(raw) > branchesPerIpPerHour) {
-      throw new HttpException('REPOSITORY_RATE_LIMITED', HttpStatus.TOO_MANY_REQUESTS);
+      throw repositoryRateLimited();
     }
   }
 
@@ -569,7 +689,7 @@ export class RepositoriesService {
     const key = `tau:repositories:archive:${hourBucket()}:${ip}`;
     const raw = await this.redisService.client.eval(incrByExpireLua, 1, key, String(rateLimitWindowSeconds));
     if (Number(raw) > archivesPerIpPerHour) {
-      throw new HttpException('REPOSITORY_RATE_LIMITED', HttpStatus.TOO_MANY_REQUESTS);
+      throw repositoryRateLimited();
     }
   }
 }

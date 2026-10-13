@@ -32,6 +32,12 @@ import type { AgentLogEvent, RowKey } from '#log/event-types.js';
  * and is unused: the chat ref is a chain and each commit's tree names the
  * segments it held, so "the commit that first contained this term" is a real
  * happens-before. Read the chain here when an interleave has to be exact.
+ *
+ * A second approximation lives outside this merge: while this device's run is
+ * still streaming, a fetched foreign turn that started later is placed after
+ * the run's user message, and the live assistant is appended after it. The
+ * order is right again once the run settles and the transcript is re-derived
+ * from the merged log.
  */
 
 /** One device's log, as the ref's tree holds it. @public */

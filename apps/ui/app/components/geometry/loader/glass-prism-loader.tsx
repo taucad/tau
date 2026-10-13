@@ -13,7 +13,7 @@ import {
   useShowcaseLoader,
 } from '#components/geometry/loader/showcase-loader.js';
 import type { ShowcaseLoaderInput, ShowcaseLoaderStatus } from '#components/geometry/loader/showcase-loader.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 
 export type GlassPrismLoaderStatus = ShowcaseLoaderStatus;
 

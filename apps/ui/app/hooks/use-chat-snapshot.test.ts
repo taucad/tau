@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { workbenchRecords } from '@taucad/workbench';
-import { projectWorkbenchSnapshot } from '#hooks/use-chat-snapshot.js';
+import type { GeometryComponentManifest } from '@taucad/types';
+import { projectViewerSelection, projectWorkbenchSnapshot } from '#hooks/use-chat-snapshot.js';
 import type { WorkbenchLayoutSnapshot } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 
 describe('projectWorkbenchSnapshot', () => {
@@ -94,5 +95,88 @@ describe('projectWorkbenchSnapshot', () => {
         isTauDebugEnabled: true,
       })?.unavailable,
     ).toEqual([]);
+  });
+});
+
+describe('projectViewerSelection', () => {
+  const capabilities = {
+    canHide: true,
+    canIsolate: true,
+    canFocus: true,
+    canAdjustOpacity: true,
+    hasDrawings: false,
+    hasPreciseTopology: false,
+    exports: [],
+  };
+  const node = ({ id, name, kind, index }: { id: string; name: string; kind: 'model' | 'part'; index: number }) => ({
+    id,
+    name,
+    kind,
+    selector: `node/${index}`,
+    childIds: [],
+    depth: index,
+    path: [id],
+    meshNodeIndices: [],
+    primitiveIndices: [],
+    materialIndices: [],
+    capabilities,
+  });
+  const manifest = (sourceFile: string | undefined): GeometryComponentManifest => ({
+    schemaVersion: 1,
+    ...(sourceFile === undefined ? {} : { sourceFile }),
+    geometryHash: 'hash-1',
+    rootId: 'root',
+    nodeOrder: ['root', 'component:sun_gear'],
+    nodesById: {
+      root: node({ id: 'root', name: 'Model', kind: 'model', index: 0 }),
+      'component:sun_gear': node({ id: 'component:sun_gear', name: 'Sun gear', kind: 'part', index: 1 }),
+    },
+    capabilities,
+  });
+  const unit = (sourceFile: string | undefined, selectedComponentIds: string[]) => ({
+    manifest: manifest(sourceFile),
+    selectedComponentIds,
+    hiddenComponentIds: [],
+    isolatedComponentIds: [],
+    opacityByComponentId: {},
+  });
+
+  it('carries the selected components as structured references, preferring the active entry', () => {
+    const context = {
+      unitOrder: ['file:a.ts', 'geometry:hash-9', 'file:gears/main.ts'],
+      unitsById: {
+        'file:a.ts': unit('a.ts', ['component:sun_gear']),
+        'geometry:hash-9': unit(undefined, ['component:sun_gear']),
+        'file:gears/main.ts': unit('gears/main.ts', ['component:sun_gear', 'component:gone']),
+      },
+    };
+    expect(projectViewerSelection(context, 'gears/main.ts')).toEqual({
+      entryPath: 'gears/main.ts',
+      selected: [
+        {
+          resource: { kind: 'workspace-file', path: 'gears/main.ts', revision: 'hash-1' },
+          target: {
+            kind: 'component',
+            componentId: 'component:sun_gear',
+            selector: 'node/1',
+            label: 'Sun gear',
+            componentKind: 'part',
+          },
+        },
+      ],
+    });
+    expect(projectViewerSelection(context, undefined)?.entryPath).toBe('a.ts');
+  });
+
+  it('reports nothing when no source file has a selection', () => {
+    expect(
+      projectViewerSelection(
+        {
+          unitOrder: ['file:a.ts', 'geometry:h'],
+          unitsById: { 'file:a.ts': unit('a.ts', []), 'geometry:h': unit(undefined, ['component:sun_gear']) },
+        },
+        'a.ts',
+      ),
+    ).toBeUndefined();
   });
 });

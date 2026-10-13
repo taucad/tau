@@ -91,6 +91,7 @@
     "@taucad/skills": "workspace:*",
     "@taucad/slicer": "workspace:*",
     "@taucad/tscircuit": "workspace:*",
+    "@taucad/zoo": "workspace:*",
     "citty": "catalog:",
     "consola": "catalog:",
     "ink": "catalog:",
@@ -101,6 +102,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "catalog:",
     "@taucad/utils": "workspace:*",
     "@types/react": "catalog:",
     "@types/semver": "catalog:",

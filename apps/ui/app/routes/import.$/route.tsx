@@ -10,7 +10,7 @@ import type { MachineActors } from '#lib/xstate.lib.js';
 // oxlint-disable-next-line import/extensions -- React Router generates this virtual route-type module.
 import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
-import { importGitHubMachine } from '#machines/import-github.machine.js';
+import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.machine.js';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
 import { PageNotice } from '#components/layout/page-notice.js';
 import { Checkbox } from '@taucad/ui/components/checkbox';
@@ -21,6 +21,7 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { RepositoryCard } from '#routes/import.$/repository-card.js';
 import { BranchSelector } from '#routes/import.$/branch-selector.js';
+import { FolderSelector, repositoryFolders } from '#routes/import.$/folder-selector.js';
 import { FileSelector, createStaticDataSource } from '#components/files/file-selector.js';
 import { SuggestedClones } from '#routes/import.$/suggested-clones.js';
 import { UploadCard } from '#routes/import.$/upload-card.js';
@@ -29,15 +30,15 @@ import {
   parseGitHubUrl,
   normalizeGitHubUrl,
   resolveGitHubImportTarget,
+  resolveImportRoute,
   supportedKernelExtensions,
   findMainFile,
 } from '#routes/import.$/import.utils.js';
-import type { GitHubRepoInfo } from '#routes/import.$/import.utils.js';
 import { ImportErrorView } from '#routes/import.$/import-error-view.js';
 import { ImportProcessingView } from '#routes/import.$/import-processing-view.js';
 import { ImportMainFileView } from '#routes/import.$/import-main-file-view.js';
 import { inspect } from '#machines/inspector.js';
-import { CopyButton } from '#components/copy-button.js';
+import { CopyButton } from '@taucad/ui/components/copy-button';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { createImportedProjectFiles } from '#utils/file-reader.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
@@ -108,19 +109,36 @@ export function meta({ params, location }: Route.MetaArgs): MetaDescriptor[] {
  */
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- inferred type
 export function clientLoader({ request, params }: Route.ClientLoaderArgs) {
-  const target = resolveGitHubImportTarget(readSplatPath(params), new URL(request.url).search);
-  if (!target) {
-    throw new Error('Invalid GitHub URL. Only github.com repositories are supported.');
-  }
-
-  return target satisfies GitHubRepoInfo;
+  /* An address that is not a GitHub repository opens the form holding it, never the crash page. */
+  return resolveImportRoute(readSplatPath(params), new URL(request.url).search);
 }
 
 type ImportMode = 'github' | 'disk';
 
+const failureOf = (error: Error | undefined): ImportGitHubError['failure'] | undefined =>
+  error instanceof ImportGitHubError ? error.failure : undefined;
+
+/** What to do when the repository could not be opened; only a missing repository is an address problem. */
+const repositoryUnavailableAdvice = (error: Error | undefined, canChooseFromAccount: boolean): string => {
+  const fromAccount = canChooseFromAccount ? ', or choose a repository from your GitHub account' : '';
+  switch (failureOf(error)) {
+    case 'rateLimited': {
+      return `GitHub’s limit for public reads was reached. Try again in a few minutes${fromAccount}.`;
+    }
+    case 'failed': {
+      return 'Tau couldn’t read it from GitHub. Try again shortly.';
+    }
+    default: {
+      return canChooseFromAccount
+        ? 'Check the public repository address or choose a repository from your GitHub account.'
+        : 'Check the public repository address.';
+    }
+  }
+};
+
 // oxlint-disable-next-line complexity -- TODO: consider refactoring.
 export default function ImportRoute(): React.JSX.Element {
-  const { owner, repo, ref, mainFile } = useLoaderData<typeof clientLoader>();
+  const { owner, repo, ref, path, mainFile, rejectedUrl } = useLoaderData<typeof clientLoader>();
   const [arrivalRepository] = useState({ owner, repo });
   const navigate = useNavigate();
   const projectManager = useProjectManager();
@@ -134,13 +152,14 @@ export default function ImportRoute(): React.JSX.Element {
   const [linkedSyncChats, setLinkedSyncChats] = useState(true);
   const githubConnectionAvailable = useGithubConnectionAvailable();
   const branchLabelId = useId();
+  const folderLabelId = useId();
   const mainFileLabelId = useId();
   const linkedMainFileLabelId = useId();
 
   // Track active import mode
   const [activeMode, setActiveMode] = useState<ImportMode | undefined>(undefined);
   const [localOperation, setLocalOperation] = useState<'read' | 'extract'>('read');
-  const [repoUrlDraft, setRepoUrlDraft] = useState<string>();
+  const [repoUrlDraft, setRepoUrlDraft] = useState<string | undefined>(rejectedUrl);
   const repoUrlInput = useRef<HTMLInputElement>(null);
   const repoUrlHintId = useId();
 
@@ -155,7 +174,9 @@ export default function ImportRoute(): React.JSX.Element {
             const project = await projectManager.createProject({
               project: {
                 name: `${input.owner}/${input.repo}`,
-                description: `Imported from GitHub: https://github.com/${input.owner}/${input.repo}`,
+                description: `Imported from GitHub: https://github.com/${input.owner}/${input.repo}${
+                  input.path ? `/tree/${input.ref}/${input.path}` : ''
+                }`,
                 tags: [],
                 assets: {
                   main: {
@@ -179,6 +200,7 @@ export default function ImportRoute(): React.JSX.Element {
         owner,
         repo,
         ref,
+        path,
         mainFile,
       },
       inspect,
@@ -243,7 +265,19 @@ export default function ImportRoute(): React.JSX.Element {
   const branches = useSelector(gitHubActorRef, (snapshot) => snapshot.context.branches);
   const selectedBranch = useSelector(gitHubActorRef, (snapshot) => snapshot.context.selectedBranch);
   const repoFiles = useSelector(gitHubActorRef, (snapshot) => snapshot.context.repoFiles);
-  const repoFilesDataSource = useMemo(() => createStaticDataSource(repoFiles), [repoFiles]);
+  const selectedFolder = useSelector(gitHubActorRef, (snapshot) => snapshot.context.path);
+  const repoFolders = useMemo(() => repositoryFolders(repoFiles.map((file) => file.path)), [repoFiles]);
+  /* Files under the chosen folder, relative to it: the folder becomes the project root. */
+  const folderFiles = useMemo(() => {
+    if (selectedFolder === '') {
+      return repoFiles;
+    }
+    const prefix = `${selectedFolder}/`;
+    return repoFiles
+      .filter((file) => file.path.startsWith(prefix))
+      .map((file) => ({ ...file, path: file.path.slice(prefix.length) }));
+  }, [repoFiles, selectedFolder]);
+  const repoFilesDataSource = useMemo(() => createStaticDataSource(folderFiles), [folderFiles]);
   const linkedFilesDataSource = useMemo(
     () =>
       createStaticDataSource(
@@ -348,6 +382,7 @@ export default function ImportRoute(): React.JSX.Element {
         owner,
         repo,
         ref,
+        path,
         mainFile,
       });
       return;
@@ -359,9 +394,10 @@ export default function ImportRoute(): React.JSX.Element {
       owner,
       repo,
       ref,
+      path,
       mainFile,
     });
-  }, [owner, repo, ref, mainFile, gitHubActorRef, currentUrl]);
+  }, [owner, repo, ref, path, mainFile, gitHubActorRef, currentUrl]);
 
   /* Through the router, never `history.*` (D3): a raw history write left React
    * Router's location stale, so nothing downstream of `useLocation` saw the
@@ -553,6 +589,7 @@ export default function ImportRoute(): React.JSX.Element {
 
   const publicRepoUrl = repoUrlDraft ?? repoUrl;
   const canReviewRepository = parseGitHubUrl(normalizeGitHubUrl(publicRepoUrl.trim())) !== undefined;
+  const isRepoUrlRejected = publicRepoUrl.trim() !== '' && !canReviewRepository;
   const cancelRepositoryReview = (): void => {
     setRepoUrlDraft(repoUrl);
     setLinkedSelection(undefined);
@@ -682,7 +719,7 @@ export default function ImportRoute(): React.JSX.Element {
               {!isCheckingOrFetching && !repoMetadata ? (
                 <PageNotice
                   title='Couldn’t open this repository'
-                  message='Check the public repository address or choose a repository from your GitHub account.'
+                  message={repositoryUnavailableAdvice(gitHubError, githubConnectionAvailable !== false)}
                   detail={gitHubError?.message ?? "Tau couldn't find a public repository at this address."}
                 >
                   {githubConnectionAvailable === false ? undefined : (
@@ -734,6 +771,12 @@ export default function ImportRoute(): React.JSX.Element {
                               : undefined
                           }
                         />
+                      ) : failureOf(fetchErrors.branches) === 'serverNotConfigured' ? (
+                        <p role='status' className='text-sm'>
+                          This server isn’t set up to list branches, so import will use the{' '}
+                          <span className='font-mono'>{selectedBranch}</span> branch. Its administrator can enable
+                          branch listing with <span className='font-mono'>GITHUB_API_TOKEN</span>.
+                        </p>
                       ) : fetchErrors.branches ? (
                         <p role='status' className='text-sm'>
                           Could not fetch branches. Import will use the{' '}
@@ -743,11 +786,29 @@ export default function ImportRoute(): React.JSX.Element {
                         <p className='font-mono text-sm'>{selectedBranch}</p>
                       )}
                     </div>
+                    <span id={folderLabelId} className='text-sm font-medium'>
+                      Folder
+                    </span>
+                    <div className='max-w-sm'>
+                      {repoFolders.length > 0 ? (
+                        <FolderSelector
+                          labelId={folderLabelId}
+                          folders={repoFolders}
+                          selectedFolder={selectedFolder}
+                          isDisabled={isLoadingFiles}
+                          onSelect={(folder) => {
+                            gitHubActorRef.send({ type: 'selectFolder', path: folder });
+                          }}
+                        />
+                      ) : (
+                        <p className='font-mono text-sm'>{selectedFolder || 'Whole repository'}</p>
+                      )}
+                    </div>
                     <span id={mainFileLabelId} className='text-sm font-medium'>
                       Main file
                     </span>
                     <div role='group' aria-labelledby={mainFileLabelId} className='max-w-sm space-y-2'>
-                      {repoFiles.length > 0 || isLoadingFiles ? (
+                      {folderFiles.length > 0 || isLoadingFiles ? (
                         <FileSelector
                           dataSource={repoFilesDataSource}
                           selectedFile={gitHubSelectedMainFile}
@@ -795,6 +856,9 @@ export default function ImportRoute(): React.JSX.Element {
                       if (selectedBranch && selectedBranch !== 'main') {
                         parameters.set('ref', selectedBranch);
                       }
+                      if (selectedFolder) {
+                        parameters.set('path', selectedFolder);
+                      }
                       const queryString = parameters.size > 0 ? `?${parameters.toString()}` : '';
                       return `${shareOrigin()}/i/${repoUrl}${queryString}`;
                     }}
@@ -839,6 +903,7 @@ export default function ImportRoute(): React.JSX.Element {
                         placeholder='https://github.com/owner/repo'
                         value={publicRepoUrl}
                         aria-describedby={repoUrlHintId}
+                        aria-invalid={isRepoUrlRejected}
                         className='pr-8 font-mono text-sm'
                         onChange={(event) => {
                           setRepoUrlDraft(event.target.value);
@@ -862,7 +927,9 @@ export default function ImportRoute(): React.JSX.Element {
                       ) : undefined}
                     </div>
                     <p id={repoUrlHintId} className='text-xs text-muted-foreground'>
-                      Copies files without Git history or sync.
+                      {isRepoUrlRejected
+                        ? 'Enter a github.com repository address, like https://github.com/owner/repo.'
+                        : 'Copies files without Git history or sync.'}
                     </p>
                     <Button type='submit' variant='outline' disabled={!canReviewRepository}>
                       Review repository
@@ -962,6 +1029,10 @@ export default function ImportRoute(): React.JSX.Element {
                     disabled={linkedBusy}
                     onChange={(event) => {
                       setLinkedTargetBranch(event.target.value);
+                      /* A refusal of the old name ("…already names another revision.") is not about the new one. */
+                      if (!linkedReviewBlocked) {
+                        setLinkedError(undefined);
+                      }
                     }}
                   />
                   <p className='text-xs text-muted-foreground'>
@@ -1087,6 +1158,13 @@ export default function ImportRoute(): React.JSX.Element {
       return (
         <ImportErrorView
           error={gitHubError}
+          {...(failureOf(gitHubError) === 'tooLarge'
+            ? {
+                title: 'Repository too large',
+                message:
+                  'This repository exceeds the size limit for GitHub imports. Import one of its folders, choose a smaller branch, or download the repository and import the files you need from your computer.',
+              }
+            : {})}
           onRetry={() => {
             gitHubActorRef.send({ type: 'retry' });
           }}
@@ -1097,7 +1175,7 @@ export default function ImportRoute(): React.JSX.Element {
     default: {
       return (
         <ImportProcessingView
-          title={`${repoOwner}/${repoName}${selectedBranch && selectedBranch !== 'main' ? ` @ ${selectedBranch}` : ''}`}
+          title={`${repoOwner}/${repoName}${selectedFolder ? `/${selectedFolder}` : ''}${selectedBranch && selectedBranch !== 'main' ? ` @ ${selectedBranch}` : ''}`}
           source='github'
           phase={
             gitHubState.matches('creating') || gitHubState.matches('success')

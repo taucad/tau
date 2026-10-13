@@ -1,28 +1,17 @@
 import type { ActorRefFrom } from 'xstate';
-import type { GeometryComponentManifest } from '@taucad/types';
+import type {
+  ExactOccurrenceDistanceRequest,
+  ExactOccurrenceDistanceResult,
+} from '@taucad/viewer/graphics/three/react/exact-measurement';
 import type { Rendering, RuntimeDocument, SourceRevision } from '@taucad/runtime';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { bestRouteForActiveKernel, exportDocumentWithValidatedInput } from '#utils/export-formats.utils.js';
 import { runExactRequest } from '#workers/measurement-exact.transport.js';
 import type { ExactRequest, ExactResponse } from './measurement-exact.worker.js';
 
-export type ExactOccurrenceDistanceResult =
-  | {
-      status: 'cad-geometry';
-      distanceMeters: number;
-      pointAMeters: [number, number, number];
-      pointBMeters: [number, number, number];
-      source: 'ap242';
-    }
-  | { status: 'unavailable'; reason: string };
-
-export type ExactOccurrenceDistanceInput = {
+/** The viewer's exact-distance request, answered against the view's CAD actor. */
+export type ExactOccurrenceDistanceInput = ExactOccurrenceDistanceRequest & {
   cadRef: ActorRefFrom<typeof cadMachine>;
-  manifest: GeometryComponentManifest;
-  presentedGeometryHash: string;
-  occurrenceA: string;
-  occurrenceB: string;
-  signal?: AbortSignal;
 };
 
 let nextRequestId = 0;

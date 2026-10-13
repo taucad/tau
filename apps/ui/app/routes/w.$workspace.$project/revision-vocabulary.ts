@@ -20,6 +20,7 @@ import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import { useRevisionCards, useRevisions } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useProjectRole, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import type { TurnRevisionState } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
 
 /** What a surface draws for one state: one glyph in one tone, the mark it stands for, and the sentence. @public */
@@ -42,6 +43,8 @@ export type RevisionWhere = Readonly<{
   isLoading?: boolean;
   /** The viewer's role on the cloud project, which makes view-only and removed access calm states (HQ3). */
   role?: ProjectAccessRole | undefined;
+  /** The viewer is signed out of Tau, so this device withholds its GitHub credential (D100). */
+  isSignedOut?: boolean;
 }>;
 
 /** A decision waiting on the person, said one way on every surface (HQ1, HQ6). @public */
@@ -101,6 +104,23 @@ export const revisionTitle = (revision: RevisionCard, revisions: readonly Revisi
  */
 export const isGithubRemote = (remote: RemoteFacet): boolean =>
   remote.provider === 'github' || (remote.kind === 'git' && remote.url !== undefined && isGithubRemoteUrl(remote.url));
+
+/**
+ * Whether a credential refusal is the viewer's Tau sign-in to fix (D18, D100):
+ * Tau Cloud is reached with this device's own session, and signed out, this
+ * device withholds its GitHub credential, so GitHub refused nothing.
+ *
+ * @param sync - The failure's class.
+ * @param remote - The connection.
+ * @param isSignedOut - Whether the viewer is signed out of Tau.
+ * @returns Whether *Sign in* is the answer.
+ * @public
+ */
+export const asksTauSignIn = (
+  { reason }: Readonly<{ reason?: SyncFacet['reason'] }>,
+  remote: RemoteFacet,
+  isSignedOut: boolean | undefined,
+): boolean => reason === 'unauthorized' && (remote.kind === 'tau' || (isSignedOut === true && isGithubRemote(remote)));
 
 /**
  * The backup's own sentence: whether this project's work is on its remote.
@@ -171,19 +191,32 @@ export const isRefusedWhileBackedUp = (sync: SyncFacet): boolean =>
 
 /**
  * The backup line for this viewer: removed access is a calm fact, not a failed
- * push (HQ3).
+ * push (HQ3), and a GitHub credential withheld while signed out is no refusal (D100).
  *
  * @param sync - The settled sync facet.
- * @param role - The viewer's role on the cloud project.
+ * @param viewer - The viewer's role on the cloud project and whether they are signed out of Tau.
  * @param remote - The connection, so a refusal names who refused.
  * @returns The sentence, or `undefined` with no remote.
  * @public
  */
 export const backupCopy = (
   sync: SyncFacet,
-  role: ProjectAccessRole | undefined,
+  { role, isSignedOut }: Pick<RevisionWhere, 'role' | 'isSignedOut'>,
   remote?: RemoteFacet,
-): string | undefined => (role === 'revoked' && sync.state !== 'noRemote' ? accessRemoved : syncCopy(sync, remote));
+): string | undefined => {
+  if (role === 'revoked' && sync.state !== 'noRemote') {
+    return accessRemoved;
+  }
+  if (
+    remote !== undefined &&
+    remote.kind !== 'tau' &&
+    isRefusedWhileBackedUp(sync) &&
+    asksTauSignIn(sync, remote, isSignedOut)
+  ) {
+    return 'Backed up';
+  }
+  return syncCopy(sync, remote);
+};
 
 const operationWords: Record<NonNullable<RevisionStatusProjection['branchVerb']['operation']>, string> = {
   switch: 'Switching',
@@ -198,18 +231,27 @@ const failedBackupReasons: ReadonlySet<string> = new Set(['rejected', 'forbidden
 
 /**
  * What a failed backup asks the person for (R-U4). Only Tau Cloud is reached
- * with this device's own session, so only it asks to *Sign in* (D18).
+ * with this device's own session, so only it, or GitHub while signed out, asks
+ * to *Sign in* (D18, D100).
  *
  * @param status - The revision status projection.
+ * @param isSignedOut - Whether the viewer is signed out of Tau.
  * @returns The ask, or `undefined` when the backup needs nothing from the person.
  */
-const backupAsk = ({ sync, remote }: RevisionStatusProjection): string | undefined => {
+const backupAsk = (
+  { sync, remote }: RevisionStatusProjection,
+  isSignedOut: boolean | undefined,
+): string | undefined => {
   if (sync.state !== 'failed') {
     return undefined;
   }
   switch (sync.reason) {
     case 'unauthorized': {
-      return remote.kind === 'tau' ? 'Sign in' : isGithubRemote(remote) ? 'Reconnect GitHub' : 'Remote refused access';
+      return asksTauSignIn(sync, remote, isSignedOut)
+        ? 'Sign in'
+        : isGithubRemote(remote)
+          ? 'Reconnect GitHub'
+          : 'Remote refused access';
     }
     case 'quota': {
       return 'Over your plan';
@@ -261,7 +303,7 @@ const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWher
       sentence: line === undefined ? needsDecision : `${needsDecision} on ${line}`,
     };
   }
-  const ask = where.role === 'revoked' ? undefined : backupAsk(status);
+  const ask = where.role === 'revoked' ? undefined : backupAsk(status, where.isSignedOut);
   return ask === undefined
     ? undefined
     : {
@@ -305,7 +347,7 @@ const restingFacts = (status: RevisionStatusProjection, where: RevisionWhere): R
   if (where.role === 'read') {
     return { icon: History, tone: '', mark: 'none', sentence: 'Saved · View only' };
   }
-  const backup = backupCopy(status.sync, where.role, status.remote);
+  const backup = backupCopy(status.sync, where, status.remote);
   return {
     icon: History,
     tone: '',
@@ -404,6 +446,7 @@ export const useRevisionFacts = (): Readonly<{
   const { line, headRevisionId, revisions, isDirty, isLoading } = useRevisions();
   const status = useRevisionStatus();
   const role = useProjectRole();
+  const isSignedOut = useRevisionSessionUser() === undefined;
   const head = revisions.find((revision) => revision.revisionId === headRevisionId);
   const arrivedId = status?.sync.arrived;
   const arrived = useRevisionCards(arrivedId === undefined ? [] : [arrivedId]).get(arrivedId ?? '');
@@ -413,6 +456,7 @@ export const useRevisionFacts = (): Readonly<{
     isDirty,
     isLoading,
     role,
+    isSignedOut,
   };
   return { where, facts: selectRevisionFacts(status, where, arrived), head, status };
 };
@@ -491,7 +535,7 @@ export const selectStripVerbs = ({
   if (sync.state === 'queued') {
     return { primary: 'Sync now', secondary };
   }
-  if (sync.state === 'failed' && sync.reason === 'unauthorized' && remote.kind === 'tau') {
+  if (sync.state === 'failed' && asksTauSignIn(sync, remote, where.isSignedOut)) {
     return { primary: 'Sign in', secondary };
   }
   if (sync.state === 'failed' && (sync.reason === 'quota' || sync.reason === 'notEntitled')) {

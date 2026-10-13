@@ -20,6 +20,8 @@ export type {
   KernelFileSystem,
   KernelDefinition,
   KernelServices,
+  RealmResources,
+  RealmHold,
   ViewDeclaration,
   ExportDeclaration,
   ViewInstance,

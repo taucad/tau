@@ -14,12 +14,14 @@ import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type { MockRuntimeDocumentFixture } from '@taucad/runtime-testing';
 import { workbenchRecords } from '@taucad/workbench';
 import { createEmptyGlb } from '@taucad/geometry-core';
-import { defaultGraphicsSettings, defaultOperationTimeout } from '#constants/editor.constants.js';
-import type { GraphicsViewSettings, PinnedMeasurement } from '#constants/editor.constants.js';
+import { defaultOperationTimeout } from '#constants/editor.constants.js';
+import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
+import type { GraphicsViewSettings, PinnedMeasurement } from '@taucad/viewer/graphics/graphics-settings';
 import type { cadMachine } from '#machines/cad.machine.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
-import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
-import type { PartThumbnailService, PartThumbnailState } from '#services/part-thumbnail.service.js';
+import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import type { ModelInteractionContext } from '@taucad/viewer/machines/model-interaction.machine';
+import type { PartThumbnailService } from '#services/part-thumbnail.service.js';
+import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
 const mockViewActions = vi.hoisted(() => ({
   edit: vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true),
   remove: vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true),
@@ -391,7 +393,7 @@ vi.mock('#hooks/use-file-content.js', () => ({
 // Children that aren't relevant to the overlay assertion
 // =============================================================================
 
-vi.mock('#components/geometry/cad/cad-viewer.js', () => ({
+vi.mock('@taucad/viewer/cad/cad-viewer', () => ({
   CadViewer: ({
     eventPrefix,
     eventSource,
@@ -496,7 +498,7 @@ vi.mock('#components/cad/ar-button.js', () => ({
 
 // `use-graphics` drags in three.js via screenshot/camera capability machines, so
 // stub the provider/hooks to avoid loading three under jsdom.
-vi.mock('#hooks/use-graphics.js', () => ({
+vi.mock('@taucad/viewer/hooks/use-graphics', () => ({
   GraphicsProvider: ({ children, seed }: { children: React.ReactNode; seed?: unknown }) => {
     mockCameraSeed = seed;
     mockGraphicsProviderMounts += 1;

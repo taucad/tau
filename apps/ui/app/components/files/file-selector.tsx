@@ -14,7 +14,7 @@ import { Button } from '@taucad/ui/components/button';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { menuItemLayoutClass } from '@taucad/ui/components/menu.variants';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
 
 export type FileSelectorEntry = {

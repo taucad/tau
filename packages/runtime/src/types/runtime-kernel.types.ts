@@ -132,6 +132,47 @@ export type KernelFileSystem = Omit<RuntimeFileSystemBase, 'watch'> & {
   ensureDir(path: string): Promise<void>;
 };
 
+/**
+ * One holder's share of a realm-shared resource.
+ * @public
+ */
+export type RealmHold<Value> = {
+  /** The realm's single instance, shared with every other holder. */
+  readonly value: Value;
+  /** Give up this share; idempotent. The last release disposes the instance. */
+  release(): void;
+};
+
+/**
+ * Realm-shared resources: at most one live instance per group in a JavaScript realm.
+ *
+ * For a library that binds its backend at module scope (replicad's OpenCASCADE), every kernel in
+ * the realm must use the same instance. Hold it from `initialize` and release it from `onDispose`.
+ * @public
+ */
+export type RealmResources = {
+  /**
+   * Hold the realm's single instance for `group`; `key` identifies its build.
+   *
+   * Concurrent and later holders of the same `group` and `key` share one `create` call. A rejected
+   * `create` is retried by the next holder. A different `key` for a held `group` rejects with an
+   * error whose `issues` carry `KERNEL_REALM_CONFLICT`.
+   *
+   * @param input - Group, build key, creator and optional disposer.
+   * @returns This holder's share of the instance.
+   */
+  hold<Value>(input: {
+    /** Backend whose single instance the realm may hold, e.g. `'replicad-occt'`. */
+    readonly group: string;
+    /** Build identity of that instance, e.g. `'single:<wasmUrl>'`. */
+    readonly key: string;
+    /** Creates the instance once for every holder. */
+    readonly create: () => Promise<Value>;
+    /** Frees the instance after its last holder released it. */
+    readonly dispose?: (value: Value) => void;
+  }): Promise<RealmHold<Value>>;
+};
+
 // =============================================================================
 // Kernel Runtime
 // =============================================================================
@@ -168,6 +209,8 @@ export type KernelRuntime = {
   tracer: RuntimeSpanTracer;
   /** Compute reuse facet for the active operation. `off` carries no operations at all. */
   readonly compute: KernelComputeCapability;
+  /** Resources shared by every kernel in this JavaScript realm. */
+  readonly realm: RealmResources;
   /** Resolve a host-compiled WASM module by its absolute asset URL. */
   getCompiledWasmModule(url: string): WebAssembly.Module | undefined;
   /**

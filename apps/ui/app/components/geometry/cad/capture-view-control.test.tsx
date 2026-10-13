@@ -29,14 +29,14 @@ vi.mock('#services/headless-capture.js', () => ({
   captureFilesToDataUrls: () => ['data:image/webp;base64,AQID'],
   omittedSectionCutsNotice: 'Section cutaways narrower than 180° are not shown in captures.',
 }));
-vi.mock('#hooks/use-graphics.js', () => ({ useGraphics: () => mockGraphicsRef }));
+vi.mock('@taucad/viewer/hooks/use-graphics', () => ({ useGraphics: () => mockGraphicsRef }));
 vi.mock('#hooks/use-cad.js', () => ({ useCad: () => mockCadRef }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectRef: { send: mockProjectSend } }) }));
 vi.mock('#hooks/use-chat.js', () => ({ useChatActions: () => ({ addDraftAttachment: mockAddDraftAttachment }) }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({ model: { model: mockSelectedModel }, execution: { execution: mockExecution } }),
 }));
-vi.mock('#hooks/use-tick-animation.js', () => ({
+vi.mock('@taucad/ui/hooks/use-tick-animation', () => ({
   useTickAnimation: () => ({ ticked: false, trigger: mockTrigger }),
 }));
 vi.mock('#providers/headless-image-provider.js', () => ({

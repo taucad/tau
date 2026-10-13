@@ -51,6 +51,7 @@ import {
   strictConsumerCompilerOptions,
   vendoredAssetIssues,
   vendoredNodeModulesIssues,
+  workerUrlIssues,
   workspaceRangeIssues,
 } from './pkgcheck-metadata.js';
 import type { AssetFile, CopyEntry, UpstreamExport } from './pkgcheck-metadata.js';
@@ -482,15 +483,10 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
       'node/default platform swap for the Bambu Studio engine, pinned by src/slicer.plugin.test.ts',
   },
   '@taucad/geospec-engine': {
-    '#cache/node-evidence-store.js':
-      'browser/default platform swap for the evidence store, pinned by src/browser-import-graph.test.ts',
-    '#model/default-runtime-client.js':
-      'browser/default platform swap for the private model runtime fallback, pinned by src/browser-import-graph.test.ts',
     // The canonical map reaches `src/` only, and `.oxlintrc.json` ("no-restricted-imports",
-    // regex `^\.`) bans the relative import that would replace these workspace-wide — so a
+    // regex `^\.`) bans the relative import that would replace it workspace-wide — so a
     // directory outside `src/` can only be reached through a key of its own.
-    '#e2e/*.js': 'browser-engine harness outside src/; relative imports are banned workspace-wide',
-    '#experiments/*.js': 'load-path experiments outside src/; relative imports are banned workspace-wide',
+    '#experiments/*.js': 'performance-lab experiments outside src/; relative imports are banned workspace-wide',
   },
   '@taucad/geospec-engine-native': {
     '#native-binding':
@@ -511,6 +507,19 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
   '@taucad/ui': {
     '#components/*.variants.js': 'variant modules are .ts and share components/ with the .tsx components',
     '#components/*.js': 'components are .tsx, which the canonical #*.js -> ./src/*.ts target cannot reach',
+  },
+  // React components and hooks sit beside .ts modules in every viewer directory, so a per-directory key
+  // like the design system's cannot reach them; `.jsx` names the .tsx module as `.js` names the .ts one.
+  '@taucad/viewer': {
+    '#*.jsx': '.tsx components and hooks share every directory with .ts modules; the canonical #*.js reaches only .ts',
+  },
+  // The viewer page builds from app/ into one HTML file (not the plugin's src/ launcher), and its
+  // basic-host harness sits in e2e/; relative imports are banned workspace-wide.
+  '@taucad/agent-plugin': {
+    '#app/*.jsx': 'viewer page .tsx components outside src/, built into dist-app/app.html',
+    '#app/*.js': 'viewer page .ts modules outside src/, built into dist-app/app.html',
+    '#app/*': 'viewer page stylesheet outside src/, imported by its entry',
+    '#e2e/*.js': 'MCP Apps basic-host harness outside src/; relative imports are banned workspace-wide',
   },
 };
 
@@ -799,6 +808,17 @@ async function validateDistributionAssets(): Promise<CheckResult> {
         status: 'fail',
         details: [`${String(issues.length)} distribution asset issue(s) found`, ...issues],
       };
+}
+
+/** Every `new Worker(new URL(…, import.meta.url))` in `dist` names a file the build emitted beside its module. */
+function validateWorkerUrls(): CheckResult {
+  const distributionRoot = join(absoluteRoot, 'dist');
+  const emitted = walkDirectory(distributionRoot).map((path) => relative(distributionRoot, path).split(sep).join('/'));
+  const modules = emitted
+    .filter((path) => path.endsWith('.mjs') || path.endsWith('.js'))
+    .map((path) => ({ path, source: readFileSync(join(distributionRoot, path), 'utf8') }));
+  const issues = workerUrlIssues(modules, new Set(emitted));
+  return checkResult('tau-worker-urls', issues, 'every emitted worker URL names an emitted file');
 }
 
 /** `react` -> `@types/react`, `@scope/name` -> `@types/scope__name`. */
@@ -1630,6 +1650,9 @@ async function main(): Promise<void> {
   printResult(results.at(-1)!);
 
   results.push(await validateDistributionAssets());
+  printResult(results.at(-1)!);
+
+  results.push(validateWorkerUrls());
   printResult(results.at(-1)!);
 
   results.push(validateBundledArtifact());

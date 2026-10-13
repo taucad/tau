@@ -1,6 +1,6 @@
 import { Suspense, lazy, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { GearDemo } from '#routes/_index/demo/gear-demo.js';
 
 // OpenRSCAD (WASM) is confined to this lazily-imported module, so selecting the

@@ -708,6 +708,35 @@ describe('machine tool registry', () => {
       expect(result.content).not.toHaveProperty('approval');
     });
 
+    it('should leave the request awaiting approval in Tau when the host could not ask the person', async () => {
+      const fixture = clientFixture();
+      const approve = vi.fn<NonNullable<HostToolInvocation['approve']>>(async () => {
+        throw Object.assign(new Error('The agent app could not ask the person.'), { code: 'APPROVAL_UNAVAILABLE' });
+      });
+      const result = await run(fixture.client, {
+        toolName: 'request_print',
+        input: { targetFile: 'main.ts' },
+        approve,
+      });
+      expect(approve).toHaveBeenCalledOnce();
+      expect(fixture.resolvePrintRequest).not.toHaveBeenCalled();
+      expect(fixture.withdrawPrintRequest).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        isError: false,
+        content: { request: { requestId: 'call-1', state: 'awaiting-approval' } },
+      });
+      expect(result.content).not.toHaveProperty('approval');
+      /* Any other rejection, such as a Tau host aborting the paused attempt, is not swallowed. */
+      const aborted = await run(clientFixture().client, {
+        toolName: 'request_print',
+        input: { targetFile: 'main.ts' },
+        approve: vi.fn<NonNullable<HostToolInvocation['approve']>>(async () => {
+          throw new Error('attempt aborted');
+        }),
+      });
+      expect(aborted).toMatchObject({ isError: true });
+    });
+
     it('names the bound machines when the choice is missing, ambiguous or unknown', async () => {
       const none = clientFixture({ entries: [] });
       await expect(invoke(none.client, 'request_print', { targetFile: 'main.ts' })).resolves.toMatchObject({

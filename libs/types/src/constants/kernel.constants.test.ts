@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { isKernelId, kernelConfigurations, languageFromKernel } from '#constants/kernel.constants.js';
 
 describe('kernel configuration identity', () => {
+  it('should start Zoo projects and files with the latest stable bundled KCL version', () => {
+    const zoo = kernelConfigurations.find(({ id }) => id === 'zoo');
+
+    expect(zoo).toMatchObject({
+      language: 'kcl',
+      mainFile: 'main.kcl',
+      emptyCode: '@settings(defaultLengthUnit = mm, kclVersion = 3.0)\n',
+    });
+  });
+
   it('should expose PicoGK as a native C# desktop offering', () => {
     const configuration = kernelConfigurations.find(({ id }) => id === 'picogk');
     expect(configuration).toMatchObject({

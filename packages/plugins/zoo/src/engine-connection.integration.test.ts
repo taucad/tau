@@ -42,6 +42,29 @@ describe('EngineConnection (transport + session wiring)', () => {
     zooTestRestoreWebSocket(OriginalWebSocket);
   });
 
+  it('closes the authenticated socket when the session cannot open on it', async () => {
+    const wasmModule = {
+      Context: class {
+        public constructor() {
+          throw new Error('Context construction failed');
+        }
+      },
+    } as unknown as WasmModule;
+    const conn = new EngineConnection({
+      baseUrl: 'ws://fake.example/modeling-commands',
+      wasmModule,
+      fileSystemManager: new FileSystemManager(noopFs()),
+    });
+
+    const init = conn.initialize();
+    await Promise.resolve();
+    zooTestFakeSocketCapture.current?.testEmitMessage(JSON.stringify(authSuccess));
+
+    await expect(init).rejects.toThrow('Context construction failed');
+    expect(zooTestFakeSocketCapture.current?.readyState).toBe(3);
+    expect(conn.context).toBeUndefined();
+  });
+
   it('forwards WebSocket frames to Context.sendResponse after initialize', async () => {
     const received: Array<Uint8Array<ArrayBuffer>> = [];
 

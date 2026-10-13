@@ -1,0 +1,35 @@
+@import 'tailwindcss' source(none);
+@import '@taucad/ui/styles/tokens.css';
+
+/* The page draws only what these sources use. */
+@source '.';
+@source '../../ui/src';
+@source '../../viewer/src';
+
+/* The running viewer tool's glyph, as the app defines it (`apps/ui/app/styles/global.css`). */
+:root {
+  --viewer-tool-active: oklch(0.53 0.12 var(--hue-primary));
+}
+
+.dark,
+:root[class~='dark'] {
+  --viewer-tool-active: oklch(0.75 0.1 var(--hue-primary));
+}
+
+@theme inline {
+  --color-viewer-tool-active: var(--viewer-tool-active);
+}
+
+/* The host's font (E6): it sets `--font-sans` on the root; no font is bundled. */
+html,
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background-color: var(--background);
+}
+
+/* In a card the conversation scrolls vertically; a horizontal drag still orbits (E5, G21).
+ * camera-controls writes `touch-action: none` on the canvas inline, hence the importance. */
+[data-composition='inline'] canvas {
+  touch-action: pan-y !important;
+}

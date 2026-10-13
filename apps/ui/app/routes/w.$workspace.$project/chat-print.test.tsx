@@ -82,7 +82,7 @@ vi.mock('#routes/w.$workspace.$project/chat-converter.js', async (importOriginal
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
   return fixtures.converterMock(await importOriginal());
 });
-vi.mock('#components/geometry/parameters/parameters.js', async (importOriginal) => {
+vi.mock('@taucad/viewer/parameters/parameters', async (importOriginal) => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
   return fixtures.parametersMock(await importOriginal());
 });

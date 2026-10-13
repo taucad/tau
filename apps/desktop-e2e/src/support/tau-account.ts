@@ -51,7 +51,10 @@ const tauBillingEnvironment = async (token: string): Promise<string | undefined>
   const response = await fetch(`${desktopE2EApiUrl}/v1/billing/credits`, {
     headers: { authorization: `Bearer ${token}`, origin: desktopE2EFrontendUrl },
   });
-  const selfHostedArtifact = desktopE2ECompletedArtifact && process.env['TAU_E2E_COMPLETED_CLOUD_GATEWAY'] !== 'true';
+  /* `TAU_E2E_API_SELF_HOST` starts the API in self-host mode too (`global-setup.ts`): no billing routes, nothing to fund. */
+  const selfHostedArtifact =
+    process.env['TAU_E2E_API_SELF_HOST'] === 'true' ||
+    (desktopE2ECompletedArtifact && process.env['TAU_E2E_COMPLETED_CLOUD_GATEWAY'] !== 'true');
   if (selfHostedArtifact && response.status === 404) {
     // The self-hosted completed-artifact API does not register billing routes.
     return undefined;

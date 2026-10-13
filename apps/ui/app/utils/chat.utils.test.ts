@@ -2,6 +2,7 @@ import process from 'node:process';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MyUIMessage } from '@taucad/chat';
 import {
+  buildEditedUserMessage,
   buildUserMessage,
   finalizeInterruptedToolParts,
   serializeMessage,
@@ -1040,6 +1041,72 @@ describe('buildUserMessage', () => {
 
     expect(first.parts).toEqual([]);
     expect(first.id).not.toBe(second.id);
+  });
+
+  describe('geometry references', () => {
+    const picked = {
+      resource: { kind: 'workspace-file', path: 'gears/main.ts', revision: 'hash-1' },
+      target: {
+        kind: 'component',
+        componentId: 'component:sun_gear',
+        selector: 'node/3',
+        label: 'Sun gear',
+        componentKind: 'part',
+      },
+    } as const;
+
+    it('should carry the chip reference for each token in the text, and a bare one for a typed token', () => {
+      const message = buildUserMessage({
+        text: 'Widen @cad[gears/main.ts#component:sun_gear] and @cad[b.ts#x], again @cad[gears/main.ts#component:sun_gear]',
+        references: [picked],
+      });
+      expect(message.metadata?.references).toEqual([
+        picked,
+        {
+          resource: { kind: 'workspace-file', path: 'b.ts' },
+          target: { kind: 'component', componentId: 'x', label: 'x', componentKind: 'unknown' },
+        },
+      ]);
+    });
+
+    it('should drop a chip reference whose token left the text, and stamp nothing without tokens', () => {
+      expect(buildUserMessage({ text: 'Plain text', references: [picked] }).metadata).not.toHaveProperty('references');
+    });
+
+    describe('when a message is edited', () => {
+      const original = {
+        ...buildUserMessage({ text: 'Widen @cad[gears/main.ts#component:sun_gear]', references: [picked] }),
+        id: 'msg_original',
+      };
+
+      it("should drop the original's references when the edit removes their tokens", () => {
+        const edited = buildEditedUserMessage(original, { text: 'Widen the plate instead' });
+        expect(edited.id).toBe('msg_original');
+        expect(edited.metadata).not.toHaveProperty('references');
+      });
+
+      it("should keep the original's reference for a token the edit kept, and add a token the edit typed", () => {
+        const edited = buildEditedUserMessage(original, {
+          text: 'Widen @cad[gears/main.ts#component:sun_gear] and @cad[b.ts#x]',
+        });
+        expect(edited.metadata?.references).toEqual([
+          picked,
+          {
+            resource: { kind: 'workspace-file', path: 'b.ts' },
+            target: { kind: 'component', componentId: 'x', label: 'x', componentKind: 'unknown' },
+          },
+        ]);
+      });
+
+      it("should prefer the edit composer's chip over the original's reference for the same token", () => {
+        const repicked = { ...picked, resource: { ...picked.resource, revision: 'hash-2' } };
+        const edited = buildEditedUserMessage(original, {
+          text: 'Widen @cad[gears/main.ts#component:sun_gear]',
+          references: [repicked],
+        });
+        expect(edited.metadata?.references).toEqual([repicked]);
+      });
+    });
   });
 });
 

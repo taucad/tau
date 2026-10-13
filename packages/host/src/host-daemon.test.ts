@@ -33,6 +33,8 @@ import * as agentServer from '#agent-server.js';
 import * as machineHost from '#machine-host.js';
 import * as projectHosts from '#project-host.js';
 import type { HostJobWorkerFactory } from '#job-worker.js';
+import type * as runtimeChildSupervisor from '#runtime-child-supervisor.js';
+import type { RuntimeChildHandle } from '#runtime-child-supervisor.js';
 
 /* Observe the filesystem the daemon binds to its runtime child, without changing
  * it: the captured thunk is the connection that child's bridge opens. */
@@ -44,6 +46,48 @@ vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
     fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => {
       runtimeFileSystemOpens.push(open);
       return original.fromFileSystemBridge(open);
+    },
+  };
+});
+
+/* Observe every runtime child the daemon starts and each frame it posts to one, without changing either. A case
+ * can act at the instant a start begins through `runtimeChildStart.hook`. */
+const runtimeChildren = vi.hoisted(
+  () => [] as Array<{ readonly handle: RuntimeChildHandle; readonly frames: Array<{ readonly type: string }> }>,
+);
+const runtimeChildStart = vi.hoisted(() => ({
+  hook: undefined as (() => void) | undefined,
+  /** Holds each started child's `closed` after its exit, as a slow temp-directory removal does. */
+  holdClosed: undefined as Promise<void> | undefined,
+}));
+vi.mock('#runtime-child-supervisor.js', async (importOriginal) => {
+  const original = await importOriginal<typeof runtimeChildSupervisor>();
+  return {
+    ...original,
+    startRuntimeChild: async (
+      options: Parameters<typeof original.startRuntimeChild>[0],
+    ): Promise<RuntimeChildHandle> => {
+      runtimeChildStart.hook?.();
+      const handle = await original.startRuntimeChild(options);
+      const frames: Array<{ readonly type: string }> = [];
+      runtimeChildren.push({ handle, frames });
+      const hold = runtimeChildStart.holdClosed;
+      return {
+        ...handle,
+        ...(hold
+          ? {
+              closed: (async () => {
+                const result = await handle.closed;
+                await hold;
+                return result;
+              })(),
+            }
+          : {}),
+        post: (frame) => {
+          frames.push(frame);
+          handle.post(frame);
+        },
+      };
     },
   };
 });
@@ -197,7 +241,7 @@ type StubRelay = {
  * each one back by path. Unlike the real API it reaps nothing on its own, so a
  * test decides exactly when a peerless route dies.
  */
-const startRelay = async (): Promise<StubRelay> => {
+const startRelay = async (options: { readonly refuse?: (pathname: string) => boolean } = {}): Promise<StubRelay> => {
   const httpServer = createServer();
   resources.push(httpServer);
   const socketServer = new WebSocketServer({ noServer: true });
@@ -228,6 +272,10 @@ const startRelay = async (): Promise<StubRelay> => {
     response.end();
   });
   httpServer.on('upgrade', (request, socket, head) => {
+    if (options.refuse?.(new URL(request.url ?? '/', 'http://relay.invalid').pathname)) {
+      socket.destroy();
+      return;
+    }
     socketServer.handleUpgrade(request, socket, head, (accepted) => {
       const { pathname } = new URL(request.url ?? '/', 'http://relay.invalid');
       if (pathname === '/v1/agents/control') {
@@ -1087,6 +1135,74 @@ describe('startHostDaemon', () => {
     expect(await daemon.closed).toEqual({ cause: 'requested' });
   }, 30_000);
 
+  /* A relay that cannot pair yet (a 404 from an API without the pairing route) once closed the channel the daemon had
+   * already reported ready, and the process lived on with nothing listening. Pairing retries instead. */
+  it('should keep the agent channel listening while a failed pairing retries', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-pairing-retry-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    let pairingRequests = 0;
+    const httpServer = createServer((request, response) => {
+      const { pathname } = new URL(request.url ?? '/', 'http://relay.invalid');
+      if (request.method === 'POST' && pathname === '/v1/agents/pairings') {
+        pairingRequests += 1;
+        if (pairingRequests === 1) {
+          response.writeHead(404).end();
+          return;
+        }
+        response.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            deviceCode: 'device-code-0123456789',
+            userCode: 'WXYZ-9876',
+            verificationUri: 'https://tau.example/pair',
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            pollInterval: 250,
+          }),
+        );
+        return;
+      }
+      if (request.method === 'POST' && pathname === '/v1/agents/pairings/token') {
+        response.writeHead(202).end();
+        return;
+      }
+      response.writeHead(404).end();
+    });
+    resources.push(httpServer);
+    await new Promise<void>((resolve) => {
+      httpServer.listen(0, '127.0.0.1', resolve);
+    });
+    const address = httpServer.address();
+    if (!address || typeof address === 'string') {
+      throw new TypeError('Expected a TCP relay address.');
+    }
+    const events: HostDaemonEvent[] = [];
+    agentServerSpy.mockClear();
+    const daemon = startHostDaemon({
+      relayUrl: new URL(`http://127.0.0.1:${String(address.port)}`),
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), testModel: false },
+      onEvent: (event) => events.push(event),
+    });
+    await daemon.ready;
+    await vi.waitFor(
+      () => {
+        expect(events).toContainEqual(expect.objectContaining({ type: 'pairing', userCode: 'WXYZ-9876' }));
+      },
+      { timeout: 10_000 },
+    );
+
+    expect(events).toContainEqual(expect.objectContaining({ type: 'warning', code: 'PAIRING_FAILED' }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'agent', state: 'stopped' }));
+    const served = agentServerSpy.mock.results.at(-1);
+    if (served?.type !== 'return') {
+      throw new TypeError('Expected the daemon to serve its agent channel.');
+    }
+    await expect(fetch(served.value.url())).resolves.toBeInstanceOf(Response);
+
+    await daemon.close();
+    expect(await daemon.closed).toEqual({ cause: 'requested' });
+  }, 30_000);
+
   /* W6.r1 round 3 (GI-Q6): the account the pairing exchange returned, stored with the credential, is the principal
    * the daemon's credential port and its funded transport name. */
   it('should name the stored account as the principal of its credential and funded transport', async () => {
@@ -1707,9 +1823,17 @@ describe('startHostDaemon', () => {
     await daemon.ready;
     const control = await relay.control;
     control.close(4401, 'device revoked');
+    const pairingRequests = () => relay.requests.filter(({ line }) => line.includes('/v1/agents/pairings'));
+    if (pair !== false) {
+      /* A failed pairing retries rather than ending the daemon, so it is closed once pairing has started. */
+      await vi.waitFor(() => {
+        expect(pairingRequests()).not.toEqual([]);
+      });
+      await daemon.close().catch(() => undefined);
+    }
     const closed = await daemon.closed;
     await daemon.close().catch(() => undefined);
-    return { closed, pairingRequests: relay.requests.filter(({ line }) => line.includes('/v1/agents/pairings')) };
+    return { closed, pairingRequests: pairingRequests() };
   };
 
   it('should exit on a refused credential and never pair when it is a provisioned host', async () => {
@@ -1879,4 +2003,233 @@ describe('startHostDaemon', () => {
     expect(events).toContainEqual(expect.objectContaining({ type: 'jobs', state: 'stopped' }));
     expect(JSON.stringify(events)).not.toContain(credential);
   }, 15_000);
+});
+
+/*
+ * One sandboxed runtime child per agent root and per relay session (kernel
+ * realm-shared state blueprint, invariant I8; operator ruling Q8). Roots and
+ * sessions never share a realm, and a child that exits or hangs costs only
+ * its own root or session.
+ */
+describe('startHostDaemon runtime child per root and session', () => {
+  const proofChild = fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url));
+  const zooProxyUrl = 'wss://zoo.example.test/v1/kernels/zoo';
+
+  /** Settles `'closed'` once the child exits, or `'open'` after `milliseconds`. */
+  const exitOf = async (handle: RuntimeChildHandle, milliseconds = 10_000): Promise<'closed' | 'open'> => {
+    const exited = async (): Promise<'closed'> => {
+      await handle.closed;
+      return 'closed';
+    };
+    const lapsed = async (): Promise<'open'> => {
+      await delay(milliseconds);
+      return 'open';
+    };
+    return Promise.race([exited(), lapsed()]);
+  };
+
+  /** Wait until the daemon is past its control `ready`, so no start of its own interleaves with the case's. */
+  const awaitControlReady = async (relay: StubRelay): Promise<void> => {
+    await vi.waitFor(() => {
+      expect(relay.controlFrames).toContainEqual(expect.objectContaining({ type: 'ready' }));
+    });
+  };
+
+  it('starts one child per agent root, once under concurrent first use, each with the Zoo credential, and closes it with its root', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-child-per-root-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    projectHostSpy.mockClear();
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: proofChild },
+      agent: await agentOptionsIn(temporaryDirectory),
+      /* No session token: every child gets the signed-out frame, with no mint to wait for. */
+      zooProxy: { url: zooProxyUrl, apiUrl: 'https://zoo.example.test' },
+    });
+    try {
+      await daemon.ready;
+      await awaitControlReady(relay);
+      const options = projectHostSpy.mock.calls.at(-1)?.[0];
+      if (options === undefined) {
+        throw new TypeError('Expected the daemon to open a project host.');
+      }
+      const rootA = join(temporaryDirectory, 'workspace');
+      const rootB = join(temporaryDirectory, 'checkout-b');
+      await mkdir(rootB);
+      const releaseB = options.fileSystem.admit(rootB);
+      const before = runtimeChildren.length;
+
+      const [clientA, sameClientA] = await Promise.all([options.runtimeClient(rootA), options.runtimeClient(rootA)]);
+      const clientB = requireTerminableRuntimeClient(await options.runtimeClient(rootB));
+
+      expect(sameClientA).toBe(clientA);
+      const started = runtimeChildren.slice(before);
+      expect(started.map(({ handle }) => handle.url.href)).toEqual([expect.any(String), expect.any(String)]);
+      expect(started[0]?.handle.url.href).not.toBe(started[1]?.handle.url.href);
+      await vi.waitFor(() => {
+        expect(started.map(({ frames }) => frames)).toEqual([
+          [{ type: 'zoo-proxy-credential', url: zooProxyUrl }],
+          [{ type: 'zoo-proxy-credential', url: zooProxyUrl }],
+        ]);
+      });
+
+      releaseB();
+      expect(await exitOf(started[1]!.handle)).toBe('closed');
+      expect(clientB.lifecycleState).toBe('terminated');
+      expect(await exitOf(started[0]!.handle, 0)).toBe('open');
+    } finally {
+      await daemon.close();
+    }
+    expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');
+  }, 30_000);
+
+  it('stays quiet about the runtime child a close interrupts while it starts', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-child-close-race-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const events: HostDaemonEvent[] = [];
+    let closing: Promise<void> | undefined;
+    /* With no agent root, the first child is the version probe the run loop starts after `ready`: close the
+     * daemon the instant that start begins. */
+    runtimeChildStart.hook = () => {
+      runtimeChildStart.hook = undefined;
+      closing = daemon.close();
+    };
+    const before = runtimeChildren.length;
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: proofChild },
+      onEvent: (event) => events.push(event),
+    });
+
+    await vi.waitFor(() => {
+      expect(closing).toBeDefined();
+    });
+    await closing;
+
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'warning', code: 'RUNTIME_CHILD_FAILED' }));
+    /* `close()` resolves only after the interrupted start has finished and its child has exited. */
+    const started = runtimeChildren.slice(before);
+    expect(started).toHaveLength(1);
+    expect(await exitOf(started[0]!.handle, 0)).toBe('closed');
+  }, 30_000);
+
+  it('closes the child of an offer whose route never opens only after reporting why the session ended', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-child-unopened-route-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay({ refuse: (pathname) => pathname === routePath('session-1', 'fs') });
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const events: HostDaemonEvent[] = [];
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: proofChild },
+      onEvent: (event) => events.push(event),
+    });
+    try {
+      await daemon.ready;
+      await awaitControlReady(relay);
+      const control = await relay.control;
+
+      control.send(JSON.stringify(agentOffer(relay.url, 'session-1')));
+      await vi.waitFor(() => {
+        expect(events).toContainEqual(
+          expect.objectContaining({ type: 'session', sessionId: 'session-1', state: 'disconnected' }),
+        );
+      });
+
+      expect(relay.controlFrames).toContainEqual(
+        expect.objectContaining({ type: 'reject', sessionId: 'session-1', code: 'CHILD_UNAVAILABLE' }),
+      );
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ type: 'session', sessionId: 'session-1', code: 'CHILD_EXIT' }),
+      );
+    } finally {
+      await daemon.close();
+    }
+  }, 30_000);
+
+  it('gives each relay session its own child, and a child exit ends only its own session', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-child-per-session-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const events: HostDaemonEvent[] = [];
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: proofChild },
+      maxSessions: 2,
+      onEvent: (event) => events.push(event),
+    });
+    const disconnected = (sessionId: string) =>
+      events.filter(
+        (event) => event.type === 'session' && event.sessionId === sessionId && event.state === 'disconnected',
+      );
+    const cleanupHeld = Promise.withResolvers<void>();
+    try {
+      await daemon.ready;
+      await awaitControlReady(relay);
+      const control = await relay.control;
+      const before = runtimeChildren.length;
+      /* The crash is attributed on the exit alone: `closed` stays pending past any grace, like a slow cleanup. */
+      runtimeChildStart.holdClosed = cleanupHeld.promise;
+
+      control.send(JSON.stringify(agentOffer(relay.url, 'session-1')));
+      control.send(JSON.stringify(agentOffer(relay.url, 'session-2')));
+      await vi.waitFor(() => {
+        expect(relay.controlFrames).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'accept', sessionId: 'session-1' }),
+            expect.objectContaining({ type: 'accept', sessionId: 'session-2' }),
+          ]),
+        );
+      });
+      const started = runtimeChildren.slice(before);
+      expect(started).toHaveLength(2);
+
+      const firstRuntimeRoute = await relay.route(routePath('session-1', 'runtime'));
+      firstRuntimeRoute.send('crash');
+      await vi.waitFor(() => {
+        expect(disconnected('session-1')).toEqual([expect.objectContaining({ code: 'CHILD_EXIT' })]);
+      });
+      /* A shared child would end session 2 in the same instant; give it time to show. */
+      await delay(1000);
+      expect(disconnected('session-2')).toEqual([]);
+      const secondRuntimeRoute = await relay.route(routePath('session-2', 'runtime'));
+      expect(secondRuntimeRoute.readyState).toBe(WebSocket.OPEN);
+
+      control.send(JSON.stringify({ v: 1, type: 'revoke', sessionId: 'session-2' }));
+      await vi.waitFor(() => {
+        expect(disconnected('session-2')).toEqual([expect.objectContaining({ code: 'REVOKED' })]);
+      });
+      expect(await exitOf(started[1]!.handle)).toBe('closed');
+    } finally {
+      runtimeChildStart.holdClosed = undefined;
+      cleanupHeld.resolve();
+      await daemon.close();
+    }
+    expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');
+  }, 30_000);
 });

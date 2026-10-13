@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { CopyButton } from '#components/copy-button.js';
+import { CopyButton } from '@taucad/ui/components/copy-button';
 import { toast } from '#components/ui/sonner.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';

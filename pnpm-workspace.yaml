@@ -74,9 +74,9 @@ catalog:
   '@langchain/ollama': ^1.3.0
   '@langchain/openai': ^1.5.1
   '@langchain/xai': ^1.4.3
+  '@modelcontextprotocol/ext-apps': 1.7.5
   '@modelcontextprotocol/sdk': ^1.29.0
   '@msgpack/msgpack': ^3.1.3
-  '@libcascade/toolchain': 3.0.2
   '@nestjs/common': ^11.1.27
   '@nestjs/core': ^11.1.27
   '@nestjs/platform-fastify': ^11.2.4
@@ -153,7 +153,7 @@ catalog:
   schematic-symbols: 0.0.244
   spicets: 0.0.5
   spicey: 0.0.14
-  '@taucad/kcl-wasm-lib': 0.1.184
+  '@taucad/kcl-wasm-lib': 0.1.191
   '@testing-library/jest-dom': 6.6.3
   '@testing-library/react': 16.2.0
   '@tiptap/core': ^3.27.1
@@ -226,7 +226,7 @@ catalog:
   katex: ^0.16.47
   knip: ^6.17.1
   libassimp: ^0.3.0
-  libcascade: 3.0.2
+  libcascade: 3.0.3
   lighthouse: ^13.4.0
   lint-staged: ^16.4.0
   lucide-react: ^0.552.0
@@ -286,6 +286,7 @@ catalog:
   unist-util-visit: ^5.1.0
   vite: 8.0.10
   vite-plugin-mkcert: 2.0.0
+  vite-plugin-singlefile: 2.3.3
   vite-plugin-static-copy: ^4.1.1
   vitest: 4.1.11
   vitest-mock-extended: ^3.1.1
@@ -295,7 +296,7 @@ catalog:
   isomorphic-git: 1.38.5
   xstate: 6.0.0-alpha.59
   zod: ^4.4.3
-  nanoraster: ^0.5.7
+  nanoraster: ^0.6.0
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
   picovoxel: 0.1.0
   n8ao: 1.10.2

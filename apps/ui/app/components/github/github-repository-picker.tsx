@@ -20,8 +20,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
+import { isReservedBranchName } from '@taucad/revisions';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import {
   configureGithubAccess,
   GithubRequestError,
@@ -37,6 +38,9 @@ import type {
   GithubRepository,
   GithubTreeFile,
 } from '#lib/github-connections.js';
+
+/* A conflict line travels as a branch but holds a decision, not a line to link (D14). */
+const isLinkable = ({ name }: { readonly name: string }): boolean => !isReservedBranchName(name);
 
 export type GithubRepositorySelection = Readonly<{
   connection: GithubConnection;
@@ -253,7 +257,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
       try {
         const result = await githubConnections.branches(connectionId, repository.id);
         let found: readonly GithubBranch[] =
-          result.branches.length === 0 ? [{ name: repository.defaultBranch }] : result.branches;
+          result.branches.length === 0 ? [{ name: repository.defaultBranch }] : result.branches.filter(isLinkable);
         /* D14: pages are alphabetical, so the default branch may lie beyond the first one. */
         if (!found.some((item) => item.name === repository.defaultBranch)) {
           const resolved = await githubConnections
@@ -454,7 +458,9 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
       }
       setBranches((current) => [
         ...current,
-        ...result.branches.filter((candidate) => !current.some((item) => item.name === candidate.name)),
+        ...result.branches.filter(
+          (candidate) => isLinkable(candidate) && !current.some((item) => item.name === candidate.name),
+        ),
       ]);
       setBranchPage(nextPage);
       setBranchHasMore(result.branches.length === 100);

@@ -1229,7 +1229,7 @@ describe('transport conformance — shared transport internals (T37)', () => {
           url: new URL('about:blank'),
           workerCtor: function fakeNodeWorker() {
             return worker;
-          } as unknown as WorkerConstructorLike,
+          } as unknown as new (url: string | URL) => typeof worker,
         }).materialize() as unknown as RuntimeTransportClient;
       },
     ],
@@ -1476,8 +1476,6 @@ function messagePortAsWebSocket(port: MessagePort): WebSocketLike {
   };
 }
 
-type WorkerConstructorLike = new (url: string | URL) => unknown;
-
 type FakeWorker = {
   postMessage: (data: unknown, transfer?: readonly Transferable[]) => void;
   addEventListener: (type: 'message', listener: (event: { data: unknown }) => void) => void;
@@ -1547,7 +1545,7 @@ type FakeNodeWorker = {
 };
 
 function makeFakeNodeWorkerCtor(): {
-  workerCtor: unknown;
+  workerCtor: new (url: string | URL) => FakeNodeWorker;
   created: FakeNodeWorker[];
   urls: Array<string | URL>;
   terminateCalls: () => number;

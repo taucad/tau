@@ -11,9 +11,9 @@ import { z } from 'zod';
  */
 export const revisionsInputSchema = z.object({
   action: z
-    .enum(['log', 'diff', 'describe'])
+    .enum(['log', 'diff', 'describe', 'conflict'])
     .describe(
-      'log: list a branch’s revisions, newest first. diff: list the files that changed between two revisions. describe: say which branch this project is on and what else it holds.',
+      'log: list a branch’s revisions, newest first. diff: list the files that changed between two revisions. describe: say which branch this project is on and what else it holds. conflict: read both sides of a conflict waiting for a decision.',
     ),
   branch: z.string().optional().describe('log only. Branch to list; defaults to the one this project is on.'),
   limit: z
@@ -25,6 +25,11 @@ export const revisionsInputSchema = z.object({
     .describe('log only. Most recent revisions to list; defaults to all of them.'),
   from: z.string().optional().describe('diff only. The older revision id. Omit to compare against an empty project.'),
   to: z.string().optional().describe('diff only. The newer revision id. Required for diff.'),
+  revision: z
+    .string()
+    .optional()
+    .describe('conflict only. The conflicted revision id; defaults to the conflict waiting on this branch.'),
+  path: z.string().optional().describe('conflict only. One conflicted file; defaults to all of them.'),
 });
 
 /** One revision, as the history pane and the chat card show it. @public */
@@ -49,6 +54,17 @@ export const revisionChangeSchema = z.object({
   kind: z.enum(['added', 'modified', 'deleted']),
 });
 
+/** One conflicted file's three versions. @public */
+export const revisionConflictFileSchema = z.object({
+  path: z.string(),
+  chooseOne: z
+    .boolean()
+    .describe('Not text (parametric, binary or a file/folder clash): the user keeps one side; no content is read.'),
+  base: z.string().optional().describe('What both sides started from.'),
+  ours: z.string().optional().describe('This branch’s version, which its files hold now.'),
+  theirs: z.string().optional().describe('The other side’s version.'),
+});
+
 /** What one read answers with. @public */
 export const revisionsOutputSchema = z.object({
   where: z.string().describe('Where this project is right now, in one line: "main · Rev 12".'),
@@ -59,6 +75,14 @@ export const revisionsOutputSchema = z.object({
     .array(z.object({ name: z.string(), revisionNumber: z.number().int().nonnegative(), revisionId: z.string() }))
     .optional()
     .describe('Present for describe.'),
+  conflict: z
+    .object({
+      revisionId: z.string(),
+      labels: z.object({ ours: z.string(), theirs: z.string() }),
+      files: z.array(revisionConflictFileSchema),
+    })
+    .optional()
+    .describe('Present for conflict.'),
 });
 
 /** @public */

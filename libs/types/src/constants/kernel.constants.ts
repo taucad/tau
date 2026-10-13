@@ -189,7 +189,7 @@ export default function main(p = defaultParams) {}
     backendProvider: 'zoo',
     longDescription:
       "Geometry runs on Zoo's GPU-accelerated engine in the cloud rather than in your browser, so model complexity is bounded by the server, not by the tab. Best for large assemblies and detailed parts that stall a WASM kernel, with precise parametric geometry and STEP export.",
-    emptyCode: `@settings(defaultLengthUnit = mm, kclVersion = 1.0)
+    emptyCode: `@settings(defaultLengthUnit = mm, kclVersion = 3.0)
 `,
     recommended: 'Large Assemblies & Complex Parts',
     tags: ['GPU-Accelerated', 'Cloud Engine', 'Large Assemblies', 'Parametric', 'KCL'],

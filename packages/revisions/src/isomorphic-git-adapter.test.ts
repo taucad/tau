@@ -391,3 +391,61 @@ describe('isomorphic-git tag ref locking', () => {
     );
   });
 });
+
+describe('removing a linked checkout', () => {
+  it('should stop at the first file it cannot delete, leaving nothing in flight and the checkout registered', async () => {
+    const filesystem = new MemoryProvider();
+    const checkoutRoot = new MemoryProvider();
+    providers.push(filesystem, checkoutRoot);
+    const port = createIsomorphicGitRevisionPort({
+      filesystem,
+      checkouts: { projectId: 'project-1', root: () => checkoutRoot },
+    });
+    await port.init({ author });
+    const receipt = await port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['a.scad', encoder.encode('a\n')],
+        ['b.scad', encoder.encode('b\n')],
+        ['nested/c.scad', encoder.encode('c\n')],
+      ]),
+      provenance,
+      summary: { generated: 'First' },
+    });
+    await port.updateRef({ name: 'refs/heads/main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+    const linked = await port.addCheckout!({ branch: 'side', from: revisionId(receipt.commitId) });
+    /* One file refuses at once; every other deletion takes a while to land, so a
+     * removal that refused while its siblings were still running is caught. */
+    let refusing = true;
+    const unlink = checkoutRoot.unlink.bind(checkoutRoot);
+    vi.spyOn(checkoutRoot, 'unlink').mockImplementation(async (path) => {
+      if (refusing && path === 'b.scad') {
+        throw Object.assign(new Error(`EBUSY: ${path}`), { code: 'EBUSY' });
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      return unlink(path);
+    });
+    const remaining = async (): Promise<boolean[]> =>
+      Promise.all(['a.scad', 'b.scad', 'nested/c.scad'].map(async (path) => checkoutRoot.exists(path)));
+
+    await expect(port.removeCheckout!(linked.id)).rejects.toThrow('EBUSY: b.scad');
+    const atRefusal = await remaining();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect(await remaining()).toEqual(atRefusal);
+    expect(atRefusal[1]).toBe(true);
+    const afterRefusal = await port.listCheckouts!();
+    expect(afterRefusal.map((checkout) => checkout.id)).toContain(linked.id);
+
+    refusing = false;
+    await port.removeCheckout!(linked.id);
+
+    expect(await checkoutRoot.readdir('')).toEqual([]);
+    const afterRetry = await port.listCheckouts!();
+    expect(afterRetry.map((checkout) => checkout.id)).not.toContain(linked.id);
+  });
+});

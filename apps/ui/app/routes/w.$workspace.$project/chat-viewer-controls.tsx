@@ -5,22 +5,25 @@ import { Separator } from '@taucad/ui/components/separator';
 import { cn } from '@taucad/ui/utils/cn';
 import type { Rendering } from '@taucad/runtime';
 import { CaptureViewControl } from '#components/geometry/cad/capture-view-control.js';
-import { FitViewControl } from '#components/geometry/cad/fit-view-control.js';
-import { FullscreenViewControl } from '#components/geometry/cad/fullscreen-view-control.js';
-import { GridSizeIndicator } from '#components/geometry/cad/grid-control.js';
-import { MeasureControl } from '#components/geometry/cad/measure-control.js';
-import { MeasurementList, MeasureOptions } from '#components/geometry/cad/measure-tool-row.js';
-import { SectionViewControl } from '#components/geometry/cad/section-view-control.js';
+import { FitViewControl } from '@taucad/viewer/cad/fit-view-control';
+import { FullscreenViewControl } from '@taucad/viewer/cad/fullscreen-view-control';
+import { GridSizeIndicator } from '@taucad/viewer/cad/grid-control';
+import { MeasureControl } from '@taucad/viewer/cad/measure-control';
+import { MeasurementList, MeasureOptions } from '@taucad/viewer/cad/measure-tool-row';
+import { SectionViewControl } from '@taucad/viewer/cad/section-view-control';
 import {
   SectionEditor,
   SectionOptions,
   SectionStatus,
   focusFirstControl,
   useFocusHandOff,
-} from '#components/geometry/cad/section-tool-row.js';
-import { ViewerSettings } from '#components/geometry/cad/viewer-settings.js';
-import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+} from '@taucad/viewer/cad/section-tool-row';
+import { ViewerSettings } from '@taucad/viewer/cad/viewer-settings';
+import { useGraphics, useGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';
 import { useViewerShortcuts } from '#hooks/use-viewer-shortcuts.js';
+import { useCad, useCadSelector } from '#hooks/use-cad.js';
+import { selectCadOperationTimeout } from '#machines/cad.machine.js';
+import { defaultOperationTimeout } from '#constants/editor.constants.js';
 
 type Tool = 'section' | 'measure';
 
@@ -182,6 +185,14 @@ export function ChatViewerControls({
     setAnnouncement(({ count }) => ({ phrase, count: count + 1 }));
   }, []);
   const keys = useViewerShortcuts(barRef, announce);
+  const cadRef = useCad();
+  const operationTimeoutValue = useCadSelector(selectCadOperationTimeout, defaultOperationTimeout);
+  const setOperationTimeout = useCallback(
+    (operationTimeout: number) => {
+      cadRef?.send({ type: 'setOperationTimeout', operationTimeout });
+    },
+    [cadRef],
+  );
 
   const stopSection = useCallback(() => {
     graphicsRef.send({ type: 'setSectionViewActive', payload: false });
@@ -282,6 +293,11 @@ export function ChatViewerControls({
             side='top'
             align='end'
             kernelSettings={kernelSettings}
+            operationTimeout={{
+              value: operationTimeoutValue,
+              defaultValue: defaultOperationTimeout,
+              onChange: setOperationTimeout,
+            }}
             className='size-7 border-0 bg-transparent shadow-none hover:bg-accent/50 dark:hover:bg-accent/80'
           />
         </div>

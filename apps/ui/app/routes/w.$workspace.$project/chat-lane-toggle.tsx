@@ -2,17 +2,18 @@ import { useEffect, useId, useRef } from 'react';
 import type { IDockviewHeaderActionsProps } from 'dockview-react';
 import { MessageCircle } from 'lucide-react';
 import { useSelector } from '@xstate/react';
+import { Separator } from '@taucad/ui/components/separator';
 import { cn } from '@taucad/ui/utils/cn';
 import { StatusMark } from '#components/nav/status-mark.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { useSidebar } from '#components/ui/sidebar.js';
 import { useIsTopLeftGroup } from '#components/panes/use-is-top-right-group.js';
 import { selectChatFacts, useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useProject } from '#hooks/use-project.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
+import { formatKeyCombination } from '@taucad/ui/utils/keys';
+import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { useProjectWorkspace, useWorkspaceLanes } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 type Place = 'lane' | 'viewer';
@@ -145,7 +146,8 @@ export function ChatLaneToggle({ place }: { readonly place: Place }): React.JSX.
 
 /**
  * The viewer's tab-bar prefix: the chat lane toggle at the head of the
- * top-left group's tabs, on desktop, while the chat lane is hidden.
+ * top-left group's tabs, on desktop, while the chat lane is hidden, with the
+ * same hairline that sets the top-right cluster apart from the tabs.
  *
  * @param properties - Dockview's header-action props for the group.
  * @returns The toggle, or nothing in every other group and state.
@@ -158,8 +160,10 @@ export function ViewerChatLaneToggle(properties: IDockviewHeaderActionsProps): R
     return undefined;
   }
   return (
-    <div className='flex h-full items-center pl-1'>
+    <div className='flex h-full items-center gap-1 pl-1'>
       <ChatLaneToggle place='viewer' />
+      {/* The variant, not `h-4`: the separator's own `data-[orientation=vertical]:h-full` outranks a bare height. */}
+      <Separator orientation='vertical' className='data-[orientation=vertical]:h-4' />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { dump as yamlDump, load as yamlLoad } from 'js-yaml';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { run } from './commands.ts';
 import {
+  buildCloneArgs,
   findRoot,
   forkRepo,
   mutateCatalog,
@@ -149,6 +150,12 @@ describe('strict validation', () => {
       { ...publicCatalog(), repos: { bad: { upstream: 'example/bad', surprise: true } } },
       undefined,
       /unsupported field/,
+    ],
+    [
+      'empty sparse patterns',
+      { ...publicCatalog(), groups: {}, repos: { bad: { upstream: 'example/bad', sparse: [] } } },
+      undefined,
+      /sparse must be a non-empty array/,
     ],
     [
       'path escape',
@@ -326,5 +333,35 @@ describe('catalog-aware commands', () => {
       run(['add', 'example/new', '-d', 'No']);
     }).toThrow(/Authorized setup/);
     expect(readFileSync(join(root, 'repos.yaml'), 'utf8')).toBe(before);
+  });
+});
+
+describe('clone arguments', () => {
+  it('clones blobless unless shallow, and defers checkout for sparse patterns', () => {
+    expect(buildCloneArgs({ cloneUrl: 'u', directory: 'd' })).toStrictEqual([
+      'git',
+      'clone',
+      '--filter=blob:none',
+      'u',
+      'd',
+    ]);
+    expect(buildCloneArgs({ cloneUrl: 'u', directory: 'd', shallow: true, branch: 'b' })).toStrictEqual([
+      'git',
+      'clone',
+      '--depth',
+      '1',
+      '--branch',
+      'b',
+      'u',
+      'd',
+    ]);
+    expect(buildCloneArgs({ cloneUrl: 'u', directory: 'd', sparse: true })).toContain('--no-checkout');
+  });
+
+  it('keeps sparse patterns from the catalog', () => {
+    const root = makeRoot({
+      public: { ...publicCatalog(), groups: {}, repos: { big: { upstream: 'example/big', sparse: ['/src/**'] } } },
+    });
+    expect(readManifest(root).manifest.repos['big']?.sparse).toStrictEqual(['/src/**']);
   });
 });

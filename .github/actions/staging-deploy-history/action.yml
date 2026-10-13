@@ -1,0 +1,97 @@
+name: 'Staging deploy history'
+description: >-
+  Records which commit an app last published to staging, and reads those records back
+  so `ci.yml`'s plan can diff each app against what staging actually runs.
+
+# `record` runs in a deploy job right after it publishes, never when it skipped: it
+# uploads an empty `staging-deploy-<app>` artifact to the run, so the run's commit is
+# the one staging now serves. A deploy job that publishes some other commit (a docs
+# dispatch with a `tag`) does not record.
+#
+# `base` runs in the plan job. For each app it takes the newest unexpired record and
+# returns its commit when that commit is an ancestor of HEAD. Without one (no deploy
+# since the records' retention ran out, or staging serves a commit off this history,
+# such as a branch dispatch) the app has no base, and the plan deploys it: there is no
+# commit to diff against that is known to be on staging. A red `main` does not move
+# these records, so it cannot widen a deploy the way the last green CI run as a base
+# did; a push that failed before deploying leaves the record behind it, so its change
+# still ships with the next deploy.
+
+inputs:
+  mode:
+    description: '`record` (in a deploy job, after it published) or `base` (in the plan job)'
+    required: true
+  app:
+    description: '`record`: the Nx project the job published, e.g. `ui`'
+    required: false
+    default: ''
+  apps:
+    description: '`base`: JSON array of the Nx projects to look up'
+    required: false
+    default: '[]'
+  github-token:
+    description: '`base`: token with actions: read'
+    required: false
+    default: ''
+
+outputs:
+  bases:
+    description: '`base`: JSON object from each app with a usable record to its commit; apps without one are absent'
+    value: ${{ steps.base.outputs.bases }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check the selected mode
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        APP: ${{ inputs.app }}
+      run: |
+        case "$MODE" in
+          base) ;;
+          record) [ -n "$APP" ] || { echo "::error::record needs an app" >&2; exit 1; } ;;
+          *) echo "::error::Unsupported staging deploy history mode: $MODE" >&2; exit 1 ;;
+        esac
+
+    - name: Write the deploy record
+      if: inputs.mode == 'record'
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+      run: echo "$GITHUB_SHA" > "$RUNNER_TEMP/staging-deploy-$APP"
+
+    # `overwrite` lets a rerun of the deploy job record again in the same run.
+    - name: Upload the deploy record
+      if: inputs.mode == 'record'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: staging-deploy-${{ inputs.app }}
+        path: ${{ runner.temp }}/staging-deploy-${{ inputs.app }}
+        if-no-files-found: error
+        overwrite: true
+
+    - name: Find each app's last staging deploy on this history
+      id: base
+      if: inputs.mode == 'base'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        APPS: ${{ inputs.apps }}
+      run: |
+        set -euo pipefail
+        bases='{}'
+        for app in $(jq -r '.[]' <<< "$APPS"); do
+          sha=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/artifacts" \
+            -f name="staging-deploy-$app" -f per_page=100 \
+            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | last | .workflow_run.head_sha // empty')
+          if [ -z "$sha" ]; then
+            echo "$app: no staging deploy on record"
+          elif ! git merge-base --is-ancestor "$sha" HEAD 2> /dev/null; then
+            echo "$app: staging serves $sha, which is not on this history"
+          else
+            echo "$app: staging serves $sha"
+            bases=$(jq -c --arg app "$app" --arg sha "$sha" '.[$app] = $sha' <<< "$bases")
+          fi
+        done
+        echo "bases=$bases" >> "$GITHUB_OUTPUT"

@@ -223,7 +223,9 @@ describe('createChatToolRegistry listing', () => {
    * the thing nothing asserted. */
   it('lists the revisions tool only where a revisions client is attached', () => {
     expect(listOf({})).not.toContain('revisions');
-    expect(listOf({ revisions: { log: vi.fn(), diff: vi.fn(), describe: vi.fn() } })).toContain('revisions');
+    expect(listOf({ revisions: { log: vi.fn(), diff: vi.fn(), describe: vi.fn(), conflict: vi.fn() } })).toContain(
+      'revisions',
+    );
   });
 
   it('lists and dispatches both parameter tools only with one semantic client', async () => {

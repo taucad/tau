@@ -1,5 +1,5 @@
 import { interactiveViewContent } from '#lib/interactive-view-content.js';
-import { markGeometryReceipt } from '#lib/renderer-telemetry.js';
+import { markGeometryReceipt } from '@taucad/viewer/lib/renderer-telemetry';
 import { createAsyncLogic, setup, types, waitFor } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import type { CodeIssue, LogLevel, LogOrigin } from '@taucad/types';
@@ -16,7 +16,7 @@ import type {
 import type { ParameterManifest } from '@taucad/parameters';
 import { asKnownArtifact, isKernelIssueCode } from '@taucad/runtime/types';
 import { safeDispose } from '@taucad/utils/dispose';
-import type { LengthSymbol } from '#constants/length-units.js';
+import type { LengthSymbol } from '@taucad/viewer/constants/length-units';
 import { defaultOperationTimeout } from '#constants/editor.constants.js';
 import { actorIdOf, eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';

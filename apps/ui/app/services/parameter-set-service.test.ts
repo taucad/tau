@@ -2,8 +2,8 @@ import { createElement } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
-import type { ParameterCommit } from '#components/geometry/parameters/rjsf-context.js';
+import { ParametersNumber } from '@taucad/viewer/parameters/parameters-number';
+import type { ParameterCommit } from '@taucad/viewer/parameters/rjsf-context';
 import { parameterEntryPath } from '@taucad/types';
 import { compileParameterManifest } from '@taucad/parameters';
 import type { ParameterManifest, ParameterSetOutcome, ParameterSetRequestBase } from '@taucad/parameters';
@@ -231,32 +231,40 @@ const serviceFixture = (initialRecord?: string, watchReady = Promise.resolve()) 
 };
 
 describe('parameter set service behaviours', () => {
-  it.each(['reset', 'closed'] as const)(
-    'waits for actual watch acknowledgement and preserves %s diagnostics',
-    async (type) => {
-      const ready = Promise.withResolvers<void>();
-      const fixture = serviceFixture(undefined, ready.promise);
-      const manifest = await fixture.manifestFor();
-      const resolving = fixture.service.resolve('main.ts', manifest);
-      await vi.waitFor(() => {
-        expect(fixture.service.actor('main.ts')).toBeDefined();
-      });
-      expect(fixture.exists).not.toHaveBeenCalled();
-      ready.resolve();
-      await resolving;
-      if (type === 'reset') {
-        fixture.resetWatch();
-      } else {
-        fixture.closeWatch();
-      }
-      await vi.waitFor(() => {
-        expect(fixture.service.actor('main.ts')?.getSnapshot().context.diagnostic?.code).toBe(
-          type === 'reset' ? 'WATCH_RESET' : 'WATCH_CLOSED',
-        );
-      });
-      await fixture.service.close();
-    },
-  );
+  it('waits for actual watch acknowledgement and preserves closed diagnostics', async () => {
+    const ready = Promise.withResolvers<void>();
+    const fixture = serviceFixture(undefined, ready.promise);
+    const manifest = await fixture.manifestFor();
+    const resolving = fixture.service.resolve('main.ts', manifest);
+    await vi.waitFor(() => {
+      expect(fixture.service.actor('main.ts')).toBeDefined();
+    });
+    expect(fixture.exists).not.toHaveBeenCalled();
+    ready.resolve();
+    await resolving;
+    fixture.closeWatch();
+    await vi.waitFor(() => {
+      expect(fixture.service.actor('main.ts')?.getSnapshot().context.diagnostic?.code).toBe('WATCH_CLOSED');
+    });
+    await fixture.service.close();
+  });
+
+  it('re-arms the watch and reloads when it resets', async () => {
+    const fixture = serviceFixture();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.resolve('main.ts', manifest);
+    const actor = fixture.service.actor('main.ts')!;
+    fixture.resetWatch();
+    expect(actor.getSnapshot().matches({ open: 'loading' })).toBe(true);
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().matches({ open: 'ready' })).toBe(true);
+    });
+    expect(actor.getSnapshot().context.diagnostic).toBeUndefined();
+    expect(await fixture.commit(manifest, { pointer: '/width', value: 110, base: 100 })).toMatchObject({
+      status: 'committed',
+    });
+    await fixture.service.close();
+  });
 
   it('commits each field against the live manifest after a source edit', async () => {
     const fixture = serviceFixture();

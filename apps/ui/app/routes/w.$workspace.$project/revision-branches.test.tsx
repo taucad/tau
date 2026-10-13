@@ -174,3 +174,46 @@ describe('a conflict line in Branches (D14)', () => {
     expect(revisionStatusHarness.commands.syncNow).not.toHaveBeenCalled();
   });
 });
+
+describe('a branch with no checkout on this device (D93)', () => {
+  it('should say Remote only for a branch the remote has, and nothing for one only this device has', () => {
+    render(
+      <RevisionBranches
+        branches={[
+          { name: 'main', head: 'rev-1', checkoutId: 'live', checkoutRoot: '/p', leaseChatIds: [] },
+          {
+            name: 'upstream',
+            head: 'rev-2',
+            checkoutId: undefined,
+            checkoutRoot: undefined,
+            leaseChatIds: [],
+            onRemote: true,
+          },
+          {
+            name: 'renamed-here',
+            head: 'rev-3',
+            checkoutId: undefined,
+            checkoutRoot: undefined,
+            leaseChatIds: [],
+            onRemote: false,
+          },
+        ]}
+        currentBranch='main'
+        liveCheckoutId='live'
+        chatNames={{}}
+        chatCheckoutIds={{}}
+        branchFacts={new Map()}
+        conflicts={[]}
+        isBusy={false}
+        isWritable
+        onSwitch={vi.fn()}
+        onMerge={vi.fn()}
+        onDiscard={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    );
+
+    const rows = screen.getAllByRole('listitem');
+    expect(rows.map((row) => row.textContent.includes('Remote only'))).toEqual([false, true, false]);
+  });
+});

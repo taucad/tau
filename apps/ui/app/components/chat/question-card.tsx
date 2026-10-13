@@ -270,7 +270,8 @@ function SettledRows({
   );
 }
 
-const cardClassName = (isFlat: boolean): string => (isFlat ? 'px-1 py-2.5' : 'rounded-lg border bg-background p-3');
+const cardClassName = (isFlat: boolean): string =>
+  isFlat ? 'px-1 py-2.5' : 'rounded-lg border bg-background px-1 py-3';
 
 const settledTitle = (kind: AskStatus['kind'], agentName: string | undefined): string => {
   switch (kind) {

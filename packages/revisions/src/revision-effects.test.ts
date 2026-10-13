@@ -28,7 +28,7 @@ import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
 import { writeChatRef } from '#chat-ref.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
-import type { ConflictRecord, RevisionPort } from '#revision-port.js';
+import type { Checkout, ConflictRecord, RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { createOpsLog, opsRefName } from '#ops-ref.js';
@@ -44,7 +44,7 @@ import type { RevisionActors, RevisionActorsOptions, RevisionFileSystem } from '
 import { StepClock } from '@taucad/xstate-testing/clock';
 
 import type { ParameterRecordCodec, RevisionId } from '#algorithms/index.js';
-import type { SyncMergeActorOutput } from '#sync.machine.js';
+import type { SyncFetchActorOutput, SyncMergeActorOutput } from '#sync.machine.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { syncPullDeadlineMilliseconds } from '#sync.machine.js';
 
@@ -82,6 +82,8 @@ type Fixture = {
   readonly filesystem: RevisionFileSystem;
   readonly port: RevisionPort;
   readonly actors: RevisionActors;
+  /** Each checkout's own files, as the actors reach them before any wrap. */
+  readonly actorFilesystem: (checkout: Checkout) => Promise<RevisionFileSystem>;
 };
 
 type ActorSet = Readonly<{
@@ -151,20 +153,19 @@ const fixture = async (
       filesystem,
       checkouts: { projectId: 'project-1', root: linkedFilesystem },
     });
+  const actorFilesystem = async (checkout: Checkout): Promise<RevisionFileSystem> =>
+    native === undefined
+      ? checkout.kind === 'live'
+        ? filesystem
+        : linkedFilesystem(checkout.id)
+      : new NodeFsProvider(checkout.root);
   const actors = createRevisionActors({
     port,
     projectId: 'project-1',
-    filesystem: async (checkout) =>
-      wrap(
-        native === undefined
-          ? checkout.kind === 'live'
-            ? filesystem
-            : await linkedFilesystem(checkout.id)
-          : new NodeFsProvider(checkout.root),
-      ),
+    filesystem: async (checkout) => wrap(await actorFilesystem(checkout)),
     ...extra,
   });
-  return { root, filesystem, port, actors };
+  return { root, filesystem, port, actors, actorFilesystem };
 };
 
 /** The record device (R1) the conflict-line fixtures record as. */
@@ -1472,6 +1473,47 @@ for (const actorSet of actorSets) {
       expect(await context.port.readRef('rename-target')).toBe(context.base);
     }, 30_000);
 
+    /* D91: a rename moves one ref. A linked checkout is named by its branch and
+     * the remote keeps the old name, so either would be left on a branch that no
+     * longer exists — refused before anything is written. */
+    it('should refuse to rename a branch a linked checkout holds, and write nothing', async () => {
+      const context = await synchronized();
+      const linked = await context.port.addCheckout?.({ branch: 'side', from: context.base });
+
+      await expect(
+        run(context.actors.branch.rename, { projectId: 'project-1', branch: 'side', name: 'side-renamed' }),
+      ).rejects.toMatchObject({ code: 'BRANCH_RENAME_LINKED' });
+      expect(await context.port.readRef('side')).toBe(context.base);
+      expect(await context.port.readRef('side-renamed')).toBeUndefined();
+      const checkouts = await context.port.listCheckouts?.();
+      expect(checkouts?.find((checkout) => checkout.id === linked?.id)?.branch).toBe('side');
+    }, 30_000);
+
+    it('should refuse to rename a branch its remote holds, and write nothing', async () => {
+      const context = await synchronized();
+      await context.port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+
+      await expect(
+        run(context.actors.branch.rename, { projectId: 'project-1', branch: 'main', name: 'trunk' }),
+      ).rejects.toMatchObject({ code: 'BRANCH_RENAME_PUSHED' });
+      expect(await context.port.readRef('main')).toBe(context.base);
+      expect(await context.port.readRef('trunk')).toBeUndefined();
+      const live = await context.port.readHead();
+      expect(live?.branch).toBe('main');
+    }, 30_000);
+
+    it('should rename a branch only this device holds', async () => {
+      const context = await synchronized();
+      await context.port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+      await context.port.updateRef({ name: 'solo', expectedHead: undefined, head: context.base });
+
+      await expect(
+        run(context.actors.branch.rename, { projectId: 'project-1', branch: 'solo', name: 'solo-renamed' }),
+      ).resolves.toStrictEqual({ branch: 'solo-renamed' });
+      expect(await context.port.readRef('solo')).toBeUndefined();
+      expect(await context.port.readRef('solo-renamed')).toBe(context.base);
+    }, 30_000);
+
     it('aborts a stopped apply and drains the in-flight port operation before settling', async () => {
       const context = await synchronized();
       const entered = Promise.withResolvers<void>();
@@ -1708,25 +1750,33 @@ for (const actorSet of actorSets) {
       });
     }, 30_000);
 
-    /* Policy: fast-forward a clean checkout (D60 extends that to linked ones);
-     * a branch with work of its own is never moved by a fetch. */
-    it('does not advance another checkout’s branch that has work of its own', async () => {
+    /*
+     * D87: another checkout's branch that diverged from its remote head was left
+     * where it was — no merge, no conflict line, and every push refused its
+     * lease for ever. Policy rule 9 integrates every checkout on every fetch.
+     *
+     * @param change - What `feature`'s own revision does to the base tree.
+     * @returns The fixture, `feature`'s own revision, and actors whose fetch
+     *   brings the remote's `feature` (which changed `main.ts`).
+     */
+    const linkedDivergence = async (change: Readonly<Record<string, string>>) => {
       const context = await synchronized();
-      const feature = await context.port.addCheckout?.({ branch: 'feature', from: context.base });
-      expect(feature).toMatchObject({ kind: 'linked', branch: 'feature' });
-      await context.port.updateRef({ name: 'refs/remotes/tau/feature', expectedHead: undefined, head: context.base });
-      const baseTree = (await context.port.readTree(revisionId(context.base))) ?? new ImmutableRevisionTree([]);
       const own = await context.port.writeRevision({
         parents: [revisionId(context.base)],
-        tree: baseTree,
+        tree: new ImmutableRevisionTree([
+          ...context.baseTree
+            .entries()
+            .filter((entry) => !(entry.path in change))
+            .map((entry) => [entry.path, entry.content, entry.mode] as const),
+          ...Object.entries(change),
+        ]),
         provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13, 4) },
         summary: { generated: 'Work on feature' },
       });
-      await context.port.updateRef({
-        name: 'feature',
-        expectedHead: revisionId(context.base),
-        head: revisionId(own.commitId),
-      });
+      await context.port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(own.commitId) });
+      const feature = await context.port.addCheckout?.({ branch: 'feature' });
+      expect(feature).toMatchObject({ kind: 'linked', branch: 'feature' });
+      await context.port.updateRef({ name: 'refs/remotes/tau/feature', expectedHead: undefined, head: context.base });
       const wrappedPort: RevisionPort = {
         ...context.port,
         listRemoteRefs: async () => [
@@ -1734,9 +1784,10 @@ for (const actorSet of actorSets) {
           { name: 'refs/heads/feature', head: context.remote },
         ],
         fetch: async () => {
+          const tracked = await context.port.readRef('refs/remotes/tau/feature');
           await context.port.updateRef({
             name: 'refs/remotes/tau/feature',
-            expectedHead: context.base,
+            expectedHead: tracked === undefined ? undefined : revisionId(tracked),
             head: context.remote,
           });
           return { refs: [{ name: 'refs/remotes/tau/feature', head: context.remote }] };
@@ -1745,11 +1796,80 @@ for (const actorSet of actorSets) {
       const actors = createRevisionActors({
         port: wrappedPort,
         projectId: 'project-1',
-        filesystem: () => context.filesystem,
+        filesystem: async (checkout) => context.actorFilesystem(checkout),
+      });
+      return { ...context, own: own.commitId, featureId: feature?.id ?? '', actors };
+    };
+    const fetchMain = async (actors: RevisionActors) =>
+      run<SyncFetchActorOutput>(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+
+    it('should merge another checkout’s diverged clean branch on fetch, re-head it and owe a push (D87)', async () => {
+      const context = await linkedDivergence({ 'feature.ts': 'mine\n' });
+
+      const fetched = await fetchMain(context.actors);
+
+      const head = await context.port.readRef('feature');
+      expect(head).not.toBe(context.own);
+      const landed = await context.port.readRevision(revisionId(head ?? ''));
+      expect(landed?.parents).toEqual([context.own, context.remote]);
+      expect(fetched.advanced).toContainEqual({
+        branch: 'feature',
+        checkoutId: context.featureId,
+        revisionId: head,
+        treeId: expect.any(String) as string,
+      });
+      expect(fetched.merged).toEqual(['feature']);
+      expect(fetched.conflicts).toBeUndefined();
+      expect(fetched.branches).toContainEqual({ name: 'feature', head, onRemote: true });
+    }, 30_000);
+
+    it('should report a branch only this device has as not on the remote (D93)', async () => {
+      const context = await linkedDivergence({ 'feature.ts': 'mine\n' });
+      await context.port.updateRef({
+        name: 'refs/heads/local-only',
+        expectedHead: undefined,
+        head: revisionId(context.own),
       });
 
-      await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
-      expect(await context.port.readRef('feature')).toBe(own.commitId);
+      const fetched = await fetchMain(context.actors);
+
+      expect(fetched.branches).toContainEqual({ name: 'local-only', head: context.own, onRemote: false });
+    }, 30_000);
+
+    it('should record an overlapping linked divergence on its conflict line and announce it once (D87)', async () => {
+      const context = await linkedDivergence({ 'main.ts': 'mine\n' });
+
+      const first = await fetchMain(context.actors);
+
+      expect(await context.port.readRef('feature')).toBe(context.own);
+      expect(first.merged).toBeUndefined();
+      expect(first.conflicts).toEqual([
+        { branch: expect.stringMatching(/^conflicts\/feature\//u) as string, into: 'feature', paths: ['main.ts'] },
+      ]);
+      const line = first.conflicts?.[0]?.branch ?? '';
+      const recorded = await context.port.readRevision(revisionId((await context.port.readRef(line)) ?? ''));
+      expect(recorded?.parents.slice(0, 2)).toEqual([context.remote, context.own]);
+
+      /* The same divergence, pulled again, is the conflict already waiting: not news. */
+      const second = await fetchMain(context.actors);
+      expect(second.conflicts).toBeUndefined();
+      expect(await context.port.readRef(line)).toBe(recorded?.id);
+    }, 30_000);
+
+    it('should leave a leased linked branch where it is (D87, rule 9)', async () => {
+      const context = await linkedDivergence({ 'feature.ts': 'mine\n' });
+      await run(context.actors.turn.writeLease, {
+        key: { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 0 },
+        checkoutId: context.featureId,
+        headRevisionId: undefined,
+      });
+
+      const fetched = await fetchMain(context.actors);
+
+      expect(await context.port.readRef('feature')).toBe(context.own);
+      expect(fetched).not.toHaveProperty('merged');
+      expect(fetched).not.toHaveProperty('conflicts');
+      expect(fetched.advanced).toBeUndefined();
     }, 30_000);
   });
 }

@@ -46,6 +46,8 @@ export type UserButtonProps = {
   links?: Array<UserButtonLink | ReactElement>;
   /** Hide the built-in "Settings" link. Useful when replacing it via `links`. */
   shouldHideSettings?: boolean;
+  /** Signed-in content shown under the account label, above the menu entries. */
+  header?: ReactNode;
 };
 
 function renderUserLink(
@@ -83,6 +85,7 @@ export function UserButton({
   variant = 'ghost',
   links,
   shouldHideSettings = false,
+  header,
 }: UserButtonProps): React.JSX.Element {
   const { authClient, basePaths, viewPaths, localization, plugins, Link } = useAuth();
 
@@ -150,6 +153,8 @@ export function UserButton({
             <DropdownMenuLabel className='text-sm font-normal'>
               <UserView />
             </DropdownMenuLabel>
+
+            {header}
 
             <DropdownMenuSeparator />
           </>

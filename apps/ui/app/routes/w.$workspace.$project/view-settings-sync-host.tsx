@@ -18,7 +18,7 @@ import type { ActorRefFrom } from 'xstate';
 import { useProject } from '#hooks/use-project.js';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import type { editorMachine } from '#machines/editor.machine.js';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import type { projectMachine } from '#machines/project.machine.js';
 
 const storeMounts = new WeakMap<ReturnType<typeof createWorkbenchViewStore>, number>();

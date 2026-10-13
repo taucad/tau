@@ -1179,21 +1179,14 @@
     "kind": "model",
     "geometry": "2d",
     "kernel": "replicad",
-    "name": "libassimp-format-prism",
+    "name": "libassimp-logo",
     "mainFile": "main.ts",
     "files": [
       "README.md",
       "banner.svg",
       "generate-logo.ts",
-      "generate-variants.ts",
       "libassimp.svg",
       "main.ts",
-      "variants.ts",
-      "variants/01-full-bleed-stack.svg",
-      "variants/02-ember-spine.svg",
-      "variants/03-signal-ribbon.svg",
-      "variants/04-foundry-frame.svg",
-      "variants/review-board.svg",
       "wordmark.ts"
     ]
   },

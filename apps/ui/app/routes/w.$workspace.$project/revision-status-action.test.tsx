@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { ArrowDownToLine, CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History } from 'lucide-react';
@@ -19,6 +19,7 @@ import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-sta
 import { revisionAccessibleName, selectRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionWhere } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
+import { setRevisionSessionUser } from '#lib/revision-actor.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
 let focusedChatId: string | undefined = 'chat-1';
@@ -187,6 +188,22 @@ describe('selectRevisionFacts', () => {
       'Backed up · Reconnect GitHub',
     ],
     [
+      'GitHub withheld while signed out of Tau, with nothing waiting (D100)',
+      status({ remote: githubRemote, sync: sync({ state: 'failed', reason: 'unauthorized', pendingCount: 0 }) }),
+      { ...onMain, isSignedOut: true },
+      CloudAlert,
+      'attention',
+      'Backed up · Sign in',
+    ],
+    [
+      'GitHub withheld while signed out of Tau, with a revision waiting (D100)',
+      status({ remote: githubRemote, sync: sync({ state: 'failed', reason: 'unauthorized', pendingCount: 1 }) }),
+      { ...onMain, isSignedOut: true },
+      CloudAlert,
+      'attention',
+      'Not backed up · Sign in',
+    ],
+    [
       'a Git remote refusing large files (R-U4)',
       status({ remote: gitRemote, sync: sync({ state: 'failed', reason: 'largeFiles' }) }),
       onMain,
@@ -345,6 +362,42 @@ describe('RevisionStatusAction', () => {
       expect(card).toHaveTextContent('Restored Rev 3');
     });
     expect(revisionStatusHarness.rowRequests).toEqual(['rev-3']);
+  });
+
+  /* D100: signed out, this device withholds its GitHub credential, so GitHub refused nothing. */
+  it('should ask a signed-out viewer to sign in, and a signed-in one to reconnect GitHub', async () => {
+    onTestFinished(() => {
+      setRevisionSessionUser(undefined);
+    });
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-12', revisionNumber: 12 })];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-12',
+      remote: {
+        ...revisionStatusHarness.status.remote,
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://github.com/o/r.git',
+        provider: 'github',
+      },
+      sync: { ...revisionStatusHarness.status.sync, state: 'failed', reason: 'unauthorized', pendingCount: 0 },
+    };
+
+    render(<RevisionStatusAction />, { wrapper });
+
+    expect(
+      await screen.findByRole('button', { name: 'Open Revisions. You are on main, Rev 12. Backed up, Sign in.' }),
+    ).toBeInTheDocument();
+
+    act(() => {
+      setRevisionSessionUser({ id: 'user-1' });
+    });
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'Open Revisions. You are on main, Rev 12. Backed up, Reconnect GitHub.',
+      }),
+    ).toBeInTheDocument();
   });
 
   it('opens Revisions when it is clicked', async () => {

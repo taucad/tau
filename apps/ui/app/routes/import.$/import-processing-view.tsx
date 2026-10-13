@@ -1,7 +1,7 @@
 import { Check } from 'lucide-react';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { formatFileSize } from '#components/geometry/converter/converter-utils.js';
 import { Progress } from '@taucad/ui/components/progress';
 import { Button } from '@taucad/ui/components/button';

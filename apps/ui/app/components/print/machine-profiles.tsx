@@ -21,7 +21,7 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import type { MachineSettingsRecord } from '@taucad/types';
 import { slicingPreferences } from '@taucad/slicer/preferences';
-import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
+import { ParameterSelect } from '@taucad/viewer/parameters/parameter-select';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import type { MachineSettingsHandle } from '#components/print/use-machine-settings.js';
 import type { BambuStudioMode } from '#components/print/use-bambu-studio.js';

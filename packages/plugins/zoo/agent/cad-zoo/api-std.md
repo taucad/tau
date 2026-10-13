@@ -107,11 +107,11 @@ assertIs(
 // Category: std
 // Stop KCL evaluation with a user-defined error
 // Remarks: Use `fail` when evaluation cannot continue and the caller should receive a specific error message. `fail` never returns a value.
-// EXPERIMENTAL
 // std.fail (function)
 fail(@msg: string): never
 //   @msg: Message reported to the caller
 // Example:
+//   @settings(kclVersion = 3.0)
 //   fn positive(@value: number): number {
 //     return if value > 0 {
 //       value

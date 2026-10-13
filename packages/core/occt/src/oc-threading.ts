@@ -33,6 +33,19 @@ const multiThreadReasons: Readonly<Record<IsolationFailureReason, string>> = {
 };
 
 /**
+ * Whether Node's permission model refuses worker threads here.
+ *
+ * `process.permission` exists only in a Node process started with
+ * `--permission`; a browser has no `process` at all.
+ *
+ * @returns true when `--permission` runs without `--allow-worker`.
+ */
+const workerThreadsRefused = (): boolean => {
+  const { process: nodeProcess } = globalThis as { process?: { permission?: NodeJS.ProcessPermission } };
+  return nodeProcess?.permission?.has('worker') === false;
+};
+
+/**
  * Detect whether the runtime can host the multi-threaded (pthread) build.
  *
  * Pthread WASM requires `SharedArrayBuffer`. Browsers gate `SharedArrayBuffer`
@@ -40,14 +53,23 @@ const multiThreadReasons: Readonly<Record<IsolationFailureReason, string>> = {
  * `Cross-Origin-Embedder-Policy: require-corp`). Node 22+ exposes SAB
  * unconditionally — no headers needed.
  *
- * Derived from {@link getIsolationStatus} so the runtime has exactly one
- * detector of this fact; only the human-readable vocabulary lives here.
+ * The pthread build also starts worker threads when it instantiates, which
+ * Node's permission model refuses without `--allow-worker` (the Tau Host
+ * runtime child runs so), so a realm that may not start workers gets the
+ * single-threaded build even with `SharedArrayBuffer` available.
+ *
+ * Isolation is derived from {@link getIsolationStatus} so the runtime has
+ * exactly one detector of that fact; only the human-readable vocabulary lives
+ * here.
  *
  * @returns flag plus a human-readable reason for the chosen variant.
  * @public
  * @see https://github.com/taucad/opencascade.js/blob/main/docs-site/content/docs/package/guides/multi-threading.mdx
  */
 export function detectMultiThreadSupport(): MultiThreadSupport {
+  if (workerThreadsRefused()) {
+    return { supported: false, reason: 'worker threads refused by the Node permission model (no --allow-worker)' };
+  }
   const status = getIsolationStatus();
   if (status.crossOriginIsolated) {
     return { supported: true, reason: 'SAB available' };

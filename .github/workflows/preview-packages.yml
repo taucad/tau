@@ -1,0 +1,97 @@
+name: Preview packages
+
+# Publishes every publishable workspace package to pkg.pr.new for one commit on
+# main, so the agent plugin and the CLI it starts can be installed without npm
+# (`pnpm plugin:dev preview --sha <commit>`). The packages carry the preview
+# version 0.0.0-preview-<sha>, and pkg.pr.new rewrites their @taucad/*
+# dependencies to the same run's URLs. Needs the pkg.pr.new GitHub App
+# (https://github.com/apps/pkg-pr-new) installed on this repository.
+on:
+  workflow_dispatch:
+    inputs:
+      wait-minutes:
+        description: "How long to wait for the commit's ci.yml run on main to finish (it supplies the GeoSpec products)"
+        required: false
+        default: '90'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: preview-packages-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  pnpm_config_verify_deps_before_run: warn
+
+jobs:
+  preview:
+    name: Publish previews to pkg.pr.new
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      # The macOS producer cannot run here: take this commit's GeoSpec products from its main CI run.
+      - name: GeoSpec products from main
+        uses: ./.github/actions/geospec-artifact-from-main
+        with:
+          wait-minutes: ${{ inputs.wait-minutes }}
+          github-token: ${{ github.token }}
+
+      - name: Build every publishable package
+        run: pnpm nx run-many -t build --projects=tag:type:package
+
+      - name: List the publishable package folders
+        id: packages
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, existsSync } from "node:fs";
+            import { execFileSync } from "node:child_process";
+            const projects = JSON.parse(execFileSync("pnpm", ["-r", "--depth", "-1", "ls", "--json"], { encoding: "utf8" }));
+            const folders = projects
+              .map(({ path }) => path)
+              .filter((path) => existsSync(`${path}/project.json`))
+              .filter((path) => (JSON.parse(readFileSync(`${path}/project.json`, "utf8")).tags ?? []).includes("type:package"))
+              .filter((path) => JSON.parse(readFileSync(`${path}/package.json`, "utf8")).private !== true)
+              .map((path) => path.slice(process.cwd().length + 1))
+              .sort();
+            console.log(`Publishing ${folders.length} packages:\n${folders.join("\n")}`);
+            const { appendFileSync } = await import("node:fs");
+            appendFileSync(process.env.GITHUB_OUTPUT, `folders=${folders.join(" ")}\n`);
+          '
+
+      # --pnpm packs with pnpm, which applies publishConfig and resolves workspace: and catalog: specifiers.
+      - name: Publish to pkg.pr.new
+        env:
+          FOLDERS: ${{ steps.packages.outputs.folders }}
+        run: |
+          # shellcheck disable=SC2086 # one argument per folder
+          pnpm dlx pkg-pr-new@0.0.88 publish --pnpm --previewVersion --comment=off --json preview.json $FOLDERS
+
+      - name: Summarise the install
+        run: |
+          {
+            echo "## Preview packages for ${GITHUB_SHA::7}"
+            echo
+            echo '```bash'
+            echo "pnpm plugin:dev preview --sha ${GITHUB_SHA::7}"
+            echo '```'
+            echo
+            node -e 'for (const { name, url } of require("./preview.json").packages ?? []) console.log(`- ${name}: ${url}`)'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the preview list
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pkg-pr-new-preview-${{ github.sha }}
+          path: preview.json
+          if-no-files-found: error

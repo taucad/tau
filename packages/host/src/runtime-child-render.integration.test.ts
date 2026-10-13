@@ -19,12 +19,43 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { setTimeout as delay } from 'node:timers/promises';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
+import { Engine, initialize } from '@taucad/geospec-engine-native/wasm';
+import { createNativeGeoSpecRunner } from 'geospec/runner/native';
+import type { RuntimeClient } from '@taucad/runtime/client';
+
+import { writeHostCredential } from '#credential-store.js';
+import { startHostDaemon } from '#host-daemon.js';
+import * as projectHosts from '#project-host.js';
+import type * as runtimeChildSupervisor from '#runtime-child-supervisor.js';
+import type { RuntimeChildHandle } from '#runtime-child-supervisor.js';
+
+/* Observe every runtime child the daemon starts, without changing it. */
+const runtimeChildren = vi.hoisted(() => [] as RuntimeChildHandle[]);
+vi.mock('#runtime-child-supervisor.js', async (importOriginal) => {
+  const original = await importOriginal<typeof runtimeChildSupervisor>();
+  return {
+    ...original,
+    startRuntimeChild: async (
+      options: Parameters<typeof original.startRuntimeChild>[0],
+    ): Promise<RuntimeChildHandle> => {
+      const handle = await original.startRuntimeChild(options);
+      runtimeChildren.push(handle);
+      return handle;
+    },
+  };
+});
+
+/* Observe the admission and per-root runtime client the daemon hands its project host, without changing them. */
+const projectHostSpy = vi.spyOn(projectHosts, 'createProjectHost');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../..');
@@ -130,4 +161,353 @@ describe('runtime child render (from source)', () => {
     expect(repaired?.isError, JSON.stringify(repaired?.content)).toBe(false);
     expect(JSON.stringify(repaired?.content)).toContain('"status":"ready"');
   });
+});
+
+/*
+ * One realm per agent root (kernel-realm-shared-state blueprint, WP-B4,
+ * invariant I8; operator ruling Q8).
+ *
+ * The daemon gives each agent root (and each relay session) its own
+ * sandboxed runtime child process. With one child for every root, replicad's
+ * module-level OpenCASCADE binding belongs to whichever root initialised last,
+ * so an earlier root's shapes meet a foreign heap (`KERNEL_BINDING_FAILED`),
+ * one root's runaway model blocks every root, and one child exit ends them
+ * all. These cases drive the real daemon over the real CLI child from source:
+ * the served workspace is root A, and every other root is admitted the way a
+ * candidate checkout is.
+ */
+
+const replicadBox = (x: number, y: number, z: number): string =>
+  `import { makeBaseBox } from 'replicad';\nexport default () => makeBaseBox(${String(x)}, ${String(y)}, ${String(z)});\n`;
+
+/** Never returns: the box keeps the replicad import live through bundling. */
+const hungModel =
+  "import { makeBaseBox } from 'replicad';\nexport default () => { const box = makeBaseBox(1, 1, 1); while (box) { /* hang */ } return box; };\n";
+
+type RuntimeDocument = ReturnType<RuntimeClient['open']>;
+
+/** A daemon serving `workspace` (root A) over the CLI's source runtime child, with no relay to reach. */
+const startSourceDaemon = async (workspaceSource: string) => {
+  const directory = await mkdtemp(join(tmpdir(), 'tau-host-realm-'));
+  roots.push(directory);
+  const workspaceRoot = join(directory, 'workspace');
+  await mkdir(workspaceRoot);
+  await writeFile(join(workspaceRoot, 'main.ts'), workspaceSource, 'utf8');
+  const originalDirectory = process.cwd();
+  const originalExecArgv = process.execArgv;
+  process.env['TAU_CONFIG_DIR'] = directory;
+  process.chdir(repoRoot);
+  /* The supervisor forks a `.ts` child only from a tsx-carrying parent, and the daemon starts one per root. */
+  process.execArgv = [...originalExecArgv, '--import', 'tsx'];
+  await writeHostCredential({
+    v: 1,
+    deviceId: 'device-1',
+    credential: 'secret-credential-value-that-never-enters-a-url',
+  });
+  projectHostSpy.mockClear();
+  const childrenBefore = runtimeChildren.length;
+  const daemon = startHostDaemon({
+    /* Nothing listens: the agent channel and its runtime clients serve without a relay. */
+    relayUrl: new URL('http://127.0.0.1:1'),
+    runtimeHost: { modulePath: resolve(here, '../../cli/src/host-runtime-child.ts') },
+    agent: {
+      workspaceRoot,
+      gatewayBaseUrl: 'http://127.0.0.1:1',
+      model: { id: 'fixture-model', contextWindow: 1000 },
+      systemPrompt: 'You are a fixture.',
+      token: 'daemon-agent-token-with-at-least-32-characters',
+      port: 0,
+      testModel: false,
+    },
+  });
+  await daemon.ready;
+  /* The run loop starts and closes a version-probe child after `ready`. Let it finish, so a case can name each
+   * root's child by the order its first use started it. */
+  await vi.waitFor(
+    () => {
+      expect(runtimeChildren.length).toBeGreaterThan(childrenBefore);
+    },
+    { timeout: 60_000 },
+  );
+  await runtimeChildren[childrenBefore]?.closed;
+  const options = projectHostSpy.mock.calls.at(-1)?.[0];
+  if (options === undefined) {
+    throw new TypeError('Expected the daemon to open a project host.');
+  }
+  return {
+    workspaceRoot,
+    /** Admit another root, as a candidate checkout is, holding `source` as its `main.ts`. */
+    admitRoot: async (
+      name: string,
+      source: string,
+    ): Promise<{ readonly root: string; readonly release: () => void }> => {
+      const root = join(directory, name);
+      await mkdir(root);
+      await writeFile(join(root, 'main.ts'), source, 'utf8');
+      return { root, release: options.fileSystem.admit(root) };
+    },
+    /** Admit an existing root again; returns its release. */
+    admit: options.fileSystem.admit,
+    /** The root's daemon-owned runtime client, as the geometry tools get it. */
+    clientFor: async (root: string): Promise<RuntimeClient> =>
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the daemon creates a full runtime client; the project host only narrows its type.
+      (await options.runtimeClient(root)) as unknown as RuntimeClient,
+    close: async (): Promise<void> => {
+      try {
+        await daemon.close();
+      } finally {
+        process.execArgv = originalExecArgv;
+        process.chdir(originalDirectory);
+        delete process.env['TAU_CONFIG_DIR'];
+      }
+    },
+  };
+};
+
+const withTimeout = async <Value>(promise: Promise<Value>, milliseconds: number, label: string): Promise<Value> => {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} did not settle within ${String(milliseconds)} ms`));
+        }, milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const issuesOf = (issues: ReadonlyArray<{ readonly code: string; readonly message: string }>): string =>
+  issues
+    .map(({ code, message }) => `${code}: ${message}`)
+    .join('; ')
+    .slice(0, 240);
+
+/** `'ok'`, or the reason the step failed — collected so one run shows the whole matrix. */
+const step = async (label: string, action: () => Promise<string>, milliseconds = 60_000): Promise<string> => {
+  try {
+    return await withTimeout(action(), milliseconds, label);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
+
+const render = async (document: RuntimeDocument): Promise<string> => {
+  const outcome = await document.view().rendering();
+  if (outcome.superseded) {
+    return 'superseded';
+  }
+  return outcome.rendering.success ? 'ok' : issuesOf(outcome.rendering.issues);
+};
+
+/* The WASM engine, not the NAPI binding: CI ships the binding only to its Darwin lane, and the Linux lanes that run
+ * this suite carry the WASM product. */
+const loadWasm = async (): Promise<void> => {
+  const bytes = await readFile(createRequire(import.meta.url).resolve('@taucad/geospec-engine-native/wasm-binary'));
+  await initialize(new Uint8Array(bytes));
+};
+let wasmReady: Promise<void> | undefined;
+const initializeWasm = async (): Promise<void> => {
+  wasmReady ??= loadWasm();
+  await wasmReady;
+};
+
+/**
+ * The document's STEP export, re-imported through GeoSpec's STEP reader on the WASM engine and held to `size`.
+ * Returns the size on a pass, so the per-step log reads as the measured box.
+ */
+const stepSize = async (document: RuntimeDocument, size: readonly [number, number, number]): Promise<string> => {
+  const exported = await document.export('step');
+  if (!exported.success) {
+    return issuesOf(exported.issues);
+  }
+  const root = await mkdtemp(join(tmpdir(), 'tau-host-step-'));
+  roots.push(root);
+  const stepPath = join(root, 'export.step');
+  await writeFile(stepPath, exported.files[0].bytes);
+  await writeFile(
+    join(root, 'size.geospec.ts'),
+    [
+      "import { it, expectGeo } from 'geospec';",
+      "import { loadModel } from 'geospec/model';",
+      "it('re-imported STEP size', async () => {",
+      `  const model = await loadModel({ source: ${JSON.stringify(stepPath)}, format: 'step' });`,
+      `  expectGeo(model).toHaveBoundingBox({ size: ${JSON.stringify(size)}, tolerance: 1e-3 });`,
+      '});',
+      '',
+    ].join('\n'),
+  );
+  await initializeWasm();
+  const engine = new Engine();
+  const runner = createNativeGeoSpecRunner({
+    filesystem: createNodeVmFileSystem(root),
+    nativeAssertions: { engine },
+    model: {
+      projectPath: root,
+      readSource: async (source) => {
+        if (typeof source !== 'string') {
+          throw new TypeError('Only path sources are read from disk.');
+        }
+        return new Uint8Array(await readFile(source));
+      },
+    },
+  });
+  try {
+    const result = await runner.run({ files: ['size.geospec.ts'] });
+    if (result.passed !== 1) {
+      return `STEP did not re-import at ${size.join('x')}: ${JSON.stringify(result).slice(0, 240)}`;
+    }
+    return size.map((value) => value.toFixed(3)).join('x');
+  } finally {
+    await runner.close();
+    engine.close();
+  }
+};
+
+const exportsGlb = async (document: RuntimeDocument): Promise<string> => {
+  const exported = await document.export('glb');
+  return exported.success ? 'ok' : issuesOf(exported.issues);
+};
+
+describe('daemon runtime child per agent root (from source)', () => {
+  it('renders and STEP-exports two replicad roots interleaved and concurrently', { timeout: 300_000 }, async () => {
+    const daemon = await startSourceDaemon(replicadBox(10, 20, 30));
+    const log: Record<string, string> = {};
+    try {
+      const rootA = daemon.workspaceRoot;
+      const { root: rootB } = await daemon.admitRoot('root-b', replicadBox(12, 24, 36));
+      const clientA = await daemon.clientFor(rootA);
+      const clientB = await daemon.clientFor(rootB);
+      let documentA = clientA.open({ source: { path: 'main.ts' }, watch: false });
+      const documentB = clientB.open({ source: { path: 'main.ts' }, watch: false });
+
+      log['1 render A'] = await step('render A', async () => render(documentA));
+      log['2 render B'] = await step('render B', async () => render(documentB));
+      log['3 STEP A after B'] = await step('STEP A after B', async () => stepSize(documentA, [10, 20, 30]));
+      log['4 GLB A after B'] = await step('GLB A after B', async () => exportsGlb(documentA));
+
+      documentA.close();
+      documentA = clientA.open({ source: { path: 'main.ts' }, watch: false });
+      log['5 re-opened A render'] = await step('re-opened A render', async () => render(documentA));
+      log['6 re-opened A STEP'] = await step('re-opened A STEP', async () => stepSize(documentA, [10, 20, 30]));
+
+      documentA.close();
+      await writeFile(join(rootA, 'main.ts'), replicadBox(14, 20, 30), 'utf8');
+      documentA = clientA.open({ source: { path: 'main.ts' }, watch: false });
+      log['7 edited A render'] = await step('edited A render', async () => render(documentA));
+      log['8 edited A STEP'] = await step('edited A STEP', async () => stepSize(documentA, [14, 20, 30]));
+
+      const [concurrentA, concurrentB] = await Promise.all([
+        step('concurrent STEP A', async () => stepSize(documentA, [14, 20, 30])),
+        step('concurrent STEP B', async () => stepSize(documentB, [12, 24, 36])),
+      ]);
+      log['9 concurrent STEP A'] = concurrentA;
+      log['9 concurrent STEP B'] = concurrentB;
+    } finally {
+      await daemon.close();
+    }
+
+    expect(log).toEqual({
+      '1 render A': 'ok',
+      '2 render B': 'ok',
+      '3 STEP A after B': '10.000x20.000x30.000',
+      '4 GLB A after B': 'ok',
+      '5 re-opened A render': 'ok',
+      '6 re-opened A STEP': '10.000x20.000x30.000',
+      '7 edited A render': 'ok',
+      '8 edited A STEP': '14.000x20.000x30.000',
+      '9 concurrent STEP A': '14.000x20.000x30.000',
+      '9 concurrent STEP B': '12.000x24.000x36.000',
+    });
+  });
+
+  it(
+    "keeps serving other roots while one root's model hangs, and serves that root again after its release",
+    { timeout: 300_000 },
+    async () => {
+      const daemon = await startSourceDaemon(replicadBox(12, 24, 36));
+      const log: Record<string, string> = {};
+      try {
+        const rootB = daemon.workspaceRoot;
+        const hung = await daemon.admitRoot('root-h', hungModel);
+        const clientB = await daemon.clientFor(rootB);
+        const documentB = clientB.open({ source: { path: 'main.ts' }, watch: false });
+        log['1 render B'] = await step('render B', async () => render(documentB));
+
+        const clientH = await daemon.clientFor(hung.root);
+        const documentH = clientH.open({ source: { path: 'main.ts' }, watch: false });
+        /* Settles only when its client closes: the model loops. `allSettled` observes that rejection. */
+        const hungRendering = Promise.allSettled([documentH.view().rendering()]);
+        /* Let the hung root's kernel initialise and enter its loop. */
+        await delay(5000);
+
+        log['2 STEP B while H hangs'] = await step(
+          'STEP B while H hangs',
+          async () => stepSize(documentB, [12, 24, 36]),
+          30_000,
+        );
+        log['3 GLB B while H hangs'] = await step('GLB B while H hangs', async () => exportsGlb(documentB), 30_000);
+
+        /* The last release of a checkout root closes its runtime, as a finished candidate turn does. */
+        hung.release();
+        await Promise.race([hungRendering, delay(15_000)]);
+        await writeFile(join(hung.root, 'main.ts'), replicadBox(5, 6, 7), 'utf8');
+        daemon.admit(hung.root);
+        const clientH2 = await daemon.clientFor(hung.root);
+        const documentH2 = clientH2.open({ source: { path: 'main.ts' }, watch: false });
+        log['4 new client for H after release'] = await step(
+          'new client for H after release',
+          async () => stepSize(documentH2, [5, 6, 7]),
+          60_000,
+        );
+      } finally {
+        await daemon.close();
+      }
+
+      expect(log).toEqual({
+        '1 render B': 'ok',
+        '2 STEP B while H hangs': '12.000x24.000x36.000',
+        '3 GLB B while H hangs': 'ok',
+        '4 new client for H after release': '5.000x6.000x7.000',
+      });
+    },
+  );
+
+  it(
+    "ends only the exited child's root, and serves that root again on its next use",
+    { timeout: 300_000 },
+    async () => {
+      const daemon = await startSourceDaemon(replicadBox(10, 20, 30));
+      try {
+        const rootA = daemon.workspaceRoot;
+        const { root: rootB } = await daemon.admitRoot('root-b', replicadBox(12, 24, 36));
+        const clientA = await daemon.clientFor(rootA);
+        const childA = runtimeChildren.at(-1);
+        const clientB = await daemon.clientFor(rootB);
+        const documentA = clientA.open({ source: { path: 'main.ts' }, watch: false });
+        const documentB = clientB.open({ source: { path: 'main.ts' }, watch: false });
+        expect([await render(documentA), await render(documentB)]).toEqual(['ok', 'ok']);
+
+        await childA?.close();
+
+        await vi.waitFor(
+          () => {
+            expect(clientA.lifecycleState).toBe('terminated');
+          },
+          { timeout: 15_000 },
+        );
+        expect(clientB.lifecycleState).not.toBe('terminated');
+        expect(await stepSize(documentB, [12, 24, 36])).toBe('12.000x24.000x36.000');
+        const replacement = await daemon.clientFor(rootA);
+        expect(replacement).not.toBe(clientA);
+        const replacementDocument = replacement.open({ source: { path: 'main.ts' }, watch: false });
+        expect(await stepSize(replacementDocument, [10, 20, 30])).toBe('10.000x20.000x30.000');
+      } finally {
+        await daemon.close();
+      }
+    },
+  );
 });

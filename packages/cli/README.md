@@ -18,9 +18,15 @@ WebP export is lossless when `quality` is omitted or set to `1`; values below `1
 
 ## Plugins
 
-The CLI ships every first-party plugin except Zoo, which needs credential configuration for a
-headless export. Add Zoo or any third-party plugin with repeatable `--plugin`, resolved from the
-invoking project:
+The CLI ships every first-party plugin. Zoo (KCL) computes geometry through Tau's Zoo proxy, so it
+needs a Tau session: set `TAU_API_TOKEN` (and `TAU_API_URL` or `TAU_WEBSOCKET_URL` for another Tau
+API; the default is `https://api.tau.new`). Without it a KCL export fails with a sign-in diagnostic.
+
+```bash
+TAU_API_TOKEN=<session token> tau export bracket.kcl --ext=glb
+```
+
+Add any third-party plugin with repeatable `--plugin`, resolved from the invoking project:
 
 ```bash
 pnpm add @example/tau-plugin
@@ -75,6 +81,8 @@ tau serve --trust-projects --plugin @example/tau-plugin
 
 The first launch prints a pairing URL and code. The default relay is `https://api.tau.new`; override it with `--relay` or `TAU_HOST_RELAY_URL`. `--max-sessions` defaults to `1`.
 
+With `TAU_API_TOKEN` set, the daemon trades it for a short-lived Zoo-scoped token and sends only that to its runtime child, so project code never sees the session.
+
 For local Tau development, keep a hot-reloading Host attached to its own terminal pane:
 
 ```bash
@@ -107,6 +115,24 @@ tau agent respond chat-1 <run> <interrupt> approved --option=allow
 Stdout carries result data only: tab-separated plain lines by default, one `{"v":1,…}` record with `--json`, or one record per event ending in an `outcome` record with `--jsonl`. Diagnostics go to stderr. Exit codes are `0` completed, `1` failed, `2` usage, `3` refused, `4` requested but not observed to settle — so `tau agent cancel` exits `4`, not `0`, when the run is still running after the host acknowledged the request.
 
 `tau agent list` reads `<workspace>/.tau/chats`; the agent channel has no command that lists chats, so naming a host refuses with `HOST_CHAT_LIST_UNSUPPORTED` rather than guessing at ids.
+
+## Agent plugins
+
+`tau mcp` serves Tau's CAD tools — `evaluate_model`, `test_model`, `screenshot`, `export_model` and `arrange_workbench` — over stdio to the MCP client that launched it. Stdout carries the MCP protocol only. Each call works in the first of: `--project`; the folder Codex sends with the call; `CLAUDE_PROJECT_DIR`; the working directory. Screenshots come back inline; they and GeoSpec reports over 128 KiB are saved in a temporary folder that is removed when the server stops. `--plugin` and `--config` work as they do for `export`.
+
+Each project folder gets its own worker thread on its first call, so projects evaluate, export and screenshot in parallel (`test_model` calls run one at a time) and a model that hangs or crashes its thread costs only that project. An operation that runs past `--operation-timeout` seconds (default 600) fails, and the project's next call starts a fresh thread. A thread with no tool call in flight for `--idle-release` seconds (default 900) is released, and the project's next call loads a fresh one.
+
+```bash
+tau mcp --project ./bracket
+tau mcp --operation-timeout 120 --idle-release 300
+```
+
+For Codex and Claude Code, install [`@taucad/agent-plugin`](https://www.npmjs.com/package/@taucad/agent-plugin): it starts `tau mcp` for the agent and adds Tau's CAD skills.
+
+```bash
+claude plugin install tau --marketplace taucad/tau
+codex plugin marketplace add taucad/tau && codex plugin add tau@taucad
+```
 
 ## TUI
 

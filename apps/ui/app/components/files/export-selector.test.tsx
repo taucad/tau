@@ -122,7 +122,7 @@ vi.mock('#components/ui/sonner.js', () => ({
   },
 }));
 
-vi.mock('#components/ui/combobox-responsive.js', () => ({
+vi.mock('@taucad/ui/components/combobox-responsive', () => ({
   ComboBoxResponsive: ({
     children,
     onSelect,

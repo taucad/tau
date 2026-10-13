@@ -6,10 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
-import { createSourceModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
-import type { PartThumbnailState } from '#services/part-thumbnail.service.js';
-import { KeyboardProvider } from '#hooks/use-keyboard.js';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import {
+  createSourceModelInteractionUnitId,
+  modelInteractionMachine,
+} from '@taucad/viewer/machines/model-interaction.machine';
+import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { PartGalleryProvider, useOpenPartGallery } from '#components/geometry/cad/part-gallery.js';
 import type { PartGalleryRequest } from '#components/geometry/cad/part-gallery.js';
 

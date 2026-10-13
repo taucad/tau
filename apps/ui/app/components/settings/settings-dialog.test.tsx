@@ -65,11 +65,11 @@ vi.mock('#components/settings/compute-reuse-settings.js', () => ({
 vi.mock('#components/settings/settings-auth-gate.js', () => ({
   SettingsAuthGate: ({ children }: { readonly children: React.JSX.Element }): React.JSX.Element => children,
 }));
-vi.mock('#hooks/use-keyboard.js', () => ({ useKeybinding: vi.fn() }));
+vi.mock('@taucad/ui/components/keyboard', () => ({ useKeybinding: vi.fn() }));
 
-function SettingsTestSurface(): React.JSX.Element {
+function SettingsTestSurface({ url = '/home/project?settings=general' }: { readonly url?: string }): React.JSX.Element {
   return (
-    <MemoryRouter initialEntries={['/home/project?settings=general']}>
+    <MemoryRouter initialEntries={[url]}>
       <SidebarProvider>
         <SettingsDialog />
       </SidebarProvider>
@@ -151,6 +151,19 @@ describe('SettingsDialog', () => {
 
     deferredBillingState.showTarget = true;
     view.rerender(<SettingsTestSurface />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Credit balance' })).toHaveFocus();
+    });
+  });
+
+  it('should reveal the setting a deep link names once its section has loaded', async () => {
+    const url = '/home/project?settings=billing&setting=credit-balance';
+    const view = render(<SettingsTestSurface url={url} />);
+
+    expect(screen.getByText('Mounted billing')).toBeInTheDocument();
+    deferredBillingState.showTarget = true;
+    view.rerender(<SettingsTestSurface url={url} />);
 
     await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Credit balance' })).toHaveFocus();

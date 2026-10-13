@@ -229,7 +229,7 @@ export const zooKernel = defineKernel({
   id: 'zoo',
   extensions: ['kcl'],
   name: 'ZooKernel',
-  version: '1.2.0',
+  version: '1.3.0',
   optionsSchema: zooOptionsSchema,
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: ['includeTopology'] } },
   exports: {

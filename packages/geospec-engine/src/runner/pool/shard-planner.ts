@@ -13,7 +13,7 @@
  */
 
 import type { GeoSpecPoolShard } from 'geospec/runner/worker';
-import type { ShardTiming, ShardTimings } from '#cache/timings.js';
+import type { ShardTiming, ShardTimings } from '#runner/pool/timings.js';
 
 /**
  * The telemetry key one shard is recorded under.

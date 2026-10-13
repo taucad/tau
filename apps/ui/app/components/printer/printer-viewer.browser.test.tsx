@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createRenderer } from '#components/geometry/graphics/three/renderer.js';
+import { createRenderer } from '@taucad/viewer/graphics/three/renderer';
 import { printerPreparation } from '#components/printer/printer-preparation.js';
 import {
   createToolpathReveal,
@@ -23,7 +23,7 @@ import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client'
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
-import { probeWebGpuSupport } from '#components/geometry/graphics/graphics-backend.js';
+import { probeWebGpuSupport } from '@taucad/viewer/graphics/graphics-backend';
 import type { PrinterFileKind } from '#components/printer/printer-file.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import type { PrinterLiveState } from '#components/printer/use-printer-live.js';

@@ -20,6 +20,7 @@
  * | 13 | **W6 (D14)** | two devices change one file: the device that meets the divergence records it on its conflict line and pushes that line; both list it; deciding on the other device lands a merge on `main` that fast-forwards the recorder and hides the line on both |
  * | 13c | **D14-P** | the remote answers the conflict line's push `503 GIT_PUSH_RACE_LOST` (another device's push committed first): the line is offered again after the backoff and reaches the remote (isomorphic-git leg) |
  * | 13b | **RV-W6 F2** | a line removed on the remote stays on the device that recorded it, still listed, and its next push offers it again |
+ * | 19 | **D87** | another checkout's branch that diverged with overlapping changes records its conflict line on the pull and pushes it, and the live branch's next revision still reaches the remote (isomorphic-git leg) |
  * | 15 | **FX1 N** | a hook's plan-quota refusal of `main` reaches the per-ref result as the hook's sentence, and the push settles as a terminal quota answer |
  *
  * Each row runs on both legs: `isomorphic-git` (the browser's port) and native
@@ -218,8 +219,9 @@ const projectTree = (files: Readonly<Record<string, string>>): ImmutableRevision
  * Record one revision on `main`, the way a `save` cut records one.
  *
  * @param input - The device recording it, the tree this revision holds, what the
- *   row calls it, and the revision it continues when it continues one.
- * @returns The revision id `main` now names.
+ *   row calls it, the revision it continues when it continues one, and the
+ *   branch it lands on when that is not `main`.
+ * @returns The revision id the branch now names.
  */
 const record = async (
   input: Readonly<{
@@ -227,9 +229,10 @@ const record = async (
     files: Readonly<Record<string, string>>;
     summary: string;
     parent?: string;
+    branch?: string;
   }>,
 ): Promise<string> => {
-  const { device: device_, files, summary, parent } = input;
+  const { device: device_, files, summary, parent, branch = mainRef } = input;
   const receipt = await device_.port.writeRevision({
     parents: parent === undefined ? [] : [revisionId(parent)],
     tree: projectTree(files),
@@ -237,7 +240,7 @@ const record = async (
     summary: { generated: summary },
   });
   await device_.port.updateRef({
-    name: mainRef,
+    name: branch,
     /* `undefined` is "this ref must be unborn" (`UpdateRevisionRefInput`), so a
      * revision that continues another has to name it as its expected old value
      * or the move is refused and the branch silently stays put. */
@@ -246,6 +249,22 @@ const record = async (
   });
   return receipt.commitId;
 };
+
+/**
+ * The store's own generated files: a checkout is clean only against a tree that
+ * carries them, as every real revision does.
+ *
+ * @param device_ - The device whose files hold them.
+ * @returns Each generated path and its text.
+ */
+const generatedFilesOf = async (device_: Device): Promise<Record<string, string>> =>
+  Object.fromEntries(
+    await Promise.all(
+      [generatedGitattributesPath, generatedIgnorePath].map(
+        async (path) => [path, new TextDecoder().decode(await device_.filesystem.readFile(path))] as const,
+      ),
+    ),
+  );
 
 const queueOf = async (device_: Device): Promise<SyncQueueRecord> => {
   const stored = await readFile(join(device_.root, syncQueuePath), 'utf8');
@@ -740,8 +759,8 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       });
       expect(fetched.branches).toEqual(
         expect.arrayContaining([
-          { name: 'main', head: main },
-          { name: 'feature', head: feature.commitId },
+          { name: 'main', head: main, onRemote: true },
+          { name: 'feature', head: feature.commitId, onRemote: true },
         ]),
       );
       await run(two.actors.branch.applySwitch, {
@@ -1382,15 +1401,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       const featureRef = 'refs/heads/feature';
       try {
         const one = await device({ leg, label: 'a-linked', remoteUrl: remote.url, files: { 'part.scad': 'a\n' } });
-        /* A checkout is clean only against a tree that carries the store's own
-         * generated files, as every real revision does. */
-        const generated = Object.fromEntries(
-          await Promise.all(
-            [generatedGitattributesPath, generatedIgnorePath].map(
-              async (path) => [path, new TextDecoder().decode(await one.filesystem.readFile(path))] as const,
-            ),
-          ),
-        );
+        const generated = await generatedFilesOf(one);
         const shared = await record({ device: one, files: { ...generated, 'part.scad': 'a\n' }, summary: 'Shared' });
         await one.port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(shared) });
         await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }, { name: featureRef }] });
@@ -1443,6 +1454,85 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         });
         expect(pushed.refs.find((entry) => entry.name === featureRef)?.status).not.toBe('rejected');
         expect(await remote.git(['rev-parse', featureRef])).toBe(theirs.commitId);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
+  /* D87 (observed live 2026-10-12): a diverged linked branch was never integrated, and its lost lease
+   * narrowed every retry to it alone, so the live branch's next revision never reached the remote either. */
+  it.skipIf(leg.name === 'native git')(
+    'row 19: another checkout’s overlapping divergence records its conflict line, and both back up (D87)',
+    async () => {
+      const remote = await startGitHttpBackend({ root: await temporaryRoot('remote-linked-conflict') });
+      try {
+        const one = await device({ leg, label: 'a-g2', remoteUrl: remote.url, files: { 'part.scad': 'a\n' } });
+        const generated = await generatedFilesOf(one);
+        const shared = await record({ device: one, files: { ...generated, 'part.scad': 'a\n' }, summary: 'Shared' });
+        await one.port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(shared) });
+        await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }, { name: 'refs/heads/feature' }] });
+        await one.port.addCheckout!({ branch: 'feature' });
+
+        /* A second device changes the last line of `feature`… */
+        const two = await device({ leg, label: 'b-g2', remoteUrl: remote.url });
+        await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+        const theirs = await record({
+          device: two,
+          files: { ...generated, 'part.scad': 'theirs\n' },
+          summary: 'Feature, elsewhere',
+          parent: shared,
+          branch: 'refs/heads/feature',
+        });
+        await two.port.push({ remote: 'tau', atomic: true, refs: [{ name: 'refs/heads/feature' }] });
+
+        /* …and this device saves the same line on its linked checkout. This fixture serves every checkout from one root. */
+        await one.filesystem.writeFile('part.scad', 'mine\n');
+        const mineFiles = { ...generated, 'part.scad': 'mine\n' };
+        const mine = await record({
+          device: one,
+          files: mineFiles,
+          summary: 'Feature, here',
+          parent: shared,
+          branch: 'refs/heads/feature',
+        });
+
+        const scheduler = one.scheduler({ retryMilliseconds: 200 });
+        scheduler.start();
+        await vi.waitFor(
+          () => {
+            expect(selectSyncFacet(scheduler.getSnapshot()).state).toBe('queued');
+          },
+          { timeout: 30_000 },
+        );
+        /* The decision travels: this device's conflict line for `feature` is on the remote. */
+        const line = `refs/heads/conflicts/feature/${await recordDeviceOf(one)}`;
+        await vi.waitFor(
+          async () => {
+            expect(await remote.git(['rev-parse', line])).toBe(await one.port.readRef(line));
+          },
+          { timeout: 30_000 },
+        );
+
+        /* The live branch saves while `feature` waits on its decision: it still backs up. */
+        const next = await record({ device: one, files: mineFiles, summary: 'Main, here', parent: shared });
+        scheduler.send({
+          type: 'revisionMinted',
+          checkoutId: 'live',
+          trigger: 'save',
+          revisionId: next,
+          branch: 'main',
+        });
+        await vi.waitFor(
+          async () => {
+            expect(await remote.git(['rev-parse', mainRef])).toBe(next);
+          },
+          { timeout: 30_000 },
+        );
+        expect(await remote.git(['rev-parse', 'refs/heads/feature'])).toBe(theirs);
+        expect(await one.port.readRef('feature')).toBe(mine);
+        scheduler.stop();
       } finally {
         await remote.close();
       }

@@ -22,7 +22,7 @@ import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import { captureFilesToDataUrls, captureSettledCadImages } from '#services/headless-capture.js';
-import type { SectionCutValues } from '#components/geometry/graphics/section-cuts.js';
+import type { SectionCutValues } from '@taucad/viewer/graphics/section-cuts';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { armChatTurnHold, releaseChatTurnHold } from '#chat-clients/_internal/chat-host-binding.js';

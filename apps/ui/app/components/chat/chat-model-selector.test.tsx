@@ -136,7 +136,7 @@ const capturedComboBox: {
   renderLabel?: (item: Model, selectedItem?: Model) => React.ReactNode;
   value?: unknown;
 } = {};
-vi.mock('#components/ui/combobox-responsive.js', () => ({
+vi.mock('@taucad/ui/components/combobox-responsive', () => ({
   ComboBoxResponsive: (properties: {
     readonly groupedItems?: Array<{ name: string; items: Model[] }>;
     readonly onSelect?: (id: string) => void;

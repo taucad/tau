@@ -48,26 +48,6 @@ describe('chatExecutionTargetSchema', () => {
     expect(verdict.success).toBe(true);
   });
 
-  it('carries the conflict a resolution turn is being asked about (W10)', () => {
-    // *Ask chat to resolve* seeds a turn from the conflicted revision itself,
-    // so the paths still without a side ride the placement, not the prompt.
-    const verdict = chatTurnRequestSchema.safeParse({
-      ...validRequest(),
-      execution: { ...validRequest().execution, conflict: { revisionId: 'revision_9', paths: ['src/bracket.ts'] } },
-    });
-
-    expect(verdict.success).toBe(true);
-  });
-
-  it('rejects a conflict with no path to decide', () => {
-    const verdict = chatTurnRequestSchema.safeParse({
-      ...validRequest(),
-      execution: { ...validRequest().execution, conflict: { revisionId: 'revision_9', paths: [] } },
-    });
-
-    expect(verdict.success).toBe(false);
-  });
-
   it('rejects a revision mode the wire no longer speaks', () => {
     const verdict = chatTurnRequestSchema.safeParse({
       ...validRequest(),

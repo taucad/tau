@@ -7,17 +7,19 @@
 # reads `apps/ui/netlify.toml` and the site's environment variables as a
 # Netlify Git build did, and publishes the result.
 #
-#   - staging (taucad.dev): `ci.yml` → `deploy-ui-staging` on every push to
-#     `main` that affects the UI, using this run's `geospec-ci-*` artifact.
+#   - staging (taucad.dev): `ci.yml` → `deploy-ui-staging` on a push to `main`
+#     that affects the UI since its last staging deploy, using this run's
+#     GeoSpec products.
 #   - production (tau.new): `release-build.yml` calls this workflow in a `ui@x.y.z`
 #     release's own run, and `deploy-production.yml` dispatches it at the tag
 #     for a rollback or redeploy. Either way it uses the artifact of the `ci.yml`
-#     push run on `main` for the tag's commit, and waits for a release manager
-#     on the `production` environment.
+#     push run on `main` for the tag's commit.
 #
 # Both Netlify sites run with `deploy_mode = "ci"` in tau-cloud, so Netlify's Git
 # integration no longer builds them. Each environment holds a `NETLIFY_AUTH_TOKEN`
-# secret, set by hand by the account owner; the site IDs below are not secrets.
+# secret that tau-cloud's `tau-repo` HCP workspace writes from its
+# `netlify_auth_token_staging` / `netlify_auth_token_production` variables; the
+# site IDs below are not secrets.
 #
 # Manual redeploy of staging: `gh workflow run deploy-ui.yml -f
 # environment=staging` from `main`. Production rollbacks and redeploys go
@@ -69,8 +71,7 @@ jobs:
     steps:
       # Production deploys run at a release tag: called by release-build.yml in
       # the release's own run, or dispatched by deploy-production.yml for a
-      # rollback or redeploy. Either way the `production` environment waits for
-      # a release manager. A person dispatching this workflow directly is
+      # rollback or redeploy. A person dispatching this workflow directly is
       # refused. (In a called workflow, `github.workflow_ref` names the caller.)
       - name: Require a production deploy from a release
         if: inputs.environment == 'production' && contains(github.workflow_ref, '/.github/workflows/deploy-ui.yml@')
@@ -95,7 +96,7 @@ jobs:
             *) echo "::error::Unknown environment: $ENVIRONMENT"; exit 1 ;;
           esac
           if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
-            echo "::error::NETLIFY_AUTH_TOKEN is not set on the $ENVIRONMENT environment."
+            echo "::error::NETLIFY_AUTH_TOKEN is not set on the $ENVIRONMENT environment. Set netlify_auth_token_$ENVIRONMENT on tau-cloud's tau-repo HCP workspace and apply it."
             exit 1
           fi
           echo "site_id=$site_id" >> "$GITHUB_OUTPUT"
@@ -182,19 +183,46 @@ jobs:
 
       # The CLI comes from the workspace lockfile (`scripts` owns it); its build
       # runs `apps/ui/netlify.toml`'s production command with the site's variables.
+      # Each push to `main` runs on its own, so an older run can reach this queue
+      # after a newer one has deployed; it must not put its commit back.
+      - name: Skip a staging deploy a newer commit has superseded
+        id: superseded
+        if: inputs.environment == 'staging'
+        uses: ./.github/actions/staging-deploy-superseded
+        with:
+          job-name: Deploy UI to ${{ inputs.environment }}
+          github-token: ${{ github.token }}
+
       - name: Build and deploy with the Netlify CLI
+        if: steps.superseded.outputs.superseded != 'true'
         working-directory: apps/ui
         env:
+          ENVIRONMENT: ${{ inputs.environment }}
           SITE_ID: ${{ steps.site.outputs.site_id }}
           MESSAGE: ${{ github.workflow }} ${{ github.sha }}
           # Only production needs its PostHog source maps to deploy.
           TAU_SOURCEMAPS_OPTIONAL: ${{ inputs.environment != 'production' }}
         run: |
+          # The CLI reports every refused deploy as a bare `Forbidden`: the token
+          # was revoked or cannot deploy this site, or the Netlify team is out of
+          # credits, which pauses every production deploy (taucad.dev included).
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
             --prod --context production \
-            --site "$SITE_ID" --message "$MESSAGE"
+            --site "$SITE_ID" --message "$MESSAGE" || {
+            echo "::error::Netlify refused the deploy. If it said Forbidden: check the TauCAD team's credits (Netlify > Usage & billing; production deploys pause when they run out), then that netlify_auth_token_$ENVIRONMENT on tau-cloud's tau-repo HCP workspace is a live token with access to this site."
+            exit 1
+          }
+
+      # The plan of the next push to `main` diffs the UI against this commit.
+      - name: Record this staging deploy
+        if: inputs.environment == 'staging' && steps.superseded.outputs.superseded != 'true'
+        uses: ./.github/actions/staging-deploy-history
+        with:
+          mode: record
+          app: ui
 
       - name: Check the site answers
+        if: steps.superseded.outputs.superseded != 'true'
         env:
           URL: ${{ steps.site.outputs.url }}
         run: curl --fail --silent --show-error --location --retry 5 --retry-delay 10 --output /dev/null "$URL"

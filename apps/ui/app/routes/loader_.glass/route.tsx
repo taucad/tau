@@ -19,7 +19,7 @@ import {
 import type { GlassPrismShapeId } from '#components/geometry/loader/glass-prism-shapes.js';
 import type { ShowcaseFrameCapture } from '#components/geometry/loader/showcase-capture.js';
 import { LazySection } from '#components/ui/lazy-section.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { useFeature } from '#flags/use-feature.js';
 import type { Handle } from '#types/matches.types.js';
 

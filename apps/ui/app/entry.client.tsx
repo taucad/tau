@@ -1,7 +1,7 @@
 import { HydratedRouter } from 'react-router/dom';
 import { startTransition, StrictMode } from 'react';
 import { hydrateRoot } from 'react-dom/client';
-import { observeLongAnimationFrames } from '#lib/renderer-telemetry.js';
+import { observeLongAnimationFrames } from '@taucad/viewer/lib/renderer-telemetry';
 import { startErrorReporting } from '#lib/error-reporting.js';
 
 /* D21: started before hydration and never stopped, so the frames that block the first paint are

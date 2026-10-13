@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import type { RefObject } from 'react';
-import { useCameraRig, useGraphics } from '#hooks/use-graphics.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
+import { useCameraRig, useGraphics } from '@taucad/viewer/hooks/use-graphics';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
+import type { KeyCombination } from '@taucad/ui/utils/keys';
 
 /** Focus inside one of these belongs to a menu, list, tree, grid or dialog, which keeps its own keys. */
 const ownKeysSelector =

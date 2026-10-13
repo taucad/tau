@@ -1,6 +1,7 @@
 import type { ExportFile } from '@taucad/types';
 import { Topic } from '@taucad/events';
 import type { HeadlessImageJob, HeadlessImageService } from '#services/headless-image.service.js';
+import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
 
 type BatchPreviewOptions = Extract<
   Extract<HeadlessImageJob, { sourceFormat: 'glb'; format: 'webp' }>['exportOptions'],
@@ -28,13 +29,6 @@ export type PartThumbnailSource = Readonly<{
   content: Uint8Array<ArrayBuffer>;
   /** Optional preview-only normalization, evaluated only when an image is missing. */
   renderContent?: () => Uint8Array<ArrayBuffer>;
-}>;
-
-export type PartThumbnailState = Readonly<{
-  status: 'pending' | 'ready' | 'failed';
-  /** The last successfully rendered preview stays visible during refresh or failure. */
-  bytes?: Uint8Array<ArrayBuffer>;
-  error?: unknown;
 }>;
 
 const maxSourceBytes = 64 * 1024 * 1024;

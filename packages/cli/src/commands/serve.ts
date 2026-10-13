@@ -11,8 +11,11 @@ import { systemSkillBundles } from '@taucad/skills/resources';
 import { defineCommand } from 'citty';
 import { consola } from 'consola';
 
+import { cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
+import { machineProviders } from '#machine-providers.js';
 import { exitCodes } from '#output.js';
+import type { ComputeStoreWorkerData } from '#compute-store.worker.js';
 
 const runtimeChildModulePath = (): string =>
   fileURLToPath(
@@ -38,25 +41,21 @@ const computeStoreWorkerModulePath = (): string =>
     ),
   );
 
-/**
- * The machine providers `--machines` serves: the Bambu Lab X1C and its
- * socket-free simulator, the operator's dry-run device. Loaded on demand so a
- * daemon without the flag never touches the vendor package.
- *
- * @returns The daemon's machines option.
- */
-const machineProviders = async (): Promise<NonNullable<HostDaemonAgentOptions['machines']>> => {
-  const { bambuA1MiniMachine, bambuMachine, bambuSimulatorMachine } = await import('@taucad/bambu');
-  return { providers: [bambuMachine(), bambuA1MiniMachine(), bambuSimulatorMachine()] };
-};
-
-const childArguments = (options: { readonly plugin: unknown; readonly config?: string }): string[] => {
+const childArguments = (options: {
+  readonly plugin: unknown;
+  readonly config?: string;
+  readonly zooProxyUrl: string;
+}): string[] => {
   const plugins = Array.isArray(options.plugin)
     ? options.plugin.filter((value): value is string => typeof value === 'string')
     : typeof options.plugin === 'string'
       ? [options.plugin]
       : [];
-  return [...plugins.map((plugin) => `--plugin=${plugin}`), ...(options.config ? [`--config=${options.config}`] : [])];
+  return [
+    ...plugins.map((plugin) => `--plugin=${plugin}`),
+    ...(options.config ? [`--config=${options.config}`] : []),
+    `--zoo-proxy-url=${options.zooProxyUrl}`,
+  ];
 };
 
 /**
@@ -344,7 +343,7 @@ export const serveCommand = defineCommand({
         throw new Error('Durable compute requires an admitted workspace.');
       }
       const worker = new Worker(computeStoreWorkerModulePath(), {
-        workerData: { directory: join(defaultConfigDirectory(), 'compute') },
+        workerData: { directory: join(defaultConfigDirectory(), 'compute') } satisfies ComputeStoreWorkerData,
       });
       worker.once('exit', () => {
         invalidateComputeWorker(worker);
@@ -385,12 +384,20 @@ export const serveCommand = defineCommand({
     };
     process.once('SIGINT', onSignal);
     process.once('SIGTERM', onSignal);
+    /* The relay is this daemon's Tau API, so its Zoo proxy is too unless TAU_WEBSOCKET_URL says otherwise. */
+    /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
+    const zooProxyUrl = cliZooProxyUrl({
+      TAU_WEBSOCKET_URL: process.env['TAU_WEBSOCKET_URL'],
+      TAU_API_URL: args.relay,
+    });
+    /* eslint-enable @typescript-eslint/naming-convention -- End environment variable names. */
     const daemon = startHostDaemon({
       relayUrl: new URL(args.relay),
       runtimeHost: {
         modulePath: runtimeChildModulePath(),
-        args: childArguments({ plugin: args.plugin, config: args.config }),
+        args: childArguments({ plugin: args.plugin, config: args.config, zooProxyUrl }),
       },
+      zooProxy: { url: zooProxyUrl, apiUrl: args.relay, sessionToken: process.env['TAU_API_TOKEN'] },
       maxSessions,
       systemSkillBundles,
       pair: args.pair,

@@ -1,5 +1,5 @@
 import { useSelector } from '@xstate/react';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { useProject } from '#hooks/use-project.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
 import { cn } from '@taucad/ui/utils/cn';

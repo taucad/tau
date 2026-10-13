@@ -4,6 +4,7 @@
 #
 # Optional env vars:
 #   CLEAN_DISK_HOME  Home directory to inspect (default: current user's home).
+#   CLEAN_DISK_REPO  Git repository whose registered worktree caches to inspect (optional).
 #
 # Usage:
 #   .agents/skills/clean-disk/scripts/clean-disk.sh [dry|delete]
@@ -74,10 +75,23 @@ recoverable_kib=0
 printf 'MODE\t%s\n' "$MODE"
 printf 'VOLUME_AVAILABLE_BEFORE_KIB\t%s\n' "$before_kib"
 
-open_files=''
-if [[ "$MODE" == delete ]]; then
-  open_files="$(lsof -Fn 2>/dev/null | sed -n 's/^n//p' || true)"
+# Workspace caches are opt-in so isolated-home checks never touch real worktrees.
+WORKSPACE_CANDIDATES=()
+if [[ -n "${CLEAN_DISK_REPO:-}" ]]; then
+  command -v git >/dev/null || exit 3
+  [[ "$CLEAN_DISK_REPO" == /* && ! -L "$CLEAN_DISK_REPO" ]] || exit 1
+  while IFS= read -r -d '' field; do
+    case "$field" in
+      "worktree "*)
+        tree="${field#worktree }"
+        [[ -d "$tree" && ! -L "$tree" ]] || continue
+        WORKSPACE_CANDIDATES+=("$tree/.nx/cache" "$tree/node_modules/.vite")
+        ;;
+    esac
+  done < <(git -C "$CLEAN_DISK_REPO" worktree list --porcelain -z)
 fi
+CANDIDATES+=(${WORKSPACE_CANDIDATES[@]+"${WORKSPACE_CANDIDATES[@]}"})
+
 
 for candidate in "${CANDIDATES[@]}"; do
   [[ -e "$candidate" ]] || continue
@@ -86,6 +100,23 @@ for candidate in "${CANDIDATES[@]}"; do
     continue
   }
   resolved="$(realpath "$candidate")"
+  workspace=false
+  for path in ${WORKSPACE_CANDIDATES[@]+"${WORKSPACE_CANDIDATES[@]}"}; do
+    [[ "$candidate" != "$path" ]] || workspace=true
+  done
+  if [[ "$workspace" == true ]]; then
+    [[ "$resolved" == "$candidate" ]] || { printf 'SKIP_SYMLINK_PARENT\t%s\n' "$candidate"; continue; }
+    case "$candidate" in
+      */.nx/cache) tree="${candidate%/.nx/cache}"; parent="$tree/.nx" ;;
+      */node_modules/.vite) tree="${candidate%/node_modules/.vite}"; parent="$tree/node_modules" ;;
+    esac
+    # A local instruction boundary needs agent review before automatic deletion.
+    [[ ! -f "$parent/AGENTS.md" && ! -f "$candidate/AGENTS.md" ]] || { printf 'SKIP_INSTRUCTIONS\t%s\n' "$candidate"; continue; }
+    if ! tracked="$(git -C "$tree" ls-files -- "$candidate")"; then
+      printf 'SKIP_INSPECTION_FAILED\t%s\n' "$candidate"; continue
+    fi
+    [[ -z "$tracked" ]] || { printf 'SKIP_TRACKED\t%s\n' "$candidate"; continue; }
+  else
   case "$resolved" in
     "$CLEAN_DISK_HOME/.npm/"*|"$CLEAN_DISK_HOME/.cache/"*|"$CLEAN_DISK_HOME/Library/Caches/"*) ;;
     *)
@@ -93,17 +124,34 @@ for candidate in "${CANDIDATES[@]}"; do
       exit 1
       ;;
   esac
+  fi
 
   size_kib="$(du -sk "$resolved" 2>/dev/null | awk '{ print $1 }')"
   recoverable_kib=$((recoverable_kib + size_kib))
   printf 'CANDIDATE\t%s\t%s\n' "$size_kib" "$resolved"
 
   [[ "$MODE" == delete ]] || continue
-  if awk -v prefix="$resolved/" 'index($0, prefix) == 1 { found=1; exit } END { exit !found }' <<<"$open_files"; then
+  # Recheck immediately before each removal and fail closed on inspection errors.
+  if ! open_files="$(lsof -Fn 2>/dev/null)"; then
+    printf 'SKIP_INSPECTION_FAILED\t%s\n' "$resolved"
+    continue
+  fi
+  open_files="$(sed -n 's/^n//p' <<<"$open_files")"
+  if [[ "$workspace" == true ]]; then
+    if ! processes="$(ps -axo args=)"; then
+      printf 'SKIP_INSPECTION_FAILED\t%s\n' "$resolved"; continue
+    fi
+    if awk '/node|pnpm|npm|cargo|rustc|cmake|ninja/ && !/daemon\/server\/start.js/ { found=1 } END { exit !found }' <<<"$processes"; then
+      printf 'SKIP_ACTIVE_BUILD\t%s\n' "$resolved"; continue
+    fi
+  fi
+  [[ -d "$candidate" && ! -L "$candidate" && "$(realpath "$candidate")" == "$resolved" ]] || { printf 'SKIP_CHANGED\t%s\n' "$candidate"; continue; }
+  if awk -v exact="$resolved" -v prefix="$resolved/" '$0 == exact || index($0, prefix) == 1 { found=1; exit } END { exit !found }' <<<"$open_files"; then
     printf 'SKIP_OPEN\t%s\n' "$resolved"
     continue
   fi
   rm -rf -- "$resolved"
+  [[ ! -e "$resolved" ]] || { printf 'ERROR: deletion incomplete: %s\n' "$resolved" >&2; exit 1; }
   printf 'DELETED\t%s\n' "$resolved"
 done
 

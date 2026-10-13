@@ -282,6 +282,15 @@ describe('ProjectSharePanel', () => {
     expect(portableContextDispose).toHaveBeenCalledOnce();
   });
 
+  it('should leave sign-in to the hosted link rather than asking under the direct link (D95)', async () => {
+    renderPanel(
+      <ProjectSharePanel projectId='proj_direct' projectName='Direct' entryPath='main.ts' collectSnapshot={vi.fn()} />,
+    );
+
+    expect(await screen.findByRole('button', { name: /copy direct link/i })).toBeInTheDocument();
+    expect(screen.queryByText(/sign in to persist/i)).not.toBeInTheDocument();
+  });
+
   it('opts into password encryption and can omit the password from the copied link', async () => {
     portableProviderPublish.mockResolvedValueOnce({
       locator: { providerId: 'direct' },

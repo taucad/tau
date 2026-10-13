@@ -188,6 +188,26 @@ describe('GithubController over HTTP', () => {
     });
   });
 
+  it.each([['https://evil.example'], [undefined]])(
+    'should refuse a start from origin %s with 400 ORIGIN_INVALID before starting an attempt',
+    async (origin) => {
+      await withApp(configured, async ({ app, auth, github }) => {
+        auth.api.getSession.mockResolvedValue(signedIn);
+        const start = vi.spyOn(github, 'start');
+
+        const response = await app.inject({
+          method: 'POST',
+          url: '/v1/github/connections/start',
+          headers: origin === undefined ? {} : { origin },
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(response.json()).toMatchObject({ code: 'ORIGIN_INVALID' });
+        expect(start).not.toHaveBeenCalled();
+      });
+    },
+  );
+
   it('should start a bodiless request with the default return location', async () => {
     await withApp(configured, async ({ app, auth }) => {
       auth.api.getSession.mockResolvedValue(signedIn);

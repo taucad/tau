@@ -20,7 +20,7 @@ export type PortRevisionsClient = RpcRevisionsClient &
   }>;
 
 /**
- * Serve `log`, `diff` and `describe` over a revision port.
+ * Serve `log`, `diff`, `describe` and `conflict` over a revision port.
  *
  * @param port - A port the file-manager worker's revision registry serves for this project.
  * @returns The client and its close.
@@ -123,6 +123,18 @@ export const createPortRevisionsClient = (port: MessagePort): PortRevisionsClien
               ? `${branch} · no revisions yet`
               : `${branch} · Rev ${String(revisionNumber)}`,
       };
+    },
+    conflict: async (revision) => {
+      await status.promise;
+      /* The one waiting on this project's branch, from the projection the pane's card reads. */
+      const { line, conflicts } = latest!;
+      const id =
+        revision ?? conflicts.find((conflict) => line.kind === 'branch' && conflict.into === line.name)?.revisionId;
+      if (id === undefined) {
+        return undefined;
+      }
+      const result = await ask({ command: 'readConflict', revisionId: id }, 'conflict');
+      return result.conflict;
     },
     close: () => {
       /* Uncorrelated: the last port's close releases the root; any other port's only leaves it. */

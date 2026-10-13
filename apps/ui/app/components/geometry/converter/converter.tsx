@@ -2,7 +2,7 @@ import { useCallback, useId, useState } from 'react';
 import type { ExportFile } from '@taucad/types';
 import { Download } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { toast } from '#components/ui/sonner.js';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';

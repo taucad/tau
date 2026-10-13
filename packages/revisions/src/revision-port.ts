@@ -609,6 +609,10 @@ export type RevisionPortErrorCode =
   | 'BRANCH_NEEDS_REVISION'
   /** A branch name conflict lines own: `conflicts` or a name under it (charter D14). */
   | 'BRANCH_NAME_RESERVED'
+  /** A rename of a branch a linked checkout holds: the checkout is named by its branch. */
+  | 'BRANCH_RENAME_LINKED'
+  /** A rename of a branch a remote holds: no push removes the old name there. */
+  | 'BRANCH_RENAME_PUSHED'
   /** The requested branch already has a checkout, or the id names no checkout. */
   | 'CHECKOUT_CONFLICT'
   | 'ENGINE_FAILED'

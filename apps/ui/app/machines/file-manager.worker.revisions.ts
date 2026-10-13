@@ -27,6 +27,7 @@ import {
 import type {
   EditorConflictInput,
   EditorConflictOutcome,
+  RevisionConflictRead,
   TurnConflictedEvent,
   TurnFailedEvent,
   TurnFinalizedEvent,
@@ -255,7 +256,9 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'log'; branch?: string; limit?: number; from?: string }>
   | Readonly<{ command: 'divergence'; head: string; base: string }>
   | Readonly<{ command: 'diff'; revisionId: string; from?: string; against?: 'checkout' }>
-  | Readonly<{ command: 'compare'; revisionId: string; path: string; from?: string; against?: 'checkout' }>;
+  | Readonly<{ command: 'compare'; revisionId: string; path: string; from?: string; against?: 'checkout' }>
+  /** Both sides of one conflicted revision as text, for the agent's `revisions` tool (rule 8). */
+  | Readonly<{ command: 'readConflict'; revisionId: string }>;
 
 /**
  * One settled signal from the worker revision root.
@@ -430,6 +433,8 @@ export type WorkerProjectRevisions = Readonly<{
   saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
   /** Record an editor's overlapping edit as a conflicted revision, and wait for it (D14). */
   recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
+  /** Both sides of one conflicted revision as text (rule 8). */
+  readConflict: (revision: string) => Promise<RevisionConflictRead>;
   /** One content-change event on a checkout, already filtered to versioned paths. */
   changed: (checkoutId: string, paths: readonly string[]) => void;
   /** Name one revision, or re-point an existing name (S31). */
@@ -681,7 +686,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const events = new Topic<WorkerRevisionEvent>({ name: 'WorkerProjectRevisionEvents' });
   const toasts = new Topic<RevisionToast>({ name: 'WorkerProjectRevisionToasts' });
 
-  const { actor, settled, turns, recordEditorConflict } = createProjectRevisionsActor({
+  const { actor, settled, turns, recordEditorConflict, readConflict } = createProjectRevisionsActor({
     port: options.port,
     projectId,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
@@ -1442,6 +1447,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'divergence':
         case 'diff':
         case 'compare':
+        case 'readConflict':
         case 'recordEditorConflict': {
           break;
         }
@@ -1559,6 +1565,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     },
     saveRevision,
     recordEditorConflict,
+    readConflict,
     createBranch,
     placementSession: async () => {
       await session?.fence();
@@ -1656,6 +1663,7 @@ export type WorkerRevisionResult =
   | Readonly<{ kind: 'divergence'; divergence: RevisionDivergence }>
   | Readonly<{ kind: 'diff'; entries: readonly RevisionDiffEntry[] }>
   | Readonly<{ kind: 'comparison'; comparison: RevisionFileComparison }>
+  | Readonly<{ kind: 'conflict'; conflict: RevisionConflictRead }>
   | Readonly<{ kind: 'geoSpecCandidates'; candidates: ReadonlyArray<Uint8Array<ArrayBuffer>> }>
   | Readonly<{ kind: 'geoSpecCandidatePublication'; status: 'updated' | 'upToDate' | 'rejected' }>
   /** `tag` answers with the named version; `deleteTag` answers with nothing. */
@@ -1870,6 +1878,9 @@ const answerOf = (
           ...(request.against === undefined ? {} : { against: request.against }),
         })
         .then((comparison) => ({ kind: 'comparison', comparison }) as const);
+    }
+    case 'readConflict': {
+      return tree.readConflict(request.revisionId).then((conflict) => ({ kind: 'conflict', conflict }) as const);
     }
     case 'fetchGeoSpecCandidates': {
       return tree.fetchGeoSpecCandidates().then((candidates) => ({ kind: 'geoSpecCandidates', candidates }) as const);

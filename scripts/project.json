@@ -25,6 +25,13 @@
         "command": "node scripts/src/validate-frontmatter.ts"
       }
     },
+    "validate-brain-evidence": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/src/validate-brain-evidence.ts"
+      }
+    },
     "validate-workspace-root": {
       "executor": "nx:run-commands",
       "options": {

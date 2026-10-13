@@ -19,7 +19,7 @@ import { SvgIcon } from '#components/icons/svg-icon.js';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import {
   FloatingPanel,
   FloatingPanelClose,

@@ -702,6 +702,19 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  it('names the live checkout while a linked one is selected (D96)', () => {
+    const harness = start();
+
+    registerCheckouts(harness);
+    harness.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
+    expect(selectRevisionStatus(harness.actor.getSnapshot())).toMatchObject({
+      checkoutId: 'checkout-b',
+      liveCheckoutId: 'checkout-live',
+    });
+
+    harness.actor.stop();
+  });
+
   /* RM-R5: a producer's fact is a hint, so the checkout re-reads and reports its own head. */
   it('re-heads a checkout that a restore moved', async () => {
     const harness = start();
@@ -1008,6 +1021,7 @@ describe('projectRevisionsMachine', () => {
     expect(selectRevisionStatus(harness.actor.getSnapshot())).toEqual({
       projectId: 'project-1',
       checkoutId: 'checkout-b',
+      liveCheckoutId: 'checkout-live',
       checkoutRoot: '/checkouts/checkout-b',
       line: { kind: 'unborn', name: 'agent/b' },
       registrySettled: true,
@@ -2125,6 +2139,45 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  /* D88: a head that moves under a waiting conflict (a chat's turn, a save) re-reads the card, so a choice is
+   * judged against the files that still fight rather than refused against the ones read at spawn. */
+  it('re-reads a waiting conflict when the head of the line it decides moves', async () => {
+    const harness = start();
+    const report = (headRevisionId: string): void => {
+      harness.actor.send({
+        type: 'checkoutStatusChanged',
+        checkoutId: 'checkout-live',
+        status: 'clean',
+        branch: 'main',
+        headRevisionId,
+      });
+    };
+
+    registerCheckouts(harness, [live, linked], [undecided]);
+    report('rev-5');
+    await flush();
+    harness.promises.settle('loadConflict', {
+      output: {
+        branch: conflictLine,
+        labels: { ours: 'main', theirs: 'agent/b' },
+        paths: [{ path: 'enclosure.ts', openable: true }],
+        checkoutId: 'checkout-live',
+      },
+    });
+    await flush();
+
+    report('rev-turn');
+    await flush();
+    expect(harness.promises.inputsFor('loadConflict')).toHaveLength(2);
+
+    /* The same head again is not a move. */
+    report('rev-turn');
+    await flush();
+    expect(harness.promises.inputsFor('loadConflict')).toHaveLength(2);
+
+    harness.actor.stop();
+  });
+
   it('projects the conflict card from the records and its child, and counts it as attention', async () => {
     const harness = start();
 
@@ -2348,15 +2401,21 @@ describe('projectRevisionsMachine', () => {
     harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
     await flush();
     harness.promises.settle('syncFetch', {
-      output: { leases: {}, integration: 'diverged', branches: [{ name: 'remote-feature', head: 'rev-remote' }] },
+      output: {
+        leases: {},
+        integration: 'diverged',
+        branches: [{ name: 'remote-feature', head: 'rev-remote', onRemote: true }],
+      },
     });
     await flush();
+    /* The fetch's own word on the remote reaches the row, so *Remote only* is never a guess (D93). */
     expect(selectRevisionStatus(harness.actor.getSnapshot()).branches).toContainEqual({
       name: 'remote-feature',
       head: 'rev-remote',
       checkoutId: undefined,
       checkoutRoot: undefined,
       leaseChatIds: [],
+      onRemote: true,
     });
     harness.promises.settle('syncMerge', {
       output: { status: 'conflicted', branch: conflictLine, into: 'main', paths: ['enclosure.ts'] },
@@ -2460,6 +2519,42 @@ describe('projectRevisionsMachine', () => {
       { branch: 'conflicts/main/device-b', into: 'main', foreign: true },
     ]);
     expect(status.branches.map((branch) => branch.name)).toEqual(['main', 'conflicts/main/device-b']);
+
+    harness.actor.stop();
+  });
+
+  it('says a linked branch whose conflict waits on the person waits, not that it catches up (D90)', async () => {
+    const harness = start();
+    const waiting: ConflictRecord = {
+      revisionId: 'rev-b-conflict',
+      line: 'conflicts/agent/b/device-a',
+      into: 'agent/b',
+      foreign: false,
+    };
+
+    await readyRegistry(harness, [live, linked], [waiting]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
+    await flush();
+    harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'ahead' } });
+    await flush();
+    harness.promises.settle('syncPush', {
+      output: {
+        refs: [
+          { name: 'refs/heads/main', status: 'upToDate', head: 'rev-1' },
+          { name: 'refs/heads/agent/b', status: 'rejected', head: 'rev-b', reason: 'leaseLost' },
+        ],
+      },
+    });
+    await flush();
+    harness.promises.settle('writePending', { output: undefined });
+    await flush();
+
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).sync).toMatchObject({
+      state: 'queued',
+      error: 'agent/b waits on your decision; its revisions back up once you choose.',
+    });
 
     harness.actor.stop();
   });

@@ -1,6 +1,6 @@
 {
   "name": "@taucad/workbench",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.1",
   "description": "Portable workbench records and agent skill",
   "type": "module",
   "sideEffects": false,
@@ -54,7 +54,7 @@
     "#*": "./src/*"
   },
   "peerDependencies": {
-    "@taucad/camera": "^0.0.1",
+    "@taucad/camera": "^0.1.0-beta.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {

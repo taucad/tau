@@ -32,7 +32,13 @@ import type { DraftAttachment } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
 import { ChatEditor } from '#components/chat/tiptap/chat-editor.js';
-import { buildEditorContentJson, extractContent, useChatEditor } from '#components/chat/tiptap/use-chat-editor.js';
+import type { CadReference } from '@taucad/chat/references';
+import {
+  buildEditorContentJson,
+  cadReferencesOfChips,
+  extractContent,
+  useChatEditor,
+} from '#components/chat/tiptap/use-chat-editor.js';
 import type { ContextSuggestionItem, SlashCommandItem } from '#components/chat/tiptap/suggestion-types.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import { createScreenshotContextHandler } from '#components/chat/screenshot-actions.utils.js';
@@ -90,7 +96,7 @@ type ChatTextareaDesktopProperties = {
   readonly addContextReferencesRef: React.RefObject<((references: ChatContextReference[]) => void) | undefined>;
 
   // Handlers (all must be stable references to prevent tooltip re-render loops)
-  readonly handleSubmit: (finalizedText?: string) => Promise<void>;
+  readonly handleSubmit: (finalizedText?: string, references?: readonly CadReference[]) => Promise<void>;
   readonly handleCancelClick: () => void;
   readonly handleDragOver: (event: React.DragEvent) => void;
   readonly handleDragLeave: () => void;
@@ -262,6 +268,12 @@ export const ChatTextareaDesktop = memo(function ({
     latestDraftOwner.current = draftActorRef;
   }, [draftActorRef]);
   const dictation = useDictation(insertTranscript, draftActorRef);
+  /* The chips' structured references travel beside the text only when the draft has some. */
+  const submitWithReferences = useCallback(
+    async (text: string | undefined, references: readonly CadReference[]): Promise<void> =>
+      references.length === 0 ? handleSubmit(text) : handleSubmit(text, references),
+    [handleSubmit],
+  );
   const submitWithDictation = useCallback(async (): Promise<void> => {
     if (dictation.phase !== 'idle') {
       if (dictation.phase !== 'recording' || !(await dictation.stop())) {
@@ -269,12 +281,19 @@ export const ChatTextareaDesktop = memo(function ({
       }
       const currentEditor = editorRef.current;
       if (currentEditor && !currentEditor.isDestroyed && latestDraftOwner.current === draftActorRef) {
-        await handleSubmit(extractContent(currentEditor).text);
+        const content = extractContent(currentEditor);
+        await submitWithReferences(content.text, cadReferencesOfChips(content.contextChips));
       }
       return;
     }
-    await handleSubmit();
-  }, [dictation.phase, dictation.stop, draftActorRef, handleSubmit]);
+    const currentEditor = editorRef.current;
+    await submitWithReferences(
+      undefined,
+      currentEditor && !currentEditor.isDestroyed
+        ? cadReferencesOfChips(extractContent(currentEditor).contextChips)
+        : [],
+    );
+  }, [dictation.phase, dictation.stop, draftActorRef, submitWithReferences]);
   const escapeWithDictation = useCallback((): void => {
     if (dictation.phase === 'idle') {
       onEscapePressed?.();

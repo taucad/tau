@@ -1,10 +1,20 @@
 name: Preview packages
 
-# Publishes every publishable workspace package to pkg.pr.new for one commit on
-# main, so the agent plugin and the CLI it starts can be installed without npm
-# (`pnpm plugin:dev preview --sha <commit>`). The packages carry the preview
-# version 0.0.0-preview-<sha>, and pkg.pr.new rewrites their @taucad/*
-# dependencies to the same run's URLs. Needs the pkg.pr.new GitHub App
+# The pkg.pr.new full run: publishes every publishable workspace package for one
+# commit, so the agent plugin and the CLI it starts can be installed without npm
+# (`pnpm plugin:dev preview --sha <commit>`), then installs what it published by
+# URL into a clean npm application on Linux and macOS and exports a GLB with the
+# installed `tau`. It rehearses the npm release train before each train.
+#
+# Runs on a dispatch from `main`, and on a same-repository pull request carrying
+# the `preview` label (each push to it publishes again). The packages carry the
+# preview version 0.0.0-preview-<sha>; pkg.pr.new rewrites their @taucad/* and
+# geospec dependencies to the same run's URLs, and such peers to that version
+# (--peerDeps), which no registry range would admit.
+# --no-compact keeps every URL in its long form: the npm name @taucad/replicad
+# still belongs to the retired replicad fork, whose repository field compact URLs
+# would follow. The GeoSpec engine packages are left out: they publish from
+# taucad/geospec (charter D36). Needs the pkg.pr.new GitHub App
 # (https://github.com/apps/pkg-pr-new) installed on this repository.
 on:
   workflow_dispatch:
@@ -13,14 +23,18 @@ on:
         description: "How long to wait for the commit's ci.yml run on main to finish (it supplies the GeoSpec products)"
         required: false
         default: '90'
+  pull_request:
+    types: [labeled, opened, reopened, synchronize]
 
 permissions:
   contents: read
   actions: read
 
+# A new push to a labelled pull request replaces its running preview; a label other than
+# `preview` gets its own group, so adding it never cancels one.
 concurrency:
-  group: preview-packages-${{ github.sha }}
-  cancel-in-progress: false
+  group: preview-packages-${{ github.event.pull_request.number || github.sha }}-${{ github.event.action == 'labeled' && github.event.label.name != 'preview' && github.run_id || 'publish' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   pnpm_config_verify_deps_before_run: warn
@@ -28,7 +42,14 @@ env:
 jobs:
   preview:
     name: Publish previews to pkg.pr.new
-    if: github.ref == 'refs/heads/main'
+    # A dispatch publishes only from main; a pull request only when labelled `preview`, from
+    # this repository (never a fork), and a `labeled` event only for that label.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(github.event.pull_request.labels.*.name, 'preview') &&
+        (github.event.action != 'labeled' || github.event.label.name == 'preview'))
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -40,11 +61,15 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
-      # The macOS producer cannot run here: take this commit's GeoSpec products from its main CI run.
+      # The macOS producer cannot run here: take the GeoSpec products from a main CI run
+      # (this commit's on a dispatch; the pull request's base on a pull request) and verify
+      # them against this checkout, which fails when the pull request changes GeoSpec inputs.
       - name: GeoSpec products from main
         uses: ./.github/actions/geospec-artifact-from-main
         with:
-          wait-minutes: ${{ inputs.wait-minutes }}
+          sha: ${{ github.event.pull_request.base.sha }}
+          wait-minutes: ${{ inputs.wait-minutes || '90' }}
+          require-success: ${{ github.event_name == 'pull_request' && 'false' || 'true' }}
           github-token: ${{ github.token }}
 
       - name: Build every publishable package
@@ -54,28 +79,42 @@ jobs:
         id: packages
         run: |
           node --input-type=module -e '
-            import { readFileSync, existsSync } from "node:fs";
+            import { appendFileSync, readFileSync, existsSync } from "node:fs";
             import { execFileSync } from "node:child_process";
+            // Published from taucad/geospec, not from this train (charter D36); `geospec` stays in.
+            const geospecEngine = new Set(["@taucad/geospec-engine", "@taucad/geospec-engine-native"]);
             const projects = JSON.parse(execFileSync("pnpm", ["-r", "--depth", "-1", "ls", "--json"], { encoding: "utf8" }));
             const folders = projects
-              .map(({ path }) => path)
-              .filter((path) => existsSync(`${path}/project.json`))
-              .filter((path) => (JSON.parse(readFileSync(`${path}/project.json`, "utf8")).tags ?? []).includes("type:package"))
-              .filter((path) => JSON.parse(readFileSync(`${path}/package.json`, "utf8")).private !== true)
-              .map((path) => path.slice(process.cwd().length + 1))
+              .filter(({ path }) => existsSync(`${path}/project.json`))
+              .filter(({ path }) => (JSON.parse(readFileSync(`${path}/project.json`, "utf8")).tags ?? []).includes("type:package"))
+              .filter(({ path }) => JSON.parse(readFileSync(`${path}/package.json`, "utf8")).private !== true)
+              .filter(({ name }) => !geospecEngine.has(name))
+              .map(({ path }) => path.slice(process.cwd().length + 1))
               .sort();
             console.log(`Publishing ${folders.length} packages:\n${folders.join("\n")}`);
-            const { appendFileSync } = await import("node:fs");
-            appendFileSync(process.env.GITHUB_OUTPUT, `folders=${folders.join(" ")}\n`);
+            appendFileSync(process.env.GITHUB_OUTPUT, `folders=${folders.join(" ")}\ncount=${folders.length}\n`);
           '
 
       # --pnpm packs with pnpm, which applies publishConfig and resolves workspace: and catalog: specifiers.
+      # A labelled pull request gets one pkg.pr.new comment, updated on each push; a dispatch none.
       - name: Publish to pkg.pr.new
         env:
           FOLDERS: ${{ steps.packages.outputs.folders }}
+          COMMENT: ${{ github.event_name == 'pull_request' && 'update' || 'off' }}
         run: |
           # shellcheck disable=SC2086 # one argument per folder
-          pnpm dlx pkg-pr-new@0.0.88 publish --pnpm --previewVersion --comment=off --json preview.json $FOLDERS
+          pnpm dlx pkg-pr-new@0.0.88 publish --pnpm --previewVersion --peerDeps --no-compact \
+            --comment="$COMMENT" --json preview.json $FOLDERS
+
+      - name: Check every folder published
+        env:
+          EXPECTED: ${{ steps.packages.outputs.count }}
+        run: |
+          node -e '
+            const packages = require("./preview.json").packages ?? [];
+            console.log(`pkg.pr.new published ${packages.length} of ${process.env.EXPECTED} folders.`);
+            if (packages.length !== Number(process.env.EXPECTED)) process.exit(1);
+          '
 
       - name: Summarise the install
         run: |
@@ -95,3 +134,46 @@ jobs:
           name: pkg-pr-new-preview-${{ github.sha }}
           path: preview.json
           if-no-files-found: error
+
+  consumer:
+    name: Install the previews (${{ matrix.os }})
+    needs: preview
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      # The checkout supplies only the checker and its tools (TypeScript, esbuild, Playwright):
+      # the consumer application lives under the OS temp dir and installs nothing from it.
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Install Chromium for the browser checks
+        run: pnpm exec playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+
+      - name: Download the preview list
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pkg-pr-new-preview-${{ github.sha }}
+          path: ${{ runner.temp }}/preview
+
+      - name: Install every preview by URL and export a GLB
+        run: |
+          set -o pipefail
+          node scripts/src/check-pack-install.ts --from-urls "$RUNNER_TEMP/preview/preview.json" 2>&1 \
+            | tee "$RUNNER_TEMP/consumer-${{ matrix.os }}.log"
+
+      - name: Upload the consumer log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pkg-pr-new-consumer-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/consumer-${{ matrix.os }}.log
+          if-no-files-found: ignore

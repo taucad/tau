@@ -5,6 +5,7 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { Line2 as Line2WebGpu } from 'three/addons/lines/webgpu/Line2.js';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import { Line2NodeMaterial } from '#graphics/three/materials/line2.material.js';
+import { axesHelperColors } from '#graphics/three/overlay-colors.constants.js';
 import { gizmoBaseDistance } from '#graphics/three/utils/math.utils.js';
 
 export type ViewportGizmoCubeAxesProps = {
@@ -20,6 +21,7 @@ export type ViewportGizmoCubeAxesProps = {
   readonly xLabelColor?: string;
   readonly yLabelColor?: string;
   readonly zLabelColor?: string;
+  readonly fontFamily?: string;
   readonly lineOpacity?: number;
   readonly lineWidth?: number;
   readonly renderingBackend?: ResolvedGraphicsBackend;
@@ -28,13 +30,14 @@ export type ViewportGizmoCubeAxesProps = {
 export const createViewportGizmoCubeAxes = ({
   axesSize = 2.1,
   rendererSize = 96,
-  xAxisColor = 'red',
-  yAxisColor = 'green',
-  zAxisColor = 'blue',
-  xLabelColor = 'red',
-  yLabelColor = 'green',
-  zLabelColor = 'blue',
-  lineOpacity = 0.6,
+  xAxisColor = axesHelperColors.x,
+  yAxisColor = axesHelperColors.y,
+  zAxisColor = axesHelperColors.z,
+  xLabelColor = axesHelperColors.x,
+  yLabelColor = axesHelperColors.y,
+  zLabelColor = axesHelperColors.z,
+  fontFamily = "'Geist Sans', ui-sans-serif, system-ui, sans-serif",
+  lineOpacity = 1,
   lineWidth = 1.5,
   renderingBackend = 'webgl',
 }: ViewportGizmoCubeAxesProps): THREE.Group => {
@@ -80,6 +83,9 @@ export const createViewportGizmoCubeAxes = ({
         worldUnits: false,
         transparent: true,
         opacity: lineOpacity,
+        depthTest: true,
+        depthWrite: false,
+        toneMapped: false,
       });
       axes.add(new Line2WebGpu(geometry, material));
     } else {
@@ -87,8 +93,12 @@ export const createViewportGizmoCubeAxes = ({
         color: line.lineColor,
         linewidth: lineWidth,
         opacity: lineOpacity,
+        depthTest: true,
+        depthWrite: false,
+        toneMapped: false,
         resolution: new THREE.Vector2(rendererSize, rendererSize),
         transparent: true,
+        alphaToCoverage: true,
       });
       axes.add(new Line2(geometry, material));
     }
@@ -99,7 +109,7 @@ export const createViewportGizmoCubeAxes = ({
     // Create a canvas for the text
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
-    const textCanvasSize = 64;
+    const textCanvasSize = 128;
     canvas.width = textCanvasSize;
     canvas.height = textCanvasSize;
 
@@ -109,7 +119,7 @@ export const createViewportGizmoCubeAxes = ({
 
       // Draw the text with smaller font size
       context.fillStyle = line.labelColor;
-      context.font = '100 48px monospace';
+      context.font = `500 88px ${fontFamily}`;
       context.textAlign = 'center';
       context.textBaseline = 'middle';
       context.fillText(line.label, textCanvasSize / 2, textCanvasSize / 2);
@@ -117,7 +127,7 @@ export const createViewportGizmoCubeAxes = ({
 
     // Create texture from canvas
     const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
+    texture.colorSpace = THREE.SRGBColorSpace;
 
     // Create a sprite with the texture.
     // sizeAttenuation: true makes the sprite size proportional to
@@ -129,6 +139,8 @@ export const createViewportGizmoCubeAxes = ({
       map: texture,
       sizeAttenuation: true,
       depthTest: true,
+      depthWrite: false,
+      toneMapped: false,
       transparent: true,
     });
 
@@ -136,7 +148,7 @@ export const createViewportGizmoCubeAxes = ({
     const sprite = new THREE.Sprite(spriteMaterial);
     sprite.renderOrder = 3;
     sprite.position.copy(endPoint);
-    sprite.scale.set(0.08 * gizmoBaseDistance, 0.06 * gizmoBaseDistance, 1);
+    sprite.scale.set(0.07 * gizmoBaseDistance, 0.07 * gizmoBaseDistance, 1);
 
     // Add increased offset to move labels further from line ends
     const direction = new THREE.Vector3().subVectors(endPoint, new THREE.Vector3(0, 0, 0)).normalize();

@@ -119,6 +119,8 @@ Keep commit identity, regular-file mode, refs, log, diff, merge, tags, checkouts
 
 Keep each worktree's Git index naming its branch's head tree, for stock Git only. Tau never reads the index and decides dirtiness by capture, so the port refreshes it after every branch move, every `HEAD` switch, and at open when no index exists, and never fails the move because of it. Leave an existing index alone at open: an adopted repository may hold the person's staged work. A person's staging is folded into the next revision. Adopt only a repository whose `.git` is a directory at the project root; refuse a project path whose `.git` is a file (a linked worktree or submodule) before writing anything, because its index, LFS objects and worktree listing belong to another repository.
 
+Treat a repository already at the project path whose ignore and attributes files carry no Tau generated block as adopted, on disk hosts only. Leave its ignore, attributes and Git config files as the person wrote them and put Tau's generated ignore block in `.git/info/exclude`. Record its entries verbatim, so an unchanged entry keeps its representation (rule 13), and exclude from capture every untracked path its own Git ignores. List only the checkouts Tau created as its linked checkouts; a worktree the person made is never watched, cut or committed to. Refuse adoption before writing anything when its `HEAD` tree holds a path the registry cannot version, a mode other than `100644` or `100755`, or LFS attributes: those are entries the first revision would drop or convert.
+
 Keep remote transport to `listRemoteRefs`, `fetch`, and `push`; do not add bundle or import-bundle wires.
 
 ### 6. Compose one revision actor system per project

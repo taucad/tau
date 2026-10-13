@@ -1112,11 +1112,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       memos: CheckoutMemos;
       bypassMemo: boolean;
       changed?: Readonly<{ paths: readonly string[] | undefined }>;
+      /** Paths the person's own Git ignores, in an adopted repository. */
+      ignored?: ReadonlySet<string> | undefined;
     }>,
   ): Promise<ImmutableRevisionTree> => {
-    const { memos, bypassMemo, changed } = captureOptions;
+    const { memos, bypassMemo, changed, ignored } = captureOptions;
     const started = ++captureSequence;
-    const exclude = (path: string): boolean => !policy.classify(path).versioned;
+    /* Git lists an ignored directory once, with its trailing `/`; capture never
+     * descends into an excluded directory, so the directory is enough. */
+    const exclude = (path: string): boolean =>
+      !policy.classify(path).versioned || ignored?.has(path) === true || ignored?.has(`${path}/`) === true;
     const since = options.completeChanges === true && changed?.paths !== undefined ? memos.last : undefined;
     const tree =
       since === undefined || changed?.paths === undefined
@@ -1128,7 +1133,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
              * written moments ago would read as old enough to trust (RV-W4W5a #5). */
             const observedAt = clock();
             const memoOptions = memos.capture.unchanged(
-              await rooted.statTree?.('', { admits: (path) => policy.classify(path).versioned }),
+              await rooted.statTree?.('', { admits: (path) => !exclude(path) }),
               observedAt,
             );
             const basis = await basisOf();
@@ -1187,10 +1192,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       await sweepTemporarySiblings(place, rooted);
       const { modeBasis, bypassMemo, changed } = captureOptions;
       const memos = memosOf(place.id);
+      const ignored = await port.ignoredPaths?.(place.kind === 'live' ? undefined : place.root);
       return captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
         memos,
         bypassMemo,
         ...(changed === undefined ? {} : { changed }),
+        ...(ignored === undefined ? {} : { ignored: new Set(ignored) }),
       });
     });
   /* The tree id of one checkout's capture, through that checkout's warm memo (E3). */

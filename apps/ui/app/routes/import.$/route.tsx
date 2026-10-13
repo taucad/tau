@@ -53,6 +53,7 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { GithubRepositoryPicker, useGithubConnectionAvailable } from '#components/github/github-repository-picker.js';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import { prepareLinkedGithubImport } from '#lib/github-linked-import.js';
+import { GithubRequestError } from '#lib/github-connections.js';
 import { githubNoreplyAuthor, githubProjectBinding } from '#lib/github-project-binding.js';
 import { shareOrigin } from '#lib/share-origin.js';
 
@@ -136,7 +137,12 @@ const repositoryUnavailableAdvice = (error: Error | undefined, canChooseFromAcco
   }
 };
 
-type LinkedImportRefusal = Readonly<{ title: string; message: string }>;
+type LinkedImportRefusal = Readonly<{
+  title: string;
+  message: string;
+  /** The one control that fixes the cause, when the review's own controls cannot (R23). */
+  action?: Readonly<{ label: string; recovery: 'chooseRepository' | 'connectGithub' }>;
+}>;
 
 /**
  * A deliberate refusal of *Import and link*, headlined as one (R4). Anything
@@ -144,14 +150,30 @@ type LinkedImportRefusal = Readonly<{ title: string; message: string }>;
  *
  * @param error - What the linked import threw.
  * @param targetBranch - The local and sync branch the import tried to create.
- * @param sourceBranch - The GitHub branch the review was taken from.
+ * @param selection - The reviewed repository and branch.
  * @returns The refusal's headline and next step, or `undefined` for an interruption.
  */
 const linkedImportRefusal = (
   error: unknown,
   targetBranch: string,
-  sourceBranch: string,
+  selection: GithubRepositorySelection,
 ): LinkedImportRefusal | undefined => {
+  /* The account that opened the review is gone or lapsed: trying Import and link again cannot succeed (R23). */
+  if (error instanceof GithubRequestError && error.code === 'GITHUB_CONNECTION_NOT_FOUND') {
+    return {
+      title: 'GitHub account no longer connected',
+      message: `Choose ${selection.repository.fullName} again from a connected account.`,
+      action: { label: 'Choose repository again', recovery: 'chooseRepository' },
+    };
+  }
+  if (error instanceof GithubRequestError && error.code === 'GITHUB_RECONNECT_REQUIRED') {
+    return {
+      title: 'GitHub connection needs renewing',
+      message: `Connect GitHub again, then choose ${selection.repository.fullName}.`,
+      action: { label: 'Connect GitHub again', recovery: 'connectGithub' },
+    };
+  }
+  const sourceBranch = selection.branch.name;
   if (!(error instanceof RevisionPortError) || error.code !== 'REMOTE_REF_CONFLICT') {
     return undefined;
   }
@@ -186,6 +208,7 @@ export default function ImportRoute(): React.JSX.Element {
   const [linkedRefusal, setLinkedRefusal] = useState<LinkedImportRefusal>();
   const [linkedReviewBlocked, setLinkedReviewBlocked] = useState(false);
   const [linkedSyncChats, setLinkedSyncChats] = useState(true);
+  const [connectGithub, setConnectGithub] = useState(false);
   const githubConnectionAvailable = useGithubConnectionAvailable();
   const branchLabelId = useId();
   const folderLabelId = useId();
@@ -613,7 +636,7 @@ export default function ImportRoute(): React.JSX.Element {
       void navigate(projectUrl(created.slugs));
     } catch (error) {
       presentLocationError(error);
-      setLinkedRefusal(linkedImportRefusal(error, linkedTargetBranch, linkedSelection.branch.name));
+      setLinkedRefusal(linkedImportRefusal(error, linkedTargetBranch, linkedSelection));
       setLinkedError(error instanceof Error ? error.message : 'The linked project could not be imported.');
       setLinkedBusy(false);
     }
@@ -630,6 +653,14 @@ export default function ImportRoute(): React.JSX.Element {
   const publicRepoUrl = repoUrlDraft ?? repoUrl;
   const canReviewRepository = parseGitHubUrl(normalizeGitHubUrl(publicRepoUrl.trim())) !== undefined;
   const isRepoUrlRejected = publicRepoUrl.trim() !== '' && !canReviewRepository;
+  /* Leaving the linked review remounts the picker, which lists the accounts still connected. */
+  const leaveLinkedReview = (): void => {
+    setLinkedSelection(undefined);
+    requestAnimationFrame(() => repoUrlInput.current?.focus());
+  };
+  const handleConnectRequest = useCallback((): void => {
+    setConnectGithub(false);
+  }, []);
   const cancelRepositoryReview = (): void => {
     setRepoUrlDraft(repoUrl);
     setLinkedSelection(undefined);
@@ -921,7 +952,12 @@ export default function ImportRoute(): React.JSX.Element {
                         : 'Link a repository or import a public copy.'}
                     </p>
                   </div>
-                  <GithubRepositoryPicker actionLabel='Review import' onSelect={reviewLinkedRepository} />
+                  <GithubRepositoryPicker
+                    actionLabel='Review import'
+                    shouldConnect={connectGithub}
+                    onConnectRequestHandled={handleConnectRequest}
+                    onSelect={reviewLinkedRepository}
+                  />
                   <form
                     className='space-y-2 pt-1'
                     onSubmit={(event) => {
@@ -1026,7 +1062,20 @@ export default function ImportRoute(): React.JSX.Element {
                         'Import and link did not finish. Review the details, then try Import and link again.')
                   }
                   detail={linkedError}
-                />
+                >
+                  {linkedReviewBlocked || linkedRefusal?.action === undefined ? undefined : (
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      onClick={() => {
+                        setConnectGithub(linkedRefusal.action?.recovery === 'connectGithub');
+                        leaveLinkedReview();
+                      }}
+                    >
+                      {linkedRefusal.action.label}
+                    </Button>
+                  )}
+                </PageNotice>
               )}
               <div className='grid gap-x-8 gap-y-5 md:grid-cols-[12rem_minmax(0,1fr)]'>
                 <label
@@ -1153,14 +1202,7 @@ export default function ImportRoute(): React.JSX.Element {
                   >
                     {linkedBusy ? 'Importing and linking…' : 'Import and link'}
                   </Button>
-                  <Button
-                    variant='ghost'
-                    disabled={linkedBusy}
-                    onClick={() => {
-                      setLinkedSelection(undefined);
-                      requestAnimationFrame(() => repoUrlInput.current?.focus());
-                    }}
-                  >
+                  <Button variant='ghost' disabled={linkedBusy} onClick={leaveLinkedReview}>
                     Cancel
                   </Button>
                 </div>

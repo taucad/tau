@@ -272,8 +272,27 @@ export function ConflictDecision({
 }
 
 /**
+ * Why *Rename* would be refused for a row, as the rename effect decides it (D91):
+ * a linked checkout's branch first, then a branch the remote holds under its
+ * name. The sentence is the refusal's own, so the menu and the toast never
+ * disagree. A row whose live checkout is not known yet is not called linked.
+ *
+ * @param branch - The row.
+ * @param liveCheckoutId - The live checkout's id, from the same projection.
+ * @returns The refusal's sentence, or `undefined` when the rename can go through.
+ */
+const renameRefusalOf = (branch: RevisionBranchFacet, liveCheckoutId: string | undefined): string | undefined => {
+  const isLinked =
+    branch.checkoutId !== undefined && liveCheckoutId !== undefined && branch.checkoutId !== liveCheckoutId;
+  const code = isLinked ? 'BRANCH_RENAME_LINKED' : branch.onRemote === true ? 'BRANCH_RENAME_PUSHED' : undefined;
+  return code === undefined ? undefined : describeRevisionFailure('branch', code).description;
+};
+
+/**
  * A branch row's More, each verb with its glyph. Rename names the branch in the
- * one naming form under this menu's button, as New branch does (round 16).
+ * one naming form under this menu's button, as New branch does (round 16); a
+ * rename that would be refused stays listed, unavailable, with the reason under
+ * it, as a print profile's verbs are.
  *
  * @param props - The branch, the line the checkout is on, and the verbs.
  * @returns The menu.
@@ -283,6 +302,7 @@ function BranchMenu({
   currentBranch,
   isCurrent,
   isBusy,
+  renameRefusal,
   onMerge,
   onRename,
   onPlace,
@@ -292,6 +312,8 @@ function BranchMenu({
   readonly currentBranch: string | undefined;
   readonly isCurrent: boolean;
   readonly isBusy: boolean;
+  /** Why *Rename* would be refused (D91); `undefined` offers it. */
+  readonly renameRefusal: string | undefined;
   readonly onMerge: () => void;
   readonly onRename: (name: string) => void;
   /** Present only when using this branch would move the chat in focus. */
@@ -343,14 +365,24 @@ function BranchMenu({
             {`Merge ${branch} into ${currentBranch}`}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem
-          onSelect={() => {
-            opensRename.current = true;
-          }}
-        >
-          <Pencil aria-hidden />
-          {`Rename ${branch}…`}
-        </DropdownMenuItem>
+        {renameRefusal === undefined ? (
+          <DropdownMenuItem
+            onSelect={() => {
+              opensRename.current = true;
+            }}
+          >
+            <Pencil aria-hidden />
+            {`Rename ${branch}…`}
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem disabled className='h-auto items-start'>
+            <Pencil aria-hidden className='mt-0.5' />
+            <span className='flex flex-col'>
+              {`Rename ${branch}…`}
+              <span className='max-w-64 text-xs text-muted-foreground'>{renameRefusal}</span>
+            </span>
+          </DropdownMenuItem>
+        )}
         {onPlace === undefined ? null : (
           <DropdownMenuItem onSelect={onPlace}>
             <MessageSquare aria-hidden />
@@ -634,6 +666,7 @@ export function RevisionBranches({
                     currentBranch={currentBranch}
                     isCurrent={isCurrent}
                     isBusy={isBusy}
+                    renameRefusal={renameRefusalOf(branch, liveCheckoutId)}
                     onPlace={
                       placement === undefined
                         ? undefined

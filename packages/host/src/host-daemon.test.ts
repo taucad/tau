@@ -1054,6 +1054,52 @@ describe('startHostDaemon', () => {
   /* G0-2/W14: the runtime child executes project code the agent wrote, so the
    * daemon binds it the agent's view. The trusted planes beside it — the
    * parameter authority and the revisions engine — keep the working copy. */
+  /* W8b-f1: a stored credential is read before the agent channel opens, so a Tau run sent the instant the channel is
+   * ready is admitted rather than told to pair a host that already is. */
+  it('should admit a Tau run sent as soon as the agent channel is ready on a stored credential', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-stored-pairing-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    agentServerSpy.mockClear();
+    let started: ReturnType<agentServer.AgentServerOptions['launcher']['execute']> | undefined;
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), testModel: false },
+      onEvent: (event) => {
+        /* Synchronously inside the channel's `ready` event: no later turn of the daemon has run yet. */
+        if (event.type === 'agent' && event.state === 'ready') {
+          started = agentServerSpy.mock.calls.at(-1)?.[0].launcher.execute({
+            type: 'start',
+            commandId: 'start-on-channel-ready',
+            payload: {
+              trigger: 'submit',
+              chatId: 'chat-channel-ready',
+              runId: 'run-channel-ready',
+              message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+            },
+          });
+        }
+      },
+    });
+    try {
+      await daemon.ready;
+      if (started === undefined) {
+        throw new TypeError('Expected a start sent on the agent channel ready event.');
+      }
+
+      await expect(started).resolves.toMatchObject({ status: 'applied' });
+    } finally {
+      await daemon.close();
+    }
+  }, 30_000);
+
   /* RH-A14 (RH-S6): the relay revoked the stored credential; until pairing returns a new one the daemon admits no
    * Tau run on it, so the served launcher refuses a start with HOST_NOT_PAIRED. */
   it('should refuse start with HOST_NOT_PAIRED while the daemon re-pairs', async () => {

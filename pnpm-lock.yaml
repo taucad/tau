@@ -538,8 +538,8 @@ catalogs:
       specifier: ^1.7.2
       version: 1.7.2
     geospec-engine:
-      specifier: 0.1.0-next.19
-      version: 0.1.0-next.19
+      specifier: 0.1.0-next.51
+      version: 0.1.0-next.51
     graphics-debug:
       specifier: 0.0.100
       version: 0.0.100
@@ -1583,7 +1583,7 @@ importers:
         version: link:packages/geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.1.0-next.19
+        version: 0.1.0-next.51
       gray-matter:
         specifier: 'catalog:'
         version: 4.0.3
@@ -1776,7 +1776,7 @@ importers:
         version: link:../../packages/geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.1.0-next.19
+        version: 0.1.0-next.51
       pino-pretty:
         specifier: 'catalog:'
         version: 13.1.3
@@ -1911,7 +1911,7 @@ importers:
         version: 0.8.3
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.1.0-next.19
+        version: 0.1.0-next.51
       libassimp:
         specifier: 'catalog:'
         version: 0.3.0
@@ -2444,7 +2444,7 @@ importers:
         version: link:../../packages/geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.1.0-next.19
+        version: 0.1.0-next.51
       ws:
         specifier: 'catalog:'
         version: 8.21.3
@@ -2678,7 +2678,7 @@ importers:
         version: link:../../packages/geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.1.0-next.19
+        version: 0.1.0-next.51
       isbot:
         specifier: 'catalog:'
         version: 5.1.43
@@ -3705,7 +3705,7 @@ importers:
         version: link:../geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.1.0-next.19
+        version: 0.1.0-next.51
     devDependencies:
       '@taucad/picogk':
         specifier: workspace:*
@@ -3815,7 +3815,7 @@ importers:
         version: link:../geospec
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.1.0-next.19
+        version: 0.1.0-next.51
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
@@ -19135,14 +19135,21 @@ packages:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
 
-  geospec-engine-darwin-arm64@0.1.0-next.19:
-    resolution: {integrity: sha512-lHbmwZhee/KIDnJPOdBu8S9pscbmlGnOrjE0UoAkjRE49BXwn5smyp4BqpIDKi9gHstaXSk89AJymqbXRm/SAA==}
+  geospec-engine-darwin-arm64@0.1.0-next.51:
+    resolution: {integrity: sha512-YJNKjSyn8GtDqv9CT/54sR4BxROozjJYNhYWhMRWsmtjYHM8iH+dL6oq5aZ40tN/QOCJcsDSN3739aJgK4Xkuw==}
     engines: {node: '>=24.0.0'}
     cpu: [arm64]
     os: [darwin]
 
-  geospec-engine@0.1.0-next.19:
-    resolution: {integrity: sha512-aHvd13R7vhwEqSludE/Y86AT6Sc3VqG9P36GtY3Hu0pl2G4MPN2JJooS045sz8yUeKHkw8IBUhtdHNZA5p9iLg==}
+  geospec-engine-linux-x64-gnu@0.1.0-next.51:
+    resolution: {integrity: sha512-l1gluVKl6lbMwZ+WhtlIkq/Gdtg3i2cSLf5G7hA+0mbn0EFjp2CPS6BEF5QOegyAyzDet3N1q6HFj5/z9TMDMw==}
+    engines: {node: '>=24.0.0'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  geospec-engine@0.1.0-next.51:
+    resolution: {integrity: sha512-QY1Z3qb4+DvNG6AbNg9Ibsg/390/VuNsNWeWQqifqd/v3kIzumRP35zm3Cp8REYGy6rUXGvDUzWdh5nmjoeRSQ==}
     engines: {node: '>=24.0.0'}
 
   get-amd-module-type@6.0.2:
@@ -42303,12 +42310,16 @@ snapshots:
 
   gensync@1.0.0-beta.2: {}
 
-  geospec-engine-darwin-arm64@0.1.0-next.19:
+  geospec-engine-darwin-arm64@0.1.0-next.51:
     optional: true
 
-  geospec-engine@0.1.0-next.19:
+  geospec-engine-linux-x64-gnu@0.1.0-next.51:
+    optional: true
+
+  geospec-engine@0.1.0-next.51:
     optionalDependencies:
-      geospec-engine-darwin-arm64: 0.1.0-next.19
+      geospec-engine-darwin-arm64: 0.1.0-next.51
+      geospec-engine-linux-x64-gnu: 0.1.0-next.51
 
   get-amd-module-type@6.0.2:
     dependencies:

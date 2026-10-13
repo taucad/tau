@@ -8,8 +8,9 @@ name: Preview packages
 #
 # Runs on a dispatch from `main`, and on a same-repository pull request carrying
 # the `preview` label (each push to it publishes again). The packages carry the
-# preview version 0.0.0-<sha>, and pkg.pr.new rewrites their @taucad/* and
-# geospec dependencies and peers (--peerDeps) to the same run's URLs.
+# preview version 0.0.0-preview-<sha>; pkg.pr.new rewrites their @taucad/* and
+# geospec dependencies to the same run's URLs, and such peers to that version
+# (--peerDeps), which no registry range would admit.
 # --no-compact keeps every URL in its long form: the npm name @taucad/replicad
 # still belongs to the retired replicad fork, whose repository field compact URLs
 # would follow. The GeoSpec engine packages are left out: they publish from

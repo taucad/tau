@@ -215,35 +215,36 @@ describe('previewPackages', () => {
 
 describe('unrewrittenSiblings', () => {
   const published = new Set(['@taucad/runtime', '@taucad/units']);
+  const previewVersion = '0.0.0-preview-1f80f46';
 
-  it('rejects a dependency or peer on a package of the run that kept a registry range', () => {
+  it('rejects a registry version, a dependency kept at a registry range and a peer not on the run version', () => {
     expect(
       unrewrittenSiblings(
         {
           name: '@taucad/replicad',
-          version: '0.0.0-1f80f46',
+          version: '0.1.0-beta.0',
           dependencies: { '@taucad/units': '0.1.0-beta.0', zod: '^4.4.3' },
           peerDependencies: { '@taucad/runtime': '^0.1.0-beta.0' },
         },
         published,
       ),
     ).toStrictEqual([
+      '@taucad/replicad carries version 0.1.0-beta.0, not a 0.0.0-preview-<sha> version.',
       '@taucad/replicad declares @taucad/units as 0.1.0-beta.0, not a pkg.pr.new URL.',
-      '@taucad/replicad declares @taucad/runtime as ^0.1.0-beta.0, not a pkg.pr.new URL.',
+      "@taucad/replicad declares peer @taucad/runtime as ^0.1.0-beta.0, not the run's 0.1.0-beta.0.",
     ]);
   });
 
-  it('accepts siblings rewritten to pkg.pr.new URLs and leaves other names alone', () => {
+  it('accepts dependencies on run URLs and peers on the run version, and leaves other names alone', () => {
     expect(
       unrewrittenSiblings(
         {
           name: '@taucad/host',
-          version: '0.0.0-1f80f46',
-          dependencies: { '@taucad/units': 'https://pkg.pr.new/taucad/tau/@taucad/units@1f80f46' },
-          peerDependencies: {
-            '@taucad/runtime': 'https://pkg.pr.new/taucad/tau/@taucad/runtime@1f80f46',
-            '@taucad/geospec-engine': '^0.1.0-beta.0',
+          version: previewVersion,
+          dependencies: {
+            '@taucad/units': 'https://pkg.pr.new/taucad/tau/@taucad/units@1f80f46a34135790d19f791e8c305c044d1518fd',
           },
+          peerDependencies: { '@taucad/runtime': previewVersion, '@taucad/geospec-engine': '^0.1.0-beta.0' },
         },
         published,
       ),

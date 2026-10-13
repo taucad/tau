@@ -90,18 +90,28 @@ export const previewPackages = (preview: unknown): PreviewPackage[] => {
 };
 
 /**
- * Sibling specifiers a published preview manifest kept from the workspace: every dependency,
- * optional dependency or peer naming another package of the same run must point at a pkg.pr.new
- * URL (`--previewVersion`, and `--peerDeps` for peers), or npm takes the registry copy instead.
+ * Sibling specifiers a published preview manifest kept from the workspace. `--previewVersion`
+ * rewrites a dependency or optional dependency on another package of the same run to that
+ * package's pkg.pr.new URL, and `--peerDeps` rewrites such a peer to the run's preview version
+ * (the manifest's own `0.0.0-preview-<sha>`); anything else lets npm take the registry copy.
  */
-export const unrewrittenSiblings = (manifest: Manifest, published: ReadonlySet<string>): string[] =>
-  [manifest.dependencies, manifest.optionalDependencies, manifest.peerDependencies].flatMap((dependencies) =>
+export const unrewrittenSiblings = (manifest: Manifest, published: ReadonlySet<string>): string[] => [
+  ...(manifest.version.startsWith('0.0.0-preview-')
+    ? []
+    : [`${manifest.name} carries version ${manifest.version}, not a 0.0.0-preview-<sha> version.`]),
+  ...[manifest.dependencies, manifest.optionalDependencies].flatMap((dependencies) =>
     Object.entries(dependencies ?? {}).flatMap(([name, specifier]) =>
       published.has(name) && !specifier.startsWith(previewUrlPrefix)
         ? [`${manifest.name} declares ${name} as ${specifier}, not a pkg.pr.new URL.`]
         : [],
     ),
-  );
+  ),
+  ...Object.entries(manifest.peerDependencies ?? {}).flatMap(([name, specifier]) =>
+    published.has(name) && specifier !== manifest.version
+      ? [`${manifest.name} declares peer ${name} as ${specifier}, not the run's ${manifest.version}.`]
+      : [],
+  ),
+];
 
 /**
  * Subpaths that cannot be imported in a bare Node process for a stated reason, keyed by a

@@ -2115,6 +2115,28 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  /* D91, audit R1: *Rename* refuses a branch the remote holds, checked out or not, so the row says so before it is asked. */
+  it('should carry the fetch’s word on the remote onto a checked-out branch’s row', async () => {
+    const harness = start();
+
+    registerCheckouts(harness, [live, linked]);
+    await flush();
+    harness.actor.send({
+      type: 'branchesFetched',
+      branches: [
+        { name: 'main', head: 'rev-1', onRemote: true },
+        { name: 'agent/b', head: 'rev-2', onRemote: false },
+      ],
+    });
+    await flush();
+
+    const rows = selectRevisionStatus(harness.actor.getSnapshot()).branches;
+    expect(rows.find((row) => row.name === 'main')).toMatchObject({ checkoutId: 'checkout-live', onRemote: true });
+    expect(rows.find((row) => row.name === 'agent/b')).toMatchObject({ checkoutId: 'checkout-b', onRemote: false });
+
+    harness.actor.stop();
+  });
+
   /* 25–28: the conflict cards (W10, S33). */
   it('spawns one resolution child per undecided conflict and retires it once the line contains it (D14)', async () => {
     const harness = start();

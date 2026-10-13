@@ -1704,25 +1704,31 @@ const selectConflicts = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>)
  */
 const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>): readonly RevisionBranchFacet[] => {
   const { context } = snapshot;
-  const checkedOut = viewsOf(context).flatMap((checkout) =>
-    checkout.branch === undefined
-      ? []
-      : [
-          {
-            name: checkout.branch,
-            /* The live child's head first, as `headRevisionId` reads it: the
-               registry record lags a save, and the row then counted the
-               branch behind itself (D47). */
-            head: context.checkoutStatus[checkout.id]?.headRevisionId ?? checkout.headRevisionId,
-            checkoutId: checkout.id,
-            checkoutRoot: checkout.root,
-            /* The registry's own record, not the root's routing memory: a chip
-               that came from `chatCheckouts` was gone the moment the page
-               reloaded, because nothing on disk said it (I3; review R9). */
-            leaseChatIds: checkout.leaseChatIds,
-          },
-        ],
-  );
+  /* The fetch's word on every branch, a checked-out one included: *Rename*
+     reads it, because a branch the remote holds is never renamed (D91). */
+  const onRemoteOf = new Map(context.availableBranches.map((branch) => [branch.name, branch.onRemote]));
+  const checkedOut = viewsOf(context).flatMap((checkout) => {
+    if (checkout.branch === undefined) {
+      return [];
+    }
+    const onRemote = onRemoteOf.get(checkout.branch);
+    return [
+      {
+        name: checkout.branch,
+        /* The live child's head first, as `headRevisionId` reads it: the
+           registry record lags a save, and the row then counted the
+           branch behind itself (D47). */
+        head: context.checkoutStatus[checkout.id]?.headRevisionId ?? checkout.headRevisionId,
+        checkoutId: checkout.id,
+        checkoutRoot: checkout.root,
+        /* The registry's own record, not the root's routing memory: a chip
+           that came from `chatCheckouts` was gone the moment the page
+           reloaded, because nothing on disk said it (I3; review R9). */
+        leaseChatIds: checkout.leaseChatIds,
+        ...(onRemote === undefined ? {} : { onRemote }),
+      },
+    ];
+  });
   const known = new Set(checkedOut.map((branch) => branch.name));
   /* A conflict line is listed while it holds a decision nobody landed, and
    * hidden once the line it decides contains it (D14). */

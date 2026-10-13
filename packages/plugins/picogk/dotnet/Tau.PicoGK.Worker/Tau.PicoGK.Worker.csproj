@@ -7,6 +7,8 @@
     <PublishSingleFile>false</PublishSingleFile>
     <PublishTrimmed>false</PublishTrimmed>
     <PublishReadyToRun>false</PublishReadyToRun>
+    <!-- Publish no localized Roslyn resources (13 cultures): compiler diagnostics stay English on every locale. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="$(PicoGKProject)" />

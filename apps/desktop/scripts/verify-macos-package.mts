@@ -362,6 +362,32 @@ const verifyPythonResource = (architecture: 'arm64' | 'x64'): void => {
   }
 };
 
+/**
+ * The PicoGK payload carries the MIT notices of the .NET runtime, Roslyn and SkiaSharp, lists SkiaSharp
+ * in its SBOM, and ships no localized Roslyn satellite assemblies.
+ */
+const verifyPicoGkNoticesAndTrims = (
+  root: string,
+  resourcePaths: readonly string[],
+  sbomListsSkiaSharp: boolean,
+): void => {
+  if (resourcePaths.some((path) => path.endsWith('.resources.dll'))) {
+    throw new Error(
+      'PicoGK resources carry localized satellite assemblies; publish with SatelliteResourceLanguages=en.',
+    );
+  }
+  const missingNotices = [
+    'DotNet-LICENSE.txt',
+    'DotNet-THIRD-PARTY-NOTICES.txt',
+    'Roslyn-NOTICES.rtf',
+    'SkiaSharp-LICENSE.txt',
+    'SkiaSharp-THIRD-PARTY-NOTICES.txt',
+  ].filter((name) => !existsSync(resolve(root, name)));
+  if (missingNotices.length > 0 || !sbomListsSkiaSharp) {
+    throw new Error(`PicoGK resources omit MIT notices or the SkiaSharp SBOM entry: ${missingNotices.join(', ')}`);
+  }
+};
+
 const verifyPicoGkResource = (): string => {
   const target = 'darwin-arm64';
   const root = resolve(appPath, `Contents/Resources/picogk/${target}`);
@@ -414,6 +440,7 @@ const verifyPicoGkResource = (): string => {
   if (resourcePaths.some((path) => path.endsWith('.pdb') || path.endsWith('.xml'))) {
     throw new Error('PicoGK production resources contain development-only symbols or XML documentation.');
   }
+  verifyPicoGkNoticesAndTrims(root, resourcePaths, components.has('SkiaSharp'));
   return resolve(root, manifest.workerPath);
 };
 
@@ -444,6 +471,18 @@ run('plutil', ['-extract', 'CFBundleDocumentTypes', 'json', '-o', '-', resolve(a
 if (release) {
   run('xcrun', ['stapler', 'validate', appPath]);
   run('spctl', ['--assess', '--type', 'execute', '--verbose=2', appPath]);
+}
+
+/* The sandbox runtime's Linux and Windows helpers stay out of the macOS package (runtime-stage.mts). */
+const sandboxRuntimeRoot = resolve(appPath, 'Contents/Resources/app.asar/node_modules/@anthropic-ai/sandbox-runtime');
+const stagedSandboxHelpers = run('env', [
+  'ELECTRON_RUN_AS_NODE=1',
+  appExecutable,
+  '-e',
+  `const {existsSync}=require('node:fs');process.stdout.write(JSON.stringify(['package.json','vendor/seccomp','vendor/srt-win'].map((path)=>existsSync(require('node:path').join(${JSON.stringify(sandboxRuntimeRoot)},path)))))`,
+]);
+if (stagedSandboxHelpers !== JSON.stringify([true, false, false])) {
+  throw new Error(`The macOS package stages Linux or Windows sandbox helpers: ${stagedSandboxHelpers}`);
 }
 
 const libassimpAddon = resolve(

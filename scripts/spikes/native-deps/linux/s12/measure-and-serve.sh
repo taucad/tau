@@ -38,10 +38,16 @@ digest="$(sha256sum "$layer" | cut -d' ' -f1)"
   echo "map_unpacked_bytes=$(find "$build/client" -type f -name '*.map' -printf '%s\n' | awk '{s+=$1} END {print s+0}')"
   echo "limit_bytes=157286400 (150 MiB); 150000000 (150 MB)"
 } | tee "$out/measure.txt"
+# Without source maps: the build emits hidden maps (`--sourcemapClient hidden`) that no page requests.
+nomaps_bytes="$(tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner --exclude='*.map' -C "$build" -cf - client | gzip -9n | wc -c)"
+echo "layer_without_maps_bytes=$nomaps_bytes" | tee -a "$out/measure.txt"
+# Listings go through files: `sort | head` under pipefail fails on sort's broken pipe.
+find "$build/client" -type f -printf '%s %P\n' | sort -rn >"$out/files-by-size.txt"
 echo "largest files:" | tee -a "$out/measure.txt"
-find "$build/client" -type f -printf '%s %P\n' | sort -rn | head -15 | tee -a "$out/measure.txt"
-echo "by extension (unpacked bytes):" | tee -a "$out/measure.txt"
-find "$build/client" -type f -printf '%s %f\n' | awk '{n=split($2,p,"."); e=(n>1)?p[n]:"(none)"; s[e]+=$1} END {for (k in s) print s[k], k}' | sort -rn | head -12 | tee -a "$out/measure.txt"
+sed -n '1,15p' "$out/files-by-size.txt" | tee -a "$out/measure.txt"
+echo "by extension (unpacked bytes, files):" | tee -a "$out/measure.txt"
+awk '{n = split($2, parts, "."); ext = (n > 1) ? parts[n] : "(none)"; size[ext] += $1; count[ext] += 1} END {for (k in size) print size[k], count[k], k}' "$out/files-by-size.txt" | sort -rn >"$out/by-extension.txt"
+sed -n '1,12p' "$out/by-extension.txt" | tee -a "$out/measure.txt"
 
 # 2. Unpack the layer into a digest-named store directory (the W18 placement), as the host would.
 target="$store/closures/sha256/$digest"

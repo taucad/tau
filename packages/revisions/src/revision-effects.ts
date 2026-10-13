@@ -3545,7 +3545,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           tree,
           provenance: provenanceOf('merge', []),
           summary: Object.freeze({
-            generated: `Resolved ${String(terms.conflicts.length)} ${terms.conflicts.length === 1 ? 'file' : 'files'} on ${into}`,
+            /* A later merge can leave no file to choose (R13): count only files a person decided. */
+            generated:
+              terms.conflicts.length === 0
+                ? `Finished the merge into ${into}`
+                : `Resolved ${String(terms.conflicts.length)} ${terms.conflicts.length === 1 ? 'file' : 'files'} on ${into}`,
           }),
         });
         /* The terms were read against `head`; a line that moved since is new

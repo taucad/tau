@@ -15,7 +15,7 @@ import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { test } from 'node:test';
 
-type Entry = { kind: string; kernel: string; name: string; mainFile: string };
+type Entry = { kind: string; kernel: string; name: string; mainFile?: string; files: string[] };
 type Issue = { code: string; severity: string; message: string };
 type Result = {
   status: string;
@@ -96,10 +96,21 @@ await test('tau check classifies every libs/tau-examples fixture', { timeout: 3_
   const drain = async (): Promise<void> => {
     for (let entry = queue.shift(); entry !== undefined; entry = queue.shift()) {
       // oxlint-disable-next-line no-await-in-loop -- a bounded worker pool drains the queue.
-      const record = { ...entry, ...(await runCheck(join(examplesRoot, entry.kernel, entry.name, entry.mainFile))) };
+      // A spec fixture without a main file is checked through its first test export.
+      const entryFile = entry.mainFile ?? entry.files.find((file) => file.startsWith('test-exports/')) ?? '';
+      const record = {
+        ...entry,
+        entryFile,
+        ...(await runCheck(join(examplesRoot, entry.kernel, entry.name, entryFile))),
+      };
       records.push(record);
+      const first = record.issues[0];
+      const detail =
+        first === undefined
+          ? ''
+          : `${first.code} ${first.severity} ${first.message.replaceAll('\n', ' ').slice(0, 160)}`;
       process.stdout.write(
-        `${String(record.exit)} ${record.status} ${entry.kernel}/${entry.name} ${String(record.ms)}ms ${record.issues[0]?.code ?? ''}\n`,
+        `${String(record.exit)} ${record.status} ${entry.kernel}/${entry.name}:${entryFile} ${String(record.ms)}ms ${detail}\n`,
       );
     }
   };
@@ -117,10 +128,11 @@ await test('tau check classifies every libs/tau-examples fixture', { timeout: 3_
     kernel: 'jscad (synthetic)',
     name: 'synthetic-throw',
     mainFile: 'main.ts',
+    files: ['main.ts'],
     ...synthetic,
   });
   process.stdout.write(
-    `${String(synthetic.exit)} ${synthetic.status} synthetic-throw ${String(synthetic.ms)}ms ${synthetic.issues[0]?.code ?? ''}\n`,
+    `${String(synthetic.exit)} ${synthetic.status} synthetic-throw ${String(synthetic.ms)}ms ${synthetic.issues[0]?.code ?? ''} ${synthetic.issues[0]?.message.slice(0, 160) ?? ''}\n`,
   );
 
   const output = process.env['S11_OUT'];

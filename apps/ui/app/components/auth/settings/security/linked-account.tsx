@@ -4,8 +4,18 @@ import { getProviderName } from '@better-auth-ui/core';
 import { providerIcons, useAccountInfo, useAuth, useLinkSocial, useUnlinkAccount } from '@better-auth-ui/react';
 import type { Account, SocialProvider } from 'better-auth';
 import { Link2, Link2Off, Plug } from 'lucide-react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@taucad/ui/components/alert-dialog';
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent } from '@taucad/ui/components/card';
 import { Skeleton } from '@taucad/ui/components/skeleton';
@@ -17,8 +27,26 @@ export type LinkedAccountProps = {
   provider: SocialProvider;
 };
 
+/**
+ * What unlinking takes away, said before it happens (R7).
+ *
+ * GitHub is also the account Tau publishes Gists with, so its sentence says so.
+ *
+ * @param providerName - The provider's display name.
+ * @param provider - The provider id.
+ * @param accountLabel - The linked account's email or name, once known.
+ * @returns The confirmation's description.
+ */
+const getUnlinkConsequence = (providerName: string, provider: SocialProvider, accountLabel?: string): string => {
+  const signIn = `You will no longer be able to sign in to Tau with ${providerName}${accountLabel ? ` (${accountLabel})` : ''}.`;
+  return provider === 'github'
+    ? `${signIn} Tau also uses this account to publish and manage your GitHub Gists.`
+    : signIn;
+};
+
 export function LinkedAccount({ account, provider }: LinkedAccountProps): React.JSX.Element {
   const { authClient, baseURL, localization } = useAuth();
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
   const { data: accountInfo, isPending: isLoadingInfo } = useAccountInfo(authClient, {
     query: { accountId: account?.accountId },
@@ -27,13 +55,17 @@ export function LinkedAccount({ account, provider }: LinkedAccountProps): React.
   const { mutate: linkSocial, isPending: isLinking } = useLinkSocial(authClient);
 
   const { mutate: unlinkAccount, isPending: isUnlinking } = useUnlinkAccount(authClient, {
-    onSuccess: () => toast.success(localization.settings.accountUnlinked),
+    onSuccess: () => {
+      setIsConfirmOpen(false);
+      toast.success(localization.settings.accountUnlinked);
+    },
   });
 
   const ProviderIcon = providerIcons[provider];
   const providerName = getProviderName(provider);
 
   const displayName = accountInfo ? (accountInfo.user.email ?? accountInfo.user.name) : account?.accountId;
+  const unlinkLabel = localization.settings.unlinkProvider.replace('{{provider}}', providerName);
 
   return (
     <Card className='border-0 bg-transparent shadow-none ring-0'>
@@ -59,19 +91,45 @@ export function LinkedAccount({ account, provider }: LinkedAccountProps): React.
         </div>
 
         {account ? (
-          <Button
-            className='ml-auto shrink-0'
-            variant='outline'
-            size='sm'
-            onClick={() => {
-              unlinkAccount({ providerId: account.providerId });
-            }}
-            disabled={isUnlinking}
-            aria-label={localization.settings.unlinkProvider.replace('{{provider}}', providerName)}
-          >
-            {isUnlinking ? <Spinner /> : <Link2Off />}
-            {localization.settings.unlinkProvider.replace('{{provider}}', '').trim()}
-          </Button>
+          <>
+            <Button
+              className='ml-auto shrink-0'
+              variant='outline'
+              size='sm'
+              onClick={() => {
+                setIsConfirmOpen(true);
+              }}
+              disabled={isUnlinking}
+              aria-label={unlinkLabel}
+            >
+              {isUnlinking ? <Spinner /> : <Link2Off />}
+              {localization.settings.unlinkProvider.replace('{{provider}}', '').trim()}
+            </Button>
+            <AlertDialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{`${unlinkLabel}?`}</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {getUnlinkConsequence(providerName, provider, accountInfo?.user.email ?? accountInfo?.user.name)}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={isUnlinking}>{localization.settings.cancel}</AlertDialogCancel>
+                  <Button
+                    type='button'
+                    variant='destructive'
+                    disabled={isUnlinking}
+                    onClick={() => {
+                      unlinkAccount({ providerId: account.providerId });
+                    }}
+                  >
+                    {isUnlinking ? <Spinner /> : null}
+                    {unlinkLabel}
+                  </Button>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
         ) : (
           <Button
             className='ml-auto shrink-0'

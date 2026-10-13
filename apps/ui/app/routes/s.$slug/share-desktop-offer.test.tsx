@@ -99,16 +99,18 @@ describe('web /s/:slug desktop offer', () => {
     });
     const { unmount } = mountAt('tau~pub_123', { publication: {}, viewerRole: 'public' });
     const open = await screen.findByRole('button', { name: 'Open in Tau Desktop' });
-    const offer = open.closest('.fixed')!;
+    const offer = open.closest<HTMLElement>('.fixed')!;
+    offer.style.left = '17px';
     const menu = screen.getByText('Viewer menu');
     const controls = menu.parentElement!;
     const frame = controls.parentElement!;
     const x = () => controls.style.getPropertyValue('--share-desktop-offer-x');
     const y = () => controls.style.getPropertyValue('--share-desktop-offer-y');
+    const offerX = () => offer.style.getPropertyValue('--share-desktop-offer-center-x');
     let viewerWidth = 1000;
     vi.spyOn(offer, 'getBoundingClientRect').mockImplementation(() =>
       DOMRect.fromRect({
-        x: 17,
+        x: 17 + Number.parseFloat(offerX() || '0'),
         y: 650,
         width: offer.contains(open) ? 320 : 0,
         height: offer.contains(open) ? 133 : 0,
@@ -131,6 +133,7 @@ describe('web /s/:slug desktop offer', () => {
       expect(x()).toBe('164px');
     });
     expect(y()).toBe('0px');
+    expect(offerX()).toBe('0px');
     expect(controls).not.toHaveAttribute('data-desktop-offer-compact');
 
     viewerWidth = 620;
@@ -140,6 +143,7 @@ describe('web /s/:slug desktop offer', () => {
     });
     expect(x()).toBe('164px');
     expect(y()).toBe('0px');
+    expect(offerX()).toBe('0px');
 
     viewerWidth = 550;
     resize();
@@ -147,8 +151,12 @@ describe('web /s/:slug desktop offer', () => {
       expect(y()).toBe('-141px');
     });
     expect(x()).toBe('0px');
+    expect(offerX()).toBe('107px');
+    const offerBounds = offer.getBoundingClientRect();
+    const menuBounds = menu.getBoundingClientRect();
+    expect(offerBounds.left + offerBounds.width / 2).toBe(menuBounds.left + menuBounds.width / 2);
 
-    // Re-measuring the transformed menu must not make it oscillate between positions.
+    // Re-measuring either transformed element must not make the layout oscillate between positions.
     globalThis.dispatchEvent(new Event('resize'));
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => {
@@ -156,6 +164,7 @@ describe('web /s/:slug desktop offer', () => {
       });
     });
     expect(y()).toBe('-141px');
+    expect(offerX()).toBe('107px');
 
     viewerWidth = 1000;
     resize();
@@ -163,16 +172,19 @@ describe('web /s/:slug desktop offer', () => {
       expect(y()).toBe('0px');
     });
     expect(x()).toBe('164px');
+    expect(offerX()).toBe('0px');
     expect(controls).not.toHaveAttribute('data-desktop-offer-compact');
     fireEvent.click(screen.getByRole('button', { name: 'Continue in the browser' }));
     await waitFor(() => {
       expect(x()).toBe('0px');
     });
     expect(y()).toBe('0px');
+    expect(offerX()).toBe('0px');
     unmount();
     expect(observer.disconnect).toHaveBeenCalledOnce();
     expect(x()).toBe('');
     expect(y()).toBe('');
+    expect(offerX()).toBe('');
   });
 
   /* The desktop route announces the same wait (`desktop-route.tsx`). */

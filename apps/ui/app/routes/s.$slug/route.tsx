@@ -446,6 +446,10 @@ const ShareDesktopOffer = (): React.JSX.Element => {
     const update = (): void => {
       animationFrame = 0;
       const offerBounds = offer.getBoundingClientRect();
+      // Keep fit decisions anchored to the fixed inset even while the offer animates to the center.
+      const offerLeft = Number.parseFloat(getComputedStyle(offer).left);
+      const offerRight = offerLeft + offerBounds.width;
+      let offerX = 0;
       const targets = new Set<Element>([offer]);
       for (const controls of surface.querySelectorAll<HTMLElement>('[data-viewer-bottom-controls]')) {
         const viewer = controls.closest<HTMLElement>('[data-viewer-frame]');
@@ -465,14 +469,14 @@ const ShareDesktopOffer = (): React.JSX.Element => {
           offerBounds.width > 0 &&
           offerBounds.height > 0 &&
           menuBounds.width > 0 &&
-          offerBounds.right > viewerBounds.left + inset &&
-          offerBounds.left < viewerBounds.right - inset &&
+          offerRight > viewerBounds.left + inset &&
+          offerLeft < viewerBounds.right - inset &&
           bottom > offerBounds.top &&
           bottom - menuBounds.height < offerBounds.bottom;
         let x = 0;
         let y = 0;
         if (sharesBottom) {
-          const availableLeft = Math.max(offerBounds.right + inset, viewerBounds.left + inset);
+          const availableLeft = Math.max(offerRight + inset, viewerBounds.left + inset);
           const availableRight = viewerBounds.right - inset;
           const availableWidth = availableRight - availableLeft;
           let menuWidth = menuBounds.width;
@@ -487,12 +491,14 @@ const ShareDesktopOffer = (): React.JSX.Element => {
             // Only the final fallback moves above; the whole viewer can show the normal labels again.
             delete controls.dataset['desktopOfferCompact'];
             y = offerBounds.top - bottom - inset;
+            offerX = viewerBounds.left + (viewerBounds.width - offerBounds.width) / 2 - offerLeft;
           }
         }
         controls.style.setProperty('--share-desktop-offer-x', `${x}px`);
         controls.style.setProperty('--share-desktop-offer-y', `${y}px`);
         shifted.add(controls);
       }
+      offer.style.setProperty('--share-desktop-offer-center-x', `${offerX}px`);
       for (const element of observed) {
         if (!targets.has(element)) {
           resizeObserver.unobserve(element);
@@ -530,6 +536,7 @@ const ShareDesktopOffer = (): React.JSX.Element => {
       resizeObserver.disconnect();
       mutationObserver.disconnect();
       window.removeEventListener('resize', schedule);
+      offer.style.removeProperty('--share-desktop-offer-center-x');
       for (const controls of shifted) {
         controls.style.removeProperty('--share-desktop-offer-x');
         controls.style.removeProperty('--share-desktop-offer-y');
@@ -541,7 +548,7 @@ const ShareDesktopOffer = (): React.JSX.Element => {
   return (
     <div
       ref={offerRef}
-      className='pointer-events-none fixed bottom-[calc(var(--spacing)*4+1px)] left-[calc(var(--spacing)*4+1px)] z-50 hidden lg:block'
+      className='pointer-events-none fixed bottom-[calc(var(--spacing)*4+1px)] left-[calc(var(--spacing)*4+1px)] z-50 hidden [transform:translateX(var(--share-desktop-offer-center-x,0px))] transition-transform duration-200 ease-out motion-reduce:transition-none lg:block'
     >
       <div className='pointer-events-auto [&>[data-slot=card]]:shadow-xs'>
         <OpenInDesktop continueLabel='Continue in the browser' />

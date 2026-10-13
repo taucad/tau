@@ -30,13 +30,13 @@ const lockPath = resolve(import.meta.dirname, '../../../../../packages/plugins/b
  */
 export const lockedPackages = (): LockedPackage[] => {
   const lock = readFileSync(lockPath, 'utf8');
-  return [...lock.matchAll(/^([A-Za-z0-9_.-]+)==(\S+) \\\n((?:\s+--hash=sha256:[0-9a-f]{64}(?: \\)?\n)+)/gmu)].map(
-    (match) => ({
-      name: match[1] ?? '',
-      version: match[2] ?? '',
-      hashes: new Set([...(match[3] ?? '').matchAll(/sha256:([0-9a-f]{64})/gu)].map((hash) => hash[1] ?? '')),
-    }),
-  );
+  return [
+    ...lock.matchAll(/^([A-Za-z0-9_.-]+)==(\S+)(?: ;[^\\\n]*)? \\\n((?:\s+--hash=sha256:[0-9a-f]{64}(?: \\)?\n)+)/gmu),
+  ].map((match) => ({
+    name: match[1] ?? '',
+    version: match[2] ?? '',
+    hashes: new Set([...(match[3] ?? '').matchAll(/sha256:([0-9a-f]{64})/gu)].map((hash) => hash[1] ?? '')),
+  }));
 };
 
 /**

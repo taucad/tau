@@ -1568,7 +1568,8 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       startTurnOwner(store, projectId);
       const session = store.acquire(chatId, projectId);
       const unadmit = publishChatTurnAdmission(chatId, async (gesture) => {
-        const admitted = gesture.requestId === firstCommand.commandId ? firstCommand : secondCommand;
+        const admitted =
+          gesture.kind === 'regenerate' && gesture.requestId === firstCommand.commandId ? firstCommand : secondCommand;
         return {
           runId: admitted.payload.runId,
           leaseTurnId: undefined,

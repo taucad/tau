@@ -213,7 +213,10 @@ function renderViewer(): { readonly cad: ActorRefFrom<typeof cadLikeMachine> } {
   actors.graphics = createActor(graphicsLikeMachine).start();
   render(<ChatViewer viewId='view-1' entryPath={entryPath} panelApi={panelApi} />);
   expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
-  expect(renders.canvas).toEqual([{ hash: 'first', revision: 1 }]);
+  expect(renders.canvas).toEqual([
+    { hash: undefined, revision: 0 },
+    { hash: 'first', revision: 1 },
+  ]);
   renders.viewer = 0;
   renders.canvas = [];
   return { cad };

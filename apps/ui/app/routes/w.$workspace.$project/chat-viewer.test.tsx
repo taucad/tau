@@ -399,6 +399,7 @@ vi.mock('#components/geometry/cad/cad-viewer.js', () => ({
     onModelComponentSecondaryPointerCandidate,
     secondaryMouseButtonMode,
     artifactHash,
+    artifact,
   }: {
     readonly eventPrefix?: string;
     readonly eventSource?: unknown;
@@ -408,12 +409,14 @@ vi.mock('#components/geometry/cad/cad-viewer.js', () => ({
     ) => void;
     readonly secondaryMouseButtonMode?: string;
     readonly artifactHash?: string;
+    readonly artifact?: Artifact;
   }) => {
     mockCadViewerProps = { eventPrefix, eventSource, gizmoContainer, secondaryMouseButtonMode, artifactHash };
 
     return (
       <div
         data-testid='cad-viewer-canvas'
+        data-artifact={artifact?.mimeType}
         onPointerDown={(event) => {
           if (event.button !== 2) {
             return;
@@ -842,7 +845,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Saved view “missing-drawing” is unavailable');
     expect(runtime.viewSpy).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Use default view' }));
     expect(mockViewActions.edit).toHaveBeenCalledWith('view-1', expect.any(Function));
   });
@@ -860,7 +863,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
     expect(runtime.viewSpy).not.toHaveBeenCalled();
   });
 
@@ -880,11 +883,42 @@ describe('ChatViewer reopen-renderer overlay', () => {
       await Promise.resolve();
     });
     expect(await screen.findByRole('status', { name: 'Empty model' })).toBeInTheDocument();
-    expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
     expect(mockGraphicsSend).toHaveBeenCalledWith({ type: 'clearArtifact' });
     expect(mockGraphicsSend).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'updateArtifact', hash: 'empty-model' }),
     );
+  });
+
+  it('should retain the viewport while an empty model gains and loses geometry', async () => {
+    const runtime = createMockRuntimeDocument();
+    const emptyRendering: Rendering = {
+      ...mockRendering,
+      artifact: { mimeType: 'model/gltf-binary', content: createEmptyGlb() },
+      hash: 'empty-model',
+    };
+    vi.mocked(runtime.view.rendering).mockResolvedValue({ superseded: false, rendering: emptyRendering });
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ runtime, rendering: emptyRendering }));
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    const canvas = screen.getByTestId('cad-viewer-canvas');
+    await screen.findByRole('status', { name: 'Empty model' });
+    expect(canvas).not.toHaveAttribute('data-artifact');
+
+    act(() => {
+      runtime.emitRendered(mockRendering);
+    });
+    await waitFor(() => {
+      expect(canvas).toHaveAttribute('data-artifact', 'model/gltf-binary');
+    });
+    expect(screen.getByTestId('cad-viewer-canvas')).toBe(canvas);
+
+    act(() => {
+      runtime.emitRendered(emptyRendering);
+    });
+    await screen.findByRole('status', { name: 'Empty model' });
+    expect(screen.getByTestId('cad-viewer-canvas')).toBe(canvas);
+    expect(canvas).not.toHaveAttribute('data-artifact');
+    expect(mockGraphicsSend).toHaveBeenCalledWith({ type: 'clearArtifact' });
   });
 
   it('renders the Reopen renderer button when the geometry unit is closed', () => {
@@ -934,7 +968,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(screen.getByTestId('chat-stack-trace')).toBeInTheDocument();
     expect(screen.queryByRole('alert', { name: 'CAD runtime error' })).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Waiting for geometry' })).toBeInTheDocument();
-    expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
   });
 
   it('leaves editor connection failures to the existing issue panel', () => {
@@ -1283,7 +1317,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
     const overlay = screen.getByTestId('chat-viewer-status').parentElement!;
     expect(overlay).toHaveClass('absolute', 'top-1/2', '-translate-y-1/2');
   });

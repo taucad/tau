@@ -1,3 +1,8 @@
+import { randomUUID } from 'node:crypto';
+import { createCallbackLogic } from 'xstate';
+import type { EventObject } from 'xstate';
+import { createShutdownActor } from '#main/shutdown.machine.js';
+import type { ShutdownDriverInput, ShutdownMachineEvent } from '#main/shutdown.machine.js';
 import { installBrowserHost } from '#main/browser-host.js';
 /**
  * Electron main process (work item E2).
@@ -20,6 +25,7 @@ import {
   ipcMain,
   MessageChannelMain,
   net,
+  powerSaveBlocker,
   protocol,
   safeStorage,
   screen,
@@ -28,15 +34,17 @@ import {
   systemPreferences,
   utilityProcess,
 } from 'electron';
-import type { IpcMainInvokeEvent } from 'electron';
+import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { createZooProxyTokenSource } from '@taucad/zoo/proxy';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
+import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import {
   defaultConfigDirectory,
   discoverAcpAgents,
   externalAgentDescriptors,
+  keepAwakeWhileStreaming,
   projectCloseMilliseconds,
   projectReleaseMilliseconds,
 } from '@taucad/host';
@@ -105,7 +113,7 @@ import {
   servicesPortRelayTag,
   slicersChannels,
 } from '#shared/desktop-bootstrap.js';
-import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
+import type { AppIconTheme, DesktopMachineBindingFailure } from '#shared/desktop-bootstrap.js';
 import {
   generatedImageIpcChannel,
   isQuickLookEnabled,
@@ -232,11 +240,13 @@ const quitMarginMilliseconds = 3000;
  * drain, then the live-checkout wait, the close cuts and the sync quiesce — so
  * rule 9's nesting holds whatever those bounds become: the host's reason
  * lands before this wait's. Projects close in parallel, so the per-project
- * bound is the whole bound. After it the durable queue is the guarantee (D28).
+ * bound is the whole bound. The utility's quiesce first waits for machine job
+ * starts already admitted, before any project closes, so that wait adds on.
+ * After it the durable queue is the guarantee (D28).
  *
  * @internal
  */
-export const quitQuiesceMilliseconds = projectCloseMilliseconds + quitMarginMilliseconds;
+export const quitQuiesceMilliseconds = projectCloseMilliseconds + machineStartWaitMilliseconds + quitMarginMilliseconds;
 
 /*
  * The page's own close steps before its sync flush: `cancelRuns`, then
@@ -255,6 +265,19 @@ const rendererCloseStepsMilliseconds = 2 * 10_000;
  * should hear "timed out" rather than wait on a spinner.
  */
 const machineBindingMilliseconds = 60_000;
+
+/**
+ * How long quit waits for the utility to say whether a program is streaming. The utility first quiesces the machine
+ * host, which waits up to {@link machineStartWaitMilliseconds} for job starts already admitted, so this bound sits
+ * above that wait.
+ */
+const machineStreamingMilliseconds = machineStartWaitMilliseconds + 2000;
+
+/**
+ * How often main asks whether a program is streaming, to keep the computer awake while one does: well inside the
+ * shortest idle-sleep timer an operating system offers (one minute).
+ */
+const keepAwakeIntervalMilliseconds = 20_000;
 
 /**
  * How long quit waits for the renderer's sessions registry (D31, P49).
@@ -282,6 +305,7 @@ export const quitRendererMilliseconds =
  */
 const askRendererToQuiesce = async (
   boundMilliseconds: number,
+  attemptId: string,
 ): Promise<'quiesced' | 'forced' | 'timeout' | 'no-window'> => {
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
   if (windows.length === 0) {
@@ -293,15 +317,29 @@ const askRendererToQuiesce = async (
       ipcMain.off(quitChannels.quiesced, onQuiesced);
       resolve(outcome);
     };
-    const onQuiesced = (_event: unknown, forced: unknown): void => {
-      settle(forced === true ? 'forced' : 'quiesced');
+    const pending = new Set(windows.map((window) => window.webContents.id));
+    let anyForced = false;
+    const onQuiesced = (event: IpcMainEvent, replyAttempt: unknown, forced: unknown): void => {
+      if (
+        replyAttempt !== attemptId ||
+        typeof forced !== 'boolean' ||
+        !pending.has(event.sender.id) ||
+        event.senderFrame !== event.sender.mainFrame
+      ) {
+        return;
+      }
+      pending.delete(event.sender.id);
+      anyForced ||= forced;
+      if (pending.size === 0) {
+        settle(anyForced ? 'forced' : 'quiesced');
+      }
     };
     const timer = setTimeout(() => {
       settle('timeout');
     }, boundMilliseconds);
     ipcMain.on(quitChannels.quiesced, onQuiesced);
     for (const window of windows) {
-      window.webContents.send(quitChannels.ask);
+      window.webContents.send(quitChannels.ask, attemptId);
     }
   });
 };
@@ -727,6 +765,22 @@ const bootstrapElectronApp = async (): Promise<void> => {
       log.log(level, event, detail);
     },
   });
+  /* Q-streamed-host: a streamed program needs this computer awake for its whole run. */
+  const stopKeepingAwake = keepAwakeWhileStreaming({
+    streamingMachines: async () => services.peekStreamingMachines(keepAwakeIntervalMilliseconds / 2),
+    blocker: {
+      hold: () => {
+        const id = powerSaveBlocker.start('prevent-app-suspension');
+        return () => {
+          powerSaveBlocker.stop(id);
+        };
+      },
+    },
+    intervalMilliseconds: keepAwakeIntervalMilliseconds,
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  });
   const agentHostSessionInput = (
     event: IpcMainInvokeEvent,
     payload: unknown,
@@ -772,14 +826,28 @@ const bootstrapElectronApp = async (): Promise<void> => {
     ) {
       throw new Error('Desktop shell refused invalid machine binding completion.');
     }
-    return services.completeMachineBinding(
-      {
-        ceremonyId,
-        ...(address === undefined ? {} : { address }),
-        ...(accessCode === undefined ? {} : { accessCode }),
-      },
-      machineBindingMilliseconds,
-    );
+    try {
+      return await services.completeMachineBinding(
+        {
+          ceremonyId,
+          ...(address === undefined ? {} : { address }),
+          ...(accessCode === undefined ? {} : { accessCode }),
+        },
+        machineBindingMilliseconds,
+      );
+    } catch (error) {
+      /* Resolved, not thrown: an error crossing the context bridge keeps only its message, and the host's typed code
+       * is what the renderer reads. */
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+          ? error.code
+          : undefined;
+      return {
+        status: 'failed',
+        ...(code === undefined ? {} : { code }),
+        message: error instanceof Error ? error.message : String(error),
+      } satisfies DesktopMachineBindingFailure;
+    }
   });
   registeredProjectRootFor = (executionRoot) => services.computeProjectRoot(executionRoot);
   const publishRoots = (): void => {
@@ -1101,8 +1169,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
        * so it passes the same registry the kernel fork resolver uses. Refusing
        * outright rather than substituting Home: an agent host working over the
        * wrong directory is worse than no agent host. Machines need no root:
-       * printers belong to the per-user store, and a print request names its
-       * own project. */
+       * printers belong to the per-user store, and a job names its own
+       * project. */
       if (concern === 'agentHost' && !roots.isTrusted(resolved['workspaceRoot'] ?? '')) {
         log.log('error', 'services.untrusted-root', { concern, workspaceRoot: resolved['workspaceRoot'] });
         refuse('services.untrusted-root');
@@ -1227,6 +1295,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
       (event: 'will-navigate' | 'will-redirect') =>
       (navigation: { preventDefault: () => void }, url: string): void => {
         const decision = navigationDecision(url, origins);
+        if (quitting) {
+          navigation.preventDefault();
+          return;
+        }
         if (decision === 'allow') {
           return;
         }
@@ -1254,6 +1326,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   await createMainWindow();
   showOpenFileImport = () => {
+    if (quitting) {
+      return;
+    }
     const window = BrowserWindow.getAllWindows()[0];
     if (!window || window.webContents.getURL().includes('/import?desktop-open=1')) {
       return;
@@ -1282,6 +1357,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * here, and never reaches the renderer.
    */
   const openDeepLink = async (value: string): Promise<void> => {
+    if (quitting) {
+      queuedDeepLink = value;
+      focusMainWindow();
+      return;
+    }
     try {
       const link = parseDeepLink(value);
       if (link === undefined) {
@@ -1300,7 +1380,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
         log.log('info', 'deep-link.opened', { kind: link.kind });
         /* On macOS the app stays alive with every window closed. */
         const window = BrowserWindow.getAllWindows()[0] ?? (await createMainWindow());
-        await window.loadURL(rendererUrl(link.route));
+        if (link.kind === 'machine') {
+          window.webContents.send(quitChannels.navigate, link.route);
+        } else {
+          await window.loadURL(rendererUrl(link.route));
+        }
       }
     } catch (error) {
       log.log('error', 'deep-link.failed', error);
@@ -1320,128 +1404,244 @@ const bootstrapElectronApp = async (): Promise<void> => {
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (!quitting && BrowserWindow.getAllWindows().length === 0) {
       void createMainWindow();
     }
   });
 
-  let shutdownComplete = false;
-  let shutdown: Promise<void> | undefined;
-  /**
-   * Tell the person a quit could not settle, and offer to quit anyway (C69, R13).
-   *
-   * Both abort paths below leave the app live on purpose — the unrecorded work
-   * is still there — but the renderer has already taken its own overlay down by
-   * then, so without this Cmd+Q is silent and there is nothing to act on.
-   *
-   * @param detail - What could not settle, in the person's own words.
-   * @returns Whether to go on with the quit regardless.
-   */
-  const askToQuitAnyway = async (detail: string): Promise<boolean> => {
-    const { response } = await dialog.showMessageBox({
-      type: 'warning',
-      buttons: ['Keep Tau open', 'Quit anyway'],
-      defaultId: 0,
-      cancelId: 0,
-      message: 'Tau is still saving your work.',
-      detail: `${detail} Quitting now would leave those changes out of a revision.`,
-    });
-    return response === 1;
+  const resumeQueuedNavigation = (): void => {
+    if (queuedDeepLink !== undefined) {
+      const queued = queuedDeepLink;
+      queuedDeepLink = undefined;
+      deliverDeepLink?.(queued);
+    } else if (openFiles.hasPending()) {
+      showOpenFileImport?.();
+    }
   };
+
+  let shutdownComplete = false;
+  const shutdownDriver = createCallbackLogic<EventObject, ShutdownDriverInput>(({ input, sendBack }) => {
+    let active = true;
+    const { context, stage } = input;
+    const done = (
+      result: Extract<ShutdownMachineEvent, { type: 'done' }>['result'],
+      extra: Partial<Extract<ShutdownMachineEvent, { type: 'done' }>> = {},
+    ): void => {
+      if (active) {
+        sendBack({ type: 'done', attemptId: context.attemptId, result, ...extra });
+      }
+    };
+    // async-iife: bootstrap -- the invoked actor owns cancellation of the completion.
+    void (async () => {
+      try {
+        switch (stage) {
+          case 'assessing': {
+            try {
+              const machines = await services.streamingMachines(machineStreamingMilliseconds, context.attemptId);
+              done(machines.length === 0 ? 'clear' : 'review', { machines });
+            } catch (error) {
+              done('review', { error: String(error) });
+            }
+            break;
+          }
+          case 'reviewing': {
+            const names = context.machines?.map(({ name }) => name);
+            const { response } = await dialog.showMessageBox({
+              type: 'warning',
+              buttons: ['View machines', 'Keep Tau open', 'Quit anyway'],
+              defaultId: 0,
+              cancelId: 1,
+              message: names?.length
+                ? `Tau is streaming a program to ${new Intl.ListFormat('en', { type: 'conjunction' }).format(names)}.`
+                : 'Tau could not check whether a machine needs this connection.',
+              detail:
+                'Open Machines to review the run and use its stop control. Keep Tau open while it finishes, or explicitly quit and interrupt the connection. Quitting is not an emergency stop; buffered motion may continue.',
+            });
+            done(response === 0 ? 'view' : response === 2 ? 'force' : 'cancel');
+            break;
+          }
+          case 'confirming': {
+            const { response } = await dialog.showMessageBox({
+              type: 'warning',
+              buttons: ['Go back', 'Quit anyway'],
+              defaultId: 0,
+              cancelId: 0,
+              message: 'Quit and interrupt machine connections?',
+              detail:
+                'A streamed program may be left incomplete. The machine may continue buffered motion after Tau exits. Use the physical emergency stop if needed. Unsaved project changes may also be lost. Tau will not automatically resend a program on restart.',
+            });
+            done(response === 1 ? 'confirmed' : 'cancel');
+            break;
+          }
+          case 'renderer': {
+            const outcome = await askRendererToQuiesce(quitRendererMilliseconds, context.attemptId);
+            log.log('info', 'main.renderer-quiesce', { outcome });
+            done(outcome === 'timeout' ? 'failed' : 'settled', {
+              error: outcome === 'timeout' ? 'An open window has not finished saving its projects.' : undefined,
+            });
+            break;
+          }
+          case 'utility': {
+            const outcome = await services.quiesce(quitQuiesceMilliseconds, {
+              attemptId: context.attemptId,
+              forceMachines: context.forceMachines,
+            });
+            log.log(
+              outcome.status === 'quiesced' || outcome.status === 'no-utility' ? 'info' : 'error',
+              'main.quiesce',
+              { outcome },
+            );
+            done(outcome.status === 'quiesced' || outcome.status === 'no-utility' ? 'settled' : 'failed', {
+              error: `Project settlement: ${outcome.status}.`,
+              retryable:
+                outcome.status === 'timeout' ||
+                outcome.status === 'streaming' ||
+                outcome.status === 'streaming-unknown',
+            });
+            break;
+          }
+          case 'settlementReview': {
+            const { response } = await dialog.showMessageBox({
+              type: 'warning',
+              buttons: context.retryable
+                ? ['Retry saving', 'Keep Tau open', 'Quit anyway']
+                : ['Restore workspace', 'Quit anyway'],
+              defaultId: 0,
+              cancelId: context.retryable ? 1 : 0,
+              message: 'Tau has not finished saving every project.',
+              detail: `${context.error ?? ''} Retry saving, or restore the app after pending saves settle. Quitting anyway may lose changes.`,
+            });
+            done(
+              context.retryable
+                ? response === 0
+                  ? 'retry'
+                  : response === 2
+                    ? 'force'
+                    : 'recover'
+                : response === 1
+                  ? 'force'
+                  : 'recover',
+            );
+            break;
+          }
+          case 'recovering': {
+            const outcome = await askRendererToQuiesce(quitRendererMilliseconds, context.attemptId);
+            if (outcome === 'timeout') {
+              throw new Error('Pending edits have not finished saving. Retry recovery to preserve them.');
+            }
+            if (outcome === 'forced') {
+              const { response } = await dialog.showMessageBox({
+                type: 'warning',
+                buttons: ['Review again', 'Restore and discard unsaved changes'],
+                defaultId: 0,
+                cancelId: 0,
+                message: 'Some renderer edits were not saved.',
+                detail:
+                  'An earlier Quit anyway skipped these saves. Restoring reloads the workspace from its last saved state and may discard those edits.',
+              });
+              if (response !== 1) {
+                throw new Error('Restoring needs your decision about unsaved renderer edits.');
+              }
+            }
+            await services.recover(context.attemptId, quitQuiesceMilliseconds);
+            quitting = false;
+            for (const window of BrowserWindow.getAllWindows()) {
+              if (!window.isDestroyed()) {
+                window.reload();
+              }
+            }
+            resumeQueuedNavigation();
+            done('settled');
+            break;
+          }
+          case 'recoveryReview': {
+            const { response } = await dialog.showMessageBox({
+              type: 'warning',
+              buttons: ['Retry recovery', 'Quit anyway'],
+              defaultId: 0,
+              cancelId: 0,
+              message: 'Tau is waiting to restore your workspace.',
+              detail: context.error ?? 'Pending saves must settle before the workspace can reopen.',
+            });
+            done(response === 1 ? 'force' : 'retry');
+            break;
+          }
+          case 'cancelling':
+          case 'viewing': {
+            services.resumeMachineStarts(context.attemptId);
+            quitting = false;
+            resumeQueuedNavigation();
+            if (stage === 'viewing') {
+              const machine = context.machines?.length === 1 ? context.machines[0] : undefined;
+              const route = machine
+                ? `/machines/${encodeURIComponent(machine.hostId)}/${encodeURIComponent(machine.machineId)}`
+                : '/machines';
+              const window = BrowserWindow.getAllWindows()[0] ?? (await createMainWindow());
+              window.webContents.send(quitChannels.navigate, route);
+              focusMainWindow();
+            }
+            done('settled');
+            break;
+          }
+          case 'exiting': {
+            try {
+              showOpenFileImport = undefined;
+              for (const controller of quickLookControllers.values()) {
+                controller.dispose();
+              }
+              quickLookControllers.clear();
+              auth.dispose();
+            } catch (error) {
+              log.log('error', 'main.shutdown', error);
+            }
+            stopKeepingAwake();
+            try {
+              await services.dispose();
+            } catch (error) {
+              log.log('error', 'main.shutdown', error);
+            }
+            try {
+              await geometry.dispose();
+            } catch (error) {
+              log.log('error', 'main.shutdown', error);
+            }
+            zooProxyToken.dispose();
+            try {
+              runtimeMain.dispose();
+            } catch (error) {
+              log.log('error', 'main.shutdown', error);
+            }
+            try {
+              for (const connection of computeConnections.values()) {
+                connection.dispose();
+              }
+              computeConnections.clear();
+              await computeWorker?.terminate();
+              computeWorker = undefined;
+            } catch (error) {
+              log.log('error', 'main.shutdown', error);
+            }
+            shutdownComplete = true;
+            app.quit();
+            break;
+          }
+        }
+      } catch (error) {
+        done('failed', { error: String(error) });
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  });
+  const shutdown = createShutdownActor({ identity: randomUUID() }, { actors: { shutdownDriver } }).start();
   app.on('before-quit', (event) => {
-    quitting = true;
     if (shutdownComplete) {
       return;
     }
     event.preventDefault();
-    if (!shutdown) {
-      shutdown = (async () => {
-        /*
-         * The quit hold (D31, W19).
-         *
-         * Every project the services utility serves takes its close cut and
-         * waits for W13's `awaitSyncSettled` before this process ends. Without
-         * this round trip `services.dispose()` killed the utility outright —
-         * `ServicesHost.dispose()` is synchronous fire-and-forget — so the last
-         * edits of a quit were recorded by nothing. A timeout or negative
-         * acknowledgement leaves the app live so the same owners can retry.
-         */
-        /*
-         * The renderer's half first (P49): the browser-side registry owns the
-         * file manager, compute admission and every `chat-session`, and only
-         * it can cancel runs and release the leases its turns took. It shows
-         * the *Backing up…* overlay while it does, with *Quit anyway*.
-         */
-        const rendererOutcome = await askRendererToQuiesce(quitRendererMilliseconds);
-        log.log('info', 'main.renderer-quiesce', { outcome: rendererOutcome });
-        let forced = rendererOutcome === 'forced';
-        if (
-          rendererOutcome === 'timeout' &&
-          !(await askToQuitAnyway('This window did not finish closing its projects.'))
-        ) {
-          quitting = false;
-          shutdown = undefined;
-          return;
-        }
-        forced ||= rendererOutcome === 'timeout';
-        const utilityOutcome = await services.quiesce(quitQuiesceMilliseconds);
-        log.log(
-          utilityOutcome.status === 'quiesced' || utilityOutcome.status === 'no-utility' ? 'info' : 'error',
-          'main.quiesce',
-          { outcome: utilityOutcome },
-        );
-        if (
-          !forced &&
-          utilityOutcome.status !== 'quiesced' &&
-          utilityOutcome.status !== 'no-utility' &&
-          !(await askToQuitAnyway('Tau could not finish saving every open project.'))
-        ) {
-          quitting = false;
-          shutdown = undefined;
-          return;
-        }
-        try {
-          showOpenFileImport = undefined;
-          for (const controller of quickLookControllers.values()) {
-            controller.dispose();
-          }
-          quickLookControllers.clear();
-          auth.dispose();
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
-        }
-        try {
-          await services.dispose();
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
-        }
-        try {
-          await geometry.dispose();
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
-        }
-        zooProxyToken.dispose();
-        try {
-          runtimeMain.dispose();
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
-        }
-        try {
-          for (const connection of computeConnections.values()) {
-            connection.dispose();
-          }
-          computeConnections.clear();
-          await computeWorker?.terminate();
-          computeWorker = undefined;
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
-        }
-        shutdownComplete = true;
-        app.quit();
-      })();
-      // async-iife: bootstrap -- Electron event callbacks cannot return shutdown completion.
-      void shutdown;
-    }
+    quitting = true;
+    shutdown.send({ type: 'quit' });
   });
 };
 

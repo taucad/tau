@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { expect } from 'vitest';
+import { machineChannelProtocolVersion } from '@taucad/runtime/machine';
 import type { DesktopSession } from '#support/desktop-app.js';
 
 /** Product geometry utility events, observed in packaged main without replacing its fork. */
@@ -281,6 +282,6 @@ export const probeServicesHost = async (session: DesktopSession): Promise<number
       shell.requestServicesPort(requestId, 'machines');
     });
   }, randomUUID());
-  expect(hello).toEqual({ server: 'machines', protocolVersion: 1 });
+  expect(hello).toEqual({ server: 'machines', protocolVersion: machineChannelProtocolVersion });
   return Date.now() - before;
 };

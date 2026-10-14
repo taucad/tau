@@ -1,33 +1,87 @@
 ---
 title: Machines API
-description: Discover and bind physical machines, read their directory, and preflight, transfer, or control prints.
+description: Bind physical machines, watch their state, and apply actions, holds, stop and jobs through one admitted machines client.
 docType: reference
-wordBudgetOverride: 1200
+# 1760 -> 1910 (2026-10-10): credential, typed vendor actions, halt emission, job approval, postedFor, typed codes.
+wordBudgetOverride: 1910
 ---
 
 # Machines API
 
-Import browser-safe contracts from `@taucad/runtime/machine`. `MachineClient` exposes the admitted machines route; its `MachinePrintRequestClient` facet manages requests that require approval. Discovery, binding, preparation, transfer, and start are distinct operations. A successful preparation or upload never means a physical print has started.
+Import browser-safe contracts from `@taucad/runtime/machine`. `MachineClient` is the machines facet that a workbench, Tau's agent tools and external agents share. Four kinds of operation cause a physical effect: `applyAction` (one declared action), the hold operations (a control held down), `stop`, and `resolveJob` (the only way a program is transferred or started). `approveAction` authorizes one; every other operation reads, binds or reconciles. An accepted receipt means the machine took the command, not that its physical result has happened.
 
-## Discovery and directory
+## Discovery and binding
 
-`MachineListProvidersInput` lists registered `MachineProvider` descriptors. `MachineDiscoverInput` starts bounded discovery for a provider and configuration; the returned `MachineDiscoveryFrame` stream carries `MachineDiscoveryEvent` values. A `MachineCandidate` contains a transient `MachineCandidateEndpoint` and untrusted `MachineClaimedIdentity`. `MachineBeginBindingInput` starts a non-secret ceremony and returns `MachineBindingOutcome`; native code completes credentials and trust. `MachineRemoveBindingInput` produces `MachineBindingRemoval` when safe. `machineCredentialReference` creates the host-local reference to a saved credential, not a portable secret.
+`listProviders` takes `MachineListProvidersInput` and returns the admitted `MachineProvider` descriptors. Show a provider the host marks `unavailable` with its reason, not as a choice; `discover` refuses it with `MACHINE_PROVIDER_UNAVAILABLE`. `discover` takes `MachineDiscoverInput` for one provider and configuration; its `MachineDiscoveryFrame` stream carries `MachineDiscoveryEvent` values. An optional `endpoint`, a `MachineEndpoint` (network address, or serial path), searches only there; another transport is refused with `MACHINE_DISCOVERY_ENDPOINT_INVALID`. A `MachineCandidate` holds a transient `MachineCandidateEndpoint` (a `MachineEndpoint` plus its network interface) and an untrusted `MachineClaimedIdentity`. `beginBinding` takes `MachineBeginBindingInput`, a non-secret ceremony, and returns `MachineBindingOutcome`; native code completes credentials and trust. `removeBinding` takes `MachineRemoveBindingInput` and returns `MachineBindingRemoval`; it is refused while a job of that machine is between preparation and start. `machineCredentialReference` creates the host-local reference to a saved credential, not a portable secret. `isSimulatedMachine` reads a manifest or a descriptor's capabilities: one that declares qualifications, all in simulation, is a simulator. Never test a provider id. `machineCredentialOf` says whether binding asks the person for a secret: the manifest's `connection.credential`, or else exactly when its identity is authenticated.
 
-The directory's `MachineListInput`, `MachineGetInput`, and `MachineWatchInput` yield `MachineDirectorySnapshot`, `MachineDirectoryEntry`, and streamed `MachineDirectoryFrame` values. `MachineDirectoryCursor` resumes observation; it is not a mutation authority. Each entry pairs a stable descriptor with observed state and freshness.
+Import `prepareMachineWebSocket`, `PrepareMachineWebSocketInput` and `PreparedMachineWebSocket` from `@taucad/runtime/transport/websocket`. The helper probes an exact authenticated HTTP(S) endpoint. A `204` yields a `RuntimeTransportFacet` whose `connect()` opens a fresh channel; `403` returns `not-granted` and `404` returns `unsupported`. Redirects and URL credentials are refused.
 
-Import `prepareMachineWebSocket`, `PrepareMachineWebSocketInput`, and `PreparedMachineWebSocket` from `@taucad/runtime/transport/websocket`. The helper probes an exact authenticated HTTP(S) endpoint. A `204` yields a `RuntimeTransportFacet` whose `connect()` opens a fresh channel; `403` returns `not-granted` and `404` returns `unsupported`. Redirects and URL credentials are refused. Wait for channel readiness after connecting.
+## Directory and observation
 
-`MachineDescriptor` records physical identity and capabilities. `MachineEnvelope` uses canonical metres. `MachineToolCapability`, `MachineMaterialSystem`, and `MachineQuantityDeclaration` describe tool, slot, and native-unit facts needed for compatibility checks. `MachineSnapshot` holds connection/readiness and `MachineObservedSetup`; the latter includes `MachineObservedMaterial`. Live `MachineRunSnapshot`, `MachineTemperatureSnapshot`, `MachineFanSnapshot`, `MachineMaterialUnitSnapshot`, `MachineMaterialSystemSnapshot`, `MachineNetworkSnapshot`, `MachineLightSnapshot`, and `MachineAlertSnapshot` carry observations, not commands. `MachineObservation` is the provider's pull-stream item.
+`list`, `get` and `watch` take `MachineListInput`, `MachineGetInput` and `MachineWatchInput` and yield `MachineDirectorySnapshot`, `MachineDirectoryEntry` and streamed `MachineDirectoryFrame` values. A frame is a `snapshot`, an `event` that upserts or removes an entry, an `observed` delta for one machine's components, or `resync-required` with a fresh snapshot. `MachineDirectoryCursor` resumes a watch; it is not a mutation authority.
 
-## Physical operations
+An entry pairs a `MachineDescriptor` with a `MachineSnapshot` and a freshness. The descriptor's `MachineCapabilities` are the `MachineInstalledCapabilities` now present plus a `revision`, an `incarnation` and the provider's `qualifications`: a changed revision invalidates every form shown before it. The snapshot is the provider's `MachineReport` plus Tau's recent operations. A report carries a `MachineState` whose `MachineStatus` is one of `machineStatuses`, the current `MachineRun` with its `MachineRunProgress` and `MachineRunCounter` values, active `MachineAlert` entries, `MachineAvailability` per declared action, and component observations.
 
-`MachinePreparePrintInput` asks for read-only preflight of a `MachineArtifactReference` against observed setup; the `MachinePreparedPrint` result binds artifact, machine, configuration and setup digests with an expiry. `MachineUploadPrintInput` transfers exactly that preparation under a caller-retained operation id. `MachineStartPrintInput` also requires the accepted upload's transfer id and expected setup digest. `MachineControlRunInput` names `cancel`, `pause`, `resume`, or `urgent-stop` against the exact observed provider run. `MachineReconcileOperationInput` checks a prior uncertain effect. `MachineRunOperationKind` and `MachineOperationKind` distinguish run commands from upload.
+Each `ComponentObservation` has its own receive time and validity, and either a `MachineComponentValue` or `unknown` with a reason. Values include `MachineReading` (temperatures, fans, signal), `MachineTool`, `MaterialSlotSnapshot` (addressed by `MaterialSlotAddress`, holding a `SlotMaterial`) and machine-held `MachineTable` rows such as `CalibrationProfile`. A `MachineActivity` lists `MachineActivityStep` entries; a `MachinePrompt` is the machine's current question with its `MachinePromptAnswer` choices. Standard group ids are `machineObservationGroups` (`MachineObservationGroup`); a vendor group is namespaced `<vendor>.<name>` and is read by its label. `componentValue` reads one component's value of one kind; `mergeComponentObservations` folds a delta into a list.
 
-The resulting `MachineOperationReceipt` is `accepted`, `rejected`, or `unknown`. `MachineOperationSnapshot` is the durable projection, including planned and sending states; preserve the original operation id and reconcile an unknown outcome rather than issuing a new physical effect. `MachineCaptureStillClientInput` returns a short-lived `MachineStill` only when the provider declares `MachineStillCaptureCapability`.
+`captureStill` takes `MachineCaptureStillClientInput` and returns a short-lived `MachineStill` only when the machine declares still capture.
 
-## Print requests
+## Actions
 
-`MachineRequestPrintInput` creates a `PrintRequest` for a `PrintRequester`. `PrintRequestState` distinguishes approval, transfer, start, and terminal outcomes; `PrintRequestSummary` is the list projection. `MachineListPrintRequestsInput` and `MachineWatchPrintRequestsInput` read and follow requests. `MachineResolvePrintRequestInput` supplies an approval decision; `MachineWithdrawPrintRequestInput` withdraws a pending request. These methods sit on `MachinePrintRequestClient`, not on a provider's raw session.
+A `MachineActionDescriptor` names its component, a standard family or a `<vendor>.<area>.<verb>` id, a version, a parameters form, its `MachineActionEffect` values (from `machineActionEffects`), a scope (`idle`, `run` or `any`), the statuses it applies in, a `MachineActionSafety` floor, a `MachineActionQualification`, the observation groups that must be fresh, and how its effect is confirmed. An action that pauses or ends a run declares its `MachineHaltOutcome`; a blocked action names a `MachineRemedy`: an action, a person's step, or `stop` with its `consequence` when only Stop ends the effect early. `standardMachineActions` lists the standard families by `StandardMachineActionId`, with parameters typed by `StandardMachineActionParameters`. A `MachineClient<Extensions>` types one provider's own actions: a `MachineActionExtensions` map from action id to schema makes `applyAction` take `MachineActionParameters` for that id; without it, parameters are `unknown`.
+
+Before offering or sending, run `checkMachineAction` with a `MachineActionCheckInput` over a `MachineActionCheckEntry`; `machineActionOf` finds the installed descriptor. Motion waits until every motion group that can home trusts its position. The pure `MachineActionCheck` is `available`, `approval-required` (an agent asks, a person approves this exact intent) or `unavailable` with a `MachineFailure` and remedy. The check is advisory: the host repeats every step with facts only it has.
+
+`machineActionIntent` builds a complete `MachineApplyActionInput` from the entry and descriptor: machine, component, capability revision, version and the run the caller saw. `applyAction` sends it once and returns a `MachineReceipt` of kind `action`. Keep the `operationId` across reconnects and reloads; the same id never applies twice. Refusals carry a `MachineFailureCode` from `machineFailureCodes`. Read an error's `code`, never its message; `withMachineCode` gives a refusal thrown as a bare code its `code` where it crosses to a consumer.
+
+## Holds and stop
+
+A hold is a control that acts while a person holds it: the standard held jog in `standardMachineHolds`. A `MachineHoldDescriptor` declares a `lease` (how often the client renews) and a `bound` (how far the machine can keep moving after the last renewal). `beginHold` takes `MachineBeginHoldInput` with `MachineJogHoldParameters` and returns a `MachineHold`; call `renewHold` within the lease and `endHold` to finish. A hold that stops being renewed stops the machine within its bound with no message arriving. Holds are for a person at the machine only, while it is ready.
+
+`stop` takes `MachineStopInput` and returns a `MachineReceipt` of kind `stop`. It needs no run or revision, nothing gates it, and anyone may call it. The descriptor's `stop` is a `MachineHaltOutcome` stating what halting leaves running and how to recover; on a machine with a beam, `emission` says whether it goes off. A stop sent over a network or cable is not a safety-rated emergency stop.
+
+## Authority, attendance and qualification
+
+Every request names a `MachineRequester`. A descriptor's `MachineAuthority` floor is `agent` (admitted only for the host's low-risk list, see `isUnattendedAction`), `approved-agent` (a person, or an agent after a person approved this exact intent) or `person`. A person approves on their own session: `approveAction` takes `MachineApproveActionInput` (the agent's `operationId`, the intent shown with its run, `approve` or `deny`) and returns `MachineActionApproval`. The host keeps it with an intent digest for 10 minutes; a restart drops it. The agent's matching intent and `operationId` is admitted once; anything else, a denial included, is refused with `MACHINE_ACTION_APPROVAL_REQUIRED`. Agent sessions never approve actions or decide jobs. A provider or host setting may raise a floor, never lower it. `attended` is a person's statement that they are at the machine: recorded with the operation, refused from an agent, and not a safety function. Interlocks named by an action must report safe.
+
+A qualification is `qualified` against a `MachineQualificationProfile` (hardware or simulation evidence for a model and firmware), or `designed` or `unsupported` with a reason. Simulation never qualifies hardware. `setTesting` takes `MachineSetTestingInput` and returns the updated entry: in Testing mode a person may try `designed` controls on that machine to qualify them. Testing is a person's mode: an agent's request for a `designed` action is refused with Testing on.
+
+## Jobs
+
+`checkJob` takes `MachineCheckJobInput` and returns a `MachineJobCheck`: the parsed `MachineProgramSummary`, each `MachineCheck`, and the completed start-form values, or a refusal. It sends nothing and records nothing. `requestJob` takes `MachineRequestJobInput` and returns a `MachineJob`; the same `jobId` returns the existing job. `listJobs` and `watchJobs` take `MachineListJobsInput`; when `watchJobs` completes, list and watch again.
+
+A job moves through `MachineJobState` values from `preparing` and `awaiting-approval` to `started`, or ends `denied`, `withdrawn`, `rejected`, `unknown` or `failed`. `MachinePreparedJob` binds artifact, machine, configuration and setup digests with an expiry. `resolveJob` takes `MachineResolveJobInput`: approval carries the person's attestations and attendance, and the transfer and start operation ids. Only a person's session decides a job, so a job declares no authority; agents read it. Every machine that runs jobs asks for the `machineWorkAreaClearAttestation` attestation. A milling program's facts may name the model it was `postedFor`. `personOnlyJobApproval` names the attestations and attendance only the person's Print pane collects. `withdrawJob` takes `MachineWithdrawJobInput`. The descriptor's `MachineJobFacts` say whether delivery is `stored` or `streamed` and whether a person starts it at the machine.
+
+## Operations
+
+Each effect is a `MachineOperation` of one `MachineOperationKind`, with one state from `planned` through `sending` to `accepted`, `rejected` or `confirming`; `attention` asks a person to look when no proof arrives. A `MachineOperationReceipt` is `accepted`, `rejected` or `unknown`. Nothing is resent: `reconcileOperation` takes `MachineReconcileOperationInput` and reads what happened.
+
+```ts
+import { checkMachineAction, machineActionIntent } from '@taucad/runtime/machine';
+import type { MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
+
+export const turnOnLight = async (client: MachineClient, entry: MachineDirectoryEntry): Promise<string> => {
+  const check = checkMachineAction({
+    entry,
+    componentId: 'chamber-light',
+    action: 'switch.set',
+    caller: 'person',
+    attended: false,
+    now: Date.now(),
+  });
+  if (check.status !== 'available' || !('scope' in check.descriptor)) {
+    return check.status === 'unavailable' ? check.message : 'Needs approval';
+  }
+  const receipt = await client.applyAction(
+    machineActionIntent(entry, check.descriptor, {
+      operationId: crypto.randomUUID(),
+      parameters: { on: true },
+      requestedBy: { kind: 'user', id: 'local', label: 'You' },
+    }),
+  );
+  return receipt.status; // 'accepted', 'rejected' or 'unknown'
+};
+```
 
 ## Saved machine settings
 
@@ -50,7 +104,7 @@ A `SettingsSchema` admits sparse JSON objects. A `SettingsDefinition` preserves 
 
 Import `MachineSettingsOwner` and its boundary types from `@taucad/runtime/host`. Construct it with an exact rooted filesystem supporting bounded streaming reads and checked writes, plus trusted definitions. Its `read` and `subscribe` methods return `MachineSettingsSnapshot`, distinguishing current, absent, refused, and unavailable records.
 
-An edit supplies a `MachineSettingsEdit`: operation ID, type ID, captured base record, and proposed next record. `MachineSettingsSave` reports saved, conflict, refused, or uncertain. Keep the operation ID and call `settlement` after an uncertain result; do not reinterpret uncertainty as success. Call `dispose` when the owner is no longer used.
+An edit supplies a `MachineSettingsEdit`: operation ID, type ID, captured base record, and proposed next record. `MachineSettingsSave` reports saved, conflict, refused, or uncertain. Keep the operation ID and call `settlement` after an uncertain result; never treat uncertainty as success. Call `dispose` when done.
 
 ## Related
 

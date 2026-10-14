@@ -83,13 +83,11 @@ export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
 /**
  * The exact tool grant a host capability carries.
  *
- * The four CAD tools, the workbench record tool, the parameter tools (agent plugin UI blueprint G22), and the print
- * tools (blueprint D5, Bambu Studio D13): an
- * external agent may read the slicing profiles a machine offers, and open,
- * read, list and stop a print request through the same ledger a Tau turn
- * uses. A print starts only on the person's answer: in the client's own approval form when it declares form
- * elicitation (`tau mcp`), otherwise in Tau, while the agent is told to wait. Every name is dispatched into the
- * daemon's own registry by tool name.
+ * The four CAD tools, the workbench record tool, the parameter tools, and the machine tools: an external agent may read machines and
+ * their slicing profiles, apply the host's unattended actions (anything needing a person's approval is refused with
+ * the step to take in Tau, since only a Tau turn can pause for it), stop a machine, and request or check a job,
+ * which a person approves through the client’s form when supported or in Tau. Every name is dispatched into the daemon's own
+ * registry by tool name.
  *
  * @public
  */
@@ -101,11 +99,13 @@ export const hostMcpAllowedTools = [
   toolName.arrangeWorkbench,
   toolName.getParameters,
   toolName.applyParameterOperation,
+  toolName.listMachines,
+  toolName.getMachine,
+  toolName.machineAction,
+  toolName.stopMachine,
   toolName.getPrintProfiles,
-  toolName.requestPrint,
-  toolName.getPrintRequest,
-  toolName.listPrintRequests,
-  toolName.cancelPrint,
+  toolName.requestJob,
+  toolName.checkJob,
   toolName.askQuestions,
 ] as const;
 
@@ -123,20 +123,26 @@ const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAll
   toolName.getParameters,
   toolName.applyParameterOperation,
   toolName.askQuestions,
+  toolName.listMachines,
+  toolName.getMachine,
+  toolName.machineAction,
+  toolName.stopMachine,
   toolName.getPrintProfiles,
-  toolName.requestPrint,
-  toolName.getPrintRequest,
-  toolName.listPrintRequests,
-  toolName.cancelPrint,
+  toolName.requestJob,
+  toolName.checkJob,
 ]);
 
 /** The registry tools that change nothing, here or on a machine. */
 const readOnlyRegistryTools: ReadonlySet<string> = new Set<string>([
   toolName.getParameters,
+  toolName.listMachines,
+  toolName.getMachine,
   toolName.getPrintProfiles,
-  toolName.getPrintRequest,
-  toolName.listPrintRequests,
+  toolName.checkJob,
 ]);
+
+/** The registry tools that can end a run or halt a machine. */
+const destructiveRegistryTools: ReadonlySet<string> = new Set<string>([toolName.machineAction, toolName.stopMachine]);
 
 /** Tool-specific hints where the derived registry defaults do not describe the effect. */
 const hostMcpAnnotationOverrides: Readonly<Partial<Record<string, NonNullable<TauMcpHostTool['annotations']>>>> = {
@@ -215,9 +221,10 @@ const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMc
       : definition.inputSchema,
     annotations: hostMcpAnnotationOverrides[definition.name] ?? {
       readOnlyHint: reads,
-      destructiveHint: definition.name === toolName.cancelPrint,
-      idempotentHint: definition.name !== toolName.cancelPrint,
-      /* A print request reaches a machine outside this process once accepted. */
+      destructiveHint: destructiveRegistryTools.has(definition.name),
+      /* Stopping twice stops once; every other effect is a new operation per call. */
+      idempotentHint: reads || definition.name === toolName.stopMachine,
+      /* A machine is outside this process. */
       openWorldHint: !reads,
     },
   };
@@ -588,7 +595,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     /**
      * One allowed tool, by name, into the daemon's registry.
      *
-     * Keyed by tool name rather than RPC name because the print request tools
+     * Keyed by tool name rather than RPC name because the machine tools
      * have no chat RPC — they are registry tools — and this is the one call
      * the MCP adapter makes for either kind.
      *

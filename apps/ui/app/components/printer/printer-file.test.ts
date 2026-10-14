@@ -36,7 +36,10 @@ describe('readPrinterFile and loadPrinterProgram', () => {
     const gcode = fixtureGcode({ layers: 3 });
     const container = writeBambuContainer({ gcode, modelName: 'fixture', plate: 'textured-pei' });
     expect(printerFileKind('fixture.gcode.3mf', container.subarray(0, 8))).toBe('container');
-    expect(new TextDecoder().decode(readPrinterFile(container, 'container').gcode)).toBe(gcode);
+    // The writer records the plate the slice was made for in a config block ahead of the program, as Bambu Studio does.
+    expect(new TextDecoder().decode(readPrinterFile(container, 'container').gcode)).toBe(
+      `; CONFIG_BLOCK_START\n; curr_bed_type = Textured PEI Plate\n; CONFIG_BLOCK_END\n${gcode}`,
+    );
     const { program, slicedPlate } = loadPrinterProgram(container, 'container');
     expect(program.layerTable).toHaveLength(3);
     expect(program.coverage.complete).toBe(true);

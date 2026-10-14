@@ -1,46 +1,84 @@
 import type { HostToolResult, JsonObject } from '@taucad/agent-host';
 import { exportModelOutputSchema } from '@taucad/chat';
 import type { KernelIssue } from '@taucad/runtime';
+import { bambuSlotOf } from '@taucad/bambu/settings';
+import { fffProcessOf } from '@taucad/runtime/machine';
 import type {
+  MachineAcceptedContainer,
   MachineArtifactReference,
   MachineClient,
   MachineDirectoryEntry,
   MachineManifest,
-  MachineObservedMaterial,
+  MachineProgramSummary,
   MachineProvider,
-  PrintRequest,
-  PrintRequestSummary,
+  MachineRequestJobInput,
+  MaterialSlotAddress,
 } from '@taucad/runtime/machine';
 import { bambuPlates, resolveBambuStudioSelection } from '@taucad/slicer/bambu-studio';
 import type { BambuStudioInstallation } from '@taucad/slicer/bambu-studio';
-import {
-  slicedFilamentColors,
-  bambuPlateMember,
-  readBambuContainer,
-  readBambuContainerProducer,
-} from '@taucad/slicer/container';
+import { slicedFilamentColors, readBambuContainer, readBambuContainerProducer } from '@taucad/slicer/container';
 import { parseGcode } from '@taucad/slicer/toolpath';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { z } from 'zod';
 
 import type { MachinePrintPlanner } from '#registry/machine-tool-registry.js';
+import { acceptedText } from '#registry/machine-text.js';
 import {
   applyMachinePreferences,
   bambuHints,
   defaultBambuStudioEngine,
+  externalSpoolOf,
   isBambuProvider,
+  isBambuSettings,
   loadedMaterial,
   machinePreferencesHint,
+  nozzleDiameterOf,
+  observedPlate,
+  observedSlots,
+  sameSlot,
+  withOnlySlot,
 } from '#registry/print-profiles.js';
-import type { BambuStudioEngine, PrintChoices, ResolvedMachinePreferences } from '#registry/print-profiles.js';
+import type {
+  BambuStudioEngine,
+  ObservedSlot,
+  PrintChoices,
+  ResolvedMachinePreferences,
+} from '#registry/print-profiles.js';
 
-/** The export target every print goes through (blueprint D3). */
-const printFormat = 'gcode.3mf';
+/**
+ * The export target a slice goes through, by the media type a machine accepts it in: Bambu's print-ready container,
+ * or plain G-code. ponytail: add a row when a slicer produces another container a printer declares.
+ */
+type SliceFormat = 'gcode.3mf' | 'gcode';
+const sliceFormats: ReadonlyMap<string, SliceFormat> = new Map([
+  ['application/vnd.bambulab.gcode-3mf', 'gcode.3mf'],
+  ['text/x.gcode', 'gcode'],
+]);
+
+/**
+ * The format to slice to: the first container the machine accepts that Tau can slice into.
+ * @param machine - The machine as observed; its `accepts` are what preflight checks.
+ * @returns The export target.
+ * @throws When the machine accepts no container Tau slices to.
+ */
+const sliceFormatOf = (machine: MachineDirectoryEntry): SliceFormat => {
+  const { jobs } = machine.descriptor.capabilities;
+  const accepts: readonly MachineAcceptedContainer[] = jobs.type === 'supported' ? jobs.accepts : [];
+  for (const { mediaType } of accepts) {
+    const format = sliceFormats.get(mediaType);
+    if (format !== undefined) {
+      return format;
+    }
+  }
+  throw new Error(
+    `Tau cannot slice into anything ${machine.name} accepts (${accepts.map(({ mediaType }) => mediaType).join(', ') || 'no jobs'}); name a finished program with artifact.`,
+  );
+};
 
 /** `#RRGGBB` from a colour as a file or a tray records it; the printer's carries an alpha byte. */
 const opaqueColor = (color: string | undefined): string | undefined => {
-  const match = /^#?([\dA-F]{6})(?:[\dA-F]{2})?$/iu.exec(color ?? '');
-  return match === null ? undefined : `#${match[1]!.toUpperCase()}`;
+  const hex = /^#?([\dA-F]{6})(?:[\dA-F]{2})?$/iu.exec(color ?? '')?.[1];
+  return hex === undefined ? undefined : `#${hex.toUpperCase()}`;
 };
 
 /**
@@ -69,19 +107,20 @@ const colorDistance = (a: string | undefined, b: string | undefined): number | u
  * @param colors - The filaments' colours in filament order, as {@link slicedFilamentColors} reads them.
  * @param materials - The trays as the machine observes them.
  * @param materialId - The material the print is sliced for.
- * @returns One slot per filament; `undefined` for a filament no free tray can take.
+ * @returns One slot per filament, as the materials name it (compared by identity); `undefined` for a filament no free
+ *   tray can take.
  * @public
  */
-export const defaultFilamentSlots = (
+export const defaultFilamentSlots = <Slot>(
   colors: readonly string[],
-  materials: readonly MachineObservedMaterial[],
+  materials: ReadonlyArray<Readonly<{ slot: Slot } & Pick<ObservedSlot, 'state' | 'materialId' | 'color'>>>,
   materialId: string,
-): ReadonlyArray<number | undefined> => {
+): ReadonlyArray<Slot | undefined> => {
   const trays = materials.filter(
     (tray) => tray.state === 'loaded' && tray.materialId?.toLowerCase() === materialId.toLowerCase(),
   );
-  const taken = new Set<number>();
-  const slots: Array<number | undefined> = colors.map(() => undefined);
+  const taken = new Set<Slot>();
+  const slots: Array<Slot | undefined> = colors.map(() => undefined);
   // Closest pairs first, so an exact match is never taken by another filament's near one.
   const pairs = colors
     .flatMap((color, filament) =>
@@ -129,18 +168,21 @@ export type MachinePrintPlannerDependencies = Readonly<{
   /**
    * The registry's own `export_model` route, which also carries the slicer
    * options the model-facing tool cannot. Going through it records the slice
-   * under `.tau/artifacts` exactly as a person's export is recorded.
+   * under `.tau/artifacts` exactly as a person's export is recorded. A host
+   * without it cannot slice, and runs finished programs (`artifact`) only.
    */
-  exportModel(
-    input: Readonly<{
-      toolCallId: string;
-      targetFile: string;
-      to: typeof printFormat;
-      /** The slicer options `request_print` admitted; the runtime validates them. */
-      options?: JsonObject | undefined;
-      signal: AbortSignal;
-    }>,
-  ): Promise<HostToolResult>;
+  exportModel?:
+    | ((
+        input: Readonly<{
+          toolCallId: string;
+          targetFile: string;
+          to: SliceFormat;
+          /** The slicer options `request_job` admitted; the runtime validates them. */
+          options?: JsonObject | undefined;
+          signal: AbortSignal;
+        }>,
+      ) => Promise<HostToolResult>)
+    | undefined;
   /** Read the exported bytes back from the project by their recorded path. */
   readArtifact(input: Readonly<{ path: string; signal: AbortSignal }>): Promise<Uint8Array<ArrayBuffer>>;
 }>;
@@ -154,9 +196,27 @@ const exported = z.object({
 const failure = z.object({ message: z.string().min(1) });
 
 /**
+ * The FFF process of a machine that prints.
+ * @param manifest - The machine's manifest.
+ * @returns The process facts.
+ * @throws When the machine is not a 3D printer.
+ */
+const fffOf = (manifest: MachineManifest) => {
+  const fff = fffProcessOf(manifest);
+  if (fff === undefined) {
+    throw new Error(
+      `${manifest.identity.displayName} is not a 3D printer, so Tau cannot slice a job for it; name a finished program with artifact instead.`,
+    );
+  }
+  return fff;
+};
+
+/**
  * Slicer options the machine fixes rather than the print: its plate, nozzle,
- * filament and the manifest's recommended temperatures. Callers spread their
- * own options over these, so a person or agent can still set temperatures.
+ * filament, the material loaded where the print feeds from and the manifest's
+ * recommended temperatures. The reference engine records the material in the
+ * file, so a printer's filament check can read it. Callers spread their own
+ * options over these, so a person or agent can still set temperatures.
  *
  * ponytail: temperatures are the manifest's machine-wide recommendation (Bambu:
  * 250 °C / 70 °C, PETG on a smooth plate); per-material recommendations belong
@@ -164,16 +224,23 @@ const failure = z.object({ message: z.string().min(1) });
  *
  * @param manifest - The machine's manifest; quantities are in mm and °C.
  * @param plate - The manifest plate id installed.
+ * @param material - The material id loaded in the slot the print feeds from, when known.
  * @returns Slicer option values.
+ * @throws When the machine has no FFF process.
  * @public
  */
-export const machineSliceOptions = (manifest: MachineManifest, plate: string): JsonObject => ({
-  plate,
-  nozzleDiameter: manifest.toolhead.nozzles[0]!.diameter.value,
-  filamentDiameter: manifest.toolhead.filamentDiameter.value,
-  nozzleTemperature: manifest.slicing.recommended.nozzleTemperature.value,
-  bedTemperature: manifest.slicing.recommended.bedTemperature.value,
-});
+export const machineSliceOptions = (manifest: MachineManifest, plate: string, material?: string): JsonObject => {
+  const fff = fffOf(manifest);
+  const nozzleDiameter = nozzleDiameterOf(manifest);
+  return {
+    plate,
+    ...(nozzleDiameter === undefined ? {} : { nozzleDiameter }),
+    filamentDiameter: fff.filamentDiameter.value,
+    ...(material === undefined ? {} : { filamentType: material }),
+    nozzleTemperature: fff.slicing.recommended.nozzleTemperature.value,
+    bedTemperature: fff.slicing.recommended.bedTemperature.value,
+  };
+};
 
 /**
  * The plate a print is for: what the machine reports, else what the agent
@@ -191,33 +258,36 @@ const resolvePlate = (
   machine: MachineDirectoryEntry,
   requested: string | undefined,
 ): Readonly<{ id: string; observed: boolean }> => {
-  const ids = manifest.bed.plates.map(({ id }) => id);
-  const observed = machine.snapshot.setup.bedType;
+  const ids = fffOf(manifest).bed.plates.map(({ id }) => id);
+  const observed = observedPlate(machine);
   if (observed !== undefined) {
     return { id: observed, observed: true };
   }
   if (requested === undefined || !ids.includes(requested)) {
     throw new Error(
-      `${machine.descriptor.name} does not report its build plate; ask the person which plate is installed, then pass plate as one of ${ids.join(', ')}.`,
+      `${machine.name} does not report its build plate; ask the person which plate is installed, then pass plate as one of ${ids.join(', ')}.`,
     );
   }
   return { id: requested, observed: false };
 };
 
 /**
- * The setup the machine must still show when the print starts: what it
- * observes now, completed from the provider manifest. Preflight compares the
- * two again at approval time, so a plate or spool swapped meanwhile refuses.
+ * What this call chose of the start form. For a provider whose settings are Bambu's, that is its submission keys: the
+ * plate the slice was made for (and that a person stated it, when the machine does not report one), the trays the
+ * filaments print from, and the person's saved start choices. Any other provider receives `{}` and completes its own
+ * form from the program and what the machine reports when `checkJob` runs (R5); preflight compares again at approval,
+ * so a plate or spool swapped meanwhile refuses.
  *
  * @param provider - The provider that manufactured the descriptor.
  * @param machine - The machine as the directory currently observes it.
- * @param preferences - The requested plate and captured saved settings.
- * @returns The provider's submission configuration for the loaded slot a
- *   one-filament print uses, the same configuration for other filament
- *   slots, the plate it expects and that loaded slot.
- * @throws When no material is loaded; there is nothing to expect then. When no plate is known.
+ * @param choices - The requested plate and captured saved settings (Bambu's only, so trays by number).
+ * @returns The configuration for the slots each filament prints from, the plate it was sliced for (`stated` when
+ *   the machine does not report it, so the approval prompt names it) and the loaded slot a one-filament print uses;
+ *   none for a printer that declares no material system, which slices with the process defaults.
+ * @throws When the machine declares a material system that reports nothing loaded; there is nothing to print with
+ *   then. When no plate is known.
  */
-const expectedSetup = (
+const chosenSetup = (
   provider: MachineProvider,
   machine: MachineDirectoryEntry,
   {
@@ -225,65 +295,222 @@ const expectedSetup = (
     preferences,
   }: Readonly<{ requestedPlate: string | undefined; preferences: ResolvedMachinePreferences['machine'] | undefined }>,
 ): Readonly<{
-  configuration: PrintRequest['configuration'];
-  configure: (
-    materials: ReadonlyArray<Readonly<{ slot: number; materialId: string }>>,
-  ) => PrintRequest['configuration'];
-  plate: string;
-  loaded: Readonly<{ slot: number; materialId: string }>;
+  configure: (slots: readonly MaterialSlotAddress[]) => MachineRequestJobInput['configuration'];
+  plate: Readonly<{ id: string; observed: boolean }>;
+  loaded: Readonly<{ address: MaterialSlotAddress; materialId: string }> | undefined;
 }> => {
-  const slot = preferences?.material?.defaultSlot;
-  const tray =
-    slot === undefined
+  const tray = preferences?.material?.defaultSlot;
+  const material =
+    tray === undefined
       ? loadedMaterial(machine)
-      : machine.snapshot.setup.materials.find(
-          (value) => value.slot === slot && value.state === 'loaded' && value.materialId !== undefined,
+      : observedSlots(machine).find(
+          (value) => bambuSlotOf(value.address) === tray && value.state === 'loaded' && value.materialId !== undefined,
         );
-  if (tray?.materialId === undefined) {
-    throw new Error(`No material is loaded in ${machine.descriptor.name}; load one, then ask again.`);
+  const reportsMaterial = machine.descriptor.capabilities.components.some(({ kind }) => kind === 'material-system');
+  if (material?.materialId === undefined && reportsMaterial) {
+    throw new Error(`No material is loaded in ${machine.name}; load one, then ask again.`);
   }
-  const loaded = { slot: tray.slot, materialId: tray.materialId };
   const plate = resolvePlate(provider.manifest, machine, requestedPlate);
-  const { toolhead } = provider.manifest;
-  // ponytail: named keys are the Bambu submission vocabulary; a second provider gets its own mapping here.
-  /* One material per filament, in filament order; the mapping names each one's slot. */
-  const configure = (materials: ReadonlyArray<Readonly<{ slot: number; materialId: string }>>) => ({
-    ...(preferences?.bedLeveling === undefined ? {} : { bedLeveling: preferences.bedLeveling }),
-    ...(preferences?.flowCalibration === undefined ? {} : { flowCalibration: preferences.flowCalibration }),
-    ...(preferences?.timelapse === undefined ? {} : { timelapse: preferences.timelapse }),
-    expectedModel: machine.descriptor.model,
-    expectedBedType: plate.id,
-    ...(plate.observed ? {} : { operatorConfirmedBedType: plate.id }),
-    expectedMaterials: materials,
-    amsMapping: materials.map(({ slot }) => slot),
-    expectedNozzleDiameter: toolhead.nozzles[0]!.diameter.value,
-    expectedFilamentDiameter: toolhead.filamentDiameter.value,
-  });
-  return { configuration: configure([loaded]), configure, plate: plate.id, loaded };
+  const configure = (slots: readonly MaterialSlotAddress[]) =>
+    isBambuSettings(provider)
+      ? {
+          ...(preferences?.bedLeveling === undefined ? {} : { bedLeveling: preferences.bedLeveling }),
+          ...(preferences?.flowCalibration === undefined ? {} : { flowCalibration: preferences.flowCalibration }),
+          ...(preferences?.timelapse === undefined ? {} : { timelapse: preferences.timelapse }),
+          expectedBedType: plate.id,
+          ...(plate.observed ? {} : { operatorConfirmedBedType: plate.id }),
+          amsMapping: slots.map((address) => bambuSlotOf(address) ?? -1),
+        }
+      : {};
+  return {
+    configure,
+    plate,
+    loaded:
+      material?.materialId === undefined ? undefined : { address: material.address, materialId: material.materialId },
+  };
+};
+
+/** The Bambu print-ready container, the one program format this host reads itself. */
+const bambuContainerContract = 'manufacturing.toolpath.bambu-gcode-3mf';
+
+/** Program readers by container contract; a contract without one is read by the machine host alone. */
+const programReaders: Readonly<Record<string, (bytes: Uint8Array<ArrayBuffer>) => Partial<MachineProgramSummary>>> = {
+  /* Its producer, layers, duration in milliseconds (the slicer's own estimate when its header carries one) and
+   * filament. */
+  [bambuContainerContract]: (bytes) => {
+    const producer = readBambuContainerProducer(bytes);
+    const program = parseGcode(readBambuContainer(bytes).gcode);
+    return {
+      ...(producer === undefined ? {} : { producer }),
+      estimatedDuration: Math.round((program.headerEstimate?.seconds ?? program.duration) * 1000),
+      facts: { process: 'fff', layers: program.layerTable.length, filamentLength: program.filamentLength },
+    };
+  },
 };
 
 /**
- * Advisory facts for the approval prompt.
+ * What the program is, for the approval prompt; the host's own parse wins where both exist.
  *
- * @param bytes - The container the slicer produced.
- * @returns Its producer, layers, seconds (the slicer's own estimate when its
- *   header carries one) and filament; no toolpath facts when the plate cannot
- *   be timed, since preflight refuses a container the machine cannot take anyway.
+ * @param bytes - The program as the project holds it.
+ * @param artifact - Its container contract and name.
+ * @returns The facts its contract's reader found; none for a contract this host does not read. A program its reader
+ *   cannot read is `other`, with a warning saying so, never silently.
  */
-const summarize = (bytes: Uint8Array<ArrayBuffer>): Omit<PrintRequestSummary, 'fileName'> | undefined => {
-  const producer = readBambuContainerProducer(bytes);
-  const made = producer === undefined ? undefined : { producer };
-  try {
-    const program = parseGcode(readBambuContainer(bytes).gcode);
-    return {
-      ...made,
-      layers: program.layerTable.length,
-      estimatedDuration: program.headerEstimate?.seconds ?? program.duration,
-      filamentLength: program.filamentLength,
-    };
-  } catch {
-    return made;
+const summarize = (
+  bytes: Uint8Array<ArrayBuffer>,
+  artifact: Readonly<{ contract: MachineArtifactReference['contract']; name: string }>,
+): Readonly<{ program: Partial<MachineProgramSummary>; warnings: readonly KernelIssue[] }> => {
+  const read = programReaders[artifact.contract.id];
+  if (read === undefined) {
+    return { program: {}, warnings: [] };
   }
+  try {
+    return { program: read(bytes), warnings: [] };
+  } catch (error) {
+    return {
+      program: { facts: { process: 'other' } },
+      warnings: [
+        {
+          code: 'RUNTIME_CONTENT_UNSUPPORTED',
+          severity: 'warning',
+          message: `Tau could not read ${artifact.name} as ${artifact.contract.id} (${error instanceof Error ? error.message : String(error)}), so its layers and time are unknown; the machine checks it again before anything starts.`,
+        },
+      ],
+    };
+  }
+};
+
+/**
+ * File names by media type, for a container that declares no `extensions` (the contract allows one: its media type
+ * alone says). A container that declares them is matched by them only.
+ */
+const programNames: ReadonlyMap<string, RegExp> = new Map([
+  ['application/vnd.bambulab.gcode-3mf', /\.gcode\.3mf$/iu],
+  ['text/x.gcode', /\.(?:gcode|nc|ngc|tap|cnc)$/iu],
+]);
+
+/**
+ * Whether a program file is of a container: by its media type when the slicer stated one, else by its name against
+ * the extensions the provider declares.
+ */
+const isProgramOf = (
+  container: MachineAcceptedContainer,
+  file: Readonly<{ path: string; mediaType?: string }>,
+): boolean => {
+  if (file.mediaType !== undefined) {
+    return container.mediaType === file.mediaType;
+  }
+  const path = file.path.toLowerCase();
+  return container.extensions === undefined
+    ? programNames.get(container.mediaType)?.test(path) === true
+    : container.extensions.some((extension) => path.endsWith(extension));
+};
+
+/**
+ * The artifact reference a job names: the program's project path and digest, in the container the machine accepts.
+ * The program's media type, stated by the slicer, or its name against each container's declared extensions picks
+ * the container.
+ *
+ * @param deps - The project the program is in.
+ * @param machine - The machine as observed; its `accepts` are what preflight checks.
+ * @param file - The program's path, bytes and media type when known.
+ * @returns The reference.
+ * @throws When the machine takes no jobs, accepts no container of this format, or names no plate to run.
+ */
+const artifactReference = async (
+  deps: Pick<MachinePrintPlannerDependencies, 'projectId'>,
+  machine: MachineDirectoryEntry,
+  file: Readonly<{ path: string; bytes: Uint8Array<ArrayBuffer>; mediaType?: string }>,
+): Promise<MachineArtifactReference> => {
+  const { jobs } = machine.descriptor.capabilities;
+  const accepts = jobs.type === 'supported' ? jobs.accepts : [];
+  if (accepts.length === 0) {
+    throw new Error(`${machine.name} takes no jobs.`);
+  }
+  const accepted = accepts.find((container) => isProgramOf(container, file));
+  if (accepted === undefined) {
+    throw new Error(
+      `${machine.name} accepts ${accepts.map((container) => acceptedText(container)).join(', ')}; ${file.path} is not one of them.`,
+    );
+  }
+  const selectedMember = accepted.payloadSelection === 'single' ? file.path : accepted.requiredMembers[0];
+  if (selectedMember === undefined) {
+    throw new Error(`${machine.name} names no plate to run in ${accepted.mediaType}.`);
+  }
+  // SAFETY: sha256Bytes returns the lowercase hex the digest brand describes.
+  const digest = `sha256:${await sha256Bytes(file.bytes)}` as MachineArtifactReference['digest'];
+  return {
+    projectId: deps.projectId,
+    path: file.path,
+    digest,
+    length: file.bytes.byteLength,
+    mediaType: accepted.mediaType,
+    contract: accepted.contract,
+    selectedMember,
+  };
+};
+
+/**
+ * The plate a person stated for a finished program, in the provider's words: Bambu's settings carry it as operator
+ * confirmed; any other provider completes its own form (R5). A plate is a 3D printer's alone.
+ *
+ * @param deps - The provider list.
+ * @param input - The call and its machine.
+ * @returns The configuration the plate adds; empty when none was stated or the machine reports its own.
+ * @throws When the plate is stated for a machine that is no 3D printer, or is not one of its plates; nothing is read
+ *   from the machine then.
+ */
+const statedPlateConfiguration = async (
+  deps: MachinePrintPlannerDependencies,
+  input: PlanInput,
+): Promise<MachineRequestJobInput['configuration']> => {
+  const { machine, plate } = input;
+  if (plate === undefined) {
+    return {};
+  }
+  const plates = fffProcessOf(machine.descriptor.capabilities)?.bed.plates.map(({ id }) => id);
+  if (plates === undefined) {
+    throw new Error(`plate applies to a 3D printer; ${machine.name} is not one, so pass no plate.`);
+  }
+  if (!plates.includes(plate)) {
+    throw new Error(`plate "${plate}" is not one of ${machine.name}'s plates: ${plates.join(', ')}.`);
+  }
+  if (observedPlate(machine) !== undefined) {
+    return {};
+  }
+  const providers = await deps.machines.listProviders({ signal: input.signal });
+  const provider = providers.find((candidate) => candidate.id === machine.providerId);
+  return provider !== undefined && isBambuSettings(provider) ? { operatorConfirmedBedType: plate } : {};
+};
+
+/**
+ * A finished program run as is: read it from the project and name it for the machine.
+ *
+ * @param deps - The planner's host seams.
+ * @param input - The call; its plate is the person's statement when the machine reports none.
+ * @param path - The program's project path.
+ * @returns The plan.
+ */
+const planProgram = async (
+  deps: MachinePrintPlannerDependencies,
+  input: PlanInput,
+  path: string,
+): ReturnType<MachinePrintPlanner> => {
+  const { machine, signal } = input;
+  /* A stated plate is checked before anything is read. */
+  const configuration = await statedPlateConfiguration(deps, input);
+  const statedPlate = observedPlate(machine) === undefined ? input.plate : undefined;
+  const bytes = await deps.readArtifact({ path, signal });
+  const name = path.split('/').at(-1) ?? path;
+  const artifact = await artifactReference(deps, machine, { path, bytes });
+  const { program, warnings } = summarize(bytes, { contract: artifact.contract, name });
+  return {
+    artifact,
+    configuration,
+    program: { name, ...program },
+    ...(statedPlate === undefined ? {} : { statedPlate }),
+    ...(warnings.length === 0 ? {} : { warnings }),
+  };
 };
 
 /**
@@ -302,27 +529,27 @@ const summarize = (bytes: Uint8Array<ArrayBuffer>): Omit<PrintRequestSummary, 'f
  */
 const sliceOptions = (
   provider: MachineProvider,
-  input: PrintChoices & Readonly<{ machine: MachineDirectoryEntry; plate: string }>,
+  input: PrintChoices & Readonly<{ machine: MachineDirectoryEntry; plate: string; material: string | undefined }>,
   bambuStudio: boolean,
 ): JsonObject => {
-  const { machine, options, profiles, settings, preset, plate } = input;
+  const { machine, options, profiles, settings, preset, plate, material } = input;
   if (!bambuStudio) {
     if (profiles !== undefined || settings !== undefined) {
       throw new Error(
-        `Bambu Studio does not slice for ${machine.descriptor.name} on this host, so profiles and settings do not apply; use options instead (get_print_profiles says why).`,
+        `Bambu Studio does not slice for ${machine.name} on this host, so profiles and settings do not apply; use options instead (get_print_profiles says why).`,
       );
     }
     /* The machine's own options first, then the call's keys, the preset from
      * its own field (the registry refuses one inside `options`). */
     return {
-      ...machineSliceOptions(provider.manifest, plate),
+      ...machineSliceOptions(provider.manifest, plate, material),
       ...options,
       ...(preset === undefined ? {} : { preset }),
     };
   }
   if (options !== undefined && Object.keys(options).length > 0) {
     throw new Error(
-      `Bambu Studio slices for ${machine.descriptor.name}, so options do not apply; set Bambu Studio settings instead, with keys from get_print_profiles.`,
+      `Bambu Studio slices for ${machine.name}, so options do not apply; set Bambu Studio settings instead, with keys from get_print_profiles.`,
     );
   }
   const bambuPlate = bambuPlates.find(({ id }) => id === plate)?.id;
@@ -344,6 +571,10 @@ const sliceOptions = (
 
 type PlanInput = Parameters<MachinePrintPlanner>[0];
 
+/** The planner's seams on a host that can slice. */
+type SlicingDependencies = MachinePrintPlannerDependencies &
+  Readonly<{ exportModel: NonNullable<MachinePrintPlannerDependencies['exportModel']> }>;
+
 /** One slice through the export route, as the project recorded it, with what the export warned about it. */
 type Slice = Readonly<{
   file: z.infer<typeof exported>['files'][number];
@@ -356,19 +587,25 @@ type Slice = Readonly<{
  *
  * @param deps - The planner's host seams.
  * @param input - The call; its tool call id names the artifact directory.
- * @param options - The slicer options, and what the print intent contributed for a failure to name.
+ * @param options - The CAD source to slice, the slicer options, and what the print intent contributed for a failure to name.
  * @returns The recorded file and its bytes.
  * @throws When the export fails or produces no artifact.
  */
 const exportSlice = async (
-  deps: MachinePrintPlannerDependencies,
+  deps: SlicingDependencies,
   input: PlanInput,
-  options: Readonly<{ exportOptions: JsonObject; machinePreferences: JsonObject | undefined }>,
+  options: Readonly<{
+    targetFile: string;
+    to: SliceFormat;
+    exportOptions: JsonObject;
+    machinePreferences: JsonObject | undefined;
+  }>,
 ): Promise<Slice> => {
+  const { targetFile, to } = options;
   const result = await deps.exportModel({
     toolCallId: input.toolCallId,
-    targetFile: input.targetFile,
-    to: printFormat,
+    targetFile,
+    to,
     options: options.exportOptions,
     signal: input.signal,
   });
@@ -376,16 +613,20 @@ const exportSlice = async (
   const file = success?.files[0];
   if (file === undefined) {
     const reason = failure.safeParse(result.content).data?.message ?? 'no artifact was produced';
-    throw new Error(
-      `Slicing ${input.targetFile} failed: ${reason}${machinePreferencesHint(options.machinePreferences)}`,
-    );
+    throw new Error(`Slicing ${targetFile} failed: ${reason}${machinePreferencesHint(options.machinePreferences)}`);
   }
   const bytes = await deps.readArtifact({ path: file.artifactPath, signal: input.signal });
   return { file, bytes, warnings: success?.warnings ?? [] };
 };
 
-/** The printed filaments' colours; none when the bytes are no container, which preflight refuses anyway. */
-const colorsOf = (bytes: Uint8Array<ArrayBuffer>): readonly string[] => {
+/**
+ * The printed filaments' colours: only Bambu's container records them. None for plain G-code, and none when the bytes
+ * are no container, which preflight refuses anyway.
+ */
+const colorsOf = (bytes: Uint8Array<ArrayBuffer>, format: SliceFormat): readonly string[] => {
+  if (format !== 'gcode.3mf') {
+    return [];
+  }
   try {
     return slicedFilamentColors(readBambuContainer(bytes));
   } catch {
@@ -398,8 +639,8 @@ const colorsOf = (bytes: Uint8Array<ArrayBuffer>): readonly string[] => {
  *
  * @param colors - The printed filaments' colours.
  * @param machine - The machine as observed.
- * @param print - The print's material, and the manifest's external spool, which cannot change filament mid-print
- *   and so feeds one-filament prints only.
+ * @param print - The print's material, the manifest's external spool (it cannot change filament mid-print, so feeds
+ *   one-filament prints only), and the person's saved slots by colour (Bambu tray numbers).
  * @returns Each filament's slot, and the material the machine reports in it.
  * @throws When a filament has no free slot of the print's material, naming its colour.
  */
@@ -408,36 +649,40 @@ const mapFilaments = (
   machine: MachineDirectoryEntry,
   print: Readonly<{
     materialId: string;
-    externalSpoolSlot: number | undefined;
+    externalSpool: MaterialSlotAddress | undefined;
     slotsByColor?: Readonly<Record<string, number>>;
   }>,
-): ReadonlyArray<Readonly<{ slot: number; materialId: string }>> => {
-  const { materials } = machine.snapshot.setup;
+): ReadonlyArray<Readonly<{ address: MaterialSlotAddress; materialId: string }>> => {
+  const materials = observedSlots(machine);
   const selected = colors.map((color) => {
-    const slot = print.slotsByColor?.[color.toLowerCase()];
-    if (slot === undefined) {
+    const tray = print.slotsByColor?.[color.toLowerCase()];
+    if (tray === undefined) {
       return undefined;
     }
     const material = materials.find(
-      (value) => value.slot === slot && value.state === 'loaded' && value.materialId !== undefined,
+      (value) => bambuSlotOf(value.address) === tray && value.state === 'loaded' && value.materialId !== undefined,
     );
-    if (!material?.materialId || slot === print.externalSpoolSlot) {
-      throw new Error(`Saved material slot ${slot} is unavailable for this multi-filament print.`);
+    if (!material?.materialId || sameSlot(material.address, print.externalSpool)) {
+      throw new Error(`Saved material slot ${String(tray)} is unavailable for this multi-filament print.`);
     }
-    return { slot, materialId: material.materialId };
+    return { address: material.address, materialId: material.materialId };
   });
-  const reserved = selected.flatMap((value) => (value ? [value.slot] : []));
-  if (new Set(reserved).size !== reserved.length) {
+  const reserved = selected.flatMap((value) => (value ? [value.address] : []));
+  if (reserved.some((address, index) => reserved.findIndex((other) => sameSlot(address, other)) !== index)) {
     throw new Error('Saved material mapping repeats a slot. Choose a distinct loaded slot for each filament.');
   }
   const missing = colors.filter((_color, index) => selected[index] === undefined);
-  const trays = materials.filter((tray) => tray.slot !== print.externalSpoolSlot && !reserved.includes(tray.slot));
-  const slots = defaultFilamentSlots(missing, trays, print.materialId);
+  const free = materials
+    .filter(
+      ({ address }) => !sameSlot(address, print.externalSpool) && !reserved.some((taken) => sameSlot(address, taken)),
+    )
+    .map((material) => ({ ...material, slot: material }));
+  const slots = defaultFilamentSlots(missing, free, print.materialId);
   const unavailable = missing.filter((_color, index) => slots[index] === undefined);
   if (unavailable.length > 0) {
     const named = `${unavailable.length === 1 ? 'colour' : 'colours'} ${unavailable.join(' and ')}`;
     throw new Error(
-      `No free ${print.materialId} slot in ${machine.descriptor.name} for the model's ${named}; load one for each, then ask again.`,
+      `No free ${print.materialId} slot in ${machine.name} for the model's ${named}; load one for each, then ask again.`,
     );
   }
   let fallbackIndex = 0;
@@ -445,11 +690,11 @@ const mapFilaments = (
     if (value) {
       return value;
     }
-    const slot = slots[fallbackIndex++]!;
-    return {
-      slot,
-      materialId: materials.find((tray) => tray.slot === slot)?.materialId ?? print.materialId,
-    };
+    const slot = slots[fallbackIndex++];
+    if (slot === undefined) {
+      throw new Error(`No free ${print.materialId} slot in ${machine.name}; load one, then ask again.`);
+    }
+    return { address: slot.address, materialId: slot.materialId ?? print.materialId };
   });
 };
 
@@ -497,16 +742,15 @@ const filamentPresets = async (
     input: PlanInput;
     plate: string;
     machinePreferences: JsonObject | undefined;
-    sliced: number;
-    slots: readonly number[];
+    sliced: MaterialSlotAddress;
+    slots: readonly MaterialSlotAddress[];
   }>,
 ): Promise<Readonly<{ sliced: string; filaments: readonly string[]; machinePreferences: JsonObject | undefined }>> => {
   const { provider, input, plate } = context;
   const { machine } = input;
-  const fromSlot = (slot: number) => {
+  const fromSlot = (slot: MaterialSlotAddress) => {
     /* The machine as a one-filament print from this slot sees it. */
-    const materials = machine.snapshot.setup.materials.filter((tray) => tray.slot === slot);
-    const view = { ...machine, snapshot: { ...machine.snapshot, setup: { ...machine.snapshot.setup, materials } } };
+    const view = withOnlySlot(machine, slot);
     const { choices } = applyMachinePreferences(
       input.preferences,
       { provider, machine: view, bambuStudio: true },
@@ -515,12 +759,13 @@ const filamentPresets = async (
     return { choices, hints: bambuHints(provider, view, { preset: choices.preset, plate }) };
   };
   const sliced = fromSlot(context.sliced);
-  const perSlot = context.slots.map((slot) => fromSlot(slot));
-  /* The call names no filaments here, so every one named is the file's. */
+  const perSlot = context.slots.map((slot) => ({ slot, ...fromSlot(slot) }));
+  /* The call names no filaments here, so every one named is the file's, keyed by tray number as the file keys them. */
   const supplied = Object.fromEntries(
-    context.slots.flatMap((slot, index) => {
-      const name = perSlot[index]!.choices.profiles?.filaments?.[0];
-      return name === undefined ? [] : [[String(slot), name]];
+    perSlot.flatMap(({ slot, choices }) => {
+      const name = choices.profiles?.filaments?.[0];
+      const tray = bambuSlotOf(slot);
+      return name === undefined || tray === undefined ? [] : [[String(tray), name]];
     }),
   );
   const machinePreferences = withSuppliedFilaments(context.machinePreferences, supplied);
@@ -530,8 +775,13 @@ const filamentPresets = async (
     install,
     printer === undefined ? { model, ...(nozzleDiameter === undefined ? {} : { nozzleDiameter }) } : { printer },
   );
-  const presetOf = ({ choices, hints }: ReturnType<typeof fromSlot>): string =>
-    resolveBambuStudioSelection(catalog, hints, choices.profiles).filaments[0]!;
+  const presetOf = ({ choices, hints }: ReturnType<typeof fromSlot>): string => {
+    const [name] = resolveBambuStudioSelection(catalog, hints, choices.profiles).filaments;
+    if (name === undefined) {
+      throw new Error(`Bambu Studio has no filament preset for ${hints.materials[0]?.materialId ?? 'this slot'}.`);
+    }
+    return name;
+  };
   try {
     return { sliced: presetOf(sliced), filaments: perSlot.map((slot) => presetOf(slot)), machinePreferences };
   } catch (error) {
@@ -545,12 +795,15 @@ const filamentPresets = async (
 };
 
 /**
- * Build the planner `request_print` slices with.
+ * Build the planner `request_job` and `check_job` prepare jobs with.
  *
- * Refuses before slicing when the request could never be accepted (no loaded
- * material, no provider), then exports through the host's own route, reads the
- * bytes back for the digest the machine host verifies, and names the artifact
- * by this project, its path and that digest.
+ * A finished `artifact` is read from the project and named in the container the
+ * machine accepts. A `targetFile` is sliced: the planner refuses before slicing
+ * when the request could never be accepted (no loaded material, no provider),
+ * then exports through the host's own route, reads the bytes back for the digest
+ * the machine host verifies, and names the artifact by this project, its path
+ * and that digest. Either way it returns only what the call chose of the start
+ * form; the provider completes the rest when the registry checks the job.
  *
  * A slice that prints several filaments expects one loaded slot per filament
  * ({@link defaultFilamentSlots}), and refuses when a filament has none. Each
@@ -564,11 +817,18 @@ const filamentPresets = async (
 export const createMachinePrintPlanner =
   (deps: MachinePrintPlannerDependencies): MachinePrintPlanner =>
   async (input) => {
-    const { machine, signal } = input;
+    if (input.artifact !== undefined) {
+      return planProgram(deps, input, input.artifact);
+    }
+    const { exportModel } = deps;
+    if (exportModel === undefined) {
+      throw new Error('This host cannot slice; name a finished program with artifact.');
+    }
+    const { machine, signal, targetFile } = input;
     const providers = await deps.machines.listProviders({ signal });
     const provider = providers.find((candidate) => candidate.id === machine.providerId);
     if (provider === undefined) {
-      throw new Error(`No provider ${machine.providerId} backs ${machine.descriptor.name}.`);
+      throw new Error(`No provider ${machine.providerId} backs ${machine.name}.`);
     }
     const engine = deps.bambuStudio ?? defaultBambuStudioEngine;
     const install = isBambuProvider(provider) ? await engine.findBambuStudio() : undefined;
@@ -576,40 +836,50 @@ export const createMachinePrintPlanner =
     /* The call's own choices over the project's print intent, over the defaults. */
     const intent = applyMachinePreferences(input.preferences, { provider, machine, bambuStudio }, input);
     const { choices } = intent;
-    const {
-      configuration: oneFilament,
-      configure,
-      plate,
-      loaded,
-    } = expectedSetup(provider, machine, { requestedPlate: choices.plate, preferences: input.preferences?.machine });
+    const { configure, plate, loaded } = chosenSetup(provider, machine, {
+      requestedPlate: choices.plate,
+      preferences: input.preferences?.machine,
+    });
+    /* Bambu Studio writes Bambu's container only. */
+    const to = bambuStudio ? 'gcode.3mf' : sliceFormatOf(machine);
     const slice = async (
       profiles: PrintChoices['profiles'],
       machinePreferences: JsonObject | undefined,
     ): Promise<Slice> =>
-      exportSlice(deps, input, {
-        exportOptions: sliceOptions(provider, { ...choices, profiles, machine, plate }, bambuStudio),
+      exportSlice({ ...deps, exportModel }, input, {
+        targetFile,
+        to,
+        exportOptions: sliceOptions(
+          provider,
+          { ...choices, profiles, machine, plate: plate.id, material: loaded?.materialId },
+          bambuStudio,
+        ),
         machinePreferences,
       });
     const first = await slice(choices.profiles, intent.machinePreferences);
-    const colors = colorsOf(first.bytes);
+    const colors = colorsOf(first.bytes, to);
+    /* A printer that reports no material system prints from whatever it holds, as one filament. */
     const filaments =
-      colors.length > 1
+      colors.length > 1 && loaded !== undefined
         ? mapFilaments(colors, machine, {
             materialId: loaded.materialId,
-            externalSpoolSlot: provider.manifest.materialSystem.externalSpoolSlot,
+            externalSpool: externalSpoolOf(provider.manifest),
             slotsByColor: input.preferences?.machine.material?.slotsByColor,
           })
         : undefined;
     /* A call naming its own filaments keeps them, as it does for one filament. */
     const presets =
-      filaments !== undefined && install !== undefined && input.profiles?.filaments === undefined
+      filaments !== undefined &&
+      loaded !== undefined &&
+      install !== undefined &&
+      input.profiles?.filaments === undefined
         ? await filamentPresets(engine, install, {
             provider,
             input,
-            plate,
+            plate: plate.id,
             machinePreferences: intent.machinePreferences,
-            sliced: loaded.slot,
-            slots: filaments.map(({ slot }) => slot),
+            sliced: loaded.address,
+            slots: filaments.map(({ address }) => address),
           })
         : undefined;
     const machinePreferences = presets?.machinePreferences ?? intent.machinePreferences;
@@ -617,49 +887,40 @@ export const createMachinePrintPlanner =
       presets?.filaments.some((name) => name !== presets.sliced) === true
         ? await slice({ ...choices.profiles, filaments: [...presets.filaments] }, machinePreferences)
         : first;
-    const configuration = filaments === undefined ? oneFilament : configure(filaments);
-    // SAFETY: sha256Bytes returns the lowercase hex the digest brand describes.
-    const digest = `sha256:${await sha256Bytes(bytes)}` as MachineArtifactReference['digest'];
+    const name = file.artifactPath.split('/').at(-1) ?? file.artifactPath;
     /* Preflight checks the artifact against the descriptor's list, so choose from it. */
-    const accepted =
-      machine.descriptor.accepts.find((container) => container.mediaType === file.mimeType) ??
-      machine.descriptor.accepts[0];
-    if (accepted === undefined) {
-      throw new Error(`${machine.descriptor.name} declares no accepted container.`);
-    }
-    const summary = summarize(bytes);
+    const artifact = await artifactReference(deps, machine, {
+      path: file.artifactPath,
+      bytes,
+      mediaType: file.mimeType,
+    });
+    const summary = summarize(bytes, { contract: artifact.contract, name });
+    const allWarnings = [...warnings, ...summary.warnings];
     return {
-      artifact: {
-        projectId: deps.projectId,
-        path: file.artifactPath,
-        digest,
-        length: bytes.byteLength,
-        mediaType: accepted.mediaType,
-        contract: accepted.contract,
-        selectedMember: accepted.requiredMembers[0] ?? bambuPlateMember,
+      artifact,
+      configuration: configure(
+        filaments?.map(({ address }) => address) ?? (loaded === undefined ? [] : [loaded.address]),
+      ),
+      program: {
+        name,
+        ...summary.program,
+        ...(input.preferences
+          ? {
+              preferences: {
+                scope: 'project',
+                typeId: provider.manifest.identity.typeId,
+                profileId: input.preferences.profileId,
+                configurationVersions: Object.fromEntries(
+                  Object.entries(
+                    input.preferences.record.profiles[input.preferences.profileId]?.configurations ?? {},
+                  ).flatMap(([id, block]) => (block ? [[id, block.version]] : [])),
+                ),
+              },
+            }
+          : {}),
       },
-      configuration,
-      summary:
-        summary === undefined && input.preferences === undefined
-          ? undefined
-          : {
-              ...summary,
-              ...(input.preferences
-                ? {
-                    preferences: {
-                      scope: 'project',
-                      typeId: provider.manifest.identity.typeId,
-                      profileId: input.preferences.profileId,
-                      configurationVersions: Object.fromEntries(
-                        Object.entries(
-                          input.preferences.record.profiles[input.preferences.profileId]?.configurations ?? {},
-                        ).flatMap(([id, block]) => (block ? [[id, block.version]] : [])),
-                      ),
-                    },
-                  }
-                : {}),
-            },
+      ...(plate.observed ? {} : { statedPlate: plate.id }),
       ...(machinePreferences === undefined ? {} : { machinePreferences }),
-      ...(warnings.length === 0 ? {} : { warnings }),
+      ...(allWarnings.length === 0 ? {} : { warnings: allWarnings }),
     };
   };

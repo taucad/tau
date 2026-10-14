@@ -1,29 +1,106 @@
 ---
 title: Machine Provider API
-description: Declare physical machine capabilities and implement bounded discovery, connection, observation, and effects.
+description: Declare a machine's manifest v3, its actions, holds, jobs and stop, and implement the provider session ABI v2 over host-owned I/O.
 docType: reference
-wordBudgetOverride: 1200
+# 1150 -> 1300 (2026-10-09): services, remoteName, timed effects, a parsing example.
+# 1300 -> 1360 (2026-10-10): credential, work-area-clear, job safety without authority, halt emission.
+wordBudgetOverride: 1360
 ---
 
 # Machine Provider API
 
-Import from `@taucad/runtime/machine`. `defineMachine` attaches a trusted `MachineProviderDefinition` to a callable `MachineProviderFactory`. The serializable `MachineProvider` advertises provider identity, configuration, queries, and capabilities; `parseMachineProvider` admits only the bounded descriptor. The `/plugin` type `ExpandPluginMachines` lets a composed runtime infer the provider tuple.
+Import from `@taucad/runtime/machine`. A provider describes one machine model in a manifest and connects to one machine as a session. The host admits every request against that manifest before the provider sees it; the provider sends, observes and reports.
 
-## Provider declaration
+## Provider definition
 
-`MachineManifest` is the versioned descriptor checked by `parseMachineManifest` and `machineManifestSchema`; `MachineActionDescriptor` advertises supported actions. `defineMachineQuery` preserves the input/result schema correlation of a `MachineDeclaredQuery`, while `MachineQueryManifest` is its serializable form. Queries disclose catalog facts; they are not a hidden path to physical effects.
+`defineMachine` takes a trusted `MachineProviderDefinition` and returns a callable `MachineProviderFactory`. The definition carries identity, `protocolVersion: 2`, an authored `MachineManifestDefinition`, a binding configuration, a submission configuration (the start form), optional settings, `discover` and `connect`. The serializable `MachineProvider` is what every surface reads; `parseMachineProvider` admits only that bounded descriptor. The `/plugin` type `ExpandPluginMachines` lets a composed runtime infer the provider tuple.
 
-The provider receives a `MachineDiscoveryRuntime` for discovery and a `MachineConnectionRuntime` only while establishing a trusted connection. `MachineDiscoveryInput` carries configuration and cancellation; its stream yields `MachineDiscoveryEvent`. `MachineConnectInput` includes `MachineConnectionContext`, which carries a host-local credential reference and `MachineTransportTrust` (`system` or pinned digest). `MachineClock` is the host's time source; `MachineLogEntry` is redacted provider telemetry.
+`machineManifestOf` turns the authored manifest into the serializable `MachineManifest`: descriptors without their schemas, with the start form filled in. `parseMachineManifest` and `machineManifestSchema` admit a manifest and refuse unknown keys and dangling references. `machineActionDefinitionOf` returns the trusted schema of one installed action or hold for host-side validation.
 
-`MachineAcceptedContainer` records the semantic container a provider accepts for print preparation; it is distinct from a raw filename extension.
+## Manifest v3
 
-Host-owned network access is bounded by `MachineNetworkRequest` and `MachineNetworkStream`. `MachineNetworkStillInput` requests one bounded authenticated JPEG. `MachineDatagramListenInput` admits a user-initiated listener and yields `MachineDatagram` with peer evidence. `MachineFileUploadInput` uses the host-owned transfer service and returns `MachineFileUploadReceipt`; the provider does not receive a general filesystem or socket grant.
+A `MachineManifest` has `version: 3` and these parts:
 
-## Connected session
+- `identity`: type id, vendor, model and display name.
+- `connection`: `MachineConnectionFacts` for network or serial transport, exclusivity, whether opening resets the controller, whether identity is authenticated or only claimed (a claimed one is pinned to its endpoint), an optional `credential` (`none` or `secret`: whether binding asks for a code or key; defaults to `secret` only for an authenticated identity), and optional `services` (`{ id, port, required }`, at most 8): TLS services binding pins on first use, kept in `serviceTrust` by id; a `required` one that does not answer refuses the binding.
+- `axes` and `components`: each `MachineAxis` the controller moves, and each `MachineComponent` with its kind (`motion`, `spindle`, `tools`, `probe`, `toolhead`, `material-system`, `interlock`, simple kinds by name, or `kind: 'vendor'` with a namespaced `type`, `<vendor>.<name>`).
+- `processes`: each `MachineProcess`, a `MachineFffProcess`, a `MachineMillingProcess` or a vendor process; `fffProcessOf` and `millingProcessOf` find them.
+- `actions`, `holds`, `jobs` and `stop`: what the machine can be asked to do, described below.
+- `observations`: each group's freshness budget and whether it is `retained` or `latest` (coalesced, never replayed).
+- `qualifications`: each `MachineQualificationProfile`, the hardware or simulation evidence an action names when it is qualified.
 
-`MachineSession` owns explicit cleanup plus read and effect methods. `MachineGetDescriptorInput`, `MachineGetSnapshotInput`, and `MachineObserveInput` supply cancellation to descriptor, snapshot, and observation calls. `MachineSubmitInput` starts one exact transferred artifact; `MachineReconcileInput` looks up a late semantic reply. `MachineControlInput` checks the expected run before a command. Their outcomes are `MachineSubmissionReceipt` and `MachineCommandReceipt` and may be unknown after a transport loss.
+## Actions and holds
 
-`MachineProviderPreparePrintInput` asks for non-mutating preflight; `MachinePreparationReceipt` proves what is ready. `MachineProviderUploadInput` then requests one exact transfer and receives `MachineTransferReceipt`. `MachineArtifactReadInput` lets the host stream the immutable `MachineArtifactReference` in bounded chunks. `MachineCaptureStillInput` may return a `MachineStill`; `MachineStillCaptureCapability` explicitly says whether capture is supported. Never infer still capture from a network endpoint.
+Declare a standard family with `standardMachineAction` or a provider-owned `<vendor>.<area>.<verb>` action with `defineMachineAction`. Each returns a `MachineActionDefinition`: a `MachineActionDescriptor` plus the schema the host validates parameters with. A provider may narrow a family's schema, never widen it, and may only raise its authority. Every action stays `designed` until the provider names a qualification profile; a person can try it only in Testing mode. `machineJogHold` declares the standard held jog as a `MachineHoldDefinition` with this machine's lease and bound. `machineActionDescriptorOf` strips the schema from either definition. A timed effect (spindle run, heater hold, dwell) declares `safety.maximumDuration` and is queued on the controller as one bounded sequence that ends by itself if Tau goes silent; when only Stop ends it early, refuse an early off with a `stop` remedy.
+
+`jobs` is `unsupported` or `MachineJobFacts`: each accepted container (`MachineAcceptedContainer`: a semantic `contract`, `mediaType`, `technology`, `requiredMembers` and `payloadSelection`, `single` for a G-code or NC program; optional `extensions` such as `.gcode` name the files a consumer offers), `stored` or `streamed` delivery, a `remote` or `at-machine` start, attestations a person makes before a start (always `work-area-clear`), and the start's attendance and interlocks; a person always approves a job, so it names no authority. `stop` is a `MachineHaltOutcome`: what motion, spindle, heaters and an optional beam `emission` do, whether position is kept, and the recovery remedies.
+
+```ts
+import { defineConfiguration } from '@taucad/runtime/configuration';
+import { machineJogHold, standardMachineAction } from '@taucad/runtime/machine';
+import type { MachineManifestDefinition } from '@taucad/runtime/machine';
+import { z } from 'zod';
+
+export const manifest: MachineManifestDefinition = {
+  version: 3,
+  identity: { typeId: 'example.router', vendor: 'Example', model: 'router', displayName: 'Example router' },
+  connection: { transport: 'serial', exclusive: true, opening: 'resets-controller', identity: 'claimed' },
+  axes: ['x', 'y', 'z'].map((id) => ({
+    id,
+    label: id.toUpperCase(),
+    kind: 'linear',
+    unit: 'mm',
+    carries: 'tool',
+    reference: 'cycle',
+  })),
+  components: [
+    { id: 'light', kind: 'light', label: 'Light' },
+    { id: 'gantry', kind: 'motion', label: 'Gantry', axes: ['x', 'y', 'z'] },
+  ],
+  processes: [],
+  actions: [
+    standardMachineAction({
+      id: 'switch.set',
+      componentId: 'light',
+      componentKind: 'light',
+      label: 'Light',
+      when: ['ready', 'active'],
+    }),
+  ],
+  holds: [machineJogHold({ componentId: 'gantry', lease: 250, bound: 500 })],
+  jobs: { type: 'unsupported' },
+  stop: { motion: 'halts', spindle: 'stops', heaters: 'none', position: 'kept', recovery: [] },
+  observations: [],
+  qualifications: [],
+};
+
+export const binding = defineConfiguration({
+  id: 'example.router.binding',
+  version: '1.0.0',
+  // Only how to talk to it: the serial path is the discovery endpoint, and the person names the machine at bind.
+  schema: z.object({ baudRate: z.number().int().positive().default(115_200) }),
+  ui: { version: 1, rjsf: {} },
+});
+```
+
+## Host services
+
+The provider never receives a general filesystem, socket or secret grant. `discover` receives `MachineDiscoveryInput`, whose optional `endpoint` names where a person says the machine is (search only there), and a `MachineDiscoveryRuntime`: `listenDatagrams` admits a user-initiated listener (`MachineDatagramListenInput`) yielding `MachineDatagram` values with peer evidence, and `listSerialPorts` lists each `MachineSerialPort`. It yields `MachineDiscoveryEvent` values.
+
+`connect` receives `MachineConnectInput`, whose `MachineConnectionContext` carries a host-local secret reference and each service's `MachineTransportTrust` (`system` or a pinned digest), and a `MachineConnectionRuntime`. That runtime opens a bounded `MachineNetworkStream` for a `MachineNetworkRequest` and streams an immutable `MachineArtifactReference` in chunks through `MachineArtifactReadInput`. Optional services, absent on a host without them: `openSerial` takes a `MachineSerialRequest`, `captureNetworkStill` captures one RTSPS JPEG for `MachineNetworkStillInput`, and `uploadFile` stores a file over implicit FTPS with `MachineFileUploadInput`, returning `MachineFileUploadReceipt`. Any provider may use them undeclared; the call carries every endpoint, account and trust detail. `MachineClock` is the host's time source; `MachineLogEntry` is redacted provider telemetry.
+
+## Session ABI v2
+
+`connect` returns a `MachineSession`. Its reads are `getDescriptor` (`MachineGetDescriptorInput`, returning a `MachineProviderDescriptor` of `MachineInstalledCapabilities`; the host adds revision, incarnation and the manifest's qualifications, which a provider never reports), `getSnapshot` (`MachineGetSnapshotInput`, returning a `MachineReport`) and `observe` (`MachineObserveInput`). The first `MachineObservation` every subscriber receives is a `snapshot`; `changed` deltas follow only after it. Aborting ends the iteration by returning, never by throwing.
+
+`stop` is not a facet: every session has it, and it halts ahead of anything queued. `reconcile` takes `MachineReconcileInput` and reads proof of a late stop, transfer, start or action; it never sends. Both return a `MachineCommandReceipt`: `accepted`, `rejected` with a code, or `unknown`, which the host never retries. `close` and `dispose` release the session.
+
+Four required facets are each `unsupported` or `supported`:
+
+- `actions` is a `MachineActionCapability`. `apply` receives one admitted `MachineProviderActionInput` and sends it once. Before sending, call `checkMachineActionAtSend` with the current report and the manifest's `observations` budgets: it repeats state, run, freshness, homing, interlock and availability checks and returns the refusal to report. For an action confirmed by observation, `confirm` reads the most recent report and returns a `MachineActionConfirmation`; for an operation this session never sent, the answer is `pending`.
+- `holds` is a `MachineHoldCapability`. `begin` receives `MachineProviderHoldInput` and returns a `MachineProviderHold` whose `extend` sends at most one self-ending segment and whose `release` stops now, or a refusal.
+- `jobs` is a `MachineJobCapability`. The optional `completeConfiguration` fills a partial start form (`MachineCompleteConfigurationInput`) in the provider's own keys: facts from the program first, then the machine's current setup. `prepare` receives `MachineProviderJobInput` and returns a read-only `MachinePreparation`. For a `stored` delivery, `prepare` also returns `remoteName`, the program's name on the machine, and `transfer` and `start` receive it; a `streamed` delivery has only `start` (`MachineProviderStartInput`), which returns once the controller takes the first block while the session keeps feeding the rest. Job refusal codes are a `MachineJobFailureCode`: a host code or a provider's own under `MACHINE_JOB_` or `MACHINE_TRANSFER_`, as `isMachineJobFailureCode` checks. Only a check or `prepare` refusal keeps a provider's own code; a rejected transfer or start records `MACHINE_ACTION_PROVIDER_REJECTED` with it in the message.
+- `stillCapture` is a `MachineStillCaptureCapability`. `capture` takes `MachineCaptureStillInput` and returns a `MachineStill`. Never infer still capture from a network endpoint.
 
 ## Related
 

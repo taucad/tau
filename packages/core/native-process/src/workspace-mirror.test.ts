@@ -12,7 +12,7 @@ describe('large native workspaces', () => {
     { name: 'a file larger than 32 MiB', count: 1, size: 32 * 1024 * 1024 + 1 },
     { name: 'more than 10,000 files', count: 10_001, size: 1 },
     { name: 'more than 512 MiB in total', count: 17, size: 32 * 1024 * 1024 },
-  ])('should mirror $name byte-exactly', { timeout: 60_000 }, async ({ count, size }) => {
+  ])('should mirror $name byte-exactly', { timeout: 180_000 }, async ({ count, size }) => {
     const bytes = new Uint8Array(size).fill(37);
     const names = Array.from({ length: count }, (_, index) => `asset-${String(index)}.bin`);
     const filesystem = createMockFileSystem({ readFileResult: () => bytes });

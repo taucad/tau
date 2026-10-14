@@ -104,6 +104,7 @@ try {
     'node_modules/@agentclientprotocol/codex-acp/dist/index.js',
     'node_modules/@agentclientprotocol/codex-acp/node_modules/dependency/index.js',
     'node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips.dylib',
+    'node_modules/@gltf-transform/functions/node_modules/ndarray-pixels/node_modules/sharp/node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips.dylib',
   ];
   await Promise.all(
     [...unpacked, 'app.js'].map(async (file) => {

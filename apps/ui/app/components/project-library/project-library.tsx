@@ -83,6 +83,7 @@ import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
+import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCloudProjects } from '#hooks/use-cloud-projects.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
@@ -202,7 +203,15 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
   );
   const navigate = useNavigate();
   const projectManager = useProjectManager();
-  const { projects: cloudProjects, isSettled: isCloudSettled, isFetching: isCloudFetching } = useCloudProjects();
+  const {
+    projects: cloudProjects,
+    isSettled: isCloudSettled,
+    isFetching: isCloudFetching,
+    isFailed: isCloudFailed,
+    retry: retryCloud,
+  } = useCloudProjects();
+  const auth = useResolvedAuth();
+  const cloudPending = auth === 'authed' && !isCloudSettled && !isCloudFailed;
   const openCloudProject = useOpenCloudProject();
   useMaterializeCloudProjects({
     cloud: cloudProjects,
@@ -648,6 +657,27 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {!showDeleted && isCloudFailed && auth === 'authed' ? (
+        <div role='alert' className='flex flex-wrap items-center justify-between gap-3 rounded-md border p-4'>
+          <span className='text-sm'>
+            Tau Cloud projects could not be loaded. Projects on this device are still available.
+          </span>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => {
+              retryCloud();
+            }}
+          >
+            Retry Tau Cloud
+          </Button>
+        </div>
+      ) : !showDeleted && auth === 'authed' && isCloudFetching ? (
+        <div role='status' aria-busy='true' className='flex items-center gap-2 text-sm text-muted-foreground'>
+          <Loader className='size-4' />
+          Loading Tau Cloud projects…
+        </div>
+      ) : null}
       {listingError && projects.length === 0 ? (
         <div className='flex min-h-80 flex-col items-center justify-center gap-3 rounded-md border p-6 text-center'>
           <PackageX className='size-8 text-muted-foreground' />
@@ -673,6 +703,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
       ) : (
         <UnifiedProjectList
           rows={toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted })}
+          isCatalogUnavailable={!showDeleted && auth === 'authed' && (cloudPending || isCloudFailed)}
           viewMode={viewMode}
           actions={actions}
           onOpenCloudProject={handleOpenCloudProject}
@@ -735,6 +766,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
 }
 
 type UnifiedProjectListProps = {
+  readonly isCatalogUnavailable: boolean;
   readonly rows: LibraryRow[];
   readonly viewMode: 'grid' | 'table';
   readonly actions: ProjectActions;
@@ -745,7 +777,13 @@ type UnifiedProjectListProps = {
 const defaultPageSize = 20;
 const pageSizeOptions = [defaultPageSize, 50, 100, 150, 200];
 
-function UnifiedProjectList({ rows, viewMode, actions, onOpenCloudProject }: UnifiedProjectListProps) {
+function UnifiedProjectList({
+  rows,
+  viewMode,
+  actions,
+  onOpenCloudProject,
+  isCatalogUnavailable,
+}: UnifiedProjectListProps) {
   'use no memo';
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'lastActivityAt', desc: true }]);
@@ -786,6 +824,9 @@ function UnifiedProjectList({ rows, viewMode, actions, onOpenCloudProject }: Uni
   });
 
   // Show empty state if no projects at all
+  if (rows.length === 0 && isCatalogUnavailable) {
+    return null;
+  }
   if (rows.length === 0) {
     return (
       <CollectionEmptyState className='min-h-[60vh]'>

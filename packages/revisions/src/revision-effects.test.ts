@@ -44,7 +44,7 @@ import type { RevisionActors, RevisionActorsOptions, RevisionFileSystem } from '
 import { StepClock } from '@taucad/xstate-testing/clock';
 
 import type { ParameterRecordCodec, RevisionId } from '#algorithms/index.js';
-import type { SyncFetchActorOutput, SyncMergeActorOutput } from '#sync.machine.js';
+import type { SyncFetchActorOutput, SyncMergeActorOutput, SyncProjectRecordsActorOutput } from '#sync.machine.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { syncPullDeadlineMilliseconds } from '#sync.machine.js';
 
@@ -2326,10 +2326,13 @@ describe('independent sync record failures', () => {
 
     let settled = false;
     const fetching = (async () => {
-      const result = await run<Readonly<{ records?: ReadonlyArray<Readonly<{ name: string; status: string }>> }>>(
-        actors.sync.fetch,
-        { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 },
-      );
+      const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+        remote: 'tau',
+        branch: 'main',
+        deadlineMilliseconds: 10_000,
+      });
+      expect(fetched.recordProjection).toBeDefined();
+      const result = await run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, fetched.recordProjection);
       settled = true;
       return result;
     })();
@@ -2390,6 +2393,65 @@ describe('independent sync record failures', () => {
     expect(result.refs.map((entry) => entry.name)).not.toContain(refused);
   }, 30_000);
 
+  it('bounds optional chat projection to 16 refs while preserving every per-ref outcome', async () => {
+    const context = await fixture({});
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['events/device-a.jsonl', '{"sequence":0}\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Chat records' },
+    });
+    const references = Array.from({ length: 20 }, (_, index) => ({
+      name: `refs/remotes/tau/tau/chats/chat-${String(index)}`,
+      head: revisionId(receipt.commitId),
+    }));
+    const release = Promise.withResolvers<void>();
+    let active = 0;
+    let peak = 0;
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        readTree: async (head) => {
+          active++;
+          peak = Math.max(peak, active);
+          try {
+            await release.promise;
+            return await context.port.readTree(head);
+          } finally {
+            active--;
+          }
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+      deviceId: () => 'device-b',
+    });
+    const pending = run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, {
+      remote: 'tau',
+      fetchRefs: [],
+      refs: references,
+      syncChats: true,
+      syncLargeExports: false,
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(active).toBe(16);
+      });
+      expect(peak).toBe(16);
+    } finally {
+      release.resolve();
+    }
+    const result = await pending;
+    expect(peak).toBeLessThanOrEqual(16);
+    expect(result.chats).toBe('ready');
+    expect(result.records).toHaveLength(20);
+    expect(result.records.every((record) => record.status === 'updated')).toBe(true);
+    expect(await context.filesystem.readFile('.tau/chats/chat-19/events/device-a.jsonl', 'utf8')).toBe(
+      '{"sequence":0}\n',
+    );
+  }, 30_000);
+
   /* RV-W7 #5: a record conflict still wrote the other device's log, and the page has to hear of it. */
   it('announces a chat whose record conflicted, because its segments were still written', async () => {
     const context = await fixture({ '.tau/chats/talk/chat.json': '{"name":"Local name"}' });
@@ -2418,10 +2480,12 @@ describe('independent sync record failures', () => {
       onChatsProjected: (chatIds) => projected.push([...chatIds]),
     });
 
-    const result = await run<Readonly<{ records?: ReadonlyArray<Readonly<{ name: string; status: string }>> }>>(
-      actors.sync.fetch,
-      { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 },
-    );
+    const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+      remote: 'tau',
+      branch: 'main',
+      deadlineMilliseconds: 10_000,
+    });
+    const result = await run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, fetched.recordProjection);
 
     expect(result.records).toContainEqual(expect.objectContaining({ name: 'refs/tau/chats/talk', status: 'rejected' }));
     expect(await context.filesystem.readFile('.tau/chats/talk/events/device-a.jsonl', 'utf8')).toBe('{"sequence":0}\n');
@@ -2505,12 +2569,17 @@ describe('independent sync record failures', () => {
         filesystem: () => context.filesystem,
       });
 
-      await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+      const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+        remote: 'tau',
+        branch: 'main',
+        deadlineMilliseconds: 10_000,
+      });
+      await run(actors.sync.projectRecords, fetched.recordProjection);
 
       expect(requested).toEqual(
         remotePreference
           ? [['refs/heads/main', unrelated], [evidence]]
-          : [['refs/heads/main', unrelated, ...(localManifest === '{"syncLargeExports":true}\n' ? [evidence] : [])]],
+          : [['refs/heads/main', unrelated], ...(localManifest === '{"syncLargeExports":true}\n' ? [[evidence]] : [])],
       );
     },
     30_000,
@@ -2594,7 +2663,12 @@ describe('independent sync record failures', () => {
       filesystem: () => context.filesystem,
     });
 
-    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+      remote: 'tau',
+      branch: 'main',
+      deadlineMilliseconds: 10_000,
+    });
+    await run(actors.sync.projectRecords, fetched.recordProjection);
     expect(await context.filesystem.readFile('exports/shared.step', 'utf8')).toBe('new remote output\n');
     expect(await context.filesystem.readFile('exports/local.step', 'utf8')).toBe('local only\n');
     expect(await context.filesystem.readFile('exports/remote.step', 'utf8')).toBe('remote only\n');

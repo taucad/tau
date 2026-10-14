@@ -736,6 +736,7 @@ describe('projectAgentHostEvent', () => {
           interruptId: 'approval-1',
           kind: 'approval',
           prompt: 'write hello.txt',
+          request: { title: 'write hello.txt', input: undefined },
           options: [
             { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
             { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
@@ -744,6 +745,30 @@ describe('projectAgentHostEvent', () => {
       },
       { type: 'tool-approval-request', approvalId: 'approval-1', toolCallId: 'approval-1' },
     ]);
+  });
+
+  it('retains full input and readable elicitation content instead of only an opaque ID', () => {
+    const input = { serverName: 'cua_repl', schema: { type: 'object', properties: {} } };
+    const [part] = projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'app-permission',
+      phase: 'requested',
+      reason: 'Allow elicitation:opaque?',
+      payload: {
+        prompt: 'Allow elicitation:opaque?',
+        context: {
+          toolCall: {
+            rawInput: input,
+            content: [{ type: 'content', content: { type: 'text', text: 'Allow Computer Use to use Tau?' } }],
+          },
+        },
+      },
+    });
+    expect(part).toMatchObject({
+      type: 'tool-input-available',
+      input: { request: { title: 'Allow Computer Use to use Tau?', input } },
+    });
   });
 
   it('carries the ledger correlation a print request attaches, and nothing else from its context', () => {
@@ -2212,3 +2237,89 @@ it.each(['commentary', 'final_answer', 'partial_answer', 'future_phase', undefin
     );
   },
 );
+
+it('should keep the latest structured summary through live, checkpoint, duplicate and durable-only replay', async () => {
+  const identity = { chatId: 'chat', runId: base.runId, messageId: 'summary', contentIndex: 0 };
+  const first = '**Preparing supplemental CAD details**';
+  const last = '**Checking plot quality**';
+  const full = `${first}\n\n${last}`;
+  const live: AgentLiveEvent[] = [
+    { ...identity, type: 'thinking-start', timestamp: 100, reasoningSummary: first },
+    { ...identity, type: 'thinking-delta', delta: first, offset: 0, reasoningSummary: first },
+    { ...identity, type: 'thinking-delta', delta: `\n\n${last}`, offset: first.length, reasoningSummary: last },
+    { ...identity, type: 'thinking-end', content: full, timestamp: 200, reasoningSummary: last },
+  ];
+  const durable = (text: string, summary: string, checkpoint: boolean): AgentLogEvent =>
+    parseLogEvent({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: identity.messageId,
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: text }],
+        metadata: {
+          reasoningSummary: summary,
+          reasoningTimings: [{ contentIndex: 0, startedAtMs: 100, endedAtMs: 200 }],
+          tauInternal: { kind: 'external', origin: 'external', streamState: checkpoint ? 'checkpoint' : 'final' },
+        },
+      },
+    });
+  await Promise.all(
+    [
+      live,
+      [
+        live[0],
+        live[1],
+        durable(first, first, true),
+        live[2],
+        live[1],
+        durable(first, first, true),
+        live[3],
+        durable(full, last, false),
+      ],
+      [durable(first, first, true), ...live, durable(full, last, false)],
+      [durable(full, last, false), ...live],
+      [durable(full, last, false)],
+    ].map(async (events) => {
+      const blocks: AgentHostLiveBlocks = new Map();
+      const chunks = events.flatMap((event) => {
+        if (!event) {
+          throw new Error('Missing reasoning fixture');
+        }
+        return 'leaderEpoch' in event ? projectAgentHostEvent(event, blocks) : projectAgentHostLiveEvent(event, blocks);
+      });
+      const stream = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          for (const chunk of chunks) {
+            controller.enqueue(chunk);
+          }
+          controller.close();
+        },
+      });
+      let parts: MyUIMessage['parts'] = [];
+      let sawLatest = false;
+      for await (const message of readUIMessageStream<MyUIMessage>({
+        stream,
+        onError(error) {
+          throw error;
+        },
+      })) {
+        parts = message.parts;
+        const part = parts.find((candidate) => candidate.type === 'reasoning');
+        if (part?.type === 'reasoning' && part.text === full) {
+          expect(part.providerMetadata?.['common']?.['reasoningSummary']).toBe(last);
+          sawLatest = true;
+        }
+        if (sawLatest) {
+          expect(selectChatActivityCue({ runState: 'working', chatStatus: 'streaming', parts })?.sentence).toBe(
+            'Checking plot quality',
+          );
+        }
+      }
+      expect(parts.filter((part) => part.type === 'reasoning').map((part) => part.text)).toEqual([full]);
+      expect(selectChatActivityCue({ runState: 'working', chatStatus: 'streaming', parts })?.sentence).toBe(
+        'Checking plot quality',
+      );
+    }),
+  );
+});

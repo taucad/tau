@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { mock } from 'vitest-mock-extended';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectToManifest } from '@taucad/types';
@@ -52,6 +53,23 @@ vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => auth.curr
 /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));
 
+const storageValues = new Map<string, string>();
+vi.stubGlobal(
+  'localStorage',
+  mock<Storage>({
+    getItem: (key) => storageValues.get(key) ?? null,
+    setItem: (key, value) => {
+      storageValues.set(key, value);
+    },
+    removeItem: (key) => {
+      storageValues.delete(key);
+    },
+    clear: () => {
+      storageValues.clear();
+    },
+  }),
+);
+
 const { toLibraryRows, useMaterializeCloudProjects } = await import('#routes/projects_/cloud-projects.js');
 const { materializeOnSignIn, materializedCloudProjects, tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
 
@@ -72,6 +90,17 @@ describe('toLibraryRows', () => {
       ['proj_ccccccccccccccccccccc', 'local'],
       ['proj_bbbbbbbbbbbbbbbbbbbbb', 'cloud'],
     ]);
+  });
+
+  it('should keep an unmaterialized stub in the cloud presentation and deduplicate its catalog row', () => {
+    tauCloudIntent.set(held.id, 'open');
+    try {
+      const rows = toLibraryRows({ projects: [held], held: [held], cloud, includeCloudOnly: true });
+      expect(rows.filter((row) => row.id === held.id)).toHaveLength(1);
+      expect(rows.find((row) => row.id === held.id)).toMatchObject({ cloudOnly: true, name: held.name });
+    } finally {
+      tauCloudIntent.set(held.id, undefined);
+    }
   });
 
   it('should sort a Tau-Cloud-only row by its update time', () => {

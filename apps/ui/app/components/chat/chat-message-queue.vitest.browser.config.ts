@@ -12,7 +12,10 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
   test: {
-    include: ['app/components/chat/chat-message-queue.browser.test.tsx'],
+    include: [
+      'app/components/chat/chat-message-queue.browser.test.tsx',
+      'app/components/chat/chat-questions.browser.test.tsx',
+    ],
     fileParallelism: false,
     browser: {
       enabled: true,

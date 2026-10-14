@@ -40,6 +40,25 @@ updates:
           - 'major'
           - 'minor'
           - 'patch'
+      # Auth adapters and UI packages declare peers on the auth core/plugins.
+      auth:
+        applies-to: 'version-updates'
+        patterns:
+          - 'better-auth'
+          - '@better-auth/*'
+          - '@better-auth-ui/*'
+        update-types:
+          - 'minor'
+          - 'patch'
+      # The Vite plugin and optional compiler must satisfy each other's peers.
+      react-compiler:
+        applies-to: 'version-updates'
+        patterns:
+          - '@vitejs/plugin-react'
+          - 'oxc-transform-react'
+        update-types:
+          - 'minor'
+          - 'patch'
       react:
         applies-to: 'version-updates'
         patterns:
@@ -109,7 +128,6 @@ updates:
       include: 'scope'
     labels:
       - 'dependencies'
-      - 'docker'
       - 'automated'
 
   - package-ecosystem: 'docker-compose'
@@ -125,8 +143,6 @@ updates:
       include: 'scope'
     labels:
       - 'dependencies'
-      - 'docker'
-      - 'infrastructure'
       - 'automated'
 
   - package-ecosystem: 'docker-compose'
@@ -142,7 +158,6 @@ updates:
       include: 'scope'
     labels:
       - 'dependencies'
-      - 'docker'
       - 'search'
       - 'automated'
 

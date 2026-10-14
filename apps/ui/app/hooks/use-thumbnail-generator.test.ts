@@ -129,13 +129,31 @@ describe('useThumbnailGenerator', () => {
     vi.unstubAllGlobals();
   });
 
+  it('should not publish a fresh preview when the source is disposed during the local write', async () => {
+    const onStored = vi.fn();
+    const written = deferred<undefined>();
+    writeFile.mockImplementationOnce(async () => written.promise);
+    const { unmount } = renderHook(() => useThumbnailGenerator({ onStored }));
+    const artifact = await renderArtifact();
+    const storing = thumbnailInput!.store(artifact);
+    await vi.waitFor(() => {
+      expect(writeFile).toHaveBeenCalled();
+    });
+    unmount();
+    written.resolve(undefined);
+    await storing;
+    expect(onStored).not.toHaveBeenCalled();
+  });
+
   it('should forward the settled nested entry path unchanged and commit bytes', async () => {
-    renderHook(() => useThumbnailGenerator());
+    const onStored = vi.fn();
+    renderHook(() => useThumbnailGenerator({ onStored }));
     const artifact = await renderArtifact();
 
     await expect(thumbnailInput!.store(artifact)).resolves.toEqual({ status: 'stored' });
 
     expect(writeFile).toHaveBeenCalledWith('thumbnail.webp', webpBytes(1), { source: 'machine' });
+    expect(onStored).toHaveBeenCalledExactlyOnceWith(webpBytes(1));
     expect(exportImage).toHaveBeenCalledWith({
       kind: 'manual-thumbnail',
       identity: 'proj_aaaaaaaaaaaaaaaaaaaaa:unsettled',

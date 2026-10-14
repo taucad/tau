@@ -1477,3 +1477,102 @@ it.each([
     expect(messages[0]?.metadata?.phase).toBe(expected);
   },
 );
+
+it('should preserve the latest structured Codex summary separately from the full thought', async () => {
+  const updates: SessionUpdate[] = [
+    {
+      sessionUpdate: 'agent_thought_chunk',
+      messageId: 'rs',
+      content: { type: 'text', text: '**Preparing supplemental CAD details**' },
+      _meta: { codex: { reasoningSummary: { index: 0, text: '**Preparing supplemental CAD details**' } } },
+    },
+    { sessionUpdate: 'agent_thought_chunk', messageId: 'rs', content: { type: 'text', text: '\n\n' } },
+    {
+      sessionUpdate: 'agent_thought_chunk',
+      messageId: 'rs',
+      content: { type: 'text', text: '**Checking ' },
+      _meta: { codex: { reasoningSummary: { index: 1, text: '**Checking ' } } },
+    },
+    {
+      sessionUpdate: 'agent_thought_chunk',
+      messageId: 'rs',
+      content: { type: 'text', text: 'plot quality**' },
+      _meta: { codex: { reasoningSummary: { index: 1, text: 'plot quality**' } } },
+    },
+    {
+      sessionUpdate: 'agent_thought_chunk',
+      messageId: 'rs',
+      content: { type: 'text', text: 'Raw detail is not a summary' },
+    },
+  ];
+  const { appended, live } = await projectEvents(updates);
+  const messages = appended.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+  expect(messages[0]?.metadata?.reasoningSummary).toBe('**Checking plot quality**');
+  expect(live.filter((event) => event['type'] === 'thinking-delta').map((event) => event['reasoningSummary'])).toEqual([
+    '**Preparing supplemental CAD details**',
+    '**Preparing supplemental CAD details**',
+    '**Checking ',
+    '**Checking plot quality**',
+    '**Checking plot quality**',
+  ]);
+  expect(messages[0]?.content).toEqual([
+    {
+      type: 'thinking',
+      thinking: '**Preparing supplemental CAD details**\n\n**Checking plot quality**Raw detail is not a summary',
+    },
+  ]);
+});
+
+it.each([
+  ['claude', { index: 0, text: 'Not Codex' }],
+  ['codex', { index: -1, text: 'Invalid index' }],
+  ['codex', { index: 1.5, text: 'Invalid index' }],
+  ['codex', { index: 0, text: 123 }],
+] as const)('should reject unowned or malformed summary metadata (%s)', async (agentId, reasoningSummary) => {
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'agent_thought_chunk',
+        messageId: 'rs',
+        content: { type: 'text', text: '**Thinking**' },
+        _meta: { codex: { reasoningSummary } },
+      },
+    ],
+    agentId,
+  );
+  expect(messages[0]?.metadata?.reasoningSummary).toBeUndefined();
+});
+
+it('should keep summary indexes scoped to each Codex item and ignore stale or empty parts', async () => {
+  const chunk = (messageId: string, index: number, text: string): SessionUpdate => ({
+    sessionUpdate: 'agent_thought_chunk',
+    messageId,
+    content: { type: 'text', text },
+    _meta: { codex: { reasoningSummary: { index, text } } },
+  });
+  const messages = await project([
+    chunk('first', 1, 'Checking plot quality'),
+    chunk('first', 0, 'Earlier summary'),
+    chunk('first', 2, ''),
+    chunk('second', 0, 'Preparing a status comment'),
+  ]);
+  expect(messages.map((message) => message.metadata?.reasoningSummary)).toEqual([
+    'Checking plot quality',
+    'Preparing a status comment',
+  ]);
+});
+
+it('should retain a completed-only summary without losing earlier transcript sections', async () => {
+  const messages = await project([
+    {
+      sessionUpdate: 'agent_thought_chunk',
+      messageId: 'completed',
+      content: { type: 'text', text: 'Preparing supplemental CAD details\n\nChecking plot quality' },
+      _meta: { codex: { reasoningSummary: { index: 1, text: 'Checking plot quality' } } },
+    },
+  ]);
+  expect(messages[0]?.metadata?.reasoningSummary).toBe('Checking plot quality');
+  expect(messages[0]?.content).toEqual([
+    { type: 'thinking', thinking: 'Preparing supplemental CAD details\n\nChecking plot quality' },
+  ]);
+});

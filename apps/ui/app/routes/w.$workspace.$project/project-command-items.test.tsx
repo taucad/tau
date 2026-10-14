@@ -47,6 +47,8 @@ const graphicsActor = {
   getSnapshot: () => ({ context: { cameraState } }),
 };
 
+vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({ usePublishCloudProjectPreview: () => vi.fn() }));
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) =>
     selector(actor?.getSnapshot()),

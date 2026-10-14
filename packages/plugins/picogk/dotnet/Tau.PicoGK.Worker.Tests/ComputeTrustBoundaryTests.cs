@@ -118,7 +118,7 @@ public sealed partial class WorkerTests
         RejectManifest(manifest=>First(manifest)["size"]=2147483648UL,request=>request["maxEncodedBytes"]=4294967296UL);
         RejectManifest(manifest=>First(manifest)["nativeBytes"]=268435457);
         RejectManifest(manifest=>First(manifest)["size"]=First(manifest)["size"]!.GetValue<ulong>()+1);
-        RejectManifest(manifest=>First(manifest)["action"]!["inputs"]![0]!["extra"]=true);
+        RejectManifest(manifest=>First(manifest)["action"]!["inputs"]!.AsArray().Add(new JsonObject{["extra"]=true}));
         RejectManifest(manifest=>First(manifest)["action"]!["arguments"]!["extra"]=true);
         RejectManifest(manifest=>First(manifest)["action"]!["codec"]!["version"]="1");
         RejectManifest(manifest=>First(manifest)["action"]!["codec"]!["id"]="unknown");

@@ -2,8 +2,10 @@ import { useEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import type { RevisionStatusProjection, RemoteFacet, SyncFacet } from '@taucad/revisions';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
+import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
@@ -79,6 +81,7 @@ const projectFileManagerRef = {
 const chatSessionStore = {
   get: () => undefined,
   setProjectSession: () => undefined,
+  setRevisionFacts: () => undefined,
   setFocusedProject: () => undefined,
   publishProjectHostConnector,
   getChatHostSettings: async (chatId: string) => storedHostSettings.get(chatId),
@@ -109,6 +112,11 @@ vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
   }),
 }));
 /* `quiesce` is W13's close cut: `closing.flushing` calls it on this client. */
+const revisionStatus = vi.fn<() => RevisionStatusProjection | undefined>(() => undefined);
+vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => 'authed' }));
+vi.mock('#cloud/commercial-features.js', () => ({
+  useCommercialFeatures: () => ({ isResolved: true, canSyncFiles: true }),
+}));
 const revisionClient = { subscribeEvents: () => () => undefined, quiesce: async () => undefined };
 let editorIsIdle = true;
 type EditorSnapshot = Readonly<{
@@ -227,6 +235,9 @@ vi.mock('#hooks/use-project.js', () => ({
     flushWorkbenchRecordProducers: flushWorkbenchRecords,
   }),
 }));
+vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({
+  usePublishCloudProjectPreview: () => () => undefined,
+}));
 vi.mock('./workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
 vi.mock('./view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => null }));
 vi.mock('./entries-sync-host.js', () => ({ EntriesSyncHost: () => null }));
@@ -246,8 +257,9 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionClient: () => undefined,
   useRevisionClientLifecycle: () => revisionClient,
-  useRevisionClientStatus: () => undefined,
+  useRevisionClientStatus: () => revisionStatus(),
   useRevisionStatus: () => undefined,
+  useProjectRole: () => 'owner',
   useRevisionCommands: () => ({ connectRemote }),
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
@@ -368,11 +380,9 @@ const deferred = <T,>(): {
 const renderRouteProvider = ({
   requestedChatId,
   createdChatId,
-  shouldOpenFromTauCloud,
 }: {
   readonly requestedChatId?: string;
   readonly createdChatId?: string;
-  readonly shouldOpenFromTauCloud?: boolean;
 } = {}): {
   Provider: React.JSXElementConstructor<React.PropsWithChildren>;
   view: ReturnType<typeof render>;
@@ -390,7 +400,6 @@ const renderRouteProvider = ({
         projectId={currentProjectId}
         requestedChatId={requestedChatId}
         createdChatId={createdChatId}
-        shouldOpenFromTauCloud={shouldOpenFromTauCloud}
       >
         {children}
         <sessionsModule.ProjectChatRoute />
@@ -408,6 +417,7 @@ const renderRouteProvider = ({
 };
 
 beforeEach(() => {
+  tauCloudIntent.set(projectA, undefined);
   currentProjectId = projectA;
   getProjectRouteAccess.mockReset();
   restoreProject.mockReset();
@@ -420,6 +430,7 @@ beforeEach(() => {
   editorSend.mockReset();
   projectSend.mockReset();
   connectRemote.mockClear();
+  revisionStatus.mockReset();
   publishProjectHostConnector.mockClear();
   connectorReleases.length = 0;
   browserClientOptions.length = 0;
@@ -705,7 +716,15 @@ describe('project route session identity', () => {
 
   it('connects a Tau Cloud library open through the project-scoped client', async () => {
     getProjectRouteAccess.mockResolvedValue(ready(projectA));
-    renderRouteProvider({ shouldOpenFromTauCloud: true });
+    revisionStatus.mockReturnValue(
+      mock<RevisionStatusProjection>({
+        remote: mock<RemoteFacet>({ kind: 'none', phase: 'none' }),
+        sync: mock<SyncFacet>({ hasAppliedRemote: false, state: 'noRemote', pendingCount: 0 }),
+        line: { kind: 'unknown' },
+      }),
+    );
+    tauCloudIntent.set(projectA, 'open');
+    renderRouteProvider();
 
     await waitFor(() => {
       expect(connectRemote).toHaveBeenCalledWith('tau');

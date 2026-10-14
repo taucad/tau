@@ -6,6 +6,8 @@ import type { FileParameterEntry } from '@taucad/types';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { ChatParameters } from '#routes/w.$workspace.$project/chat-parameters.js';
 
+vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) => {
     if (!actor) {

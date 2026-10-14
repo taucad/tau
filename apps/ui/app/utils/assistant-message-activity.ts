@@ -244,7 +244,7 @@ export const classifyActivityPart = (part: MyMessagePart): ActivityCategory => {
   }
   if (part.type === 'dynamic-tool') {
     if (part.toolName === agentApprovalToolName) {
-      return 'skip';
+      return part.state === 'output-available' ? 'data' : 'skip';
     }
     const nativeName = tauMcpToolName(part);
     /* A question is a decision, never folded into routine activity (agent questions blueprint D7). */

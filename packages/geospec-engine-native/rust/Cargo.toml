@@ -9,7 +9,7 @@ autotests = false
 
 [dependencies]
 gltf = { version = "=1.4.1", default-features = false, features = ["utils", "names"] }
-num-bigint = "=0.4.6"
+num-bigint = "=0.5.1"
 num-integer = "=0.1.46"
 num-rational = "=0.4.2"
 num-traits = "=0.2.19"

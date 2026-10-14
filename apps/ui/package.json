@@ -12,7 +12,7 @@
   "dependencies": {
     "@base-ui/react": "catalog:",
     "@better-auth-ui/core": "1.6.18",
-    "@better-auth-ui/react": "1.6.18",
+    "@better-auth-ui/react": "1.7.29",
     "@better-auth/api-key": "catalog:",
     "@react-router/express": "catalog:",
     "@react-router/node": "catalog:",

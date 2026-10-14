@@ -4,13 +4,12 @@
     animation: shiny-text 1.2s linear infinite;
   }
 
-  /* Codex TUI's bold, 10-character band; CSS stops approximate its cosine falloff.
+  /* Codex TUI's 10-character band; CSS stops approximate its cosine falloff.
    * Source: openai/codex@1b6e0d8145e1fe5b2663d32fbe7ee02f51a10e1c
    * codex-rs/tui/src/shimmer.rs (Apache-2.0). The caller sets the loader cadence.
    */
   .animate-activity-shimmer {
     color: transparent;
-    font-weight: var(--font-weight-bold);
     background-color: var(--foreground);
     background-image: linear-gradient(
       90deg,

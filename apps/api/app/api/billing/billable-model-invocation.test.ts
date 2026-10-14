@@ -196,7 +196,7 @@ describe('BillableModelInvocationService', () => {
         expect(resolved.maximumQuantities.find((quantity) => quantity.dimension === 'output')?.quantity).toBe(
           BigInt(maximum),
         );
-        expect(resolved.normalizedRequest.body[field]).toBe(maximum);
+        expect(resolved.normalizedRequest.body).toMatchObject({ [field]: maximum });
       }
     },
   );

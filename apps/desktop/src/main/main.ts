@@ -9,6 +9,7 @@ import { installBrowserHost } from '#main/browser-host.js';
  */
 
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -99,6 +100,7 @@ import { prepareOtaProbe } from '#main/ota-probe.js';
 import { startDesktopUpdater } from '#main/updater.js';
 import {
   appIconThemeChannel,
+  openDirectoryChannel,
   agentHostSessionChannels,
   machinesChannels,
   externalAgentsChannel,
@@ -108,6 +110,7 @@ import {
   computeControlChannels,
   servicesPortRelayTag,
   slicersChannels,
+  windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
 import {
@@ -1017,6 +1020,24 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * observable behaviour, which is what the shared picker seam promises. */
   const lastDirectoryById = new Map<string, string>();
 
+  ipcMain.handle(openDirectoryChannel, async (event, path: unknown) => {
+    if (!trusted(event.senderFrame) || typeof path !== 'string' || path.includes('\0')) {
+      throw new Error('Desktop shell refused the directory request.');
+    }
+    const directory = roots.canonical(path);
+    if (directory === undefined) {
+      throw new Error('Reopen this folder from Tau before opening it in the file manager.');
+    }
+    const info = await stat(directory);
+    if (!info.isDirectory()) {
+      throw new Error('The project directory is no longer a folder.');
+    }
+    const error = await shell.openPath(directory);
+    if (error) {
+      throw new Error(error);
+    }
+  });
+
   ipcMain.handle('tau:select-directory', async (event, options: unknown) => {
     if (!trusted(event.senderFrame)) {
       return undefined;
@@ -1184,6 +1205,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
         }),
       );
     }
+    const publishFullscreen = (): void => {
+      window.webContents.send(windowFullscreenChannel, window.isFullScreen());
+    };
+    window.on('enter-full-screen', publishFullscreen);
+    window.on('leave-full-screen', publishFullscreen);
+    window.webContents.on('did-finish-load', publishFullscreen);
     window.once('close', () => {
       try {
         writeWindowState(windowStatePath, {

@@ -3,12 +3,17 @@ import { browserChannels } from '@taucad/types/browser';
 import { mock } from 'vitest-mock-extended';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
-import { quitChannels, slicersChannels } from '#shared/desktop-bootstrap.js';
+import {
+  openDirectoryChannel,
+  quitChannels,
+  slicersChannels,
+  windowFullscreenChannel,
+} from '#shared/desktop-bootstrap.js';
 import { generatedImageIpcChannel, isQuickLookEnabled } from '#shared/quick-look.js';
 
 const state = vi.hoisted(() => ({
   exposed: new Map<string, unknown>(),
-  listeners: new Map<string, Array<() => void>>(),
+  listeners: new Map<string, Array<(...args: unknown[]) => void>>(),
 }));
 
 vi.mock('electron', () => ({
@@ -20,10 +25,10 @@ vi.mock('electron', () => ({
   ipcRenderer: {
     invoke: vi.fn(),
     send: vi.fn(),
-    on: vi.fn((channel: string, listener: () => void) => {
+    on: vi.fn((channel: string, listener: (...args: unknown[]) => void) => {
       state.listeners.set(channel, [...(state.listeners.get(channel) ?? []), listener]);
     }),
-    off: vi.fn((channel: string, listener: () => void) => {
+    off: vi.fn((channel: string, listener: (...args: unknown[]) => void) => {
       state.listeners.set(
         channel,
         (state.listeners.get(channel) ?? []).filter((candidate) => candidate !== listener),
@@ -82,6 +87,34 @@ describe('desktop preload quit bridge', () => {
   });
 });
 
+describe('desktop preload fullscreen snapshot', () => {
+  it('should retain early native state, notify subscribers and stop notifications on unsubscribe', () => {
+    const { window } = state.exposed.get('tau') as {
+      readonly window: { isFullscreen(): boolean; onFullscreenChange(listener: () => void): () => void };
+    };
+    const emit = (value: unknown): void => {
+      for (const listener of state.listeners.get(windowFullscreenChannel) ?? []) {
+        listener({}, value);
+      }
+    };
+    expect(window.isFullscreen()).toBe(false);
+    emit(true);
+    expect(window.isFullscreen()).toBe(true);
+    const observed: boolean[] = [];
+    const unsubscribe = window.onFullscreenChange(() => {
+      observed.push(window.isFullscreen());
+    });
+    emit(false);
+    expect(observed).toEqual([false]);
+    unsubscribe();
+    emit(true);
+    expect(observed).toEqual([false]);
+    expect(window.isFullscreen()).toBe(true);
+    emit('not a boolean');
+    expect(window.isFullscreen()).toBe(true);
+  });
+});
+
 describe('desktop preload generated image bridge', () => {
   it('should forward the requested path and return its bytes', async () => {
     const response = { path: 'run-1/top.png', bytes: new Uint8Array([1, 2]) };
@@ -131,6 +164,26 @@ describe('desktop preload Quick Look bridge', () => {
     const tau = state.exposed.get('tau') as Readonly<Record<string, unknown>>;
 
     expect('quickLook' in tau).toBe(isQuickLookEnabled());
+  });
+});
+
+describe('native directory access', () => {
+  it('should advertise the native file manager and forward the selected directory', async () => {
+    const tau = state.exposed.get('tau') as {
+      directories: { openLabel: string; openIcon: string; open(path: string): Promise<void> };
+    };
+    expect(tau.directories.openLabel).toBe(
+      process.platform === 'darwin'
+        ? 'Open in Finder'
+        : process.platform === 'win32'
+          ? 'Open in File Explorer'
+          : 'Open in file manager',
+    );
+    expect(tau.directories.openIcon).toBe(
+      process.platform === 'darwin' ? 'finder' : process.platform === 'win32' ? 'file-explorer' : 'folder',
+    );
+    await tau.directories.open('/picked/Project');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(openDirectoryChannel, '/picked/Project');
   });
 });
 

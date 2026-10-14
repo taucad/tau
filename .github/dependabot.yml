@@ -40,6 +40,16 @@ updates:
           - 'major'
           - 'minor'
           - 'patch'
+      # Vitest core, browser providers, coverage and UI require matching releases.
+      vitest:
+        applies-to: 'version-updates'
+        patterns:
+          - 'vitest'
+          - '@vitest/*'
+        update-types:
+          - 'major'
+          - 'minor'
+          - 'patch'
       # Auth adapters and UI packages declare peers on the auth core/plugins.
       auth:
         applies-to: 'version-updates'

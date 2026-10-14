@@ -27,6 +27,7 @@ import { exposeElectronRuntime, relayElectronPorts } from '@taucad/runtime/elect
 
 import {
   appIconThemeChannel,
+  openDirectoryChannel,
   agentHostSessionChannels,
   externalAgentsChannel,
   machinesChannels,
@@ -35,6 +36,7 @@ import {
   readBootstrap,
   servicesPortRelayTag,
   slicersChannels,
+  windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
 import {
@@ -52,6 +54,14 @@ import type {
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
 const bootstrap = readBootstrap(process.argv);
+
+// Keep the snapshot even when native fullscreen changes before React mounts.
+let isWindowFullscreen = false;
+ipcRenderer.on(windowFullscreenChannel, (_event, isFullscreen: unknown) => {
+  if (typeof isFullscreen === 'boolean') {
+    isWindowFullscreen = isFullscreen;
+  }
+});
 
 let pendingQuitAsk = false;
 let quitAskHandler: (() => void) | undefined;
@@ -120,6 +130,18 @@ contextBridge.exposeInMainWorld('tau', {
         ipcRenderer.invoke(slicersChannels.bambuStudio.settings, input),
     },
   },
+  directories: {
+    openIcon: process.platform === 'darwin' ? 'finder' : process.platform === 'win32' ? 'file-explorer' : 'folder',
+    openLabel:
+      process.platform === 'darwin'
+        ? 'Open in Finder'
+        : process.platform === 'win32'
+          ? 'Open in File Explorer'
+          : 'Open in file manager',
+    open: async (path: string): Promise<void> => {
+      await ipcRenderer.invoke(openDirectoryChannel, path);
+    },
+  },
   nodeFs: { homeRoot: bootstrap.homeRoot },
   runtimeKernelIds: bootstrap.runtimeKernelIds,
   /* A call, not a value (D17): main answers when ACP discovery settles, which no
@@ -136,6 +158,18 @@ contextBridge.exposeInMainWorld('tau', {
   appIcon: {
     setTheme: (theme: AppIconTheme): void => {
       ipcRenderer.send(appIconThemeChannel, theme);
+    },
+  },
+  window: {
+    isFullscreen: (): boolean => isWindowFullscreen,
+    onFullscreenChange: (listener: () => void): (() => void) => {
+      const handler = (): void => {
+        listener();
+      };
+      ipcRenderer.on(windowFullscreenChannel, handler);
+      return () => {
+        ipcRenderer.off(windowFullscreenChannel, handler);
+      };
     },
   },
   quit: {

@@ -30,7 +30,7 @@ it builds and links OCCT, is at [github.com/taucad/tau](https://github.com/tauca
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 752 packages, with the license each declares.
+The web and desktop apps include the following 753 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -76,19 +76,18 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@babel/runtime](https://github.com/babel/babel) | 8.0.7 | MIT |
 | [@base-ui/react](https://github.com/mui/base-ui) | 1.9.0 | MIT |
 | [@base-ui/utils](https://github.com/mui/base-ui) | 0.5.0 | MIT |
-| [@better-auth-ui/core](https://github.com/better-auth-ui/better-auth-ui) | 1.6.18 | Not declared |
-| [@better-auth-ui/react](https://github.com/better-auth-ui/better-auth-ui) | 1.6.18 | Not declared |
-| [@better-auth/api-key](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
-| [@better-auth/core](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
-| [@better-auth/drizzle-adapter](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
-| [@better-auth/kysely-adapter](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
-| [@better-auth/memory-adapter](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
-| [@better-auth/mongo-adapter](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
-| [@better-auth/prisma-adapter](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
-| [@better-auth/telemetry](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
+| [@better-auth-ui/core](https://github.com/better-auth-ui/better-auth-ui) | 1.7.29 | Not declared |
+| [@better-auth-ui/react](https://github.com/better-auth-ui/better-auth-ui) | 1.7.29 | Not declared |
+| [@better-auth/api-key](https://github.com/better-auth/better-auth) | 1.7.7 | MIT |
+| [@better-auth/core](https://github.com/better-auth/better-auth) | 1.7.7 | MIT |
+| [@better-auth/drizzle-adapter](https://github.com/better-auth/better-auth) | 1.7.7 | MIT |
+| [@better-auth/kysely-adapter](https://github.com/better-auth/better-auth) | 1.7.7 | MIT |
+| [@better-auth/memory-adapter](https://github.com/better-auth/better-auth) | 1.7.7 | MIT |
+| [@better-auth/mongo-adapter](https://github.com/better-auth/better-auth) | 1.7.7 | MIT |
+| [@better-auth/prisma-adapter](https://github.com/better-auth/better-auth) | 1.7.7 | MIT |
+| [@better-auth/telemetry](https://github.com/better-auth/better-auth) | 1.7.7 | MIT |
 | [@better-auth/utils](https://github.com/better-auth/utils) | 0.4.2 | MIT |
 | [@better-auth/utils](https://github.com/better-auth/utils) | 0.5.0 | MIT |
-| [@better-fetch/fetch](https://github.com/better-auth/better-fetch) | 1.3.1 | MIT |
 | [@better-fetch/fetch](https://github.com/better-auth/better-fetch) | 1.3.2 | MIT |
 | [@cfworker/json-schema](https://github.com/cfworker/cfworker) | 4.1.1 | MIT |
 | [@cspotcode/source-map-support](https://github.com/cspotcode/node-source-map-support) | 0.8.1 | MIT |
@@ -320,7 +319,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [balanced-match](https://github.com/juliangruber/balanced-match) | 4.0.4 | MIT |
 | [base64-js](https://github.com/beatgammit/base64-js) | 1.5.1 | MIT |
 | [basic-ftp](https://github.com/patrickjuchli/basic-ftp) | 6.2.1 | MIT |
-| [better-auth](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
+| [better-auth](https://github.com/better-auth/better-auth) | 1.7.7 | MIT |
 | [better-call](https://github.com/better-auth/better-call) | 1.4.0 | MIT |
 | [bidi-js](https://github.com/lojjic/bidi-js) | 1.1.0 | MIT |
 | [bignumber.js](https://github.com/MikeMcl/bignumber.js) | 9.3.1 | MIT |
@@ -535,6 +534,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [libassimp](https://github.com/taucad/libassimp) | 0.3.0 | Apache-2.0 |
 | [libassimp-{platform}](https://github.com/taucad/libassimp) | 0.3.0 | Apache-2.0 |
 | [libcascade](https://github.com/taucad/opencascade.js) | 3.1.0 | LGPL-2.1-only WITH Open-CASCADE-Exception-1.0 |
+| [libphonenumber-js](https://gitlab.com/catamphetamine/libphonenumber-js) | 1.13.15 | MIT |
 | [lie](https://github.com/calvinmetcalf/lie) | 3.3.0 | MIT |
 | [lodash](https://github.com/lodash/lodash) | 4.18.1 | MIT |
 | [lodash-es](https://github.com/lodash/lodash) | 4.18.1 | MIT |
@@ -741,6 +741,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [unist-util-visit](https://github.com/syntax-tree/unist-util-visit) | 5.1.0 | MIT |
 | [unist-util-visit-parents](https://github.com/syntax-tree/unist-util-visit-parents) | 6.0.2 | MIT |
 | [unpipe](https://github.com/stream-utils/unpipe) | 1.0.0 | MIT |
+| [uqr](https://github.com/unjs/uqr) | 0.1.3 | MIT |
 | [use-callback-ref](https://github.com/theKashey/use-callback-ref/) | 1.3.3 | MIT |
 | [use-sidecar](https://github.com/theKashey/use-sidecar) | 1.1.3 | MIT |
 | [use-sync-external-store](https://github.com/react/react) | 1.7.0 | MIT |

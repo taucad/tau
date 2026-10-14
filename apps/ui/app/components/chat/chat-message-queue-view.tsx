@@ -111,7 +111,7 @@ export function ChatMessageQueueView({
                 <Button
                   variant='ghost'
                   size='icon-xs'
-                  className='cursor-grab touch-none text-muted-foreground active:cursor-grabbing'
+                  className='cursor-grab touch-none text-muted-foreground/90 active:cursor-grabbing'
                   aria-label={`Reorder queued message ${String(index + 1)}`}
                   title='Drag to reorder, or use the up and down arrow keys'
                   disabled={locked || reorderLocked || items.length < 2}
@@ -197,7 +197,7 @@ export function ChatMessageQueueView({
                     {attachments}
                   </span>
                 ) : null}
-                <div className='flex shrink-0 items-center gap-0 text-muted-foreground @max-[14rem]/message-queue:basis-full @max-[14rem]/message-queue:flex-wrap @max-[14rem]/message-queue:justify-end'>
+                <div className='flex shrink-0 items-center gap-0 text-muted-foreground/90 @max-[14rem]/message-queue:basis-full @max-[14rem]/message-queue:flex-wrap @max-[14rem]/message-queue:justify-end'>
                   <Button
                     variant='ghost'
                     size='xs'

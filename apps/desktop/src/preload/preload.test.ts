@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
-import { quitChannels, slicersChannels } from '#shared/desktop-bootstrap.js';
+import { openDirectoryChannel, quitChannels, slicersChannels } from '#shared/desktop-bootstrap.js';
 import { generatedImageIpcChannel, isQuickLookEnabled } from '#shared/quick-look.js';
 
 const state = vi.hoisted(() => ({
@@ -128,5 +128,20 @@ describe('desktop preload Quick Look bridge', () => {
     const tau = state.exposed.get('tau') as Readonly<Record<string, unknown>>;
 
     expect('quickLook' in tau).toBe(isQuickLookEnabled());
+  });
+});
+
+describe('native directory access', () => {
+  it('should advertise the native file manager and forward the selected directory', async () => {
+    const tau = state.exposed.get('tau') as { directories: { openLabel: string; open(path: string): Promise<void> } };
+    expect(tau.directories.openLabel).toBe(
+      process.platform === 'darwin'
+        ? 'Open in Finder'
+        : process.platform === 'win32'
+          ? 'Open in File Explorer'
+          : 'Open in file manager',
+    );
+    await tau.directories.open('/picked/Project');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(openDirectoryChannel, '/picked/Project');
   });
 });

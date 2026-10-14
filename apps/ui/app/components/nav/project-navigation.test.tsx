@@ -1,5 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
+import { mock } from 'vitest-mock-extended';
+import { toast } from '#components/ui/sonner.js';
 import type { ReactNode } from 'react';
 import type { useProjects } from '#hooks/use-projects.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
@@ -10,6 +13,11 @@ const mockIsProjectExpanded = vi.fn();
 const mockSetProjectDisclosure = vi.fn();
 const mockNavigate = vi.fn();
 const mockInvalidateQueries = vi.fn();
+let bridge: DesktopBridge | undefined;
+const mockOpenDirectory = vi.fn(async (_path: string) => undefined);
+const mockWorkspaceRoot = vi.fn(async (_projectId: string) => '/picked/Two space');
+vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => bridge }));
+vi.mock('#lib/agent-host-placement.js', () => ({ desktopWorkspaceRoot: async (id: string) => mockWorkspaceRoot(id) }));
 let pathname = '/';
 let search = '';
 let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
@@ -175,6 +183,7 @@ const closedRow = (projectId: string): SidebarStatusModule.ProjectSidebarRow => 
 });
 
 const firstProject = {
+  locator: { backend: 'node', path: '/picked', relativeDirectory: 'one' },
   id: 'proj_one',
   name: 'One',
   description: 'First',
@@ -207,6 +216,9 @@ const descriptionOf = (link: HTMLElement) =>
 
 describe('ProjectNavigation', () => {
   beforeEach(() => {
+    bridge = undefined;
+    mockOpenDirectory.mockReset();
+    mockWorkspaceRoot.mockClear();
     vi.clearAllMocks();
     pathname = '/';
     search = '';
@@ -312,6 +324,45 @@ describe('ProjectNavigation', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?chat=chat%2Ftwo', {
         state: { focusChatComposer: true },
       });
+    });
+  });
+
+  it('should open files for the selected project without carrying another project chat', () => {
+    pathname = '/w/home/one';
+    search = '?chat=chat_1&keep=1';
+    render(<ProjectNavigation />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open files' })[0]!);
+    expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?workbench=files');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open files' })[1]!);
+    expect(mockNavigate).toHaveBeenCalledWith('/w/home/one?chat=chat_1&keep=1&workbench=files');
+    expect(screen.queryByRole('button', { name: /Open in/u })).not.toBeInTheDocument();
+  });
+
+  it.each(['Open in Finder', 'Open in File Explorer', 'Open in file manager'])(
+    'should use the host label %s and resolve the selected project directory',
+    async (openLabel) => {
+      bridge = mock<DesktopBridge>({ directories: { openLabel, open: mockOpenDirectory } });
+      render(<ProjectNavigation />);
+      fireEvent.click(screen.getAllByRole('button', { name: openLabel })[0]!);
+      await waitFor(() => {
+        expect(mockOpenDirectory).toHaveBeenCalledWith('/picked/Two space');
+      });
+      expect(mockWorkspaceRoot).toHaveBeenCalledWith('proj_two');
+      expect(mockNavigate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should hide native access for browser storage and report native opening failures', async () => {
+    bridge = mock<DesktopBridge>({ directories: { openLabel: 'Open in Finder', open: mockOpenDirectory } });
+    mockUseProjects.mockReturnValue({
+      ...projectsResult,
+      projects: [{ ...firstProject, locator: { backend: 'indexeddb', relativeDirectory: 'one' } }, secondProject],
+    });
+    mockOpenDirectory.mockRejectedValueOnce(new Error('Folder is unavailable'));
+    render(<ProjectNavigation />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open in Finder' }));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Could not open Two', { description: 'Folder is unavailable' });
     });
   });
 

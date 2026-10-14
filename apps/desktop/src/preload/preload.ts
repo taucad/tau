@@ -25,6 +25,7 @@ import { exposeElectronRuntime, relayElectronPorts } from '@taucad/runtime/elect
 
 import {
   appIconThemeChannel,
+  openDirectoryChannel,
   agentHostSessionChannels,
   externalAgentsChannel,
   machinesChannels,
@@ -116,6 +117,17 @@ contextBridge.exposeInMainWorld('tau', {
         ipcRenderer.invoke(slicersChannels.bambuStudio.resolveSelection, input),
       settings: async (input: unknown): Promise<unknown> =>
         ipcRenderer.invoke(slicersChannels.bambuStudio.settings, input),
+    },
+  },
+  directories: {
+    openLabel:
+      process.platform === 'darwin'
+        ? 'Open in Finder'
+        : process.platform === 'win32'
+          ? 'Open in File Explorer'
+          : 'Open in file manager',
+    open: async (path: string): Promise<void> => {
+      await ipcRenderer.invoke(openDirectoryChannel, path);
     },
   },
   nodeFs: { homeRoot: bootstrap.homeRoot },

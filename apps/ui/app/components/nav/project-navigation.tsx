@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
-import { ChevronRight, Copy, Forward, EllipsisVertical, Pencil, SquarePen, Trash2, X } from 'lucide-react';
+import { ChevronRight, Copy, FolderOpen, Forward, EllipsisVertical, Pencil, SquarePen, Trash2, X } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -53,6 +53,9 @@ import {
   useProjectSidebarRow,
   useSidebarCommands,
 } from '#hooks/use-sidebar-status.js';
+
+import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopWorkspaceRoot } from '#lib/agent-host-placement.js';
 
 const projectsPerPage = 5;
 
@@ -177,6 +180,14 @@ export function ProjectNavigation(): React.JSX.Element {
                     }
                   }}
                   onDuplicate={async () => handleDuplicate(project)}
+                  onOpenFiles={() => {
+                    if (!project.slugs) {
+                      return;
+                    }
+                    const parameters = new URLSearchParams(isActive ? location.search : '');
+                    parameters.set(searchParameterName.workbench, 'files');
+                    void navigate(`${projectUrl(project.slugs)}?${parameters.toString()}`);
+                  }}
                   onShare={() => {
                     if (!project.slugs) {
                       return;
@@ -236,6 +247,7 @@ function ProjectNavigationItem({
   onEditingChange,
   onDuplicate,
   onShare,
+  onOpenFiles,
   onDelete,
 }: {
   readonly project: ProjectListItem;
@@ -251,9 +263,27 @@ function ProjectNavigationItem({
   readonly onEditingChange: (isEditing: boolean) => void;
   readonly onDuplicate: () => Promise<void>;
   readonly onShare: () => void;
+  readonly onOpenFiles: () => void;
   readonly onDelete: () => Promise<void>;
 }): React.JSX.Element {
   const { isMobile } = useSidebar();
+  const directories = project.locator.backend === 'node' ? desktopBridge()?.directories : undefined;
+  const [isOpeningDirectory, setIsOpeningDirectory] = useState(false);
+  const openDirectory = async (): Promise<void> => {
+    if (!directories || isOpeningDirectory) {
+      return;
+    }
+    setIsOpeningDirectory(true);
+    try {
+      await directories.open(await desktopWorkspaceRoot(project.id));
+    } catch (error) {
+      toast.error(`Could not open ${project.name}`, {
+        description: error instanceof Error ? error.message : 'Try opening the folder again.',
+      });
+    } finally {
+      setIsOpeningDirectory(false);
+    }
+  };
   const chatsId = `project-chats-${project.id}`;
   const target = projectUrlOr(project.slugs);
   /* S46's "one coalesced status object per project", in the render tree too
@@ -302,6 +332,22 @@ function ProjectNavigationItem({
         <SquarePen aria-hidden />
         New chat
       </Item>
+      <Item disabled={!project.slugs} onSelect={onOpenFiles}>
+        <FolderOpen aria-hidden />
+        Open files
+      </Item>
+      {directories ? (
+        <Item
+          disabled={isOpeningDirectory}
+          aria-busy={isOpeningDirectory}
+          onSelect={() => {
+            void openDirectory();
+          }}
+        >
+          <FolderOpen aria-hidden />
+          {directories.openLabel}
+        </Item>
+      ) : null}
       <Item onSelect={onRename}>
         <Pencil aria-hidden />
         Rename

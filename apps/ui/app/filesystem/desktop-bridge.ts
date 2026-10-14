@@ -45,6 +45,7 @@ type DesktopShell = {
     onAsk(handler: () => void): () => void;
     reportQuiesced(forced: boolean): void;
   };
+  readonly directories?: DesktopBridge['directories'];
   readonly dialog: DesktopBridge['dialog'];
   readonly openFiles: DesktopBridge['openFiles'];
   readonly generatedImages: DesktopBridge['generatedImages'];
@@ -260,6 +261,11 @@ export type DesktopBridge = {
       input: Omit<Parameters<ComputeStoreControl['collect']>[0], 'signal'>,
     ): ReturnType<ComputeStoreControl['collect']>;
   };
+  /** Present only when this shell can open native directories. */
+  readonly directories?: {
+    readonly openLabel: string;
+    open(path: string): Promise<void>;
+  };
   readonly dialog: {
     /**
      * Native directory picker. Resolves to the chosen absolute path, or
@@ -403,6 +409,7 @@ export const desktopBridge = (): DesktopBridge | undefined => {
         throw new Error('Native compute controls are unavailable.');
       },
     },
+    ...(shell.directories === undefined ? {} : { directories: shell.directories }),
     dialog: shell.dialog,
     openFiles: shell.openFiles,
     generatedImages: shell.generatedImages,

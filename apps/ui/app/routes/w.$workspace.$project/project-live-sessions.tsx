@@ -14,6 +14,7 @@ import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { WorkbenchRecordHost } from '#routes/w.$workspace.$project/workbench-record-host.js';
+import { ProjectFilesRouteIntent } from '#routes/w.$workspace.$project/project-files-route-intent.js';
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ViewSettingsSyncHost } from '#routes/w.$workspace.$project/view-settings-sync-host.js';
 import { EntriesSyncHost } from '#routes/w.$workspace.$project/entries-sync-host.js';
@@ -593,6 +594,7 @@ function ProjectSession({
                   <ProjectWorkspaceProvider>
                     <WorkbenchRecordHost />
                     <ProjectShareRouteIntent />
+                    <ProjectFilesRouteIntent />
                     <RevisionRestore />
                     {/* AC14: *Ask chat to resolve* seeds one chat, bound to the
                         conflict its turn is being started for. */}

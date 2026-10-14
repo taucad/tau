@@ -95,7 +95,10 @@ describe('PublicationAccessPanel', () => {
 
     await userEvent.hover(screen.getByRole('button', { name: /revoke friend@example.com/i }));
 
-    expect(await screen.findAllByText('Revoke access')).toHaveLength(2);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Revoke access');
+    expect(screen.getByRole('button', { name: /revoke friend@example.com/i })).toHaveAccessibleDescription(
+      'Revoke access',
+    );
   });
 
   it('adds normalized email recipients through the publication access API', async () => {

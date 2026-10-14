@@ -30,7 +30,7 @@ it builds and links OCCT, is at [github.com/taucad/tau](https://github.com/tauca
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 753 packages, with the license each declares.
+The web and desktop apps include the following 752 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -40,8 +40,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@agentclientprotocol/sdk](https://github.com/agentclientprotocol/typescript-sdk) | 1.3.0 | Apache-2.0 |
 | [@agentclientprotocol/sdk](https://github.com/agentclientprotocol/typescript-sdk) | 1.4.0 | Apache-2.0 |
 | [@agentclientprotocol/sdk](https://github.com/agentclientprotocol/typescript-sdk) | 1.8.0 | Apache-2.0 |
-| [@ai-sdk/gateway](https://github.com/vercel/ai) | 3.0.133 | Apache-2.0 |
-| [@ai-sdk/provider](https://github.com/vercel/ai) | 3.0.10 | Apache-2.0 |
+| [@ai-sdk/gateway](https://github.com/vercel/ai) | 3.0.212 | Apache-2.0 |
 | [@ai-sdk/provider](https://github.com/vercel/ai) | 3.0.18 | Apache-2.0 |
 | [@ai-sdk/provider-utils](https://github.com/vercel/ai) | 4.0.57 | Apache-2.0 |
 | [@anthropic-ai/claude-agent-sdk](https://github.com/anthropics/claude-agent-sdk-typescript) | 0.3.232 | SEE LICENSE IN README.md |
@@ -307,7 +306,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [acorn](https://github.com/acornjs/acorn) | 8.19.0 | MIT |
 | [acorn-walk](https://github.com/acornjs/acorn) | 8.3.5 | MIT |
 | [agent-base](https://github.com/TooTallNate/proxy-agents) | 7.1.4 | MIT |
-| [ai](https://github.com/vercel/ai) | 6.0.208 | Apache-2.0 |
+| [ai](https://github.com/vercel/ai) | 6.0.304 | Apache-2.0 |
 | [ajv](https://github.com/ajv-validator/ajv) | 8.20.0 | MIT |
 | [ajv-formats](https://github.com/ajv-validator/ajv-formats) | 3.0.1 | MIT |
 | [ansi-colors](https://github.com/doowb/ansi-colors) | 4.1.3 | MIT |

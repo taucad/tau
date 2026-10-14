@@ -176,8 +176,8 @@ export async function confirmFlush(flush: () => Promise<boolean>, message: strin
         }, slowWriteMilliseconds);
       }),
     ]);
-  } catch (cause) {
-    throw new Error(message, { cause });
+  } catch (error) {
+    throw new Error(message, { cause: error });
   } finally {
     clearTimeout(timer);
   }

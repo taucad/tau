@@ -123,6 +123,7 @@ export function RecordIssuesAction({ fallbackFocus }: { readonly fallbackFocus: 
   const debug = useFeature('tauDebug');
   const trigger = useRef<HTMLButtonElement>(null);
   const setTrigger = useCallback(
+    // oxlint-disable-next-line no-restricted-types -- React callback refs receive null on detach.
     (node: HTMLButtonElement | null): void => {
       // A settled async reset can remove the trigger after the dialog already returned focus.
       if (!node && trigger.current === document.activeElement) {

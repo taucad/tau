@@ -115,7 +115,9 @@ describe('ProjectWorkspaceProvider', () => {
       expect(screen.getByRole('button', { name: mode === 'moved' ? 'Export' : 'Share' })).toHaveFocus();
       const restore = workspace.restoreRecordRecoveryFocus;
       view.unmount();
-      expect(() => restore()).not.toThrow();
+      expect(() => {
+        restore();
+      }).not.toThrow();
       expect(document.body).toHaveFocus();
     },
   );

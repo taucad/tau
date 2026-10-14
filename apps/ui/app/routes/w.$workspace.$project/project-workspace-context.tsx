@@ -152,8 +152,10 @@ const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelI
 
 export function ProjectWorkspaceProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const { editorRef, mainEntryPath } = useProject();
+  const providerActiveRef = useRef(true);
   const recordRecoveryFocusRef = useRef<HTMLButtonElement>(null);
   const pendingRecordRecoveryFocus = useRef(false);
+  // oxlint-disable-next-line no-restricted-types -- React callback refs receive null on detach.
   const registerRecordRecoveryFocus = useCallback((node: HTMLButtonElement | null): void => {
     if (!node && recordRecoveryFocusRef.current === document.activeElement) {
       pendingRecordRecoveryFocus.current = true;
@@ -189,13 +191,14 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
       pendingFilesRef.current = undefined;
       openerRef.current = undefined;
       committedRouteKeyRef.current = routeKey;
+      pendingRecordRecoveryFocus.current = false;
     }
   }, [routeKey]);
-  const providerActiveRef = useRef(true);
   useLayoutEffect(() => {
     providerActiveRef.current = true;
     return () => {
       providerActiveRef.current = false;
+      pendingRecordRecoveryFocus.current = false;
       pendingFilesRef.current = undefined;
     };
   }, []);

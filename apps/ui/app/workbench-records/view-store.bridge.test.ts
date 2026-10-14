@@ -19,7 +19,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: vi.fn() }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
 
 const seed = workbenchRecords.view.schema.parse({ version: 1, entryPath: 'main.cs', name: 'Original' });
-const serialize = workbenchRecords.view.serialize;
+const { serialize } = workbenchRecords.view;
 const root = 'project';
 const viewId = 'v-bridge';
 const path = `${root}/${workbenchPaths.view(viewId)}`;
@@ -56,8 +56,8 @@ const authority = async () => {
   });
   const filesystem = service.createRootedFileSystem('/');
   await filesystem.writeFile(path, serialize(seed));
-  const connections: ReturnType<typeof createFileSystemBridgePort>[] = [];
-  const proxies: ReturnType<typeof createFileSystemBridgeProxy>[] = [];
+  const connections: Array<ReturnType<typeof createFileSystemBridgePort>> = [];
+  const proxies: Array<ReturnType<typeof createFileSystemBridgeProxy>> = [];
   const connect = async () => {
     const connection = createFileSystemBridgePort(filesystem);
     connections.push(connection);
@@ -175,12 +175,11 @@ describe('view records across real authority connection replacement', () => {
         await fixture.replace();
         expect(await first).toBe(false);
         let closed = false;
-        const closing = deleteViewFile({ root, viewId, files: fixture.files, onError: () => undefined }).then(
-          (result) => {
-            closed = result;
-            return result;
-          },
-        );
+        const closing = (async () => {
+          const result = await deleteViewFile({ root, viewId, files: fixture.files, onError: () => undefined });
+          closed = result;
+          return result;
+        })();
         await Promise.resolve();
         expect(closed).toBe(false);
         release.resolve();

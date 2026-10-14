@@ -141,9 +141,13 @@ describe('entry owner reconciliation', () => {
         await Promise.resolve();
       });
       let refusal: unknown;
-      const waiting = closeFlush!().catch((error: unknown) => {
-        refusal = error;
-      });
+      const waiting = (async () => {
+        try {
+          await closeFlush!();
+        } catch (error) {
+          refusal = error;
+        }
+      })();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(slowWriteMilliseconds);
       });

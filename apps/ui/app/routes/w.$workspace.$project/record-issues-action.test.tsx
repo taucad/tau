@@ -1,12 +1,11 @@
 import { createRef } from 'react';
 import { workbenchRecords } from '@taucad/workbench';
 import { createWorkbenchEntriesStore } from '#workbench-records/entries-store.js';
-import { recordIssueState } from '#workbench-records/record-issues.js';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { publishRecordIssue } from '#workbench-records/record-issues.js';
+import { publishRecordIssue, recordIssueState } from '#workbench-records/record-issues.js';
 import type { RecordIssue } from '#workbench-records/record-issues.js';
 
 const state = vi.hoisted(() => ({ debug: false }));
@@ -197,7 +196,7 @@ describe('RecordIssuesAction', () => {
 it.each([false, true])(
   'should describe invalid entries without guessing the active baseline, prior-valid=%s',
   async (hasBaseline) => {
-    const valid = { version: 1 as const, entries: { 'main.cs': { renderTimeout: 180_000 } } };
+    const valid = { version: 1, entries: { 'main.cs': { renderTimeout: 180_000 } } } as const;
     let bytes = encoder.encode(hasBaseline ? workbenchRecords.entries.serialize(valid) : '{broken');
     const store = createWorkbenchEntriesStore({
       root: '/records-copy',

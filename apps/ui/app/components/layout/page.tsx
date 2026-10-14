@@ -1,4 +1,4 @@
-import { Link, NavigationType, Outlet, useLocation, useNavigationType } from 'react-router';
+import { NavigationType, Outlet, useLocation, useNavigationType } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { CSSProperties, ReactNode, UIEvent } from 'react';

@@ -129,13 +129,15 @@ test('shows independent GitHub connections and repository approval at desktop an
   await target.emulateColorScheme('dark');
   await target.screenshot(undefined, 'github-security-dark');
   await target.setViewport({ width: 390, height: 844 });
-  await target.scrollIntoView(selectors.getByRole('heading', { name: 'GitHub sign-in and Gists', exact: true }));
+  await target.scrollIntoView(selectors.getByRole('button', { name: 'Turn off Gist sharing', exact: true }));
   const overflows = await target.evaluate(() => {
     const region = document.querySelector('[aria-label="Security settings"]');
     return region !== null && region.scrollWidth > region.clientWidth;
   });
   expect(overflows).toBe(false);
   await target.screenshot(undefined, 'github-security-mobile');
+  await target.scrollIntoView(selectors.getByRole('button', { name: 'Manage repositories', exact: true }));
+  await target.screenshot(undefined, 'github-security-repositories-mobile.png');
   await target.navigate('/?settings=repositories');
   await target.expectVisible(selectors.getByRole('heading', { name: 'Repositories', exact: true }));
   await target.screenshot(undefined, 'github-repositories-mobile');
@@ -163,4 +165,30 @@ test('shows independent GitHub connections and repository approval at desktop an
   await target.screenshot(undefined, 'github-repository-enabled-mobile.png');
   await target.click(selectors.getByRole('button', { name: 'Disable writes', exact: true }));
   await target.expectVisible(selectors.getByRole('button', { name: 'Enable writes', exact: true }));
+});
+
+test('keeps the Share pane in sync with Gist use without publishing or exposing a token', async () => {
+  await target.commands.uiStartLinkedGithubFixture();
+  await target.setViewport({ width: 1280, height: 900 });
+  await target.navigate('/?settings=security');
+  await target.expectVisible(selectors.getByRole('button', { name: 'Turn off Gist sharing', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Turn off Gist sharing', exact: true }));
+  await target.expectVisible(selectors.getByRole('button', { name: 'Enable Gist sharing', exact: true }));
+  await openFixture('');
+  await target.click(selectors.getByRole('button', { name: 'Share', exact: true }).first());
+  const share = selectors.getByRole('region', { name: 'Share project' });
+  await target.expectVisible(share);
+  await target.click(share.getByRole('button', { name: /^Share with/u }));
+  await target.click(selectors.getByRole('option', { name: 'GitHub Gist', exact: true }));
+  await target.expectVisible(share.getByRole('button', { name: 'Manage Gist sharing', exact: true }));
+  await target.screenshot(undefined, 'github-share-disabled.png');
+  await target.click(share.getByRole('button', { name: 'Manage Gist sharing', exact: true }));
+  await target.expectVisible(selectors.getByRole('button', { name: 'Enable Gist sharing', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Enable Gist sharing', exact: true }));
+  await target.expectVisible(selectors.getByRole('button', { name: 'Turn off Gist sharing', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Back to app', exact: true }));
+  await target.expectVisible(share.getByRole('button', { name: 'Create Gist and copy link', exact: true }));
+  await target.screenshot(undefined, 'github-share-ready.png');
+  const state = await target.commands.uiReadLinkedGithubFixture();
+  expect(state.unanswered.some((path) => /get-access-token|refresh-token|\/github\/gists$/u.test(path))).toBe(false);
 });

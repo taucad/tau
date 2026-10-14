@@ -1,5 +1,5 @@
 name: 'Prepare GeoSpec engine products'
-description: 'Darwin ARM64, after setup-nx with Node 24.10.0: provision the pinned toolchains, restore retained preparation and run prepare-geospec-ci-artifacts'
+description: 'Darwin ARM64, after setup-nx with native-node-version 24.10.0 and tooling Node 24.20.0: provision the pinned toolchains, restore retained preparation and run prepare-geospec-ci-artifacts'
 
 # `prepare-geospec-ci-artifacts` reuses a verified transport already in the checkout,
 # reassembles its delivery for the current source, or builds everything. Building means

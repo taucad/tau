@@ -120,7 +120,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
+          native-node-version: '24.10.0'
           save-pnpm-store: 'false'
 
       - name: Prepare GeoSpec engine products
@@ -208,7 +208,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '24.20.0' }}
+          native-node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '' }}
 
       - name: Download same-run GeoSpec transport
         if: env.SPIKE_GATE == 'true' && needs.plan.outputs.geospec-required == 'true'

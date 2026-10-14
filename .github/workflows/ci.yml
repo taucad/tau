@@ -210,7 +210,7 @@ jobs:
         name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
+          native-node-version: '24.10.0'
           save-pnpm-store: 'false'
 
       - &prepare-geospec
@@ -323,7 +323,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
+          native-node-version: '24.10.0'
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
   # typecheck, build and its checks, and three test shards. One runner running every
@@ -357,7 +357,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '24.20.0' }}
+          native-node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '' }}
 
       - &download-geospec
         name: Download same-run GeoSpec transport

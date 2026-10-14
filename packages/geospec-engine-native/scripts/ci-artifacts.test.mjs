@@ -305,7 +305,7 @@ void test('explicit delivery cache remains the exact selected path', (context) =
   const producer = context.mock.method(
     childProcess,
     'spawnSync',
-    /** @type {(executable: string, args: string[], options: {env: {GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_DELIVERY_GENERATION?: string}}) => {status: number, stdout?: string}} */
+    /** @type {(executable: string, args: string[], options: {env: {GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_HOST_TOOL_PATH?: string, GEOSPEC_DELIVERY_GENERATION?: string}}) => {status: number, stdout?: string}} */
     (executable, _args, options) => {
       if (executable === 'python3') {
         return { status: 0, stdout: `${'a'.repeat(64)}\n` };
@@ -516,6 +516,9 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     childProcess,
     'execFileSync',
     /** @type {(executable: string, args: string[]) => string} */ (executable, args) => {
+      if (executable === process.execPath && args[0] === '--version') {
+        return process.version;
+      }
       assert.equal(executable, 'git');
       if (args[0] === 'rev-parse') {
         return `${revision}\n`;
@@ -548,7 +551,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
   context.mock.method(
     childProcess,
     'spawnSync',
-    /** @type {(executable: string, args: string[], options: {cwd: string, stdio: import('node:child_process').StdioOptions, env: {PATH?: string, CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string, GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_DELIVERY_GENERATION?: string, GEOSPEC_OCCT_PRODUCER_BUILDER?: string, GEOSPEC_OCCT_PRODUCER_RECIPE?: string, GIT_CEILING_DIRECTORIES?: string}}) => {status: number | null, stdout?: string | Buffer}} */ (
+    /** @type {(executable: string, args: string[], options: {cwd: string, stdio: import('node:child_process').StdioOptions, env: {PATH?: string, CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string, GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_HOST_TOOL_PATH?: string, GEOSPEC_DELIVERY_GENERATION?: string, GEOSPEC_OCCT_PRODUCER_BUILDER?: string, GEOSPEC_OCCT_PRODUCER_RECIPE?: string, GIT_CEILING_DIRECTORIES?: string}}) => {status: number | null, stdout?: string | Buffer}} */ (
       executable,
       args,
       options,
@@ -589,7 +592,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
         /** @type {unknown} */
         const invocationData = JSON.parse(readFileSync(args[3], 'utf8'));
         const invocation =
-          /** @type {{exitCode: number, environment: {PATH?: string, CARGO_TARGET_DIR: string, GEOSPEC_OCCT_PREFIX: string}, prefixBuilder: string, addon: {sha256: string}, orchestratorNode: {path: string, version: string, sha256: string}}} */ (
+          /** @type {{exitCode: number, environment: {PATH?: string, CARGO_TARGET_DIR: string, GEOSPEC_OCCT_PREFIX: string}, prefixBuilder: string, addon: {sha256: string}, orchestratorNode: {path: string, version: string, sha256: string}, nativeNode: {path: string, version: string, sha256: string}}} */ (
             invocationData
           );
         assert.equal(invocation.exitCode, 0);
@@ -597,6 +600,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
         assert.equal(invocation.orchestratorNode.path, process.execPath);
         assert.equal(invocation.orchestratorNode.version, process.version);
         assert.equal(invocation.orchestratorNode.sha256, digest(readFileSync(process.execPath)));
+        assert.deepEqual(invocation.nativeNode, invocation.orchestratorNode);
         assert.equal(invocation.prefixBuilder, nativeBuilder);
         assert.equal(invocation.environment.GEOSPEC_OCCT_PREFIX, join(nativeCache, 'occt-native/install'));
         assert.ok(invocation.environment.CARGO_TARGET_DIR.includes('/ci-node-target-'));
@@ -644,7 +648,8 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       targets.push(target);
       assert.equal(options.env.GEOSPEC_OCCT_PREFIX, join(nativeCache, 'occt-native/install'));
       if (target === 'prepare-delivery:reuse-native') {
-        assert.equal(options.env.PATH, nativePrefixPath);
+        assert.equal(options.env.PATH, productPath);
+        assert.equal(options.env.GEOSPEC_HOST_TOOL_PATH, nativePrefixPath);
         assert.equal(options.env.GEOSPEC_DELIVERY_CACHE, nativeCache);
         assert.equal(options.env.GEOSPEC_OCCT_PRODUCER_BUILDER, nativeBuilder);
         assert.equal(options.env.GEOSPEC_OCCT_PRODUCER_RECIPE, join(producer, 'native-producing-recipe.json'));

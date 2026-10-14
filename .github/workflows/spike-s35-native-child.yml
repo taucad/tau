@@ -58,7 +58,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
+          native-node-version: '24.10.0'
           save-pnpm-store: 'false'
 
       - name: Setup Linux sandbox prerequisites

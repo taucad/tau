@@ -349,7 +349,7 @@ const config: KnipConfig = {
         'bindings/node/current-profile.test.mjs',
         'bindings/browser-conformance/run-browser-conformance.ts',
         'scripts/{build-mixed-wasm,prepare-legacy-reference}.mts',
-        'scripts/ci-artifacts{,.test}.mjs',
+        'scripts/{ci-artifacts,native-node}{,.test}.mjs',
         // `run.ts` starts `worker.ts` by URL; run-browser-conformance serves `app/run.ts` as its page script.
         'bench/worker.ts',
         'bindings/browser-conformance/app/run.ts',
@@ -360,8 +360,8 @@ const config: KnipConfig = {
       ignore: ['bench/fixtures/performance-lab/workspace/**'],
       // Both resolve through package.json `imports` into binding output that the build generates.
       ignoreUnresolved: ['#native-binding', '#mixed-wasm-binding'],
-      // `build-node` runs `pnpm --dir packages/geospec-engine-native exec napi build`; knip attributes
-      // that root-level command to the root workspace.
+      // The workspace-root `build-node` command dispatches the NAPI CLI through native-node.mjs;
+      // its manifest is resolved dynamically rather than imported as a module.
       ignoreDependencies: ['@napi-rs/cli'],
     },
     'packages/host': {

@@ -39,6 +39,31 @@ materials = load_script('generate-delivery-materials')
 
 
 class DeploymentTargetTest(unittest.TestCase):
+    def test_native_node_selector_keeps_tooling_path_and_validates_executable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            native = Path(temporary) / 'native-node'
+            native.write_text('inert native tool')
+            native.chmod(0o755)
+            with patch.dict(os.environ, GEOSPEC_NATIVE_NODE=str(native), PATH='/tooling-node24.20'):
+                self.assertEqual(prepare.selected_host_tool('node'), native.resolve())
+                self.assertEqual(materials.selected_executable('node'), native.resolve())
+                self.assertEqual(os.environ['PATH'], '/tooling-node24.20')
+            for invalid in ['relative-node', str(native.parent), str(native.parent / 'missing')]:
+                with patch.dict(os.environ, GEOSPEC_NATIVE_NODE=invalid):
+                    with self.assertRaisesRegex(ValueError, 'absolute executable'):
+                        prepare.selected_host_tool('node')
+            native.chmod(0o644)
+            with patch.dict(os.environ, GEOSPEC_NATIVE_NODE=str(native)):
+                with self.assertRaisesRegex(ValueError, 'absolute executable'):
+                    prepare.selected_host_tool('node')
+
+    def test_host_tool_path_is_scoped_discovery_not_orchestration_path(self):
+        with patch.dict(os.environ, GEOSPEC_HOST_TOOL_PATH='/native-tools', PATH='/tooling-node24.20'), \
+                patch.object(prepare.shutil, 'which', return_value='/native-tools/cmake') as which:
+            self.assertEqual(prepare.selected_host_tool('cmake'), Path('/native-tools/cmake'))
+            which.assert_called_once_with('cmake', path='/native-tools')
+            self.assertEqual(os.environ['PATH'], '/tooling-node24.20')
+
     def test_should_verify_relocated_mixed_sources_without_relabeling_external_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / 'consumer'
@@ -887,6 +912,15 @@ class PreparationContractTest(unittest.TestCase):
                 patch.object(prepare, 'support_payload', side_effect=lambda _roots: support.copy()):
             base = prepare.delivery_generation()
             self.assertEqual(prepare.delivery_generation(), base)
+            self.builder.chmod(0o755)
+            with patch.dict(os.environ, GEOSPEC_NATIVE_NODE=str(self.builder), PATH='/different/tooling-node24.20'):
+                self.assertEqual(prepare.delivery_generation(), base,
+                                 'explicit same native tool preserves the compiler generation')
+                other_node = self.root / 'different-node'
+                other_node.write_text('different native node bytes')
+                other_node.chmod(0o755)
+                with patch.dict(os.environ, GEOSPEC_NATIVE_NODE=str(other_node)):
+                    self.assertNotEqual(prepare.delivery_generation(), base)
             sources['selected.patch'] = 'd' * 64
             self.assertNotEqual(prepare.delivery_generation(), base)
             sources['selected.patch'] = 'b' * 64

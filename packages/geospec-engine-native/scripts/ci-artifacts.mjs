@@ -7,7 +7,7 @@
  * GEOSPEC_NATIVE_DELIVERY_CACHE selects independent retained native-prefix reuse;
  * GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER/RECIPE and GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES
  * apply only to that prefix's verification. Mixed selectors remain independent.
- * GEOSPEC_NATIVE_PREFIX_PATH overrides PATH only for native-prefix verification.
+ * GEOSPEC_NATIVE_PREFIX_PATH selects host tools only inside native-prefix verification; Nx keeps its caller PATH.
  * Output: out/artifacts/geospec-native-engine/ci/{inventory,mixed-build-receipt,mixed-inputs,mixed-commands}.json;
  * product-key prints the digest of the product source closure on any platform, for cross-run reuse.
  * Exit: 0 complete and matching; 1 missing, changed or failed prerequisite.
@@ -36,6 +36,8 @@ import { homedir } from 'node:os';
 import process from 'node:process';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
+// oxlint-disable-next-line no-restricted-imports -- Standalone producer consumes its co-located runtime selector without a package export.
+import { nativeNode } from './native-node.mjs';
 
 const packagePath = 'packages/geospec-engine-native';
 const transportPath = 'out/artifacts/geospec-native-engine/ci';
@@ -921,6 +923,10 @@ export const prepareArtifacts = (root) => {
             source,
             addon: fileRecord(root, outputs[2]),
             orchestratorNode: { ...fileRecord(root, process.execPath), version: process.version },
+            nativeNode: {
+              ...fileRecord(root, nativeNode()),
+              version: childProcess.execFileSync(nativeNode(), ['--version'], { encoding: 'utf8' }).trim(),
+            },
             environment: {
               PATH: environment.PATH,
               CARGO_TARGET_DIR: nativeTarget,
@@ -947,10 +953,10 @@ export const prepareArtifacts = (root) => {
   if (reusePrefixes) {
     assert.ok(
       executableOnPath('node', process.env['GEOSPEC_NATIVE_PREFIX_PATH'] ?? process.env['PATH']),
-      'Native prefix PATH lacks executable node for nested Nx and env-node scripts.',
+      'Native prefix tool path lacks executable node for native tool discovery.',
     );
     run('prepare-delivery:reuse-native', {
-      PATH: process.env['GEOSPEC_NATIVE_PREFIX_PATH'] ?? process.env['PATH'],
+      GEOSPEC_HOST_TOOL_PATH: process.env['GEOSPEC_NATIVE_PREFIX_PATH'] ?? process.env['PATH'],
       GEOSPEC_DELIVERY_CACHE: nativeCache,
       GEOSPEC_DELIVERY_GENERATION: undefined,
       GEOSPEC_OCCT_PRODUCER_BUILDER: nativeBuilder,
@@ -1010,7 +1016,7 @@ export const prepareArtifacts = (root) => {
       root,
       resolve(root, transportPath, 'native-invocation.json'),
       proofDirectory,
-      process.execPath,
+      nativeNode(),
     ],
     {
       cwd: root,

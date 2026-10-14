@@ -279,7 +279,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
+          native-node-version: '24.10.0'
 
       # The GeoSpec native payload is produced on this host, as publish.yml does.
       - name: Setup producer Python

@@ -59,7 +59,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
+          native-node-version: '24.10.0'
 
       - name: Prepare GeoSpec engine products
         id: prepare

@@ -16,7 +16,9 @@
     "ci-artifacts.mjs",
     "ci-artifacts.test.mjs",
     "assemble-package-mt.test.mjs",
-    "build-mixed-wasm.test.mjs"
+    "build-mixed-wasm.test.mjs",
+    "native-node.mjs",
+    "native-node.test.mjs"
   ],
   "include": [],
   "references": []

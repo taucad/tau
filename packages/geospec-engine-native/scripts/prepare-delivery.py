@@ -22,6 +22,7 @@ legacy SDK support rows before excluding the unused default Emscripten cache.
 GEOSPEC_OCCT_JOBS defaults to 2; CARGO_BUILD_JOBS, EMCC_CORES and BINARYEN_CORES
 default to that bound. All four scheduling controls must be positive integers.
 GEOSPEC_GIT selects the exact Git executable, including verifier subprocesses.
+GEOSPEC_NATIVE_NODE selects the native compiler/emulator Node independently of Nx.
 All default paths derive from this checkout, with no Brain/spike dependency.
 Exit: 0 success; 1 unavailable/not-ready/invalid; 2 argument error.
 """
@@ -217,15 +218,24 @@ def prepare_sources():
                       'sources': {name: len(files(CACHE / 'sources' / name)) for name in ['occt', *RECIPE['headers']]}}))
 
 
+def selected_host_tool(name):
+    selector = os.environ.get('GEOSPEC_NATIVE_NODE') if name == 'node' else None
+    if selector is not None:
+        selected = Path(selector)
+        require(selected.is_absolute() and selected.is_file() and os.access(selected, os.X_OK),
+                'GEOSPEC_NATIVE_NODE must name an absolute executable file')
+        return selected.resolve()
+    command = os.environ.get('GEOSPEC_GIT', 'git') if name == 'git' else name
+    host_path = os.environ.get('GEOSPEC_HOST_TOOL_PATH')
+    found = shutil.which(command, path=host_path) if host_path is not None else shutil.which(command)
+    require(found is not None, f'Missing prerequisite: {name}')
+    # rustup dispatches on argv[0]; do not resolve a Homebrew rustup-init link.
+    return Path(found).absolute() if name == 'rustup' else Path(found).resolve()
+
+
 def host_tool_paths():
-    paths = {}
-    for name in ['node', 'python3', 'cmake', 'ninja', 'xcrun', 'bash', 'git', 'rustup']:
-        found = shutil.which(os.environ.get('GEOSPEC_GIT', 'git') if name == 'git' else name)
-        require(found is not None, f'Missing prerequisite: {name}')
-        # rustup is a multicall binary that dispatches on argv[0]; Homebrew links `rustup` to
-        # `rustup-init`, so resolving the link would run the installer.
-        paths[name] = Path(found).absolute() if name == 'rustup' else Path(found).resolve()
-    return paths
+    return {name: selected_host_tool(name)
+            for name in ['node', 'python3', 'cmake', 'ninja', 'xcrun', 'bash', 'git', 'rustup']}
 
 
 def tool_paths():

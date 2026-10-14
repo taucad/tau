@@ -181,7 +181,10 @@ jobs:
             const metadataUrl = 'https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json';
             const metadata = await (await fetch(metadataUrl)).json();
             const release = metadata.releases.find((entry) => entry.runtime?.version === '10.0.11');
-            const file = release.runtime.files.find((entry) => entry.rid === 'osx-arm64' && entry.name.endsWith('.tar.gz'));
+            // Apphost packs share the RID and suffix but contain only packs/, not the dotnet muxer.
+            const files = release?.runtime.files.filter((entry) => entry.rid === 'osx-arm64' && entry.name === 'dotnet-runtime-osx-arm64.tar.gz') ?? [];
+            if (files.length !== 1) throw new Error('Missing or ambiguous .NET runtime 10.0.11 osx-arm64 archive');
+            const [file] = files;
             const { bytes, milliseconds } = await fetchBytes(file.url);
             const sha512 = hex('sha512', bytes);
             if (sha512 !== file.hash.toLowerCase()) throw new Error(`.NET runtime digest mismatch ${sha512}`);
@@ -627,7 +630,7 @@ jobs:
         name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
+          native-node-version: '24.10.0'
           save-pnpm-store: 'false'
 
       - &install-uv
@@ -934,6 +937,9 @@ jobs:
           mkdir -p "$S15/store/dotnet" "$S15/store/layer" "$S15/store-xattrs/dotnet" "$S15/picogk-sc" "$S15/app"
           tar --no-xattrs --no-mac-metadata -xzf "$S15/downloads/archives/dotnet-runtime-10.0.11-osx-arm64.tar.gz" -C "$S15/store/dotnet"
           tar -xzf "$S15/downloads/archives/dotnet-runtime-10.0.11-osx-arm64.tar.gz" -C "$S15/store-xattrs/dotnet"
+          test -x "$S15/store/dotnet/dotnet"
+          test -f "$S15/store/dotnet/host/fxr/10.0.11/libhostfxr.dylib"
+          test -x "$S15/store-xattrs/dotnet/dotnet"
           tar --no-xattrs --no-mac-metadata -xzf "$S15/layer-archives/picogk-fd-layer.tar.gz" -C "$S15/store/layer"
           tar --no-xattrs --no-mac-metadata -xzf "$S15/layer-archives/picogk-darwin-arm64.tar.gz" -C "$S15/picogk-sc" --strip-components=1
           ditto -x -k "$S15/tau-app/Tau-macos-arm64.zip" "$S15/app"

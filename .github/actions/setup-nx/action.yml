@@ -6,6 +6,10 @@ inputs:
     description: 'Node.js version used by this job. 24.21 segfaults Nx as it exits, so the default stays on 24.20.0.'
     required: false
     default: '24.20.0'
+  native-node-version:
+    description: 'Optional Node.js version for GeoSpec native compiler/emulator tools; pnpm and Nx keep node-version.'
+    required: false
+    default: ''
   save-pnpm-store:
     description: "'false' restores the pnpm store without saving it after the job, for jobs whose end gates a workflow"
     required: false
@@ -19,6 +23,19 @@ runs:
     # Learn more at https://nx.dev/ci/reference/nx-cloud-cli#npx-nxcloud-startcirun
     # Connect your workspace by running "nx connect" and uncomment this
     # - run: npx nx-cloud start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="build"
+
+    # Capture the native executable before restoring the tooling runtime. Never
+    # put this older runtime on PATH around pnpm or nested Nx graph discovery.
+    - name: Setup native Node.js
+      if: inputs.native-node-version != ''
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: ${{ inputs.native-node-version }}
+
+    - name: Capture native Node.js executable
+      if: inputs.native-node-version != ''
+      shell: bash
+      run: node --input-type=module -e 'import {appendFileSync} from "node:fs"; appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_NATIVE_NODE=${process.execPath}\n`);'
 
     - name: Setup Node.js
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0

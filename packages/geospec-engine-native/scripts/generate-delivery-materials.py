@@ -94,6 +94,8 @@ def run(command):
 
 
 def selected_executable(name):
+    if name == 'node':
+        return prepare.selected_host_tool(name)
     found = shutil.which(name)
     require(found is not None, f'Missing required executable: {name}')
     # rustup dispatches on argv[0], and Homebrew links `rustup` to `rustup-init`.

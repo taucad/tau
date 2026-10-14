@@ -60,7 +60,7 @@ const recordSchema = z.strictObject({
 });
 const emptyRecord: ChatMessageQueueRecord = { version: 1, items: [] };
 
-const validate = async (input: unknown): Promise<ChatMessageQueueRecord> => {
+const validate = async (input: unknown, source: 'saved' | 'updated'): Promise<ChatMessageQueueRecord> => {
   const record = recordSchema.parse(input);
   if (record.items.length === 0) {
     return { ...record, items: [] };
@@ -79,7 +79,11 @@ const validate = async (input: unknown): Promise<ChatMessageQueueRecord> => {
     ids.add(item.id);
     requests.add(item.requestId);
     if (message.parts.some((part) => part.type === 'file' && attachmentReferenceOf(part) === undefined)) {
-      throw new Error('Save attachments before queueing this message.');
+      throw new Error(
+        source === 'saved'
+          ? 'Queued messages could not be read. The saved file has been preserved.'
+          : 'Save attachments before queueing this message.',
+      );
     }
     if (
       item.command !== undefined &&
@@ -116,7 +120,7 @@ export const createChatMessageQueueStore = (
 ): ChatMessageQueueStore => {
   const read = async (): Promise<ChatMessageQueueRecord> => {
     try {
-      return await validate(JSON.parse(new TextDecoder().decode(await client.readFile(path))));
+      return await validate(JSON.parse(new TextDecoder().decode(await client.readFile(path))), 'saved');
     } catch (error) {
       if (isNotFound(error)) {
         return emptyRecord;
@@ -133,7 +137,7 @@ export const createChatMessageQueueStore = (
       if (next === current) {
         return current;
       }
-      const valid = await validate(next);
+      const valid = await validate(next, 'updated');
       await client.writeFile(path, new TextEncoder().encode(`${JSON.stringify(valid)}\n`));
       return valid;
     });

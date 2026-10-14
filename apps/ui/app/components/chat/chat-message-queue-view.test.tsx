@@ -19,6 +19,25 @@ const fixture = (overrides: Partial<ChatMessageQueueProps> = {}): ChatMessageQue
   ...overrides,
 });
 describe('queued message adornment', () => {
+  it('should ignore keyboard reordering when delivery locks a focused handle', async () => {
+    const user = userEvent.setup();
+    const props = fixture();
+    const items: ChatMessageQueueProps['items'] = [
+      ...props.items,
+      {
+        id: 'two',
+        requestId: 'req_two',
+        message: { id: 'two', role: 'user', parts: [{ type: 'text', text: 'Second' }] },
+      },
+    ];
+    const { rerender } = render(<ChatMessageQueueView {...props} items={items} />);
+    const handle = screen.getByRole('button', { name: 'Reorder queued message 2' });
+    handle.focus();
+    rerender(<ChatMessageQueueView {...props} items={items} sendingId='one' />);
+    await user.keyboard('{ArrowUp}');
+    expect(props.onMove).not.toHaveBeenCalled();
+  });
+
   it('should reorder from the handle with the keyboard and remove Move to front', async () => {
     const user = userEvent.setup();
     const props = fixture();

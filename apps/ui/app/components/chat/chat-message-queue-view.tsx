@@ -196,6 +196,9 @@ export function ChatMessageQueueView({
                       pointer.current = undefined;
                       setDrag(undefined);
                     }
+                    if (locked || reorderLocked) {
+                      return;
+                    }
                     if (event.key === 'ArrowUp' && index > 0) {
                       event.preventDefault();
                       act(item.id, 'Moving…', async () => onMove(item.id, items[index - 1]?.id));

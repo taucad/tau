@@ -31,6 +31,21 @@ const fixture = () => {
   return { files, client, path, open: () => createChatMessageQueueStore(client, path, lock) };
 };
 describe('durable chat message queue', () => {
+  it('should report invalid saved attachments as a recovery error and preserve the bytes', async () => {
+    const f = fixture();
+    const invalid = item('one');
+    invalid.message.parts.push({ type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AA==' });
+    await expect(f.open().enqueue(invalid)).rejects.toThrow('Save attachments before queueing this message.');
+    const bytes = new TextEncoder().encode(JSON.stringify({ version: 1, items: [invalid] }));
+    f.files.set(f.path, bytes);
+    await expect(f.open().read()).rejects.toThrow(
+      'Queued messages could not be read. The saved file has been preserved.',
+    );
+    await expect(f.open().enqueue(item('two'))).rejects.toThrow('The saved file has been preserved.');
+    expect(f.files.get(f.path)).toEqual(bytes);
+    expect(f.client.writeFile).not.toHaveBeenCalled();
+  });
+
   it('should persist arbitrary moves without replacing identities or concurrent submissions', async () => {
     const f = fixture();
     const a = f.open();

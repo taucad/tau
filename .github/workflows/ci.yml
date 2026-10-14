@@ -197,7 +197,7 @@ jobs:
     name: Produce current GeoSpec artifacts
     needs: [plan]
     if: needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached != 'true'
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - &checkout-darwin
         name: Checkout
@@ -265,7 +265,7 @@ jobs:
       !cancelled() && needs.plan.result == 'success' &&
       needs.plan.outputs.geospec-required == 'true' &&
       needs.plan.outputs.geospec-darwin-tests == 'true'
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - *checkout-darwin
       - *setup-nx-darwin
@@ -317,7 +317,7 @@ jobs:
     name: Save the macOS pnpm store
     needs: [geospec-producer, geospec-darwin]
     if: ${{ !cancelled() && github.event_name == 'push' }}
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - *checkout-darwin
       - name: Setup Nx Environment

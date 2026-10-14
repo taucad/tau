@@ -38,6 +38,7 @@ import {
   desktopPackageChannel,
   excludesBuildDiagnostics,
   resolveRuntimePackages,
+  runtimeAsarOptions,
   stageRuntimePackages,
 } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
@@ -316,7 +317,7 @@ try {
      * and writes this key afterwards, and `TauHost-Info.plist` declares document
      * types and UTIs only, never a URL type. */
     protocols: [{ name: 'Tau', schemes: ['tau'] }],
-    asar: { unpack: '**/{*.node,bin/esbuild,@agentclientprotocol/**,@img/**}' },
+    asar: runtimeAsarOptions,
     prune: false,
   });
 

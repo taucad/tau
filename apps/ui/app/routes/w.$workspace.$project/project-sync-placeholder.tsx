@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router';
-import { CloudDownload, CloudOff, CircleAlert } from 'lucide-react';
+import { CloudOff, CircleAlert } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
@@ -60,8 +60,6 @@ export function ProjectSyncPlaceholder({ state }: { readonly state: ProjectAvail
         <CloudOff className='size-8 text-muted-foreground' />
       ) : isFailure ? (
         <CircleAlert className='size-8 text-muted-foreground' />
-      ) : state === 'downloading' ? (
-        <CloudDownload className='size-8 text-muted-foreground' />
       ) : (
         <Loader className='size-8 motion-reduce:animate-none' />
       )}

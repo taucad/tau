@@ -238,7 +238,7 @@ export function ChatMessageQueueView({
                     {attachments}
                   </span>
                 ) : null}
-                <div className='flex shrink-0 items-center gap-0 text-muted-foreground/90 @max-[14rem]/message-queue:basis-full @max-[14rem]/message-queue:flex-wrap @max-[14rem]/message-queue:justify-end'>
+                <div className='flex shrink-0 items-center gap-0.5 text-muted-foreground/90 @max-[14rem]/message-queue:basis-full @max-[14rem]/message-queue:flex-wrap @max-[14rem]/message-queue:justify-end'>
                   <Button
                     variant='ghost'
                     size='xs'

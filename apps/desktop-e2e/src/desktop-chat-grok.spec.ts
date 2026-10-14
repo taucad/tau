@@ -1,0 +1,102 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, expect, test } from 'vitest';
+import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
+import type { DesktopSession } from '#support/desktop-app.js';
+import { evaluateModelOutputSchema } from '@taucad/chat';
+import { latestCompletedRun, toolResult } from '#support/acp-evidence.js';
+import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
+import {
+  activeChatId,
+  connectPickedFolder,
+  expectVisible,
+  selectAgent,
+  selectKernel,
+  sendPrompt,
+  submitPrompt,
+} from '#support/scenario.js';
+
+let session: DesktopSession | undefined;
+let seededEmail: string | undefined;
+
+afterEach(async () => {
+  await session?.close();
+  session = undefined;
+  if (seededEmail) {
+    await deleteTauTestUser(seededEmail);
+    seededEmail = undefined;
+  }
+});
+
+// Explicit opt-in: this test uses the operator's cached Grok login and quota.
+test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
+  'should answer and retain context through the Grok composer',
+  async () => {
+    const account = tauTestAccount('grok');
+    seededEmail = account.email;
+    const token = await seedTauTestUser(account);
+    const packaged = process.env['TAU_E2E_GROK_PACKAGED'] === 'true';
+    session = await launchDesktopApp({ token, visible: true, packaged });
+    if (packaged) {
+      await authenticatePackagedDesktop(session, token);
+    }
+    const { page } = session;
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    try {
+      await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+      await selectKernel(page, 'Build123d');
+      await connectPickedFolder(session);
+      expect(await selectAgent(page, 'Grok Build', 'Grok 4.7')).toMatch(/^Agent and model: Grok Build, /u);
+      const slug = await submitPrompt(
+        page,
+        'Remember the number 8127. Reply with the single word pong. Do not use tools.',
+      );
+      await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
+      const chatId = activeChatId(page);
+      const eventsPath = join(session.pickedDirectory, slug, '.tau/chats', chatId, 'events.jsonl');
+      const readEvents = (): string => readFileSync(eventsPath, 'utf8');
+      await expect.poll(readEvents, { timeout: 180_000 }).toMatch(/"state":"completed"/u);
+      await expectVisible(page.getByRole('article').getByText(/^pong[.!]?$/iu));
+      const firstRun = latestCompletedRun(readEvents());
+      await sendPrompt(page, 'What number did I ask you to remember? Reply with only the number.');
+      await expect.poll(() => latestCompletedRun(readEvents()), { timeout: 180_000 }).not.toBe(firstRun);
+      await expectVisible(page.getByRole('article').getByText(/^8127[.!]?$/u));
+      expect(readEvents()).toContain('"agentId":"grok"');
+      await session.capture('grok-composer-continuity');
+      const secondRun = latestCompletedRun(readEvents());
+      await sendPrompt(
+        page,
+        'Use the cad-build123d skill to create a simple 20 mm cube in main.py. Check it with Tau evaluate_model and briefly report the result. Do not export anything.',
+      );
+      let approvals = 0;
+      await expect
+        .poll(
+          async () => {
+            const approve = page.getByRole('button', { name: /^(?:Yes|allow once)$/u });
+            if (await approve.isVisible()) {
+              if (approvals === 0) {
+                await session?.capture('grok-composer-approval');
+              }
+              await approve.click();
+              approvals += 1;
+            }
+            return latestCompletedRun(readEvents());
+          },
+          { timeout: 600_000 },
+        )
+        .not.toBe(secondRun);
+      expect(approvals).toBeGreaterThan(0);
+      const cadRun = latestCompletedRun(readEvents());
+      expect(
+        evaluateModelOutputSchema.parse(
+          toolResult(readEvents(), { runId: cadRun, toolName: 'evaluate_model', targetFile: 'main.py' }),
+        ),
+      ).toMatchObject({ status: 'ready', kernelIssues: [] });
+      expect(readEvents()).toContain('cad-build123d');
+      await session.capture('grok-composer-cad');
+    } catch (error) {
+      await session.capture('grok-composer-failure');
+      throw error;
+    }
+  },
+);

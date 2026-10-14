@@ -23,7 +23,7 @@ import { reduceEventLog } from '@taucad/agent-host';
 import type { AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 
 import { openAcpSession } from '#acp/acp-session.js';
-import { chooseOption, createTurnProjection } from '#acp/session.js';
+import { chooseOption, createTurnProjection, promptUsageOf } from '#acp/session.js';
 import type { AcpPromptTurn } from '#acp/session.js';
 import type { AcpAdapter } from '#acp/registry.js';
 
@@ -37,6 +37,132 @@ const stubTurn = (appended: ExternalAgentLogEvent[] = []): AcpPromptTurn => ({
   publishLive: async () => undefined,
   signal: new AbortController().signal,
 });
+
+it('should normalize a qualified Grok MCP call and its JSON output', async () => {
+  const output = { status: 'ready' };
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'grok-mcp',
+        title: 'use_tool',
+        rawInput: { tool_name: 'tau__evaluate_model', tool_input: { targetFile: 'main.py' } },
+        _meta: { 'x.ai/tool': { version: 1, name: 'use_tool', namespace: 'grok_build' } },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'grok-mcp',
+        title: 'tau__evaluate_model',
+        status: 'completed',
+        rawOutput: {
+          type: 'MCP',
+          tool_name: 'evaluate_model',
+          server_name: 'tau',
+          output: { OkayOutput: JSON.stringify(output) },
+        },
+      },
+    ],
+    'grok',
+    undefined,
+    'tau',
+  );
+  expect(messages[0]).toMatchObject({
+    role: 'tool-input',
+    toolName: 'evaluate_model',
+    content: { targetFile: 'main.py' },
+    metadata: { tauInternal: { presentation: 'tau-mcp' } },
+  });
+  expect(messages[1]).toMatchObject({
+    role: 'tool-output',
+    toolName: 'evaluate_model',
+    content: output,
+    isError: false,
+  });
+});
+
+it('should prefer standard usage and ignore malformed or foreign Grok metadata', () => {
+  const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
+  const response = { stopReason: 'end_turn', _meta: { usage } } as const;
+  expect(promptUsageOf({ ...response, usage }, 'grok', usage)).toEqual(usage);
+  expect(promptUsageOf(response, 'codex', undefined)).toBeUndefined();
+  expect(
+    promptUsageOf({ ...response, _meta: { usage: { ...usage, inputTokens: -1 } } }, 'grok', undefined),
+  ).toBeUndefined();
+  expect(promptUsageOf({ ...response, _meta: { usage: { totalTokens: 12 } } }, 'grok', undefined)).toBeUndefined();
+});
+
+it.each(['foreign-server', 'foreign-tool', 'invalid-json', 'invalid-schema', 'missing-output'])(
+  'should refuse a Grok MCP %s result',
+  async (variant) => {
+    const messages = await project(
+      [
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'grok-mcp',
+          title: 'use_tool',
+          rawInput: { tool_name: 'tau__evaluate_model', tool_input: { targetFile: 'main.py' } },
+          _meta: { 'x.ai/tool': { version: 1, name: 'use_tool', namespace: 'grok_build' } },
+        },
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'grok-mcp',
+          status: 'completed',
+          rawOutput: {
+            type: 'MCP',
+            tool_name: variant === 'foreign-tool' ? 'screenshot' : 'evaluate_model',
+            server_name: variant === 'foreign-server' ? 'foreign' : 'tau',
+            output:
+              variant === 'missing-output'
+                ? {}
+                : {
+                    OkayOutput:
+                      variant === 'invalid-json'
+                        ? '{broken'
+                        : JSON.stringify(variant === 'invalid-schema' ? { unrelated: true } : { status: 'ready' }),
+                  },
+          },
+        },
+      ],
+      'grok',
+      undefined,
+      'tau',
+    );
+    expect(messages[1]).toMatchObject({ role: 'tool-output', toolName: 'evaluate_model', isError: true });
+  },
+);
+
+it.each(['foreign-server', 'unattested', 'foreign-agent'])(
+  'should keep a %s Grok-shaped MCP call generic',
+  async (variant) => {
+    const messages = await project(
+      [
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'grok-mcp',
+          title: 'use_tool',
+          status: 'completed',
+          rawInput: {
+            tool_name: `${variant === 'foreign-server' ? 'foreign' : 'tau'}__evaluate_model`,
+            tool_input: { targetFile: 'main.py' },
+          },
+          _meta:
+            variant === 'unattested' ? {} : { 'x.ai/tool': { version: 1, name: 'use_tool', namespace: 'grok_build' } },
+          rawOutput: {
+            type: 'MCP',
+            tool_name: 'evaluate_model',
+            server_name: 'tau',
+            output: { OkayOutput: '{"status":"ready"}' },
+          },
+        },
+      ],
+      variant === 'foreign-agent' ? 'codex' : 'grok',
+      undefined,
+      'tau',
+    );
+    expect(messages[0]).toMatchObject({ toolName: 'use_tool' });
+    expect(messages[0]?.metadata?.tauInternal).not.toHaveProperty('presentation');
+  },
+);
 
 it('should finalize named text exactly once after its durable append fails', async () => {
   const appended: ExternalAgentLogEvent[] = [];

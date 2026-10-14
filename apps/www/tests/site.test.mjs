@@ -1,3 +1,4 @@
+import { detectDesktopPlatform, desktopDownloadHref } from '#www/downloads.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -227,7 +228,7 @@ await test('only staging offers the staging desktop builds', () => {
   assert.equal(stagingDesktopNote('tau.new'), undefined);
 });
 
-await test('the primary CTA opens downloads and Mac downloads use the current R2 alias', () => {
+await test('header actions open the app and sign in while the hero opens host downloads', () => {
   const home = pages.find((page) => page.path === '/');
   const downloads = pages.find((page) => page.path === '/download/');
   assert.ok(home && downloads);
@@ -238,8 +239,36 @@ await test('the primary CTA opens downloads and Mac downloads use the current R2
     asset: { css: '/a.css', js: '/a.js' },
     analyticsEndpoint: '',
   });
-  assert.match(html, /href="\/download\/" data-event="cta" data-placement="header">Download for Mac/u);
-  assert.match(home.body(), /href="\/download\/" data-event="cta" data-placement="hero">Download for Mac/u);
+  assert.match(
+    html,
+    /href="https:\/\/tau.new\/projects\/new" data-event="cta" data-placement="header">Start designing/u,
+  );
+  assert.match(html, /href="https:\/\/tau.new\/auth\/sign-in">Sign in/u);
+  assert.match(
+    home.body(),
+    /href="\/download\/" data-event="cta" data-placement="hero" data-host-download="page">Download Tau/u,
+  );
   assert.match(downloads.body(), /https:\/\/downloads.tau.new\/latest\/Tau-macos-arm64.zip/u);
   assert.doesNotMatch(downloads.body(), /No installer is published/u);
+});
+
+await test('desktop downloads detect all supported hosts and keep mobile or unknown hosts neutral', () => {
+  const cases = [
+    [{ userAgentData: { platform: 'macOS' } }, 'mac'],
+    [{ platform: 'MacIntel', userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' }, 'mac'],
+    [{ userAgentData: { platform: 'Windows' } }, 'windows'],
+    [{ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, 'windows'],
+    [{ platform: 'Linux x86_64' }, 'linux'],
+    [{ userAgentData: { platform: 'Android', mobile: true }, platform: 'Linux armv8l' }, undefined],
+    [{ platform: 'MacIntel', maxTouchPoints: 5 }, undefined],
+    [{ userAgent: 'Mozilla/5.0 (X11; CrOS x86_64)' }, undefined],
+    [{ platform: 'Linux aarch64' }, undefined],
+    [{}, undefined],
+  ];
+  for (const [browser, expected] of cases) {
+    assert.equal(detectDesktopPlatform(browser), expected);
+  }
+  for (const platform of ['mac', 'windows', 'linux']) {
+    assert.match(desktopDownloadHref(platform), /^https:\/\/downloads.tau.new\/latest\/Tau-/u);
+  }
 });

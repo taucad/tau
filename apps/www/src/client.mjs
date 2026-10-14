@@ -1,3 +1,4 @@
+import { detectDesktopPlatform, desktopDownloads, desktopDownloadHref, desktopDownloadLabel } from '#www/downloads.js';
 import { readStoryProgress } from '#www/story-progress.js';
 import { randomUuid } from '@taucad/utils/id';
 import { sanitizeEvent, campaignCodes } from '#www/analytics.js';
@@ -6,10 +7,27 @@ import { environmentHref, stagingDesktopNote } from '#www/environment.js';
 for (const link of document.querySelectorAll('a[href^="https://"]')) {
   link.setAttribute('href', environmentHref(link.getAttribute('href') ?? '', location.hostname));
 }
-const desktopNote = document.querySelector('[data-platform-note]');
-const stagingNote = stagingDesktopNote(location.hostname);
-if (stagingNote && desktopNote instanceof HTMLElement) {
-  desktopNote.textContent = stagingNote;
+const hostPlatform = detectDesktopPlatform(navigator);
+if (hostPlatform) {
+  const download = desktopDownloads[hostPlatform];
+  for (const link of document.querySelectorAll('[data-host-download]')) {
+    link.innerHTML = desktopDownloadLabel(hostPlatform);
+    if (link instanceof HTMLElement && link.dataset['hostDownload'] === 'direct') {
+      link.setAttribute('href', environmentHref(desktopDownloadHref(hostPlatform), location.hostname));
+    }
+  }
+  const detail = document.querySelector('[data-download-detail]');
+  const instructions = document.querySelector('[data-install-instructions]');
+  const note = document.querySelector('[data-platform-note]');
+  if (detail) {
+    detail.textContent = download.detail;
+  }
+  if (instructions) {
+    instructions.textContent = download.install;
+  }
+  if (note) {
+    note.textContent = (hostPlatform === 'mac' ? stagingDesktopNote(location.hostname) : undefined) ?? download.updates;
+  }
 }
 
 const mobileMenu = document.querySelector('.mobile-menu');

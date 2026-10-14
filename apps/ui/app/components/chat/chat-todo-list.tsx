@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ChevronRight, Circle, CircleCheck, CircleDot, ListChecks } from 'lucide-react';
+import { ChevronRight, Circle, CircleCheck, LoaderCircle, ListChecks } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { parseTodoList, todoListPath } from '@taucad/chat';
 import type { TodoItem, TodoItemStatus } from '@taucad/chat';
@@ -31,7 +31,7 @@ const writeCollapsed = (chatId: string, collapsed: boolean): void => {
 export const todoStatusIcons: Record<TodoItemStatus, LucideIcon> = {
   pending: Circle,
   // eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
-  in_progress: CircleDot,
+  in_progress: LoaderCircle,
   done: CircleCheck,
 };
 
@@ -59,7 +59,7 @@ function TodoRow({ item }: { readonly item: TodoItem }): React.JSX.Element {
         className={cn(
           'mt-0.5 size-3 shrink-0',
           item.status === 'done' && 'text-success',
-          item.status === 'in_progress' && 'text-primary',
+          item.status === 'in_progress' && 'animate-spin animation-duration-[2s] motion-reduce:animate-none',
         )}
       />
       <span className='min-w-0 flex-1 wrap-break-word'>

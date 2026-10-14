@@ -155,7 +155,7 @@ export const isDocumentActive = (): boolean =>
  *
  * @public
  */
-export type StopOrigin = 'stop-button' | 'stop-shortcut' | 'message-stop' | 'close-chat' | 'new-turn' | 'project-close';
+export type StopOrigin = 'stop-button' | 'stop-shortcut' | 'close-chat' | 'new-turn' | 'project-close';
 
 /* Renderer console reaches the desktop log, where it lines up with the ledger's cancel row by command id. */
 const logStop = (command: HostCommand, origin: StopOrigin | undefined): void => {

@@ -15,17 +15,18 @@ env:
   TAU_WEBSOCKET_URL: ws://localhost:4001
   TAU_FRONTEND_URL: http://localhost:3000
 
-# A newer push to a pull request cancels its outdated run; different PRs run side by
-# side. Each push to `main` gets a group of its own, so it neither waits for nor
-# cancels another: in one shared group a run held the group until its last job ended,
-# including a Darwin job waiting hours for a macOS runner, and each newer push was
-# cancelled while pending, staging deploy and release commit included (2026-10-11,
-# runs 38179340616 and 38183401821). The staging deploys keep their own queues
+# A newer push to a pull request, Dependabot's included, cancels its outdated run, so
+# superseded runs release their queued macOS jobs; different PRs run side by side.
+# Each push to `main` gets a group of its own and is never cancelled, so it neither
+# waits for nor cancels another: in one shared group a run held the group until its
+# last job ended, including a Darwin job waiting hours for a macOS runner, and each
+# newer push was cancelled while pending, staging deploy and release commit included
+# (2026-10-11, runs 38179340616 and 38183401821). The staging deploys keep their own queues
 # (`deploy-api-staging`, `deploy-ui-staging`) and skip a commit that a newer deploy
 # has already superseded.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # One affected computation for every downstream lane. Every selector here is a
@@ -48,6 +49,13 @@ jobs:
       geospec-darwin-projects: ${{ steps.geospec.outputs.geospec-darwin-projects }}
       geospec-key: ${{ steps.geospec-key.outputs.key }}
       geospec-cached: ${{ steps.geospec-cache.outputs.cache-hit == 'true' }}
+      # The one switch for every macOS job in this run. A pull request run that Dependabot
+      # itself triggered never requests a macOS runner: the shared pool serves taucad/tau
+      # and taucad/geospec, and weekly dependency batches queued dozens of Darwin jobs
+      # (2026-10-14). `triggering_actor`, not the PR author, so a maintainer who pushes to
+      # a Dependabot branch or re-runs its workflow gets the full macOS lanes. Pushes to
+      # `main` always run them, so a merged Dependabot change still meets the Darwin suites.
+      macos-allowed: ${{ github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -56,6 +64,10 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+
+      - name: Report the macOS jobs this Dependabot run leaves out
+        if: github.event_name == 'pull_request' && github.triggering_actor == 'dependabot[bot]'
+        run: echo "::notice title=No macOS runners for Dependabot::This run skips the GeoSpec producer and the Darwin host suites. The Linux lanes use GeoSpec products an earlier run saved for this source closure; when none exists the required check fails until a maintainer re-runs the workflow. The push to main runs every macOS job."
 
       - name: Select the apps with a staging deploy
         id: deployables
@@ -196,7 +208,9 @@ jobs:
   geospec-producer:
     name: Produce current GeoSpec artifacts
     needs: [plan]
-    if: needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached != 'true'
+    if: >-
+      needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached != 'true' &&
+      needs.plan.outputs.macos-allowed == 'true'
     runs-on: macos-15
     steps:
       - &checkout-darwin
@@ -264,7 +278,8 @@ jobs:
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
       needs.plan.outputs.geospec-required == 'true' &&
-      needs.plan.outputs.geospec-darwin-tests == 'true'
+      needs.plan.outputs.geospec-darwin-tests == 'true' &&
+      needs.plan.outputs.macos-allowed == 'true'
     runs-on: macos-15
     steps:
       - *checkout-darwin
@@ -534,7 +549,9 @@ jobs:
   # The required check. It passes only when every affected lane passed, when this run
   # needed the GeoSpec producer the producer did too, and when it needed the Darwin host
   # suites they passed. An unneeded producer may be skipped, and so may one whose
-  # products an earlier run already made (see `plan`).
+  # products an earlier run already made (see `plan`). A run without macOS runners
+  # (`macos-allowed`, Dependabot) must show both macOS jobs skipped; it fails when its
+  # lanes needed products that no earlier run saved, since nothing produced them.
   affected:
     name: Run affected tasks
     needs: [plan, geospec-producer, geospec-darwin, affected-lane]
@@ -550,10 +567,23 @@ jobs:
           DARWIN_REQUIRED: ${{ needs.plan.outputs.geospec-darwin-tests }}
           DARWIN_RESULT: ${{ needs.geospec-darwin.result }}
           LANES_RESULT: ${{ needs.affected-lane.result }}
+          MACOS_ALLOWED: ${{ needs.plan.outputs.macos-allowed }}
         run: |
           test "$PLAN_RESULT" = success
-          if [ "$PRODUCER_REQUIRED" = true ] && [ "$PRODUCTS_CACHED" != true ]; then test "$PRODUCER_RESULT" = success; fi
-          if [ "$PRODUCER_REQUIRED" = true ] && [ "$DARWIN_REQUIRED" = true ]; then test "$DARWIN_RESULT" = success; fi
+          if [ "$MACOS_ALLOWED" != true ]; then
+            test "$PRODUCER_RESULT" = skipped
+            test "$DARWIN_RESULT" = skipped
+            if [ "$PRODUCER_REQUIRED" = true ] && [ "$PRODUCTS_CACHED" != true ]; then
+              echo "::error title=GeoSpec products missing::This Dependabot run changes the GeoSpec product closure and no earlier run saved its products; Dependabot runs request no macOS runner. Re-run the workflow as a maintainer to produce them."
+              exit 1
+            fi
+            if [ "$PRODUCER_REQUIRED" = true ] && [ "$DARWIN_REQUIRED" = true ]; then
+              echo "::notice title=Darwin host suites skipped::Dependabot run; the push to main runs them."
+            fi
+          else
+            if [ "$PRODUCER_REQUIRED" = true ] && [ "$PRODUCTS_CACHED" != true ]; then test "$PRODUCER_RESULT" = success; fi
+            if [ "$PRODUCER_REQUIRED" = true ] && [ "$DARWIN_REQUIRED" = true ]; then test "$DARWIN_RESULT" = success; fi
+          fi
           test "$LANES_RESULT" = success
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers

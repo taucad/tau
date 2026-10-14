@@ -154,3 +154,75 @@ describe('root redirect cache isolation', () => {
     expect(response.headers.get('cache-control')).toBe('public, max-age=600');
   });
 });
+
+describe('marketing download channel before JavaScript', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const files = [
+    'Tau-macos-x64.zip',
+    'Tau-macos-arm64.zip',
+    'Tau-macos-x64.zip',
+    'Tau-win32-x64.zip',
+    'Tau-linux-x64.tar.gz',
+  ];
+  const scripts =
+    '<script>const anchor = `<a href="https://downloads.tau.new/latest/Tau-macos-arm64.zip">Download</a>`;</script><script type="application/ld+json">{"url":"https://tau.new/download/"}</script>';
+  const html = `<link rel="canonical" href="https://tau.new/download/">${scripts}${files.map((file) => `<a class="text-link" href="https://downloads.tau.new/latest/${file}" data-event="download">Download</a>`).join('')}`;
+
+  it('should serve every archive link from staging while preserving scripts and document policies', async () => {
+    vi.stubGlobal('Netlify', { env: { get: () => origin } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(html, {
+            headers: {
+              'content-type': 'text/html; charset=utf-8',
+              'content-length': String(html.length),
+              'content-encoding': 'gzip',
+              etag: '"upstream"',
+              'last-modified': 'Wed, 14 Oct 2026 01:00:00 GMT',
+              'content-security-policy': "script-src 'self' 'sha256-boot'",
+              'cache-control': 'public, max-age=0, must-revalidate',
+            },
+          }),
+      ),
+    );
+    const response = await marketing(new Request('https://taucad.dev/download/'), { next: vi.fn() });
+    const body = await response.text();
+    expect([...body.replace(scripts, '').matchAll(/<a[^>]+href="([^"]+)"/gu)].map((match) => match[1])).toEqual(
+      files.map((file) => `https://downloads.taucad.dev/latest/${file}`),
+    );
+    expect(body).toContain(scripts);
+    expect(body).toContain('<link rel="canonical" href="https://tau.new/download/">');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-security-policy')).toBe("script-src 'self' 'sha256-boot'");
+    expect(response.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
+    for (const header of ['content-length', 'content-encoding', 'etag', 'last-modified']) {
+      expect(response.headers.has(header)).toBe(false);
+    }
+  });
+
+  it.each([
+    ['https://tau.new/download/', 'GET', 'text/html'],
+    ['https://taucad.dev.example/download/', 'GET', 'text/html'],
+    ['https://taucad.dev/_www/assets/site.js', 'GET', 'application/javascript'],
+    ['https://taucad.dev/download/', 'HEAD', 'text/html'],
+  ])('should preserve upstream bytes and validators for %s %s %s', async (url, method, contentType) => {
+    vi.stubGlobal('Netlify', { env: { get: () => origin } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(method === 'HEAD' ? null : html, {
+            headers: {
+              'content-type': contentType,
+              etag: '"upstream"',
+            },
+          }),
+      ),
+    );
+    const response = await marketing(new Request(url, { method }), { next: vi.fn() });
+    expect(await response.text()).toBe(method === 'HEAD' ? '' : html);
+    expect(response.headers.get('etag')).toBe('"upstream"');
+  });
+});

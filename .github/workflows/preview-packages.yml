@@ -147,8 +147,12 @@ jobs:
     needs: preview
     strategy:
       fail-fast: false
+      # A run Dependabot triggered requests no macOS runner from the shared pool; a
+      # maintainer's label, push or re-run, and every dispatch, keeps the macOS leg.
       matrix:
-        os: [ubuntu-latest, macos-15]
+        os: >-
+          ${{ github.event_name == 'pull_request' && github.triggering_actor == 'dependabot[bot]'
+          && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-15"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:

@@ -584,14 +584,16 @@ function PortableShareBody({
             <p className='font-medium'>
               {encrypted
                 ? `Password-encrypted ${isDesktopTarget() ? 'on your computer' : 'in your browser'}`
-                : 'No upload through Tau'}
+                : isDirect
+                  ? 'No upload through Tau'
+                  : 'Stored on GitHub'}
             </p>
             <p className='mt-1 text-muted-foreground'>
               {encrypted
                 ? 'The password can travel in the link or be shared separately. Files remain in memory until download or remix.'
                 : isDirect
                   ? 'The compressed project stays in the URL. Anyone with the link can open it.'
-                  : 'GitHub stores the compressed project; Tau only opens it in memory.'}
+                  : 'Tau sends the compressed project to GitHub using your Gist connection.'}
             </p>
           </div>
         </div>

@@ -9,11 +9,6 @@ import type { QueuedChatMessage } from '#db/chat-message-queue-store.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
 
 export type ChatMessageQueueMachineInput = Readonly<{ chatId: string; projectId: string }>;
-export type ChatMessageQueueMachineEvent =
-  | { readonly type: 'refresh' }
-  | { readonly type: 'retry' }
-  | { readonly type: 'loaded'; readonly items: readonly QueuedChatMessage[]; readonly sendingId?: string }
-  | { readonly type: 'watchFailed'; readonly error: string };
 export type QueueAdvanceResult = Readonly<{
   items: readonly QueuedChatMessage[];
   status: 'waiting' | 'changed' | 'blocked';

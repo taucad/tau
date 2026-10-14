@@ -155,9 +155,24 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
   const providerActiveRef = useRef(true);
   const recordRecoveryFocusRef = useRef<HTMLButtonElement>(null);
   const pendingRecordRecoveryFocus = useRef(false);
+  const recordRecoveryHadFocus = useRef(false);
+  useEffect(() => {
+    const trackFocus = (event: FocusEvent): void => {
+      recordRecoveryHadFocus.current = event.target === recordRecoveryFocusRef.current;
+    };
+    // Dockview may detach a portal container before React releases its refs.
+    document.addEventListener('focusin', trackFocus);
+    return () => {
+      document.removeEventListener('focusin', trackFocus);
+    };
+  }, []);
   // oxlint-disable-next-line no-restricted-types -- React callback refs receive null on detach.
   const registerRecordRecoveryFocus = useCallback((node: HTMLButtonElement | null): void => {
-    if (!node && recordRecoveryFocusRef.current === document.activeElement) {
+    if (
+      !node &&
+      (recordRecoveryFocusRef.current === document.activeElement ||
+        (recordRecoveryHadFocus.current && document.activeElement === document.body))
+    ) {
       pendingRecordRecoveryFocus.current = true;
     }
     recordRecoveryFocusRef.current = node;
@@ -174,7 +189,7 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
       return;
     }
     const target = recordRecoveryFocusRef.current;
-    pendingRecordRecoveryFocus.current = !target;
+    pendingRecordRecoveryFocus.current = !target?.isConnected;
     if (target?.isConnected && !target.closest('[inert]')) {
       target.focus();
     }
@@ -192,6 +207,7 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
       openerRef.current = undefined;
       committedRouteKeyRef.current = routeKey;
       pendingRecordRecoveryFocus.current = false;
+      recordRecoveryHadFocus.current = false;
     }
   }, [routeKey]);
   useLayoutEffect(() => {
@@ -199,6 +215,7 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
     return () => {
       providerActiveRef.current = false;
       pendingRecordRecoveryFocus.current = false;
+      recordRecoveryHadFocus.current = false;
       pendingFilesRef.current = undefined;
     };
   }, []);

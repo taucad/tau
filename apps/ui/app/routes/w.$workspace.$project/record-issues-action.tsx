@@ -169,7 +169,7 @@ export function RecordIssuesAction({ fallbackFocus }: { readonly fallbackFocus: 
         <AlertDialogContent
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            if (trigger.current) {
+            if (trigger.current?.isConnected) {
               trigger.current.focus();
             } else {
               fallbackFocus();

@@ -383,9 +383,7 @@ function ProjectNavigationItem({
           {directories.openLabel}
         </Item>
       ) : null}
-      <Item disabled={!project.slugs} onSelect={openSyncDetails}>
-        View sync status
-      </Item>
+      <Separator />
       <Item onSelect={onRename}>
         <Pencil aria-hidden />
         Rename
@@ -402,6 +400,10 @@ function ProjectNavigationItem({
         <Forward aria-hidden />
         Share project
       </Item>
+      <Item disabled={!project.slugs} onSelect={openSyncDetails}>
+        View sync status
+      </Item>
+      <Separator />
       {row.glyph === 'none' ? null : (
         <Item
           aria-label={`Close ${project.name}`}
@@ -417,7 +419,6 @@ function ProjectNavigationItem({
           Close
         </Item>
       )}
-      <Separator />
       <Item
         variant='destructive'
         onSelect={() => {

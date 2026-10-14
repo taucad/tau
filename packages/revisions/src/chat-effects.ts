@@ -343,9 +343,21 @@ export const createChatEffects = (
         repositoryUrl: input.repositoryUrl,
         refs: input.names.map((name) => offerOf(name, input.leases)),
       });
-      return input.retryRejected !== false && pushed.refs.every((entry) => entry.status === 'rejected')
-        ? undefined
-        : new Map(pushed.refs.map((entry) => [entry.name, outcomeOf(entry, input.offered)]));
+      const outcomes = new Map(pushed.refs.map((entry) => [entry.name, outcomeOf(entry, input.offered)]));
+      if (input.retryRejected === false) {
+        return new Map(
+          input.names.map((name) => [
+            name,
+            outcomes.get(name) ?? {
+              name,
+              status: 'rejected',
+              head: input.offered.get(name),
+              reason: 'The remote said nothing about this ref.',
+            },
+          ]),
+        );
+      }
+      return pushed.refs.every((entry) => entry.status === 'rejected') ? undefined : outcomes;
     } catch (error) {
       if (rateLimited(error)) {
         throw error;

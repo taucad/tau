@@ -54,6 +54,14 @@ describe('explicit record push refusals', () => {
     expect(push).toHaveBeenCalledTimes(1);
   });
 
+  it('makes a missing ref verdict terminal instead of requesting another push', async () => {
+    const { push, effects } = await setup();
+    push.mockResolvedValue({ refs: [] });
+    const result = await effects.pushRecordSet({ ...input, retryRejected: false });
+    expect(result?.get(name)).toMatchObject({ status: 'rejected', reason: 'The remote said nothing about this ref.' });
+    expect(push).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves the automatic Tau backup per-ref fallback', async () => {
     const { push, effects } = await setup();
     push.mockResolvedValue({ refs: [{ name, head: undefined, status: 'rejected', reason: 'fetch first' }] });

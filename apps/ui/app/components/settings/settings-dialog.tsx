@@ -237,7 +237,7 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
     >
       <DialogTitle className='sr-only'>Settings</DialogTitle>
       <DialogDescription className='sr-only'>Application settings and preferences</DialogDescription>
-      <div className='flex min-h-0 flex-col md:flex-row'>
+      <div className='flex min-h-0 min-w-0 flex-col md:flex-row'>
         <aside className='flex shrink-0 flex-col gap-4 border-b bg-sidebar p-4 max-md:max-h-[45%] md:w-64 md:border-r md:border-b-0'>
           <Button variant='ghost' className='w-full justify-start' onClick={close}>
             <ArrowLeft className='size-4' aria-hidden='true' /> Back to app

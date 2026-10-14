@@ -129,6 +129,12 @@ test('shows independent GitHub connections and repository approval at desktop an
   await target.emulateColorScheme('dark');
   await target.screenshot(undefined, 'github-security-dark');
   await target.setViewport({ width: 390, height: 844 });
+  await target.scrollIntoView(selectors.getByRole('heading', { name: 'GitHub sign-in and Gists', exact: true }));
+  const overflows = await target.evaluate(() => {
+    const region = document.querySelector('[aria-label="Security settings"]');
+    return region !== null && region.scrollWidth > region.clientWidth;
+  });
+  expect(overflows).toBe(false);
   await target.screenshot(undefined, 'github-security-mobile');
   await target.navigate('/?settings=repositories');
   await target.expectVisible(selectors.getByRole('heading', { name: 'Repositories', exact: true }));

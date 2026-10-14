@@ -15,21 +15,13 @@ export const chatComposerActionButtonClassName =
 type ChatStreamingStopButtonProperties = {
   readonly formattedCancelKeyCombination: string;
   readonly onCancel: () => void;
-  /** `compact` fits a single-line `text-sm` user bubble without overlapping ascenders. */
-  readonly variant?: 'default' | 'compact';
 };
 
-/**
- * Circular stop control used while a turn runs (the composer's, and the one
- * pinned to the live user bubble). Named, with its shortcut exposed (F1).
- */
-export const ChatStreamingStopButton = memo(function ({
+/** Circular composer stop control with its keyboard shortcut exposed (F1). */
+const ChatStreamingStopButton = memo(function ({
   formattedCancelKeyCombination,
   onCancel,
-  variant = 'default',
 }: ChatStreamingStopButtonProperties): React.JSX.Element {
-  const isCompact = variant === 'compact';
-
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -39,13 +31,13 @@ export const ChatStreamingStopButton = memo(function ({
           size='icon'
           aria-label='Stop'
           aria-keyshortcuts={ariaKeyShortcuts(cancelChatStreamKeyCombination)}
-          className={cn(chatComposerActionButtonClassName, isCompact ? 'size-6' : 'size-7')}
+          className={cn(chatComposerActionButtonClassName, 'size-7')}
           onClick={(event) => {
             event.stopPropagation();
             onCancel();
           }}
         >
-          <Square aria-hidden='true' className={cn('fill-background', isCompact ? 'size-3' : 'size-4')} />
+          <Square aria-hidden='true' className='size-4 fill-background' />
         </Button>
       </TooltipTrigger>
       <TooltipContent className='flex items-center gap-2 align-baseline'>

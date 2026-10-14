@@ -110,6 +110,7 @@ import {
   computeControlChannels,
   servicesPortRelayTag,
   slicersChannels,
+  windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
 import {
@@ -1204,6 +1205,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
         }),
       );
     }
+    const publishFullscreen = (): void => {
+      window.webContents.send(windowFullscreenChannel, window.isFullScreen());
+    };
+    window.on('enter-full-screen', publishFullscreen);
+    window.on('leave-full-screen', publishFullscreen);
+    window.webContents.on('did-finish-load', publishFullscreen);
     window.once('close', () => {
       try {
         writeWindowState(windowStatePath, {

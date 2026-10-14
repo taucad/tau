@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render as renderWithProviders, screen, within } from '@testing-library/react';
 import { createContext, forwardRef, useContext, useEffect, useImperativeHandle } from 'react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ResolvedAuth } from '#hooks/use-resolved-auth.js';
 import type { PageChromeContext } from '#types/matches.types.js';
+import type * as TitlebarControlsModule from '#components/layout/desktop-titlebar-controls.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
+const render = (ui: ReactNode) => renderWithProviders(ui, { wrapper: TooltipProvider });
 
 const state = vi.hoisted(() => ({
   authState: 'authed' as ResolvedAuth,
@@ -12,8 +15,10 @@ const state = vi.hoisted(() => ({
   enablePageWrapper: undefined as boolean | ((context: PageChromeContext) => boolean) | undefined,
   hasBreadcrumb: false,
   isMobile: false,
+  isFullscreen: false,
   sidebarOpen: true,
   allotmentResize: vi.fn(),
+  onPaneChange: undefined as ((sizes: number[]) => void) | undefined,
   providers: [] as Array<{ handle: { providers: () => React.JSXElementConstructor<React.PropsWithChildren> } }>,
   commandPalette: [] as Array<{ id: string; handle: { commandPalette: () => ReactNode } }>,
   sidebarMounts: 0,
@@ -35,8 +40,12 @@ vi.mock('react-router', () => ({
   useNavigationType: () => state.navigationType,
 }));
 vi.mock('allotment', () => {
-  const Pane = ({ children, visible = true }: React.PropsWithChildren<{ readonly visible?: boolean }>) => (
-    <div data-pane data-visible={visible}>
+  const Pane = ({
+    children,
+    visible = true,
+    minSize,
+  }: React.PropsWithChildren<{ readonly visible?: boolean; readonly minSize?: number }>) => (
+    <div data-pane data-visible={visible} data-min-size={minSize}>
       {children}
     </div>
   );
@@ -44,7 +53,8 @@ vi.mock('allotment', () => {
     forwardRef<
       { readonly resize: (sizes: number[]) => void },
       React.PropsWithChildren<{ readonly onChange?: (sizes: number[]) => void }>
-    >(({ children }, reference) => {
+    >(({ children, onChange }, reference) => {
+      state.onPaneChange = onChange;
       useImperativeHandle(reference, () => ({ resize: state.allotmentResize }));
       return <div data-slot='application-allotment'>{children}</div>;
     }),
@@ -53,6 +63,7 @@ vi.mock('allotment', () => {
   return { Allotment, LayoutPriority: { Low: 0, High: 1 } };
 });
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => state.authState }));
+vi.mock('#hooks/use-desktop-fullscreen.js', () => ({ useDesktopFullscreen: () => state.isFullscreen }));
 vi.mock('#flags/use-feature.js', () => ({ useFeatureFlags: () => ({}) }));
 vi.mock('#hooks/use-typed-matches.js', () => ({
   useTypedMatches: (selector: (handles: Record<string, unknown[]>) => unknown) =>
@@ -81,7 +92,8 @@ vi.mock('#components/layout/app-sidebar.js', () => ({
     return <aside aria-label='Application sidebar'>Sidebar</aside>;
   },
 }));
-vi.mock('#components/layout/desktop-titlebar-controls.js', () => ({
+vi.mock('#components/layout/desktop-titlebar-controls.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof TitlebarControlsModule>()),
   DesktopTitlebarControls: () => <div data-slot='desktop-titlebar-controls' />,
 }));
 vi.mock('#components/ui/sidebar.js', () => ({
@@ -142,6 +154,7 @@ beforeEach(() => {
   state.isMobile = false;
   state.sidebarOpen = true;
   state.allotmentResize.mockReset();
+  state.isFullscreen = false;
   state.providers = [];
   state.commandPalette = [];
   state.sidebarMounts = 0;
@@ -244,24 +257,27 @@ describe('Page application shell', () => {
     expect(screen.getByText('Page content')).toBeInTheDocument();
   });
 
-  it('keeps the browser wordmark and sidebar control adjacent', () => {
-    const { container } = render(<Page />);
+  it('shows only browser toggle and wordmark, and only the toggle while closed', () => {
+    const view = render(<Page />);
+    const { container } = view;
     const controls = container.querySelector<HTMLElement>('[data-slot=web-titlebar-controls]');
     expect(controls).not.toBeNull();
     const controlRegion = controls!;
 
-    expect(controlRegion.children[0]).toBe(within(controlRegion).getByRole('link', { name: 'Home' }));
-    expect(controlRegion.children[1]).toBe(within(controlRegion).getByRole('button', { name: 'Toggle Sidebar' }));
-    expect(controlRegion.children).toHaveLength(2);
-    // The wordmark link's own `px-1` is the 4 px gap to the trigger, matching the gap between
-    // every later control; a row gap on top would double it.
-    expect(controlRegion).toHaveClass('pl-2', 'pr-1');
-    expect(controlRegion).not.toHaveClass('gap-1', 'gap-2', 'px-2');
-    expect(
-      container
-        .querySelector<HTMLElement>('[data-slot=application-shell]')
-        ?.style.getPropertyValue('--titlebar-controls-width'),
-    ).toBe(`calc(var(--spacing) * ${2 + 1 + 5 * (2321.24 / 710) + 1 + 7 + 1})`);
+    expect([...controlRegion.children].map((element) => element.getAttribute('aria-label'))).toEqual([
+      'Toggle Sidebar',
+      'Home',
+    ]);
+    expect(controlRegion).toHaveClass('pl-2', 'pr-1', 'gap-1');
+    const shell = container.querySelector<HTMLElement>('[data-slot=application-shell]');
+    expect(shell?.style.getPropertyValue('--titlebar-controls-width')).toBe('calc(var(--sidebar-panel-width) - 1px)');
+    state.sidebarOpen = false;
+    view.rerender(<Page />);
+    expect(within(controlRegion).queryByRole('link', { name: 'Home' })).not.toBeInTheDocument();
+    expect([...controlRegion.children].map((element) => element.getAttribute('aria-label'))).toEqual([
+      'Toggle Sidebar',
+    ]);
+    expect(shell?.style.getPropertyValue('--titlebar-controls-width')).toBe('calc(var(--spacing) * 10)');
   });
 
   it('resizes the sidebar by 16px and clamps to the pane bounds', () => {
@@ -286,6 +302,8 @@ describe('Page application shell', () => {
     }
 
     expect(state.allotmentResize).toHaveBeenLastCalledWith([480, 544]);
+    state.onPaneChange?.([320, 704]);
+    expect(shell?.style.getPropertyValue('--sidebar-panel-width')).toBe('320px');
     expect(state.allotmentResize).toHaveBeenCalledTimes(20);
   });
 });
@@ -325,10 +343,32 @@ describe('Page header contract', () => {
       container
         .querySelector<HTMLElement>('[data-slot=application-shell]')
         ?.style.getPropertyValue('--titlebar-controls-width'),
-    ).toBe('calc(var(--spacing) * 44)');
+    ).toBe('calc(var(--sidebar-panel-width) - 1px)');
     expect(container.querySelector('header > div')).toHaveClass(
       'md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
     );
+  });
+
+  it('should update occupied header width and traffic-light inset on native fullscreen transitions', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const view = render(<Page />);
+    const shell = view.container.querySelector<HTMLElement>('[data-slot=application-shell]');
+    expect(view.container.querySelector('[data-pane]')).toHaveAttribute('data-min-size', '192');
+    state.isFullscreen = true;
+    view.rerender(<Page />);
+    expect(shell?.style.getPropertyValue('--titlebar-controls-width')).toBe('calc(var(--sidebar-panel-width) - 1px)');
+    expect(shell?.style.getPropertyValue('--desktop-titlebar-inset')).toBe('calc(var(--spacing) * 2)');
+    expect(view.container.querySelector('[data-pane]')).toHaveAttribute('data-min-size', '192');
+    state.isFullscreen = false;
+    view.rerender(<Page />);
+    expect(shell?.style.getPropertyValue('--titlebar-controls-width')).toBe('calc(var(--sidebar-panel-width) - 1px)');
+    expect(shell?.style.getPropertyValue('--desktop-titlebar-inset')).toBe('');
+    state.sidebarOpen = false;
+    view.rerender(<Page />);
+    expect(shell?.style.getPropertyValue('--titlebar-controls-width')).toBe('calc(var(--spacing) * 44)');
+    state.isFullscreen = true;
+    view.rerender(<Page />);
+    expect(shell?.style.getPropertyValue('--titlebar-controls-width')).toBe('calc(var(--spacing) * 26)');
   });
 });
 

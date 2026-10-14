@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { FuseV1Options } from '@electron/fuses';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
+import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
 
 assert.deepEqual(parseMacosPackageMode([]), { release: false, unsigned: false, zip: false, notarize: false });
 assert.deepEqual(parseMacosPackageMode(['--release']), { release: true, unsigned: false, zip: true, notarize: true });
@@ -80,3 +80,8 @@ for (const [args, channel] of [
   });
 }
 console.log('✓ macOS packages flip the hardening fuses before signing, and only a release refuses --inspect');
+
+assert.equal(macosPackageArchitecture('darwin', 'arm64'), 'arm64');
+assert.equal(macosPackageArchitecture('darwin', 'x64'), 'x64');
+assert.throws(() => macosPackageArchitecture('linux', 'x64'));
+assert.throws(() => macosPackageArchitecture('darwin', 'ia32'));

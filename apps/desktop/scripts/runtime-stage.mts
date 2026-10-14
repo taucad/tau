@@ -20,7 +20,7 @@ import { copyRuntimeClosure, copyTree } from './runtime-closure.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
 
 /** A `<platform>-<arch>` the desktop app is packaged for. */
-export type RuntimeTarget = 'darwin-arm64' | 'linux-x64' | 'win32-x64';
+export type RuntimeTarget = 'darwin-arm64' | 'darwin-x64' | 'linux-x64' | 'win32-x64';
 
 /** Match binary basenames and relative package directories so hidden checkout ancestors cannot defeat ASAR unpacking. */
 export const runtimeAsarOptions = {
@@ -32,7 +32,7 @@ export const runtimeAsarOptions = {
 export type RuntimePlatformPackages = Readonly<{
   openrscadEngine: string;
   esbuild: string;
-  libassimp: string;
+  libassimp: string | undefined;
   nanoraster: string;
   /**
    * Native payloads the bundled imports load through `optionalDependencies`: sharp's libvips (where it
@@ -61,6 +61,19 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
       '@img/sharp-libvips-darwin-arm64',
       '@img/sharp-darwin-arm64',
       '@parcel/watcher-darwin-arm64',
+    ],
+    unusedSandboxHelpers: ['vendor/seccomp', 'vendor/srt-win'],
+  },
+  'darwin-x64': {
+    openrscadEngine: '@taulabs/openrscad-engine-darwin-x64',
+    esbuild: '@esbuild/darwin-x64',
+    // The pinned Assimp release has no Intel Mac addon; this host uses its WASM backend.
+    libassimp: undefined,
+    nanoraster: 'nanoraster-darwin-x64',
+    bundledOptionalDependencies: [
+      '@img/sharp-libvips-darwin-x64',
+      '@img/sharp-darwin-x64',
+      '@parcel/watcher-darwin-x64',
     ],
     unusedSandboxHelpers: ['vendor/seccomp', 'vendor/srt-win'],
   },
@@ -97,7 +110,7 @@ export type ResolvedRuntimePackages = Readonly<{
   esbuild: InstalledPackage;
   esbuildPlatform: string;
   libassimp: InstalledPackage;
-  libassimpPlatform: string;
+  libassimpPlatform: string | undefined;
   nanoraster: InstalledPackage;
   nanorasterPlatform: string;
   sandboxRuntime: InstalledPackage;
@@ -183,7 +196,7 @@ export const resolveRuntimePackages = async (
     esbuild,
     esbuildPlatform: platformPackage(esbuild.source, platform.esbuild),
     libassimp,
-    libassimpPlatform: platformPackage(libassimp.source, platform.libassimp),
+    libassimpPlatform: platform.libassimp ? platformPackage(libassimp.source, platform.libassimp) : undefined,
     nanoraster,
     nanorasterPlatform: platformPackage(nanoraster.source, platform.nanoraster),
     sandboxRuntime,
@@ -303,7 +316,9 @@ export const stageRuntimePackages = async (
     copyRuntimePackage('esbuild', packages.esbuild.source, ['bin']),
     copyRuntimePackage(platform.esbuild, packages.esbuildPlatform),
     copyRuntimePackage('libassimp', packages.libassimp.source),
-    copyRuntimePackage(platform.libassimp, packages.libassimpPlatform),
+    platform.libassimp && packages.libassimpPlatform
+      ? copyRuntimePackage(platform.libassimp, packages.libassimpPlatform)
+      : undefined,
     copyRuntimePackage('nanoraster', packages.nanoraster.source),
     copyRuntimePackage(platform.nanoraster, packages.nanorasterPlatform),
     writeFile(
@@ -323,7 +338,7 @@ export const stageRuntimePackages = async (
             [platform.esbuild]: packages.esbuild.version,
             esbuild: packages.esbuild.version,
             libassimp: packages.libassimp.version,
-            [platform.libassimp]: packages.libassimp.version,
+            ...(platform.libassimp ? { [platform.libassimp]: packages.libassimp.version } : {}),
             nanoraster: packages.nanoraster.version,
             [platform.nanoraster]: packages.nanoraster.version,
             '@anthropic-ai/sandbox-runtime': packages.sandboxRuntime.version,

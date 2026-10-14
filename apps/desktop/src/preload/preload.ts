@@ -36,6 +36,7 @@ import {
   readBootstrap,
   servicesPortRelayTag,
   slicersChannels,
+  windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
 import {
@@ -53,6 +54,14 @@ import type {
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
 const bootstrap = readBootstrap(process.argv);
+
+// Keep the snapshot even when native fullscreen changes before React mounts.
+let isWindowFullscreen = false;
+ipcRenderer.on(windowFullscreenChannel, (_event, isFullscreen: unknown) => {
+  if (typeof isFullscreen === 'boolean') {
+    isWindowFullscreen = isFullscreen;
+  }
+});
 
 let pendingQuitAsk = false;
 let quitAskHandler: (() => void) | undefined;
@@ -149,6 +158,18 @@ contextBridge.exposeInMainWorld('tau', {
   appIcon: {
     setTheme: (theme: AppIconTheme): void => {
       ipcRenderer.send(appIconThemeChannel, theme);
+    },
+  },
+  window: {
+    isFullscreen: (): boolean => isWindowFullscreen,
+    onFullscreenChange: (listener: () => void): (() => void) => {
+      const handler = (): void => {
+        listener();
+      };
+      ipcRenderer.on(windowFullscreenChannel, handler);
+      return () => {
+        ipcRenderer.off(windowFullscreenChannel, handler);
+      };
     },
   },
   quit: {

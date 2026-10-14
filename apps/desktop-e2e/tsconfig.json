@@ -21,6 +21,7 @@
     "global-setup.ts",
     "scripts/**/*.mts",
     "src/**/*.ts",
-    "vitest.machine-profiles.config.ts"
+    "vitest.machine-profiles.config.ts",
+    "vitest.record-recovery.config.ts"
   ]
 }

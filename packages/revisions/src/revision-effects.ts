@@ -4576,7 +4576,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           });
           const rejected = settled.find((result) => result.status === 'rejected');
           if (rejected?.status === 'rejected') {
-            throw rejected.reason;
+            throw rejected.reason instanceof Error
+              ? rejected.reason
+              : new Error('Optional records could not be restored.', { cause: rejected.reason });
           }
           const records = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
           return {

@@ -917,7 +917,7 @@ overrides:
 pnpmfileChecksum: sha256-3KVaUDCxMNG4R+5jAV/A5zGLniaPPaZ1zCo/RcrdYwE=
 
 patchedDependencies:
-  '@agentclientprotocol/codex-acp@1.7.0': a4663c1a80c0c9a670a2f897d5629ca9974aad6e18696b7fc0df667793e8ac53
+  '@agentclientprotocol/codex-acp@1.7.0': f8b40a7943f7e5ba3d6259f87dac5d0da00277ae82775a28c0abc61c5683e830
   '@ai-sdk/langchain@2.0.181': 4db10f07aa138655b17d3bcb1e56ae99b2584a8f8dd1241aeca7f30b4937fa1d
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
   '@react-three/fiber@9.6.1': db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1
@@ -1845,7 +1845,7 @@ importers:
         version: 0.70.0(@anthropic-ai/sdk@0.122.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
       '@agentclientprotocol/codex-acp':
         specifier: 'catalog:'
-        version: 1.7.0(patch_hash=a4663c1a80c0c9a670a2f897d5629ca9974aad6e18696b7fc0df667793e8ac53)
+        version: 1.7.0(patch_hash=f8b40a7943f7e5ba3d6259f87dac5d0da00277ae82775a28c0abc61c5683e830)
       '@anthropic-ai/sandbox-runtime':
         specifier: 'catalog:'
         version: 0.0.75
@@ -3457,7 +3457,7 @@ importers:
         version: 0.70.0(@anthropic-ai/sdk@0.122.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
       '@agentclientprotocol/codex-acp':
         specifier: 'catalog:'
-        version: 1.7.0(patch_hash=a4663c1a80c0c9a670a2f897d5629ca9974aad6e18696b7fc0df667793e8ac53)
+        version: 1.7.0(patch_hash=f8b40a7943f7e5ba3d6259f87dac5d0da00277ae82775a28c0abc61c5683e830)
       '@parcel/watcher':
         specifier: 'catalog:'
         version: 2.6.0
@@ -25543,7 +25543,7 @@ snapshots:
       - '@anthropic-ai/sdk'
       - '@modelcontextprotocol/sdk'
 
-  '@agentclientprotocol/codex-acp@1.7.0(patch_hash=a4663c1a80c0c9a670a2f897d5629ca9974aad6e18696b7fc0df667793e8ac53)':
+  '@agentclientprotocol/codex-acp@1.7.0(patch_hash=f8b40a7943f7e5ba3d6259f87dac5d0da00277ae82775a28c0abc61c5683e830)':
     dependencies:
       '@agentclientprotocol/sdk': 1.8.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@openai/codex': 0.148.0

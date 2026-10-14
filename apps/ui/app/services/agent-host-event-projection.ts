@@ -117,6 +117,7 @@ export type AgentHostLiveBlocks = Map<
       /** A text block whose last applied frame was a durable checkpoint: open, but nothing is arriving. */
       resting?: boolean;
       phase?: string | undefined;
+      reasoningSummary?: string | undefined;
     }
   | {
       readonly type: 'tool';
@@ -158,6 +159,23 @@ const textStreamState = (
  * orphaned ("File edits failed", lane H5).
  */
 const toolKey = (runId: string, toolCallId: string): string => JSON.stringify([runId, 'tool', toolCallId]);
+
+const reasoningMetadata = (
+  summary?: string,
+  startedAt?: number,
+  endedAt?: number,
+): { providerMetadata?: ProviderMetadata } =>
+  summary === undefined && startedAt === undefined && endedAt === undefined
+    ? {}
+    : {
+        providerMetadata: {
+          common: {
+            ...(summary === undefined ? {} : { reasoningSummary: summary }),
+            ...(startedAt === undefined ? {} : { reasoningStartedAtMs: startedAt }),
+            ...(endedAt === undefined ? {} : { reasoningEndedAtMs: endedAt }),
+          },
+        },
+      };
 
 const reasoningTiming = (
   metadata: ProviderMessageMetadata | undefined,
@@ -305,71 +323,54 @@ const assistantChunks = (
       const key = blockKey(runId, message.id, index);
       let streamed = streamedBlocks?.get(key);
       const timing = reasoningTiming(message.metadata, index);
+      const summary = message.metadata?.reasoningSummary;
       if (streamed?.type === 'thinking') {
         if (!streamed.closed) {
           streamed = { ...streamed };
           streamedBlocks?.set(key, streamed);
-          const suffix = value['thinking'].startsWith(streamed.content)
-            ? value['thinking'].slice(streamed.content.length)
-            : '';
-          if (suffix) {
-            chunks.push({ type: 'reasoning-delta', id, delta: suffix });
-          }
+          // A checkpoint behind the live stream must not rewind its summary.
           if (value['thinking'].startsWith(streamed.content)) {
+            const suffix = value['thinking'].slice(streamed.content.length);
+            const summaryChanged = summary !== undefined && summary !== streamed.reasoningSummary;
+            streamed.reasoningSummary = summary ?? streamed.reasoningSummary;
+            if (suffix || summaryChanged) {
+              chunks.push({
+                type: 'reasoning-delta',
+                id,
+                delta: suffix,
+                ...reasoningMetadata(streamed.reasoningSummary),
+              });
+            }
             streamed.content = value['thinking'];
           }
           if (!streamCheckpoint) {
             chunks.push({
               type: 'reasoning-end',
               id,
-              ...(timing === undefined && streamed.startedAtMs === undefined
-                ? {}
-                : {
-                    providerMetadata: {
-                      common: {
-                        reasoningStartedAtMs: timing?.startedAt ?? streamed.startedAtMs,
-                        ...(timing?.endedAt === undefined ? {} : { reasoningEndedAtMs: timing.endedAt }),
-                      },
-                    },
-                  }),
+              ...reasoningMetadata(
+                streamed.reasoningSummary,
+                timing?.startedAt ?? streamed.startedAtMs,
+                timing?.endedAt,
+              ),
             });
             streamed.closed = true;
           }
         }
       } else {
+        const metadata = reasoningMetadata(summary, timing?.startedAt);
         chunks.push(
-          {
-            type: 'reasoning-start',
-            id,
-            ...(timing === undefined
-              ? {}
-              : { providerMetadata: { common: { reasoningStartedAtMs: timing.startedAt } } }),
-          },
-          { type: 'reasoning-delta', id, delta: value['thinking'] },
+          { type: 'reasoning-start', id, ...metadata },
+          { type: 'reasoning-delta', id, delta: value['thinking'], ...metadata },
         );
-        if (streamedBlocks) {
-          streamedBlocks.set(key, {
-            type: 'thinking',
-            content: value['thinking'],
-            closed: !streamCheckpoint,
-            ...(timing === undefined ? {} : { startedAtMs: timing.startedAt }),
-          });
-        }
+        streamedBlocks?.set(key, {
+          type: 'thinking',
+          content: value['thinking'],
+          closed: !streamCheckpoint,
+          ...(timing === undefined ? {} : { startedAtMs: timing.startedAt }),
+          ...(summary === undefined ? {} : { reasoningSummary: summary }),
+        });
         if (!streamCheckpoint || !streamedBlocks) {
-          chunks.push({
-            type: 'reasoning-end',
-            id,
-            ...(timing === undefined
-              ? {}
-              : {
-                  providerMetadata: {
-                    common: {
-                      reasoningStartedAtMs: timing.startedAt,
-                      ...(timing.endedAt === undefined ? {} : { reasoningEndedAtMs: timing.endedAt }),
-                    },
-                  },
-                }),
-          });
+          chunks.push({ type: 'reasoning-end', id, ...reasoningMetadata(summary, timing?.startedAt, timing?.endedAt) });
         }
       }
       continue;
@@ -816,15 +817,16 @@ export const projectAgentHostLiveEvent = (
       closed: false,
       ...(event.type === 'text-start' && event.phase !== undefined ? { phase: event.phase } : {}),
       ...(event.type === 'thinking-start' && event.timestamp !== undefined ? { startedAtMs: event.timestamp } : {}),
+      ...(event.type === 'thinking-start' && event.reasoningSummary !== undefined
+        ? { reasoningSummary: event.reasoningSummary }
+        : {}),
     });
     return [
       {
         type: type === 'text' ? 'text-start' : 'reasoning-start',
         id,
         ...(event.type === 'text-start' ? textStreamState(undefined, event.phase) : {}),
-        ...(event.type === 'thinking-start' && event.timestamp !== undefined
-          ? { providerMetadata: { common: { reasoningStartedAtMs: event.timestamp } } }
-          : {}),
+        ...(event.type === 'thinking-start' ? reasoningMetadata(event.reasoningSummary, event.timestamp) : {}),
       },
     ];
   }
@@ -842,6 +844,9 @@ export const projectAgentHostLiveEvent = (
       return [];
     }
     const delta = event.delta.slice(block.content.length - offset);
+    if (delta && event.type === 'thinking-delta' && event.reasoningSummary !== undefined) {
+      block.reasoningSummary = event.reasoningSummary;
+    }
     block.content += delta;
     const resumed = delta !== '' && block.resting === true;
     if (resumed) {
@@ -855,12 +860,17 @@ export const projectAgentHostLiveEvent = (
             type: type === 'text' ? 'text-delta' : 'reasoning-delta',
             id,
             delta,
-            ...(event.type === 'text-delta' ? textStreamState(resumed ? 'live' : undefined, block.phase) : {}),
+            ...(event.type === 'text-delta'
+              ? textStreamState(resumed ? 'live' : undefined, block.phase)
+              : reasoningMetadata(block.reasoningSummary)),
           },
         ]
       : start;
   }
   const { content } = event;
+  if (event.type === 'thinking-end' && event.reasoningSummary !== undefined) {
+    block.reasoningSummary = event.reasoningSummary;
+  }
   const suffix = content.startsWith(block.content) ? content.slice(block.content.length) : '';
   block.content = content;
   block.closed = true;
@@ -873,15 +883,8 @@ export const projectAgentHostLiveEvent = (
     type: type === 'text' ? 'text-end' : 'reasoning-end',
     id,
     ...(event.type === 'text-end' ? textStreamState(undefined, block.phase) : {}),
-    ...(event.type === 'thinking-end' && (block.startedAtMs !== undefined || event.timestamp !== undefined)
-      ? {
-          providerMetadata: {
-            common: {
-              ...(block.startedAtMs === undefined ? {} : { reasoningStartedAtMs: block.startedAtMs }),
-              ...(event.timestamp === undefined ? {} : { reasoningEndedAtMs: event.timestamp }),
-            },
-          },
-        }
+    ...(event.type === 'thinking-end'
+      ? reasoningMetadata(block.reasoningSummary, block.startedAtMs, event.timestamp)
       : {}),
   });
   return chunks;

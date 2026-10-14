@@ -95,15 +95,22 @@ export type AgentLiveEvent =
       readonly offset?: number | undefined;
     })
   | (AgentLiveEventBase & { readonly type: 'text-end'; readonly content: string; readonly phase?: string | undefined })
-  | (AgentLiveEventBase & { readonly type: 'thinking-start'; readonly timestamp?: number | undefined })
+  | (AgentLiveEventBase & {
+      readonly type: 'thinking-start';
+      readonly timestamp?: number | undefined;
+      readonly reasoningSummary?: string | undefined;
+    })
   | (AgentLiveEventBase & {
       readonly type: 'thinking-delta';
+      /** Latest provider-declared reasoning summary, never inferred from thought formatting. */
+      readonly reasoningSummary?: string | undefined;
       readonly delta: string;
       /** UTF-16 offset in this block, for reconciliation with durable checkpoints. */
       readonly offset?: number | undefined;
     })
   | (AgentLiveEventBase & {
       readonly type: 'thinking-end';
+      readonly reasoningSummary?: string | undefined;
       readonly content: string;
       readonly timestamp?: number | undefined;
     })

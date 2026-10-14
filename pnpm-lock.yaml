@@ -5159,6 +5159,9 @@ importers:
       '@rjsf/utils':
         specifier: 6.11.0
         version: 6.11.0(react@19.2.7)
+      '@rjsf/validator-ajv8':
+        specifier: 6.11.0
+        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))
       '@taucad/camera':
         specifier: workspace:*
         version: link:../camera
@@ -5220,9 +5223,6 @@ importers:
       '@react-three/fiber':
         specifier: 9.6.1
         version: 9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
-      '@rjsf/validator-ajv8':
-        specifier: 6.11.0
-        version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))
       '@taucad/assimp':
         specifier: workspace:*
         version: link:../plugins/assimp

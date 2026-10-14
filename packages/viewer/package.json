@@ -554,6 +554,7 @@
     "@react-three/drei": "^10.7.7",
     "@rjsf/core": "6.11.0",
     "@rjsf/utils": "6.11.0",
+    "@rjsf/validator-ajv8": "6.11.0",
     "@taucad/camera": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/kinematics": "workspace:*",
@@ -587,7 +588,6 @@
   },
   "devDependencies": {
     "@react-three/fiber": "^9.6.1",
-    "@rjsf/validator-ajv8": "6.11.0",
     "@taucad/assimp": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/image": "workspace:*",

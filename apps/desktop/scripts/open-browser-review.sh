@@ -35,7 +35,7 @@ done
 
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$script_directory" rev-parse --show-toplevel)"
-package_root="$REPO_ROOT/apps/desktop/package-out"
+package_root="$REPO_ROOT/out/artifacts/desktop-browser-review"
 app_path="$package_root/Tau-darwin-arm64/Tau.app"
 receipt="$package_root/browser-review.sha256"
 revision_file="$package_root/browser-review-revision.txt"
@@ -50,7 +50,7 @@ revision_file="$package_root/browser-review-revision.txt"
 }
 
 worktree_id="$(printf '%s' "$REPO_ROOT" | shasum -a 256 | cut -c 1-12)"
-profile_path="$HOME/Library/Application Support/Tau Browser Review/$worktree_id"
+profile_path="$HOME/Library/Application Support/Tau Browser Review/$worktree_id-overlays"
 mkdir -p "$profile_path"
 printf '→ Source revision: %s\n' "$(cat "$revision_file")"
 printf '→ Build: %s\n' "$app_path"

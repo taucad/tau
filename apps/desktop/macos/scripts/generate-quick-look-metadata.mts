@@ -187,9 +187,7 @@ const typeDeclaration = (format: Format): Record<string, unknown> => ({
 });
 
 const supportedIdentifiers = (manifest: Manifest): readonly string[] =>
-  manifest.formats
-    .filter((format) => !format.systemPreview)
-    .flatMap((format) => [format.identifier, ...(format.aliases ?? [])]);
+  manifest.formats.flatMap((format) => (format.systemPreview ? [] : [format.identifier, ...(format.aliases ?? [])]));
 
 const extensionInfo = (options: { manifest: Manifest; point: string; principal: string }): string =>
   plist({

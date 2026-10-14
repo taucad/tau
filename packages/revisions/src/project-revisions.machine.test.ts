@@ -1113,7 +1113,16 @@ describe('projectRevisionsMachine', () => {
       publish: { phase: 'idle', tags: [], publicationId: undefined, shareUrl: undefined, error: undefined },
       /* The scheduler is still reading its own record and git's remotes list,
          which is exactly what `Checking…` means in the Sync row (S26). */
-      sync: { state: 'checking', pendingCount: 0, online: true, conflictRef: undefined, error: undefined },
+      sync: {
+        state: 'checking',
+        pullPhase: 'idle',
+        hasAppliedRemote: false,
+        chats: 'unknown',
+        pendingCount: 0,
+        online: true,
+        conflictRef: undefined,
+        error: undefined,
+      },
       /* W10's row, empty until a merge records a conflicted head: existence is
          record-derived, so there is nothing here to be stale (S33). */
       conflicts: [],

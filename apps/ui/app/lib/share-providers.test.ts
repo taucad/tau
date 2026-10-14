@@ -37,7 +37,7 @@ describe('GitHub share credential broker', () => {
       TAU_API_URL: 'https://api.tau.test/',
     };
     authClient.listAccounts.mockResolvedValue({
-      data: [{ providerId: 'github', accountId: 'account_1', scopes: ['read:user', 'gist'] }],
+      data: [{ id: 'account-row-1', providerId: 'github', accountId: 'account_1', scopes: ['read:user', 'gist'] }],
       error: null,
     });
     authClient.getAccessToken.mockResolvedValue({
@@ -77,9 +77,39 @@ describe('GitHub share credential broker', () => {
     ).resolves.toEqual({ accessToken: 'one-operation-token', grantedScopes: ['gist'] });
     expect(authClient.getAccessToken).toHaveBeenCalledOnce();
     expect(authClient.getAccessToken).toHaveBeenCalledWith({
-      providerId: 'github',
-      accountId: 'account_1',
+      accountId: 'account-row-1',
     });
+  });
+
+  it('selects the GitHub row rather than a different provider with the same subject', async () => {
+    authClient.listAccounts.mockResolvedValueOnce({
+      data: [
+        { id: 'google-row', providerId: 'google', accountId: 'shared-subject', scopes: ['gist'] },
+        { id: 'github-row', providerId: 'github', accountId: 'shared-subject', scopes: ['gist'] },
+      ],
+      error: null,
+    });
+    await githubShareCredentialBroker.getAccessToken({
+      connectionId: 'github',
+      audience: 'https://api.github.com',
+      scopes: ['gist'],
+    });
+    expect(authClient.getAccessToken).toHaveBeenCalledExactlyOnceWith({ accountId: 'github-row' });
+  });
+
+  it('does not lease a token when only another provider is linked', async () => {
+    authClient.listAccounts.mockResolvedValueOnce({
+      data: [{ id: 'google-row', providerId: 'google', accountId: 'account_1', scopes: ['gist'] }],
+      error: null,
+    });
+    await expect(
+      githubShareCredentialBroker.getAccessToken({
+        connectionId: 'github',
+        audience: 'https://api.github.com',
+        scopes: ['gist'],
+      }),
+    ).rejects.toThrow();
+    expect(authClient.getAccessToken).not.toHaveBeenCalled();
   });
 
   it('rejects broader authorities before requesting a token', async () => {
@@ -111,7 +141,7 @@ describe('GitHub share credential broker', () => {
   it('requires the actual gist scope on a linked GitHub account', async () => {
     await expect(getGithubGistConnectionStatus()).resolves.toBe('connected');
     authClient.listAccounts.mockResolvedValueOnce({
-      data: [{ providerId: 'github', accountId: 'account_1', scopes: ['read:user'] }],
+      data: [{ id: 'account-row-1', providerId: 'github', accountId: 'account_1', scopes: ['read:user'] }],
       error: null,
     });
     await expect(getGithubGistConnectionStatus()).resolves.toBe('permission-required');
@@ -161,7 +191,7 @@ describe('GitHub share credential broker', () => {
 
   /* D51: a link Better Auth refuses for a reason a retry cannot fix says which. */
   it('names the email mismatch and the account already linked elsewhere instead of asking for a retry', () => {
-    const emailMismatch = parseGithubGistAuthorizationReturn("?shareAuth=github-gist&error=email_doesn't_match");
+    const emailMismatch = parseGithubGistAuthorizationReturn('?shareAuth=github-gist&error=email_does_not_match');
     expect(emailMismatch).toMatchObject({ outcome: 'failed', remainingSearch: '' });
     expect(emailMismatch?.failure).toMatch(/different email address from your Tau account/u);
     const linkedElsewhere = parseGithubGistAuthorizationReturn(
@@ -215,9 +245,15 @@ describe('desktop GitHub Gist consent', () => {
   it('should poll every two seconds until the account carries the gist scope', async () => {
     vi.useFakeTimers();
     authClient.listAccounts
-      .mockResolvedValueOnce({ data: [{ providerId: 'github', accountId: 'a', scopes: ['read:user'] }], error: null })
+      .mockResolvedValueOnce({
+        data: [{ id: 'account-row-1', providerId: 'github', accountId: 'a', scopes: ['read:user'] }],
+        error: null,
+      })
       .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValue({ data: [{ providerId: 'github', accountId: 'a', scopes: ['gist'] }], error: null });
+      .mockResolvedValue({
+        data: [{ id: 'account-row-1', providerId: 'github', accountId: 'a', scopes: ['gist'] }],
+        error: null,
+      });
 
     const connected = awaitGithubGistConnection(new AbortController().signal);
     await vi.advanceTimersByTimeAsync(1999);
@@ -231,7 +267,7 @@ describe('desktop GitHub Gist consent', () => {
   it('should give up after ten minutes without the gist scope', async () => {
     vi.useFakeTimers();
     authClient.listAccounts.mockResolvedValue({
-      data: [{ providerId: 'github', accountId: 'a', scopes: ['read:user'] }],
+      data: [{ id: 'account-row-1', providerId: 'github', accountId: 'a', scopes: ['read:user'] }],
       error: null,
     });
 

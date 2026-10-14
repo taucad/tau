@@ -116,8 +116,16 @@ export type AgentHostLiveBlocks = Map<
       startedAtMs?: number | undefined;
       /** A text block whose last applied frame was a durable checkpoint: open, but nothing is arriving. */
       resting?: boolean;
+      phase?: string | undefined;
+      reasoningSummary?: string | undefined;
     }
-  | { readonly type: 'tool'; content: ''; closed: boolean; input: 'started' | 'available' }
+  | {
+      readonly type: 'tool';
+      content: '';
+      closed: boolean;
+      input: 'started' | 'available';
+      toolMetadata?: ToolChunkMetadata | undefined;
+    }
 >;
 
 /**
@@ -128,9 +136,20 @@ export type AgentHostLiveBlocks = Map<
  * bytes are still arriving. The checkpoint row is the host's own signal that
  * they stopped; the next live delta with bytes is the signal that they resumed.
  */
-const textStreamState = (streamState: 'checkpoint' | 'live'): { providerMetadata: ProviderMetadata } => ({
-  providerMetadata: { common: { streamState } },
-});
+const textStreamState = (
+  streamState: 'checkpoint' | 'live' | undefined,
+  phase?: string,
+): { providerMetadata?: ProviderMetadata } =>
+  streamState === undefined && phase === undefined
+    ? {}
+    : {
+        providerMetadata: {
+          common: {
+            ...(streamState === undefined ? {} : { streamState }),
+            ...(phase === undefined ? {} : { messagePhase: phase }),
+          },
+        },
+      };
 
 /**
  * The run-scoped identity for a tool call's input and settled-output fence.
@@ -140,6 +159,23 @@ const textStreamState = (streamState: 'checkpoint' | 'live'): { providerMetadata
  * orphaned ("File edits failed", lane H5).
  */
 const toolKey = (runId: string, toolCallId: string): string => JSON.stringify([runId, 'tool', toolCallId]);
+
+const reasoningMetadata = (
+  summary?: string,
+  startedAt?: number,
+  endedAt?: number,
+): { providerMetadata?: ProviderMetadata } =>
+  summary === undefined && startedAt === undefined && endedAt === undefined
+    ? {}
+    : {
+        providerMetadata: {
+          common: {
+            ...(summary === undefined ? {} : { reasoningSummary: summary }),
+            ...(startedAt === undefined ? {} : { reasoningStartedAtMs: startedAt }),
+            ...(endedAt === undefined ? {} : { reasoningEndedAtMs: endedAt }),
+          },
+        },
+      };
 
 const reasoningTiming = (
   metadata: ProviderMessageMetadata | undefined,
@@ -244,35 +280,40 @@ const assistantChunks = (
       const id = `${message.id}:text:${String(index)}`;
       const key = blockKey(runId, message.id, index);
       let streamed = streamedBlocks?.get(key);
+      const phase = typeof message.metadata?.phase === 'string' ? message.metadata.phase : undefined;
+      const metadata = textStreamState(
+        streamCheckpoint && streamedBlocks !== undefined ? 'checkpoint' : undefined,
+        phase ?? (streamed?.type === 'text' ? streamed.phase : undefined),
+      );
       if (streamed?.type === 'text') {
         if (!streamed.closed) {
-          streamed = { ...streamed };
+          streamed = { ...streamed, ...(phase === undefined ? {} : { phase }) };
           streamedBlocks?.set(key, streamed);
           const suffix = value['text'].startsWith(streamed.content) ? value['text'].slice(streamed.content.length) : '';
           if (streamCheckpoint) {
             // An empty delta still carries the rest fact: the reducer appends '' and assigns the metadata.
-            chunks.push({ type: 'text-delta', id, delta: suffix, ...textStreamState('checkpoint') });
+            chunks.push({ type: 'text-delta', id, delta: suffix, ...metadata });
             streamed.resting = true;
           } else if (suffix) {
-            chunks.push({ type: 'text-delta', id, delta: suffix });
+            chunks.push({ type: 'text-delta', id, delta: suffix, ...metadata });
           }
           if (value['text'].startsWith(streamed.content)) {
             streamed.content = value['text'];
           }
           if (!streamCheckpoint) {
-            chunks.push({ type: 'text-end', id });
+            chunks.push({ type: 'text-end', id, ...metadata });
             streamed.closed = true;
           }
         }
       } else {
         const resting = streamCheckpoint && streamedBlocks !== undefined;
         chunks.push(
-          { type: 'text-start', id },
-          { type: 'text-delta', id, delta: value['text'], ...(resting ? textStreamState('checkpoint') : {}) },
+          { type: 'text-start', id, ...textStreamState(undefined, phase) },
+          { type: 'text-delta', id, delta: value['text'], ...metadata },
         );
-        streamedBlocks?.set(key, { type: 'text', content: value['text'], closed: !streamCheckpoint, resting });
+        streamedBlocks?.set(key, { type: 'text', content: value['text'], closed: !streamCheckpoint, resting, phase });
         if (!resting) {
-          chunks.push({ type: 'text-end', id });
+          chunks.push({ type: 'text-end', id, ...metadata });
         }
       }
       continue;
@@ -282,71 +323,54 @@ const assistantChunks = (
       const key = blockKey(runId, message.id, index);
       let streamed = streamedBlocks?.get(key);
       const timing = reasoningTiming(message.metadata, index);
+      const summary = message.metadata?.reasoningSummary;
       if (streamed?.type === 'thinking') {
         if (!streamed.closed) {
           streamed = { ...streamed };
           streamedBlocks?.set(key, streamed);
-          const suffix = value['thinking'].startsWith(streamed.content)
-            ? value['thinking'].slice(streamed.content.length)
-            : '';
-          if (suffix) {
-            chunks.push({ type: 'reasoning-delta', id, delta: suffix });
-          }
+          // A checkpoint behind the live stream must not rewind its summary.
           if (value['thinking'].startsWith(streamed.content)) {
+            const suffix = value['thinking'].slice(streamed.content.length);
+            const summaryChanged = summary !== undefined && summary !== streamed.reasoningSummary;
+            streamed.reasoningSummary = summary ?? streamed.reasoningSummary;
+            if (suffix || summaryChanged) {
+              chunks.push({
+                type: 'reasoning-delta',
+                id,
+                delta: suffix,
+                ...reasoningMetadata(streamed.reasoningSummary),
+              });
+            }
             streamed.content = value['thinking'];
           }
           if (!streamCheckpoint) {
             chunks.push({
               type: 'reasoning-end',
               id,
-              ...(timing === undefined && streamed.startedAtMs === undefined
-                ? {}
-                : {
-                    providerMetadata: {
-                      common: {
-                        reasoningStartedAtMs: timing?.startedAt ?? streamed.startedAtMs,
-                        ...(timing?.endedAt === undefined ? {} : { reasoningEndedAtMs: timing.endedAt }),
-                      },
-                    },
-                  }),
+              ...reasoningMetadata(
+                streamed.reasoningSummary,
+                timing?.startedAt ?? streamed.startedAtMs,
+                timing?.endedAt,
+              ),
             });
             streamed.closed = true;
           }
         }
       } else {
+        const metadata = reasoningMetadata(summary, timing?.startedAt);
         chunks.push(
-          {
-            type: 'reasoning-start',
-            id,
-            ...(timing === undefined
-              ? {}
-              : { providerMetadata: { common: { reasoningStartedAtMs: timing.startedAt } } }),
-          },
-          { type: 'reasoning-delta', id, delta: value['thinking'] },
+          { type: 'reasoning-start', id, ...metadata },
+          { type: 'reasoning-delta', id, delta: value['thinking'], ...metadata },
         );
-        if (streamedBlocks) {
-          streamedBlocks.set(key, {
-            type: 'thinking',
-            content: value['thinking'],
-            closed: !streamCheckpoint,
-            ...(timing === undefined ? {} : { startedAtMs: timing.startedAt }),
-          });
-        }
+        streamedBlocks?.set(key, {
+          type: 'thinking',
+          content: value['thinking'],
+          closed: !streamCheckpoint,
+          ...(timing === undefined ? {} : { startedAtMs: timing.startedAt }),
+          ...(summary === undefined ? {} : { reasoningSummary: summary }),
+        });
         if (!streamCheckpoint || !streamedBlocks) {
-          chunks.push({
-            type: 'reasoning-end',
-            id,
-            ...(timing === undefined
-              ? {}
-              : {
-                  providerMetadata: {
-                    common: {
-                      reasoningStartedAtMs: timing.startedAt,
-                      ...(timing.endedAt === undefined ? {} : { reasoningEndedAtMs: timing.endedAt }),
-                    },
-                  },
-                }),
-          });
+          chunks.push({ type: 'reasoning-end', id, ...reasoningMetadata(summary, timing?.startedAt, timing?.endedAt) });
         }
       }
       continue;
@@ -425,29 +449,34 @@ type ToolChunkMetadata = NonNullable<Extract<UIMessageChunk, { type: 'tool-input
  * renderer reads one shape for both emitters.
  *
  * @param message - The durable tool row.
+ * @param previous - Facts from the same run and tool identity.
  * @returns Chunk fields shared by the input and output chunks.
  */
 const toolChunkFacts = (
   message: ToolProviderMessage,
+  previous?: ToolChunkMetadata,
 ): { dynamic?: true; title?: string; toolMetadata?: ToolChunkMetadata } => {
   const tauInternal = isRecord(message.metadata?.tauInternal) ? message.metadata.tauInternal : undefined;
   const external = tauInternal?.['origin'] === 'external';
   const { call } = message;
   const agentId = tauInternal?.['agentId'];
   const presentation = tauInternal?.['presentation'];
-  /* The SDK carries a part's `toolMetadata` from the *input* chunk and reuses it
-   * for the result. Omit transient status, but retain a terminal replacement so
-   * the real SDK consumer sees the final ACP facts.
+  /* The SDK replaces tool metadata when an output chunk supplies it. Carry
+   * earlier run-scoped facts forward, with explicitly supplied fields replacing
+   * them, so sparse results cannot erase captured content or terminal updates.
+   * Omit transient status while preserving the final ACP facts.
    *
    * The durable log's JSON and the SDK's `JSONValue` describe the same bytes and
    * differ only in array readonly-ness, so this asserts rather than re-copies. */
   const { status: _status, ...facts } = call ?? {};
   const durable = {
+    ...(isRecord(previous?.['tau']) ? previous['tau'] : {}),
     ...facts,
     ...(call?.status === 'completed' || call?.status === 'failed' ? { status: call.status } : {}),
     ...(external ? { origin: 'external' } : {}),
     ...(typeof agentId === 'string' ? { agentId } : {}),
-    ...(presentation === 'tau-mcp' ? { presentation } : {}),
+    // Grok omits nativeName; its qualified Tau tool name is already canonical.
+    ...(presentation === 'tau-mcp' ? { presentation, nativeName: call?.nativeName ?? message.toolName } : {}),
   };
   const tau = durable as ToolChunkMetadata;
   return {
@@ -471,28 +500,42 @@ const messageChunks = (
     }
     case 'tool-input': {
       const key = toolKey(runId, message.toolCallId);
-      if (streamedBlocks?.get(key)?.closed) {
+      const current = streamedBlocks?.get(key);
+      if (current?.closed) {
         return [];
       }
-      streamedBlocks?.set(key, { type: 'tool', content: '', closed: false, input: 'available' });
+      const facts = toolChunkFacts(message, current?.type === 'tool' ? current.toolMetadata : undefined);
+      streamedBlocks?.set(key, {
+        type: 'tool',
+        content: '',
+        closed: false,
+        input: 'available',
+        toolMetadata: facts.toolMetadata,
+      });
       return [
         {
           type: 'tool-input-available',
           toolCallId: message.toolCallId,
           toolName: message.toolName,
           input: message.content,
-          ...toolChunkFacts(message),
+          ...facts,
         },
       ];
     }
     case 'tool-output': {
-      streamedBlocks?.set(toolKey(runId, message.toolCallId), {
+      const key = toolKey(runId, message.toolCallId);
+      const current = streamedBlocks?.get(key);
+      const { title: _title, ...facts } = toolChunkFacts(
+        message,
+        current?.type === 'tool' ? current.toolMetadata : undefined,
+      );
+      streamedBlocks?.set(key, {
         type: 'tool',
         content: '',
         closed: true,
         input: 'available',
+        toolMetadata: facts.toolMetadata,
       });
-      const { title: _title, ...facts } = toolChunkFacts(message);
       const output: UIMessageChunk = message.isError
         ? {
             type: 'tool-output-error',
@@ -773,21 +816,27 @@ export const projectAgentHostLiveEvent = (
       type,
       content: '',
       closed: false,
+      ...(event.type === 'text-start' && event.phase !== undefined ? { phase: event.phase } : {}),
       ...(event.type === 'thinking-start' && event.timestamp !== undefined ? { startedAtMs: event.timestamp } : {}),
+      ...(event.type === 'thinking-start' && event.reasoningSummary !== undefined
+        ? { reasoningSummary: event.reasoningSummary }
+        : {}),
     });
     return [
       {
         type: type === 'text' ? 'text-start' : 'reasoning-start',
         id,
-        ...(event.type === 'thinking-start' && event.timestamp !== undefined
-          ? { providerMetadata: { common: { reasoningStartedAtMs: event.timestamp } } }
-          : {}),
+        ...(event.type === 'text-start' ? textStreamState(undefined, event.phase) : {}),
+        ...(event.type === 'thinking-start' ? reasoningMetadata(event.reasoningSummary, event.timestamp) : {}),
       },
     ];
   }
   const start: UIMessageChunk[] = current ? [] : [{ type: type === 'text' ? 'text-start' : 'reasoning-start', id }];
   const block: NonNullable<typeof current> =
     current === undefined ? { type, content: '', closed: false } : { ...current };
+  if ((event.type === 'text-delta' || event.type === 'text-end') && event.phase !== undefined) {
+    block.phase = event.phase;
+  }
   if (event.type === 'text-delta' || event.type === 'thinking-delta') {
     // Durable checkpoints and live deltas travel on independent subscriptions.
     // A missing prefix is recovered by the next checkpoint/end, never guessed.
@@ -796,6 +845,9 @@ export const projectAgentHostLiveEvent = (
       return [];
     }
     const delta = event.delta.slice(block.content.length - offset);
+    if (delta && event.type === 'thinking-delta' && event.reasoningSummary !== undefined) {
+      block.reasoningSummary = event.reasoningSummary;
+    }
     block.content += delta;
     const resumed = delta !== '' && block.resting === true;
     if (resumed) {
@@ -809,12 +861,17 @@ export const projectAgentHostLiveEvent = (
             type: type === 'text' ? 'text-delta' : 'reasoning-delta',
             id,
             delta,
-            ...(resumed ? textStreamState('live') : {}),
+            ...(event.type === 'text-delta'
+              ? textStreamState(resumed ? 'live' : undefined, block.phase)
+              : reasoningMetadata(block.reasoningSummary)),
           },
         ]
       : start;
   }
   const { content } = event;
+  if (event.type === 'thinking-end' && event.reasoningSummary !== undefined) {
+    block.reasoningSummary = event.reasoningSummary;
+  }
   const suffix = content.startsWith(block.content) ? content.slice(block.content.length) : '';
   block.content = content;
   block.closed = true;
@@ -826,15 +883,9 @@ export const projectAgentHostLiveEvent = (
   chunks.push({
     type: type === 'text' ? 'text-end' : 'reasoning-end',
     id,
-    ...(event.type === 'thinking-end' && (block.startedAtMs !== undefined || event.timestamp !== undefined)
-      ? {
-          providerMetadata: {
-            common: {
-              ...(block.startedAtMs === undefined ? {} : { reasoningStartedAtMs: block.startedAtMs }),
-              ...(event.timestamp === undefined ? {} : { reasoningEndedAtMs: event.timestamp }),
-            },
-          },
-        }
+    ...(event.type === 'text-end' ? textStreamState(undefined, block.phase) : {}),
+    ...(event.type === 'thinking-end'
+      ? reasoningMetadata(block.reasoningSummary, block.startedAtMs, event.timestamp)
       : {}),
   });
   return chunks;
@@ -941,6 +992,8 @@ export type AgentHostApproval = {
    * write nothing.
    */
   readonly context?: AgentHostApprovalContext | undefined;
+  /** Structured request facts retained for compact presentation and Debug inspection. */
+  readonly request?: { readonly title?: string | undefined; readonly input?: unknown } | undefined;
 };
 
 /** Ledger correlation a tool attaches to the interrupt it raises. @public */
@@ -988,8 +1041,9 @@ const interruptRequestSchema = z.looseObject({
   agentId: z.string().optional(),
   context: z
     .looseObject({
-      toolCall: z.looseObject({ title: z.string().optional() }).optional(),
+      toolCall: z.looseObject({ title: z.string().optional(), rawInput: z.json().optional() }).optional(),
       options: z.array(approvalOptionSchema).optional(),
+      input: z.json().optional(),
       requestId: z.string().min(1).optional(),
       machineId: z.string().min(1).optional(),
       fileName: z.string().min(1).optional(),
@@ -1092,6 +1146,7 @@ const agentHostApprovalSchema = z.object({
   agentId: z.string().optional(),
   login: agentHostLoginSchema.optional(),
   context: agentHostApprovalContextSchema.optional(),
+  request: z.object({ title: z.string().optional(), input: z.json().optional() }).optional(),
 });
 
 /**
@@ -1118,6 +1173,16 @@ const approvalChunks = (
   const request = interruptRequestSchema.safeParse(event.payload).data;
   const login = loginOf(event.payload);
   const context = approvalContextOf(request?.context);
+  const content = request?.context?.toolCall?.['content'];
+  const description = Array.isArray(content)
+    ? content
+        .flatMap((block: unknown) =>
+          isRecord(block) && isRecord(block['content']) && typeof block['content']['text'] === 'string'
+            ? [block['content']['text']]
+            : [],
+        )
+        .join('\n')
+    : undefined;
   const input: AgentHostApproval = {
     interruptId: event.interruptId,
     kind: request?.kind ?? 'approval',
@@ -1130,6 +1195,14 @@ const approvalChunks = (
     ...(request?.agentId === undefined ? {} : { agentId: request.agentId }),
     ...(login === undefined ? {} : { login }),
     ...(context === undefined ? {} : { context }),
+    ...(request?.context?.toolCall === undefined && request?.context?.input === undefined
+      ? {}
+      : {
+          request: {
+            title: request.context.toolCall?.title ?? (description === '' ? undefined : description),
+            input: request.context.input ?? request.context.toolCall?.rawInput,
+          },
+        }),
   };
   return [
     {

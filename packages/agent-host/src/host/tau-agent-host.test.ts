@@ -3294,6 +3294,43 @@ describe('the attempt ledger and its refusal taxonomy', () => {
       }),
     );
 
+  it('resumes an exhausted text-only output limit after reload instead of completing the truncated answer', async () => {
+    const file = createMemoryLogFile();
+    const requests: ModelStreamRequest[] = [];
+    const transport: ModelTransport = {
+      funding: { type: 'unfunded' },
+      async *stream(request) {
+        requests.push(request);
+        yield { type: 'text-delta', text: requests.length <= 3 ? 'I will implement' : 'Implemented.' };
+        yield { type: 'completed', stopReason: requests.length <= 3 ? 'length' : 'stop' };
+      },
+    };
+    const first = silentHost(file, 'limited', transport);
+    await first.admit({
+      chatId: 'chat-limited',
+      runId: 'run-limited',
+      trigger: 'submit',
+      message: { id: 'turn-limited', role: 'user', content: 'Implement the engine.' },
+    });
+    await vi.waitFor(async () => {
+      expect(await first.snapshot('chat-limited')).toMatchObject({
+        state: 'failed',
+        failure: { code: 'MODEL_OUTPUT_LIMIT' },
+      });
+    });
+    expect(requests).toHaveLength(3);
+    await first.close();
+
+    const reopened = silentHost(file, 'resumed', transport);
+    await reopened.resume('chat-limited');
+    await vi.waitFor(async () => {
+      expect(await reopened.snapshot('chat-limited')).toMatchObject({ state: 'completed' });
+    });
+    expect(requests).toHaveLength(4);
+    expect(requests[3]?.messages.at(-1)?.metadata?.tauInternal?.['kind']).toBe('output-limit-recovery');
+    await reopened.close();
+  });
+
   it('admits a rewinding gesture on a chat whose first run committed no turn', async () => {
     const file = createMemoryLogFile();
     await seedLog(file, stoppedInAdmission);
@@ -3780,67 +3817,70 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     await host.close();
   });
 
-  it('reopens a settled run whose refusal is resumable, and refuses one that is not', async () => {
-    const reopenFile = createMemoryLogFile();
-    await seedLog(reopenFile, [
-      { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
-      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
-      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
-      {
-        type: 'run.lifecycle',
-        runId: 'run-1',
-        state: 'failed',
-        detail: { code: 'INSUFFICIENT_CREDIT', message: 'Top up.' },
-      },
-      {
-        type: 'turn.failed',
-        runId: 'run-1',
-        chatId: 'chat-reopen',
-        turnId: 'turn-1',
-        reason: 'The turn ended before it recorded a revision.',
-      },
-    ]);
-    const host = silentHost(reopenFile, 'reopen');
+  it.each(['INSUFFICIENT_CREDIT', 'MODEL_OUTPUT_LIMIT', 'TOOL_RESULT_PERSISTENCE_FAILED'])(
+    'reopens a settled %s run from disk, and refuses one that is not resumable',
+    async (code) => {
+      const reopenFile = createMemoryLogFile();
+      await seedLog(reopenFile, [
+        { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+        { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+        { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+        {
+          type: 'run.lifecycle',
+          runId: 'run-1',
+          state: 'failed',
+          detail: { code, message: 'Resume the saved run.' },
+        },
+        {
+          type: 'turn.failed',
+          runId: 'run-1',
+          chatId: 'chat-reopen',
+          turnId: 'turn-1',
+          reason: 'The turn ended before it recorded a revision.',
+        },
+      ]);
+      const host = silentHost(reopenFile, 'reopen');
 
-    await host.resume('chat-reopen');
+      await host.resume('chat-reopen');
 
-    /* The second attempt settles on its own terms: the reopening row clears the
-     * first attempt's settlement slot, so M1's row for attempt 2 is no longer the
-     * `SETTLEMENT_CONFLICT` that left the turn with no revision. */
-    await vi.waitFor(async () => {
-      expect(await readLog(reopenFile)).toContainEqual(
-        expect.objectContaining({ type: 'turn.finalized', runId: 'run-1', attempt: 2 }),
-      );
-    });
-    expect(await host.snapshot('chat-reopen')).toMatchObject({ runId: 'run-1', state: 'completed' });
-    await host.close();
+      /* The second attempt settles on its own terms: the reopening row clears the
+       * first attempt's settlement slot, so M1's row for attempt 2 is no longer the
+       * `SETTLEMENT_CONFLICT` that left the turn with no revision. */
+      await vi.waitFor(async () => {
+        expect(await readLog(reopenFile)).toContainEqual(
+          expect.objectContaining({ type: 'turn.finalized', runId: 'run-1', attempt: 2 }),
+        );
+      });
+      expect(await host.snapshot('chat-reopen')).toMatchObject({ runId: 'run-1', state: 'completed' });
+      await host.close();
 
-    const closedFile = createMemoryLogFile();
-    await seedLog(closedFile, [
-      { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
-      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
-      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
-      {
-        type: 'turn.failed',
-        runId: 'run-1',
-        chatId: 'chat-closed',
-        turnId: 'turn-1',
-        reason: 'The turn ended before it recorded a revision.',
-      },
-    ]);
-    const closedHost = silentHost(closedFile, 'closed');
+      const closedFile = createMemoryLogFile();
+      await seedLog(closedFile, [
+        { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+        { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+        { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+        {
+          type: 'turn.failed',
+          runId: 'run-1',
+          chatId: 'chat-closed',
+          turnId: 'turn-1',
+          reason: 'The turn ended before it recorded a revision.',
+        },
+      ]);
+      const closedHost = silentHost(closedFile, 'closed');
 
-    /* A settled attempt whose driver is gone: opening abandons it (RA-R9), and Resume then opens attempt 2 through
-     * the one reopen predicate, with a settlement slot of its own, never re-running attempt 1 under its settlement. */
-    await closedHost.resume('chat-closed');
-    const rowsLog = await readLog(closedFile);
-    const rows = rowsLog.filter((event) => event.type === 'run.lifecycle').slice(2);
-    expect(rows.slice(0, 2)).toMatchObject([
-      { state: 'failed', attempt: 1, detail: { code: 'RUN_ABANDONED' } },
-      { state: 'running', attempt: 2 },
-    ]);
-    await closedHost.close();
-  });
+      /* A settled attempt whose driver is gone: opening abandons it (RA-R9), and Resume then opens attempt 2 through
+       * the one reopen predicate, with a settlement slot of its own, never re-running attempt 1 under its settlement. */
+      await closedHost.resume('chat-closed');
+      const rowsLog = await readLog(closedFile);
+      const rows = rowsLog.filter((event) => event.type === 'run.lifecycle').slice(2);
+      expect(rows.slice(0, 2)).toMatchObject([
+        { state: 'failed', attempt: 1, detail: { code: 'RUN_ABANDONED' } },
+        { state: 'running', attempt: 2 },
+      ]);
+      await closedHost.close();
+    },
+  );
 });
 
 describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {

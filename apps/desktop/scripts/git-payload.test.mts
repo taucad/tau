@@ -25,7 +25,7 @@ const sha256 = /^[\da-f]{64}$/u;
 assert.match(payload.gitSourceSha256, sha256);
 assert.match(payload.gitLfsLicenseSha256, sha256);
 assert.equal(payload.gitSourceUrl, `https://www.kernel.org/pub/software/scm/git/git-${payload.gitVersion}.tar.xz`);
-assert.deepEqual(Object.keys(payload.gitTargets).sort(), ['darwin-arm64', 'linux-x64']);
+assert.deepEqual(Object.keys(payload.gitTargets).sort(), ['darwin-arm64', 'darwin-x64', 'linux-x64']);
 for (const { gitLfs } of Object.values(payload.gitTargets)) {
   assert.match(gitLfs.sha256, sha256);
   assert.ok(gitLfs.url.startsWith('https://github.com/git-lfs/git-lfs/releases/download/'), gitLfs.url);

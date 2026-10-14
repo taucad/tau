@@ -81,11 +81,19 @@ export const findReleaseScopeMismatches = ({
   return mismatches;
 };
 
+/** The release group Nx names when nx.json declares `release.projects` without `release.groups`. */
+export const defaultReleaseGroup = '__default__';
+
+/**
+ * Version-plan keys must name a project of the train or a release group: a fixed group's plans
+ * name the group (Nx's `__default__` when nx.json declares no groups), which bumps all of it.
+ */
 export const findVersionPlanScopeMismatches = (
   plans: readonly VersionPlan[],
   releaseTrain: readonly string[],
+  releaseGroups: readonly string[] = [defaultReleaseGroup],
 ): string[] => {
-  const allowed = new Set(releaseTrain);
+  const allowed = new Set([...releaseTrain, ...releaseGroups]);
 
   return plans.flatMap(({ path, text }) => {
     const match = /^---\r?\n(?<frontmatter>[\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(text);
@@ -129,11 +137,16 @@ const showProjects = (selector?: string): string[] => {
   return JSON.parse(stdout.slice(stdout.indexOf('['), stdout.lastIndexOf(']') + 1)) as string[];
 };
 
-/** Pull every `-p`/`--projects=` list out of a release-critical file. */
-const selectorsIn = (text: string, source: string): Array<{ value: string; source: string }> =>
-  [...text.matchAll(/(?:--projects=|-p )([^\s"',]+(?:,[^\s"']+)*)/g)].flatMap(
-    (match) => match[1]?.split(',').map((value) => ({ value, source })) ?? [],
-  );
+/**
+ * Pull every `-p`/`--projects=` list out of the Nx commands of a release-critical file; a `-p` on
+ * any other command (`mkdir -p`) is not a project selector.
+ */
+export const selectorsIn = (text: string, source: string): Array<{ value: string; source: string }> =>
+  text
+    .split('\n')
+    .filter((line) => /\bnx\b/u.test(line) && !line.trimStart().startsWith('#'))
+    .flatMap((line) => [...line.matchAll(/(?:--projects=|-p )([^\s"',]+(?:,[^\s"']+)*)/gu)])
+    .flatMap((match) => match[1]?.split(',').map((value) => ({ value, source })) ?? []);
 
 const collectReleaseScope = async (): Promise<ReleaseScope> => {
   const nxJsonText = readFileSync(join(root, 'nx.json'), 'utf8');
@@ -193,6 +206,15 @@ const collectReleaseScope = async (): Promise<ReleaseScope> => {
   };
 };
 
+/** The release groups version plans may name: nx.json's `release.groups`, or Nx's default group. */
+const releaseGroups = (): string[] => {
+  const { release } = JSON.parse(readFileSync(join(root, 'nx.json'), 'utf8')) as {
+    release?: { groups?: Record<string, unknown> };
+  };
+  const groups = Object.keys(release?.groups ?? {});
+  return groups.length > 0 ? groups : [defaultReleaseGroup];
+};
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const scope = await collectReleaseScope();
   const plans = globSync('.nx/version-plans/*.md', { cwd: root }).map((path) => ({
@@ -201,7 +223,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }));
   const mismatches = [
     ...findReleaseScopeMismatches(scope),
-    ...findVersionPlanScopeMismatches(plans, scope.releaseTrain),
+    ...findVersionPlanScopeMismatches(plans, scope.releaseTrain, releaseGroups()),
   ];
 
   if (mismatches.length > 0) {

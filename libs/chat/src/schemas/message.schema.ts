@@ -236,8 +236,41 @@ const validateStaticToolLifecycleInputs = (messages: MyUIMessage[]): z.ZodError 
   return undefined;
 };
 
+// The SDK converts unregistered static tools to dynamic parts. Check the wire
+// discriminator first so that conversion cannot bypass Tau's static registry.
+const validateStaticToolNames = (messages: unknown): z.ZodError | undefined => {
+  if (!Array.isArray(messages)) {
+    return undefined;
+  }
+  for (const [messageIndex, message] of messages.entries()) {
+    if (!isRecord(message) || !Array.isArray(message['parts'])) {
+      continue;
+    }
+    for (const [partIndex, part] of message['parts'].entries()) {
+      if (!isRecord(part) || typeof part['type'] !== 'string') {
+        continue;
+      }
+      if (isStaticToolPartType(part['type']) && !getToolInputSchema(part['type'])) {
+        return new z.ZodError([
+          {
+            code: 'custom',
+            path: ['messages', messageIndex, 'parts', partIndex, 'type'],
+            message: `Unsupported static tool: ${part['type']}`,
+          },
+        ]);
+      }
+    }
+  }
+  return undefined;
+};
+
 /** Validates and normalizes Tau UI messages through the installed AI SDK. @public */
 export const safeValidateUiMessages = async (messages: unknown): Promise<SafeValidateUIMessagesResult<MyUIMessage>> => {
+  const staticToolError = validateStaticToolNames(messages);
+  if (staticToolError) {
+    return { success: false, error: staticToolError };
+  }
+
   const result = await safeValidateUIMessages<MyUIMessage>({
     messages: normalizeToolLifecycleParts(messages),
     metadataSchema: messageMetadataSchema.optional(),

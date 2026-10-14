@@ -61,6 +61,7 @@ const metadataSchema = z
     model: z.string().optional(),
     responseModel: z.string().optional(),
     responseId: z.string().optional(),
+    reasoningSummary: z.string().optional(),
     diagnostics: z.array(jsonValueSchema).optional(),
     usage: usageSchema.optional(),
     stopReason: z.enum(['pending', 'stop', 'length', 'toolUse', 'error', 'aborted', 'deferred']).optional(),

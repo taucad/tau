@@ -1,13 +1,5 @@
-/**
- * The chat history's bottom activity indicator (chat activity indicator
- * closeout, R1–R3).
- *
- * The run state decides whether a turn is live; the trailing message's parts
- * only decide whether something else on screen already shows that. Each case
- * names the blueprint inventory row it pins.
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { messageRole } from '@taucad/chat/constants';
 import type { MyUIMessage } from '@taucad/chat';
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
@@ -83,121 +75,93 @@ beforeEach(() => {
 });
 
 describe('ChatMessagePlanning', () => {
-  it('S02: shows under the trailing user message while the run is queued', () => {
-    setRun('queued');
-    setChat('submitted', [user('u1')]);
-    render(<ChatMessagePlanning messageId='u1' />);
-    expect(indicator()).toHaveTextContent('Planning next moves…');
+  it('should stay visible while response text streams', () => {
+    setChat('streaming', [user('u1'), assistant('a1', [{ type: 'text', text: 'Drafting', state: 'streaming' }])]);
+    render(<ChatMessagePlanning />);
+    expect(indicator()).toHaveTextContent('Writing response…');
   });
 
-  it('shows only under the trailing message', () => {
-    setChat('streaming', [user('u1'), assistant('a1', [tool('output-available')])]);
-    render(<ChatMessagePlanning messageId='u1' />);
-    expect(indicator()).toBeNull();
+  it('should keep elapsed time across activity changes and remounts, then clean up on completion', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(50_000);
+      setChat('submitted', [user('u1')]);
+      const view = render(<ChatMessagePlanning />);
+      expect(screen.getByRole('timer')).toHaveTextContent('50s');
+      act(() => {
+        vi.advanceTimersByTime(11_000);
+      });
+      setChat('streaming', [user('u1'), assistant('a1', [{ type: 'text', text: 'Draft', state: 'streaming' }])]);
+      view.rerender(<ChatMessagePlanning />);
+      expect(screen.getByRole('timer')).toHaveTextContent('1m 1s');
+      expect(indicator()).not.toContainElement(screen.getByRole('timer'));
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+      const restored = render(<ChatMessagePlanning />);
+      expect(screen.getByRole('timer')).toHaveTextContent('1m 1s');
+      setRun('done');
+      restored.rerender(<ChatMessagePlanning />);
+      expect(indicator()).toBeNull();
+      expect(screen.queryByRole('timer')).toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('S10: shows between steps once every part has concluded', () => {
-    setChat('streaming', [assistant('a1', [{ type: 'step-start' }, tool('output-available')])]);
-    render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toHaveTextContent('Planning next moves…');
+  it('should reset for a new request and omit unknown timestamps', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(3_661_000);
+      setChat('streaming', [user('u1')]);
+      const view = render(<ChatMessagePlanning />);
+      expect(screen.getByRole('timer')).toHaveTextContent('1h 1m 1s');
+      setChat('submitted', [{ ...user('u2'), metadata: { createdAt: Date.now() } }]);
+      view.rerender(<ChatMessagePlanning />);
+      expect(screen.getByRole('timer')).toHaveTextContent('0s');
+      setChat('streaming', [{ id: 'legacy', role: messageRole.user, parts: [] }]);
+      view.rerender(<ChatMessagePlanning />);
+      expect(screen.queryByRole('timer')).toBeNull();
+      expect(indicator()).toBeVisible();
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('S11: shows while an ACP checkpoint leaves an earlier thought streaming behind a settled tool', () => {
-    setChat('streaming', [
-      assistant('a1', [
-        { type: 'step-start' },
-        { type: 'reasoning', text: 'Plan the housing', state: 'streaming' },
-        tool('output-available'),
-      ]),
-    ]);
-    render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toHaveTextContent('Planning next moves…');
-  });
-
-  it('S05: shows while the trailing thought streams without visible text', () => {
-    setChat('streaming', [assistant('a1', [{ type: 'reasoning', text: '  ', state: 'streaming' }])]);
-    render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toHaveTextContent('Planning next moves…');
-  });
-
-  it.each([
-    ['streaming text', { type: 'text', text: 'Drafting', state: 'streaming' }],
-    ['a streaming thought', { type: 'reasoning', text: 'Checking', state: 'streaming' }],
-    ['a tool receiving input', tool('input-streaming')],
-    ['a running tool', tool('input-available')],
-    ['a tool reporting progress', tool('output-available', { preliminary: true })],
-    ['a pending approval', tool('approval-requested')],
-  ])('stays hidden while %s shows the work itself', (_name, part) => {
-    setChat('streaming', [assistant('a1', [part])]);
-    render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toBeNull();
-  });
-
-  it('S22: shows under a resting ACP text checkpoint while the run keeps working', () => {
-    setChat('streaming', [
-      assistant('a1', [
-        { type: 'step-start' },
-        {
-          type: 'text',
-          text: 'The reference shows two broad finger scallops.',
-          state: 'streaming',
-          providerMetadata: { common: { streamState: 'checkpoint' } },
-        },
-      ]),
-    ]);
-    render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toHaveTextContent('Planning next moves…');
-  });
-
-  it('S14: shows after an approval is answered and the paused run has not resumed', () => {
-    setRun('question');
-    setChat('streaming', [assistant('a1', [tool('approval-responded')])]);
-    render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toHaveTextContent('Planning next moves…');
-  });
-
-  it('stays hidden while a paused run waits for the person', () => {
-    setRun('question');
-    setChat('streaming', [assistant('a1', [tool('output-available')])]);
-    render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toBeNull();
-  });
-
-  it('S16: says Reconnecting while a reload replays an active run', () => {
+  it('should keep the timer visible during approval and reconnect waits', () => {
+    setChat('streaming', [user('u1'), assistant('a1', [tool('approval-requested')])]);
+    setRun('approval');
+    const view = render(<ChatMessagePlanning />);
+    expect(indicator()).toHaveTextContent('Waiting for approval');
+    expect(screen.getByRole('timer')).toBeVisible();
     setRun('reconnecting');
-    setChat('submitted', [assistant('a1', [{ type: 'text', text: 'Hello', state: 'streaming' }])]);
-    render(<ChatMessagePlanning messageId='a1' />);
+    view.rerender(<ChatMessagePlanning />);
     expect(indicator()).toHaveTextContent('Reconnecting…');
   });
+});
 
-  it('S15: shows host reconnection even while parts are still open', () => {
-    setRun('reconnecting');
-    setChat('error', [assistant('a1', [tool('input-streaming')])]);
-    render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toHaveTextContent(/^Reconnecting…$/u);
-  });
-
-  it.each(['done', 'failed', 'stopped', 'idle'] as const)(
-    'stays hidden once the run is %s and the chat is ready',
-    (run) => {
-      setRun(run);
-      setChat('ready', [assistant('a1', [tool('output-available')])]);
-      render(<ChatMessagePlanning messageId='a1' />);
-      expect(indicator()).toBeNull();
-    },
-  );
-
-  it('falls back to the chat status before the run machine exists', () => {
-    setRun(undefined);
-    setChat('submitted', [user('u1')]);
-    render(<ChatMessagePlanning messageId='u1' />);
-    expect(indicator()).toHaveTextContent('Planning next moves…');
-  });
-
-  it('stays hidden on an error with no retry pending', () => {
-    setRun('failed');
-    setChat('error', [assistant('a1', [{ type: 'text', text: 'partial', state: 'streaming' }])]);
-    render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toBeNull();
-  });
+it('should show explicitly tagged progress, then clear it for a new request and terminal run', () => {
+  const text = 'Checking the mounting holes and wall thickness.';
+  setChat('streaming', [
+    user('u1'),
+    assistant('a1', [
+      {
+        type: 'text',
+        text,
+        state: 'streaming',
+        providerMetadata: { common: { messagePhase: 'commentary', streamState: 'checkpoint' } },
+      },
+    ]),
+  ]);
+  const view = render(<ChatMessagePlanning />);
+  expect(screen.getByRole('status', { name: 'Current activity' })).toHaveTextContent(text);
+  setChat('submitted', [...mockSelectorState.messages, user('u2')]);
+  view.rerender(<ChatMessagePlanning />);
+  expect(screen.getByRole('status', { name: 'Current activity' })).toHaveTextContent('Planning next moves…');
+  setRun('stopped');
+  setChat('ready', mockSelectorState.messages);
+  view.rerender(<ChatMessagePlanning />);
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  expect(screen.queryByRole('timer')).not.toBeInTheDocument();
 });

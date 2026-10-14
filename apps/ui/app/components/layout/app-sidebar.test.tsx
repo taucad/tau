@@ -119,12 +119,12 @@ describe('AppSidebar', () => {
     expect(screen.queryByRole('link', { name: 'Home' })).not.toBeInTheDocument();
   });
 
-  it('keeps desktop identity beneath the native titlebar without duplicating its toggle', () => {
+  it('reserves only the top control row without duplicate identity or controls', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     const { container } = renderSidebar();
 
-    expect(container.querySelector('[data-slot=sidebar-header]')).toHaveClass('pt-9');
-    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(container.querySelector('[data-slot=sidebar-header]')).toHaveClass('h-9', 'p-0');
+    expect(screen.queryByRole('link', { name: 'Home' })).not.toBeInTheDocument();
     expect(container.querySelector('[data-slot=sidebar-header] [data-slot=sidebar-trigger]')).not.toBeInTheDocument();
   });
 
@@ -135,5 +135,14 @@ describe('AppSidebar', () => {
 
     expect(sidebar).toHaveAttribute('aria-hidden', 'true');
     expect(sidebar).toHaveAttribute('inert');
+  });
+
+  it('should use compact spacing for desktop navigation', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const { container } = renderSidebar();
+    expect(container.querySelector('[data-slot=sidebar-header]')).toHaveClass('h-9', 'p-0');
+    expect(container.querySelector('[data-slot=sidebar-header]')).not.toHaveClass('h-18', 'pt-9');
+    expect(screen.queryByRole('link', { name: 'Home' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Account' })).toBeInTheDocument();
   });
 });

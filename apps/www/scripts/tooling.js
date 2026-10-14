@@ -51,7 +51,7 @@ export async function auditPage(page, axe, tags) {
 export async function loadSharp() {
   /** @type {unknown} */
   const module = await import(pathToFileURL(resolveTool.resolve('sharp')).href);
-  return /** @type {{default: typeof import('sharp')}} */ (module).default;
+  return /** @type {typeof import('sharp')} */ (module).default;
 }
 
 /** @param {import('node:http').Server} server */

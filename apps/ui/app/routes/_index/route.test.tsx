@@ -39,7 +39,7 @@ vi.mock('#routes/_index/homepage-chat-hero.js', () => ({
 function resolveWrapper(context: PageChromeContext): boolean {
   const { enablePageWrapper } = handle;
   if (typeof enablePageWrapper !== 'function') {
-    throw new TypeError('expected enablePageWrapper to be a function');
+    return enablePageWrapper === true;
   }
 
   return enablePageWrapper(context);
@@ -66,18 +66,7 @@ describe('Home route gate', () => {
     },
   );
 
-  it('should render the marketing landing when the flag is on and the viewer is anonymous', () => {
-    mockUseFeature.mockReturnValue(true);
-    mockUseResolvedAuth.mockReturnValue('anonymous');
-
-    render(<Home />);
-
-    expect(screen.getByTestId('marketing-landing')).toBeInTheDocument();
-    expect(screen.queryByTestId('project-library')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('legacy-landing')).not.toBeInTheDocument();
-  });
-
-  it.each(['authed', 'indeterminate'] as const)(
+  it.each(['authed', 'anonymous', 'indeterminate'] as const)(
     'should render the chat hero above the project library for %s auth',
     (authState) => {
       mockUseFeature.mockReturnValue(true);
@@ -97,11 +86,11 @@ describe('Home route chrome (enablePageWrapper)', () => {
   const flagsOn: PageChromeContext['flags'] = { ...featureFlagDefaults, marketingLanding: true };
   const flagsOff: PageChromeContext['flags'] = { ...featureFlagDefaults, marketingLanding: false };
 
-  it('should drop the app shell for anonymous visitors when the marketing flag is on', () => {
-    expect(resolveWrapper({ authState: 'anonymous', flags: flagsOn })).toBe(false);
+  it('should keep the app shell for anonymous visitors when the marketing flag is on', () => {
+    expect(resolveWrapper({ authState: 'anonymous', flags: flagsOn })).toBe(true);
   });
 
-  it.each(['authed', 'indeterminate'] as const)(
+  it.each(['authed', 'anonymous', 'indeterminate'] as const)(
     'should keep the app shell for %s auth when the marketing flag is on',
     (authState) => {
       expect(resolveWrapper({ authState, flags: flagsOn })).toBe(true);

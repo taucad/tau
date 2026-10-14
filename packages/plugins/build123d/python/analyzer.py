@@ -9,8 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-MAX_SOURCE_BYTES = 1_048_576
-MAX_AST_NODES = 50_000
 MAX_AST_DEPTH = 100
 MAX_COLLECTION_ITEMS = 1_000
 MAX_STRING_LENGTH = 65_536
@@ -84,8 +82,6 @@ def _issue(node: ast.AST | None, message: str, code: str = "PYTHON_ANALYSIS") ->
 
 
 def _parse(source: str) -> ast.Module:
-    if len(source.encode("utf-8")) > MAX_SOURCE_BYTES:
-        raise AnalysisIssue(f"Python source exceeds {MAX_SOURCE_BYTES} bytes", "PYTHON_SOURCE_LIMIT")
     try:
         tree = ast.parse(source)
     except SyntaxError as error:
@@ -93,12 +89,10 @@ def _parse(source: str) -> ast.Module:
     except (MemoryError, RecursionError) as error:
         raise AnalysisIssue("Python source is too deeply nested", "PYTHON_AST_LIMIT") from error
 
-    count = 0
     stack: list[tuple[ast.AST, int]] = [(tree, 0)]
     while stack:
         node, depth = stack.pop()
-        count += 1
-        if count > MAX_AST_NODES or depth > MAX_AST_DEPTH:
+        if depth > MAX_AST_DEPTH:
             raise _issue(node, "Python syntax tree exceeds analysis limits", "PYTHON_AST_LIMIT")
         stack.extend((child, depth + 1) for child in ast.iter_child_nodes(node))
     return tree

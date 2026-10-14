@@ -58,7 +58,9 @@ export type RevisionEngineDescriptor = Readonly<{
    * A caller that computes a tree id without writing it has to hash what the
    * store will record, pointers included (I5) — so the cut asks rather than
    * assumes. True on both legs since W11b: the decision is host-neutral
-   * (`lfs.ts`) and only the transport behind it differs.
+   * (`lfs.ts`) and only the transport behind it differs. False for a
+   * repository a disk host adopted, whose entries keep the representation the
+   * person's own Git gave them (rule 13).
    */
   largeObjects: boolean;
 }>;
@@ -594,6 +596,20 @@ export type RevisionPort = Readonly<{
   conflicts(id: RevisionId): Promise<RevisionConflict | undefined>;
   /** Every place this project's files are, live checkout first. */
   listCheckouts?(): Promise<readonly Checkout[]>;
+  /**
+   * The untracked paths Git itself ignores in one checkout of an adopted repository.
+   *
+   * Capture versions what the path registry admits. In a repository the person
+   * made, their own ignore rules decide too, or a revision records their build
+   * output and secrets and commits them to their branch. A store Tau created
+   * answers `undefined`: its ignore file is derived from the registry, so the
+   * registry alone decides on every host.
+   *
+   * @param root - A linked checkout's root, or `undefined` for the live checkout.
+   * @returns Paths relative to that root, a directory with a trailing `/`, or
+   *   `undefined` when the registry alone decides.
+   */
+  ignoredPaths?(root?: string): Promise<readonly string[] | undefined>;
   /** Add one linked checkout on its own branch. */
   addCheckout?(input: AddCheckoutInput): Promise<Checkout>;
   /** Remove one linked checkout. Removing the live checkout is refused. */

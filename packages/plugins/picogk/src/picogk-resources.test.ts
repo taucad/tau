@@ -60,8 +60,8 @@ describe('PicoGK prepared resources', () => {
         label: 'PicoGK',
       },
     ]);
-    expect(options.requestTimeout).toBe(120_000);
-    expect(options.maxArtifactBytes).toBe(512 * 1024 * 1024);
+    expect(options.requestTimeout).toBe(0);
+    expect(options.maxArtifactBytes).toBe(Number.MAX_SAFE_INTEGER);
   });
 
   it('accepts an explicit target and rejects a manifest for another target', () => {

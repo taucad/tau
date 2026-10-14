@@ -1,0 +1,56 @@
+/* ── Principle illustrations ──────────────────────────────────────────────────────────── */
+/* Faces are opaque mixes of ink into the page, so they occlude and shade correctly in both themes. */
+.pd {
+  stroke-linecap: round;
+}
+.pd .pd-face-top {
+  fill: color-mix(in oklch, var(--foreground) 5%, var(--background));
+}
+.pd .pd-face-right {
+  fill: color-mix(in oklch, var(--foreground) 10%, var(--background));
+  stroke: color-mix(in oklch, var(--foreground) 10%, var(--background));
+  stroke-width: 0.6;
+}
+.pd .pd-face-fillet {
+  fill: color-mix(in oklch, var(--foreground) 14%, var(--background));
+  stroke: color-mix(in oklch, var(--foreground) 14%, var(--background));
+  stroke-width: 0.6;
+}
+.pd .pd-face-left {
+  fill: color-mix(in oklch, var(--foreground) 19%, var(--background));
+  stroke: color-mix(in oklch, var(--foreground) 19%, var(--background));
+  stroke-width: 0.6;
+}
+.pd .pd-wall {
+  stroke: none;
+}
+.pd .pd-shade-dark {
+  stop-color: color-mix(in oklch, var(--foreground) 18%, var(--background));
+}
+.pd .pd-shade-mid {
+  stop-color: color-mix(in oklch, var(--foreground) 10%, var(--background));
+}
+.pd .pd-shade-light {
+  stop-color: color-mix(in oklch, var(--foreground) 2%, var(--background));
+}
+.pd .pd-shade-clear {
+  stop-color: var(--background);
+}
+.pd .pd-fine {
+  stroke-width: 1;
+}
+.pd .pd-dash {
+  stroke-dasharray: 2 3;
+}
+.pd .pd-accent {
+  stroke: var(--primary);
+}
+.pd .pd-accent-fill {
+  fill: var(--primary);
+  stroke: none;
+}
+.pd .pd-ghost {
+  stroke: var(--primary);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}

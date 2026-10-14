@@ -151,6 +151,56 @@ const exhaustionHarness = (qualified: QualifiedBillableInvocation) => {
 };
 
 describe('BillableModelInvocationService', () => {
+  it.each([16_384, 32_768, 65_536])(
+    'reserves and forwards the same %i output tokens on each wire family',
+    (maximum) => {
+      const adapters = createBillableModelProviderAdapters({
+        get: (key) =>
+          key === 'GOOGLE_VERTEX_AI_CREDENTIALS'
+            ? {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact Google service-account key.
+                client_email: 'fixture@test.invalid',
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact Google service-account key.
+                private_key: 'offline-fixture-key',
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact Google service-account key.
+                project_id: 'fixture-project',
+              }
+            : 'fixture-key',
+      });
+      const resolver = new CodeOwnedBillableModelQualificationResolver({
+        adapters,
+        credentialAccounts: new Map(
+          ['openai', 'anthropic', 'vertexai'].map((provider) => [provider, 'fixture-account']),
+        ),
+        executionTimeout: 30_000,
+      });
+      const routes = [
+        ['openai-gpt-6-sol', 'openai-responses', 'max_output_tokens'],
+        ['anthropic-claude-opus-5', 'anthropic', 'max_tokens'],
+        ['google-gemini-3.1-pro', 'openai-completions', 'max_completion_tokens'],
+      ] as const;
+      for (const [model, wire, field] of routes) {
+        const resolved = resolver.resolve({
+          ...intent(),
+          providerWire: wire,
+          priceHeaders: wire === 'anthropic' ? { 'anthropic-version': '2023-06-01' } : {},
+          body: {
+            model,
+            stream: true,
+            [field]: maximum,
+            ...(wire === 'openai-responses'
+              ? { input: 'Build the model.' }
+              : { messages: [{ role: 'user', content: 'Build the model.' }] }),
+          },
+        });
+        expect(resolved.maximumQuantities.find((quantity) => quantity.dimension === 'output')?.quantity).toBe(
+          BigInt(maximum),
+        );
+        expect(resolved.normalizedRequest.body).toMatchObject({ [field]: maximum });
+      }
+    },
+  );
+
   it('maps every catalog route through the production adapter factory and actual resolver', () => {
     const routeCases = (
       [

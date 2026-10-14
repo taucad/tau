@@ -3,6 +3,7 @@ import type { WorkbenchLaneTab } from '@taucad/workbench';
 type PaneId = Extract<WorkbenchLaneTab, { kind: 'pane' }>['pane'];
 
 const titles = {
+  browser: 'Browser',
   parameters: 'Parameters',
   model: 'Model',
   print: 'Print',

@@ -273,6 +273,7 @@ const config: KnipConfig = {
       entry: [
         'src/client.mjs',
         'src/site.css',
+        'src/principle-diagrams.css',
         'scripts/{build,serve,browser-check,check-story,render-assets,optimize-assets,capture-metal-hero,export-story-assets}.mjs',
         'scripts/metal-hero-entry.mjs',
         'tests/*.test.mjs',
@@ -391,7 +392,12 @@ const config: KnipConfig = {
     },
     scripts: {
       // `canvas-vite.config.ts` aliases and injects the canvas sources.
-      entry: ['src/**/*.{ts,tsx,mts}', 'canvas/{api-guide.tsx,review-layer.ts,styles.css}'],
+      entry: [
+        'src/**/*.{ts,tsx,mts}',
+        'canvas/{api-guide.tsx,review-layer.ts,styles.css}',
+        // Charter spike scripts the spike-*.yml workflows run by path; deleted with their W packages.
+        'spikes/**/*.{ts,mts}',
+      ],
       // Fixture package that `check-registry-dependencies.test.ts` inspects on disk.
       ignore: ['src/fixtures/registry-gate-artifact/**'],
       // The canvas config requires a selected private artifact at execution time.

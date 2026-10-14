@@ -23,11 +23,11 @@ export function ChatLoginAffordance({ login }: { readonly login: AgentHostLogin 
   return (
     <section
       aria-label={`Sign in to ${name}`}
-      className='mb-2 flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm'
+      className='mb-2 flex flex-col gap-2 rounded-lg border bg-background p-2 text-xs/5'
     >
       <div className='flex min-w-0 items-center gap-2'>
-        <KeyRound className='size-4 shrink-0 text-warning' />
-        <p className='min-w-0 truncate font-medium'>{`${name} needs you to sign in`}</p>
+        <KeyRound aria-hidden className='size-4 shrink-0 text-muted-foreground' />
+        <p className='min-w-0 text-sm/5 font-medium wrap-break-word'>{`${name} needs you to sign in`}</p>
       </div>
       {login.url === undefined ? undefined : (
         <p className='min-w-0 break-words'>
@@ -45,7 +45,7 @@ export function ChatLoginAffordance({ login }: { readonly login: AgentHostLogin 
           </p>
           {commands.map((method) => (
             <div key={method.id} className='flex min-w-0 items-center gap-2'>
-              <code className='min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs'>
+              <code className='min-w-0 flex-1 rounded bg-muted px-2 py-1 font-mono text-xs wrap-break-word whitespace-pre-wrap'>
                 {method.terminalCommand}
               </code>
               <CopyButton size='xs' getText={() => method.terminalCommand ?? ''} />

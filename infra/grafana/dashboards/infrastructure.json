@@ -8,6 +8,15 @@
   "templating": {
     "list": [
       {
+        "name": "app",
+        "label": "Application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": { "text": ".*", "value": ".*" },
+        "hide": 2
+      },
+      {
         "name": "service",
         "label": "Service",
         "type": "custom",
@@ -20,8 +29,8 @@
       {
         "name": "instance",
         "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(process_uptime{service_name=\"$service\"}, instance)",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(process_uptime{app=~\"$app\",service_name=\"$service\"}, instance)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",
@@ -34,7 +43,11 @@
       "title": "Redis Connection State",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-      "targets": [{ "expr": "redis_connection_state{service_name=~\"$service\"}" }],
+      "targets": [
+        {
+          "expr": "redis_connection_state{app=~\"$app\",service_name=~\"$service\"}"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "mappings": [
@@ -47,13 +60,15 @@
             }
           ]
         }
-      }
+      },
+      "id": 1
     },
     {
       "title": "PostgreSQL Backends",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "targets": [{ "expr": "sum(postgresql_backends)" }]
+      "targets": [{ "expr": "sum(postgresql_backends)" }],
+      "id": 2
     },
     {
       "title": "Node.js Heap Used",
@@ -61,11 +76,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "targets": [
         {
-          "expr": "sum(v8js_memory_heap_used{service_name=~\"$service\"})",
+          "expr": "sum(v8js_memory_heap_used{app=~\"$app\",service_name=~\"$service\"})",
           "legendFormat": "heap used"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "bytes" } }
+      "fieldConfig": {
+        "defaults": { "unit": "bytes" }
+      },
+      "id": 3
     },
     {
       "title": "PostgreSQL Row Operations by Kind",
@@ -77,14 +95,20 @@
           "legendFormat": "{{operation}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "ops" } }
+      "fieldConfig": {
+        "defaults": { "unit": "ops" }
+      },
+      "id": 4
     },
     {
       "title": "Redis Commands per Second",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "targets": [{ "expr": "sum(rate(redis_commands_processed_total[5m]))", "legendFormat": "commands" }],
-      "fieldConfig": { "defaults": { "unit": "ops" } }
+      "fieldConfig": {
+        "defaults": { "unit": "ops" }
+      },
+      "id": 5
     },
     {
       "title": "Object Storage Requests by Operation",
@@ -92,11 +116,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "targets": [
         {
-          "expr": "sum by (tau_storage_operation) (rate(tau_storage_operation_duration_count{service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (tau_storage_operation) (rate(tau_storage_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[5m]))",
           "legendFormat": "{{tau_storage_operation}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "reqps" } }
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      },
+      "id": 6
     },
     {
       "title": "Event Loop Delay (p50 / p99)",
@@ -104,15 +131,18 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
       "targets": [
         {
-          "expr": "nodejs_eventloop_delay_p50{service_name=~\"$service\"}",
+          "expr": "nodejs_eventloop_delay_p50{app=~\"$app\",service_name=~\"$service\"}",
           "legendFormat": "p50"
         },
         {
-          "expr": "nodejs_eventloop_delay_p99{service_name=~\"$service\"}",
+          "expr": "nodejs_eventloop_delay_p99{app=~\"$app\",service_name=~\"$service\"}",
           "legendFormat": "p99"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "id": 7
     },
     {
       "title": "V8 GC Duration (p95)",
@@ -120,11 +150,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(v8js_gc_duration_bucket{service_name=~\"$service\"}[5m])) by (le, v8js_gc_type))",
+          "expr": "histogram_quantile(0.95, sum(rate(v8js_gc_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le, v8js_gc_type))",
           "legendFormat": "{{v8js_gc_type}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "id": 8
     },
     {
       "title": "V8 Heap Space Breakdown",
@@ -132,16 +165,19 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
       "targets": [
         {
-          "expr": "v8js_memory_heap_space_physical_size{service_name=~\"$service\"}",
+          "expr": "v8js_memory_heap_space_physical_size{app=~\"$app\",service_name=~\"$service\"}",
           "legendFormat": "{{v8js_heap_space_name}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
-          "custom": { "stacking": { "mode": "normal" } }
+          "custom": {
+            "stacking": { "mode": "normal" }
+          }
         }
-      }
+      },
+      "id": 9
     },
     {
       "title": "PostgreSQL Connections Used",
@@ -159,69 +195,27 @@
             ]
           }
         }
-      }
+      },
+      "id": 10
     },
     {
       "title": "PostgreSQL Rollbacks (5m)",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 28 },
-      "targets": [{ "expr": "sum(increase(postgresql_rollbacks_total[5m])) or vector(0)" }]
-    },
-    {
-      "title": "Fly.io Machine Metrics",
-      "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
-      "collapsed": true,
-      "panels": [
-        {
-          "title": "CPU Usage (Fly.io)",
-          "description": "Available in production via Fly.io Prometheus federation",
-          "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
-          "targets": [{ "expr": "fly_instance_cpu{app=\"tau-api\"}", "legendFormat": "{{instance}}", "refId": "A" }],
-          "fieldConfig": { "defaults": { "unit": "percentunit" } }
-        },
-        {
-          "title": "Memory Usage (Fly.io)",
-          "description": "Available in production via Fly.io Prometheus federation",
-          "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
-          "targets": [
-            {
-              "expr": "fly_instance_memory_mem_total{app=\"tau-api\"} - fly_instance_memory_mem_available{app=\"tau-api\"}",
-              "legendFormat": "{{instance}}",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": { "defaults": { "unit": "decbytes" } }
-        },
-        {
-          "title": "Network I/O (Fly.io)",
-          "description": "Available in production via Fly.io Prometheus federation",
-          "type": "timeseries",
-          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 29 },
-          "targets": [
-            {
-              "expr": "rate(fly_instance_net_sent_bytes{app=\"tau-api\"}[5m])",
-              "legendFormat": "sent {{instance}}",
-              "refId": "A"
-            },
-            {
-              "expr": "rate(fly_instance_net_recv_bytes{app=\"tau-api\"}[5m])",
-              "legendFormat": "recv {{instance}}",
-              "refId": "B"
-            }
-          ],
-          "fieldConfig": { "defaults": { "unit": "Bps" } }
-        }
-      ]
+      "targets": [{ "expr": "sum(increase(postgresql_rollbacks_total[5m])) or vector(0)" }],
+      "id": 11
     },
     {
       "title": "Error Logs",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
+      "targets": [
+        {
+          "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"",
+          "refId": "A"
+        }
+      ],
       "options": {
         "showTime": true,
         "showLabels": true,
@@ -230,14 +224,22 @@
         "prettifyLogMessage": false,
         "enableLogDetails": true,
         "sortOrder": "Descending"
-      }
+      },
+      "id": 12
     },
     {
       "title": "Recent Traces",
       "type": "traces",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 108 },
       "datasource": { "type": "tempo", "uid": "tempo" },
-      "targets": [{ "query": "{resource.service.name=~\"$service\"}", "refId": "A", "queryType": "traceqlSearch" }]
+      "targets": [
+        {
+          "query": "{resource.service.name=~\"$service\"}",
+          "refId": "A",
+          "queryType": "traceqlSearch"
+        }
+      ],
+      "id": 13
     }
   ],
   "schemaVersion": 39

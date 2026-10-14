@@ -16,6 +16,13 @@ const { mockCreateChat, mockSubmit, mockSetFocusedChatId, mockEditorSend, mockRe
   }),
 );
 
+const editorSnapshot = { context: { focusedChatId: 'chat-test' } };
+const editorRef = {
+  send: mockEditorSend,
+  getSnapshot: () => editorSnapshot,
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
+
 let mockKernelIssues = new Map<string, KernelIssue[]>();
 let mockLatestGeometryOutcome: 'success' | 'failure' | undefined;
 let mockCadTags = new Set<string>();
@@ -35,7 +42,7 @@ let mockAgent: CadAgentConfigInput = {
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     getMainFilename: async () => 'main.scad',
-    editorRef: { send: mockEditorSend },
+    editorRef,
     projectId: 'project_test',
     projectRef: mockProjectRef,
     setFocusedChatId: mockSetFocusedChatId,

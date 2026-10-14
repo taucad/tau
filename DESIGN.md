@@ -117,15 +117,16 @@ the confirmed result and expose exact changes on request. Authored design files
 precede a labelled project-setup group. The complete history belongs in
 Revisions, without duplicating its full card in chat.
 
-While a turn runs, the chat history always ends with one activity indicator
-unless the newest content already moves: streaming text, a loading tool card
-or a pending approval. Text counts as moving only while it arrives; a paragraph
-an external agent has checkpointed is at rest, and the indicator returns under
-it until the next delta. The run state decides whether work is live; part
-states only decide whether something else already shows it. A collapsed
-activity group with a running row, or with a thought still open at its end,
-shows a spinner in place of its icon. The chat header and sidebar add no second
-live cue.
+While a turn runs, one persistent activity row sits at the bottom left of the
+chat pane, above the composer and outside the scrolling history. It stays
+visible during text, reasoning, tools, approvals and reconnection, naming the
+current action from run events. Its elapsed counter measures time since the
+request was sent and never resets between actions. Announce activity changes,
+not clock ticks. Pending decisions retain their actionable controls. Finished,
+failed and stopped runs remove the live row. The transcript fills the available
+space without per-turn viewport spacers or top pinning; follow new content only
+while the reader is at the bottom. A collapsed activity group may retain its
+own progress affordance. The chat header and sidebar add no second live cue.
 
 **Saved**, **checks passed**, **work finished** and **backed up** are independent
 facts. A saved revision can contain interrupted or unverified work. Loading is

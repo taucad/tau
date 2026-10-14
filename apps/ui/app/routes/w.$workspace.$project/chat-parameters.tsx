@@ -1,3 +1,5 @@
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import {
   XIcon,
   ChevronDown,
@@ -1105,7 +1107,7 @@ function ParametersContent({ filterTerm }: { readonly filterTerm: string }): Rea
   return <ParametersPaneview entries={entries} mainEntryPath={mainEntryPath} filterTerm={filterTerm} />;
 }
 
-export function ParametersPanelBody(): React.JSX.Element {
+function ParametersPanelBodyContent(): React.JSX.Element {
   const [filterTerm, setFilterTerm] = useState('');
 
   return (
@@ -1176,3 +1178,8 @@ export const ChatParameters = memo(function (props: {
     </FloatingPanel>
   );
 });
+
+export function ParametersPanelBody(): React.JSX.Element {
+  const availability = useProjectAvailability();
+  return availability === 'ready' ? <ParametersPanelBodyContent /> : <ProjectSyncPlaceholder state={availability} />;
+}

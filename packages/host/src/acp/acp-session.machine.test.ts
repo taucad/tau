@@ -23,6 +23,7 @@ import {
 } from '#acp/acp-session.machine.js';
 import type { AcpLend, AcpSessionInput } from '#acp/acp-session.machine.js';
 import type { AcpAdapter } from '#acp/registry.js';
+import type { AcpSessionEvent } from '#acp/acp-machine-schemas.js';
 import { protocolVersion } from '#acp/session.js';
 
 const adapter: AcpAdapter = {
@@ -100,6 +101,63 @@ const openAndLend = async (harness: Harness): Promise<void> => {
 };
 
 describe('acpSession', () => {
+  it('should retain Grok per-turn usage against the prior durable session total', async () => {
+    const harness = start({
+      opening: {
+        ...input().opening,
+        adapter: { ...adapter, id: 'grok' },
+      },
+    });
+    try {
+      await openAndLend(harness);
+      harness.answer({
+        stopReason: 'end_turn',
+        _meta: {
+          usage: {
+            inputTokens: 100,
+            outputTokens: 20,
+            totalTokens: 120,
+            cachedReadTokens: 80,
+            reasoningTokens: 5,
+          },
+        },
+      });
+      harness.fakes.sendBack('lentTurn', { type: 'flushed', title: undefined, failure: undefined });
+      harness.fakes.sendBack('lentTurn', { type: 'recorded', failure: undefined });
+      harness.actor.send({ type: 'lend', lend: { ...lent, requestId: 'run-2:0' } });
+      harness.fakes.sendBack('lentTurn', { type: 'lentReady' });
+      harness.answer({
+        stopReason: 'end_turn',
+        _meta: {
+          usage: {
+            inputTokens: 50,
+            outputTokens: 10,
+            totalTokens: 60,
+            cachedReadTokens: 40,
+            cacheCreationTokens: 2,
+            reasoningTokens: 3,
+          },
+        },
+      });
+      expect(harness.commands('lentTurn').at(-1)).toMatchObject({
+        type: 'flush',
+        report: {
+          usage: {
+            inputTokens: 150,
+            outputTokens: 30,
+            totalTokens: 180,
+            cachedReadTokens: 120,
+            cachedWriteTokens: 2,
+            thoughtTokens: 8,
+          },
+        },
+      });
+    } finally {
+      harness.actor.stop();
+      harness.parent.stop();
+    }
+  });
+
   it('should probe an idle model and queue a turn until the option update settles', async () => {
     const harness = start({ lend: undefined });
     const { actor, fakes, commands } = harness;
@@ -140,6 +198,34 @@ describe('acpSession', () => {
     harness.actor.send({ type: 'probeModel', requestId: 'probe-1', model: 'absent' });
     expect(probed).toMatchObject([{ requestId: 'probe-1', configOptions: undefined }]);
     expect(harness.lastCall()).toMatchObject({ method: 'session/new' });
+    harness.actor.stop();
+    harness.parent.stop();
+  });
+
+  it('should serve native Grok questions only for the active session', async () => {
+    const harness = start();
+    await openAndLend(harness);
+    const request = (sessionId: string): Extract<AcpSessionEvent, { type: 'vendorRequest' }> => ({
+      type: 'vendorRequest',
+      id: `question-${sessionId}`,
+      request: {
+        method: '_x.ai/ask_user_question',
+        params: { sessionId, toolCallId: 'question-1', questions: [{ question: 'Material?', options: [] }] },
+      },
+    });
+    harness.fakes.sendBack('connection', request('foreign'));
+    expect(harness.commands('connection')).toContainEqual({
+      type: 'respond',
+      id: 'question-foreign',
+      result: { outcome: 'cancelled' },
+    });
+    expect(harness.commands('lentTurn').some((event) => event['id'] === 'question-foreign')).toBe(false);
+    harness.fakes.sendBack('connection', request('acp-1'));
+    expect(harness.commands('lentTurn')).toContainEqual({
+      type: 'serve',
+      id: 'question-acp-1',
+      ...request('acp-1').request,
+    });
     harness.actor.stop();
     harness.parent.stop();
   });

@@ -68,5 +68,3 @@ export const inProcessTransport = <const Runtime extends AnyRuntimeDefinition>(
   >;
 
 export type { InProcessClientOptions } from '#transport/in-process-client.js';
-
-export { inProcessClient, inProcessClientDescribe } from '#transport/in-process-client.js';

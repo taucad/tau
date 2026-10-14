@@ -1,6 +1,6 @@
 'use client';
 
-import { authMutationKeys, parseAdditionalFieldValue } from '@better-auth-ui/core';
+import { authMutationKeys, parseAdditionalFieldValue, validateAdditionalFieldRequired } from '@better-auth-ui/core';
 import { useAuth, useFetchOptions, useSignUpEmail } from '@better-auth-ui/react';
 import { useIsMutating } from '@tanstack/react-query';
 import { Eye, EyeOff } from 'lucide-react';
@@ -71,7 +71,7 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
     },
     onSuccess: () => {
       if (emailAndPassword.requireEmailVerification) {
-        toast.success(localization.auth.verifyYourEmail);
+        toast.success(localization.auth.checkYourEmail);
         navigate({ to: `${basePaths.auth}/${viewPaths.auth.signIn}` });
       } else {
         navigate({ to: redirectTo });
@@ -120,6 +120,12 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
         continue;
       }
       const value = parseAdditionalFieldValue(field, formData.get(field.name) as string | undefined);
+
+      const requiredError = validateAdditionalFieldRequired(field, value ?? null, localization.auth.fieldRequired);
+      if (requiredError) {
+        toast.error(requiredError);
+        return;
+      }
 
       if (field.validate) {
         try {

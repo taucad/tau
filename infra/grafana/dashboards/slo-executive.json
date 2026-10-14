@@ -8,6 +8,15 @@
   "templating": {
     "list": [
       {
+        "name": "app",
+        "label": "Application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": { "text": ".*", "value": ".*" },
+        "hide": 2
+      },
+      {
         "name": "service",
         "label": "Service",
         "type": "custom",
@@ -20,8 +29,8 @@
       {
         "name": "instance",
         "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(process_uptime{service_name=\"$service\"}, instance)",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(process_uptime{app=~\"$app\",service_name=\"$service\"}, instance)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",
@@ -36,7 +45,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
       "targets": [
         {
-          "expr": "(1 - ((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[24h])), 1e-10))) * 100"
+          "expr": "(1 - ((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\"}[24h])), 1e-10))) * 100"
         }
       ],
       "fieldConfig": {
@@ -53,7 +62,8 @@
             ]
           }
         }
-      }
+      },
+      "id": 1
     },
     {
       "title": "Tau Sync Availability (24h)",
@@ -61,7 +71,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
       "targets": [
         {
-          "expr": "(1 - ((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[24h])), 1e-10))) * 100"
+          "expr": "(1 - ((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[24h])), 1e-10))) * 100"
         }
       ],
       "fieldConfig": {
@@ -78,7 +88,8 @@
             ]
           }
         }
-      }
+      },
+      "id": 2
     },
     {
       "title": "API Latency SLO (p95 < 500ms)",
@@ -86,7 +97,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_bucket{service_name=~\"$service\"}[24h])) by (le))"
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[24h])) by (le))"
         }
       ],
       "fieldConfig": {
@@ -103,7 +114,8 @@
             ]
           }
         }
-      }
+      },
+      "id": 3
     },
     {
       "title": "Active Sessions",
@@ -111,10 +123,11 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
         {
-          "expr": "sum by (ws_gateway) (ws_connections_active{service_name=~\"$service\"})",
+          "expr": "sum by (ws_gateway) (ws_connections_active{app=~\"$app\",service_name=~\"$service\"})",
           "legendFormat": "WebSocket {{ws_gateway}}"
         }
-      ]
+      ],
+      "id": 4
     },
     {
       "title": "User-Charged LLM Spend (24h)",
@@ -123,10 +136,13 @@
       "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
       "targets": [
         {
-          "expr": "sum(increase(gen_ai_client_cost_total{service_name=~\"$service\"}[24h]))"
+          "expr": "sum(increase(gen_ai_client_cost_total{app=~\"$app\",service_name=~\"$service\"}[24h]))"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD" }
+      },
+      "id": 5
     },
     {
       "title": "Total Kernel Executions (24h)",
@@ -134,16 +150,18 @@
       "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
       "targets": [
         {
-          "expr": "sum(increase(kernel_executions_total{service_name=~\"$service\"}[24h]))"
+          "expr": "sum(increase(kernel_executions_total{app=~\"$app\",service_name=~\"$service\"}[24h]))"
         }
-      ]
+      ],
+      "id": 6
     },
     {
       "title": "Error Budget",
       "type": "row",
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
       "collapsed": false,
-      "panels": []
+      "panels": [],
+      "id": 7
     },
     {
       "title": "API Error Budget Remaining",
@@ -151,7 +169,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
       "targets": [
         {
-          "expr": "1 - ((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[$__range])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[$__range])), 1e-10) / 0.001)",
+          "expr": "1 - ((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_response_status_code=~\"5..\"}[$__range])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\"}[$__range])), 1e-10) / 0.001)",
           "legendFormat": "Error Budget Remaining",
           "refId": "A"
         }
@@ -170,7 +188,8 @@
           },
           "custom": { "fillOpacity": 20 }
         }
-      }
+      },
+      "id": 8
     },
     {
       "title": "Tau Sync Error Budget Remaining",
@@ -178,7 +197,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
       "targets": [
         {
-          "expr": "1 - ((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[$__range])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[$__range])), 1e-10)) / 0.001",
+          "expr": "1 - ((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[$__range])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[$__range])), 1e-10)) / 0.001",
           "legendFormat": "Error Budget Remaining",
           "refId": "A"
         }
@@ -197,7 +216,8 @@
           },
           "custom": { "fillOpacity": 20 }
         }
-      }
+      },
+      "id": 9
     },
     {
       "title": "API Burn Rate (1h)",
@@ -206,7 +226,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
       "targets": [
         {
-          "expr": "((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[1h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[1h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_response_status_code=~\"5..\"}[1h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\"}[1h])), 1e-10)) / 0.001",
           "refId": "A"
         }
       ],
@@ -222,7 +242,8 @@
             ]
           }
         }
-      }
+      },
+      "id": 10
     },
     {
       "title": "API Burn Rate (6h)",
@@ -231,7 +252,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 18 },
       "targets": [
         {
-          "expr": "((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[6h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[6h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_response_status_code=~\"5..\"}[6h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\"}[6h])), 1e-10)) / 0.001",
           "refId": "A"
         }
       ],
@@ -247,7 +268,8 @@
             ]
           }
         }
-      }
+      },
+      "id": 11
     },
     {
       "title": "API Burn Rate (24h)",
@@ -256,7 +278,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 18 },
       "targets": [
         {
-          "expr": "((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[24h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\"}[24h])), 1e-10)) / 0.001",
           "refId": "A"
         }
       ],
@@ -272,7 +294,8 @@
             ]
           }
         }
-      }
+      },
+      "id": 12
     },
     {
       "title": "Tau Sync Burn Rate (6h)",
@@ -281,7 +304,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 18 },
       "targets": [
         {
-          "expr": "((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[6h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[6h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[6h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[6h])), 1e-10)) / 0.001",
           "refId": "A"
         }
       ],
@@ -297,7 +320,8 @@
             ]
           }
         }
-      }
+      },
+      "id": 13
     },
     {
       "title": "Tau Sync Burn Rate (24h)",
@@ -306,7 +330,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 18 },
       "targets": [
         {
-          "expr": "((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[24h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[24h])), 1e-10)) / 0.001",
           "refId": "A"
         }
       ],
@@ -322,14 +346,20 @@
             ]
           }
         }
-      }
+      },
+      "id": 14
     },
     {
       "title": "Error Logs",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
+      "targets": [
+        {
+          "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"",
+          "refId": "A"
+        }
+      ],
       "options": {
         "showTime": true,
         "showLabels": true,
@@ -338,14 +368,22 @@
         "prettifyLogMessage": false,
         "enableLogDetails": true,
         "sortOrder": "Descending"
-      }
+      },
+      "id": 15
     },
     {
       "title": "Recent Traces",
       "type": "traces",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 108 },
       "datasource": { "type": "tempo", "uid": "tempo" },
-      "targets": [{ "query": "{resource.service.name=~\"$service\"}", "refId": "A", "queryType": "traceqlSearch" }]
+      "targets": [
+        {
+          "query": "{resource.service.name=~\"$service\"}",
+          "refId": "A",
+          "queryType": "traceqlSearch"
+        }
+      ],
+      "id": 16
     }
   ],
   "schemaVersion": 39

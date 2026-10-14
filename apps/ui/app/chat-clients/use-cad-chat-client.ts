@@ -161,19 +161,30 @@ export const useCadChatClient = (): CadChatClient => {
           return;
         }
       }
-      await send();
+      try {
+        await send();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Your message could not be saved. Please try again.', {
+          id: promotionToastId,
+        });
+      }
     },
     [activeChatId, agent.execution, store, surfaceDispatchFailure],
   );
 
   const submit = useCallback(
     async (input: CadChatSubmitInput): Promise<void> => {
+      const queueIntent = store.captureMessageQueueIntent(activeChatId);
       const userMessage = buildUserMessage(input);
       await withAttachments(input.attachments ?? [], async () =>
-        actions.sendMessage(userMessage, input.attachments === undefined ? {} : { attachments: input.attachments }),
+        actions.sendMessage(userMessage, {
+          execution: agent.execution,
+          queueIntent,
+          ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
+        }),
       );
     },
-    [actions, withAttachments],
+    [actions, activeChatId, agent.execution, store, withAttachments],
   );
 
   const edit = useCallback(

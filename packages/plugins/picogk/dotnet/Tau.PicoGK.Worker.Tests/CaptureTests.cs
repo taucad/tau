@@ -154,31 +154,28 @@ public sealed partial class WorkerTests
     }
 
     [Fact]
-    public void CaptureBudgetRejectsBeforeArrayCopyAndKeepsTheAcceptedScene()
+    public void CaptureAcceptsGeometryAboveFormerBudgetAndReleasesOwnedArrays()
     {
         using var library = new Library(1f);
         using var mesh = new Mesh(library);
         mesh.nAddVertex(Vector3.Zero); mesh.nAddVertex(Vector3.UnitX); mesh.nAddVertex(Vector3.UnitY);
         mesh.nAddTriangle(0, 1, 2);
-        using var backend = new CaptureViewerBackend(Path.Combine(root, "capture-budget"));
-        backend.Add(mesh, 0);
-        var first = Assert.Single(backend.Extract().Components);
+        using var backend = new CaptureViewerBackend(Path.Combine(root, "large-capture"));
         var counter = typeof(CaptureViewerBackend).GetField("geometryBytes", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        // Represent already-accounted memory pressure without allocating a 256-MiB test fixture.
-        counter.SetValue(backend, 256L * 1024 * 1024);
-        var copies = TauGeometryCapture.Counters(library)[1];
-        mesh.nAddVertex(Vector3.UnitZ);
+        const long existingBytes = 256L * 1024 * 1024;
+        // Exercise cumulative accounting without allocating hundreds of MiB in every test run.
+        counter.SetValue(backend, existingBytes);
         try
         {
-            Assert.Equal("CS_TAU_RUNTIME", Assert.Throws<WorkerException>(() => backend.Add(mesh, 0)).Issues[0].Code);
-            Assert.Equal(copies, TauGeometryCapture.Counters(library)[1]);
+            backend.Add(mesh, 0);
+            Assert.Equal(existingBytes + 48, backend.GeometryBytes);
+            Assert.Equal(new uint[] { 0, 1, 2 }, Assert.Single(backend.Extract().Components).Indices);
             Assert.Equal(0UL, TauGeometryCapture.Counters(library)[4]);
-            Assert.Same(first.Positions, Assert.Single(backend.Extract().Components).Positions);
+            backend.RemoveAllObjects();
+            Assert.Empty(backend.Extract().Components);
+            Assert.Equal(existingBytes, backend.GeometryBytes);
         }
-        finally { counter.SetValue(backend, 48L); }
-        backend.RemoveAllObjects();
-        Assert.Empty(backend.Extract().Components);
-        Assert.Equal(0, backend.GeometryBytes);
+        finally { counter.SetValue(backend, 0L); }
     }
 
     [Fact]

@@ -15,6 +15,8 @@ import { KinematicsPanelBody } from '#routes/w.$workspace.$project/chat-kinemati
 import { WorkspaceLanesContext } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 const solvePose = vi.hoisted(() => vi.fn());
+vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+
 vi.mock('@taucad/kinematics', async (importOriginal) => ({
   ...(await importOriginal<typeof KinematicsModule>()),
   solvePose,

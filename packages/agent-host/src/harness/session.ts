@@ -71,6 +71,7 @@ import type { AttachmentReader, MessageIdentities, SessionLogEvent, SessionRecor
 import { applyHostToolResult, createAgentTools, normalizeToolInput } from '#harness/tools.js';
 import type { HostToolExecutionDetails, ToolResultSubstituter } from '#harness/tools.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
+import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery.js';
 import { codedFailureDetail as codedFailure } from '#harness/coded-failure.js';
 import { emptyChatLedger, foldChatLedger, isForeignInvocation, unresolvedInvocations } from '#log/chat-ledger.js';
 import type { InvocationResolution } from '#wire/gateway.js';
@@ -85,12 +86,6 @@ const zeroUsage: Usage = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-// The catalog ceiling is the route's limit, not the size a call should ask for.
-// Requesting it on every call made the whole output term of the admission hold
-// phantom (billing-admission-hold-redesign Finding 2); the ratified default is
-// 16,384 with a per-call raise up to the route ceiling (Q2).
-const defaultRequestedMaxTokens = 16_384;
-
 /**
  * The completion ceiling one turn asks the provider for.
  *
@@ -101,11 +96,21 @@ const defaultRequestedMaxTokens = 16_384;
  *
  * @param ceiling - The route's own maximum output tokens.
  * @param requested - A per-call raise, bounded by that ceiling.
+ * @param reasoning - The admitted reasoning controls; thinking shares the output budget.
  * @returns The `maxTokens` the provider request carries.
  * @public
  */
-export const requestedMaxTokens = (ceiling: number, requested: number | undefined): number =>
-  Math.min(requested ?? defaultRequestedMaxTokens, ceiling);
+export const requestedMaxTokens = (
+  ceiling: number,
+  requested: number | undefined,
+  reasoning?: ModelReasoningConfig,
+): number => {
+  const effort = reasoning?.effort;
+  const baseline =
+    reasoning === undefined ? 16_384 : effort === 'high' || effort === 'xhigh' || effort === 'max' ? 65_536 : 32_768;
+  // Manual thinking needs answer headroom too; the route capability remains authoritative.
+  return Math.min(requested ?? Math.max(baseline, (reasoning?.budgetTokens ?? 0) + 16_384), ceiling);
+};
 
 const modelFor = (options: AgentSessionModel): Model<Api> => ({
   id: options.id,
@@ -508,7 +513,11 @@ export const createTransportStreamFunction =
           modelCost: model.cost,
           providerKind: options.providerKind,
           reasoning: committedContext?.model?.reasoning ?? options.reasoning,
-          maxTokens: requestedMaxTokens(model.maxTokens, streamOptions?.maxTokens),
+          maxTokens: requestedMaxTokens(
+            model.maxTokens,
+            streamOptions?.maxTokens,
+            committedContext?.model?.reasoning ?? options.reasoning,
+          ),
           contextWindow: model.contextWindow,
           systemPrompt: committedContext?.systemPrompt ?? context.systemPrompt ?? '',
           systemPromptBlocks: committedContext?.systemPromptBlocks ?? options.systemPromptBlocks?.(),
@@ -919,7 +928,7 @@ const compactionModelsWithTransport = (options: {
           modelCost: model.cost,
           providerKind: options.providerKind,
           reasoning: options.reasoning,
-          maxTokens: requestedMaxTokens(model.maxTokens, streamOptions?.maxTokens),
+          maxTokens: requestedMaxTokens(model.maxTokens, streamOptions?.maxTokens, options.reasoning),
           contextWindow: model.contextWindow,
           systemPrompt: context.systemPrompt ?? '',
           messages: providerHistory(context.messages as AgentMessage[], options),
@@ -1396,33 +1405,42 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
    */
   const settlePrestartedTools = async (): Promise<void> => {
     for (const [toolCallId, prestarted] of prestartedToolResults) {
-      prestartedToolResults.delete(toolCallId);
       // oxlint-disable-next-line no-await-in-loop -- the record's append discipline is serial by construction.
       const settled = await prestarted.result;
       const details = settled.ok ? settled.value.details : undefined;
-      // oxlint-disable-next-line no-await-in-loop -- as above.
-      await record.append({
-        type: 'message.appended',
-        message: piMessageToProvider(
-          {
-            role: 'toolResult',
-            toolCallId,
-            toolName: prestarted.toolName,
-            content: settled.ok
-              ? settled.value.content
-              : [
-                  {
-                    type: 'text',
-                    text: settled.error instanceof Error ? settled.error.message : String(settled.error),
-                  },
-                ],
-            ...(details ? { details } : {}),
-            isError: details?.isError ?? true,
-            timestamp: now().getTime(),
-          },
-          record.messages,
-        ),
-      });
+      const message = piMessageToProvider(
+        {
+          role: 'toolResult',
+          toolCallId,
+          toolName: prestarted.toolName,
+          content: settled.ok
+            ? settled.value.content
+            : [
+                {
+                  type: 'text',
+                  text: settled.error instanceof Error ? settled.error.message : String(settled.error),
+                },
+              ],
+          ...(details ? { details } : {}),
+          isError: details?.isError ?? !settled.ok,
+          timestamp: now().getTime(),
+        },
+        record.messages,
+      );
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Results must be durable before another model request.
+        await record.append({ type: 'message.appended', message });
+      } catch (error) {
+        throw Object.assign(
+          new Error('Tau could not save a tool result. Resume to check the current project before continuing.', {
+            cause: error,
+          }),
+          { code: 'TOOL_RESULT_PERSISTENCE_FAILED' satisfies RefusalCode },
+        );
+      }
+      toolOutputs.set(toolCallId, message);
+      committedMessageIds.add(message.id);
+      prestartedToolResults.delete(toolCallId);
     }
   };
   const bindInvocation = async (attemptId: string, metadata: ProviderMessageMetadata): Promise<void> => {
@@ -1626,6 +1644,9 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       tools,
     },
     afterToolCall: async (context) => applyHostToolResult(context),
+    // Pi otherwise follows truncated tool batches with provisional failures. The host
+    // must first persist eager tools' real results and make the recovery decision.
+    shouldStopAfterTurn: ({ message }) => message.stopReason === 'length',
   });
   agent.prepareNextTurn = async () => {
     const reminder = await createInterruptRecoveryMessage({
@@ -1734,24 +1755,86 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     ran = true;
     let outcome: AgentRunOutcome;
     try {
-      const started = await loop();
-      if (started) {
+      const recoveryPrefix = `output-limit:${options.runId}:${attemptOf(initialEvents, options.runId)}:`;
+      const previousRecoveries = initialEvents.filter(
+        (event) => event.type === 'safeguard.recorded' && event.safeguardId.startsWith(recoveryPrefix),
+      );
+      let recoveries = previousRecoveries.length;
+      const previousRecovery = previousRecoveries.at(-1);
+      const savedNoProgress =
+        previousRecovery?.type === 'safeguard.recorded' && previousRecovery.action === 'nudge'
+          ? previousRecovery.message.metadata?.tauInternal?.['noProgress']
+          : undefined;
+      let noProgress = typeof savedNoProgress === 'number' ? savedNoProgress : 0;
+      const successfulOutputCount = (events: readonly AgentLogEvent[]): number =>
+        events.filter(
+          (event) =>
+            event.type === 'message.appended' && event.message.role === 'tool-output' && !event.message.isError,
+        ).length;
+      // A reconstructed attempt must still credit tools saved after its last continuation checkpoint.
+      let successfulOutputs = successfulOutputCount(
+        previousRecovery ? initialEvents.slice(0, initialEvents.lastIndexOf(previousRecovery) + 1) : initialEvents,
+      );
+      let nextLoop = loop;
+      for (;;) {
+        let started: boolean;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- One logical run, serial provider invocations.
+          started = await nextLoop();
+        } finally {
+          // oxlint-disable-next-line no-await-in-loop -- No continuation may race a tool's durable settlement.
+          await settlePrestartedTools();
+        }
         const final = lastFinal;
         const stop = final?.role === 'assistant' ? final.stopReason : undefined;
-        if (abortRequested || stop === 'aborted') {
+        if (!started || abortRequested || stop === 'aborted') {
           outcome = aborted();
         } else if (stop === 'error') {
+          // oxlint-disable-next-line no-await-in-loop -- Resolve the terminal failure from this invocation's log.
           outcome = { outcome: 'failed', failure: await runFailureDetail(final, record, options.runId) };
+        } else if (stop === 'length') {
+          // oxlint-disable-next-line no-await-in-loop -- Progress comes from durable results, never a text promise.
+          const completedTools = successfulOutputCount(await record.events());
+          noProgress = completedTools > successfulOutputs ? 0 : noProgress + 1;
+          successfulOutputs = completedTools;
+          if (noProgress >= 3 || recoveries >= 8) {
+            outcome = {
+              outcome: 'failed',
+              failure: {
+                code: 'MODEL_OUTPUT_LIMIT',
+                message:
+                  'The model repeatedly reached its response limit. Your progress is saved. Resume to continue, or choose another model.',
+                details: { recoveries, noProgress },
+              },
+            };
+          } else {
+            recoveries++;
+            const safeguardId = `${recoveryPrefix}${recoveries}`;
+            const message = createOutputLimitRecoveryMessage({ id: `tau:${safeguardId}`, noProgress });
+            // oxlint-disable-next-line no-await-in-loop -- Persist the continuation and its bound before dispatch.
+            await record.append({
+              type: 'safeguard.recorded',
+              safeguardId,
+              action: 'nudge',
+              reason: 'Continue the output-limited response from durable state.',
+              message,
+            });
+            // oxlint-disable-next-line no-await-in-loop -- Replace provisional Pi tool failures with durable results.
+            agent.state.messages = await projectHistory();
+            nextLoop = async () => {
+              await agent.continue();
+              return !wasAbortRequested();
+            };
+            continue;
+          }
         } else {
           outcome = { outcome: 'completed' };
         }
-      } else {
-        outcome = aborted();
+        break;
       }
     } catch (error) {
       outcome = abortRequested ? aborted() : { outcome: 'failed', failure: codedFailure(error) };
     }
-    await settlePrestartedTools().catch(() => undefined);
     state = outcome.outcome === 'completed' ? 'completed' : outcome.outcome === 'failed' ? 'failed' : 'cancelled';
     return outcome;
   };

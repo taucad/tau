@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 167.84 kB brotli on 2026-10-13 (the MCP viewer page, its parameter actors, workbench keeper, this computer's machines and the install_packages handler; @taucad/bundler-core stays external)",
+    "name": "total (ESM JS) — measured 167.84 kB brotli on 2026-10-13 (the MCP viewer page, its parameter actors, workbench keeper, this computer's machines and the install_packages handler; @taucad/bundler-core stays external); the adopted-repository open check adds 0.8 kB",
     "path": "dist/**/*.mjs",
-    "limit": "169 kB"
+    "limit": "170 kB"
   }
 ]

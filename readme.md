@@ -15,8 +15,6 @@ The AI-native CAD platform — open-source, browser-based, and kernel-agnostic. 
   <img alt="Tau Desktop View" src="docs/assets/tau-desktop-light.webp">
 </picture>
 
-> 🚧 **Tau is currently under heavy development.** APIs and interfaces may change as we add new features and improvements.
-
 ## Features
 
 - **Open Source** — Apache-2.0 across the complete Tau codebase (see [LICENSING.md](LICENSING.md))

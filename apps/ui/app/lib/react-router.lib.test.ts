@@ -1,13 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { cacheTag, cdnBackedSsrRouteHeaders, throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
+import { throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
 
 /**
  * The homepage is the one SSR route whose CDN policy lives in `netlify.toml`
  * rather than in a route `headers` export — React Router SPA mode (the
  * `ui:build:desktop` config) bans that export and `_index/route.tsx` is shared
- * by both builds. Nothing but this test binds the two together.
+ * by both builds. This test prevents shared caching from replaying the wrong
+ * app/website document after the visitor's entry preference changes.
  */
 const readNetlifyHomepageHeaders = (): Record<string, string> => {
   const toml = readFileSync(resolve(import.meta.dirname, '../../netlify.toml'), 'utf8');
@@ -31,8 +32,12 @@ const readNetlifyHomepageHeaders = (): Record<string, string> => {
 };
 
 describe('netlify.toml homepage cache policy', () => {
-  it('matches the cdnBackedSsrRouteHeaders the deleted _index headers export returned', () => {
-    expect(readNetlifyHomepageHeaders()).toStrictEqual(cdnBackedSsrRouteHeaders(cacheTag.homepage, 'short'));
+  it('prevents browser and shared CDN caching of either root document', () => {
+    expect(readNetlifyHomepageHeaders()).toStrictEqual({
+      'Cache-Control': 'private, no-store',
+      'CDN-Cache-Control': 'no-store',
+      'Netlify-CDN-Cache-Control': 'no-store',
+    });
   });
 });
 

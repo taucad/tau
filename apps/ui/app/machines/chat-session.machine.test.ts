@@ -334,6 +334,23 @@ describe('chatSessionMachine run ownership', () => {
 
   const sendGesture: ChatTurnGesture = { kind: 'regenerate' };
 
+  it('should ignore a retired run cancellation after the replacement turn starts', async () => {
+    const script = turnActors({ admit: async () => turnOf('run-new', 'user-new') });
+    const actor = startOwning(script.actors);
+    try {
+      actor.send({ type: 'requestTurn', gesture: sendGesture });
+      await vi.waitFor(() => {
+        expect(runState(actor)).toBe('queued.dispatched');
+      });
+      actor.send({ type: 'runLifecycle', phase: 'running', runId: 'run-new' });
+      actor.send({ type: 'runLifecycle', phase: 'cancelled', runId: 'run-old' });
+      expect(runState(actor)).toBe('running.generating');
+      expect(actor.getSnapshot().context.turn?.runId).toBe('run-new');
+    } finally {
+      actor.stop();
+    }
+  });
+
   it('ends an admitted turn at the terminal run row without invoking page settlement', async () => {
     const script = turnActors();
     const actor = startOwning(script.actors);

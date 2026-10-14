@@ -16,6 +16,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { metaConfig } from '#constants/meta.constants.js';
 import { legalUrl } from '#lib/legal-url.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
+import { isDesktopTarget } from '#lib/build-target.js';
+import { setEntryPreference } from '#lib/entry-preference.js';
 import { NavBillingItem, NavCreditsMeter } from '#cloud/nav-billing.js';
 
 /**
@@ -30,6 +32,31 @@ export function NavUser(): React.JSX.Element {
   const isOnline = useNetworkConnectivity();
   const { open: openSettings } = useSettingsDialog();
   const helpItems = [
+    ...(isDesktopTarget()
+      ? []
+      : [
+          <DropdownMenuItem key='website' asChild>
+            <a
+              href='/?website=1'
+              onClick={(event) => {
+                if (
+                  event.button === 0 &&
+                  !event.metaKey &&
+                  !event.ctrlKey &&
+                  !event.shiftKey &&
+                  !event.altKey &&
+                  setEntryPreference('website')
+                ) {
+                  event.preventDefault();
+                  globalThis.location.assign('/');
+                }
+              }}
+            >
+              <BookOpen />
+              Visit website
+            </a>
+          </DropdownMenuItem>,
+        ]),
     <DropdownMenuItem key='documentation' asChild>
       <a href='https://docs.tau.new' target='_blank' rel='noopener noreferrer'>
         <BookOpen />

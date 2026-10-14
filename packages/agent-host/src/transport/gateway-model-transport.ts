@@ -16,7 +16,7 @@ import { util as zodUtility } from 'zod';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
 import { fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
 import { createVertexResponseShim, echoThoughtSignatures } from '#transport/vertex-completions-shim.js';
-import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock } from '#log/event-types.js';
+import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock, ProviderMessage } from '#log/event-types.js';
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 import { gatewayProviderKinds } from '#wire/admission.schema.js';
 import { gatewayErrorCodes } from '#wire/gateway.js';
@@ -721,9 +721,56 @@ const piModelFor = (options: {
       };
 };
 
+/**
+ * Keep executed calls paired with their durable results when a stream stopped between calls.
+ * Pi drops aborted/error assistant messages but retains tool results. Project the completed
+ * prefix as a tool-use envelope, without rewriting the log or reviving unfinished calls.
+ * Native credentials in that prefix remain unchanged for the selected codec to interpret.
+ *
+ * @param messages - Durable history projected for this request.
+ * @returns Transient history with every settled interrupted call still paired.
+ */
+const replayInterruptedCalls = (messages: readonly ProviderMessage[]): readonly ProviderMessage[] =>
+  messages.map((message, index) => {
+    if (
+      message.role !== 'assistant' ||
+      !Array.isArray(message.content) ||
+      (message.metadata?.stopReason !== 'aborted' && message.metadata?.stopReason !== 'error')
+    ) {
+      return message;
+    }
+    const settled = new Map<string, string>();
+    for (let next = index + 1; next < messages.length; next++) {
+      const candidate = messages[next]!;
+      if (candidate.role === 'user' || candidate.role === 'assistant') {
+        break;
+      }
+      if (candidate.role === 'tool-output') {
+        settled.set(candidate.toolCallId, candidate.toolName);
+      }
+    }
+    const isSettledCall = (block: unknown): boolean =>
+      zodUtility.isObject(block) &&
+      block['type'] === 'toolCall' &&
+      typeof block['id'] === 'string' &&
+      typeof block['name'] === 'string' &&
+      settled.get(block['id']) === block['name'];
+    const lastSettled = message.content.findLastIndex(isSettledCall);
+    if (lastSettled === -1) {
+      return message;
+    }
+    return {
+      ...message,
+      content: message.content
+        .slice(0, lastSettled + 1)
+        .filter((block) => !zodUtility.isObject(block) || block['type'] !== 'toolCall' || isSettledCall(block)),
+      metadata: { ...message.metadata, stopReason: 'toolUse' },
+    };
+  });
+
 const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Context => {
   const identities = new MessageIdentities(() => 'transport-message');
-  const messages = request.messages.flatMap((message) => {
+  const messages = replayInterruptedCalls(request.messages).flatMap((message) => {
     const hydrated = providerMessageToPi(message, model as Model<Api>, identities);
     return hydrated ? [hydrated as Context['messages'][number]] : [];
   });

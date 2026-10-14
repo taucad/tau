@@ -1,0 +1,73 @@
+{
+  "configs": {
+    "MessageQueue.target.cfg": {
+      "tier": "pr",
+      "expect": "pass"
+    },
+    "MessageQueue.today.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SubmitPreservesRun"
+      },
+      "kind": "defect",
+      "ref": "Before persistent queue, ordinary submit requests cancellation of the live run",
+      "fixedBy": "chat-message-queue-blueprint R1"
+    },
+    "MessageQueue.duplicate.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceCharge"
+      },
+      "kind": "witness",
+      "ref": "StableIdentity removed"
+    },
+    "MessageQueue.lost-payload.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "PayloadSurvives"
+      },
+      "kind": "witness",
+      "ref": "Durable removed"
+    },
+    "MessageQueue.follower-lag.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoEarlyDelivery"
+      },
+      "kind": "witness",
+      "ref": "ObserveBarrier removed"
+    },
+    "MessageQueue.wrong-cancel.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CancelTargetsObservedRun"
+      },
+      "kind": "witness",
+      "ref": "TargetedCancel removed"
+    },
+    "MessageQueue.early-steer.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SteerWaitsForTerminal"
+      },
+      "kind": "witness",
+      "ref": "TerminalBeforeSend removed"
+    },
+    "MessageQueue.release-stopped.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoEarlyDelivery"
+      },
+      "kind": "witness",
+      "ref": "RequireTerminalIntent removed: stopping must not release older queued work"
+    },
+    "MessageQueue.late-terminal-capture.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoEarlyDelivery"
+      },
+      "kind": "witness",
+      "ref": "CaptureTerminalAtSubmit removed: stop during queue save must not authorize a pre-stop gesture"
+    }
+  }
+}

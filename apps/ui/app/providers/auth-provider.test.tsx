@@ -1,3 +1,4 @@
+import * as Cookies from 'es-cookie';
 // @vitest-environment jsdom
 
 // oxlint-disable-next-line import/no-unassigned-import -- registers DOM matchers for this test module
@@ -9,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AnonymousSessionPurge,
+  AppEntryPreference,
   AuthConfigLink,
   DesktopAuthBridge,
   desktopAuthAction,
@@ -257,5 +259,35 @@ describe('AuthConfigLink', () => {
 
     expect(screen.getByText('Sign in').closest('a')).toHaveAttribute('href', '/auth/sign-in');
     expect(routerLink).toHaveBeenCalled();
+  });
+});
+
+describe('AppEntryPreference', () => {
+  beforeEach(() => {
+    Cookies.remove('tau-entry', { path: '/' });
+    vi.unstubAllEnvs();
+  });
+  it('should remember confirmed login and preserve it through API uncertainty', () => {
+    mocks.resolvedAuth.mockReturnValue('authed');
+    const view = render(<AppEntryPreference />);
+    expect(document.cookie).toContain('tau-entry=app');
+    mocks.resolvedAuth.mockReturnValue('indeterminate');
+    view.rerender(<AppEntryPreference />);
+    expect(document.cookie).toContain('tau-entry=app');
+    mocks.resolvedAuth.mockReturnValue('anonymous');
+    view.rerender(<AppEntryPreference />);
+    expect(document.cookie).toContain('tau-entry=app');
+  });
+  it('should preserve explicit website choice and leave desktop cookies alone', () => {
+    Cookies.set('tau-entry', 'website', { path: '/' });
+    mocks.resolvedAuth.mockReturnValue('authed');
+    const view = render(<AppEntryPreference />);
+    expect(document.cookie).toContain('tau-entry=website');
+    view.unmount();
+    Cookies.remove('tau-entry', { path: '/' });
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    render(<AppEntryPreference />);
+    expect(document.cookie).not.toContain('tau-entry=');
+    vi.unstubAllEnvs();
   });
 });

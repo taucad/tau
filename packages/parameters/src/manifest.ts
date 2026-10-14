@@ -1898,6 +1898,32 @@ const admitSourceFiles = (value: unknown): Readonly<Record<string, ContentDigest
   return files as Readonly<Record<string, ContentDigest | 'missing'>>;
 };
 
+const cloneSourceFiles = (value: unknown): ParameterManifest['identity']['sourceFiles'] =>
+  admitSourceFiles(
+    cloneBoundedJson(value, {
+      ...limits,
+      maximumDepth: 1,
+      maximumNodes: Number.MAX_SAFE_INTEGER,
+      maximumCharacters: Number.MAX_SAFE_INTEGER,
+    }),
+  );
+
+/** Source identities grow with the workspace; they do not consume parameter metadata budgets. */
+const cloneManifestJson = (value: unknown): CacheValue => {
+  // Inspect data descriptors so a hostile getter is never evaluated before JSON admission.
+  const identity: unknown = isRecord(value) ? Object.getOwnPropertyDescriptor(value, 'identity')?.value : undefined;
+  const sourceFiles: unknown = isRecord(identity)
+    ? Object.getOwnPropertyDescriptor(identity, 'sourceFiles')?.value
+    : undefined;
+  const entries = Object.entries(cloneSourceFiles(sourceFiles ?? {}));
+  return cloneBoundedJson(value, {
+    ...limits,
+    maximumNodes: limits.maximumNodes + entries.length,
+    maximumCharacters:
+      limits.maximumCharacters + entries.reduce((total, [path, digest]) => total + path.length + digest.length, 0),
+  });
+};
+
 // `mode: 'default'` is the absent mode; normalising it keeps one identity for one semantics.
 const withoutDefaultMode = (resolution: ParameterResolutionOptions = {}): ParameterResolutionOptions => {
   const { mode, ...rest } = resolution;
@@ -2162,7 +2188,7 @@ export const compileParameterManifest = async (input: CompileParameterManifestIn
   const resolution = admitResolution(deepFreeze(cloneBoundedJson(withoutDefaultMode(input.resolution), limits)));
   const scope = admitScope(cloneBoundedJson(input.scope, limits));
   const source = admitSource(cloneBoundedJson(input.source, limits));
-  const sourceFiles = admitSourceFiles(cloneBoundedJson(input.sourceFiles ?? {}, limits));
+  const sourceFiles = cloneSourceFiles(input.sourceFiles ?? {});
   const tables = deriveManifestTables(declaration, source);
   const legacyProjection = projectParameterSchema(
     { schema: declaration.schema, bindings: tables.bindings },
@@ -2196,7 +2222,7 @@ export const compileParameterManifest = async (input: CompileParameterManifestIn
 };
 
 const inspectParameterManifest = (value: unknown): ParameterManifest => {
-  const cloned: unknown = cloneBoundedJson(value, limits);
+  const cloned: unknown = cloneManifestJson(value);
   if (!isRecord(cloned)) {
     fail(diagnostic('INVALID_SCHEMA', 'parameter manifest must be an object', rootResource, ''));
   }
@@ -2439,7 +2465,7 @@ const inspectParameterManifest = (value: unknown): ParameterManifest => {
  */
 export const isParameterManifestShape = (value: unknown): value is ParameterManifest => {
   try {
-    const candidate = cloneBoundedJson(value, limits);
+    const candidate = cloneManifestJson(value);
     if (
       !isRecord(candidate) ||
       candidate['version'] !== 1 ||

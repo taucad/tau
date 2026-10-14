@@ -530,6 +530,8 @@ export default defineConfig(({ mode }) => {
     test: {
       globals: true, // Required by @testing-library/jest-dom, which uses `expect` implicitly
       environment: 'jsdom',
+      // Keep mock library matchers on this runner's Vitest instance; externalizing it can load a second peer instance.
+      server: { deps: { inline: ['vitest-mock-extended'] } },
       // *.browser.test.ts(x) files need a real browser (OPFS, Web Locks, WebGL) and run
       // under their own vitest browser configs, not the jsdom sweep.
       exclude: ['**/node_modules/**', '**/dist/**', '**/*.browser.test.ts', '**/*.browser.test.tsx'],

@@ -15,9 +15,10 @@ env:
   TAU_WEBSOCKET_URL: ws://localhost:4001
   TAU_FRONTEND_URL: http://localhost:3000
 
-# A newer push to a pull request cancels its outdated run; different PRs run side by
-# side. Each push to `main` gets a group of its own, so it neither waits for nor
-# cancels another: in one shared group a run held the group until its last job ended,
+# A newer push to a pull request, Dependabot's included, cancels its outdated run;
+# different PRs run side by side. Each push to `main` gets a group of its own and is
+# never cancelled, so it neither waits for nor cancels another: in one shared group a
+# run held the group until its last job ended,
 # including a Darwin job waiting hours for a macOS runner, and each newer push was
 # cancelled while pending, staging deploy and release commit included (2026-10-11,
 # runs 38179340616 and 38183401821). The staging deploys keep their own queues
@@ -25,7 +26,7 @@ env:
 # has already superseded.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # One affected computation for every downstream lane. Every selector here is a
@@ -402,7 +403,7 @@ jobs:
 
       - name: Highlight bundle size increases
         if: steps.size-comparison.outcome == 'success'
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           SIZE_COMPARISON_STARTED_AT: ${{ steps.size-report-format.outputs.started-at }}
         with:
@@ -503,7 +504,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
       - name: Build API image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0

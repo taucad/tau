@@ -80,6 +80,7 @@ const {
   let revisionStatus = {
     dirty: false,
     line: { kind: 'branch', name: 'main' } as const,
+    remote: { kind: 'none', phase: 'none', fetchOnly: false } as const,
     sync: { state: 'noRemote' as 'backedUp' | 'checking' | 'noRemote', pendingCount: 0 },
   };
   const editorSnapshot = (): unknown => ({
@@ -177,6 +178,7 @@ const {
         revisionStatus = {
           dirty: false,
           line: { kind: 'branch', name: 'main' } as const,
+          remote: { kind: 'none', phase: 'none', fetchOnly: false } as const,
           sync: { state: 'noRemote', pendingCount: 0 },
         };
         revisionListeners.clear();
@@ -212,6 +214,8 @@ workerRef.current = mock<Worker>({
 /* The provider mirrors the app's shared worker into the store; in jsdom there
  * is no `SharedWorkerContext`, so the one hook it reads is the seam to stand
  * in for. Compute admission is then the real path, on a recording worker. */
+vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({ usePublishCloudProjectPreview: () => undefined }));
+
 vi.mock('#hooks/use-file-manager.js', () => ({
   useSharedFileManagerWorker: () => workerRef.current,
   SharedWorkerGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,

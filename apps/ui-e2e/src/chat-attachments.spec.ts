@@ -5,9 +5,11 @@ import { base64ToUint8Array, concatUint8Arrays, uint8ArrayToBase64 } from 'uint8
 import * as target from '#support/external-target.js';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
 import { waitForCaptureAttachments, waitForRenderedGeometry } from '#support/headless-capture.js';
+import { expectLogInvariant } from '#support/chat-admission.js';
 import type { AnthropicRequest, FixtureFile, RecordFile, StoredFile } from '#support/chat-attachments.js';
 import {
   chooseAttachment,
+  agentTrigger,
   composerSelector,
   editComposerSelector,
   dismissCookies,
@@ -24,6 +26,7 @@ import {
   pdfModelName,
   prepareComposerPage,
   readHomeJson,
+  readHomeGlobText,
   recordDraftText,
   recordPaths,
   seededChatIds,
@@ -90,6 +93,96 @@ const gatewayRequestCount = async (): Promise<number> => {
   const requests = await gatewayRequests();
   return requests.length;
 };
+
+test('should preserve history and attachment bytes when a saved Codex chat switches to browser Tau', async () => {
+  const { chatIds } = await openSeededChat();
+  const chatId = chatIds[0]!;
+  const chatUrl = await target.currentUrl();
+  const chatDirectory = recordPaths.chatAttachments(chatId);
+  const logPath = `/*/.tau/chats/${chatId}/events.jsonl`;
+  const jpeg = await fixtureFile('bracket-photo.jpg');
+  const pdf = await fixtureFile('bracket-spec.pdf');
+  await chooseAttachment(jpeg);
+  await chooseAttachment(pdf);
+  await sendDraft(sentText);
+  await target.expectVisible(selectors.getByText(replyText, { exact: true }).last(), 120_000);
+  await expectLogInvariant(chatId, { runs: 1, settlements: ['turn.finalized'] });
+  const originalLog = await readHomeGlobText(logPath);
+  expect(originalLog).toContain(sentText);
+  const originalFiles = await expectFiles(chatDirectory, [
+    `${await sha256OfBase64(jpeg.base64)}.jpg`,
+    `${await sha256OfBase64(pdf.base64)}.pdf`,
+  ]);
+
+  // Reopen the same persisted chat with a desktop Codex selection whose host
+  // this browser cannot discover. Leave the chat first so no mounted writer races the fixture.
+  await target.navigate('/');
+  await target.evaluate(async (id) => {
+    const root = await navigator.storage.getDirectory();
+    for await (const project of root.values()) {
+      if (project.kind !== 'directory') {
+        continue;
+      }
+      let file: FileSystemFileHandle;
+      try {
+        const tau = await project.getDirectoryHandle('.tau');
+        const chats = await tau.getDirectoryHandle('chats');
+        const chat = await chats.getDirectoryHandle(id);
+        file = await chat.getFileHandle('chat.json');
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'NotFoundError') {
+          continue;
+        }
+        throw error;
+      }
+      const stored = await file.getFile();
+      const record = JSON.parse(await stored.text()) as Record<string, unknown>;
+      record['activeExecution'] = { kind: 'acp', hostId: 'desktop', agentId: 'codex', model: 'gpt-6-sol' };
+      const writer = await file.createWritable();
+      await writer.write(JSON.stringify(record));
+      await writer.close();
+      return;
+    }
+    throw new Error(`Missing persisted chat ${id}.`);
+  }, chatId);
+  await target.navigate(chatUrl);
+  await target.expectVisible(agentTrigger(), 60_000);
+  await target.click(agentTrigger());
+  await target.click(selectors.getByRole('button', { name: /^Agent: codex/u }));
+  await target.click(selectors.getByRole('option', { name: /^Tau/u }));
+  await target.click(selectors.getByRole('option', { name: /^Haiku 5\.5/u }));
+  await target.keyboardPress('Escape');
+
+  expect(await target.currentUrl()).toBe(chatUrl);
+  expect(await readHomeGlobText(logPath)).toBe(originalLog);
+  expect(await listHomeDirectory(chatDirectory)).toEqual(originalFiles);
+  await expect
+    .poll(async () => {
+      const text = await readHomeGlobText(`/*/.tau/chats/${chatId}/chat.json`);
+      return text ? (JSON.parse(text) as { activeExecution?: unknown }).activeExecution : undefined;
+    })
+    .toMatchObject({ kind: 'tau', model: 'anthropic-claude-haiku-5.5' });
+
+  await target.reload();
+  await target.expectVisible(selectors.getByRole('button', { name: 'Open image bracket-photo.jpg' }), 60_000);
+  const pdfLink = selectors.getByCss('[aria-label="Attached files"]').getByRole('link', { name: 'bracket-spec.pdf' });
+  const downloaded = await target.download(pdfLink);
+  expect(downloaded.base64).toBe(pdf.base64);
+  expect(await readHomeGlobText(logPath)).toBe(originalLog);
+
+  const requestsBefore = await gatewayRequestCount();
+  await sendDraft('Continue using the original bracket attachments.');
+  await expect.poll(gatewayRequestCount, { timeout: 120_000 }).toBe(requestsBefore + 1);
+  await expectLogInvariant(chatId, { runs: 2, settlements: ['turn.finalized', 'turn.finalized'] });
+  const requests = await gatewayRequests();
+  const continuedRequest = requests.at(-1)!;
+  expect(JSON.stringify(continuedRequest.messages)).toContain(sentText);
+  expect(JSON.stringify(continuedRequest.messages)).toContain(replyText);
+  expect(JSON.stringify(continuedRequest.messages)).toContain(jpeg.base64);
+  expect(JSON.stringify(continuedRequest.messages)).toContain(pdf.base64);
+  expect(await listHomeDirectory(chatDirectory)).toEqual(originalFiles);
+  expect(await target.currentUrl()).toBe(chatUrl);
+});
 
 test('stores each ingest path as one file beside the chat record and restores the draft on reload', async () => {
   const { projectId, chatIds } = await openSeededChat();
@@ -339,7 +432,7 @@ test('deletes the chat record and its draft stage and keeps the tombstoned chat 
   const row = selectors.getByCss('[data-slot="chat-trigger"]').filter({ hasText: 'Attachments chat' });
   await target.hover(row);
   await target.click(selectors.getByRole('button', { name: 'More actions for Attachments chat' }));
-  await target.click(selectors.getByRole('menuitem', { name: 'Delete' }));
+  await target.click(selectors.getByRole('menuitem', { name: 'Move to Trash' }));
 
   await expect.poll(async () => readHomeJson(recordPaths.chat(projectId, chatId)), { timeout: 30_000 }).toBeUndefined();
   await expectFiles(recordPaths.chatDraftAttachments(projectId, chatId), []);

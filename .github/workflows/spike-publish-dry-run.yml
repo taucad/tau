@@ -1,0 +1,205 @@
+# Spikes S20 and S21 (native-dependency-resolution charter, D28, W16): `publish.yml` with its
+# publish step removed. It runs the release gate and the dependency-ordered dry-run publish on
+# Ubuntu. Nothing is published: the job holds no npm token and the publish step is gone. The
+# GeoSpec engine is the published `geospec-engine` catalog pin, installed with the workspace.
+#
+# S20 (gate): a dispatch, or a pull request that changes this file. S21 (gitChecks): a dispatch
+# with `gate` off skips the gate and dry-runs the publish with pnpm's git checks on or off. With
+# `tag-checkout` it first pushes a throwaway `spike-publish-<run id>` tag (never `v*`) at the
+# dispatched commit, dry-runs on that tag's checkout, the way `publish.yml` runs on a release tag,
+# and deletes the tag afterwards.
+#
+# S24 (`cli-pack-install`, on a pull request and when the `s24` input is on): pack `packages/cli` and
+# its publishable closure without the GeoSpec engine (D36), install the tarballs into a clean npm
+# application under the OS temp dir and run the installed `tau` there (`check-pack-install.ts`).
+#
+# Difference from `publish.yml`, a finding for W16: it installs Chromium before the gate
+# (`scripts:check-pack-install` launches it).
+name: Spike publish dry run
+
+on:
+  workflow_dispatch:
+    inputs:
+      gate:
+        description: 'Run the release gate (S20); off runs only the dry-run publish (S21)'
+        type: boolean
+        default: true
+      git-checks:
+        description: "pnpm's git checks for the dry-run publish: on (pnpm's default) or off (gitChecks: false)"
+        type: choice
+        options: ['on', 'off']
+        default: 'on'
+      tag-checkout:
+        description: 'Without the gate: dry-run on the checkout of a throwaway spike-publish-<run id> tag, deleted afterwards'
+        type: boolean
+        default: false
+      s24:
+        description: 'Also run S24: pack the CLI closure and run the installed tau on ubuntu-latest and macos-15'
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - '.github/workflows/spike-publish-dry-run.yml'
+      - 'scripts/src/check-pack-install.ts'
+      - 'scripts/src/check-pack-install-cli.ts'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: spike-publish-dry-run-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  pnpm_config_verify_deps_before_run: warn
+  NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+  SPIKE_GATE: ${{ github.event_name == 'pull_request' || inputs.gate }}
+  # A pull request checks out a detached merge commit, which is not what a release runs on.
+  SPIKE_GIT_CHECKS: ${{ github.event_name != 'pull_request' && inputs.git-checks != 'off' }}
+  SPIKE_TAG: spike-publish-${{ github.run_id }}
+
+jobs:
+  throwaway-tag:
+    name: Push the throwaway tag
+    if: github.event_name == 'workflow_dispatch' && !inputs.gate && inputs.tag-checkout
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Push ${{ env.SPIKE_TAG }} at the dispatched commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$SPIKE_TAG" -f sha="$GITHUB_SHA" --jq .ref
+
+  # A run Dependabot triggered (an Actions bump to this file) skips the dry run; a
+  # maintainer's push or re-run runs it.
+  dry-run:
+    name: Dry-run the publish (ubuntu-latest)
+    needs: [throwaway-tag]
+    if: >-
+      !cancelled() && needs.throwaway-tag.result != 'failure' &&
+      (github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      GEOSPEC_WORKERS: 1
+      NPM_CONFIG_PROVENANCE: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.throwaway-tag.result == 'success' && format('refs/tags/{0}', env.SPIKE_TAG) || '' }}
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Install Chromium for the pack-install check
+        if: env.SPIKE_GATE == 'true'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run the release gate
+        if: env.SPIKE_GATE == 'true'
+        run: pnpm nx run scripts:release-gate
+
+      - name: Assert pnpm is the publisher
+        run: |
+          pnpm --version
+          test -f pnpm-lock.yaml
+          node -e "if (!require('./package.json').packageManager.startsWith('pnpm@')) process.exit(1)"
+
+      - name: Record the checkout the publish sees
+        run: |
+          echo "ref=$GITHUB_REF event=$GITHUB_EVENT_NAME git-checks=$SPIKE_GIT_CHECKS"
+          git rev-parse HEAD
+          git symbolic-ref -q HEAD || echo 'HEAD is detached'
+          git describe --tags --exact-match 2>/dev/null || echo "no tag at HEAD"
+          git status --short | head -20
+          branch=$(git symbolic-ref -q --short HEAD || echo detached)
+          tag=$(git describe --tags --exact-match 2>/dev/null || echo none)
+          echo "::notice title=Checkout::ref $GITHUB_REF; HEAD $branch; tag at HEAD $tag; dirty files $(git status --short | wc -l)"
+
+      # The only step `publish.yml` runs that this keeps; `publish.yml`'s real publish step is gone.
+      - name: Dry-run the dependency-ordered publish
+        run: |
+          set -o pipefail
+          if [ "$SPIKE_GIT_CHECKS" != true ]; then export pnpm_config_git_checks=false; fi
+          echo "pnpm git-checks: $(pnpm config get git-checks)"
+          status=0
+          pnpm nx release publish --dry-run --tag=beta 2>&1 | tee "$RUNNER_TEMP/dry-run.log" || status=$?
+          git_errors=$(grep -Eo 'ERR_PNPM_GIT_[A-Z_]+' "$RUNNER_TEMP/dry-run.log" | sort | uniq -c | tr '\n' ' ' || true)
+          would=$(grep -c 'Would publish to' "$RUNNER_TEMP/dry-run.log" || true)
+          echo "::notice title=Dry-run publish (git-checks $SPIKE_GIT_CHECKS)::exit $status; $would packages would publish; ${git_errors:-no ERR_PNPM_GIT_* errors}"
+          exit "$status"
+
+      - name: Upload the dry-run log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-dry-run-${{ github.run_id }}
+          path: ${{ runner.temp }}/dry-run.log
+          if-no-files-found: ignore
+
+  delete-throwaway-tag:
+    name: Delete the throwaway tag
+    needs: [throwaway-tag, dry-run]
+    if: always() && needs.throwaway-tag.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Delete ${{ env.SPIKE_TAG }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$SPIKE_TAG"
+
+  cli-pack-install:
+    name: S24 CLI closure pack-install (${{ matrix.os }})
+    if: github.event_name == 'pull_request' || inputs.s24
+    strategy:
+      fail-fast: false
+      matrix:
+        os: >-
+          ${{ github.event_name == 'pull_request' && github.triggering_actor == 'dependabot[bot]'
+          && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-15"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # The CLI's build graph omits packages it reaches only through peers (`@taucad/camera`), so build them all.
+      - name: Build every publishable package
+        run: pnpm nx run-many -t build --projects=tag:type:package
+
+      - name: Install Chromium for the pack-install check
+        run: pnpm exec playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+
+      - name: Pack, install and run the CLI closure
+        run: |
+          set -o pipefail
+          started=$(date +%s)
+          node scripts/src/check-pack-install.ts packages/cli 2>&1 | tee "$RUNNER_TEMP/s24-${{ matrix.os }}.log"
+          seconds=$(( $(date +%s) - started ))
+          lines=$(grep -E '^(Elapsed|tau |CLI checks|npm install:|README quick start)' "$RUNNER_TEMP/s24-${{ matrix.os }}.log" | tr '\n' ';')
+          echo "::notice title=S24 ${{ matrix.os }}::${seconds} s (limit 300 s); ${lines}"
+
+      - name: Upload the S24 log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s24-${{ matrix.os }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/s24-${{ matrix.os }}.log
+          if-no-files-found: ignore

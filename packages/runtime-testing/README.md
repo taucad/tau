@@ -24,6 +24,8 @@ npm install @taucad/runtime
 
 `@taucad/runtime` and Vitest are required peers. Install one runtime instance and a Vitest version `>=2`.
 
+For browser renderer output tests, also install `three` at version `^0.184.0` and import the browser subpath. Three is an optional peer for package-root consumers.
+
 ## Quick start
 
 ```typescript
@@ -82,7 +84,39 @@ The caller owns a client returned by `createTestRuntimeClient`. Always call `shu
 | Material/color evidence  | `colorParityCases`, `expectLinearBaseColor`, `getAllMaterialBaseColors`, `getMaterialAlphaMode`, `getMaterialBaseColor`                         |
 | Coordinates and naming   | `readCoordinateEvidence`, `mapZupMillimetersToYupMeters`, `readGltfNamingSummary`                                                               |
 
-Only the package root is a code entry point.
+The package root contains the runtime and geometry helpers above. Browser renderer capture has a separate `@taucad/runtime-testing/browser/three-renderer-output` entry so package-root imports do not load Three.
+
+### Browser renderer output
+
+Use the browser subpath in Three.js WebGL and native WebGPU fixture tests. Pass the explicit `'hardware'` or `'software'` profile supplied by the browser configuration. Install before the renderer's first render, then await capture after the final frame. Await disposal before the fixture or React disposes the renderer.
+
+```typescript
+import { page } from 'vitest/browser';
+import {
+  captureRendererOutput,
+  createRendererOutputCanvas,
+  disposeRendererOutput,
+  installRendererOutput,
+} from '@taucad/runtime-testing/browser/three-renderer-output';
+
+installRendererOutput(renderer, webGpuProfile);
+try {
+  await renderFrame();
+  const pixels = await captureRendererOutput(renderer);
+  const snapshot = createRendererOutputCanvas({ renderer, pixels });
+  document.body.append(snapshot);
+  try {
+    await page.screenshot({ element: snapshot, path: 'final-frame.png' });
+  } finally {
+    snapshot.remove();
+  }
+} finally {
+  await disposeRendererOutput(renderer);
+  renderer.dispose();
+}
+```
+
+`captureRendererOutput` returns RGBA `Uint8ClampedArray` pixels in Canvas2D orientation with straight alpha. On software native WebGPU, it reads a temporary final output target; on hardware WebGPU and WebGL, it copies the presented canvas. `createRendererOutputCanvas` builds a detached canvas from captured pixels, positioned at the renderer's page bounds for screenshot assertions. The caller adds and removes that canvas; the helper does not render another frame. Captured arrays retain their width and height: a snapshot after any drawing-buffer resize throws `RangeError`, even when the pixel count is unchanged. Copied or external arrays are checked only by length, so their caller must ensure they represent the current frame. Capture again after resizing. A WebGPU renderer must use a native WebGPU backend; Three's WebGL fallback throws. Installing twice or capturing before install or after disposal also throws. `disposeRendererOutput` drains a pending readback, restores the renderer and releases the temporary target; calling it when nothing is installed is safe for fixture cleanup.
 
 ## Environment
 
@@ -90,6 +124,8 @@ Only the package root is a code entry point.
 | -------------- | --------- | ------------------------------------------------------------- |
 | Browser worker | Yes       | browser-safe runtime entries; no Node built-ins               |
 | Node.js        | Yes       | Node `>=24`; in-process tests use the platform MessageChannel |
+
+The renderer-output subpath requires a DOM canvas and Three.js; use it in browser tests.
 
 ## Versioning and stability
 

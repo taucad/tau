@@ -39,12 +39,17 @@ type DesktopShell = {
   readonly externalAgents?: () => Promise<unknown>;
   readonly compute?: DesktopBridge['compute'];
   readonly appIcon: { setTheme(theme: 'light' | 'dark'): void };
+  readonly window?: {
+    isFullscreen(): boolean;
+    onFullscreenChange(listener: () => void): () => void;
+  };
   /** The quit hold's renderer half (D31, P49). */
   readonly quit?: {
     isReady(): boolean;
     onAsk(handler: () => void): () => void;
     reportQuiesced(forced: boolean): void;
   };
+  readonly directories?: DesktopBridge['directories'];
   readonly dialog: DesktopBridge['dialog'];
   readonly openFiles: DesktopBridge['openFiles'];
   readonly generatedImages: DesktopBridge['generatedImages'];
@@ -159,6 +164,16 @@ export const setDesktopAppIconTheme = (theme: 'light' | 'dark'): void => {
   (globalThis as { tau?: DesktopShell }).tau?.appIcon.setTheme(theme);
 };
 
+/** Native window state; viewer-only DOM fullscreen does not change application chrome. */
+export const isDesktopFullscreen = (): boolean =>
+  isDesktopBuildTarget() && ((globalThis as { tau?: DesktopShell }).tau?.window?.isFullscreen() ?? false);
+
+/** Subscribe to the native window's snapshot; browser builds have no native window. */
+export const onDesktopFullscreenChange = (listener: () => void): (() => void) => {
+  const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
+  return shell?.window?.onFullscreenChange(listener) ?? ((): void => undefined);
+};
+
 /**
  * Listen for main's quit ask (D31, P49).
  *
@@ -257,6 +272,12 @@ export type DesktopBridge = {
       projectRoot: string,
       input: Omit<Parameters<ComputeStoreControl['collect']>[0], 'signal'>,
     ): ReturnType<ComputeStoreControl['collect']>;
+  };
+  /** Present only when this shell can open native directories. */
+  readonly directories?: {
+    readonly openLabel: string;
+    readonly openIcon: 'finder' | 'file-explorer' | 'folder';
+    open(path: string): Promise<void>;
   };
   readonly dialog: {
     /**
@@ -398,6 +419,7 @@ export const desktopBridge = (): DesktopBridge | undefined => {
         throw new Error('Native compute controls are unavailable.');
       },
     },
+    ...(shell.directories === undefined ? {} : { directories: shell.directories }),
     dialog: shell.dialog,
     openFiles: shell.openFiles,
     generatedImages: shell.generatedImages,

@@ -1,3 +1,6 @@
+import { useSelector } from '@xstate/react';
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useCallback, useMemo, useState } from 'react';
 import { CircleAlert, CircleCheck, LoaderCircle, PauseCircle, Printer, RefreshCw } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -614,8 +617,40 @@ export const PrintPanel = ({
  * @returns The Print pane.
  * @public
  */
-export const PrintPanelBody = ({ isShown = true }: { readonly isShown?: boolean }): React.JSX.Element => {
-  const machines = useMachinesFacet();
+const noChatApprovalBridge: PrintApprovalBridge = {
+  pendingFor: () => undefined,
+  respond: async () => {
+    throw new Error('A chat must be loaded before responding to its approval.');
+  },
+};
+
+function ChatPrintPanel({
+  isShown,
+  machines,
+}: {
+  readonly isShown: boolean;
+  readonly machines: RuntimeTransportFacet<MachineClient>;
+}): React.JSX.Element {
   const bridge = usePrintApprovalBridge();
   return <PrintPanel machines={machines} bridge={bridge} isShown={isShown} />;
+}
+
+function AvailablePrintPanel({ isShown }: { readonly isShown: boolean }): React.JSX.Element {
+  const { editorRef } = useProject();
+  const chatId = useSelector(editorRef, (snapshot) => snapshot.context.focusedChatId);
+  const machines = useMachinesFacet();
+  return chatId === undefined ? (
+    <PrintPanel machines={machines} bridge={noChatApprovalBridge} isShown={isShown} />
+  ) : (
+    <ChatPrintPanel isShown={isShown} machines={machines} />
+  );
+}
+
+export const PrintPanelBody = ({ isShown = true }: { readonly isShown?: boolean }): React.JSX.Element => {
+  const availability = useProjectAvailability();
+  return availability === 'ready' ? (
+    <AvailablePrintPanel isShown={isShown} />
+  ) : (
+    <ProjectSyncPlaceholder state={availability} />
+  );
 };

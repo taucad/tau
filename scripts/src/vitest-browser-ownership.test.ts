@@ -158,13 +158,14 @@ describe('Vitest Browser test-runner ownership', () => {
     // The create-repo template is CI for generated repositories, not a Tau browser-driver site.
     // The docs deployment gate installs Chromium on the Netlify builder unless one is supplied.
     // The staging billing harness workflow installs Chromium for the hosted Checkout its rows pay.
-    // The pkg.pr.new consumer leg installs Chromium for check-pack-install's browser checks.
+    // The pkg.pr.new consumer leg and the publish dry-run spike install Chromium for check-pack-install's browser checks.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
         '.github/workflows/billing-staging-e2e.yml',
         '.github/workflows/e2e-nightly.yml',
         '.github/workflows/preview-packages.yml',
+        '.github/workflows/spike-publish-dry-run.yml',
         'apps/docs/project.json',
       ].sort(),
     );
@@ -216,6 +217,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/react-e2e/vitest.bundlers.config.ts',
         'apps/react-e2e/vitest.config.ts',
         'apps/ui-e2e/vitest.config.ts',
+        'apps/ui/app/components/chat/chat-message-queue.vitest.browser.config.ts',
         'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',
         'apps/ui/app/components/code/code-editor.vitest.browser.config.ts',
         'apps/ui/app/components/geometry/viewer-resize.vitest.browser.config.ts',

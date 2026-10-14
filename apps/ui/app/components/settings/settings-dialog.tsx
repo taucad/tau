@@ -205,7 +205,7 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
 
   return (
     <DialogContent
-      className='h-[90dvh] max-w-[calc(100%-2rem)] grid-rows-[1fr] gap-0 overflow-hidden p-0 sm:max-w-6xl'
+      className='h-[90dvh] max-w-[calc(100%-2rem)] grid-rows-[1fr] gap-0 overflow-hidden p-0 sm:max-w-6xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input]]:bg-card [&_[data-slot=select-trigger]]:bg-card [&_[data-slot=slider-input]]:bg-card [&_[data-slot=textarea]]:bg-card'
       onOpenAutoFocus={(event) => {
         // A deep link owns focus: its reveal moves it to the content, not the dialog's first button.
         if (linkedDestination) {
@@ -243,7 +243,6 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
               aria-label='Search settings'
               placeholder='Search settings…'
               value={query}
-              variant='transparent'
               onClear={clearSearch}
               onChange={(event) => {
                 setQuery(event.target.value);

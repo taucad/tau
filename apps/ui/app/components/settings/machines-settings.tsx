@@ -577,7 +577,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
             <Label htmlFor='machines-bind-model'>Printer model</Label>
             <select
               id='machines-bind-model'
-              className='min-h-8 rounded-md border bg-background px-2 text-sm'
+              className='min-h-8 rounded-md border bg-card px-2 text-sm'
               value={selectedProviderId}
               onChange={(event) => {
                 setSelectedProviderId(event.target.value);

@@ -104,18 +104,18 @@ export function BillingSettings(): React.JSX.Element {
   return (
     <div className='flex flex-col gap-8 pb-4'>
       {entitlements.status === 'past_due' ? (
-        <div className='rounded-md border border-warning/20 bg-warning/10 px-3 py-2 text-sm'>
+        <div className='rounded-md border border-warning/20 bg-card px-3 py-2 text-sm'>
           Payment failed — update your card to restore Pro. Your credits are safe.
         </div>
       ) : undefined}
       {entitlements.cancelAtPeriodEnd && entitlements.paidThrough ? (
-        <div className='rounded-md border border-border bg-muted/40 px-3 py-2 text-sm'>
+        <div className='rounded-md border border-border bg-card px-3 py-2 text-sm'>
           Pro until {formatRenewalDate(entitlements.paidThrough)} — reactivate any time from Manage Subscription.
         </div>
       ) : undefined}
 
       {availableBalance && BigInt(availableBalance.debtCreditAtoms) > 0n ? (
-        <p role='alert' className='rounded-md border border-warning/20 bg-warning/10 px-3 py-2 text-sm'>
+        <p role='alert' className='rounded-md border border-warning/20 bg-card px-3 py-2 text-sm'>
           {formatCredits(BigInt(availableBalance.debtCreditAtoms))} outstanding. Add credits to resume AI usage. Your
           projects are unaffected.
         </p>

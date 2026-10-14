@@ -51,6 +51,7 @@ import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provid
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
+import type { ChatMessageQueueIntent } from '#db/chat-message-queue-store.js';
 import type { TurnGroup } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
@@ -462,7 +463,14 @@ export function useDraftActions(): DraftActions {
  * was a second admission policy, and the two disagreed (F10).
  */
 export type ChatActions = DraftActions & {
-  sendMessage: (message: SendMessageInput, options?: { attachments?: readonly StoredAttachmentRef[] }) => Promise<void>;
+  sendMessage: (
+    message: SendMessageInput,
+    options?: {
+      attachments?: readonly StoredAttachmentRef[];
+      execution?: CadAgentExecution;
+      queueIntent?: ChatMessageQueueIntent;
+    },
+  ) => Promise<void>;
   regenerate: () => void;
   /**
    * Resume a run the host still holds, preserving its already-settled work.
@@ -541,6 +549,8 @@ export function useChatActions(chatId?: string): ChatActions {
         await store.requestTurn(resolvedChatId, {
           kind: 'send',
           message: outgoingMessage,
+          ...(options?.queueIntent === undefined ? {} : { queueIntent: options.queueIntent }),
+          ...(options?.execution === undefined ? {} : { execution: options.execution }),
           ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
         });
       },

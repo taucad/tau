@@ -105,6 +105,10 @@ import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
 import type { SdkWatchInput } from '#chat-clients/_internal/sdk-watch.js';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
+import { createChatMessageQueueStore, chatMessageQueuePath } from '#db/chat-message-queue-store.js';
+import type { ChatMessageQueueIntent, ChatMessageQueueStore, QueueLock } from '#db/chat-message-queue-store.js';
+import { createChatMessageQueueActor } from '#machines/chat-message-queue.machine.js';
+import type { ChatMessageQueueActor, QueueAdvanceResult } from '#machines/chat-message-queue.machine.js';
 import { commandInvocation } from '#utils/at-reference.utils.js';
 
 /** Describe a failed SDK frame without exposing tool inputs, outputs, or exception payloads. */
@@ -177,6 +181,7 @@ export type ChatSessionDeps = {
    * any route (D1, D13).
    */
   client: ComposerRecordClient;
+  queueLock?: QueueLock;
   /** Acknowledged observation through the root owning the chat records. */
   watchRecordFile?: (
     path: string,
@@ -195,6 +200,7 @@ export type ChatSession = {
    * and mode. A surface mounts `useComposerRecordToasts` on it.
    */
   readonly composerRecordRef: ComposerRecordRef;
+  readonly messageQueueRef: ChatMessageQueueActor;
   /** Coherent visible transcript; the SDK array may be reconstructing a cumulative stream. */
   readonly messages: readonly MyUIMessage[];
   /**
@@ -438,6 +444,9 @@ function editedMessage(original: MyUIMessage, request: Extract<ChatRequest, { ki
 // ---------------------------------------------------------------------------
 
 type InternalSession = ChatSession & {
+  readonly messageQueueStore: ChatMessageQueueStore;
+  readonly messageQueueObservation: ObservationService<void>;
+  dispatchTask: Promise<void> | undefined;
   /** One SDK stream slot per chat; an armed watch cannot belong to a different chat. */
   readonly transport: BrowserPlacementChatTransport<MyUIMessage>;
   /** The chat's machine as the root this store started; `stateActorRef` is the same actor. */
@@ -1166,6 +1175,7 @@ export class ChatSessionStore {
 
     const session = this.#createSession(chatId, projectId);
     this.#sessions.set(chatId, session);
+    session.messageQueueRef.start();
     session.observationRelease = this.observe(chatId, projectId);
     // A retained sidebar observation may already be caught up and emit no new answer.
     this.#syncProjection(chatId, 'open');
@@ -1450,6 +1460,16 @@ export class ChatSessionStore {
     return this.#addPerChatListener({ bucket: this.#projectionTopics, namePrefix: 'projection', chatId, listener });
   }
 
+  /** Capture the observed terminal run before asynchronous message preparation begins. */
+  public captureMessageQueueIntent(chatId: string): ChatMessageQueueIntent {
+    const projection = this.#projectionContext(chatId);
+    if (projection === undefined || projection.fault !== undefined || !selectCaughtUp(projection)) {
+      return {};
+    }
+    const run = selectCurrentRun(projection);
+    return run?.lifecycle === 'cancelled' || run?.lifecycle === 'failed' ? { afterTerminalRunId: run.runId } : {};
+  }
+
   /**
    * Ask this chat's session actor for a turn.
    *
@@ -1468,7 +1488,121 @@ export class ChatSessionStore {
     if (!session) {
       return;
     }
-    await this.#requestTurn(session, gesture);
+    if (gesture.kind !== 'send') {
+      await this.#requestTurn(session, gesture);
+      return;
+    }
+    const { afterTerminalRunId } = gesture.queueIntent ?? this.captureMessageQueueIntent(chatId);
+    const execution = gesture.execution ?? (await this.getChatExecution(chatId));
+    const item = {
+      id: gesture.message.id,
+      requestId: gesture.requestId ?? generatePrefixedId(idPrefix.request),
+      message: gesture.message,
+      ...(afterTerminalRunId === undefined ? {} : { afterTerminalRunId }),
+      ...(execution === undefined ? {} : { execution }),
+    };
+    await session.messageQueueStore.update((record) => {
+      if (this.#sessions.get(chatId) !== session || session.messageQueueRef.getSnapshot().status !== 'active') {
+        throw new Error('This chat is no longer open. Your message has not been sent.');
+      }
+      return record.items.some((entry) => entry.id === item.id)
+        ? record
+        : { ...record, items: [...record.items, item] };
+    });
+    const draft = session.draftActorRef.getSnapshot().context;
+    if (draft.draftText === '' || draft.draftText === composedText(gesture.message)) {
+      session.draftActorRef.send({ type: 'clearDraft' });
+      try {
+        await this.releaseDraftAttachments(chatId);
+      } catch (error) {
+        console.warn('[ChatSessionStore] draft attachments could not be released', error);
+      }
+    }
+    session.messageQueueRef.send({ type: 'retry' });
+  }
+
+  /** Wake the durable outbox after admission or host history becomes available. */
+  public refreshMessageQueue(chatId: string): void {
+    const actor = this.#sessions.get(chatId)?.messageQueueRef;
+    if (actor?.getSnapshot().status === 'active') {
+      actor.send({ type: 'refresh' });
+    }
+  }
+
+  /** Retry a retained delivery with its original command identity. */
+  public retryMessageQueue(chatId: string): void {
+    if (this.#deps.watchRecordFile !== undefined) {
+      this.#sessions.get(chatId)?.messageQueueObservation.refresh();
+    }
+    this.#sessions.get(chatId)?.messageQueueRef.send({ type: 'retry' });
+  }
+
+  /** Edit or remove an unsent entry under the same lock used by delivery. */
+  public async editQueuedMessage(chatId: string, id: string, text: string | undefined): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    await session.messageQueueStore.exclusive(async () =>
+      session.messageQueueStore.change(id, (item) =>
+        text === undefined
+          ? undefined
+          : {
+              ...item,
+              message: {
+                ...item.message,
+                parts: [{ type: 'text', text }, ...item.message.parts.filter((part) => part.type !== 'text')],
+              },
+            },
+      ),
+    );
+    session.messageQueueRef.send({ type: 'retry' });
+  }
+
+  /** Move one unsent entry before another, or to the end, preserving its identity. */
+  public async moveQueuedMessage(chatId: string, id: string, beforeId: string | undefined): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    await session.messageQueueStore.move(id, beforeId);
+    session.messageQueueRef.send({ type: 'refresh' });
+  }
+
+  /** Persist an explicit interruption targeted only at the run the person observed. */
+  public async steerQueuedMessage(chatId: string, id: string): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    const projection = this.#projectionContext(chatId);
+    if (session === undefined || projection === undefined || !selectCaughtUp(projection)) {
+      throw new Error('Wait for this chat to reconnect before steering.');
+    }
+    const run = selectCurrentRun(projection);
+    await session.messageQueueStore.exclusive(async () =>
+      session.messageQueueStore.update((record) => {
+        if (record.items.some((entry) => entry.command !== undefined || entry.steer !== undefined)) {
+          throw new Error('Wait for the current message to finish sending.');
+        }
+        return {
+          ...record,
+          items: record.items.map((entry) =>
+            entry.id === id
+              ? {
+                  ...entry,
+                  steer: {
+                    type: 'cancel',
+                    commandId: generatePrefixedId(idPrefix.request),
+                    payload: {
+                      chatId,
+                      runId: run?.runId ?? entry.requestId,
+                    },
+                  },
+                }
+              : entry,
+          ),
+        };
+      }),
+    );
+    session.messageQueueRef.send({ type: 'retry' });
   }
 
   /**
@@ -1739,6 +1873,9 @@ export class ChatSessionStore {
    */
   public async removeChat(chatId: string): Promise<void> {
     this.#invalidateDeletedProjection(chatId);
+    const deleting = this.#sessions.get(chatId);
+    deleting?.messageQueueRef.stop();
+    deleting?.commandAbort?.abort();
     // A released chat's record may still be landing its last write; removing under it would bring the file back.
     await this.#composerDrains.get(chatId);
     const session = this.#sessions.get(chatId);
@@ -1746,6 +1883,8 @@ export class ChatSessionStore {
       return;
     }
     this.#forgetReceipt(session.projectId, chatId);
+    session.messageQueueRef.stop();
+    await session.messageQueueStore.remove();
     await removeRecord(session.composerRecordRef);
   }
 
@@ -1803,12 +1942,19 @@ export class ChatSessionStore {
     ]);
     for (const chatId of chatIds) {
       this.#invalidateDeletedProjection(chatId);
+      const session = this.#sessions.get(chatId);
+      session?.messageQueueRef.stop();
+      session?.commandAbort?.abort();
     }
     // Ponytail: waits on every released chat's drain, not only this project's; drains are one write long.
     await Promise.all(this.#composerDrains.values());
     const sessions = [...this.#sessions.values()].filter((session) => session.projectId === projectId);
     await Promise.all([
-      ...sessions.map(async (session) => removeRecord(session.composerRecordRef)),
+      ...sessions.map(async (session) => {
+        session.messageQueueRef.stop();
+        await session.messageQueueStore.remove();
+        await removeRecord(session.composerRecordRef);
+      }),
       // Kept in the map once removed: a later decision for this project reaches the terminal actor and is dropped.
       removeRecord(this.#unreadRecord(projectId).ref),
     ]);
@@ -1881,6 +2027,114 @@ export class ChatSessionStore {
         next();
       }
     }
+  }
+
+  /** One serial outbox advancement; the session machine still owns turn admission. */
+  async #advanceMessageQueue(
+    session: InternalSession,
+    signal: AbortSignal,
+    canDeliver: boolean,
+  ): Promise<QueueAdvanceResult> {
+    return session.messageQueueStore.exclusive(async () => {
+      let record = await session.messageQueueStore.read();
+      signal.throwIfAborted();
+      session.messageQueueRef.send({ type: 'loaded', items: record.items });
+      const projection = this.#projectionContext(session.chatId);
+      const connector = this.#projectHostConnectors.get(session.projectId);
+      if (projection === undefined || projection.fault !== undefined || !selectCaughtUp(projection)) {
+        return { items: record.items, status: 'waiting' };
+      }
+      for (const entry of record.items) {
+        if (entry.command !== undefined && projection.ledger.applied[entry.command.commandId] !== undefined) {
+          // oxlint-disable-next-line no-await-in-loop -- each acknowledgement reads the preceding durable queue state.
+          record = await session.messageQueueStore.acknowledge(entry.id, entry.command.commandId);
+        }
+      }
+      if (!canDeliver) {
+        return { items: record.items, status: 'waiting' };
+      }
+      const item =
+        record.items.find((entry) => entry.command !== undefined || entry.steer !== undefined) ?? record.items[0];
+      if (
+        item === undefined ||
+        connector === undefined ||
+        chatTurnAdmit(session.chatId) === undefined ||
+        session.commandInFlight ||
+        this.#isAdmittingTurn(session) ||
+        session.persistenceActorRef.getSnapshot().context.isLoadingChat
+      ) {
+        return { items: record.items, status: 'waiting' };
+      }
+      const run = selectCurrentRun(projection);
+      const phase = selectRunPhase(projection);
+      if (item.command !== undefined) {
+        if (run !== undefined && run.runId !== item.command.payload.runId && retainsLiveRun(phase)) {
+          return { items: record.items, status: 'waiting' };
+        }
+        session.messageQueueRef.send({ type: 'loaded', items: record.items, sendingId: item.id });
+        const answer = await sendHostCommand(async () => connector.connect(session.chatId), item.command, { signal });
+        if (answer.status === 'refused') {
+          throw new Error(`Delivery could not be confirmed: ${answer.message}`);
+        }
+        if (answer.effect !== 'durable') {
+          throw new Error('Message saved. The host has not confirmed durable acceptance.');
+        }
+        const after = await session.messageQueueStore.acknowledge(item.id, item.command.commandId);
+        return { items: after.items, status: 'changed' };
+      }
+      {
+        if (record.afterRunId !== undefined && projection.ledger.runs[record.afterRunId] === undefined) {
+          return { items: record.items, status: 'waiting' };
+        }
+        if (isLive(session.stateActorRef.getSnapshot()) && !retainsLiveRun(phase)) {
+          return { items: record.items, status: 'waiting' };
+        }
+        const steering = item.steer;
+        if (steering !== undefined && retainsLiveRun(phase) && run?.runId === steering.payload.runId) {
+          signal.throwIfAborted();
+          const answer = await sendHostCommand(async () => connector.connect(session.chatId), steering, { signal });
+          if (answer.status === 'refused') {
+            throw new Error(`Could not steer: ${answer.message}`);
+          }
+          return { items: record.items, status: 'waiting' };
+        }
+        const authorizedTerminal =
+          (phase === 'cancelled' || phase === 'failed') && item.afterTerminalRunId === run?.runId;
+        if (
+          run !== undefined &&
+          (retainsLiveRun(phase) || (phase !== 'completed' && item.steer === undefined && !authorizedTerminal))
+        ) {
+          return { items: record.items, status: 'waiting' };
+        }
+      }
+      signal.throwIfAborted();
+      session.messageQueueRef.send({ type: 'loaded', items: record.items, sendingId: item.id });
+      session.dispatchTask = undefined;
+      await this.#requestTurn(
+        session,
+        {
+          kind: 'send',
+          message: item.message,
+          queueId: item.id,
+          requestId: item.requestId,
+          ...(item.execution === undefined ? {} : { execution: item.execution }),
+        },
+        false,
+      );
+      await this.#currentDispatch(session);
+      const after = await session.messageQueueStore.read();
+      return after.items.some((entry) => entry.id === item.id)
+        ? {
+            items: after.items,
+            status: 'blocked',
+            error: 'Message saved. Delivery could not be confirmed. Retry to continue.',
+          }
+        : { items: after.items, status: 'changed' };
+    });
+  }
+
+  #currentDispatch(session: InternalSession): Promise<void> | undefined {
+    return session.dispatchTask;
   }
 
   #invalidateRemoteRead(chatId: string): void {
@@ -2147,7 +2401,7 @@ export class ChatSessionStore {
    * @param session - The chat that acted.
    * @param gesture - What the person did.
    */
-  async #requestTurn(session: InternalSession, gesture: ChatTurnGesture): Promise<void> {
+  async #requestTurn(session: InternalSession, gesture: ChatTurnGesture, settleComposer = true): Promise<void> {
     /* The banner belongs to the request lifecycle, and the gesture is what
      * clears it — the dispatch is an admission away. */
     session.persistenceActorRef.send({ type: 'turnRequested' });
@@ -2157,7 +2411,9 @@ export class ChatSessionStore {
     owner.send({ type: 'requestTurn', gesture });
     if (owner.getSnapshot().context.pendingGesture !== gesture) {
       /* The chat was disposed under the gesture: its stopped root takes nothing, so the composer keeps the message. */
-      await this.#settleComposer(session, gesture, displaced);
+      if (settleComposer) {
+        await this.#settleComposer(session, gesture, displaced);
+      }
       return;
     }
     /* S01: the composer stays busy until the turn is admitted or refused, so a
@@ -2188,7 +2444,9 @@ export class ChatSessionStore {
         });
       });
     }
-    await this.#settleComposer(session, gesture, displaced);
+    if (settleComposer) {
+      await this.#settleComposer(session, gesture, displaced);
+    }
   }
 
   /**
@@ -2340,7 +2598,7 @@ export class ChatSessionStore {
           session.chatId,
           request.kind === 'send' ? (request.message.metadata?.createdAt ?? Date.now()) : Date.now(),
         );
-        void this.#dispatchTurn(session, request);
+        session.dispatchTask = this.#dispatchTurn(session, request);
       }),
       stateActorRef.on('stopTurnRequest', () => {
         this.stopRun(session.chatId, 'new-turn');
@@ -2357,6 +2615,9 @@ export class ChatSessionStore {
 
   /** Dispatch one admitted command, then let the SDK read only its projected chunks. */
   async #dispatchTurn(session: InternalSession, request: ChatRequest): Promise<void> {
+    if (request.queueId !== undefined && session.messageQueueRef.getSnapshot().status !== 'active') {
+      return;
+    }
     const { command } = request;
     const connector = this.#projectHostConnectors.get(session.projectId);
     if (command === undefined || connector === undefined || (command.type !== 'start' && command.type !== 'resume')) {
@@ -2380,15 +2641,37 @@ export class ChatSessionStore {
     const abort = new AbortController();
     session.commandAbort = abort;
     try {
+      if (request.queueId !== undefined && command.type === 'start') {
+        await session.messageQueueStore.update((record) => {
+          if (!record.items.some((item) => item.id === request.queueId)) {
+            throw new Error('Queued message is no longer available.');
+          }
+          return {
+            ...record,
+            items: record.items.map((item) => (item.id === request.queueId ? { ...item, command } : item)),
+          };
+        });
+        abort.signal.throwIfAborted();
+      }
       const answer = await sendHostCommand(async () => connector.connect(session.chatId), command, {
         signal: abort.signal,
       });
+      if (session.commandAbort !== abort || abort.signal.aborted) {
+        return;
+      }
       session.commandInFlight = false;
       if (answer.status === 'refused') {
         throw new Error(`Host ${command.type} refused ${answer.code}: ${answer.message}`);
       }
-      if (answer.effect !== 'durable' || this.#sessions.get(session.chatId) !== session || abort.signal.aborted) {
+      if (answer.effect !== 'durable' || this.#sessions.get(session.chatId) !== session) {
         return;
+      }
+      if (request.queueId !== undefined) {
+        await session.messageQueueStore.acknowledge(request.queueId, command.commandId);
+        if (session.commandAbort !== abort) {
+          return;
+        }
+        abort.signal.throwIfAborted();
       }
       const { seedRequestId } = session;
       if (seedRequestId !== undefined && command.type === 'start') {
@@ -2451,7 +2734,7 @@ export class ChatSessionStore {
       session.watch = watch;
       watch.start();
     } catch (error) {
-      if (abort.signal.aborted) {
+      if (abort.signal.aborted || session.commandAbort !== abort) {
         return;
       }
       session.watch?.stop();
@@ -2474,11 +2757,11 @@ export class ChatSessionStore {
         reason: error instanceof Error ? error.message : String(error),
       });
     } finally {
-      session.commandInFlight = false;
       if (session.commandAbort === abort) {
+        session.commandInFlight = false;
         session.commandAbort = undefined;
+        this.#scheduleRunReleaseIfTerminal(session);
       }
-      this.#scheduleRunReleaseIfTerminal(session);
     }
   }
 
@@ -2604,6 +2887,9 @@ export class ChatSessionStore {
     ) {
       session.presentationHold = undefined;
       this.#messagePresentations.delete(chatId);
+    }
+    if (!retainsLiveRun(selectRunPhase(projection))) {
+      this.refreshMessageQueue(chatId);
     }
     this.#syncTools(session, projection);
     const run = selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
@@ -3213,6 +3499,57 @@ export class ChatSessionStore {
     });
     const recordStore = deferredRecordStore(composer);
     const composerRecordRef = createComposerRecordActor(recordStore);
+    const messageQueueStore = createChatMessageQueueStore(
+      client,
+      chatMessageQueuePath(projectId, chatId),
+      depsRef().queueLock,
+    );
+    const messageQueueObservation = new ObservationService<void>({
+      resource: messageQueueStore.path,
+      ...(depsRef().watchRecordFile === undefined
+        ? {}
+        : {
+            watch: (invalidate: () => void, reset: () => void) =>
+              depsRef().watchRecordFile!(messageQueueStore.path, (event) => {
+                if (event.type === 'reset') {
+                  reset();
+                } else {
+                  invalidate();
+                }
+              }),
+          }),
+      read: async (fence) => {
+        if (fence.isCurrent()) {
+          messageQueueRef.send({ type: 'refresh' });
+        }
+      },
+    });
+    const messageQueueRef = createChatMessageQueueActor(
+      { chatId, projectId },
+      {
+        advance: async (signal, canDeliver) => this.#advanceMessageQueue(session, signal, canDeliver),
+        watch: () => {
+          if (depsRef().watchRecordFile === undefined) {
+            return () => undefined;
+          }
+          const lease = messageQueueObservation.acquire();
+          const unsubscribe = lease.subscribe(() => {
+            const observed = lease.getSnapshot();
+            if (observed.status === 'error' || observed.status === 'closed') {
+              messageQueueRef.send({
+                type: 'watchFailed',
+                error: observed.error ?? 'Queue updates disconnected. Retry to reconnect.',
+              });
+            }
+          });
+          return () => {
+            unsubscribe();
+            lease.release();
+          };
+        },
+      },
+      this.#rootOptions,
+    );
 
     const readChatRow = async (id: string): Promise<ChatEntity | undefined> => depsRef().getChat(id, projectId);
 
@@ -3411,6 +3748,10 @@ export class ChatSessionStore {
       persistenceActorRef,
       draftActorRef,
       composerRecordRef,
+      messageQueueRef,
+      messageQueueStore,
+      messageQueueObservation,
+      dispatchTask: undefined,
       composer,
       composerWork: new Set(),
       viewRefcount: 1,
@@ -3445,6 +3786,7 @@ export class ChatSessionStore {
       status: chat.status,
       turnSubscriptions: [],
       dispose: () => {
+        messageQueueRef.stop();
         session.presentationHold = undefined;
         session.observationRelease?.();
         session.observationRelease = undefined;

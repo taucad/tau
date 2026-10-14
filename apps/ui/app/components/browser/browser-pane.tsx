@@ -20,9 +20,9 @@ export function BrowserPane({ tabId }: { readonly tabId?: string } = {}): React.
   const activeTabId = tabId ?? snapshot?.activeTabId;
   const activeUrl = snapshot?.tabs.find((tab) => tab.id === activeTabId)?.url;
   const activeZoom = snapshot?.tabs.find((tab) => tab.id === activeTabId)?.zoom;
-  const captureVersion = useRef(0);
+  const captureZoom = useRef(activeZoom);
   useEffect(() => {
-    captureVersion.current += 1;
+    captureZoom.current = activeZoom;
   }, [activeZoom]);
   const activeError = snapshot?.tabs.find((tab) => tab.id === activeTabId)?.error;
   useEffect(() => {
@@ -38,17 +38,17 @@ export function BrowserPane({ tabId }: { readonly tabId?: string } = {}): React.
     let previewUrl: string | undefined;
     let wasOccluded = false;
     let retryAfter = 0;
-    let capturedVersion = -1;
+    let capturedZoom: number | undefined;
     const capture = async (): Promise<void> => {
       const generation = ++captureGeneration;
       isCapturing = true;
-      const version = captureVersion.current;
+      const zoom = captureZoom.current;
       let captured = false;
       try {
         const result = await bridge.command({ kind: 'capture-preview', tabId: activeTabId });
         if (!isDisposed && generation === captureGeneration && result.preview && result.preview.url === activeUrl) {
           previewUrl = result.preview.dataUrl;
-          capturedVersion = version;
+          capturedZoom = zoom;
           captured = true;
           setPreview(result.preview);
         }
@@ -112,11 +112,7 @@ export function BrowserPane({ tabId }: { readonly tabId?: string } = {}): React.
         rect.y >= 0 &&
         viewport.checkVisibility({ visibilityProperty: true, opacityProperty: true });
       if (visible && occluded) {
-        if (
-          !isCapturing &&
-          (!previewUrl || capturedVersion !== captureVersion.current) &&
-          performance.now() >= retryAfter
-        ) {
+        if (!isCapturing && (!previewUrl || capturedZoom !== captureZoom.current) && performance.now() >= retryAfter) {
           void capture();
         }
       } else if (wasOccluded) {

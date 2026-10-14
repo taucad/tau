@@ -118,6 +118,51 @@ describe('native browser viewport lifetime', () => {
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(frames.size).toBe(0);
   });
+  it('should refresh the overlay image when the native page zoom changes', async () => {
+    const listeners = new Set<(value: BrowserSnapshot) => void>();
+    vi.stubGlobal('tauBrowser', {
+      command,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    } satisfies BrowserBridge);
+    render(
+      <KeyboardProvider>
+        <TooltipProvider>
+          <BrowserPane />
+        </TooltipProvider>
+      </KeyboardProvider>,
+    );
+    await screen.findByRole('textbox', { name: 'Search or enter a URL' });
+    await tick();
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    document.body.append(menu);
+    await tick();
+    fireEvent.load(screen.getByRole('presentation', { hidden: true }));
+    await tick();
+    const zoomedPreview = { ...preview, dataUrl: 'data:image/jpeg;base64,em9vbQ==' };
+    const zoomedSnapshot = { ...snapshot, tabs: snapshot.tabs.map((tab) => ({ ...tab, zoom: 1.25 })) };
+    command.mockImplementation(async (request) =>
+      request.kind === 'capture-preview' ? { ...zoomedSnapshot, preview: zoomedPreview } : zoomedSnapshot,
+    );
+    await act(async () => {
+      for (const listener of listeners) {
+        listener(zoomedSnapshot);
+      }
+    });
+    await tick();
+    expect(command.mock.calls.filter(([request]) => request.kind === 'capture-preview')).toHaveLength(2);
+    expect(screen.getByRole('presentation', { hidden: true })).toHaveAttribute('src', zoomedPreview.dataUrl);
+    fireEvent.load(screen.getByRole('presentation', { hidden: true }));
+    await tick();
+    menu.remove();
+    await tick();
+    expect(command).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'viewport', visible: true }));
+  });
   it('should keep the native page live for unrelated tooltips and discard a late overlapping capture', async () => {
     const pending = Promise.withResolvers<BrowserSnapshot>();
     command.mockImplementation(async (request) => (request.kind === 'capture-preview' ? pending.promise : snapshot));

@@ -19,6 +19,7 @@ export const browserCommandSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('new-tab'), input: z.string().max(8192).optional() }),
   z.strictObject({ kind: z.literal('select-tab'), tabId }),
   z.strictObject({ kind: z.literal('close-tab'), tabId }),
+  z.strictObject({ kind: z.literal('capture-preview'), tabId }),
   z.strictObject({ kind: z.literal('navigate'), tabId, input: z.string().min(1).max(8192) }),
   z.strictObject({
     kind: z.literal('action'),
@@ -79,6 +80,8 @@ export type BrowserSnapshot = {
   settings: BrowserSettings;
   history: BrowserHistoryEntry[];
   downloads: BrowserDownload[];
+  /** Transient capture response only; never persisted or broadcast. */
+  preview?: { tabId: string; url: string; dataUrl: string };
 };
 /** Browser bridge installed only in Tau's trusted renderer. @public */
 export type BrowserBridge = {

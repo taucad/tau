@@ -44,6 +44,7 @@ jobs:
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
       browser: ${{ steps.plan.outputs.browser }}
+      browser-projects: ${{ steps.plan.outputs.browser-projects }}
       geospec-required: ${{ steps.geospec.outputs.geospec-required }}
       geospec-darwin-tests: ${{ steps.geospec.outputs.geospec-darwin-tests }}
       geospec-darwin-projects: ${{ steps.geospec.outputs.geospec-darwin-projects }}
@@ -108,6 +109,7 @@ jobs:
           done
           echo "Staging deploys: $deploy_apps"
           {
+            echo "browser-projects=$browser"
             echo "apps<<EOF"
             echo "$apps"
             echo "EOF"
@@ -558,7 +560,12 @@ jobs:
       - name: Use the pinned browser for Lighthouse
         run: node --input-type=module -e "import { chromium } from 'playwright'; console.log('CHROME_PATH=' + chromium.executablePath())" >> "$GITHUB_ENV"
       - name: Verify affected browser applications
-        run: pnpm nx affected -t verify-browser --projects tag:ci:browser --parallel=1
+        env:
+          BROWSER_PROJECTS: ${{ needs.plan.outputs.browser-projects }}
+        run: |
+          projects=$(jq -r 'join(",")' <<< "$BROWSER_PROJECTS")
+          test -n "$projects"
+          pnpm nx run-many -t verify-browser --projects "$projects" --parallel=1
       - name: Package the marketing SSR function
         if: contains(fromJSON(needs.plan.outputs.apps), 'www')
         working-directory: apps/www

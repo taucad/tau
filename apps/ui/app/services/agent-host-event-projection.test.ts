@@ -17,6 +17,7 @@ import {
   parseAgentHostApproval,
   projectTurnSettlement,
 } from '#services/agent-host-event-projection.js';
+import { selectChatActivityCue } from '#utils/chat-activity-cue.js';
 import { chatTooLongMessage, parseErrorForPersistence } from '#utils/error.utils.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
 import { userProviderMessageOf } from '#chat-clients/turn-intent.js';
@@ -2072,3 +2073,74 @@ describe('chat activity indicator resting block: text rest on the part', () => {
     ).toEqual([]);
   });
 });
+
+it.each(['commentary', 'final_answer', 'partial_answer', 'future_phase', undefined])(
+  'should preserve phase %s through live/checkpoint reconciliation and reload into the activity cue',
+  async (phase) => {
+    const identity = { chatId: 'chat', runId: base.runId, messageId: 'phase-message', contentIndex: 0 };
+    const live: AgentLiveEvent[] = [
+      { ...identity, type: 'text-start', phase },
+      { ...identity, type: 'text-delta', delta: 'Checking ', offset: 0, phase },
+      { ...identity, type: 'text-delta', delta: 'geometry.', offset: 9, phase },
+      { ...identity, type: 'text-end', content: 'Checking geometry.', phase },
+    ];
+    const durable = (text: string, checkpoint: boolean): AgentLogEvent =>
+      parseLogEvent({
+        ...base,
+        type: 'message.appended',
+        message: {
+          id: identity.messageId,
+          role: 'assistant',
+          content: [{ type: 'text', text }],
+          metadata: {
+            ...(phase === undefined ? {} : { phase }),
+            tauInternal: { kind: 'external', origin: 'external', streamState: checkpoint ? 'checkpoint' : 'final' },
+          },
+        },
+      });
+    await Promise.all(
+      [
+        [live[0], live[1], durable('Checking ', true), live[2], live[3], durable('Checking geometry.', false)],
+        [durable('Checking ', true), ...live, durable('Checking geometry.', false)],
+        [durable('Checking geometry.', false), ...live],
+        [durable('Checking geometry.', false)],
+        live,
+      ].map(async (events) => {
+        const blocks = new Map();
+        const chunks = events.flatMap((event) => {
+          if (!event) {
+            throw new Error('Missing phase fixture');
+          }
+          return 'leaderEpoch' in event
+            ? projectAgentHostEvent(event, blocks)
+            : projectAgentHostLiveEvent(event, blocks);
+        });
+        const stream = new ReadableStream<UIMessageChunk>({
+          start(controller) {
+            for (const chunk of chunks) {
+              controller.enqueue(chunk);
+            }
+            controller.close();
+          },
+        });
+        let parts: MyUIMessage['parts'] = [];
+        for await (const message of readUIMessageStream<MyUIMessage>({
+          stream,
+          onError(error) {
+            throw error;
+          },
+        })) {
+          parts = message.parts;
+          const text = parts.find((part) => part.type === 'text');
+          if (text?.type === 'text' && text.text !== '') {
+            expect(text.providerMetadata?.['common']?.['messagePhase']).toBe(phase);
+          }
+        }
+        expect(parts.filter((part) => part.type === 'text').map((part) => part.text)).toEqual(['Checking geometry.']);
+        expect(selectChatActivityCue({ runState: 'working', chatStatus: 'streaming', parts })?.sentence).toBe(
+          phase === 'commentary' ? 'Checking geometry.' : 'Planning next moves…',
+        );
+      }),
+    );
+  },
+);

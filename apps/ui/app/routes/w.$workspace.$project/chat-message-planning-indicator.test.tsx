@@ -140,3 +140,28 @@ describe('ChatMessagePlanning', () => {
     expect(indicator()).toHaveTextContent('Reconnecting…');
   });
 });
+
+it('should show explicitly tagged progress, then clear it for a new request and terminal run', () => {
+  const text = 'Checking the mounting holes and wall thickness.';
+  setChat('streaming', [
+    user('u1'),
+    assistant('a1', [
+      {
+        type: 'text',
+        text,
+        state: 'streaming',
+        providerMetadata: { common: { messagePhase: 'commentary', streamState: 'checkpoint' } },
+      },
+    ]),
+  ]);
+  const view = render(<ChatMessagePlanning />);
+  expect(screen.getByRole('status', { name: 'Current activity' })).toHaveTextContent(text);
+  setChat('submitted', [...mockSelectorState.messages, user('u2')]);
+  view.rerender(<ChatMessagePlanning />);
+  expect(screen.getByRole('status', { name: 'Current activity' })).toHaveTextContent('Planning next moves…');
+  setRun('stopped');
+  setChat('ready', mockSelectorState.messages);
+  view.rerender(<ChatMessagePlanning />);
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+});

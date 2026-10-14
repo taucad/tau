@@ -14,7 +14,7 @@
  */
 
 import { memo, useCallback, useId, useMemo, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { SubmitEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { ChevronDown, CircleAlert, LoaderCircle, Trash2 } from 'lucide-react';
 import type {
@@ -448,7 +448,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     }
   };
 
-  const onBindSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+  const onBindSubmit = async (event: SubmitEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
@@ -577,7 +577,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
             <Label htmlFor='machines-bind-model'>Printer model</Label>
             <select
               id='machines-bind-model'
-              className='min-h-8 rounded-md border bg-background px-2 text-sm'
+              className='min-h-8 rounded-md border bg-card px-2 text-sm'
               value={selectedProviderId}
               onChange={(event) => {
                 setSelectedProviderId(event.target.value);

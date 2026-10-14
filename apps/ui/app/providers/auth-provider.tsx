@@ -10,6 +10,7 @@ import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 import { magicLinkPlugin } from '#utils/magic-link-plugin.js';
 import { useCloudFinancialPurge } from '#cloud/financial-purge.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
+import { hasWebsitePreference, setEntryPreference } from '#lib/entry-preference.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
 /**
@@ -246,6 +247,16 @@ export function AnonymousSessionPurge(): undefined {
   }, [purgeFinancial, resolved]);
 }
 
+/** Remember confirmed app use without mistaking an outage for logout. */
+export function AppEntryPreference(): undefined {
+  const resolved = useResolvedAuth();
+  useEffect(() => {
+    if (!isDesktopTarget() && resolved === 'authed' && !hasWebsitePreference()) {
+      setEntryPreference('app');
+    }
+  }, [resolved]);
+}
+
 export function AuthConfigProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const navigate = useNavigate();
 
@@ -269,6 +280,7 @@ export function AuthConfigProvider({ children }: { readonly children: React.Reac
     >
       <DesktopAuthBridge />
       <AnonymousSessionPurge />
+      <AppEntryPreference />
       {children}
     </AuthProvider>
   );

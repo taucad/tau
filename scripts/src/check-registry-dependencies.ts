@@ -6,7 +6,7 @@
  * Usage: node scripts/src/check-registry-dependencies.ts [manifest-path…]
  */
 import { execFile } from 'node:child_process';
-import { existsSync, globSync, readFileSync } from 'node:fs';
+import { existsSync, globSync, readFileSync, statSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -465,7 +465,7 @@ const addExportedStatementNames = (statement: ts.Statement, names: Set<string>):
   }
 };
 
-const collectModuleExportNames = (path: string, visited = new Set<string>()): string[] => {
+export const collectModuleExportNames = (path: string, visited = new Set<string>()): string[] => {
   if (visited.has(path)) {
     return [];
   }
@@ -489,7 +489,65 @@ const collectModuleExportNames = (path: string, visited = new Set<string>()): st
   for (const match of sourceText.matchAll(/(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=/gu)) {
     names.add(match[1]!);
   }
+  for (const name of commonJsAssignedNames(source, { path, visited })) {
+    names.add(name);
+  }
   return [...names].sort();
+};
+
+const isModuleExports = (node: ts.Node): boolean =>
+  ts.isPropertyAccessExpression(node) &&
+  ts.isIdentifier(node.expression) &&
+  node.expression.text === 'module' &&
+  node.name.text === 'exports';
+
+/**
+ * Names a CommonJS module assigns with `module.exports = …`, as Node's CommonJS lexer detects them
+ * for ESM named imports: the keys of an object literal (`module.exports = { satisfies, parse: f }`),
+ * and the names of a relative module it re-exports (`module.exports = require('./cjs/react.production.js')`,
+ * anywhere, such as inside a `NODE_ENV` branch).
+ */
+const commonJsAssignedNames = (source: ts.SourceFile, context: { path: string; visited: Set<string> }): string[] => {
+  const names = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      isModuleExports(node.left)
+    ) {
+      const value = node.right;
+      if (ts.isObjectLiteralExpression(value)) {
+        for (const property of value.properties) {
+          if (
+            (ts.isShorthandPropertyAssignment(property) || ts.isPropertyAssignment(property)) &&
+            (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
+          ) {
+            names.add(property.name.text);
+          }
+        }
+      } else if (
+        ts.isCallExpression(value) &&
+        ts.isIdentifier(value.expression) &&
+        value.expression.text === 'require' &&
+        value.arguments.length === 1 &&
+        ts.isStringLiteral(value.arguments[0]!) &&
+        value.arguments[0].text.startsWith('.')
+      ) {
+        const base = resolve(dirname(context.path), value.arguments[0].text);
+        const target = [base, `${base}.js`, `${base}.cjs`, join(base, 'index.js')].find(
+          (candidate) => /\.c?js$/u.test(candidate) && existsSync(candidate) && statSync(candidate).isFile(),
+        );
+        if (target !== undefined) {
+          for (const name of collectModuleExportNames(target, context.visited)) {
+            names.add(name);
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return [...names];
 };
 
 const inspectRegistryPackage: RegistryInspection = async (specifier, requirements) => {

@@ -49,7 +49,8 @@ export type GithubGistAuthorizationReturn = {
 
 /* Better Auth's link refusals (`callback.ts`); `allowDifferentEmails` is false. */
 const githubLinkFailures: Readonly<Record<string, string>> = {
-  "email_doesn't_match":
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Better Auth's error code.
+  email_does_not_match:
     'This GitHub account uses a different email address from your Tau account. Sign in to GitHub with an account that uses the same email, then try again.',
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Better Auth's error code.
   account_already_linked_to_different_user:
@@ -191,7 +192,7 @@ export const githubShareCredentialBroker: ShareCredentialBroker = {
       throw new ShareError('SHARE_PERMISSION_REQUIRED', 'The requested GitHub authority is not allowed.');
     }
     const account = await requireGithubAccount();
-    const result = await authClient.getAccessToken({ providerId: 'github', accountId: account.accountId });
+    const result = await authClient.getAccessToken({ accountId: account.id });
     if (result.error) {
       throw new ShareError('SHARE_AUTH_REQUIRED', 'The GitHub connection needs to be renewed.');
     }

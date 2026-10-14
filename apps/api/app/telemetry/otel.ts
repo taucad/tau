@@ -48,6 +48,9 @@ const resource = resourceFromAttributes({
   'cloud.region': process.env['FLY_REGION'] ?? 'local',
   'host.id': process.env['FLY_MACHINE_ID'] ?? 'local',
   'host.name': process.env['FLY_ALLOC_ID'] ?? 'local',
+  // Fly's scrape labels a series by app and Machine, not by process group; locally the collector adds
+  // `tau_process` itself, so the attribute is set only where Fly names the group.
+  ...(process.env['FLY_PROCESS_GROUP'] ? { 'tau.process': process.env['FLY_PROCESS_GROUP'] } : {}),
 });
 /* eslint-enable @typescript-eslint/naming-convention -- end OTEL attribute names block */
 
@@ -67,11 +70,14 @@ const sdk = new NodeSDK({
 
   traceExporter: hasOtlpEndpoint ? new OTLPTraceExporter() : undefined,
 
-  // Every series carries `service_name`: a scraper that does not add it (Fly's managed Prometheus) would
-  // otherwise hand dashboards and alerts series their `service_name` selectors cannot see (OBS-13).
-  metricReader: new PrometheusExporter({ port: metricsPort, withResourceConstantLabels: /^service\.name$/u }),
+  // Every series carries `service_name` and, on Fly, `tau_process`: Fly's managed Prometheus adds neither,
+  // and dashboards and alerts select and group by both (OBS-13).
+  metricReader: new PrometheusExporter({
+    port: metricsPort,
+    withResourceConstantLabels: /^(?:service\.name|tau\.process)$/u,
+  }),
 
-  logRecordProcessor: hasOtlpEndpoint ? new BatchLogRecordProcessor(new OTLPLogExporter()) : undefined,
+  logRecordProcessors: hasOtlpEndpoint ? [new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() })] : undefined,
 
   instrumentations: [
     new LangChainInstrumentation(),
@@ -79,7 +85,6 @@ const sdk = new NodeSDK({
       '@opentelemetry/instrumentation-fs': { enabled: false },
       '@opentelemetry/instrumentation-dns': { enabled: false },
       '@opentelemetry/instrumentation-net': { enabled: false },
-      '@opentelemetry/instrumentation-fastify': { enabled: false },
       '@opentelemetry/instrumentation-http': {
         ignoreIncomingRequestHook: (request) => {
           const host = request.headers.host ?? '';

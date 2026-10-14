@@ -33,7 +33,7 @@ export function LegacyLanding(): React.JSX.Element {
       <LazySection minHeight='400px' fallback={<CommunityGridSkeleton />}>
         <div className='container mx-auto px-4 py-8'>
           <div className='mb-2 flex flex-row items-center justify-between'>
-            <h1 className='text-lg font-medium tracking-tight'>From the Community</h1>
+            <h2 className='text-lg font-medium tracking-tight'>From the Community</h2>
             <Button asChild variant='link' size='lg' className='p-0'>
               <Link to='/community'>View all</Link>
             </Button>

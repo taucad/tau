@@ -40,7 +40,7 @@ describe('session query defaults', () => {
       throw Object.assign(new Error(`HTTP ${status}`), { status });
     });
 
-    await expect(client.fetchQuery({ queryKey: authQueryKeys.session, queryFn: queryFunction })).rejects.toThrow(
+    await expect(client.query({ queryKey: authQueryKeys.session, queryFn: queryFunction })).rejects.toThrow(
       `HTTP ${status}`,
     );
     expect(queryFunction).toHaveBeenCalledOnce();
@@ -54,7 +54,7 @@ describe('session query defaults', () => {
         throw error;
       });
 
-      await expect(client.fetchQuery({ queryKey: authQueryKeys.session, queryFn: queryFunction })).rejects.toBe(error);
+      await expect(client.query({ queryKey: authQueryKeys.session, queryFn: queryFunction })).rejects.toBe(error);
       expect(queryFunction).toHaveBeenCalledTimes(3);
     },
   );
@@ -65,7 +65,7 @@ describe('session query defaults', () => {
     const queryFunction = vi.fn(async () => {
       throw error;
     });
-    await expect(client.fetchQuery({ queryKey: authQueryKeys.session, queryFn: queryFunction })).rejects.toBe(error);
+    await expect(client.query({ queryKey: authQueryKeys.session, queryFn: queryFunction })).rejects.toBe(error);
 
     const observer = new QueryObserver(client, { queryKey: authQueryKeys.session, queryFn: queryFunction });
     const unsubscribe = observer.subscribe(() => undefined);
@@ -79,8 +79,8 @@ describe('session query defaults', () => {
     const client = sessionClient();
     const queryFunction = vi.fn(async () => ({ user: { id: 'user-1' } }));
 
-    await client.fetchQuery({ queryKey: authQueryKeys.session, queryFn: queryFunction });
-    await client.fetchQuery({ queryKey: authQueryKeys.session, queryFn: queryFunction });
+    await client.query({ queryKey: authQueryKeys.session, queryFn: queryFunction });
+    await client.query({ queryKey: authQueryKeys.session, queryFn: queryFunction });
 
     expect(queryFunction).toHaveBeenCalledOnce();
   });

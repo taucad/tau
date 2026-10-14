@@ -1,5 +1,7 @@
 /* oxlint-disable typescript/no-restricted-types -- Workbench record entry paths are nullable by schema. */
 /* oxlint-disable eslint/no-await-in-loop -- Producer flushes must finish in owner order before project close. */
+import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { peekRevisionClient } from '#hooks/use-revision-status.js';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { findEntryGraphics } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import type { ReactNode } from 'react';
@@ -146,13 +148,18 @@ export async function ensureFocusedChatForProject({
   persistedChatId,
   worker,
   onCreatedChat,
+  canCreateChat = () => true,
 }: {
   readonly projectId: string;
   readonly requestedChatId: string | undefined;
   readonly persistedChatId: string | undefined;
   readonly worker: FocusedChatWorker;
   readonly onCreatedChat?: () => void;
-}): Promise<{ type: 'focusedChatEnsured'; focusedChatId: string }> {
+  readonly canCreateChat?: () => boolean;
+}): Promise<
+  { type: 'focusedChatEnsured'; focusedChatId: string } | { type: 'focusedChatDeferred'; focusedChatId?: undefined }
+> {
+  const couldCreateBeforeRead = canCreateChat();
   const chats = await worker.getChatRecordsForResource(projectId);
 
   for (const candidateChatId of [requestedChatId, persistedChatId]) {
@@ -172,6 +179,9 @@ export async function ensureFocusedChatForProject({
     return { type: 'focusedChatEnsured', focusedChatId: mostRecent.id };
   }
 
+  if (!couldCreateBeforeRead || !canCreateChat()) {
+    return { type: 'focusedChatDeferred' };
+  }
   const created = await worker.createNavigationRepairChat(projectId);
   onCreatedChat?.();
   return { type: 'focusedChatEnsured', focusedChatId: created.id };
@@ -242,11 +252,13 @@ export const createProjectManifestChangeObserver = ({
   getCurrent,
   reload,
   report,
+  onSettled,
 }: {
   readonly projectId: string;
   readonly getCurrent: () => ObservedManifestState;
   readonly reload: () => void;
   readonly report: (issue: ProjectManifestParseIssue) => void;
+  readonly onSettled?: () => void;
 }): {
   readonly check: (input: { readonly readManifest: () => Promise<Uint8Array<ArrayBuffer>> }) => Promise<void>;
   readonly invalidate: () => void;
@@ -260,6 +272,7 @@ export const createProjectManifestChangeObserver = ({
     // A later return to the same bytes must reload to clear the report.
     lastObserved = undefined;
     report(issue);
+    onSettled?.();
   };
 
   return {
@@ -299,6 +312,10 @@ export const createProjectManifestChangeObserver = ({
         return;
       }
       const observed = manifestStateKey({ project: read.data, issue: read.issue });
+      if (current.project !== undefined && manifestStateKey(current) === observed) {
+        onSettled?.();
+        return;
+      }
       if (observed === lastObserved) {
         return;
       }
@@ -543,6 +560,13 @@ export function ProjectProvider({
             /* Chats are files now (W17): the project manager owns the store,
              * and the object-store worker knows nothing about them. */
             worker: projectManager,
+            canCreateChat: () => {
+              const status = peekRevisionClient(input.projectId)?.status();
+              if (isCloudProjectPending(input.projectId) && status?.sync.hasAppliedRemote !== true) {
+                return false;
+              }
+              return status?.remote.kind !== 'tau' || status.sync.chats === 'ready';
+            },
             onCreatedChat: () => {
               // Surface the new chat through TanStack Query so `useChats`
               // refetches and the history selector picks it up immediately.
@@ -777,6 +801,15 @@ export function ProjectProvider({
 
     const observer = createProjectManifestChangeObserver({
       projectId,
+      onSettled: () => {
+        if (
+          isCloudProjectPending(projectId) &&
+          canOpenCloudProject(projectId) &&
+          peekRevisionClient(projectId)?.status()?.sync.hasAppliedRemote === true
+        ) {
+          tauCloudIntent.set(projectId, undefined);
+        }
+      },
       getCurrent: () => {
         const { project, manifestIssue } = actorRef.getSnapshot().context;
         return { project, issue: manifestIssue };

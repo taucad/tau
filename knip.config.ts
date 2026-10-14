@@ -269,16 +269,8 @@ const config: KnipConfig = {
       ignoreUnresolved: [/^\.\/\+types\//u],
     },
     'apps/www': {
-      // The static builder bundles browser entries by path; these CLIs run directly from Node.
-      entry: [
-        'src/client.mjs',
-        'src/site.css',
-        'scripts/{build,serve,browser-check,check-story,render-assets,optimize-assets,capture-metal-hero,export-story-assets}.mjs',
-        'scripts/metal-hero-entry.mjs',
-        'tests/*.test.mjs',
-      ],
-      project: ['src/**/*.{mjs,css}', 'scripts/**/*.{mjs,js}', 'tests/**/*.mjs'],
-      ignore: ['public/**'],
+      entry: ['app/routes/**/*.{ts,tsx}', 'scripts/*.ts'],
+      project: ['app/**/*.{ts,tsx}', 'src/**/*.{ts,tsx,css}', 'scripts/**/*.ts', 'tests/**/*.{ts,tsx}'],
     },
     'apps/docs': {
       entry: ['app/routes/**/*.{ts,tsx}', 'vite-environment.d.ts'],
@@ -414,7 +406,12 @@ const config: KnipConfig = {
     },
     scripts: {
       // `canvas-vite.config.ts` aliases and injects the canvas sources.
-      entry: ['src/**/*.{ts,tsx,mts}', 'canvas/{api-guide.tsx,review-layer.ts,styles.css}'],
+      entry: [
+        'src/**/*.{ts,tsx,mts}',
+        'canvas/{api-guide.tsx,review-layer.ts,styles.css}',
+        // Charter spike scripts the spike-*.yml workflows run by path; deleted with their W packages.
+        'spikes/**/*.{ts,mts}',
+      ],
       // Fixture package that `check-registry-dependencies.test.ts` inspects on disk.
       ignore: ['src/fixtures/registry-gate-artifact/**'],
       // The canvas config requires a selected private artifact at execution time.

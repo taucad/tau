@@ -49,4 +49,4 @@ GeoSpec currently accepts mesh and BRep evidence, not 2D SVG drawings; generated
 - `apps/ui/public/wordmark.png` - public raster asset at 512 pixels high, used by email.
 - `thumbnail.webp` - runtime-rendered 768 by 576 preview.
 - `apps/ui/app/components/icons/tau-wordmark.tsx` and `apps/docs/app/components/tau-wordmark.tsx` - generated React consumers using `currentColor`.
-- `apps/www/src/wordmark.mjs` - generated symbol and letter paths for the marketing site, coloured separately.
+- `apps/www/src/wordmark.ts` - generated symbol and letter paths for the marketing site, coloured separately.

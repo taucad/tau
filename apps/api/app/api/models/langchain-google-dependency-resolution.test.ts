@@ -100,7 +100,7 @@ describe('LangChain Google dependency resolution (API helper path)', () => {
 
     expect(vertexPackageJson).toMatchObject({
       name: '@langchain/google-vertexai',
-      version: '2.2.0',
+      version: '2.3.2',
     });
     expect(vertexPackageJsonPath).not.toContain('langchain-fork');
 
@@ -109,7 +109,7 @@ describe('LangChain Google dependency resolution (API helper path)', () => {
 
     expect(gauthPackageJson).toMatchObject({
       name: '@langchain/google-gauth',
-      version: '2.2.0',
+      version: '2.3.2',
     });
     expect(gauthPackageJsonPath).not.toContain('langchain-fork');
 

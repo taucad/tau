@@ -1,3 +1,4 @@
+import { chatInputTextClassName } from '#components/chat/chat-input-styles.js';
 import { memo } from 'react';
 import { EditorContent } from '@tiptap/react';
 import type { Editor } from '@tiptap/core';
@@ -76,7 +77,7 @@ export const ChatEditor = memo(function ChatEditor({
           tiptapTailwindOverrides,
           'w-full min-h-6',
           'px-3 pb-3',
-          'text-sm',
+          chatInputTextClassName,
           isLoading && tiptapShimmerOverrides,
           className,
         )}

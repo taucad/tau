@@ -5,6 +5,7 @@ import { createCameraView } from '@taucad/camera';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import { ViewportGizmoCube } from '#graphics/three/controls/viewport-gizmo-cube.jsx';
 import type * as ViewerEnvironmentModule from '#environment/viewer-environment.jsx';
+import { Color } from 'three';
 
 const mocks = vi.hoisted(() => {
   const perspectiveCamera = { kind: 'perspective' };
@@ -163,6 +164,9 @@ vi.mock('#graphics/three/three-graphics-backend-context.jsx', () => ({
 vi.mock('#graphics/three/controls/viewport-gizmo-cube-axes.js', () => ({
   createViewportGizmoCubeAxes: () => ({ isAxes: true }),
 }));
+vi.mock('#graphics/three/controls/viewport-gizmo-cube-surface.js', () => ({
+  applyViewportGizmoSurface: vi.fn(),
+}));
 vi.mock('#graphics/three/controls/viewport-gizmo-controls-adapter.js', () => ({
   bindViewportGizmoControls: () => mocks.binding,
 }));
@@ -238,22 +242,49 @@ describe('ViewportGizmoCube camera retention', () => {
     expect(gizmo.cameraUpdate).toHaveBeenCalledOnce();
   });
 
-  it('warms the axes for both native camera endpoints', () => {
+  it('warms the cube and axes for both native camera endpoints', () => {
     render(<ViewportGizmoCube />);
     expect(mocks.compileAsync).toHaveBeenCalledTimes(2);
     expect(mocks.compileAsync.mock.calls.map((call) => call[1])).toEqual([
       mocks.perspectiveCamera,
       mocks.orthographicCamera,
     ]);
+    expect(mocks.compileAsync.mock.calls.every((call) => call[0] === mocks.gizmos[0])).toBe(true);
   });
 
-  it('uses stronger neutral faces and edges in high-contrast dark mode', () => {
+  it('should repaint loaded fonts without reverting a camera retarget', async () => {
+    const loaded = Promise.withResolvers<FontFace[]>();
+    const fonts = { check: () => false, load: vi.fn(async () => loaded.promise) };
+    const previousFonts = document.fonts;
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+    try {
+      render(<ViewportGizmoCube />);
+      act(() => mocks.getRetarget()?.(mocks.orthographicCamera, createDriverSnapshot(0, 1)));
+      await act(async () => {
+        loaded.resolve([]);
+        await loaded.promise;
+      });
+      expect(mocks.gizmos).toHaveLength(2);
+      expect(mocks.gizmos[0]!.dispose).toHaveBeenCalledOnce();
+      expect(mocks.gizmos[1]!.camera).toBe(mocks.orthographicCamera);
+      expect(fonts.load).toHaveBeenCalledOnce();
+    } finally {
+      Object.defineProperty(document, 'fonts', { configurable: true, value: previousFonts });
+    }
+  });
+
+  it('should rebuild with stronger faces and legible labels in high-contrast dark mode', () => {
     mocks.themeState.theme = 'dark';
+    const mounted = render(<ViewportGizmoCube />);
+    const normalFace = mocks.gizmos[0]!.options.right.color;
     mocks.themeState.isHighContrast = true;
-
-    render(<ViewportGizmoCube />);
-
-    expect(mocks.gizmos[0]!.options.right).toMatchObject({ color: 0x66_66_66, labelColor: 0xff_ff_ff });
-    expect(mocks.gizmos[0]!.options.edges.color).toBe(0xff_ff_ff);
+    mounted.rerender(<ViewportGizmoCube />);
+    const { color, labelColor } = mocks.gizmos[1]!.options.right;
+    const face = new Color(color);
+    const label = new Color(labelColor);
+    const luminance = (value: Color): number => 0.2126 * value.r + 0.7152 * value.g + 0.0722 * value.b;
+    expect(color).not.toBe(normalFace);
+    expect((luminance(label) + 0.05) / (luminance(face) + 0.05)).toBeGreaterThanOrEqual(4.5);
+    expect(mocks.gizmos[0]!.dispose).toHaveBeenCalledOnce();
   });
 });

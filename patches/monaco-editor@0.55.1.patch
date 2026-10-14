@@ -1,0 +1,15 @@
+diff --git a/esm/vs/base/browser/domSanitize.js b/esm/vs/base/browser/domSanitize.js
+index 95061a20c8ecd48ff3ca732dbb1848cd213f7965..cb90e4c1a02b38b31c33d3c16e58f42171fecbcd 100644
+--- a/esm/vs/base/browser/domSanitize.js
++++ b/esm/vs/base/browser/domSanitize.js
+@@ -1,6 +1,9 @@
+ import { Schemas } from '../common/network.js';
+ import { reset } from './dom.js';
+-import purify from './dompurify/dompurify.js';
++import createDOMPurify from 'dompurify';
++
++// Keep Monaco's sanitizer hooks isolated from other DOMPurify consumers.
++const purify = createDOMPurify();
+ 
+ /*---------------------------------------------------------------------------------------------
+  *  Copyright (c) Microsoft Corporation. All rights reserved.

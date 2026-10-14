@@ -1,3 +1,5 @@
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { z } from 'zod';
 import { fileExtensions } from '@taucad/types/constants';
 import { runtimeContentSchema } from '@taucad/runtime';
@@ -1149,7 +1151,19 @@ export function useExportPreferences(
 // Main component
 // =============================================================================
 
-export const ConverterPanelBody = function ({
+/** Exporters mount only after the first project checkout is reconciled. */
+export function ConverterPanelBody(
+  props: { readonly downloadOnly?: boolean; readonly isShown?: boolean } = {},
+): ReactElement {
+  const availability = useProjectAvailability();
+  return availability === 'ready' ? (
+    <ConverterPanelBodyContent {...props} />
+  ) : (
+    <ProjectSyncPlaceholder state={availability} />
+  );
+}
+
+const ConverterPanelBodyContent = function ({
   downloadOnly = false,
   isShown = true,
 }: { readonly downloadOnly?: boolean; readonly isShown?: boolean } = {}): ReactElement {

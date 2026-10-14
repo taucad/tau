@@ -41,14 +41,28 @@ import { createRevisionHttpClient } from '#http-client.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { createRevisionActors } from '#revision-effects.js';
-import type { RevisionFileSystem } from '#revision-effects.js';
+import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
+import type { SyncFetchActorOutput, SyncProjectRecordsActorOutput } from '#sync.machine.js';
 import type { SyncQueueRecord } from '#sync.types.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import type { ConflictRecord, RevisionPort } from '#revision-port.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
+
+/** Exercise the two owned effects when this fixture inspects optional records directly. */
+const fetchRecords = async (actors: RevisionActors) => {
+  const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+    remote: 'tau',
+    branch: 'main',
+    deadlineMilliseconds: 25_000,
+  });
+  return {
+    ...fetched,
+    ...(await run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, fetched.recordProjection)),
+  };
+};
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 const chatId = 'c1';
@@ -575,9 +589,19 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       expect(await remote.git(['rev-parse', chatRef])).not.toBe('');
 
       const projectedChats: string[][] = [];
+      const releaseRecords = Promise.withResolvers<void>();
       const two = await device({
         leg,
         label: 'b-remote-only',
+        wrapFilesystem: (filesystem) =>
+          Object.assign(Object.create(filesystem) as RevisionFileSystem, {
+            writeFile: async (path: string, content: Parameters<RevisionFileSystem['writeFile']>[1]) => {
+              if (path.startsWith(chatRecordsPath(chatId))) {
+                await releaseRecords.promise;
+              }
+              return filesystem.writeFile(path, content);
+            },
+          }),
         remoteUrl: remote.url,
         onChatsProjected: (chatIds) => projectedChats.push([...chatIds]),
       });
@@ -586,6 +610,22 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
 
       const second = two.scheduler();
       second.start();
+      try {
+        await vi.waitFor(
+          () => {
+            expect(selectSyncFacet(second.getSnapshot())).toMatchObject({
+              hasAppliedRemote: true,
+              pullPhase: 'records',
+              chats: 'loading',
+            });
+          },
+          { timeout: 30_000 },
+        );
+        expect(await two.filesystem.readFile('bracket.scad', 'utf8')).toBe('cube([7, 7, 7]);\n');
+        expect(await two.filesystem.exists(`${chatRecordsPath(chatId)}/chat.json`)).toBe(false);
+      } finally {
+        releaseRecords.resolve();
+      }
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
@@ -696,10 +736,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
        * keeps both. The scheduler turns that entry into the durable projection
        * queue and renders its reason through `SyncFacet.error`.
        */
-      const partial = await run<{ records: ReadonlyArray<{ name: string; status: string; reason?: string }> }>(
-        two.actors.sync.fetch,
-        { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 },
-      );
+      const partial = await fetchRecords(two.actors);
       expect(partial.records).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ name: chatRefName(firstChatId), status: 'updated' }),
@@ -719,7 +756,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       expect(await two.filesystem.exists(`${chatRecordsPath(secondChatId)}/chat.json`)).toBe(false);
 
       failSecond = false;
-      await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+      await fetchRecords(two.actors);
       expect(projectedChats).toEqual([[firstChatId], [secondChatId]]);
       expect(await two.filesystem.readFile(`${chatRecordsPath(firstChatId)}/chat.json`, 'utf8')).toBe(
         '{"name":"First"}\n',
@@ -805,11 +842,11 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       await expect(remote.git(['rev-parse', 'refs/tau/evidence/exports'])).resolves.toMatch(/^[\da-f]{40}$/u);
 
       const two = await device({ leg, label: 'b-evidence', remoteUrl: remote.url });
-      await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+      await fetchRecords(two.actors);
       expect(await two.filesystem.readFile('exports/model.step', 'utf8')).toBe('remote export\n');
 
       await two.filesystem.writeFile('exports/model.step', 'local export\n');
-      await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+      await fetchRecords(two.actors);
       expect(await two.filesystem.readFile('exports/model.step', 'utf8')).toBe('local export\n');
 
       const off = await device({
@@ -818,7 +855,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         remoteUrl: remote.url,
         files: { 'tau.json': JSON.stringify({ syncLargeExports: false }) },
       });
-      await run(off.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+      await fetchRecords(off.actors);
       expect(await off.filesystem.exists('exports/model.step')).toBe(false);
     } finally {
       await remote.close();

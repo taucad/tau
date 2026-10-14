@@ -178,7 +178,7 @@ describe('Esbuild runtime adapter', () => {
     });
   });
 
-  it('should register builtin modules and cleanup through the VM', async () => {
+  it('should register builtin modules with their package identity and cleanup through the VM', async () => {
     const vm = createMockVm();
 
     esbuildDefinition.registerModule(
@@ -188,6 +188,7 @@ describe('Esbuild runtime adapter', () => {
           code: 'export const describe = () => {};',
           version: '0.0.0-test',
           globalName: 'GeoSpec',
+          package: { name: 'geospec', spec: '0.0.0-test' },
           registryExpression: 'globalThis.__geospecBuiltin',
         },
       },
@@ -199,6 +200,7 @@ describe('Esbuild runtime adapter', () => {
       code: 'export const describe = () => {};',
       version: '0.0.0-test',
       globalName: 'GeoSpec',
+      package: { name: 'geospec', spec: '0.0.0-test' },
       registryExpression: 'globalThis.__geospecBuiltin',
     });
     expect(vm.dispose).toHaveBeenCalledOnce();

@@ -77,21 +77,41 @@ Object.defineProperty(navigator, 'sendBeacon', {
 const { posthog } = await import('posthog-js');
 const { WebAnalyticsProvider } = await import('#providers/web-analytics-provider.js');
 
-const transmittedEvents = (): Array<{
+type TransmittedEvent = {
   event: string;
   properties: Record<string, unknown>;
   $set?: Record<string, unknown>;
-}> =>
-  transport.bodies
-    .filter(({ url, body }) => url.includes('/e/') && body instanceof ArrayBuffer)
-    .map(
-      ({ body }) =>
-        JSON.parse(gunzipSync(new Uint8Array(body as ArrayBuffer)).toString()) as {
-          event: string;
-          properties: Record<string, unknown>;
-          $set?: Record<string, unknown>;
-        },
-    );
+};
+
+const readBlob = async (body: Blob): Promise<ArrayBuffer> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      resolve(reader.result as ArrayBuffer);
+    });
+    reader.addEventListener('error', () => {
+      reject(reader.error ?? new Error('Cannot read captured beacon body'));
+    });
+    // oxlint-disable-next-line unicorn/prefer-blob-reading-methods -- jsdom 26 Blob lacks arrayBuffer; read the real SDK beacon through its supported FileReader.
+    reader.readAsArrayBuffer(body);
+  });
+
+// The SDK wraps even unbatched captures in a timestamped batch envelope.
+// Beacon transport additionally wraps encoded bytes in a Blob for its content type.
+const transmittedEvents = async (): Promise<TransmittedEvent[]> => {
+  const batches = await Promise.all(
+    transport.bodies
+      .filter(({ url }) => url.includes('/e/'))
+      .map(async ({ body }) => {
+        const encoded = body instanceof Blob ? await readBlob(body) : body;
+        const text =
+          typeof encoded === 'string' ? encoded : gunzipSync(new Uint8Array(encoded as ArrayBuffer)).toString();
+        const payload = JSON.parse(text) as { batch: TransmittedEvent[] };
+        return payload.batch;
+      }),
+  );
+  return batches.flat();
+};
 
 afterAll(() => {
   cleanup();
@@ -192,8 +212,9 @@ describe('WebAnalyticsProvider', () => {
     expect(posthog._isIdentified()).toBe(false);
     const initialPageviews = pageviews(capture.mock.calls);
     expect(initialPageviews).toBe(1);
-    await vi.waitFor(() => {
-      expect(transmittedEvents().filter(({ event }) => event === '$pageview')).toHaveLength(1);
+    await vi.waitFor(async () => {
+      const events = await transmittedEvents();
+      expect(events.filter(({ event }) => event === '$pageview')).toHaveLength(1);
     });
 
     // Session resolves after initialisation: identified exactly as this user.
@@ -205,24 +226,21 @@ describe('WebAnalyticsProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(capture).toHaveBeenCalledWith('draft_saved', undefined);
     await settle();
-    await vi.waitFor(() => {
+    await vi.waitFor(async () => {
+      const events = await transmittedEvents();
       expect(
-        transmittedEvents().some(
-          ({ event, properties }) => event === 'draft_saved' && properties['distinct_id'] === 'user-a',
-        ),
+        events.some(({ event, properties }) => event === 'draft_saved' && properties['distinct_id'] === 'user-a'),
       ).toBe(true);
     });
-    await vi.waitFor(() => {
+    await vi.waitFor(async () => {
+      const events = await transmittedEvents();
       expect(
-        transmittedEvents().some(
-          ({ event, properties }) => event === '$identify' && properties['distinct_id'] === 'user-a',
-        ),
+        events.some(({ event, properties }) => event === '$identify' && properties['distinct_id'] === 'user-a'),
       ).toBe(true);
     });
-    await vi.waitFor(() => {
-      expect(
-        transmittedEvents().some(({ event, $set }) => event === '$identify' && $set?.['email'] === userA.email),
-      ).toBe(true);
+    await vi.waitFor(async () => {
+      const events = await transmittedEvents();
+      expect(events.some(({ event, $set }) => event === '$identify' && $set?.['email'] === userA.email)).toBe(true);
     });
 
     // Withdrawal: opted out, identity reset, product untouched.
@@ -231,7 +249,9 @@ describe('WebAnalyticsProvider', () => {
     transport.holdFlags = true;
     posthog.reloadFeatureFlags();
     await settle();
-    expect(transport.pendingFlags.length).toBeGreaterThan(0);
+    await vi.waitFor(() => {
+      expect(transport.pendingFlags.length).toBeGreaterThan(0);
+    });
     const requestsBeforeWithdrawal = transport.requests.length;
     view.rerender(tree());
     for (const resolve of transport.pendingFlags.splice(0)) {
@@ -269,53 +289,63 @@ describe('WebAnalyticsProvider', () => {
     expect(init).toHaveBeenCalledOnce();
     expect(posthog.has_opted_out_capturing()).toBe(false);
     expect(posthog.get_distinct_id()).toBe('user-a');
-    await vi.waitFor(() => {
-      expect(transmittedEvents().filter(({ event }) => event === '$pageview')).toHaveLength(1);
+    await vi.waitFor(async () => {
+      const events = await transmittedEvents();
+      expect(events.filter(({ event }) => event === '$pageview')).toHaveLength(1);
     });
-    const deliveredBeforeReaccept = transmittedEvents().filter(({ event }) => event === 'draft_saved').length;
+    const eventsBeforeReaccept = await transmittedEvents();
+    const deliveredBeforeReaccept = eventsBeforeReaccept.filter(({ event }) => event === 'draft_saved').length;
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await settle();
-    await vi.waitFor(() => {
-      expect(transmittedEvents().filter(({ event }) => event === 'draft_saved')).toHaveLength(
-        deliveredBeforeReaccept + 1,
-      );
+    await vi.waitFor(async () => {
+      const events = await transmittedEvents();
+      expect(events.filter(({ event }) => event === 'draft_saved')).toHaveLength(deliveredBeforeReaccept + 1);
     });
 
     // Account switch and logout.
     state.user = userB;
     view.rerender(tree());
     expect(posthog.get_distinct_id()).toBe('user-b');
-    const savedBeforeSwitch = transmittedEvents().filter(({ event }) => event === 'draft_saved').length;
+    const eventsBeforeSwitch = await transmittedEvents();
+    const savedBeforeSwitch = eventsBeforeSwitch.filter(({ event }) => event === 'draft_saved').length;
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await vi.waitFor(() => {
-      expect(transmittedEvents().filter(({ event }) => event === 'draft_saved')).toHaveLength(savedBeforeSwitch + 1);
+    await vi.waitFor(async () => {
+      const events = await transmittedEvents();
+      expect(events.filter(({ event }) => event === 'draft_saved')).toHaveLength(savedBeforeSwitch + 1);
     });
-    expect(transmittedEvents().findLast(({ event }) => event === 'draft_saved')?.properties['distinct_id']).toBe(
+    const eventsAfterSwitch = await transmittedEvents();
+    expect(eventsAfterSwitch.findLast(({ event }) => event === 'draft_saved')?.properties['distinct_id']).toBe(
       'user-b',
     );
     state.isPending = true;
     state.user = undefined;
     view.rerender(tree());
     expect(posthog._isIdentified()).toBe(true);
-    const savedWhilePending = transmittedEvents().filter(({ event }) => event === 'draft_saved').length;
+    const eventsWhilePending = await transmittedEvents();
+    const savedWhilePending = eventsWhilePending.filter(({ event }) => event === 'draft_saved').length;
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await vi.waitFor(() => {
-      expect(transmittedEvents().filter(({ event }) => event === 'draft_saved')).toHaveLength(savedWhilePending + 1);
+    await vi.waitFor(async () => {
+      const events = await transmittedEvents();
+      expect(events.filter(({ event }) => event === 'draft_saved')).toHaveLength(savedWhilePending + 1);
     });
-    expect(transmittedEvents().findLast(({ event }) => event === 'draft_saved')?.properties['distinct_id']).toBe(
+    const eventsDuringPending = await transmittedEvents();
+    expect(eventsDuringPending.findLast(({ event }) => event === 'draft_saved')?.properties['distinct_id']).toBe(
       'user-b',
     );
     state.isPending = false;
     view.rerender(tree());
     expect(posthog._isIdentified()).toBe(false);
-    const savedAfterLogout = transmittedEvents().filter(({ event }) => event === 'draft_saved').length;
+    const eventsAfterLogout = await transmittedEvents();
+    const savedAfterLogout = eventsAfterLogout.filter(({ event }) => event === 'draft_saved').length;
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await vi.waitFor(() => {
-      expect(transmittedEvents().filter(({ event }) => event === 'draft_saved')).toHaveLength(savedAfterLogout + 1);
+    await vi.waitFor(async () => {
+      const events = await transmittedEvents();
+      expect(events.filter(({ event }) => event === 'draft_saved')).toHaveLength(savedAfterLogout + 1);
     });
-    expect(transmittedEvents().findLast(({ event }) => event === 'draft_saved')?.properties['distinct_id']).not.toBe(
-      'user-b',
-    );
+    const eventsAfterAnonymousSave = await transmittedEvents();
+    expect(
+      eventsAfterAnonymousSave.findLast(({ event }) => event === 'draft_saved')?.properties['distinct_id'],
+    ).not.toBe('user-b');
 
     view.unmount();
   }, 20_000);

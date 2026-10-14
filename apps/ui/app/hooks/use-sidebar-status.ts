@@ -95,6 +95,8 @@ export type ProjectSidebarStatus = Readonly<{
 /** What a project row draws, aggregated from its chats and its session. @public */
 export type ProjectSidebarRow = Readonly<{
   projectId: string;
+  /** Transient sync and recovery facts; healthy state draws no sidebar icon. */
+  sync?: RevisionStatusProjection['sync'];
   /**
    * The session's own state. `none` is a closed project (A29); `failed` means
    * the session failed to open and nothing else (v2 D11) — a failed chat is
@@ -435,6 +437,7 @@ export const selectProjectRow = (status: ProjectSidebarStatus, idleWindowMillise
   const closing = session.live && session.status?.state === 'closing';
   return {
     projectId: session.projectId,
+    ...(revisions ? { sync: revisions.sync } : {}),
     glyph: projectGlyph(session, running),
     closing,
     attention: attention + (conflicted ? 1 : 0) + (settings?.count ?? 0),
@@ -639,7 +642,10 @@ const keep = <T>(cache: { current: { key: string; value: T } | undefined }, key:
   return cache.current.value;
 };
 
-const projectRowKey = (row: ProjectSidebarRow): string => Object.values(row).join(keySeparator);
+const projectRowKey = (row: ProjectSidebarRow): string => {
+  const { sync, ...facts } = row;
+  return `${Object.values(facts).join(keySeparator)}${keySeparator}${JSON.stringify(sync)}`;
+};
 
 /*
  * One binder, rebound only when its captured owners or chat set change.

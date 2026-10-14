@@ -1,20 +1,9 @@
-import { Link } from 'react-router';
 import subprocessors from '#routes/legal.subprocessors/subprocessors.txt?raw';
-import { Button } from '@taucad/ui/components/button';
-import { markdownHeaderAnchorComponents } from '#components/markdown/markdown-header-anchor.js';
-import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
-import type { Handle } from '#types/matches.types.js';
+import { LegalDocument } from '#routes/legal/legal-document.js';
+import type { MetaFunction } from 'react-router';
 
-export const handle: Handle = {
-  breadcrumb() {
-    return (
-      <Button asChild variant='ghost'>
-        <Link to='/legal/subprocessors'>Sub-processors</Link>
-      </Button>
-    );
-  },
-};
+export const meta: MetaFunction = () => [{ title: 'Sub-processors · Tau' }];
 
 export default function Subprocessors(): React.JSX.Element {
-  return <MarkdownViewer components={markdownHeaderAnchorComponents}>{subprocessors}</MarkdownViewer>;
+  return <LegalDocument>{subprocessors}</LegalDocument>;
 }

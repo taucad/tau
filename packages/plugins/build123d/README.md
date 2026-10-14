@@ -12,7 +12,7 @@ Native Build123d kernel for trusted Tau desktop and Node hosts.
 
 - **Native Build123d and OCP** — execute Python CAD without a WebAssembly translation layer.
 - **Retained topology** — one build feeds GLB preview, `TAU_cad_topology`, and STEP export.
-- **Supervised process** — exact packaged resources, bounded protocol and artifacts, process-tree termination, and no system-Python fallback.
+- **Supervised process** — exact packaged resources, validated protocol and artifacts, process-tree termination, and no system-Python fallback.
 
 ## Install
 
@@ -49,6 +49,13 @@ Do not point production at `python`, a virtual environment, or a user-writable w
 | `build123dKernel` | kernel factory  | direct `kernels` composition, with options                                    |
 
 One preset, `default`, selecting `kernels.default`.
+
+## Large models
+
+Native requests run until completion or cancellation by default (`requestTimeout: 0`). Hosts may
+set a positive deadline in milliseconds or a `maxArtifactBytes` policy under `kernels.default`.
+The default artifact allowance is `Number.MAX_SAFE_INTEGER`; actual allocation and filesystem
+limits still apply. Workspace mirroring has no fixed byte, file-count or directory-depth quota.
 
 ## Environment
 

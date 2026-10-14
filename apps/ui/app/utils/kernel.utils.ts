@@ -27,6 +27,32 @@ export function getEmptyCode(kernelId: KernelProvider): string {
 }
 
 /**
+ * Kernels whose project manifests declare npm libraries (`kernel-libraries.ts`).
+ * ponytail: hand-kept beside `kernelLibraries`; `kernel.utils.test.ts` fails when the two differ.
+ */
+export const kernelsWithLibraries: ReadonlySet<KernelProvider> = new Set([
+  'replicad',
+  'jscad',
+  'manifold',
+  'picovoxel',
+  'tscircuit',
+]);
+
+/**
+ * The npm `dependencies` a new project of this kernel declares, as the kernel plugin publishes them
+ * (`{ replicad: 'npm:@taulabs/replicad@…' }`); empty for a kernel without npm libraries. Only dependency
+ * metadata loads; executable plugins and WASM stay out of the renderer.
+ */
+export async function getKernelDependencies(kernelId: KernelProvider): Promise<Record<string, string>> {
+  if (!kernelsWithLibraries.has(kernelId)) {
+    return {};
+  }
+
+  const { kernelLibraries } = await import('#utils/kernel-libraries.js');
+  return { ...kernelLibraries[kernelId] };
+}
+
+/**
  * Format kernel names as a readable list with the specified conjunction.
  * @example formatKernelList('or') // "OpenSCAD, Replicad, Manifold, Zoo, or JSCAD"
  * @example formatKernelList('and') // "OpenSCAD, Replicad, Manifold, Zoo, and JSCAD"

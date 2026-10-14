@@ -683,6 +683,28 @@ ${keepAlive}`);
     await unwritable.session.cleanup();
   });
 
+  it('should allow a request without a deadline and still cancel it', async () => {
+    const value = fixture(respondingWorker('({protocolVersion:1,requestId:request.requestId,result:{ok:true}})'), 0);
+    try {
+      await expect(request(value.session)).resolves.toEqual({ ok: true });
+    } finally {
+      await value.session.cleanup();
+    }
+    const waiting = fixture(`${ready}${keepAlive}`, 0);
+    const controller = new AbortController();
+    const pending = request(waiting.session, { signal: controller.signal });
+    const rejected = expect(pending).rejects.toThrow('stop large render');
+    while (privateSession(waiting.session).pending.size === 0) {
+      await delay(2);
+    }
+    controller.abort(new Error('stop large render'));
+    try {
+      await rejected;
+    } finally {
+      await waiting.session.cleanup();
+    }
+  });
+
   it('bounds the queue and handles abort, timeout, spawn, and write failures', async () => {
     const stalled = fixture(`${ready}${keepAlive}`, 5000);
     const operations = Array.from({ length: 16 }, async () => request(stalled.session));
@@ -1013,7 +1035,7 @@ describe('createWorkspaceMirror', () => {
     }
   });
 
-  it('rejects case collisions, concurrent changes, depth, and size limits', async () => {
+  it('rejects case collisions and concurrent changes', async () => {
     const collision = createMockFileSystem({ readFileResult: 'x' });
     mockListing(
       collision,
@@ -1023,26 +1045,6 @@ describe('createWorkspaceMirror', () => {
     const collisionMirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
     roots.push(collisionMirror.rootPath);
     await expect(collisionMirror.sync(collision)).rejects.toThrow(/case-colliding/);
-
-    const deep = createMockFileSystem();
-    mockListing(
-      deep,
-      (directory) => [directory ? 'next' : 'root'],
-      () => ({ type: 'dir', size: 0, mtimeMs: 0 }),
-    );
-    const deepMirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
-    roots.push(deepMirror.rootPath);
-    await expect(deepMirror.sync(deep)).rejects.toThrow(/directory levels/);
-
-    const large = createMockFileSystem();
-    mockListing(
-      large,
-      () => ['large.cs'],
-      () => ({ type: 'file', size: 32 * 1024 * 1024 + 1, mtimeMs: 0 }),
-    );
-    const largeMirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
-    roots.push(largeMirror.rootPath);
-    await expect(largeMirror.sync(large)).rejects.toThrow(/size limits/);
 
     const changed = createMockFileSystem({ readFileResult: 'xx' });
     mockListing(

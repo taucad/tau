@@ -20,8 +20,14 @@ export const agentHostSessionChannels = {
   release: 'tau:agent-host:release',
 } as const;
 
+/** Open a granted directory in the operating system's file manager. */
+export const openDirectoryChannel = 'tau:open-directory';
+
 /** Theme notification shared by main and preload for the native app icon. */
 export const appIconThemeChannel = 'tau:app-icon-theme';
+
+/** Main's native window fullscreen state, sent on transitions and renderer loads. */
+export const windowFullscreenChannel = 'tau:window-fullscreen';
 
 /**
  * The renderer's half of the quit hold (D31, P49).

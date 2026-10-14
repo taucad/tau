@@ -204,6 +204,13 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
     serving.add(actor);
   };
 
+  /* An incarnation closing, or closed, because the log or a placement answer fenced it: not a host close or a hand-off. */
+  const stoppedOnFence = (actor: ChatRunActor): boolean => {
+    const snapshot = actor.getSnapshot();
+    const { cause } = snapshot.context;
+    return (cause === 'fenced' || cause === 'fault') && (snapshot.status !== 'active' || snapshot.matches('closing'));
+  };
+
   const claim = async (chatId: string): Promise<ChatRunClaim> => {
     if (closing) {
       return { refused: refusedAnswer('claim', 'HOST_CLOSED', 'The Tau agent host is closed.') };
@@ -211,9 +218,27 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
     if (fenced.has(chatId)) {
       return { refused: refusedAnswer('claim', 'LEADERSHIP_LOST', `This host no longer leads chat ${chatId}.`) };
     }
-    const fresh = actors.get(chatId)?.getSnapshot().status !== 'active';
-    const actor = open(chatId);
+    let fresh = actors.get(chatId)?.getSnapshot().status !== 'active';
+    let actor = open(chatId);
     await served(actor);
+    if (!fresh && stoppedOnFence(actor)) {
+      /*
+       * R18: this claim joined an incarnation that decided before the claim's cause, such as a settlement refused
+       * `LEASE_HELD_ELSEWHERE` just before the holder's release that sent this claim. It closes on that stale answer, so
+       * the claim rereads under a new incarnation, as `run` does (RA-A9). A claim that opened its own never repeats.
+       */
+      await waitFor(actor, (current) => current.status !== 'active').catch(() => undefined);
+      /* Read through a call: `close` may land while the claim waits, which narrowing cannot see. */
+      if (isClosing()) {
+        return { refused: refusedAnswer('claim', 'HOST_CLOSED', 'The Tau agent host is closed.') };
+      }
+      if (fenced.has(chatId)) {
+        return { refused: refusedAnswer('claim', 'LEADERSHIP_LOST', `This host no longer leads chat ${chatId}.`) };
+      }
+      fresh = actors.get(chatId)?.getSnapshot().status !== 'active';
+      actor = open(chatId);
+      await served(actor);
+    }
     const snapshot = actor.getSnapshot();
     if (
       snapshot.status !== 'active' &&

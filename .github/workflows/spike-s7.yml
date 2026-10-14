@@ -1,0 +1,56 @@
+# Spike S7 (native-dependency-resolution charter, wave 0): Node 24 fetch proxy/CA variables and mirror no-fallback (D9, D25)
+# Spike code under scripts/spikes/native-deps/linux/s7; the run's evidence is the uploaded artifact
+# and the job summary. Downloaded bytes are inspected as data and never executed.
+name: Spike S7 (Node proxy and CA)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-s7-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s7:
+    name: S7 proxy, CA and mirror fail-fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+      - name: Create the private CA and the origin certificate
+        run: node scripts/spikes/native-deps/linux/s7/proxy-ca.ts certs "$RUNNER_TEMP/s7"
+      # Row R5 needs the CA in the OS store for NODE_USE_SYSTEM_CA=1.
+      - name: Add the spike CA to the system trust store
+        run: |
+          sudo cp "$RUNNER_TEMP/s7/ca.pem" /usr/local/share/ca-certificates/tau-s7-spike.crt
+          sudo update-ca-certificates
+      - name: Run the matrix and the mirror scenarios
+        env:
+          S7_SYSTEM_CA_INSTALLED: '1'
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          set +e
+          node scripts/spikes/native-deps/linux/s7/proxy-ca.ts run "$RUNNER_TEMP/s7" > "$RUNNER_TEMP/evidence/s7.json"
+          status=$?
+          set -e
+          node -e 'const r=require(process.argv[1]);console.log(JSON.stringify(r.summary,null,2));for(const m of r.matrix)console.log(m.id,m.expected,m.observed,m.match?"match":"MISMATCH",m.proxyHits.length,m.fetch.cause??m.fetch.status,m.ms+"ms",m.label);for(const m of r.mirrorRuns)console.log(m.id,"exit",m.exit,JSON.stringify(m.results.map(x=>[x.name,x.outcome,x.code,x.detail?.cause,Math.round(x.ms??x.detail?.ms??0)+"ms"])),"proxyHits",m.proxyHits.length,"mirrorRequests",m.mirrorRequests.length,m.label)' "$RUNNER_TEMP/evidence/s7.json" | tee "$RUNNER_TEMP/evidence/s7-summary.txt"
+          { echo '```'; cat "$RUNNER_TEMP/evidence/s7-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S7' "$RUNNER_TEMP/evidence/s7-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s7-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

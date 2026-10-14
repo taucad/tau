@@ -1,0 +1,51 @@
+{
+  "actions": {},
+  "alphabet": [
+    "adoptRun",
+    "close",
+    "dirtyChanged",
+    "interruptRecorded",
+    "loaded",
+    "refresh",
+    "requestTurn",
+    "retry",
+    "runLifecycle",
+    "syncState",
+    "toolParts",
+    "turnAdmitted",
+    "turnFinalized",
+    "watchFailed"
+  ],
+  "sources": {
+    "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "84cb4aeac1fa109f2189264787454acd887fb80cc4fbc646a8495d47c27ffe21",
+    "apps/ui/app/chat-clients/chat-turn-host.tsx": "71115cd738aa95c0ac83204cc9d73e98c5121cb69f49cb13dfcdd45f2495fe1d",
+    "apps/ui/app/chat-clients/use-cad-chat-client.ts": "4d984b47c72c18d5ec693ac050f9d1e431c3966904933dae1436cc51c306ee0f",
+    "apps/ui/app/components/chat/chat-message-queue-view.tsx": "4c1712cdd32e14d64179842e0d2ab2e05d118761c23472d07017a7ee1634086c",
+    "apps/ui/app/components/chat/chat-message-queue.tsx": "8c2e364f91a13539bde640b8f9aaab4c833f36050db0548a38497de8e2fef747",
+    "apps/ui/app/components/chat/chat-textarea.tsx": "468b807ff29437061694aa575d5b0d791fd5c174a7c1625dd7e670788fa91875",
+    "apps/ui/app/db/chat-message-queue-store.ts": "8f679f892f769c4e1118ef9ff13bcec3c276cb1ef45658d1ce10e3b547ee79c7",
+    "apps/ui/app/hooks/use-chat.tsx": "6de4bf1438424a5c885cd0df851ed1656ab66d877f2903d2ef0da0fb22768fff",
+    "apps/ui/app/machines/chat-message-queue.machine.ts": "1f1dd988a54ff2f94974c5b0b68cd993f74c4b5a04c470489a8d1910003e0b62",
+    "apps/ui/app/machines/chat-session.machine.ts": "9d3180fe7082223fddcc7ff798bad3cd522c0d1b70cf77d91cd34ba7cffa221d",
+    "apps/ui/app/services/chat-session-store.ts": "45e00066d97ba60d792702444c57d00be430837644eb4d800ffeae9e542dbcd9"
+  },
+  "specs": {
+    "MessageQueue.tla": "1c631755c7b6913faf42de5837fcee0a52c6635689a7ffd38306421d7dc00f05"
+  },
+  "tables": {
+    "MessageQueue.duplicate.cfg": "9d566ac1a0f357cd7744cdf8594fbaa4554d7c262a0fadf921c45b66b9ffb9da",
+    "MessageQueue.early-steer.cfg": "c3238fc4bfcecd7fa9444fb891f8c668dd50a23aaaf20e3418a4e009f39f091e",
+    "MessageQueue.follower-lag.cfg": "0f72287763bb81ba6288212735b42dc601031938e69c52159ae87597deabf83c",
+    "MessageQueue.late-terminal-capture.cfg": "eee38a8dd8754540aba9144e65be9a21a5539a3d21816bdeb58879042062ffb8",
+    "MessageQueue.lost-payload.cfg": "3f5b7905e927a25bacd64b50c2d348a381aa922cec7210dd02e9639c257d37b9",
+    "MessageQueue.release-stopped.cfg": "12cbfa5d0b5b62bc8200e44b3b50003caa9afd9b29f69b095f20d590f6a2dbdd",
+    "MessageQueue.target.cfg": "681dc3b351dc087568c31dbc5c487d124323485706fb94483bbb67c19b4a28e3",
+    "MessageQueue.today.cfg": "f185e5b96916ae1a6ffc9e93296bf3bf70f0474617a782f86a1866e46bd9078f",
+    "MessageQueue.wrong-cancel.cfg": "821eae120126639dc7baa965d46abc6cd06880964a2f16debfa4415521de4c65",
+    "expected.json": "ee254f6ec45e0e79b9683c27c8fc8c475e56aa2d3f2b59fa3a5f5774fa567a35"
+  },
+  "versions": {
+    "chat-message-queue": "1",
+    "chat-session": "3"
+  }
+}

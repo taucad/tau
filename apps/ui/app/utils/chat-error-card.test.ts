@@ -23,6 +23,8 @@ describe('cardOf', () => {
     ['EXTERNAL_AGENT_RECOVERY_UNKNOWN', 'externalRestart'],
     ['RESUME_UNAVAILABLE', 'nothingToResume'],
     ['RUN_ABANDONED', 'pausedTurn'],
+    ['MODEL_OUTPUT_LIMIT', 'pausedTurn'],
+    ['TOOL_RESULT_PERSISTENCE_FAILED', 'pausedTurn'],
     ['EXTERNAL_AGENT_MODEL_UNAVAILABLE', 'switchModel'],
     ['MODEL_ROUTE_PAUSED', 'switchModel'],
     ['BILLING_ACCOUNT_RESTRICTED', 'accountRestricted'],

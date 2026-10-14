@@ -1,3 +1,5 @@
+import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { mock } from 'vitest-mock-extended';
 // @vitest-environment jsdom
 import type { ReactNode } from 'react';
 import { act, render, renderHook } from '@testing-library/react';
@@ -33,7 +35,25 @@ const { mockToast } = vi.hoisted(() => ({
 }));
 vi.mock('#components/ui/sonner.js', () => ({ toast: mockToast }));
 
+const storageValues = new Map<string, string>();
+vi.stubGlobal(
+  'localStorage',
+  mock<Storage>({
+    getItem: (key) => storageValues.get(key) ?? null,
+    setItem: (key, value) => {
+      storageValues.set(key, value);
+    },
+    removeItem: (key) => {
+      storageValues.delete(key);
+    },
+    clear: () => {
+      storageValues.clear();
+    },
+  }),
+);
+
 const {
+  canOpenCloudProject,
   backupByDefaultNotice,
   fetchCloudProjects,
   materializeOnSignIn,
@@ -68,9 +88,19 @@ const status = (
   kind: RemoteFacet['kind'] = 'none',
   phase: RemoteFacet['phase'] = 'none',
 ): RevisionStatusProjection => {
-  const read: Pick<RevisionStatusProjection, 'headRevisionId' | 'remote'> = {
+  const read: Pick<RevisionStatusProjection, 'headRevisionId' | 'remote' | 'sync'> = {
     headRevisionId,
     remote: remote(kind, phase),
+    sync: {
+      state: 'checking',
+      pendingCount: 0,
+      online: true,
+      conflictRef: undefined,
+      error: undefined,
+      reason: undefined,
+      arrived: undefined,
+      hasAppliedRemote: false,
+    },
   };
   return read as RevisionStatusProjection;
 };
@@ -132,10 +162,14 @@ describe('nextTauCloudStep', () => {
     expect(nextTauCloudStep('open', { ...entitled, auth: 'indeterminate' }, status(undefined))).toBe('wait');
   });
 
-  it('should keep a materialized project owed until Tau Cloud is connected', () => {
+  it('should keep a materialized project owed until its authored manifest is reconciled', () => {
     expect(nextTauCloudStep('open', entitled, status(undefined, 'tau', 'connecting'))).toBe('wait');
     expect(nextTauCloudStep('open', entitled, status(undefined, 'tau', 'failed'))).toBe('wait');
-    expect(nextTauCloudStep('open', entitled, status(undefined, 'tau', 'connected'))).toBe('forget');
+    expect(nextTauCloudStep('open', entitled, status(undefined, 'tau', 'connected'))).toBe('wait');
+    const applied = status(undefined, 'tau', 'connected');
+    expect(nextTauCloudStep('open', entitled, { ...applied, sync: { ...applied.sync, hasAppliedRemote: true } })).toBe(
+      'wait',
+    );
   });
 });
 
@@ -160,6 +194,35 @@ describe('backupByDefaultNotice', () => {
 });
 
 describe('tauCloudIntent', () => {
+  it('keeps pending opens owned by the signed-in account, including unavailable storage', () => {
+    setRevisionSessionUser({ id: 'account-a', name: 'A' });
+    tauCloudIntent.set('owned-project', 'open');
+    expect(canOpenCloudProject('owned-project')).toBe(true);
+    setRevisionSessionUser({ id: 'account-b', name: 'B' });
+    expect(canOpenCloudProject('owned-project')).toBe(false);
+    const failingStorage = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('quota');
+    });
+    tauCloudIntent.set('memory-project', 'open');
+    failingStorage.mockRestore();
+    setRevisionSessionUser({ id: 'account-c', name: 'C' });
+    expect(canOpenCloudProject('memory-project')).toBe(false);
+    tauCloudIntent.set('owned-project', undefined);
+    tauCloudIntent.set('memory-project', undefined);
+    setRevisionSessionUser(undefined);
+  });
+
+  it('does not revive a settled open when storage removal fails', () => {
+    tauCloudIntent.set('settled-project', 'open');
+    const failingRemove = vi.spyOn(globalThis.localStorage, 'removeItem').mockImplementation(() => {
+      throw new Error('storage unavailable');
+    });
+    tauCloudIntent.set('settled-project', undefined);
+    expect(tauCloudIntent.get('settled-project')).toBeUndefined();
+    failingRemove.mockRestore();
+    tauCloudIntent.set('settled-project', undefined);
+  });
+
   beforeEach(() => {
     localStorage.clear();
   });

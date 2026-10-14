@@ -1,28 +1,12 @@
-# Staging desktop releases: a signed desktop build for taucad.dev, on demand.
-#
-# Dispatch this from `main` (GitHub or the Command Center). It creates a
-# `desktop-staging@<version>-staging.<n>` tag at the newest `main` commit whose
-# CI push run succeeded (Release build refuses any other, and main's head is
-# often still running or superseded), and a GitHub
-# prerelease for it with the tau-release-bot token, and that release starts
-# `release-build.yml`, which builds the desktop app exactly as it builds a
-# production release, packaged for the staging channel:
-#
-#   - It talks to taucad.dev and api.taucad.dev, never tau.new.
-#   - It never checks for updates, and its prerelease carries no update feeds
-#     and is never marked latest, so installed production apps never see it.
-#   - macOS is Developer ID signed and notarized from the `desktop-staging`
-#     environment, which holds the same Apple values as `desktop`; Linux and
-#     Windows are unsigned, as in production.
-#
-# `<version>` is the desktop manifest version on main and `<n>` is this
-# workflow's run number, so every dispatch makes a new prerelease. Nothing here
-# touches a `desktop@*` release, the production update feed or production.
 name: Release desktop to staging
 run-name: Release desktop to staging
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions: {}
 
@@ -33,7 +17,12 @@ concurrency:
 jobs:
   prerelease:
     name: Create the staging desktop prerelease
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -48,13 +37,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
           STAGING_SUPPORT_SHA: cd8f118318e7720aeace25d6871c6b478f352673
         run: |
           set -euo pipefail
           # Run listings come back in an unreliable order (a re-run keeps its
           # old creation time), so walk main's history newest first and ask
           # each commit whether its CI push run succeeded.
-          sha=
+          sha=$TRIGGER_SHA
+          if [ -z "$sha" ]; then
           for candidate in $(gh api "repos/${GH_REPO}/commits?sha=main&per_page=50" --jq '.[].sha'); do
             green=$(gh api "repos/${GH_REPO}/actions/workflows/ci.yml/runs?head_sha=${candidate}&branch=main&event=push" --jq 'any(.workflow_runs[]; .conclusion == "success")')
             if [ "$green" = true ]; then
@@ -62,6 +53,7 @@ jobs:
               break
             fi
           done
+          fi
           if [ -z "$sha" ]; then
             echo "::error::No ci.yml push run on main has succeeded yet."
             exit 1
@@ -91,8 +83,40 @@ jobs:
         with:
           ref: ${{ steps.target.outputs.sha }}
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Require OTA-capable source
+        run: test -f apps/desktop/src/main/ota-probe.ts && test -f apps/desktop/scripts/publish-desktop.mts
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Skip duplicate, obsolete or unaffected automatic candidates
+        id: selected
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET: ${{ steps.target.outputs.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          previous=$(gh release list --limit 100 --json tagName --jq '[.[] | select(.tagName | startswith("desktop-staging@"))][0].tagName // empty')
+          if [ "$EVENT" != workflow_dispatch ] && [ -n "$previous" ]; then
+            base=$(git rev-parse "$previous^{commit}")
+            if [ "$base" = "$TARGET" ] || ! git merge-base --is-ancestor "$base" "$TARGET"; then
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            pnpm nx show projects --affected --base="$base" --head="$TARGET" --json > "$RUNNER_TEMP/affected.json"
+            if ! jq -e 'index("desktop")' "$RUNNER_TEMP/affected.json" > /dev/null; then
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "release=true" >> "$GITHUB_OUTPUT"
 
       - name: Create the tag and prerelease
+        if: steps.selected.outputs.release == 'true'
         id: release
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
@@ -110,7 +134,7 @@ jobs:
           cat > "$RUNNER_TEMP/notes.md" <<NOTES
           Staging build of the Tau desktop app from \`${TARGET}\` on \`main\`.
 
-          It signs in to and works against https://taucad.dev, never production, and it does not check for updates. Install a newer staging prerelease by hand.
+          It signs in to and works against https://taucad.dev, never production, and follows its isolated staging update feed. macOS is Developer ID signed without notarization. The channel feed advances only after a native OTA acceptance test.
           NOTES
           sed -i 's/^          //' "$RUNNER_TEMP/notes.md"
           gh release create "$tag" --target "$TARGET" --title "Tau desktop staging ${version} (build ${RUN_NUMBER})" \
@@ -118,6 +142,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Summary
+        if: steps.selected.outputs.release == 'true'
         env:
           TAG: ${{ steps.release.outputs.tag }}
           REPOSITORY: ${{ github.repository }}

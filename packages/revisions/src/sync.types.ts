@@ -65,6 +65,12 @@ export type SyncFacet = Readonly<{
    * them is whether this host will retry on its own.
    */
   state: 'noRemote' | 'checking' | 'backedUp' | 'pending' | 'queued' | 'conflicted' | 'failed';
+  /** Inbound work, independent of the short backup-status checking window. */
+  pullPhase?: 'idle' | 'fetching' | 'applying' | 'records';
+  /** This actor has acknowledged authored integration for its current remote. Never persisted. */
+  hasAppliedRemote?: boolean;
+  /** Discovery/projection of optional chats, independent of authored checkout readiness. */
+  chats?: 'unknown' | 'loading' | 'ready' | 'disabled' | 'failed';
   /** The `n`: refs this device has not had acknowledged. */
   pendingCount: number;
   /** Whether this host believes it can reach anything at all. */

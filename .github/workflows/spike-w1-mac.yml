@@ -1,0 +1,1132 @@
+# Native dependency resolution charter, spike wave 1 on GitHub-hosted macOS runners: S14 and S15.
+#
+# S14 sets the `native-darwin` budget (D30): a seed of the darwin-arm64 closure blobs round-trips
+# through actions/cache, then the row prepares both kernels from it and runs the native
+# integration files, with a stopwatch per phase. `seed` runs the existing desktop producers once
+# (the Tau-built PicoGK layer comes from them, standing in for the release job's upload), fetches
+# the registry bytes from their origins and saves the seed; `s14 (hit)` restores it; `s14 (miss)`
+# fetches everything from the origins again and saves afterwards.
+#
+# S15 qualifies the D6/D10/W12 launch facts on clean macos-15 and macos-26 runners: Node-downloaded
+# payloads, launches wrapped by Tau's own sandbox profile with the notarised Tau.app (from a
+# desktop-staging release build) as the parent, a deliberately quarantined copy, APFS clones, the
+# runtime tarball muxer's entitlements, hostfxr's install_location handling and codesign without
+# Xcode. Downloaded bytes are inspected as data; the only programs run are the workers the charter
+# row names (inside the sandbox) and what the desktop producers already run in CI.
+#
+# The scripts are written inline so this file is the whole spike; it is deleted when W15 and W12
+# land (charter § Spikes). Results are re-emitted as check annotations and uploaded as artifacts.
+name: Spike wave 1 (macOS S14, S15)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tau-app-run-id:
+        description: 'release-build.yml run whose desktop-darwin-arm64 artifact is the notarised parent'
+        required: false
+        type: string
+        default: '38124001817'
+
+permissions:
+  actions: read # nrwl/nx-set-shas inside setup-nx, and the Tau.app artifact of another run
+  contents: read
+
+concurrency:
+  group: spike-w1-mac-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  seed:
+    name: S14 seed (producers, origin fetch, cache save)
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - &write-scripts
+        name: Write the spike scripts
+        run: |
+          mkdir -p "$RUNNER_TEMP/spike" "$RUNNER_TEMP/out"
+          cat > "$RUNNER_TEMP/spike/lib.sh" <<'SPIKE_EOF'
+          # Spike S14/S15 shell helpers: wall-clock marks (milliseconds) appended to $OUT/marks.tsv.
+          now() { node -e 'process.stdout.write(String(Date.now()))'; }
+          mark() { printf '%s\t%s\n' "$1" "$(now)" >> "$OUT/marks.tsv"; }
+          SPIKE_EOF
+          cat > "$RUNNER_TEMP/spike/seed.mjs" <<'SPIKE_EOF'
+          // Spike S14/S15 helper: fetch the darwin-arm64 closure blobs from their origins with Node fetch
+          // (as the host will), verify each digest before it is written, and re-verify a seed.
+          // Bytes are data here: nothing fetched is executed by this script.
+          // Usage:
+          //   node seed.mjs fetch <workspace> <seedDir> <record.json> [pbs,wheels,dotnet]
+          //   node seed.mjs verify <seedDir> <record.json>
+          import { createHash } from 'node:crypto';
+          import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          const [mode, ...args] = process.argv.slice(2);
+          const hex = (algorithm, bytes) => createHash(algorithm).update(bytes).digest('hex');
+
+          const fetchBytes = async (url) => {
+            const started = Date.now();
+            const response = await fetch(url, { signal: AbortSignal.timeout(300_000) });
+            if (!response.ok) {
+              throw new Error(`${url} answered HTTP ${response.status}`);
+            }
+            const bytes = new Uint8Array(await response.arrayBuffer());
+            return { bytes, milliseconds: Date.now() - started };
+          };
+
+          const write = (directory, name, bytes) => {
+            mkdirSync(directory, { recursive: true });
+            const path = join(directory, name);
+            const temporary = `${path}.${process.pid}.tmp`;
+            writeFileSync(temporary, bytes);
+            renameSync(temporary, path);
+            return path;
+          };
+
+          const pool = async (items, size, task) => {
+            const results = [];
+            let next = 0;
+            const workers = Array.from({ length: size }, async () => {
+              while (next < items.length) {
+                const index = next++;
+                results[index] = await task(items[index]);
+              }
+            });
+            await Promise.all(workers);
+            return results;
+          };
+
+          const evaluateMarker = (marker) => {
+            if (!marker) return true;
+            const environment = { sys_platform: 'darwin', platform_machine: 'arm64' };
+            const expression = marker
+              .replace(/\band\b/g, '&&')
+              .replace(/\bor\b/g, '||')
+              .replace(/\b(sys_platform|platform_machine)\b/g, 'environment.$1');
+            return Boolean(new Function('environment', `return (${expression});`)(environment));
+          };
+
+          const lockedPackages = (workspace) => {
+            const lock = readFileSync(join(workspace, 'packages/plugins/build123d/python/requirements.lock'), 'utf8');
+            return [
+              ...lock.matchAll(/^([A-Za-z0-9_.-]+)==(\S+)(?: ;([^\\\n]*))? \\\n((?:\s+--hash=sha256:[0-9a-f]{64}(?: \\)?\n)+)/gm),
+            ].map((match) => ({
+              name: match[1],
+              version: match[2],
+              marker: (match[3] ?? '').trim(),
+              hashes: new Set([...match[4].matchAll(/sha256:([0-9a-f]{64})/g)].map((hash) => hash[1])),
+            }));
+          };
+
+          // Tag preference for a macOS 15 arm64 CPython 3.13 host: arm64 over universal2 over any, newest
+          // macOS floor first. uv makes the final choice offline among what the seed holds.
+          const wheelRank = (filename) => {
+            const parts = filename.slice(0, -4).split('-');
+            const [python, abi, platforms] = parts.slice(-3);
+            const abi3Ok = (tag) => abi === 'abi3' && /^cp3(\d+)$/.test(tag) && Number(tag.slice(3)) <= 13;
+            const pythonOk = python.split('.').some((tag) => ['py3', 'cp313', 'py313'].includes(tag) || abi3Ok(tag));
+            const abiOk = ['none', 'abi3', 'cp313'].includes(abi);
+            if (!pythonOk || !abiOk) return -1;
+            let best = -1;
+            for (const platform of platforms.split('.')) {
+              if (platform === 'any') best = Math.max(best, 1);
+              const mac = /^macosx_(\d+)_(\d+)_(arm64|universal2)$/.exec(platform);
+              if (mac && Number(mac[1]) <= 15) {
+                best = Math.max(best, (mac[3] === 'arm64' ? 1000 : 500) + Number(mac[1]) * 10 + Number(mac[2]));
+              }
+            }
+            return best;
+          };
+
+          const fetchPbs = async (workspace, seed) => {
+            const source = JSON.parse(readFileSync(join(workspace, 'apps/desktop/resources/python/manifest.json'), 'utf8'));
+            const target = source.targets['darwin-arm64'];
+            const url = `https://github.com/astral-sh/python-build-standalone/releases/download/${source.pythonBuildStandaloneRelease}/${encodeURIComponent(target.archive)}`;
+            const { bytes, milliseconds } = await fetchBytes(url);
+            const sha256 = hex('sha256', bytes);
+            if (sha256 !== target.sha256) throw new Error(`PBS digest mismatch ${sha256}`);
+            write(join(seed, 'archives'), target.archive, bytes);
+            return [{ kind: 'pbs', name: target.archive, url, algorithm: 'sha256', digest: sha256, path: `archives/${target.archive}`, bytes: bytes.length, milliseconds }];
+          };
+
+          const fetchWheels = async (workspace, seed) => {
+            const pins = lockedPackages(workspace).filter((pin) => evaluateMarker(pin.marker));
+            const records = await pool(pins, 6, async (pin) => {
+              const metadata = await (await fetch(`https://pypi.org/pypi/${pin.name}/${pin.version}/json`)).json();
+              const candidates = metadata.urls
+                .filter((file) => file.packagetype === 'bdist_wheel' && pin.hashes.has(file.digests.sha256))
+                .map((file) => ({ file, rank: wheelRank(file.filename) }))
+                .filter(({ rank }) => rank >= 0)
+                .sort((left, right) => right.rank - left.rank);
+              if (candidates.length === 0) throw new Error(`No darwin-arm64 wheel for ${pin.name}==${pin.version}`);
+              const { file } = candidates[0];
+              const { bytes, milliseconds } = await fetchBytes(file.url);
+              const sha256 = hex('sha256', bytes);
+              if (!pin.hashes.has(sha256)) throw new Error(`Wheel digest not in the lock: ${file.filename}`);
+              write(join(seed, 'wheels'), file.filename, bytes);
+              return { kind: 'wheel', name: file.filename, url: file.url, algorithm: 'sha256', digest: sha256, path: `wheels/${file.filename}`, bytes: bytes.length, milliseconds };
+            });
+            return records;
+          };
+
+          const fetchDotnet = async (seed) => {
+            const metadataUrl = 'https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json';
+            const metadata = await (await fetch(metadataUrl)).json();
+            const release = metadata.releases.find((entry) => entry.runtime?.version === '10.0.11');
+            const candidates = release.runtime.files.filter((entry) => entry.rid === 'osx-arm64').map((entry) => entry.name);
+            console.log(`releases.json osx-arm64 runtime files: ${candidates.join(', ')}`);
+            const file = release.runtime.files.find((entry) => entry.rid === 'osx-arm64' && entry.name === 'dotnet-runtime-osx-arm64.tar.gz');
+            if (!file) throw new Error('releases.json lists no dotnet-runtime-osx-arm64.tar.gz for 10.0.11');
+            const { bytes, milliseconds } = await fetchBytes(file.url);
+            const sha512 = hex('sha512', bytes);
+            if (sha512 !== file.hash.toLowerCase()) throw new Error(`.NET runtime digest mismatch ${sha512}`);
+            const name = 'dotnet-runtime-10.0.11-osx-arm64.tar.gz';
+            write(join(seed, 'archives'), name, bytes);
+            return [{ kind: 'dotnet-runtime', name, url: file.url, metadataUrl, algorithm: 'sha512', digest: sha512, path: `archives/${name}`, bytes: bytes.length, milliseconds }];
+          };
+
+          const summarize = (records, milliseconds) => {
+            const byKind = {};
+            for (const record of records) {
+              byKind[record.kind] ??= { count: 0, bytes: 0 };
+              byKind[record.kind].count += 1;
+              byKind[record.kind].bytes += record.bytes;
+            }
+            const bytes = records.reduce((sum, record) => sum + record.bytes, 0);
+            return { files: records.length, bytes, megabytes: Number((bytes / 1e6).toFixed(1)), milliseconds, byKind };
+          };
+
+          if (mode === 'fetch') {
+            const [workspace, seed, recordPath, kinds = 'pbs,wheels,dotnet'] = args;
+            const selected = new Set(kinds.split(','));
+            const started = Date.now();
+            const parts = await Promise.all([
+              selected.has('pbs') ? fetchPbs(workspace, seed) : [],
+              selected.has('wheels') ? fetchWheels(workspace, seed) : [],
+              selected.has('dotnet') ? fetchDotnet(seed) : [],
+            ]);
+            const records = parts.flat();
+            const milliseconds = Date.now() - started;
+            let index = [];
+            try {
+              index = JSON.parse(readFileSync(join(seed, 'index.json'), 'utf8')).filter((entry) => !records.some((record) => record.path === entry.path));
+            } catch {}
+            writeFileSync(join(seed, 'index.json'), `${JSON.stringify([...index, ...records], undefined, 2)}\n`);
+            const summary = { mode, ...summarize(records, milliseconds), records };
+            writeFileSync(recordPath, `${JSON.stringify(summary, undefined, 2)}\n`);
+            console.log(JSON.stringify({ mode, ...summarize(records, milliseconds) }));
+          } else if (mode === 'add') {
+            // Register a Tau-built blob already placed in the seed (the PicoGK layer).
+            const [seed, relativePath, kind] = args;
+            const bytes = readFileSync(join(seed, relativePath));
+            const index = JSON.parse(readFileSync(join(seed, 'index.json'), 'utf8')).filter((entry) => entry.path !== relativePath);
+            index.push({ kind, name: relativePath.split('/').pop(), algorithm: 'sha256', digest: hex('sha256', bytes), path: relativePath, bytes: bytes.length });
+            writeFileSync(join(seed, 'index.json'), `${JSON.stringify(index, undefined, 2)}\n`);
+            console.log(JSON.stringify({ added: relativePath, bytes: bytes.length }));
+          } else if (mode === 'verify') {
+            const [seed, recordPath] = args;
+            const started = Date.now();
+            const index = JSON.parse(readFileSync(join(seed, 'index.json'), 'utf8'));
+            const failures = [];
+            for (const entry of index) {
+              const digest = hex(entry.algorithm, readFileSync(join(seed, entry.path)));
+              if (digest !== entry.digest) failures.push(entry.path);
+            }
+            const onDisk = [];
+            const visit = (directory) => {
+              for (const entry of readdirSync(directory, { withFileTypes: true })) {
+                if (entry.isDirectory()) visit(join(directory, entry.name));
+                else onDisk.push(statSync(join(directory, entry.name)).size);
+              }
+            };
+            visit(seed);
+            const summary = {
+              mode,
+              files: index.length,
+              bytes: index.reduce((sum, entry) => sum + entry.bytes, 0),
+              seedDirectoryBytes: onDisk.reduce((sum, size) => sum + size, 0),
+              milliseconds: Date.now() - started,
+              failures,
+            };
+            writeFileSync(recordPath, `${JSON.stringify(summary, undefined, 2)}\n`);
+            console.log(JSON.stringify(summary));
+            if (failures.length > 0) process.exit(1);
+          } else {
+            console.error('usage: seed.mjs fetch|add|verify ...');
+            process.exit(2);
+          }
+          SPIKE_EOF
+          cat > "$RUNNER_TEMP/spike/fd-layer.mjs" <<'SPIKE_EOF'
+          // Spike S15 helper: derive a framework-dependent Tau PicoGK layer (D6, R2 variant B) from the
+          // self-contained tree the desktop producer published. The layer is every file the Microsoft
+          // runtime pack does not supply, minus the apphost and the self-contained deps.json, plus a
+          // runtimeconfig that names Microsoft.NETCore.App 10.0.11, so Microsoft's muxer launches it.
+          // Usage: node fd-layer.mjs <self-contained-tree> <runtime-pack-rid-dir> <out-dir> <record.json>
+          import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          const [tree, runtimePack, out, recordPath] = process.argv.slice(2);
+          const runtimeNames = new Set([
+            ...readdirSync(join(runtimePack, 'lib/net10.0')),
+            ...readdirSync(join(runtimePack, 'native')),
+          ]);
+          const excluded = new Set(['Tau.PicoGK.Worker', 'Tau.PicoGK.Worker.deps.json', 'tau-runtime-manifest.json']);
+          rmSync(out, { recursive: true, force: true });
+          mkdirSync(out, { recursive: true });
+          const kept = [];
+          const dropped = [];
+          for (const entry of readdirSync(tree, { withFileTypes: true })) {
+            if (excluded.has(entry.name) || (!entry.isDirectory() && runtimeNames.has(entry.name))) {
+              dropped.push(entry.name);
+              continue;
+            }
+            cpSync(join(tree, entry.name), join(out, entry.name), { recursive: true });
+            kept.push(entry.name);
+          }
+          const configPath = join(out, 'Tau.PicoGK.Worker.runtimeconfig.json');
+          const config = JSON.parse(readFileSync(configPath, 'utf8'));
+          const selfContained = structuredClone(config);
+          delete config.runtimeOptions.includedFrameworks;
+          config.runtimeOptions.framework = { name: 'Microsoft.NETCore.App', version: '10.0.11' };
+          writeFileSync(configPath, `${JSON.stringify(config, undefined, 2)}\n`);
+          const bytes = (root) =>
+            readdirSync(root, { withFileTypes: true, recursive: true })
+              .filter((entry) => entry.isFile())
+              .reduce((sum, entry) => sum + statSync(join(entry.parentPath, entry.name)).size, 0);
+          const record = {
+            selfContainedTreeBytes: bytes(tree),
+            layerBytes: bytes(out),
+            keptTopLevel: kept.length,
+            droppedTopLevel: dropped.length,
+            runtimePackNames: runtimeNames.size,
+            kept: kept.sort(),
+            selfContainedRuntimeConfig: selfContained,
+            frameworkDependentRuntimeConfig: config,
+          };
+          writeFileSync(recordPath, `${JSON.stringify(record, undefined, 2)}\n`);
+          console.log(JSON.stringify({ ...record, kept: undefined, selfContainedRuntimeConfig: undefined }));
+          SPIKE_EOF
+          cat > "$RUNNER_TEMP/spike/s14-summary.mjs" <<'SPIKE_EOF'
+          // Spike S14 summary: phase durations from $OUT/marks.tsv plus the fetch/verify records, judged
+          // against the charter line (cache round trip <= 60 s each way; hit <= 10 min, miss <= 13 min).
+          // Usage: node s14-summary.mjs <out-dir> <role> <summary.txt>
+          import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          const [out, role, summaryPath] = process.argv.slice(2);
+          const marks = new Map(
+            readFileSync(join(out, 'marks.tsv'), 'utf8')
+              .trim()
+              .split('\n')
+              .map((line) => line.split('\t'))
+              .map(([name, value]) => [name, Number(value)]),
+          );
+          const seconds = (from, to) =>
+            marks.has(from) && marks.has(to) ? Number(((marks.get(to) - marks.get(from)) / 1000).toFixed(1)) : null;
+          const phases = {
+            setup: seconds('job:start', 'setup:end'),
+            producerBuild123d: seconds('producer-build123d:start', 'producer-build123d:end'),
+            producerPicogk: seconds('producer-picogk:start', 'producer-picogk:end'),
+            originFetch: seconds('fetch:start', 'fetch:end'),
+            tauLayerDownload: seconds('layer:start', 'layer:end'),
+            cacheSave: seconds('save:start', 'save:end'),
+            cacheRestore: seconds('restore:start', 'restore:end'),
+            verify: seconds('verify:start', 'verify:end'),
+            prepareBuild123d: seconds('prepare-build123d:start', 'prepare-build123d:end'),
+            preparePicogk: seconds('prepare-picogk:start', 'prepare-picogk:end'),
+            prepareTotal: seconds('verify:start', 'prepare-picogk:end'),
+            testsNativeProcess: seconds('tests-native-process:start', 'tests-native-process:end'),
+            testsBuild123d: seconds('tests-build123d:start', 'tests-build123d:end'),
+            testsPicogk: seconds('tests-picogk:start', 'tests-picogk:end'),
+            testsTotal: seconds('tests-native-process:start', 'tests-picogk:end'),
+            rowFromJobStart: seconds('job:start', 'tests-picogk:end'),
+            rowFromAcquisition: seconds(role === 'miss' ? 'fetch:start' : 'restore:start', 'tests-picogk:end'),
+          };
+          const read = (name) => (existsSync(join(out, name)) ? JSON.parse(readFileSync(join(out, name), 'utf8')) : undefined);
+          const fetchRecord = read('fetch.json');
+          const verifyRecord = read('verify.json');
+          const exits = read('test-exits.json');
+          const lines = [`S14 ${role} (${process.env.RUNNER_NAME ?? 'runner'}, ${process.env.ImageOS ?? ''} ${process.env.ImageVersion ?? ''})`];
+          for (const [name, value] of Object.entries(phases)) {
+            if (value !== null) lines.push(`${name}: ${value} s`);
+          }
+          if (fetchRecord) {
+            const mbps = fetchRecord.milliseconds > 0 ? ((fetchRecord.bytes * 8) / 1e6 / (fetchRecord.milliseconds / 1000)).toFixed(0) : 'n/a';
+            lines.push(`origin fetch: ${fetchRecord.files} files, ${fetchRecord.megabytes} MB in ${fetchRecord.milliseconds} ms (${mbps} Mbit/s) ${JSON.stringify(fetchRecord.byKind)}`);
+          }
+          if (verifyRecord) {
+            lines.push(`seed: ${verifyRecord.files} blobs, ${(verifyRecord.bytes / 1e6).toFixed(1)} MB indexed, ${(verifyRecord.seedDirectoryBytes / 1e6).toFixed(1)} MB on disk; full digest verify ${verifyRecord.milliseconds} ms; failures ${verifyRecord.failures.length}`);
+          }
+          if (exits) lines.push(`test exits: ${JSON.stringify(exits)}`);
+          const testsGreen = exits ? Object.values(exits).every((code) => code === 0) : null;
+          if (role === 'hit') {
+            const restoreOk = phases.cacheRestore !== null && phases.cacheRestore <= 60;
+            const rowOk = phases.rowFromJobStart !== null && phases.rowFromJobStart <= 600;
+            lines.push(`verdict: restore <= 60 s ${restoreOk ? 'PASS' : 'FAIL'}; row <= 600 s ${rowOk ? 'PASS' : 'FAIL'}; suites green ${testsGreen}`);
+          }
+          if (role === 'miss') {
+            const rowOk = phases.rowFromJobStart !== null && phases.rowFromJobStart <= 780;
+            const withSave = seconds('job:start', 'save:end');
+            lines.push(`row incl. post-run cache save: ${withSave} s`);
+            lines.push(`verdict: row <= 780 s ${rowOk ? 'PASS' : 'FAIL'}; suites green ${testsGreen}`);
+          }
+          if (role === 'seed') {
+            const saveOk = phases.cacheSave !== null && phases.cacheSave <= 60;
+            lines.push(`verdict: save <= 60 s ${saveOk ? 'PASS' : 'FAIL'}`);
+          }
+          writeFileSync(summaryPath, `${lines.join('\n')}\n`);
+          writeFileSync(join(out, `s14-${role}.json`), `${JSON.stringify({ role, phases, fetchRecord: fetchRecord && { ...fetchRecord, records: undefined }, verifyRecord, exits, marks: Object.fromEntries(marks) }, undefined, 2)}\n`);
+          console.log(lines.join('\n'));
+          SPIKE_EOF
+          cat > "$RUNNER_TEMP/spike/helper.mts" <<'SPIKE_EOF'
+          // Spike S15 helper: wrap each worker launch in Tau's own sandbox (launchInNativeSandbox, the
+          // production profile), then hand the spawn vectors to a launcher that runs inside the notarised
+          // Tau.app binary (ELECTRON_RUN_AS_NODE), so the notarised app is the workers' parent.
+          // Usage: node --import @oxc-node/core/register out/spike-w1/helper.mts <spec.json> <tau-executable> <launcher.cjs> <results.json> <root>
+          import { spawn } from 'node:child_process';
+          import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          import { launchInNativeSandbox } from '../../packages/core/native-process/src/native-sandbox.ts';
+
+          type Spec = {
+            readonly name: string;
+            readonly executablePath: string;
+            readonly arguments: readonly string[];
+            readonly readablePaths: readonly string[];
+            readonly extraEnv?: Readonly<Record<string, string>>;
+          };
+
+          const [specPath, tauExecutable, launcherPath, resultsPath, root] = process.argv.slice(2) as [string, string, string, string, string];
+          const specs = JSON.parse(readFileSync(specPath, 'utf8')) as Spec[];
+          const fill = (value: string, workspace: string, artifacts: string): string =>
+            value.replaceAll('{workspace}', workspace).replaceAll('{artifacts}', artifacts).replaceAll('{parentPid}', String(process.pid));
+          const launches = [];
+          for (const spec of specs) {
+            const workspace = join(root, `ws-${spec.name}`);
+            const artifacts = join(root, `art-${spec.name}`);
+            mkdirSync(workspace, { recursive: true });
+            mkdirSync(artifacts, { recursive: true });
+            const argv = await launchInNativeSandbox({
+              executablePath: spec.executablePath,
+              arguments: spec.arguments.map((value) => fill(value, workspace, artifacts)),
+              readablePaths: [...spec.readablePaths, workspace],
+              writablePath: artifacts,
+              workingDirectory: workspace,
+              commandId: spec.name,
+            });
+            const env: Record<string, string> = {
+              LANG: 'C.UTF-8',
+              LC_ALL: 'C.UTF-8',
+              HOME: artifacts,
+              TMPDIR: artifacts,
+              TEMP: artifacts,
+              TMP: artifacts,
+              PATH: '/usr/bin:/bin',
+            };
+            for (const [name, value] of Object.entries(spec.extraEnv ?? {})) {
+              env[name] = fill(value, workspace, artifacts);
+            }
+            launches.push({ name: spec.name, argv, env, cwd: workspace, artifacts });
+          }
+          const launchesPath = join(root, 'launches.json');
+          writeFileSync(launchesPath, `${JSON.stringify(launches, undefined, 2)}\n`);
+          console.log(`helper pid ${process.pid}; ${launches.length} sandboxed launch vectors written`);
+
+          const runParent = async (executable: string, extra: Record<string, string>): Promise<unknown> =>
+            new Promise((resolve) => {
+              const child = spawn(executable, [launcherPath, launchesPath, resultsPath], {
+                env: { ...process.env, ...extra },
+                stdio: 'inherit',
+              });
+              child.once('error', (error) => resolve({ error: String(error) }));
+              child.once('exit', (code, signal) => resolve({ code, signal }));
+            });
+          const tau = await runParent(tauExecutable, { ELECTRON_RUN_AS_NODE: '1' });
+          console.log(`Tau parent exit: ${JSON.stringify(tau)}`);
+          if (!existsSync(resultsPath)) {
+            console.log('The Tau parent wrote no results; running the launcher under this Node instead');
+            console.log(`Node parent exit: ${JSON.stringify(await runParent(process.execPath, {}))}`);
+          }
+          process.exit(0);
+          SPIKE_EOF
+          cat > "$RUNNER_TEMP/spike/launcher.cjs" <<'SPIKE_EOF'
+          // Spike S15 launcher: runs inside the notarised Tau binary as Node (ELECTRON_RUN_AS_NODE) and
+          // spawns each sandboxed worker vector exactly as NativeProcessSession does (detached, shell
+          // false, the fixed environment), then records the first stdout frame or how the launch ended.
+          'use strict';
+          const { spawn } = require('node:child_process');
+          const fs = require('node:fs');
+
+          const [launchesPath, resultsPath] = process.argv.slice(2);
+          const launches = JSON.parse(fs.readFileSync(launchesPath, 'utf8'));
+
+          const launch = (entry) =>
+            new Promise((resolve) => {
+              const started = Date.now();
+              let stdout = '';
+              let stderr = '';
+              let settled = false;
+              let firstFrame;
+              let firstFrameMs;
+              let child;
+              const kill = (signal) => {
+                try {
+                  process.kill(-child.pid, signal);
+                } catch {}
+              };
+              const finish = (extra) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                resolve({
+                  name: entry.name,
+                  pid: child && child.pid,
+                  elapsedMs: Date.now() - started,
+                  ready: Boolean(firstFrame && firstFrame.type === 'ready'),
+                  firstFrame,
+                  firstFrameMs,
+                  stdoutHead: stdout.slice(0, 1500),
+                  stderrHead: stderr.slice(0, 4000),
+                  ...extra,
+                });
+              };
+              try {
+                child = spawn(entry.argv[0], entry.argv.slice(1), {
+                  cwd: entry.cwd,
+                  env: entry.env,
+                  detached: true,
+                  shell: false,
+                  stdio: ['pipe', 'pipe', 'pipe'],
+                });
+              } catch (error) {
+                resolve({ name: entry.name, spawnError: String(error) });
+                return;
+              }
+              const timer = setTimeout(() => {
+                kill('SIGKILL');
+                finish({ timedOut: true });
+              }, 120000);
+              child.stdout.on('data', (chunk) => {
+                stdout += chunk;
+                const newline = stdout.indexOf('\n');
+                if (newline >= 0 && firstFrameMs === undefined) {
+                  firstFrameMs = Date.now() - started;
+                  try {
+                    firstFrame = JSON.parse(stdout.slice(0, newline));
+                  } catch {
+                    firstFrame = { unparsed: stdout.slice(0, newline).slice(0, 300) };
+                  }
+                  kill('SIGTERM');
+                  setTimeout(() => kill('SIGKILL'), 3000);
+                }
+              });
+              child.stderr.on('data', (chunk) => {
+                stderr += chunk;
+              });
+              child.once('error', (error) => finish({ spawnError: String(error) }));
+              child.once('exit', (code, signal) => setTimeout(() => finish({ exitCode: code, exitSignal: signal }), 300));
+            });
+
+          (async () => {
+            const results = [];
+            for (const entry of launches) {
+              const result = await launch(entry);
+              console.log(
+                `${result.name}: ready=${result.ready} firstFrameMs=${result.firstFrameMs} exit=${result.exitCode}/${result.exitSignal} ` +
+                  `${result.timedOut ? 'TIMEOUT ' : ''}${result.spawnError ?? ''} stderr=${JSON.stringify((result.stderrHead || '').slice(0, 300))}`,
+              );
+              results.push(result);
+            }
+            const parent = {
+              execPath: process.execPath,
+              electron: process.versions.electron,
+              node: process.versions.node,
+              pid: process.pid,
+              ppid: process.ppid,
+            };
+            fs.writeFileSync(resultsPath, `${JSON.stringify({ parent, results }, undefined, 2)}\n`);
+            console.log(`parent ${JSON.stringify(parent)}`);
+          })();
+          SPIKE_EOF
+          cat > "$RUNNER_TEMP/spike/s15-summary.mjs" <<'SPIKE_EOF'
+          // Spike S15 summary: the eight observations of the charter row, one cell each, from the raw files
+          // the job wrote. Usage: node s15-summary.mjs <out-dir> <summary.txt>
+          import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          const [out, summaryPath] = process.argv.slice(2);
+          const text = (name) => (existsSync(join(out, name)) ? readFileSync(join(out, name), 'utf8') : '');
+          const env = (name) =>
+            Object.fromEntries(
+              text(name)
+                .split('\n')
+                .filter((line) => line.includes('='))
+                .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
+            );
+          const results = existsSync(join(out, 'results.json')) ? JSON.parse(text('results.json')) : { results: [] };
+          const byName = Object.fromEntries(results.results.map((result) => [result.name, result]));
+          const ready = (name) => byName[name]?.ready === true;
+          const outcome = (name) => {
+            const result = byName[name];
+            if (!result) return 'not run';
+            if (result.ready) return `ready in ${result.firstFrameMs} ms`;
+            return `refused: exit=${result.exitCode}/${result.exitSignal}${result.timedOut ? ' timeout' : ''} stderr=${JSON.stringify((result.stderrHead ?? '').trim().slice(0, 160))}`;
+          };
+
+          const quarantineRows = text('o1-quarantine.tsv').trim().split('\n').filter(Boolean).map((line) => line.split('\t'));
+          const quarantined = quarantineRows.filter(([, count]) => Number(count) > 0);
+          const o4 = env('o4.env');
+          const cloneKB = Number(o4.PYTHON_CLONE_DELTA_KB) + Number(o4.STORE_CLONE_DELTA_KB);
+          const treeKB = Number(o4.PYTHON_TREE_KB) + Number(o4.STORE_TREE_KB);
+          const entitlements = text('o6-entitlements.txt');
+          const trace = text('o7-trace-grep.txt');
+          const o8 = env('o8.env');
+          const log = text('o2-syspolicy-log.txt');
+          const logLines = log.split('\n').filter((line) => line.trim() && !line.startsWith('Timestamp') && !line.startsWith('Filtering'));
+          const facts = env('facts.env');
+
+          const cells = [
+            ['O1 no com.apple.quarantine on Node-downloaded payloads', quarantineRows.length > 0 && quarantined.length === 0, `${quarantineRows.length} paths checked; quarantined: ${quarantined.map(([label]) => label).join(', ') || 'none'}`],
+            ['O2 launch under the notarised parent, no syspolicyd prompt', ready('b123d-orig') && ready('muxer-orig') && results.parent?.electron !== undefined, `parent electron=${results.parent?.electron} ${results.parent?.execPath}; b123d-orig ${outcome('b123d-orig')}; muxer-orig ${outcome('muxer-orig')}; picogk-sc-orig ${outcome('picogk-sc-orig')}; syspolicy log lines in window: ${logLines.length}`],
+            ['O3 quarantined copy refused with a stable message', ['b123d-q-exe', 'b123d-q-all', 'muxer-q-exe', 'muxer-q-all', 'picogk-sc-q-exe'].every((name) => byName[name] && !byName[name].ready), ['b123d-q-exe', 'b123d-q-all', 'muxer-q-exe', 'muxer-q-all', 'picogk-sc-q-exe'].map((name) => `${name} ${outcome(name)}`).join('; ')],
+            ['O4 cp -c -R seeding is free', cloneKB < treeKB * 0.01, `clone delta ${cloneKB} KB for ${treeKB} KB of trees (python ${o4.PYTHON_CLONE_DELTA_KB} KB in ${o4.PYTHON_CLONE_SECONDS} s, store ${o4.STORE_CLONE_DELTA_KB} KB in ${o4.STORE_CLONE_SECONDS} s); control byte copy of the store ${o4.STORE_COPY_DELTA_KB} KB`],
+            ['O5 both kernels start from the clone', ready('b123d-clone') && ready('muxer-clone'), `b123d-clone ${outcome('b123d-clone')}; muxer-clone ${outcome('muxer-clone')}`],
+            ['O6 runtime-tarball muxer carries allow-jit and disable-library-validation', entitlements.includes('com.apple.security.cs.allow-jit') && entitlements.includes('com.apple.security.cs.disable-library-validation'), entitlements.replace(/\s+/g, ' ').slice(0, 400)],
+            ['O7 hostfxr in muxer mode ignores /etc/dotnet/install_location', ready('muxer-orig') && text('corehost-trace.txt').length > 0 && !text('corehost-trace.txt').includes(o8.BOGUS_ROOT || '/nonexistent'), trace.split('\n').slice(0, 6).join(' | ').slice(0, 600)],
+            ['O8 codesign exists without Xcode', o8.CODESIGN_NO_DEVELOPER_DIR_EXIT === '0' && o8.GIT_SHIM_NO_DEVELOPER_DIR_EXIT !== '0', `codesign with DEVELOPER_DIR=/nonexistent exit ${o8.CODESIGN_NO_DEVELOPER_DIR_EXIT}; xcrun-shim control (git) exit ${o8.GIT_SHIM_NO_DEVELOPER_DIR_EXIT}; ${o8.CODESIGN_PKG ?? ''}`],
+          ];
+          const lines = [`S15 on ${facts.PRODUCT_VERSION ?? '?'} (${facts.BUILD_VERSION ?? '?'}), Gatekeeper ${facts.SPCTL_STATUS_AFTER ?? facts.SPCTL_STATUS ?? '?'}, SIP ${facts.SIP ?? '?'}`];
+          for (const [name, pass, detail] of cells) lines.push(`${pass ? 'PASS' : 'FAIL'} ${name}: ${detail}`);
+          writeFileSync(summaryPath, `${lines.join('\n')}\n`);
+          writeFileSync(join(out, 's15-cells.json'), `${JSON.stringify({ facts, cells: cells.map(([name, pass, detail]) => ({ name, pass, detail })) }, undefined, 2)}\n`);
+          console.log(lines.join('\n'));
+          SPIKE_EOF
+          cat > "$RUNNER_TEMP/spike/annotate.mjs" <<'SPIKE_EOF'
+          // Re-emit a spike summary as notice annotations (at most 9 chunks of about 3800 characters), so the
+          // numbers are readable through the check-runs REST API. Portable: no GNU split on macOS.
+          // Usage: node annotate.mjs <title> <file>
+          import { existsSync, readFileSync } from 'node:fs';
+
+          const [title, file] = process.argv.slice(2);
+          if (!existsSync(file)) {
+            console.log(`::warning title=${title}::no summary file ${file}`);
+            process.exit(0);
+          }
+          const escape = (value) => value.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+          const chunks = [];
+          let current = '';
+          for (const line of readFileSync(file, 'utf8').split('\n')) {
+            if (current.length + line.length + 1 > 3800 && current) {
+              chunks.push(current);
+              current = '';
+            }
+            current += `${line.slice(0, 3800)}\n`;
+          }
+          if (current.trim()) chunks.push(current);
+          chunks.slice(0, 9).forEach((chunk, index) => console.log(`::notice title=${title} (${index + 1})::${escape(chunk)}`));
+          if (chunks.length > 9) console.log(`::warning title=${title}::summary truncated after 9 notices`);
+          SPIKE_EOF
+          {
+            echo "OUT=$RUNNER_TEMP/out"
+            echo "SPIKE=$RUNNER_TEMP/spike"
+            echo "SEED=$RUNNER_TEMP/seed"
+            echo "S15=$RUNNER_TEMP/s15"
+          } >> "$GITHUB_ENV"
+          OUT="$RUNNER_TEMP/out"
+          . "$RUNNER_TEMP/spike/lib.sh"
+          mark job:start
+
+      - &checkout
+        name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - &setup-nx
+        name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+          save-pnpm-store: 'false'
+
+      - &install-uv
+        name: Install uv
+        run: |
+          command -v uv || pipx install uv
+          uv --version
+          . "$SPIKE/lib.sh"
+          mark setup:end
+
+      - name: Host facts
+        run: |
+          sw_vers
+          sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
+          df -k "$RUNNER_TEMP"
+          cmake --version | head -1
+          ninja --version
+
+      - name: Run the build123d producer (as CI runs it)
+        run: |
+          . "$SPIKE/lib.sh"
+          mark producer-build123d:start
+          pnpm nx run desktop:prepare-build123d-python-macos
+          mark producer-build123d:end
+
+      - name: Run the PicoGK producer (as CI runs it)
+        run: |
+          . "$SPIKE/lib.sh"
+          mark producer-picogk:start
+          pnpm nx run desktop:prepare-picogk-dotnet-macos
+          mark producer-picogk:end
+
+      - name: Fetch the closure blobs from their origins into the seed
+        run: |
+          . "$SPIKE/lib.sh"
+          mark fetch:start
+          node "$SPIKE/seed.mjs" fetch "$GITHUB_WORKSPACE" "$SEED" "$OUT/fetch.json"
+          mark fetch:end
+
+      - name: Add the Tau PicoGK layer and derive the framework-dependent layer
+        run: |
+          mkdir -p "$SEED/tau" "$RUNNER_TEMP/layer"
+          tar -czf "$SEED/tau/picogk-darwin-arm64.tar.gz" -C apps/desktop/resources/picogk darwin-arm64
+          node "$SPIKE/seed.mjs" add "$SEED" tau/picogk-darwin-arm64.tar.gz tau-layer
+          pack=out/cache/picogk/nuget-packages/microsoft.netcore.app.runtime.osx-arm64/10.0.11/runtimes/osx-arm64
+          [ -d "$pack" ] || pack=out/cache/picogk/dotnet-10.0.400-darwin-arm64/packs/Microsoft.NETCore.App.Runtime.osx-arm64/10.0.11/runtimes/osx-arm64
+          node "$SPIKE/fd-layer.mjs" apps/desktop/resources/picogk/darwin-arm64 "$pack" "$RUNNER_TEMP/fd-layer" "$OUT/fd-layer.json"
+          tar -czf "$RUNNER_TEMP/layer/picogk-fd-layer.tar.gz" -C "$RUNNER_TEMP/fd-layer" .
+          cp "$SEED/tau/picogk-darwin-arm64.tar.gz" "$RUNNER_TEMP/layer/"
+          ls -l "$RUNNER_TEMP/layer"
+          node "$SPIKE/seed.mjs" verify "$SEED" "$OUT/verify.json"
+
+      - name: Upload the Tau layers (stand-in for the release upload)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-w1-tau-layer
+          path: ${{ runner.temp }}/layer
+          compression-level: 0
+          retention-days: 5
+          if-no-files-found: error
+
+      - name: Start the save stopwatch
+        run: |
+          . "$SPIKE/lib.sh"
+          mark save:start
+
+      - name: Save the seed (actions/cache)
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ runner.temp }}/seed
+          key: spike-w1-seed-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Stop the save stopwatch
+        run: |
+          . "$SPIKE/lib.sh"
+          mark save:end
+
+      - &summarize-s14
+        name: Summarize S14 against the charter line
+        if: always()
+        run: node "$SPIKE/s14-summary.mjs" "$OUT" "${S14_ROLE:-seed}" "$OUT/summary.txt"
+
+      - &annotate
+        name: Publish the summary as check annotations
+        if: always()
+        run: |
+          node "$SPIKE/annotate.mjs" "${{ github.job }}${{ matrix.role && format(' {0}', matrix.role) || '' }}${{ matrix.runner && format(' {0}', matrix.runner) || '' }}" "$OUT/summary.txt"
+
+      - &upload-evidence
+        name: Upload the evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-w1-${{ github.job }}${{ matrix.role && format('-{0}', matrix.role) || '' }}${{ matrix.runner && format('-{0}', matrix.runner) || '' }}
+          path: ${{ runner.temp }}/out
+          retention-days: 30
+          if-no-files-found: warn
+
+  s14:
+    name: S14 ${{ matrix.role }} (restore or fetch, prepare, native suites)
+    needs: seed
+    runs-on: macos-15
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [hit, miss]
+    env:
+      S14_ROLE: ${{ matrix.role }}
+    steps:
+      - *write-scripts
+      - *checkout
+      - *setup-nx
+      - *install-uv
+
+      - name: Start the restore stopwatch
+        if: matrix.role == 'hit'
+        run: |
+          . "$SPIKE/lib.sh"
+          mark restore:start
+
+      - name: Restore the seed (actions/cache)
+        if: matrix.role == 'hit'
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ runner.temp }}/seed
+          key: spike-w1-seed-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-cache-miss: true
+
+      - name: Stop the restore stopwatch
+        if: matrix.role == 'hit'
+        run: |
+          . "$SPIKE/lib.sh"
+          mark restore:end
+
+      - name: Fetch the closure blobs from their origins
+        if: matrix.role == 'miss'
+        run: |
+          . "$SPIKE/lib.sh"
+          mark fetch:start
+          node "$SPIKE/seed.mjs" fetch "$GITHUB_WORKSPACE" "$SEED" "$OUT/fetch.json"
+          mark fetch:end
+          mark layer:start
+
+      - name: Download the Tau layer (stand-in for the release download)
+        if: matrix.role == 'miss'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: spike-w1-tau-layer
+          path: ${{ runner.temp }}/layer
+
+      - name: Register the Tau layer in the seed
+        if: matrix.role == 'miss'
+        run: |
+          . "$SPIKE/lib.sh"
+          mkdir -p "$SEED/tau"
+          mv "$RUNNER_TEMP/layer/picogk-darwin-arm64.tar.gz" "$SEED/tau/"
+          node "$SPIKE/seed.mjs" add "$SEED" tau/picogk-darwin-arm64.tar.gz tau-layer
+          mark layer:end
+
+      - name: Prepare both kernels from the seed (verify, unpack, install offline)
+        run: |
+          . "$SPIKE/lib.sh"
+          mark verify:start
+          node "$SPIKE/seed.mjs" verify "$SEED" "$OUT/verify.json"
+          mark verify:end
+          mark prepare-build123d:start
+          mkdir -p out/cache/python-build-standalone
+          /bin/cp -c "$SEED"/archives/cpython-*.tar.gz out/cache/python-build-standalone/
+          printf 'offline = true\n\n[pip]\nno-index = true\nfind-links = ["%s"]\n' "$SEED/wheels" > "$RUNNER_TEMP/uv-seed.toml"
+          UV_CONFIG_FILE="$RUNNER_TEMP/uv-seed.toml" pnpm nx run desktop:prepare-build123d-python-macos
+          mark prepare-build123d:end
+          mark prepare-picogk:start
+          mkdir -p apps/desktop/resources/picogk "$RUNNER_TEMP/store/dotnet"
+          tar -xzf "$SEED/tau/picogk-darwin-arm64.tar.gz" -C apps/desktop/resources/picogk
+          tar -xzf "$SEED/archives/dotnet-runtime-10.0.11-osx-arm64.tar.gz" -C "$RUNNER_TEMP/store/dotnet"
+          pnpm nx run desktop:prepare-picogk-dotnet-macos | tee "$OUT/picogk-current.log"
+          grep -q 'PicoGK .NET is current' "$OUT/picogk-current.log"
+          mark prepare-picogk:end
+
+      - name: Run the native integration files
+        run: |
+          . "$SPIKE/lib.sh"
+          set +e
+          mark tests-native-process:start
+          (cd packages/core/native-process && pnpm exec vitest run src/native-sandbox.integration.test.ts)
+          native=$?
+          mark tests-native-process:end
+          mark tests-build123d:start
+          (cd packages/plugins/build123d && pnpm exec vitest run src/build123d.native.integration.test.ts src/build123d.native-sandbox.integration.test.ts)
+          build123d=$?
+          mark tests-build123d:end
+          mark tests-picogk:start
+          (cd packages/plugins/picogk && pnpm exec vitest run src/picogk.native.integration.test.ts src/picogk.native-sandbox.integration.test.ts src/picogk.native-lifecycle.integration.test.ts src/picogk-materials.native.integration.test.ts)
+          picogk=$?
+          mark tests-picogk:end
+          printf '{"native-process":%s,"build123d":%s,"picogk":%s}\n' "$native" "$build123d" "$picogk" > "$OUT/test-exits.json"
+          cat "$OUT/test-exits.json"
+          [ "$native" = 0 ] && [ "$build123d" = 0 ] && [ "$picogk" = 0 ]
+
+      - name: Start the save stopwatch
+        if: matrix.role == 'miss'
+        run: |
+          . "$SPIKE/lib.sh"
+          mark save:start
+
+      - name: Save the fetched seed (what a miss does after the row)
+        if: matrix.role == 'miss'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ runner.temp }}/seed
+          key: spike-w1-seed-miss-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Stop the save stopwatch
+        if: matrix.role == 'miss'
+        run: |
+          . "$SPIKE/lib.sh"
+          mark save:end
+
+      - *summarize-s14
+      - *annotate
+      - *upload-evidence
+
+  s15:
+    name: S15 launch facts on ${{ matrix.runner }}
+    needs: seed
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+    env:
+      BOGUS_ROOT: /Users/runner/s15-bogus-dotnet-root
+    steps:
+      - *write-scripts
+      - *checkout
+      - *setup-nx
+      - *install-uv
+
+      - name: Host facts, Gatekeeper and SIP
+        run: |
+          set +e
+          {
+            echo "PRODUCT_VERSION=$(sw_vers -productVersion)"
+            echo "BUILD_VERSION=$(sw_vers -buildVersion)"
+            echo "SPCTL_STATUS=$(spctl --status 2>&1)"
+            echo "SIP=$(csrutil status 2>&1 | tr '\n' ' ')"
+            echo "XCODE_SELECT=$(xcode-select -p 2>&1)"
+          } > "$OUT/facts.env"
+          if grep -q 'assessments disabled' "$OUT/facts.env"; then
+            sudo spctl --global-enable 2>&1 || sudo spctl --master-enable 2>&1
+          fi
+          echo "SPCTL_STATUS_AFTER=$(spctl --status 2>&1)" >> "$OUT/facts.env"
+          echo "DOTNET_ON_PATH=$(command -v dotnet 2>&1)" >> "$OUT/facts.env"
+          cat "$OUT/facts.env"
+          ls -la /etc/dotnet 2>&1
+          sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
+
+      - name: O8 codesign without Xcode
+        run: |
+          set +e
+          ls -l /usr/bin/codesign /usr/bin/git
+          file /usr/bin/codesign
+          DEVELOPER_DIR=/nonexistent /usr/bin/codesign -dv /bin/ls 2>&1
+          codesign_exit=$?
+          DEVELOPER_DIR=/nonexistent /usr/bin/git --version 2>&1
+          git_exit=$?
+          pkg=$(pkgutil --file-info /usr/bin/codesign 2>&1 | tr '\n' ' ')
+          echo "$pkg"
+          {
+            echo "CODESIGN_NO_DEVELOPER_DIR_EXIT=$codesign_exit"
+            echo "GIT_SHIM_NO_DEVELOPER_DIR_EXIT=$git_exit"
+            echo "CODESIGN_PKG=$pkg"
+            echo "BOGUS_ROOT=$BOGUS_ROOT"
+          } > "$OUT/o8.env"
+          cat "$OUT/o8.env"
+
+      - name: Run the build123d producer on this runner (Node downloads the CPython archive)
+        run: pnpm nx run desktop:prepare-build123d-python-macos
+
+      - name: Download the .NET runtime tarball with Node
+        run: node "$SPIKE/seed.mjs" fetch "$GITHUB_WORKSPACE" "$S15/downloads" "$OUT/s15-fetch.json" pbs,dotnet
+
+      - name: Download the Tau layers from the seed job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: spike-w1-tau-layer
+          path: ${{ runner.temp }}/s15/layer-archives
+
+      - name: Download the notarised Tau.app (desktop-staging release build)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-darwin-arm64
+          run-id: ${{ inputs.tau-app-run-id || '38124001817' }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/s15/tau-app
+
+      - name: Assemble the store and the notarised parent
+        run: |
+          set -x
+          mkdir -p "$S15/store/dotnet" "$S15/store/layer" "$S15/store-xattrs/dotnet" "$S15/picogk-sc" "$S15/app"
+          tar --no-xattrs --no-mac-metadata -xzf "$S15/downloads/archives/dotnet-runtime-10.0.11-osx-arm64.tar.gz" -C "$S15/store/dotnet"
+          tar -xzf "$S15/downloads/archives/dotnet-runtime-10.0.11-osx-arm64.tar.gz" -C "$S15/store-xattrs/dotnet"
+          tar --no-xattrs --no-mac-metadata -xzf "$S15/layer-archives/picogk-fd-layer.tar.gz" -C "$S15/store/layer"
+          tar --no-xattrs --no-mac-metadata -xzf "$S15/layer-archives/picogk-darwin-arm64.tar.gz" -C "$S15/picogk-sc" --strip-components=1
+          ditto -x -k "$S15/tau-app/Tau-macos-arm64.zip" "$S15/app"
+          ls "$S15/store/dotnet" "$S15/store/layer" | head -40
+          du -sk "$S15/store" apps/desktop/resources/python/darwin-arm64 "$S15/picogk-sc"
+
+      - name: O1 extended attributes of the Node-downloaded payloads
+        run: |
+          set +e
+          py=apps/desktop/resources/python/darwin-arm64
+          : > "$OUT/o1-quarantine.tsv"
+          row() {
+            local label="$1" path="$2"
+            local listing count names
+            listing=$(xattr -lr "$path" 2>&1)
+            count=$(printf '%s\n' "$listing" | grep -c 'com.apple.quarantine')
+            names=$(xattr -r "$path" 2>/dev/null | sed -E 's/^.*: //' | sort | uniq -c | tr '\n' ' ')
+            printf '%s\t%s\t%s\n' "$label" "$count" "$names" >> "$OUT/o1-quarantine.tsv"
+            echo "== $label ($path): quarantine=$count attributes: $names"
+            printf '%s\n' "$listing" | head -20
+          }
+          row producer-pbs-archive out/cache/python-build-standalone
+          row node-pbs-archive "$S15/downloads/archives/$(ls "$S15/downloads/archives" | grep cpython)"
+          row node-dotnet-tarball "$S15/downloads/archives/dotnet-runtime-10.0.11-osx-arm64.tar.gz"
+          row python-tree "$py"
+          row store-dotnet "$S15/store/dotnet"
+          row store-dotnet-bsdtar-xattrs "$S15/store-xattrs/dotnet"
+          row store-layer "$S15/store/layer"
+          row artifact-tau-layers "$S15/layer-archives"
+          row tau-app "$S15/app/Tau.app"
+          cat "$OUT/o1-quarantine.tsv"
+
+      - name: O6 signatures, entitlements and notarisation
+        run: |
+          set +e
+          app="$S15/app/Tau.app"
+          for binary in "$S15/store/dotnet/dotnet" "$S15/store/dotnet/host/fxr/10.0.11/libhostfxr.dylib" \
+            apps/desktop/resources/python/darwin-arm64/bin/python3.13 "$S15/picogk-sc/Tau.PicoGK.Worker" \
+            "$app/Contents/MacOS/Tau"; do
+            echo "== $binary"
+            codesign -dv --verbose=4 "$binary" 2>&1 | grep -E 'Identifier|Format|CodeDirectory|Signature|Authority|TeamIdentifier|Runtime|flags'
+            spctl -a -vv -t execute "$binary" 2>&1
+          done
+          ls "$S15/store/layer" | grep -iE 'picogk|skia|\.dylib' | while read -r name; do
+            echo "== layer $name"; codesign -dv "$S15/store/layer/$name" 2>&1 | grep -E 'Signature|flags|Authority'
+          done
+          echo "== muxer entitlements"
+          codesign -d --entitlements - "$S15/store/dotnet/dotnet" 2>&1 | tee "$OUT/o6-entitlements.txt"
+          echo "== Tau.app assessment"
+          spctl -a -vv "$app" 2>&1
+          xcrun stapler validate "$app" 2>&1
+
+      - name: O4 APFS clones of both trees and the quarantined copies
+        run: |
+          set -x
+          py=apps/desktop/resources/python/darwin-arm64
+          free() { df -k "$S15" | awk 'NR == 2 { print $4 }'; }
+          clock() { node -e 'process.stdout.write(String(Date.now()))'; }
+          sync; before=$(free); start=$(clock)
+          /bin/cp -c -R "$py" "$S15/clone-python"
+          end=$(clock); sync; after=$(free)
+          python_delta=$((before - after)); python_seconds=$(node -e "console.log(($end - $start) / 1000)")
+          sync; before=$(free); start=$(clock)
+          /bin/cp -c -R "$S15/store" "$S15/clone-store"
+          end=$(clock); sync; after=$(free)
+          store_delta=$((before - after)); store_seconds=$(node -e "console.log(($end - $start) / 1000)")
+          sync; before=$(free)
+          /bin/cp -R "$S15/store" "$S15/copy-store"
+          sync; after=$(free)
+          copy_delta=$((before - after))
+          {
+            echo "PYTHON_TREE_KB=$(du -sk "$py" | awk '{ print $1 }')"
+            echo "STORE_TREE_KB=$(du -sk "$S15/store" | awk '{ print $1 }')"
+            echo "PYTHON_CLONE_DELTA_KB=$python_delta"
+            echo "PYTHON_CLONE_SECONDS=$python_seconds"
+            echo "STORE_CLONE_DELTA_KB=$store_delta"
+            echo "STORE_CLONE_SECONDS=$store_seconds"
+            echo "STORE_COPY_DELTA_KB=$copy_delta"
+          } > "$OUT/o4.env"
+          cat "$OUT/o4.env"
+          rm -rf "$S15/copy-store"
+          quarantine="0081;$(printf '%x' "$(date +%s)");Safari;"
+          for name in q-python-exe q-python-all; do /bin/cp -c -R "$py" "$S15/$name"; done
+          for name in q-store-exe q-store-all; do /bin/cp -c -R "$S15/store" "$S15/$name"; done
+          /bin/cp -c -R "$S15/picogk-sc" "$S15/q-picogk-sc"
+          xattr -w com.apple.quarantine "$quarantine" "$S15/q-python-exe/bin/python3.13"
+          xattr -rw com.apple.quarantine "$quarantine" "$S15/q-python-all"
+          xattr -w com.apple.quarantine "$quarantine" "$S15/q-store-exe/dotnet/dotnet"
+          xattr -rw com.apple.quarantine "$quarantine" "$S15/q-store-all"
+          xattr -w com.apple.quarantine "$quarantine" "$S15/q-picogk-sc/Tau.PicoGK.Worker"
+          xattr -l "$S15/q-python-exe/bin/python3.13" "$S15/q-store-exe/dotnet/dotnet" "$S15/q-picogk-sc/Tau.PicoGK.Worker"
+          echo "QUARANTINE_VALUE=$quarantine" >> "$OUT/o4.env"
+
+      - name: O7 point /etc/dotnet/install_location at a bogus root
+        run: |
+          sudo mkdir -p /etc/dotnet
+          echo "$BOGUS_ROOT" | sudo tee /etc/dotnet/install_location /etc/dotnet/install_location_arm64
+          ls -l /etc/dotnet
+
+      - name: O2, O3, O5, O7 launch the workers in Tau's sandbox under the notarised Tau.app
+        run: |
+          set +e
+          py="$GITHUB_WORKSPACE/apps/desktop/resources/python/darwin-arm64"
+          mkdir -p "$S15/run" out/spike-w1
+          cp "$SPIKE/helper.mts" out/spike-w1/helper.mts
+          node --input-type=module - "$S15" "$py" > "$S15/spec.json" <<'NODE'
+          const [s15, py] = process.argv.slice(2);
+          const worker = ['--workspace', '{workspace}', '--artifacts', '{artifacts}', '--parent-pid', '{parentPid}'];
+          const python = (name, root) => ({ name, executablePath: `${root}/bin/python3`, arguments: ['-I', '-B', '-u', `${root}/tau-worker/worker.py`, ...worker], readablePaths: [root] });
+          const muxer = (name, store, extraEnv) => ({ name, executablePath: `${store}/dotnet/dotnet`, arguments: [`${store}/layer/Tau.PicoGK.Worker.dll`, ...worker], readablePaths: [store], extraEnv });
+          const apphost = (name, root) => ({ name, executablePath: `${root}/Tau.PicoGK.Worker`, arguments: worker, readablePaths: [root] });
+          const trace = { COREHOST_TRACE: '1', COREHOST_TRACE_VERBOSITY: '4', COREHOST_TRACEFILE: '{artifacts}/corehost-trace.txt' };
+          console.log(JSON.stringify([
+            python('b123d-orig', py),
+            apphost('picogk-sc-orig', `${s15}/picogk-sc`),
+            muxer('muxer-orig', `${s15}/store`, trace),
+            python('b123d-clone', `${s15}/clone-python`),
+            muxer('muxer-clone', `${s15}/clone-store`),
+            python('b123d-q-exe', `${s15}/q-python-exe`),
+            python('b123d-q-all', `${s15}/q-python-all`),
+            muxer('muxer-q-exe', `${s15}/q-store-exe`),
+            muxer('muxer-q-all', `${s15}/q-store-all`),
+            apphost('picogk-sc-q-exe', `${s15}/q-picogk-sc`),
+          ], undefined, 2));
+          NODE
+          date '+%Y-%m-%d %H:%M:%S' > "$S15/log-start.txt"
+          node --import @oxc-node/core/register out/spike-w1/helper.mts "$S15/spec.json" \
+            "$S15/app/Tau.app/Contents/MacOS/Tau" "$SPIKE/launcher.cjs" "$OUT/results.json" "$S15/run"
+          sleep 5
+          trace="$S15/run/art-muxer-orig/corehost-trace.txt"
+          ls -l "$trace"
+          grep -inE 'install_location|dotnet root|root path|muxer|hostfxr|Executing as|exe_dir|own dir' "$trace" | head -60 | tee "$OUT/o7-trace-grep.txt"
+          cp "$trace" "$OUT/corehost-trace.txt"
+          node -e 'const r=require(process.argv[1]);for(const x of r.results)console.log(x.name, JSON.stringify(x.firstFrame ?? null), x.exitCode, x.exitSignal)' "$OUT/results.json"
+
+      - name: O2 syspolicyd and Gatekeeper log for the launch window
+        run: |
+          set +e
+          start=$(cat "$S15/log-start.txt")
+          sudo log show --start "$start" --info --debug --style compact \
+            --predicate 'subsystem BEGINSWITH "com.apple.syspolicy" OR process == "syspolicyd" OR (process == "kernel" AND (eventMessage CONTAINS[c] "quarantine" OR eventMessage CONTAINS[c] "AMFI"))' \
+            > "$OUT/o2-syspolicy-log.txt" 2>&1
+          wc -l "$OUT/o2-syspolicy-log.txt"
+          grep -iE 'python3|dotnet|Tau.PicoGK|s15|quarantin|reject|deny|denied|not allowed|prompt' "$OUT/o2-syspolicy-log.txt" | head -150
+
+      - name: Summarize S15 against the charter line
+        if: always()
+        run: node "$SPIKE/s15-summary.mjs" "$OUT" "$OUT/summary.txt"
+
+      - *annotate
+      - *upload-evidence
+
+  # The seed entries exist only for this run: delete them so the shared 10 GB cache keeps the
+  # GeoSpec entries. The cache REST path is unreachable from outside, so the run cleans up itself.
+  cleanup:
+    name: Delete this run's seed caches
+    needs: [seed, s14, s15]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete the spike-w1 seed cache entries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          gh cache list --key spike-w1-seed --limit 100 || true
+          for key in "spike-w1-seed-$RUN_KEY" "spike-w1-seed-miss-$RUN_KEY" spike-w1-seed-38381658620-1; do
+            gh cache delete "$key" || echo "no cache entry $key"
+          done
+          gh cache list --key spike-w1-seed --limit 100 || true

@@ -1,3 +1,5 @@
+import { useSelector } from '@xstate/react';
+import { useProject } from '#hooks/use-project.js';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { FlipHorizontal, Ruler } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
@@ -285,7 +287,7 @@ export function ChatViewerControls({
           {shouldEnableCapture ? (
             <>
               <Hairline />
-              <CaptureViewControl captureRendering={captureRendering} />
+              <AvailableCaptureViewControl captureRendering={captureRendering} />
             </>
           ) : null}
           <Hairline />
@@ -307,4 +309,14 @@ export function ChatViewerControls({
       </span>
     </div>
   );
+}
+
+function AvailableCaptureViewControl({
+  captureRendering,
+}: {
+  readonly captureRendering?: () => Promise<Rendering>;
+}): React.JSX.Element | undefined {
+  const { editorRef } = useProject();
+  const chatId = useSelector(editorRef, (snapshot) => snapshot.context.focusedChatId);
+  return chatId === undefined ? undefined : <CaptureViewControl captureRendering={captureRendering} />;
 }

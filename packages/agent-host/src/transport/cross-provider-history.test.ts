@@ -269,6 +269,7 @@ const outboundBody = async (options: {
   readonly target: WireFamily;
   readonly variant: Variant;
   readonly targetModelId?: string;
+  readonly messages?: readonly ProviderMessage[];
 }): Promise<WireRecord> => {
   const bodies: WireRecord[] = [];
   const transport = createGatewayModelTransport({
@@ -287,7 +288,7 @@ const outboundBody = async (options: {
     maxTokens: 8192,
     contextWindow: 200_000,
     systemPrompt: 'CAD',
-    messages: historyFor(options.source, options.variant),
+    messages: options.messages ?? historyFor(options.source, options.variant),
     tools: [
       {
         name: 'read_file',
@@ -311,6 +312,47 @@ const outboundBody = async (options: {
   expect(bodies).toHaveLength(1);
   return bodies[0]!;
 };
+
+describe('interrupted settled tool history', () => {
+  const cases = wireFamilies.flatMap((source) =>
+    wireFamilies.flatMap((target) =>
+      (['aborted', 'error'] as const).map((stopReason) => ({ source, target, stopReason })),
+    ),
+  );
+  it.each(cases)(
+    'should pair a settled $source tool after $stopReason on $target',
+    async ({ source, target, stopReason }) => {
+      const history = historyFor(source, 'baseline');
+      const original = history[1]!;
+      const interrupted: ProviderMessage = {
+        ...original,
+        content: [
+          { type: 'thinking', thinking: thinkingText, thinkingSignature: flavours[source].thinkingSignature },
+          { type: 'text', text: firstAssistantText },
+          toolCallBlock(source, 0, true),
+          toolCallBlock(source, 1, false),
+          { type: 'thinking', thinking: 'unfinished reasoning suffix', thinkingSignature: 'partial-signature' },
+        ],
+        metadata: { ...original.metadata, stopReason },
+      };
+      const messages = [history[0]!, interrupted, history[2]!, history[4]!];
+      const before = structuredClone(messages);
+      const body = await outboundBody({ source, target, variant: 'baseline', messages });
+      const view = viewOf(target, body);
+      expect(view.calls).toHaveLength(1);
+      expect(view.results).toHaveLength(1);
+      expect(view.calls[0]!.id).toBe(view.results[0]!.id);
+      expect(view.calls[0]!.position).toBeLessThan(view.results[0]!.position);
+      expect(JSON.stringify(body)).not.toContain('unfinished reasoning suffix');
+      expect(JSON.stringify(body)).not.toContain('partial-signature');
+      expect(JSON.stringify(body)).toContain(toolOutputText);
+      expect(messages).toEqual(before);
+      if (source === 'anthropic' && target === source) {
+        expect(JSON.stringify(body)).toContain(flavours.anthropic.thinkingSignature);
+      }
+    },
+  );
+});
 
 type WireItem = Record<string, unknown>;
 

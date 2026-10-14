@@ -40,6 +40,10 @@ export async function loader({ params }: LoaderFunctionArgs): Promise<Documentat
     throw new Response('Not found', { status: 404 });
   }
 
+  if (page.data.title === undefined) {
+    throw new Error(`Documentation page has no title: ${page.path}`);
+  }
+
   return {
     path: page.path,
     url: page.url,

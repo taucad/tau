@@ -6,7 +6,7 @@ import type { ComponentProps } from 'react';
 import { BoxGeometry, Mesh, MeshStandardMaterial, Vector3 } from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { createActor, createAsyncLogic } from 'xstate';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, inject, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import type { Artifact } from '@taucad/runtime';
 import { CadViewer } from '#cad/cad-viewer.jsx';
@@ -16,23 +16,44 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
 import type * as threeContextModule from '#graphics/three/three-context.jsx';
 import type { ThreeProvider } from '#graphics/three/three-context.jsx';
+import type * as rendererModule from '#graphics/three/renderer.js';
+import {
+  captureRendererOutput,
+  createRendererOutputCanvas,
+  disposeRendererOutput,
+  installRendererOutput,
+} from '@taucad/runtime-testing/browser/three-renderer-output';
 
 import { defaultViewerEnvironment, ViewerEnvironmentProvider } from '#environment/viewer-environment.jsx';
 
 let state: RootState | undefined;
-let pixels = new Uint8ClampedArray();
 let frames = 0;
+let sceneSamples: number | undefined;
+let captureFrame: (() => Promise<void>) | undefined;
+let pendingFrame: Promise<void> | undefined;
+vi.mock('#graphics/three/renderer.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof rendererModule>();
+  return {
+    ...actual,
+    createRenderer: async (...args: Parameters<typeof actual.createRenderer>) => {
+      const renderer = await actual.createRenderer(...args);
+      installRendererOutput(renderer, inject('webGpuProfile'));
+      return renderer;
+    },
+  };
+});
 function FrameProbe(): undefined {
   useFrame((current) => {
     state = current;
-    const canvas = current.gl.domElement;
-    const copy = document.createElement('canvas');
-    copy.width = canvas.width;
-    copy.height = canvas.height;
-    const context = copy.getContext('2d')!;
-    context.drawImage(canvas, 0, 0);
-    pixels = context.getImageData(0, 0, copy.width, copy.height).data;
+    current.scene.onBeforeRender = () => {
+      sceneSamples = current.gl.getRenderTarget()?.samples;
+    };
     frames += 1;
+    const requested = captureFrame;
+    captureFrame = undefined;
+    if (requested) {
+      pendingFrame = requested();
+    }
   }, 4);
   return undefined;
 }
@@ -66,12 +87,18 @@ const difference = (left: Uint8ClampedArray, right: Uint8ClampedArray): number =
   return changed;
 };
 
-afterEach(() => {
+afterEach(async () => {
+  captureFrame = undefined;
+  await pendingFrame;
+  if (state) {
+    await disposeRendererOutput(state.gl);
+  }
   cleanup();
   document.documentElement.classList.remove('dark');
   state = undefined;
-  pixels = new Uint8ClampedArray();
   frames = 0;
+  sceneSamples = undefined;
+  pendingFrame = undefined;
 });
 
 it.each([
@@ -136,20 +163,45 @@ it.each([
     expect(isViewportWebGpu(renderer)).toBe(backend === 'webgpu');
     if (isViewportWebGpu(renderer)) {
       expect('isWebGPUBackend' in renderer.backend && renderer.backend.isWebGPUBackend).toBe(true);
+      expect(renderer.samples).toBe(4);
+      expect(renderer.reversedDepthBuffer).toBe(true);
     }
     const capture = async (): Promise<Uint8ClampedArray> => {
-      // WebGPU pipeline compilation and the browser's canvas presentation can settle after the first draw.
+      let pixels: Uint8ClampedArray = new Uint8ClampedArray();
+      // Let scene changes settle, completing each final-frame readback before requesting the next.
       for (let sample = 0; sample < 3; sample++) {
-        const before = frames;
+        const completed = Promise.withResolvers<Uint8ClampedArray>();
+        captureFrame = async () => {
+          try {
+            completed.resolve(await captureRendererOutput(renderer));
+          } catch (error) {
+            completed.reject(error);
+          }
+        };
         state!.invalidate();
-        // oxlint-disable-next-line eslint/no-await-in-loop, eslint/no-loop-func -- Observe successive frames; the previous wait finishes before the next sample.
-        await vi.waitFor(() => {
-          expect(frames).toBeGreaterThan(before);
-        });
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Each frame must finish its GPU copy before another capture.
+        pixels = await completed.promise;
       }
-      return new Uint8ClampedArray(pixels);
+      return pixels;
+    };
+    const screenshot = async (pixels: Uint8ClampedArray, phase: string): Promise<void> => {
+      let copy: HTMLCanvasElement | undefined;
+      try {
+        if (backend === 'webgpu' && inject('webGpuProfile') === 'software') {
+          copy = createRendererOutputCanvas({ renderer, pixels });
+          document.body.append(copy);
+        }
+        await page.screenshot({
+          path: `../../../../../out/test-results/empty-viewer/${backend}-${theme}-${phase}.png`,
+        });
+      } finally {
+        copy?.remove();
+      }
     };
     const empty = await capture();
+    if (isViewportWebGpu(renderer)) {
+      expect(sceneSamples, 'the actual scene pass remains multisampled').toBe(4);
+    }
     const origin = new Vector3().project(state!.camera);
     expect(Math.abs(origin.x), 'default camera centres the origin horizontally').toBeLessThan(0.001);
     expect(Math.abs(origin.y), 'default camera centres the origin vertically').toBeLessThan(0.001);
@@ -158,7 +210,7 @@ it.each([
       JSON.stringify({ position: state!.camera.position.toArray(), near: state!.camera.near, far: state!.camera.far }),
     ).toBeGreaterThan(-1);
     expect(origin.z).toBeLessThan(1);
-    await page.screenshot({ path: `../../../../../out/test-results/empty-viewer/${backend}-${theme}-empty.png` });
+    await screenshot(empty, 'empty');
     view.rerender(fixture(undefined, { grid: false }));
     const noGrid = await capture();
     // Exclude the bottom-right gizmo: each coloured world axis must contribute visible pixels.
@@ -189,6 +241,30 @@ it.each([
     view.rerender(fixture(undefined, { grid: false, axes: false, gizmo: false }));
     const noGizmo = await capture();
     expect(difference(noAxes, noGizmo), 'gizmo contributes visible pixels').toBeGreaterThan(100);
+    const gizmoBounds = { left: canvas.width, top: canvas.height, right: 0, bottom: 0 };
+    let gizmoEdgePixels = 0;
+    for (let index = 0; index < noAxes.length; index += 4) {
+      if (difference(noAxes.subarray(index, index + 4), noGizmo.subarray(index, index + 4)) === 0) {
+        continue;
+      }
+      const x = (index / 4) % canvas.width;
+      const y = Math.floor(index / 4 / canvas.width);
+      gizmoBounds.left = Math.min(gizmoBounds.left, x);
+      gizmoBounds.top = Math.min(gizmoBounds.top, y);
+      gizmoBounds.right = Math.max(gizmoBounds.right, x);
+      gizmoBounds.bottom = Math.max(gizmoBounds.bottom, y);
+      if (noAxes[index + 3]! > 0 && noAxes[index + 3]! < 255) {
+        gizmoEdgePixels += 1;
+      }
+    }
+    const ratio = renderer.getPixelRatio();
+    expect(gizmoBounds.left, 'gizmo remains in its 96px bottom-right viewport').toBeGreaterThanOrEqual(
+      canvas.width - 96 * ratio,
+    );
+    expect(gizmoBounds.top).toBeGreaterThanOrEqual(canvas.height - 96 * ratio);
+    expect(gizmoBounds.right - gizmoBounds.left, 'gizmo retains its visible size').toBeGreaterThan(40 * ratio);
+    expect(gizmoBounds.bottom - gizmoBounds.top).toBeGreaterThan(40 * ratio);
+    expect(gizmoEdgePixels, 'the final gizmo silhouette retains antialiased coverage').toBeGreaterThan(20);
 
     actor.send({
       type: 'updateArtifact',
@@ -207,7 +283,7 @@ it.each([
     expect(difference(empty, model), 'model becomes visible').toBeGreaterThan(1000);
     expect(state!.gl).toBe(renderer);
     expect(state!.gl.domElement).toBe(canvas);
-    await page.screenshot({ path: `../../../../../out/test-results/empty-viewer/${backend}-${theme}-model.png` });
+    await screenshot(model, 'model');
 
     actor.send({ type: 'clearArtifact' });
     view.rerender(fixture());
@@ -218,6 +294,11 @@ it.each([
     view.rerender(fixture(undefined, { grid: false, axes: false, gizmo: false }));
     expect(difference(cleared, await capture()), 'empty scene remains visible after clearing').toBeGreaterThan(100);
   } finally {
+    captureFrame = undefined;
+    await pendingFrame;
+    if (state) {
+      await disposeRendererOutput(state.gl);
+    }
     cleanup();
     actor.stop();
     geometry.dispose();

@@ -28,6 +28,8 @@
    # Edit .env.local with your API keys
    ```
 
+   Public GitHub import lists a repository's branches only when the API has `GITHUB_API_TOKEN`, a fine-grained personal access token with read-only access to public repositories (see `apps/api/.env.example`). It is optional locally. Without it, the import page says "This server isn’t set up to list branches, so import will use the `<branch>` branch. Its administrator can enable branch listing with GITHUB_API_TOKEN." The import then uses the branch the link names, or the repository's default branch, and archive downloads use GitHub's lower unauthenticated rate limit.
+
 4. Start the development servers:
 
    ```bash

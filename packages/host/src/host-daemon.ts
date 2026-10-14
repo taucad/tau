@@ -274,6 +274,8 @@ type AgentFileSystemAuthority = Readonly<{
   /** Candidate and linked checkout roots, by how many holders admitted each. */
   admissions: Map<string, number>;
   stopServer: () => Promise<void>;
+  /** The in-process channel between the two; held open only while a close is in flight (R5). */
+  ports: MessageChannel;
 }>;
 
 /**
@@ -803,6 +805,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
          * resolve into a path the views above hide (CI1). */
         policy: tauPathPolicy,
       }),
+      ports,
     };
     agentFileSystem = filesystem;
     /* Resolution *and* the CLI probe happen before the channel answers, because
@@ -971,6 +974,15 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       },
     };
     const externalAgents = externalAgentDescriptors(discovery);
+    /* R3: a workspace whose store refused at open can never record anything, so
+     * the daemon fails at start instead of serving it and refusing its close. */
+    try {
+      await project.revisions.opened();
+    } catch (error) {
+      await project.close().catch(() => undefined);
+      await machines?.host.close();
+      throw error;
+    }
     const server = startAgentServer({
       launcher,
       revisions: project.revisions.channel,
@@ -1026,6 +1038,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const project = agentProject;
     const machines = agentMachines;
     const filesystem = agentFileSystem;
+    /* A retried close is live work: its cut reads through this channel. */
+    filesystem?.ports.port1.ref();
+    filesystem?.ports.port2.ref();
     agentRunReporter?.close();
     agentRunReporter = undefined;
     agentExternalAgents = [];
@@ -1057,6 +1072,12 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       await settle(filesystem?.stopServer(), () => {
         agentFileSystem = undefined;
       });
+    } else {
+      /* Kept for a retry nobody may ask for: `tau serve` closes once and says
+       * so. A ref'd port would hold the process open forever after a refused
+       * close; the next `close()` refs it again before its cut. */
+      filesystem?.ports.port1.unref();
+      filesystem?.ports.port2.unref();
     }
     if (server) {
       emit({ type: 'agent', state: 'stopped' });
@@ -1489,10 +1510,17 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         emit({ type: 'warning', code: 'ZOO_TOKEN', message: error instanceof Error ? error.message : String(error) });
       }
     })();
+    /* A stored credential is a local read, so a host that is already paired is
+     * paired before its agent channel opens: a Tau run sent the moment the
+     * channel is ready is never refused `HOST_NOT_PAIRED`. */
+    const storedCredential = await readHostCredential();
+    if (storedCredential) {
+      pairedWith(storedCredential);
+    }
     /* Before pairing: the local agent channel and any served UI are reachable
-     * the moment the daemon starts. Until pairing lands the credential state is
-     * `unpaired`, so reads and external agents serve and a Tau run is refused
-     * `HOST_NOT_PAIRED` (RH-R13). */
+     * the moment the daemon starts. Until pairing lands the credential state of
+     * a host with no stored credential is `unpaired`, so reads and external
+     * agents serve and a Tau run is refused `HOST_NOT_PAIRED` (RH-R13). */
     if (options.agent) {
       await startAgent(options.agent);
     }
@@ -1521,7 +1549,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         await delay(Math.min(1000 * 2 ** attempt, reconnectDelayMaximum), undefined, { signal: shutdown.signal });
       }
     };
-    let hostCredential = (await readHostCredential()) ?? (await pair());
+    let hostCredential = storedCredential ?? (await pair());
     pairedWith(hostCredential);
     let reconnectAttempt = 0;
     while (!shutdown.signal.aborted) {

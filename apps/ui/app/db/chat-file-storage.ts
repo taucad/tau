@@ -1,3 +1,5 @@
+import type { QueueLock } from '#db/chat-message-queue-store.js';
+import { chatMessageQueuePath, createChatMessageQueueStore } from '#db/chat-message-queue-store.js';
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
 import { safeValidateUiMessages } from '@taucad/chat';
@@ -96,6 +98,7 @@ export type ChatStoreClient = {
 
 /** How the chat store finds the projects a chat could be in. @internal */
 export type ChatFileStoreOptions = {
+  readonly queueLock?: QueueLock;
   readonly client: ChatStoreClient;
   /** Every project this profile knows about, deleted ones included. */
   readonly projectIds: () => Promise<readonly string[]>;
@@ -342,8 +345,14 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
    * together and treats an absent one as done, so a chat that never had a draft
    * deletes exactly as cleanly.
    */
-  const removeComposerRecord = async (projectId: string, chatId: string): Promise<void> =>
-    createComposerRecordStore(options.client, composerRecordPaths.chat(projectId, chatId)).remove();
+  const removeComposerRecord = async (projectId: string, chatId: string): Promise<void> => {
+    await createComposerRecordStore(options.client, composerRecordPaths.chat(projectId, chatId)).remove();
+    await createChatMessageQueueStore(
+      options.client,
+      chatMessageQueuePath(projectId, chatId),
+      options.queueLock,
+    ).remove();
+  };
 
   /**
    * Tombstone a chat and reclaim its composer record. The record goes even when

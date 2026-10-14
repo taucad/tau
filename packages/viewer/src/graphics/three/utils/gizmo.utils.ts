@@ -5,7 +5,7 @@
  * individual gizmo components only need to declare their configuration differences.
  */
 
-import { useThree } from '@react-three/fiber';
+import { useStore } from '@react-three/fiber';
 import type { ViewportGizmo } from 'three-viewport-gizmo';
 import { useLayoutEffect } from 'react';
 import * as THREE from 'three';
@@ -76,15 +76,35 @@ type GizmoRefLike = Readonly<{
 }>;
 
 /**
- * Re-run `ViewportGizmo.update()` when the R3F canvas size changes so
- * `ViewportGizmo.render()` restores the correct full-canvas viewport (the library
- * caches `_originalViewport` and has no built-in resize listener).
+ * Refresh the gizmo's DOM placement and saved viewport synchronously after R3F
+ * resizes the renderer. A React effect can run after a demand frame has already
+ * restored the gizmo's old viewport, making that stale viewport permanent.
+ * In particular, native fullscreen also enters through react-use-measure's
+ * window resize listener, outside the Canvas ResizeObserver's React flush.
+ * @param gizmoRef - The gizmo owned by this canvas; read at notification time.
  */
 export function useGizmoResizeSync(gizmoRef: GizmoRefLike): void {
-  const size = useThree((state) => state.size);
+  const store = useStore();
   useLayoutEffect(() => {
-    if (size.width > 0 && size.height > 0) {
-      gizmoRef.current?.update();
-    }
-  }, [gizmoRef, size.width, size.height]);
+    let previousSize = store.getState().size;
+    let previousDpr = store.getState().viewport.dpr;
+    return store.subscribe(({ size, viewport }) => {
+      if (
+        size.width === previousSize.width &&
+        size.height === previousSize.height &&
+        size.top === previousSize.top &&
+        size.left === previousSize.left &&
+        viewport.dpr === previousDpr
+      ) {
+        return;
+      }
+      previousSize = size;
+      previousDpr = viewport.dpr;
+      if (size.width > 0 && size.height > 0) {
+        // R3F's renderer-sizing subscription was registered before ours.
+        // domUpdate avoids advancing controls or allocating a new gizmo.
+        gizmoRef.current?.domUpdate();
+      }
+    });
+  }, [gizmoRef, store]);
 }

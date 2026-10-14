@@ -11,12 +11,13 @@ import { gatewayErrorCodes } from '#wire/gateway.js';
 import { isResumable, refusalOf, refusals } from '#wire/refusals.js';
 import type { RefusalCode } from '#wire/refusals.js';
 
-/** Today's thirteen resumable codes (the run-failure set before the registry, `tau-agent-host.ts:1188` at 6f8b77392). */
+/** Produced resumable failures, including bounded output recovery. */
 const todaysResumable = [
   'CIRCUIT_BREAKER_OPEN',
   'INSUFFICIENT_CREDIT',
   'INVALID_REQUEST',
   'MALFORMED_RESPONSE',
+  'MODEL_OUTPUT_LIMIT',
   'NETWORK_ERROR',
   'NO_EVICTABLE_HISTORY',
   'PROVIDER_UNAVAILABLE',
@@ -24,6 +25,7 @@ const todaysResumable = [
   'RUN_ABANDONED',
   'SESSION_LOG_INTEGRITY',
   'SUMMARY_REQUIRED',
+  'TOOL_RESULT_PERSISTENCE_FAILED',
   'UNAUTHENTICATED',
   'UPSTREAM_REJECTED',
 ];
@@ -39,7 +41,7 @@ const notYetProduced = [
 const resumableCodes = Object.keys(refusals).filter((code) => isResumable(code));
 
 describe('the refusal registry (D11, I17)', () => {
-  it('should keep isResumable equal to the thirteen-code set plus codes nothing produces yet', () => {
+  it('should keep isResumable equal to the produced-code set plus codes nothing produces yet', () => {
     expect(resumableCodes.toSorted()).toEqual([...todaysResumable, ...notYetProduced].toSorted());
   });
 

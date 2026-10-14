@@ -1,19 +1,43 @@
-# Separate marketing preview site only. Never apply to the UI production site.
+# Dedicated marketing site. The UI edge function proxies its public routes.
 [build]
-# Set the Netlify UI package directory to apps/www so this file is selected.
-# Install from the repository root, where the pnpm workspace and lockfile live.
-base = "."
-command = "node apps/www/scripts/build.mjs"
-publish = "apps/www/dist"
+base = "apps/www"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build www"
+publish = "build/client"
 
 [build.environment]
 NODE_VERSION = "24"
-WWW_LAUNCH = "true"
-# Canonical, social and sitemap URLs name tau.new, where the UI site proxies these pages.
+NX_NO_CLOUD = "true"
+WWW_LAUNCH = "false"
 WWW_ORIGIN = "https://tau.new"
-PNPM_FLAGS = "--filter @taucad/www... --frozen-lockfile --ignore-scripts"
 
-# Security and cache headers are emitted in dist/_headers; WWW_LAUNCH drops the preview noindex.
-# No app proxy or production domain is enabled in this preview configuration.
+# The adapter creates this SSR function, which imports the server build.
+# Declare it explicitly so the CLI bundles from its real package directory.
+[functions]
+directory = ".netlify/v1/functions"
 
-# No functions, app build, Nx Cloud token or private runtime environment is used.
+[context.production.environment]
+WWW_LAUNCH = "true"
+
+[dev]
+command = "pnpm nx dev www"
+targetPort = 3003
+autoLaunch = false
+
+[[headers]]
+for = "/_www/bundles/*"
+[headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"
+
+# Stable artwork filenames revalidate so a deploy cannot leave an old poster cached.
+[[headers]]
+for = "/_www/assets/*"
+[headers.values]
+Cache-Control = "public, max-age=0, must-revalidate"
+Netlify-CDN-Cache-Control = "public, durable, s-maxage=86400"
+
+[[headers]]
+for = "/*"
+[headers.values]
+X-Content-Type-Options = "nosniff"
+Referrer-Policy = "no-referrer"

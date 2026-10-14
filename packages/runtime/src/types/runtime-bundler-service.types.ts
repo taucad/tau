@@ -22,6 +22,16 @@ export type BuiltinModule = {
   version: string;
   /** Script global that bundles bind to this module; bound only when `registryExpression` is set. */
   globalName?: string;
+  /**
+   * The npm package this module comes from, as a project declares it in `package.json`.
+   *
+   * `name` is the dependency key a model imports (`replicad`). `spec` is the exact npm spec of the
+   * package Tau runs: a plain version (`3.4.1`) when the installed package publishes under `name`,
+   * or an npm alias (`npm:@taulabs/replicad@1.1.0-taulabs.0`) when Tau runs a differently named
+   * package, such as a fork, under that key. A subpath module (`manifold-3d/manifoldCAD`) carries
+   * the identity of the package that owns it. Absent for a module with no npm package.
+   */
+  package?: { readonly name: string; readonly spec: string };
   /** JavaScript expression evaluating to the module's exports, which a bundle binds to `globalName`. */
   registryExpression?: string;
 };

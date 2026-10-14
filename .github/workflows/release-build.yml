@@ -221,7 +221,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    runs-on: ${{ needs.resolve.outputs.channel == 'staging' && 'macos-26' || 'macos-15' }}
+    runs-on: macos-26
     timeout-minutes: 240
     environment:
       name: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop' }}
@@ -580,7 +580,7 @@ jobs:
   desktop-ota:
     needs: [resolve, desktop-mirror]
     name: Verify native macOS OTA replacement
-    runs-on: ${{ needs.resolve.outputs.channel == 'staging' && 'macos-26' || 'macos-15' }}
+    runs-on: macos-26
     timeout-minutes: 40
     outputs:
       accepted: ${{ steps.baseline.outputs.found }}

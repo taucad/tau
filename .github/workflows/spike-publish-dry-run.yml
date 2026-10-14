@@ -37,7 +37,7 @@ on:
         type: boolean
         default: false
       s24:
-        description: 'Also run S24: pack the CLI closure and run the installed tau on ubuntu-latest and macos-15'
+        description: 'Also run S24: pack the CLI closure and run the installed tau on ubuntu-latest and macos-26'
         type: boolean
         default: true
       products-sha:
@@ -107,10 +107,10 @@ jobs:
   geospec-producer:
     env:
       GEOSPEC_WORKERS: 1
-    name: Produce GeoSpec artifacts and run the release gate (macos-15)
+    name: Produce GeoSpec artifacts and run the release gate (macos-26)
     needs: [plan]
     if: needs.plan.outputs.geospec-required == 'true'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 240
     steps:
       - name: Checkout
@@ -300,7 +300,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15]
+        os: [ubuntu-latest, macos-26]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:

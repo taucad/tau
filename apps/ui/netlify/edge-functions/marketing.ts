@@ -86,13 +86,41 @@ export default async function marketing(request: Request, context: EdgeContext):
   });
   const location = response.headers.get('location');
   if (!location) {
-    return requestUrl.pathname === '/' ? privateDocument(response) : response;
+    const document = await stagingDownloadLinks(response, requestUrl);
+    return requestUrl.pathname === '/' ? privateDocument(document) : document;
   }
 
   const headers = new Headers(response.headers);
   headers.set('location', rewriteLocation(location, upstream, requestUrl));
   const rewritten = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   return requestUrl.pathname === '/' ? privateDocument(rewritten) : rewritten;
+}
+
+/** Select staging downloads in the shared static HTML before client scripts run. */
+async function stagingDownloadLinks(response: Response, requestUrl: URL): Promise<Response> {
+  if (
+    requestUrl.hostname !== 'taucad.dev' ||
+    response.body === null ||
+    !response.headers.get('content-type')?.toLowerCase().startsWith('text/html')
+  ) {
+    return response;
+  }
+
+  const html = await response.clone().text();
+  // Match our emitted anchors; keep complete script blocks byte-identical for CSP hashes.
+  const rewritten = html.replaceAll(
+    /<script\b[^>]*>[\s\S]*?<\/script\s*>|(<a\b[^>]*\shref=")https:\/\/downloads\.tau\.new(\/latest\/[^"]*")/giu,
+    (match: string, anchor: string | undefined, path: string | undefined) =>
+      anchor === undefined ? match : `${anchor}https://downloads.taucad.dev${path}`,
+  );
+  if (rewritten === html) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  for (const name of ['content-length', 'content-encoding', 'etag', 'last-modified']) {
+    headers.delete(name);
+  }
+  return new Response(rewritten, { status: response.status, statusText: response.statusText, headers });
 }
 
 /** Keep both root variants out of shared and browser document caches. */

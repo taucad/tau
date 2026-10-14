@@ -282,10 +282,10 @@ export default function ProjectsNew(): React.JSX.Element {
                               'bg-transparent hover:bg-transparent data-[state=open]:bg-transparent',
                             )}
                           >
-                            <div className='flex flex-1 items-start gap-3'>
+                            <div className='flex min-w-0 flex-1 items-start gap-3'>
                               <SvgIcon id={option.id} className='mt-0.5 size-6 shrink-0' />
                               <div className='flex w-full min-w-0 flex-col gap-1'>
-                                <div className='flex w-full items-start justify-between gap-2'>
+                                <div className='flex w-full flex-wrap items-start justify-between gap-2'>
                                   <span className='flex items-center gap-1.5 text-sm font-medium'>
                                     {option.name}
                                     <KernelCommercialBadge kernelId={option.id} />

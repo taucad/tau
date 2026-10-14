@@ -313,10 +313,10 @@ function GeoSpecLab(): React.JSX.Element {
           </p>
         </header>
         <div className='flex flex-wrap items-end gap-3 border-b pb-4'>
-          <label className='grid gap-1 text-sm'>
+          <label className='grid max-w-full min-w-0 gap-1 text-sm'>
             Fixture
             <select
-              className='h-9 rounded-md border bg-background px-2'
+              className='h-9 w-full min-w-0 rounded-md border bg-background px-2'
               value={fixtureId}
               disabled={busy}
               onChange={(event) => {

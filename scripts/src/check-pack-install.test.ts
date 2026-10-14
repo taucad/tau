@@ -371,21 +371,14 @@ describe('isToleratedImportFailure', () => {
     ).toBe(false);
   });
 
-  it('tolerates a listed viewer subpath only for its stated CommonJS interop failure', () => {
-    const specifier = '@taucad/viewer/parameters/rjsf-validator';
+  it('does not tolerate a CommonJS interop failure in a viewer parameter subpath', () => {
     expect(
       isToleratedImportFailure(
         {
-          specifier,
+          specifier: '@taucad/viewer/parameters/rjsf-validator',
           message:
             "Named export 'validationDataMerge' not found. The requested module '@rjsf/utils' is a CommonJS module, which may not support all module.exports as named exports.",
         },
-        [],
-      ),
-    ).toBe(true);
-    expect(
-      isToleratedImportFailure(
-        { specifier, code: 'ERR_MODULE_NOT_FOUND', message: "Cannot find module './rjsf-context.mjs'" },
         [],
       ),
     ).toBe(false);

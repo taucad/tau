@@ -318,5 +318,5 @@ function AvailableCaptureViewControl({
 }): React.JSX.Element | undefined {
   const { editorRef } = useProject();
   const chatId = useSelector(editorRef, (snapshot) => snapshot.context.focusedChatId);
-  return chatId === undefined ? null : <CaptureViewControl captureRendering={captureRendering} />;
+  return chatId === undefined ? undefined : <CaptureViewControl captureRendering={captureRendering} />;
 }

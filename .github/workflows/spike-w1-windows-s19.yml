@@ -5,9 +5,6 @@
 name: Spike S19 (Windows facts, musl)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/spike-w1-windows-s19.yml'
   workflow_dispatch:
 
 permissions:

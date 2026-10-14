@@ -186,7 +186,9 @@ export function ProjectNavigation(): React.JSX.Element {
                     }
                     const parameters = new URLSearchParams(isActive ? location.search : '');
                     parameters.set(searchParameterName.workbench, 'files');
-                    void navigate(`${projectUrl(project.slugs)}?${parameters.toString()}`);
+                    void navigate(
+                      `${projectUrl(project.slugs)}?${parameters.toString()}${isActive ? location.hash : ''}`,
+                    );
                   }}
                   onShare={() => {
                     if (!project.slugs) {

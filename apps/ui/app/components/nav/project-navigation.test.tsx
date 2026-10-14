@@ -20,6 +20,7 @@ vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => bridge })
 vi.mock('#lib/agent-host-placement.js', () => ({ desktopWorkspaceRoot: async (id: string) => mockWorkspaceRoot(id) }));
 let pathname = '/';
 let search = '';
+let hash = '';
 let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
 
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => mockUseProjects() as ReturnType<typeof useProjects> }));
@@ -54,7 +55,7 @@ vi.mock('react-router', () => ({
       {children}
     </a>
   ),
-  useLocation: () => ({ pathname, search }),
+  useLocation: () => ({ pathname, search, hash }),
   useNavigate: () => mockNavigate,
   useNavigation: () => ({ location: pendingLocation, state: pendingLocation ? 'loading' : 'idle' }),
 }));
@@ -222,6 +223,7 @@ describe('ProjectNavigation', () => {
     vi.clearAllMocks();
     pathname = '/';
     search = '';
+    hash = '';
     pendingLocation = undefined;
     mockUseProjects.mockReturnValue(projectsResult);
     mockIsProjectExpanded.mockImplementation((_projectId: string, active: boolean) => active);
@@ -327,14 +329,15 @@ describe('ProjectNavigation', () => {
     });
   });
 
-  it('should open files for the selected project without carrying another project chat', () => {
+  it('should preserve active project location when opening files without carrying it to another project', () => {
     pathname = '/w/home/one';
     search = '?chat=chat_1&keep=1';
+    hash = '#selected-file';
     render(<ProjectNavigation />);
     fireEvent.click(screen.getAllByRole('button', { name: 'Open files' })[0]!);
     expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?workbench=files');
     fireEvent.click(screen.getAllByRole('button', { name: 'Open files' })[1]!);
-    expect(mockNavigate).toHaveBeenCalledWith('/w/home/one?chat=chat_1&keep=1&workbench=files');
+    expect(mockNavigate).toHaveBeenCalledWith('/w/home/one?chat=chat_1&keep=1&workbench=files#selected-file');
     expect(screen.queryByRole('button', { name: /Open in/u })).not.toBeInTheDocument();
   });
 

@@ -46,7 +46,7 @@ export const selectChatActivityCue = ({
   if (!isLive) {
     return undefined;
   }
-  return selectPartActivity(parts);
+  return selectPartActivity(chatStatus === 'submitted' ? [] : parts);
 };
 
 const selectPartActivity = (parts: readonly MyMessagePart[]): ChatActivityCue => {
@@ -61,13 +61,20 @@ const selectPartActivity = (parts: readonly MyMessagePart[]): ChatActivityCue =>
     return { kind: 'working', sentence: describeActivity([tool]) };
   }
   const tail = parts[findLastMeaningfulPartIndex(parts)];
+  // Reasoning may follow a progress message. A later tool or any other text
+  // supersedes it, so an old commentary never reappears after an answer/tool.
+  const latestAction = parts.findLast(
+    (part) => part.type === 'text' || part.type === 'dynamic-tool' || part.type.startsWith('tool-'),
+  );
+  if (
+    latestAction?.type === 'text' &&
+    latestAction.providerMetadata?.['common']?.['messagePhase'] === 'commentary' &&
+    latestAction.text.trim() !== ''
+  ) {
+    return { kind: 'working', sentence: latestAction.text };
+  }
   if (tail?.type === 'reasoning' && tail.state === 'streaming') {
-    const thought = tail.text
-      .split('\n')
-      .findLast((line) => line.trim() !== '')
-      ?.replaceAll(/[*#`]/gu, '')
-      .trim();
-    return { kind: 'working', sentence: thought ? thought.slice(0, 160) : 'Thinking…' };
+    return { kind: 'working', sentence: 'Thinking…' };
   }
   if (
     tail?.type === 'text' &&

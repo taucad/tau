@@ -85,14 +85,16 @@ type AgentLiveEventBase = {
 
 /** Non-durable model output projected only while its run is live. @public */
 export type AgentLiveEvent =
-  | (AgentLiveEventBase & { readonly type: 'text-start' })
+  | (AgentLiveEventBase & { readonly type: 'text-start'; readonly phase?: string | undefined })
   | (AgentLiveEventBase & {
       readonly type: 'text-delta';
+      /** Explicit provider message phase; absent means unknown. */
+      readonly phase?: string | undefined;
       readonly delta: string;
       /** UTF-16 offset in this block, for reconciliation with durable checkpoints. */
       readonly offset?: number | undefined;
     })
-  | (AgentLiveEventBase & { readonly type: 'text-end'; readonly content: string })
+  | (AgentLiveEventBase & { readonly type: 'text-end'; readonly content: string; readonly phase?: string | undefined })
   | (AgentLiveEventBase & { readonly type: 'thinking-start'; readonly timestamp?: number | undefined })
   | (AgentLiveEventBase & {
       readonly type: 'thinking-delta';

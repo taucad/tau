@@ -1,3 +1,5 @@
+import { useFeature } from '#flags/use-feature.js';
+import { MachinesDisabled } from '#components/machines/machines-disabled.js';
 import { useCallback, useMemo } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { Printer } from 'lucide-react';
@@ -144,6 +146,10 @@ function ConnectedMachine({
 export default function MachineRoute(): React.JSX.Element {
   const { hostId = '', machineId = '' } = useParams();
   const machines = useMachinesFacet();
+  const enabled = useFeature('machines');
+  if (!enabled) {
+    return <MachinesDisabled />;
+  }
   if (!isMachineRouteIdentity(hostId) || !isMachineRouteIdentity(machineId)) {
     return (
       <div className='container mx-auto px-4 pt-5'>

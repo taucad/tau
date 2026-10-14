@@ -1,3 +1,4 @@
+import { isMachinesFeatureEnabled, machinesDisabledMessage } from '@taucad/types/constants';
 import { randomUUID } from 'node:crypto';
 import { createCallbackLogic } from 'xstate';
 import type { EventObject } from 'xstate';
@@ -458,10 +459,14 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * directory: on a case-insensitive volume `…/Tau` and `…/tau` are one. */
   const tauConfigDirectory =
     desktopChannel === 'staging' ? join(app.getPath('userData'), 'config') : defaultConfigDirectory();
+  const machinesEnabled = isMachinesFeatureEnabled(environment['TAU_MACHINES_ENABLED']);
   const machinesDirectory = join(tauConfigDirectory, 'machines');
-  mkdirSync(machinesDirectory, { recursive: true, mode: 0o700 });
+  if (machinesEnabled) {
+    mkdirSync(machinesDirectory, { recursive: true, mode: 0o700 });
+  }
   const legacyMachinesDirectory = join(app.getPath('userData'), 'machines');
   const legacyMachinesEnvironment: Readonly<Record<string, string>> =
+    machinesEnabled &&
     existsSync(legacyMachinesDirectory) &&
     realpathSync.native(legacyMachinesDirectory) !== realpathSync.native(machinesDirectory)
       ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
@@ -740,7 +745,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_CONFIG_DIR: tauConfigDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
-      TAU_DESKTOP_MACHINES_DIR: machinesDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+      ...(machinesEnabled ? { TAU_DESKTOP_MACHINES_DIR: machinesDirectory } : {}),
       ...legacyMachinesEnvironment,
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
@@ -759,21 +765,23 @@ const bootstrapElectronApp = async (): Promise<void> => {
     },
   });
   /* Q-streamed-host: a streamed program needs this computer awake for its whole run. */
-  const stopKeepingAwake = keepAwakeWhileStreaming({
-    streamingMachines: async () => services.peekStreamingMachines(keepAwakeIntervalMilliseconds / 2),
-    blocker: {
-      hold: () => {
-        const id = powerSaveBlocker.start('prevent-app-suspension');
-        return () => {
-          powerSaveBlocker.stop(id);
-        };
-      },
-    },
-    intervalMilliseconds: keepAwakeIntervalMilliseconds,
-    log: (level, event, detail) => {
-      log.log(level, event, detail);
-    },
-  });
+  const stopKeepingAwake = machinesEnabled
+    ? keepAwakeWhileStreaming({
+        streamingMachines: async () => services.peekStreamingMachines(keepAwakeIntervalMilliseconds / 2),
+        blocker: {
+          hold: () => {
+            const id = powerSaveBlocker.start('prevent-app-suspension');
+            return () => {
+              powerSaveBlocker.stop(id);
+            };
+          },
+        },
+        intervalMilliseconds: keepAwakeIntervalMilliseconds,
+        log: (level, event, detail) => {
+          log.log(level, event, detail);
+        },
+      })
+    : () => undefined;
   const agentHostSessionInput = (
     event: IpcMainInvokeEvent,
     payload: unknown,
@@ -806,6 +814,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * answers its MQTT hello in seconds, but a wrong code or a sleeping printer
    * is only known at the provider's own timeout, hence the bound. */
   ipcMain.handle(machinesChannels.completeBinding, async (event, payload) => {
+    if (!machinesEnabled) {
+      return {
+        status: 'failed',
+        code: 'MACHINES_DISABLED',
+        message: machinesDisabledMessage,
+      } satisfies DesktopMachineBindingFailure;
+    }
     const { ceremonyId, address, accessCode } = (payload ?? {}) as Record<string, unknown>;
     const optionalString = (value: unknown): value is string | undefined =>
       value === undefined || (typeof value === 'string' && value.length > 0 && value.length <= 256);
@@ -983,18 +998,23 @@ const bootstrapElectronApp = async (): Promise<void> => {
   ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents : []));
   /* Blueprint D12: the Print pane's Bambu Studio presets and settings. The
    * service parses every input; this guard keeps other senders out. */
-  const bambuStudio = createBambuStudioService({ env: environment, pathOverride: !environmentLocked });
+  const bambuStudio = machinesEnabled
+    ? createBambuStudioService({ env: environment, pathOverride: !environmentLocked })
+    : undefined;
   for (const [channel, call] of [
-    [slicersChannels.bambuStudio.status, bambuStudio.status],
-    [slicersChannels.bambuStudio.catalog, bambuStudio.catalog],
-    [slicersChannels.bambuStudio.resolveSelection, bambuStudio.resolveSelection],
-    [slicersChannels.bambuStudio.settings, bambuStudio.settings],
+    [slicersChannels.bambuStudio.status, 'status'],
+    [slicersChannels.bambuStudio.catalog, 'catalog'],
+    [slicersChannels.bambuStudio.resolveSelection, 'resolveSelection'],
+    [slicersChannels.bambuStudio.settings, 'settings'],
   ] as const) {
     ipcMain.handle(channel, async (event, input: unknown) => {
       if (!trusted(event.senderFrame)) {
         throw new Error('Desktop shell refused Bambu Studio request.');
       }
-      return call(input);
+      if (bambuStudio === undefined) {
+        throw new Error(machinesDisabledMessage);
+      }
+      return bambuStudio[call](input);
     });
   }
   ipcMain.handle('tau:auth:sign-in', async (event) => {
@@ -1168,6 +1188,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
     if (!rendererServicesConcerns.includes(concern as ServicesConcern)) {
       log.log('error', 'services.unknown-concern', { concern });
       refuse('services.unknown-concern');
+      return;
+    }
+    if (concern === 'machines' && !machinesEnabled) {
+      refuse(machinesDisabledMessage);
       return;
     }
     if (concern === 'geospecPerformance' && !/^(1|true)$/iu.test(environment['TAU_DEBUG'] ?? '')) {

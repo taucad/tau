@@ -37,6 +37,7 @@ export const navRoutes: {
     },
     {
       title: 'Machines',
+      featureFlag: 'machines',
       url: '/machines',
       icon: Printer,
     },

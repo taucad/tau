@@ -9,11 +9,27 @@ import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { createFixture, entry } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 
+let enabled = true;
+vi.doMock('#flags/use-feature.js', () => ({ useFeature: () => enabled }));
 let machines: RuntimeTransportFacet<MachineClient>;
 vi.doMock('#hooks/use-machines.js', async (original) => ({
   ...(await original<Record<string, unknown>>()),
   useMachinesFacet: () => machines,
 }));
+it.each(['/machines', '/machines/host/mill'])('blocks a saved route %s without observing machines', (route) => {
+  enabled = false;
+  const fixture = createFixture();
+  const list = vi.spyOn(fixture.client, 'list');
+  machines = { available: true, ...fixture.client };
+  try {
+    mount(route);
+    expect(screen.getByText('Machines are not available in this release.')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Open projects' })).toHaveAttribute('href', '/projects');
+    expect(list).not.toHaveBeenCalled();
+  } finally {
+    enabled = true;
+  }
+});
 const { default: MachinesRoute } = await import('#routes/machines._index/route.js');
 const { default: MachineRoute } = await import('#routes/machines.$hostId.$machineId/route.js');
 const mount = (route = '/machines') =>

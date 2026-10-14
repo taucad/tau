@@ -1,3 +1,5 @@
+import { useFeature } from '#flags/use-feature.js';
+import { MachinesDisabled } from '#components/machines/machines-disabled.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
@@ -214,6 +216,10 @@ function ConnectedMachines({ client }: { readonly client: MachineClient }): Reac
 }
 export default function MachinesRoute(): React.JSX.Element {
   const machines = useMachinesFacet();
+  const enabled = useFeature('machines');
+  if (!enabled) {
+    return <MachinesDisabled />;
+  }
   return machines.available ? (
     <ConnectedMachines client={machines} />
   ) : (

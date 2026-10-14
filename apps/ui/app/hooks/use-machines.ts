@@ -1,4 +1,5 @@
 import { useMemo, useSyncExternalStore } from 'react';
+import { useFeature } from '#flags/use-feature.js';
 import { machineObservation } from '#services/machine-observation.js';
 import type {
   MachineChannelClient,
@@ -163,8 +164,9 @@ let documentFacet: RuntimeTransportFacet<MachineClient> | undefined;
  * @public
  */
 export const useMachinesFacet = (): RuntimeTransportFacet<MachineClient> => {
+  const enabled = useFeature('machines');
   const bridge = desktopBridge();
-  if (bridge === undefined) {
+  if (!enabled || bridge === undefined) {
     return unsupportedFacet;
   }
   documentFacet ??= createMachinesFacet({

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
 import { mkdir, mkdtemp, realpath, rm, stat, symlink } from 'node:fs/promises';
@@ -290,6 +291,7 @@ vi.mock('#main/environment.js', async (importOriginal) => ({
   desktopAgentGatewayBaseUrl: vi.fn(() => 'http://127.0.0.1:1'),
   desktopAgentSystemPrompt: vi.fn(() => 'test'),
   desktopEnvironment: vi.fn(() => ({
+    TAU_MACHINES_ENABLED: 'true',
     TAU_API_URL: 'http://127.0.0.1:1',
     TAU_WEBSOCKET_URL: 'ws://127.0.0.1:1',
     TAU_FRONTEND_URL: 'http://127.0.0.1:1',
@@ -1277,6 +1279,42 @@ describe('desktop main Bambu Studio channels', () => {
 });
 
 describe('desktop main machine binding channel', () => {
+  it('refuses machine and slicer IPC without creating the machine store when disabled', async () => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    const { desktopEnvironment } = await import('#main/environment.js');
+    vi.mocked(desktopEnvironment).mockReturnValueOnce({
+      TAU_API_URL: 'http://127.0.0.1:1',
+      TAU_WEBSOCKET_URL: 'ws://127.0.0.1:1',
+      TAU_FRONTEND_URL: 'http://127.0.0.1:1',
+    });
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-machines-disabled-'));
+    await import('#main/main.js');
+    await vi.waitFor(() => {
+      expect(state.handlers.has(machinesChannels.completeBinding)).toBe(true);
+    });
+    const complete = state.handlers.get(machinesChannels.completeBinding)!;
+    await expect(complete({ senderFrame: {} }, { ceremonyId: 'old' })).resolves.toMatchObject({
+      status: 'failed',
+      code: 'MACHINES_DISABLED',
+    });
+    expect(state.servicesCompleteBinding).not.toHaveBeenCalled();
+    const status = state.handlers.get(slicersChannels.bambuStudio.status)!;
+    await expect(status({ senderFrame: {} })).rejects.toThrow('Machines are not available');
+    const postMessage = vi.fn();
+    for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+      listener(
+        { senderFrame: { url: 'app://tau/index.html', postMessage } },
+        { requestId: 'disabled', concern: 'machines' },
+      );
+    }
+    expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
+      requestId: 'disabled',
+      error: 'Machines are not available in this release.',
+    });
+    expect(state.servicesConnect).not.toHaveBeenCalled();
+    expect(existsSync(join(state.userData, 'config', 'machines'))).toBe(false);
+  }, 30_000);
+
   const bootMilliseconds = 30_000;
 
   it(

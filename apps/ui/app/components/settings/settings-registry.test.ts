@@ -4,6 +4,8 @@ import { experimentalFeatureFlagNames } from '#flags/flag.constants.js';
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.doUnmock('#environment.config.js');
+  vi.resetModules();
 });
 
 describe('searchSettings', () => {
@@ -67,8 +69,21 @@ describe('searchSettings', () => {
     expect(new Set(entries.map(({ id }) => id)).size).toBe(entries.length);
   });
 
+  it('omits Machines settings and the deployment flag by default', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment module and variable names.
+    vi.doMock('#environment.config.js', () => ({ ENV: {} }));
+    vi.resetModules();
+    const desktop = await import('#components/settings/settings-registry.js');
+    expect(desktop.settingsSections.some(({ id }) => id === 'machines')).toBe(false);
+    expect(desktop.searchSettings('machines')).toEqual([]);
+    expect(experimentalFeatureFlagNames).not.toContain('machines');
+  });
+
   it('should find Machines by the parts and print options its machine details show on desktop', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment module and variable names.
+    vi.doMock('#environment.config.js', () => ({ ENV: { TAU_MACHINES_ENABLED: true } }));
     vi.resetModules();
     const desktop = await import('#components/settings/settings-registry.js');
 
@@ -101,6 +116,8 @@ describe('searchSettings', () => {
 
   it('should offer no browser storage setting in the desktop app, where Home is a folder on disk', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment module and variable names.
+    vi.doMock('#environment.config.js', () => ({ ENV: { TAU_MACHINES_ENABLED: true } }));
     vi.resetModules();
     const desktop = await import('#components/settings/settings-registry.js');
 

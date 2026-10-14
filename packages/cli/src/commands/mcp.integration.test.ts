@@ -733,6 +733,7 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
     const environment: Record<string, string> = {};
     environment['TAU_CONFIG_DIR'] = configDirectory;
     environment['TAU_HOST_MACHINES'] = 'true';
+    environment['TAU_MACHINES_ENABLED'] = 'true';
     /* No test may touch a person's keychain. */
     environment['TAU_SECRET_VAULT'] = 'memory';
     return { configDirectory, environment };

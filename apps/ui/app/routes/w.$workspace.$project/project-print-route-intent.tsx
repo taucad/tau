@@ -1,3 +1,4 @@
+import { useFeature } from '#flags/use-feature.js';
 import { useEffect } from 'react';
 import { useSearchParams } from 'react-router';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
@@ -7,7 +8,8 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 export function ProjectPrintRouteIntent(): undefined {
   const [parameters, setParameters] = useSearchParams();
   const { openPanel } = useProjectWorkspace();
-  const requested = parameters.get(searchParameterName.workbench) === 'print';
+  const enabled = useFeature('machines');
+  const requested = enabled && parameters.get(searchParameterName.workbench) === 'print';
   useEffect(() => {
     if (!requested) {
       return;

@@ -289,11 +289,28 @@ describe('createServicesHost — machines', () => {
   beforeEach(() => {
     /* The desktop picks the keychain on macOS; no test may touch a person's keychain. */
     vi.stubEnv('TAU_SECRET_VAULT', 'file');
+    vi.stubEnv('TAU_MACHINES_ENABLED', 'true');
     runtimeOptions.length = 0;
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it('refuses direct machine ports and binding without opening the store or providers when disabled', async () => {
+    vi.stubEnv('TAU_MACHINES_ENABLED', 'false');
+    const machines = await machinesHarness();
+    try {
+      await expect(machines.connect().listProviders({})).rejects.toThrow('Machines are not available');
+      await expect(machines.completeCeremony('disabled-binding', 'ceremony')).resolves.toMatchObject({
+        code: 'MACHINES_DISABLED',
+      });
+      expect(runtimeOptions).toHaveLength(0);
+      expect(existsSync(machines.store)).toBe(false);
+      expect(await machines.streaming('disabled-quit')).toEqual([]);
+    } finally {
+      await machines.cleanup();
+    }
   });
 
   it('should serve a connection that names no project, bind the simulator without keeping its code, and close on quiesce', async () => {

@@ -20,6 +20,7 @@ vi.mock('#environment.config.js', async (loadOriginal) => ({
     POSTHOG_UI_HOST: 'https://analytics.test',
     TAU_API_URL: 'https://api.test',
     TAU_DEBUG: false,
+    TAU_MACHINES_ENABLED: false,
     TAU_FRONTEND_URL: 'https://tau.test',
     TAU_GIT_REMOTE_ALLOW_PRIVATE: false,
     TAU_WEBSOCKET_URL: 'wss://api.test',

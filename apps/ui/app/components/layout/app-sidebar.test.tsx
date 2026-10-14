@@ -78,6 +78,15 @@ describe('AppSidebar', () => {
     vi.unstubAllEnvs();
   });
 
+  it('hides Machines by default and shows it only when enabled', () => {
+    const view = renderSidebar();
+    expect(getNavLink('Machines')).toBeUndefined();
+    view.unmount();
+    mockState.flags = { ...featureFlagDefaults, machines: true };
+    renderSidebar();
+    expect(getNavLink('Machines')).toHaveAttribute('href', '/machines');
+  });
+
   it('should show Parts by default and hide it when disabled', () => {
     const view = renderSidebar();
     expect(getNavLink('Parts')).toHaveAttribute('href', '/parts');

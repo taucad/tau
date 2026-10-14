@@ -1,3 +1,5 @@
+import { useFeature } from '#flags/use-feature.js';
+import { MachinesDisabled } from '#components/machines/machines-disabled.js';
 import { memo, useCallback, useMemo } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import { Link, useSearchParams } from 'react-router';
@@ -366,6 +368,10 @@ function AvailablePrintPanel({ isShown }: { readonly isShown: boolean }): React.
 
 export const PrintPanelBody = ({ isShown = true }: { readonly isShown?: boolean }): React.JSX.Element => {
   const availability = useProjectAvailability();
+  const enabled = useFeature('machines');
+  if (!enabled) {
+    return <MachinesDisabled />;
+  }
   return availability === 'ready' ? (
     <AvailablePrintPanel isShown={isShown} />
   ) : (

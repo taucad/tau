@@ -14,7 +14,8 @@ import {
   useMachinesFacet,
 } from '#hooks/use-machines.js';
 
-const state = vi.hoisted(() => ({ bridge: undefined as unknown }));
+const state = vi.hoisted(() => ({ bridge: undefined as unknown, enabled: true }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: () => state.enabled }));
 vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => state.bridge }));
 
 const snapshot: MachineDirectorySnapshot = {
@@ -155,6 +156,16 @@ describe('useMachineDirectory', () => {
 });
 
 describe('useMachinesFacet', () => {
+  it('never dials a desktop machine service while the feature is disabled', () => {
+    state.enabled = false;
+    const connect = vi.fn();
+    state.bridge = { machines: { connect } };
+    const view = renderHook(() => useMachinesFacet());
+    expect(view.result.current.available).toBe(false);
+    expect(connect).not.toHaveBeenCalled();
+    view.unmount();
+    state.enabled = true;
+  });
   it('should be unsupported on the web, and one facet per document on the desktop, whether or not a project is open', () => {
     state.bridge = undefined;
     const web = renderHook(() => useMachinesFacet());

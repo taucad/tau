@@ -1,3 +1,4 @@
+import { isMachinesFeatureEnabled, machinesDisabledMessage } from '@taucad/types/constants';
 import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /**
  * Services-utility behaviour (work item E7), separated from its entry so it is
@@ -355,6 +356,7 @@ export type ServicesHost = {
  * @returns The host.
  */
 export const createServicesHost = (options: ServicesHostOptions = {}): ServicesHost => {
+  const machinesEnabled = isMachinesFeatureEnabled(process.env['TAU_MACHINES_ENABLED']);
   const log =
     options.log ??
     ((event: string, detail?: unknown, level?: 'info' | 'warn'): void => {
@@ -669,6 +671,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the once-per-utility contract.
   const ensureMachineHost = (): Promise<MachineHostServices> => {
+    if (!machinesEnabled) {
+      return Promise.reject(Object.assign(new Error(machinesDisabledMessage), { code: 'MACHINES_DISABLED' }));
+    }
     if (activeQuitRequest !== undefined && machineHost === undefined) {
       return Promise.reject(new Error('Tau is reviewing a quit request. Cancel quitting to connect a machine.'));
     }
@@ -782,7 +787,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         port,
         ownedElsewhere
           ? Object.assign(new Error('MACHINE_STORE_OWNED_ELSEWHERE'), { code: 'MACHINE_STORE_OWNED_ELSEWHERE' })
-          : new Error(reason),
+          : error instanceof Error
+            ? error
+            : new Error(reason),
       );
       return;
     }
@@ -994,11 +1001,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     /* The agent's own machines facet: served by this utility's machine host
      * over an in-process channel once it opens, on an agent session of its own
      * beside the window's. One per actor, so every host it opens offers the same one. */
-    const machines = localMachineFacet(async (port) => serveMachines(port, 'agent'));
+    const machines = machinesEnabled ? localMachineFacet(async (port) => serveMachines(port, 'agent')) : undefined;
     let servedHost: ProjectHost | undefined;
     const actor = createProjectHostActor({
       root: workspaceRoot,
-      host: () => ({ ...projectHostOptions(workspaceRoot, projectId, route), machines }),
+      host: () => ({ ...projectHostOptions(workspaceRoot, projectId, route), ...(machines ? { machines } : {}) }),
       serve: (connectionId, host) => {
         const port = takeConnection(connectionId);
         if (port === undefined) {
@@ -1049,7 +1056,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       // async-iife: bootstrap -- completion has no caller; quiesce and dispose also await this actor.
       void settleRetired();
       mcpEndpoints.delete(route);
-      machines.close();
+      machines?.close();
       const checkoutsRoot = resolve(join(dirname(workspaceRoot), '.tau', 'checkouts', projectId));
       for (const root of runtimeClients.keys()) {
         if (root === workspaceRoot || root === checkoutsRoot || root.startsWith(`${checkoutsRoot}${sep}`)) {

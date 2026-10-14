@@ -153,7 +153,7 @@ const hashes = [
 ];
 await writeFile(
   join(output, '_headers'),
-  `/*\n  Content-Security-Policy: default-src 'self'; script-src 'self' ${hashes.join(' ')}; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n  Permissions-Policy: camera=(), microphone=(), geolocation=()\n  Cache-Control: public, max-age=0, must-revalidate\n${launch ? '' : '  X-Robots-Tag: noindex, nofollow\n'}\n/_www/assets/*\n  Cache-Control: public, max-age=3600, must-revalidate\n`,
+  `/*\n  Content-Security-Policy: default-src 'self'; script-src 'self' ${hashes.join(' ')}; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self' https://api.tau.new https://api.taucad.dev; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n  Permissions-Policy: camera=(), microphone=(), geolocation=()\n  Cache-Control: public, max-age=0, must-revalidate\n${launch ? '' : '  X-Robots-Tag: noindex, nofollow\n'}\n/_www/assets/*\n  Cache-Control: public, max-age=3600, must-revalidate\n`,
 );
 await writeFile(
   join(output, '_redirects'),

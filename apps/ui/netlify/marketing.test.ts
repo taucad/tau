@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Netlify bundles every file in edge-functions/ as a function, so this test sits beside it, outside the app alias root.
-import { config, resolveMarketingUrl, rewriteLocation } from './edge-functions/marketing.js';
+import marketing, { config, resolveMarketingUrl, rewriteLocation } from './edge-functions/marketing.js';
 
 const origin = 'https://marketing.example.netlify.app';
 
@@ -64,5 +64,93 @@ describe('config', () => {
     expect(config.path).toContain('/blog');
     expect(config.path).toContain('/blog/*');
     expect(config.path).not.toContain('/vision');
+  });
+});
+
+describe('marketing response selection', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each(['GET', 'HEAD'])(
+    'should serve app preference on bare and campaign URLs for %s without a marketing fetch',
+    async (method) => {
+      vi.stubGlobal('Netlify', { env: { get: () => origin } });
+      const fetch = vi.fn();
+      vi.stubGlobal('fetch', fetch);
+      await Promise.all(
+        ['/', '/?utm_source=return'].map(async (path) => {
+          const next = vi.fn(
+            async () =>
+              new Response('app', { headers: { 'Netlify-CDN-Cache-Control': 'public, durable, s-maxage=600' } }),
+          );
+          const response = await marketing(
+            new Request(`https://tau.new${path}`, { method, headers: { cookie: 'other=x; tau-entry=app' } }),
+            { next },
+          );
+          expect(await response.text()).toBe('app');
+          expect(response.headers.get('cache-control')).toBe('private, no-store');
+          expect(response.headers.get('netlify-cdn-cache-control')).toBe('no-store');
+          expect(next).toHaveBeenCalledOnce();
+        }),
+      );
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['', 'tau-entry=website', 'not-tau-entry=app', 'tau-entry=apple', 'tau-entry=app; tau-entry=website'])(
+    'should keep marketing for cookie %s without forwarding credentials',
+    async (cookie) => {
+      vi.stubGlobal('Netlify', { env: { get: () => origin } });
+      const fetch = vi.fn(
+        async () =>
+          new Response('marketing', { headers: { 'cache-control': 'public', 'CDN-Cache-Control': 'public' } }),
+      );
+      vi.stubGlobal('fetch', fetch);
+      const response = await marketing(
+        new Request('https://tau.new/', { headers: { cookie, authorization: 'Bearer test' } }),
+        { next: vi.fn() },
+      );
+      expect(await response.text()).toBe('marketing');
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+      expect(response.headers.get('cdn-cache-control')).toBe('no-store');
+      expect(fetch).toHaveBeenCalledWith(new URL(`${origin}/`), {
+        method: 'GET',
+        headers: { accept: '*/*' },
+        redirect: 'manual',
+      });
+    },
+  );
+});
+
+describe('root redirect cache isolation', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('should prevent caching a marketing root redirect after rewriting its location', async () => {
+    vi.stubGlobal('Netlify', { env: { get: () => origin } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(null, {
+            status: 302,
+            headers: { location: '/pricing/', 'cache-control': 'public, max-age=600' },
+          }),
+      ),
+    );
+    const response = await marketing(new Request('https://tau.new/'), { next: vi.fn() });
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('https://tau.new/pricing/');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+  });
+  it('should keep app-preferring visitors on marketing subpages and preserve their cache policy', async () => {
+    vi.stubGlobal('Netlify', { env: { get: () => origin } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('pricing', { headers: { 'cache-control': 'public, max-age=600' } })),
+    );
+    const response = await marketing(
+      new Request('https://tau.new/pricing/', { headers: { cookie: 'tau-entry=app' } }),
+      { next: vi.fn() },
+    );
+    expect(await response.text()).toBe('pricing');
+    expect(response.headers.get('cache-control')).toBe('public, max-age=600');
   });
 });

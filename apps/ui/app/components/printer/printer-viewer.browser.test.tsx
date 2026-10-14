@@ -1,5 +1,14 @@
 import * as THREE from 'three';
 import { createRenderer } from '@taucad/viewer/graphics/three/renderer';
+import type * as RendererModule from '@taucad/viewer/graphics/three/renderer';
+import type { RendererInstance } from '@taucad/viewer/graphics/three/renderer';
+import {
+  captureRendererOutput,
+  createRendererOutputCanvas,
+  disposeRendererOutput,
+  installRendererOutput,
+} from '@taucad/runtime-testing/browser/three-renderer-output';
+import type { RendererOutputProfile } from '@taucad/runtime-testing/browser/three-renderer-output';
 import { printerPreparation } from '#components/printer/printer-preparation.js';
 import {
   createToolpathReveal,
@@ -11,7 +20,8 @@ import '#styles/global.css';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { commands, page, userEvent } from 'vitest/browser';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, inject, it, vi } from 'vitest';
+import type { TestContext } from 'vitest';
 import { useCallback } from 'react';
 import { mock } from 'vitest-mock-extended';
 import { writeBambuContainer } from '@taucad/slicer/container';
@@ -30,6 +40,13 @@ import type { PrinterLiveState } from '#components/printer/use-printer-live.js';
 import { useFileContent } from '#hooks/use-file-content.js';
 import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 
+declare module 'vitest' {
+  // oxlint-disable-next-line typescript/consistent-type-definitions -- Augment the browser fixture's injected profile.
+  interface ProvidedContext {
+    webGpuProfile: RendererOutputProfile;
+  }
+}
+
 /**
  * Framing evidence for the printer simulation scene: the plate-focus view
  * framed wide and in a narrow pane, light and dark, the pane from the manual
@@ -45,12 +62,33 @@ const mocks = vi.hoisted(() => ({
   theme: 'light' as 'light' | 'dark',
   backend: 'webgl' as 'webgl' | 'webgpu',
   live: undefined as PrinterLiveState | undefined,
+  renderers: new Map<HTMLCanvasElement, RendererInstance>(),
 }));
-const fileManager = vi.hoisted(() => ({ contentService: undefined as FileContentService | undefined }));
+const fileManager = vi.hoisted(() => ({
+  contentService: undefined as FileContentService | undefined,
+}));
 
-vi.mock('#hooks/use-theme.js', () => ({ useTheme: () => ({ theme: mocks.theme }) }));
-vi.mock('#components/printer/use-printer-live.js', () => ({ usePrinterLive: () => mocks.live }));
-vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => fileManager }));
+vi.mock('#hooks/use-theme.js', () => ({
+  useTheme: () => ({ theme: mocks.theme }),
+}));
+vi.mock('#components/printer/use-printer-live.js', () => ({
+  usePrinterLive: () => mocks.live,
+}));
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useFileManager: () => fileManager,
+}));
+vi.mock('@taucad/viewer/graphics/three/renderer', async (importOriginal) => {
+  const original = await importOriginal<typeof RendererModule>();
+  return {
+    ...original,
+    createRenderer: async (...args: Parameters<typeof original.createRenderer>) => {
+      const renderer = await original.createRenderer(...args);
+      installRendererOutput(renderer, inject('webGpuProfile'));
+      mocks.renderers.set(renderer.domElement, renderer);
+      return renderer;
+    },
+  };
+});
 
 const { PrinterViewer } = await import('#components/printer/printer-viewer.js');
 
@@ -63,7 +101,11 @@ const container = writeBambuContainer({
   plate: 'textured-pei',
 });
 const readAll = async (): Promise<Uint8Array<ArrayBuffer>> => container;
-type PrinterFile = Readonly<{ name: string; kind: PrinterFileKind; readAll: () => Promise<Uint8Array<ArrayBuffer>> }>;
+type PrinterFile = Readonly<{
+  name: string;
+  kind: PrinterFileKind;
+  readAll: () => Promise<Uint8Array<ArrayBuffer>>;
+}>;
 const bracket: PrinterFile = { name, kind: 'container', readAll };
 const renderPane = ({ actions, body }: FileViewerPaneContent): React.ReactNode => (
   <div data-testid='frame' className='flex flex-col bg-background' style={{ width: '1280px', height: '720px' }}>
@@ -167,9 +209,179 @@ const isRed: PrintInk = (red, green, blue) => red > 110 && red > green * 1.6 && 
 /** A blue print: pixels far bluer than red or green. */
 const isBlue: PrintInk = (red, green, blue) => blue > 110 && blue > red * 1.6 && blue > green * 1.6;
 
+/** Preserve the dense fixture's print-colour evidence outside the timed GPU samples. */
+const expectDensePrintPixels = async (renderer: RendererInstance): Promise<void> => {
+  let pixels: Uint8Array<ArrayBuffer> | Uint8ClampedArray;
+  if (renderer instanceof THREE.WebGLRenderer) {
+    const { x: width, y: height } = renderer.getDrawingBufferSize(new THREE.Vector2());
+    pixels = new Uint8Array(width * height * 4);
+    const context = renderer.getContext();
+    context.readPixels(0, 0, width, height, context.RGBA, context.UNSIGNED_BYTE, pixels);
+  } else {
+    if (inject('webGpuProfile') !== 'software') {
+      return;
+    }
+    pixels = await captureRendererOutput(renderer);
+  }
+  expect(
+    pixels.some(
+      (value, index) =>
+        index % 4 === 0 && value > 50 && value > pixels[index + 1]! * 1.3 && value > pixels[index + 2]! * 1.3,
+    ),
+  ).toBe(true);
+};
+
+/** Milliseconds allowed for GPU completion; software also draws the full million-move geometry. */
+const gpuCompletionTimeout = (backend: 'webgl' | 'webgpu'): number => {
+  if (inject('webGpuProfile') !== 'software') {
+    return 30_000;
+  }
+  return backend === 'webgpu' ? 90_000 : 60_000;
+};
+
+/** Hardware frame statistics remain separate from software correctness evidence. */
+const denseFrameStatistics = (durations: number[]) => {
+  expect(durations).toHaveLength(20);
+  const sorted = durations.toSorted((a, b) => a - b);
+  const median = (sorted[9]! + sorted[10]!) / 2;
+  const deviations = durations.map((duration) => Math.abs(duration - median)).toSorted((a, b) => a - b);
+  return {
+    samples: durations.length,
+    median,
+    p95: sorted[18],
+    mad: deviations[10],
+    durations,
+  };
+};
+
+/** Keep actual GPU completion bounded while allowing the browser to process failures and cleanup. */
+const awaitGpuCompletion = async (work: Promise<void>, signal: AbortSignal): Promise<void> => {
+  signal.throwIfAborted();
+  const completionBudget = gpuCompletionTimeout('webgpu');
+  const started = performance.now();
+  let completionTimer: ReturnType<typeof setTimeout> | undefined;
+  let removeAbortListener: (() => void) | undefined;
+  try {
+    await Promise.race([
+      work,
+      new Promise<void>((_resolve, reject) => {
+        const abort = (): void => {
+          const reason: unknown = signal.reason;
+          reject(
+            reason instanceof Error
+              ? reason
+              : new Error('GPU frame completion was aborted', {
+                  cause: reason,
+                }),
+          );
+        };
+        signal.addEventListener('abort', abort, { once: true });
+        removeAbortListener = (): void => {
+          signal.removeEventListener('abort', abort);
+        };
+        completionTimer = setTimeout(() => {
+          reject(new Error(`GPU frame completion exceeded ${completionBudget} milliseconds`));
+        }, completionBudget);
+      }),
+    ]);
+    signal.throwIfAborted();
+    if (performance.now() - started > completionBudget) {
+      throw new Error(`GPU frame completion exceeded ${completionBudget} milliseconds`);
+    }
+  } finally {
+    clearTimeout(completionTimer);
+    removeAbortListener?.();
+  }
+};
+
+/** A real WebGL completion fence that leaves the software browser's event loop responsive. */
+const completeSoftwareWebGlFrame = async (
+  context: WebGLRenderingContext | WebGL2RenderingContext,
+  signal: AbortSignal,
+): Promise<void> => {
+  if (!(context instanceof WebGL2RenderingContext)) {
+    throw new TypeError('Software dense qualification requires native WebGL2 completion fences');
+  }
+  signal.throwIfAborted();
+  const sync = context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  if (!sync) {
+    throw new Error('Unable to allocate a WebGL completion fence');
+  }
+  context.flush();
+  const started = performance.now();
+  const completionBudget = gpuCompletionTimeout('webgl');
+  try {
+    for (;;) {
+      signal.throwIfAborted();
+      if (context.isContextLost()) {
+        throw new Error('WebGL context was lost while completing a software frame');
+      }
+      const status = context.clientWaitSync(sync, 0, 0);
+      signal.throwIfAborted();
+      // A native call can itself block; check elapsed time before accepting a signalled fence.
+      if (performance.now() - started > completionBudget) {
+        throw new Error(`WebGL frame completion exceeded ${completionBudget} milliseconds`);
+      }
+      if (status === context.ALREADY_SIGNALED || status === context.CONDITION_SATISFIED) {
+        return;
+      }
+      if (status === context.WAIT_FAILED) {
+        throw new Error('WebGL completion fence failed');
+      }
+      // oxlint-disable-next-line no-await-in-loop -- Poll the same native GPU fence until work completes.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    }
+  } finally {
+    context.deleteSync(sync);
+  }
+};
+
+/** Wait for the appearance update before retiring native GPU resources. */
+const completeGpuFrame = async (renderer: RendererInstance, signal: AbortSignal): Promise<void> => {
+  if (renderer instanceof THREE.WebGLRenderer) {
+    if (inject('webGpuProfile') === 'software') {
+      await completeSoftwareWebGlFrame(renderer.getContext(), signal);
+    } else {
+      renderer.getContext().finish();
+    }
+    return;
+  }
+  const device = Reflect.get(renderer.backend, 'device') as QualificationDevice;
+  await awaitGpuCompletion(device.queue.onSubmittedWorkDone(), signal);
+};
+
+/** Show completed GPU output at its real canvas bounds while capturing surrounding UI. */
+const withOutputSnapshots = async <Result,>(root: HTMLElement, capture: () => Promise<Result>): Promise<Result> => {
+  const snapshots: HTMLCanvasElement[] = [];
+  try {
+    if (inject('webGpuProfile') === 'software' && mocks.backend === 'webgpu') {
+      for (const canvas of root.querySelectorAll('canvas')) {
+        const renderer = mocks.renderers.get(canvas);
+        if (!renderer) {
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- Each snapshot belongs to its own real renderer.
+        const pixels = await captureRendererOutput(renderer);
+        const snapshot = createRendererOutputCanvas({ renderer, pixels });
+        // Stay in the canvas's stacking order so the legend and playback UI retain their visibility.
+        snapshot.style.zIndex = 'auto';
+        canvas.after(snapshot);
+        snapshots.push(snapshot);
+      }
+    }
+    return await capture();
+  } finally {
+    for (const snapshot of snapshots) {
+      snapshot.remove();
+    }
+  }
+};
+
 /** Find the print, red unless told otherwise, in a screenshot of the scene. */
 const measurePrint = async (scene: HTMLElement, isInk: PrintInk = isRed): Promise<PrintExtent> => {
-  const base64 = await page.screenshot({ element: scene, save: false });
+  const base64 = await withOutputSnapshots(scene, async () => page.screenshot({ element: scene, save: false }));
   const response = await fetch(`data:image/png;base64,${base64}`);
   const bitmap = await createImageBitmap(await response.blob());
   const context = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d');
@@ -220,7 +432,11 @@ const mount = async (
   theme: 'light' | 'dark',
   size: readonly [number, number],
   file: PrinterFile = bracket,
-): Promise<{ frame: HTMLElement; scene: HTMLElement; unmount: () => void }> => {
+): Promise<{
+  frame: HTMLElement;
+  scene: HTMLElement;
+  unmount: () => Promise<void>;
+}> => {
   mocks.theme = theme;
   document.documentElement.classList.toggle('dark', theme === 'dark');
   globalThis.history.replaceState(undefined, '', `?graphicsBackend=${mocks.backend}`);
@@ -236,7 +452,15 @@ const mount = async (
   await nextFrames(6);
   return {
     frame,
-    unmount,
+    unmount: async (): Promise<void> => {
+      const canvas = root.querySelector('canvas');
+      const renderer = canvas && mocks.renderers.get(canvas);
+      if (renderer) {
+        await disposeRendererOutput(renderer);
+        mocks.renderers.delete(renderer.domElement);
+      }
+      unmount();
+    },
     scene: within(frame).getByRole('img', {
       name: `${mocks.live?.manifest?.identity.displayName ?? 'Bambu Lab X1 Carbon'} printing ${file.name}`,
     }),
@@ -250,10 +474,16 @@ const resize = (frame: HTMLElement, [width, height]: readonly [number, number]):
 
 /** Seek the paused preview, which opens on the finished print, to a time share and wait for the HUD's layer to reach it. */
 const pauseAt = async (frame: HTMLElement, share: number, layer: RegExp): Promise<void> => {
-  const controls = within(frame).getByRole('group', { name: 'Playback controls' });
+  const controls = within(frame).getByRole('group', {
+    name: 'Playback controls',
+  });
   expect(within(controls).getByRole('button', { name: 'Play' })).toBeInTheDocument();
   const time = within(controls).getByRole('slider', { name: 'Time' });
-  fireEvent.change(time, { target: { value: String(Math.round(Number(time.getAttribute('max')) * share)) } });
+  fireEvent.change(time, {
+    target: {
+      value: String(Math.round(Number(time.getAttribute('max')) * share)),
+    },
+  });
   const hud = within(frame).getByRole('region', { name: 'Print HUD' });
   await waitFor(() => {
     expect(within(hud).getByText('Layer').nextElementSibling?.textContent).toMatch(layer);
@@ -277,11 +507,20 @@ const chooseFromMore = async (
 };
 
 const capture = async (frame: HTMLElement, file: string): Promise<void> => {
-  const path = await page.screenshot({ element: frame, path: `${evidenceDirectory}/${file}` });
+  const artifact =
+    inject('webGpuProfile') === 'software' && mocks.backend === 'webgpu' ? `target-readback-${file}` : file;
+  const path = await withOutputSnapshots(frame, async () =>
+    page.screenshot({
+      element: frame,
+      path: `${evidenceDirectory}/${artifact}`,
+    }),
+  );
   expect(path).toContain(file);
 };
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.all(Array.from(mocks.renderers.values(), async (renderer) => disposeRendererOutput(renderer)));
+  mocks.renderers.clear();
   cleanup();
   mocks.live = undefined;
   mocks.backend = 'webgl';
@@ -330,7 +569,11 @@ describe('Printer viewer framing', () => {
       const before = within(frame).getByRole('slider', { name: 'Time' }).getAttribute('value');
       const firstOutcome = service.peekOutcome(name);
 
-      emitFileChanged({ type: 'fileWritten', path: name, backend: 'indexeddb' });
+      emitFileChanged({
+        type: 'fileWritten',
+        path: name,
+        backend: 'indexeddb',
+      });
       await waitFor(() => {
         expect(proxy.readFile).toHaveBeenCalledTimes(2);
         expect(digest).toHaveBeenCalledTimes(3);
@@ -344,7 +587,11 @@ describe('Printer viewer framing', () => {
       await nextFrames(6);
 
       expect(service.peekOutcome(name)).toBe(firstOutcome);
-      expect(within(frame).getByRole('img', { name: `Bambu Lab X1 Carbon printing ${name}` })).toBe(scene);
+      expect(
+        within(frame).getByRole('img', {
+          name: `Bambu Lab X1 Carbon printing ${name}`,
+        }),
+      ).toBe(scene);
       expect(scene.querySelector('canvas')).toBe(canvas);
       expect(within(frame).getByRole('slider', { name: 'Time' })).toHaveAttribute('value', before);
       await page.screenshot({
@@ -458,7 +705,11 @@ describe('Printer viewer framing', () => {
   });
 
   it('draws Mini’s own thin pierced sheet and restricts its plate menu', async () => {
-    mocks.live = { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest };
+    mocks.live = {
+      ...idleLive,
+      machineName: 'Mini',
+      manifest: bambuA1MiniManifest,
+    };
     const { frame, scene } = await mount('dark', [1280, 720]);
     await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
     await userEvent.click(within(frame).getByRole('button', { name: 'More' }));
@@ -550,13 +801,17 @@ describe('Printer viewer framing', () => {
       await chooseFromMore(frame, 'menuitemcheckbox', 'Show the whole printer');
       await capture(frame, `${mini ? 'mini' : 'x1c'}-mechanical-webgpu.png`);
       expectFramed(await measurePrint(scene), 0.035);
-    });
+    }, 60_000);
   }
 
   it('loads a fresh plate after switching Mini Smooth to Textured and back', async () => {
     const loads = vi.spyOn(GLTFLoader.prototype, 'loadAsync');
     try {
-      mocks.live = { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest };
+      mocks.live = {
+        ...idleLive,
+        machineName: 'Mini',
+        manifest: bambuA1MiniManifest,
+      };
       const { frame, scene } = await mount('dark', [1280, 720]);
       await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
       await chooseFromMore(frame, 'menuitemradio', 'Smooth PEI Plate');
@@ -688,7 +943,9 @@ describe('Printer viewer framing', () => {
   it('captures the scene following a live run in dark', async () => {
     mocks.live = printingLive;
     const { frame, scene } = await mount('dark', [570, 720]);
-    const controls = within(frame).getByRole('group', { name: 'Playback controls' });
+    const controls = within(frame).getByRole('group', {
+      name: 'Playback controls',
+    });
     fireEvent.click(within(controls).getByRole('switch', { name: 'Live' }));
     await waitFor(() => {
       expect(within(controls).getByRole('switch', { name: 'Live' })).toHaveAttribute('aria-checked', 'true');
@@ -705,7 +962,9 @@ describe('Printer viewer framing', () => {
 // Three's shipped device declarations are empty; this fixture names only the native WebGPU methods it verifies.
 type QualificationDevice = {
   createShaderModule: (descriptor: { code: string }) => {
-    getCompilationInfo: () => Promise<{ messages: ReadonlyArray<{ type: string }> }>;
+    getCompilationInfo: () => Promise<{
+      messages: ReadonlyArray<{ type: string }>;
+    }>;
   };
   pushErrorScope: (filter: 'validation') => void;
   popErrorScope: () => Promise<unknown>;
@@ -723,9 +982,12 @@ type QualificationDevice = {
 /** Dense geometry validates the real backend and records synchronized whole-frame costs, not CPU submission alone. */
 describe('filament GPU qualification', () => {
   for (const backend of ['webgl', 'webgpu'] as const) {
-    it.each([100_000, 1_000_000])(
+    it.for([100_000, 1_000_000])(
       `should compile filament with negative controls and measure dense whole frames on ${backend} with %i moves`,
-      async (count) => {
+      {
+        timeout: inject('webGpuProfile') === 'software' && backend === 'webgpu' ? 210_000 : 120_000,
+      },
+      async (count, { signal }: TestContext) => {
         const lines = [
           'G28',
           'M104 S220',
@@ -741,8 +1003,13 @@ describe('filament GPU qualification', () => {
         }
         const bytes = new TextEncoder().encode(lines.join('\n'));
         const owner = new AbortController();
+        const preparationSignal = AbortSignal.any([signal, owner.signal]);
         const started = performance.now();
-        const prepared = await printerPreparation.prepare({ bytes, kind: 'gcode', signal: owner.signal });
+        const prepared = await printerPreparation.prepare({
+          bytes,
+          kind: 'gcode',
+          signal: preparationSignal,
+        });
         expect(prepared.kind).toBe('ready');
         if (prepared.kind !== 'ready') {
           throw new Error('Dense qualification did not prepare');
@@ -750,16 +1017,27 @@ describe('filament GPU qualification', () => {
         /** Milliseconds, including worker startup. */
         const preparationDuration = performance.now() - started;
         const warmStart = performance.now();
-        const warm = await printerPreparation.prepare({ bytes, kind: 'gcode', signal: owner.signal });
+        const warm = await printerPreparation.prepare({
+          bytes,
+          kind: 'gcode',
+          signal: preparationSignal,
+        });
         expect(warm.kind === 'ready' && warm.value === prepared.value).toBe(true);
         /** Milliseconds. */
         const warmDuration = performance.now() - warmStart;
         const canvas = document.createElement('canvas');
         document.body.append(canvas);
-        const renderer = await createRenderer('viewport', backend, canvas);
+        const isSoftwareQualification = inject('webGpuProfile') === 'software';
+        const mainFrames = isSoftwareQualification ? 1 : 22;
+        const renderer = await createRenderer(
+          'viewport',
+          backend,
+          isSoftwareQualification && backend === 'webgl' ? { canvas, preserveDrawingBuffer: true } : canvas,
+        );
         renderer.info.autoReset = false;
+        // Software proves full geometry/shaders at bounded raster cost; hardware keeps the full-size benchmark.
+        renderer.setPixelRatio(isSoftwareQualification ? 0.0125 : 1);
         renderer.setSize(1280, 720);
-        renderer.setPixelRatio(1);
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(35, 1280 / 720, 0.1, 1000);
         camera.up.set(0, 0, 1);
@@ -767,7 +1045,9 @@ describe('filament GPU qualification', () => {
         camera.lookAt(120, 120, 0);
         camera.coordinateSystem = renderer.coordinateSystem;
         if ('reversedDepthBuffer' in renderer) {
-          Object.assign(camera, { _reversedDepth: renderer.reversedDepthBuffer });
+          Object.assign(camera, {
+            _reversedDepth: renderer.reversedDepthBuffer,
+          });
           camera.updateProjectionMatrix();
         }
         scene.add(new THREE.AmbientLight(0xff_ff_ff, 0.55));
@@ -781,8 +1061,18 @@ describe('filament GPU qualification', () => {
         });
         scene.add(reveal.lines);
         const head = new THREE.Vector3();
-        updateToolpathReveal({ reveal, program: prepared.value.program, time: prepared.value.program.duration, head });
+        updateToolpathReveal({
+          reveal,
+          program: prepared.value.program,
+          time: prepared.value.program.duration,
+          head,
+        });
         const durations: number[] = [];
+        const errors: string[] = [];
+        let qualificationDevice: QualificationDevice | undefined;
+        const recordGpuError = (event: Event & { error: { message: string } }): void => {
+          errors.push(event.error.message);
+        };
         try {
           if (renderer instanceof THREE.WebGLRenderer) {
             const gl = renderer.getContext();
@@ -798,11 +1088,17 @@ describe('filament GPU qualification', () => {
               }
               expect(gl.getProgramParameter(program.program, gl.LINK_STATUS)).toBe(true);
             }
-            for (let sample = 0; sample < 22; sample += 1) {
+            for (let sample = 0; sample < mainFrames; sample += 1) {
               const start = performance.now();
               renderer.info.reset();
+              signal.throwIfAborted();
               renderer.render(scene, camera);
-              gl.finish();
+              if (isSoftwareQualification) {
+                // oxlint-disable-next-line no-await-in-loop -- Each measured frame must finish on the GPU.
+                await completeSoftwareWebGlFrame(gl, signal);
+              } else {
+                gl.finish();
+              }
               if (sample >= 2) {
                 durations.push(performance.now() - start);
               }
@@ -816,105 +1112,108 @@ describe('filament GPU qualification', () => {
               throw new Error('Native WebGPU device unavailable');
             }
             device.pushErrorScope('validation');
-            const invalid = device.createShaderModule({ code: 'not valid WGSL' });
+            const invalid = device.createShaderModule({
+              code: 'not valid WGSL',
+            });
             const invalidInfo = await invalid.getCompilationInfo();
             expect(invalidInfo.messages.some((message) => message.type === 'error')).toBe(true);
             const invalidError = await device.popErrorScope();
             expect(invalidError).toBeDefined();
-            const errors: string[] = [];
-            const error = (event: Event & { error: { message: string } }): void => {
-              errors.push(event.error.message);
-            };
-            device.addEventListener('uncapturederror', error);
-            try {
-              await renderer.compileAsync(scene, camera);
-              const shader = await renderer.debug.getShaderAsync(scene, camera, reveal.chunks[0]!.mesh);
-              const { vertexShader, fragmentShader } = shader;
-              if (!vertexShader || !fragmentShader) {
-                throw new Error('Generated filament shader missing');
+            qualificationDevice = device;
+            device.addEventListener('uncapturederror', recordGpuError);
+            await renderer.compileAsync(scene, camera);
+            const shader = await renderer.debug.getShaderAsync(scene, camera, reveal.chunks[0]!.mesh);
+            const { vertexShader, fragmentShader } = shader;
+            if (!vertexShader || !fragmentShader) {
+              throw new Error('Generated filament shader missing');
+            }
+            expect(vertexShader).toContain('aDimensions');
+            const compilations = await Promise.all(
+              [vertexShader, fragmentShader].map(async (code) =>
+                device.createShaderModule({ code }).getCompilationInfo(),
+              ),
+            );
+            for (const compilation of compilations) {
+              expect(compilation.messages.filter((message) => message.type === 'error')).toEqual([]);
+            }
+            for (let sample = 0; sample < mainFrames; sample += 1) {
+              const start = performance.now();
+              renderer.info.reset();
+              signal.throwIfAborted();
+              renderer.render(scene, camera);
+              // oxlint-disable-next-line no-await-in-loop -- Each measured frame must complete before the next sample starts.
+              await awaitGpuCompletion(device.queue.onSubmittedWorkDone(), signal);
+              if (sample >= 2) {
+                durations.push(performance.now() - start);
               }
-              expect(vertexShader).toContain('aDimensions');
-              const compilations = await Promise.all(
-                [vertexShader, fragmentShader].map(async (code) =>
-                  device.createShaderModule({ code }).getCompilationInfo(),
-                ),
-              );
-              for (const compilation of compilations) {
-                expect(compilation.messages.filter((message) => message.type === 'error')).toEqual([]);
-              }
-              for (let sample = 0; sample < 22; sample += 1) {
-                const start = performance.now();
-                renderer.info.reset();
-                renderer.render(scene, camera);
-                // oxlint-disable-next-line no-await-in-loop -- Each measured frame must complete before the next sample starts.
-                await device.queue.onSubmittedWorkDone();
-                if (sample >= 2) {
-                  durations.push(performance.now() - start);
-                }
-              }
-              expect(errors).toEqual([]);
-            } finally {
-              device.removeEventListener('uncapturederror', error);
             }
           }
           const drawCalls =
             renderer instanceof THREE.WebGLRenderer ? renderer.info.render.calls : renderer.info.render.drawCalls;
           expect(drawCalls).toBeLessThanOrEqual(Math.ceil(count / 16_384) + 4);
-          expect(renderer.info.render.triangles).toBeGreaterThan(count * 30);
-          const pixels = new Uint8Array(1280 * 720 * 4);
+          const { triangles } = renderer.info.render;
+          expect(triangles).toBeGreaterThan(count * 30);
+          await expectDensePrintPixels(renderer);
+          // Appearance changes share the exact same uploaded buffers and finish before evidence is saved.
+          const buffers = reveal.chunks.map(({ mesh }) => mesh.geometry.getAttribute('aDimensions'));
+          setToolpathAppearance(reveal, {
+            mode: 'flow',
+            maximum: prepared.value.maximums.flow,
+            emphasizeLayer: true,
+          });
+          signal.throwIfAborted();
+          renderer.render(scene, camera);
+          await completeGpuFrame(renderer, signal);
+          expect(reveal.chunks.map(({ mesh }) => mesh.geometry.getAttribute('aDimensions'))).toEqual(buffers);
+          expect(errors).toEqual([]);
           if (renderer instanceof THREE.WebGLRenderer) {
-            const gl = renderer.getContext();
-            gl.readPixels(0, 0, 1280, 720, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-            expect(
-              pixels.some(
-                (value, index) =>
-                  index % 4 === 0 && value > 50 && value > pixels[index + 1]! * 1.3 && value > pixels[index + 2]! * 1.3,
-              ),
-            ).toBe(true);
+            expect(renderer.getContext().getError()).toBe(renderer.getContext().NO_ERROR);
           }
-          const sorted = durations.toSorted((a, b) => a - b);
-          const median = (sorted[9]! + sorted[10]!) / 2;
-          const deviations = durations.map((duration) => Math.abs(duration - median)).toSorted((a, b) => a - b);
+          const benchmark = isSoftwareQualification ? undefined : denseFrameStatistics(durations);
           await commands.writeFile(
             `../../out/research/gcode-extrusion-rendering-blueprint/implementation/screenshots/dense-${backend}-${count}.json`,
             JSON.stringify(
               {
                 backend,
+                evidence: isSoftwareQualification ? 'software correctness qualification' : 'hardware frame benchmark',
+                webGpuProfile: inject('webGpuProfile'),
+                output:
+                  backend === 'webgpu' && inject('webGpuProfile') === 'software'
+                    ? 'target readback'
+                    : 'presented canvas',
                 revision: THREE.REVISION,
                 count,
-                samples: durations.length,
+                completedFrames: mainFrames + 1,
+                ...benchmark,
                 preparationDuration,
                 stages: prepared.stageDurations,
                 warmDuration,
-                median,
-                p95: sorted[18],
-                mad: deviations[10],
-                durations,
                 calls: drawCalls,
-                triangles: renderer.info.render.triangles,
+                triangles,
                 cpuTypedBytes: prepared.value.beads.bytes,
                 viewport: [1280, 720],
-                dpr: 1,
-                synchronization: 'completion fence; includes driver wait',
+                drawingBuffer: renderer.getDrawingBufferSize(new THREE.Vector2()).toArray(),
+                dpr: renderer.getPixelRatio(),
+                synchronization:
+                  isSoftwareQualification && backend === 'webgl'
+                    ? 'asynchronous GPU fence; includes polling and driver wait'
+                    : 'completion fence; includes driver wait',
                 gpuTimestampQueries: false,
               },
               undefined,
               2,
             ),
           );
-          // Appearance changes share the exact same uploaded buffers.
-          const buffers = reveal.chunks.map(({ mesh }) => mesh.geometry.getAttribute('aDimensions'));
-          setToolpathAppearance(reveal, { mode: 'flow', maximum: prepared.value.maximums.flow, emphasizeLayer: true });
-          renderer.render(scene, camera);
-          expect(reveal.chunks.map(({ mesh }) => mesh.geometry.getAttribute('aDimensions'))).toEqual(buffers);
         } finally {
+          qualificationDevice?.removeEventListener('uncapturederror', recordGpuError);
+          await disposeRendererOutput(renderer);
+          mocks.renderers.delete(renderer.domElement);
           reveal.dispose();
           renderer.dispose();
           canvas.remove();
           owner.abort();
         }
       },
-      120_000,
     );
   }
 });
@@ -925,7 +1224,10 @@ describe('shared two-view lifecycle', () => {
       mocks.backend = backend;
       mocks.live = idleLive;
       const first = await mount('dark', [570, 650]);
-      const second = await mount('dark', [570, 650], { ...bracket, name: 'second-view.gcode' });
+      const second = await mount('dark', [570, 650], {
+        ...bracket,
+        name: 'second-view.gcode',
+      });
       for (const view of [first, second]) {
         const root = view.frame.parentElement!;
         root.style.display = 'inline-block';
@@ -937,13 +1239,13 @@ describe('shared two-view lifecycle', () => {
       expect(printerPreparation.diagnostics().active).toBe(1);
       const canvas = second.scene.querySelector('canvas');
       const time = within(second.frame).getByRole('slider', { name: 'Time' }).getAttribute('value');
-      await page.screenshot({ element: document.body, path: `${evidenceDirectory}/two-views-${backend}.png` });
-      first.unmount();
+      await capture(document.body, `two-views-${backend}.png`);
+      await first.unmount();
       expect(printerPreparation.diagnostics().active).toBe(1);
       expect(second.scene.querySelector('canvas')).toBe(canvas);
       expect(within(second.frame).getByRole('slider', { name: 'Time' })).toHaveAttribute('value', time);
       await pauseAt(second.frame, 0.55, /^6\d \/ 120$/u);
-      second.unmount();
+      await second.unmount();
       expect(printerPreparation.diagnostics().active).toBe(0);
     }, 120_000);
   }

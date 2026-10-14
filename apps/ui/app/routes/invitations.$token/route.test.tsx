@@ -30,7 +30,9 @@ const { mockCreateProject, mockSession, mockProjects } = vi.hoisted(() => ({
 vi.mock('@better-auth-ui/react', () => ({ useSession: () => mockSession() }));
 vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => mockProjects() }));
-vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ createProject: mockCreateProject }) }));
+vi.mock('#hooks/use-project-manager.js', () => ({
+  useProjectManager: () => ({ createProject: mockCreateProject, getProjects: async () => [] }),
+}));
 /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));
 

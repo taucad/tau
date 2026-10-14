@@ -190,7 +190,7 @@ const expectStandardReplicadSvgPaths = (svg: string, { minPathCount = 1 } = {}):
     expect(path.getAttribute('vector-effect')).toBe('non-scaling-stroke');
   }
 
-  return paths.map((path) => path.getAttribute('stroke'));
+  return paths.map((path) => path.getAttribute('stroke') ?? undefined);
 };
 
 const readGltfSize = async (glbBytes: Uint8Array<ArrayBuffer>): Promise<[number, number, number]> => {

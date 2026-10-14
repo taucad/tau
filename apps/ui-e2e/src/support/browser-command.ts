@@ -19,6 +19,10 @@ import type {
   TargetClickOptions,
   TargetCookie,
   TargetDiagnostics,
+  TargetGithubAuthorization,
+  TargetGithubIdentity,
+  TargetLinkedGithub,
+  TargetLinkedGithubState,
   TargetMouseOptions,
   TargetReadOptions,
   TargetState,
@@ -42,6 +46,9 @@ import {
 } from './projection-fixture-validation.ts';
 import type { ProjectionFixtureProof, ProjectionDirectoryReceipt } from './projection-fixture-validation.ts';
 import { browserHostScript, createGatewayScriptWalk } from './agent-host-gateway-script.ts';
+import { completeGithubAuthorization } from './github-identity.ts';
+import { startLinkedGithubFixture } from './linked-github-fixture.ts';
+import type { LinkedGithubFixture } from './linked-github-fixture.ts';
 import type { GatewayScriptTurn, GatewayScriptWalk, GatewayTurnCount } from './agent-host-gateway-script.ts';
 
 type ProviderContext = BrowserCommandContext['context'];
@@ -125,6 +132,10 @@ type Session = {
   agentHostGatewayRequestHold?: boolean;
   agentHostGatewayServer?: Server;
   agentHostGatewayWalk?: GatewayScriptWalk;
+  /** The GitHub-linked project's far side, while a spec has one (R15). */
+  linkedGithub?: LinkedGithubFixture;
+  /** What `uiSetTargetOffline` last said, so a routed fixture answers offline too. */
+  offline?: boolean;
   secondary?: TargetPage;
   testUserEmail?: string;
   tracing: boolean;
@@ -275,6 +286,15 @@ const disposeSession = async (session: Session): Promise<void> => {
   if (session.testUserEmail) {
     try {
       await deleteTauTestUser(session.testUserEmail);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (session.linkedGithub) {
+    const fixture = session.linkedGithub;
+    session.linkedGithub = undefined;
+    try {
+      await fixture.dispose();
     } catch (error) {
       errors.push(error);
     }
@@ -1742,7 +1762,83 @@ export const uiAddContextInitScript: BrowserCommand<[source: string, argument?: 
 
 /** Cuts the context off from the network, so a cached shell is all a navigation can be served from. */
 export const uiSetTargetOffline: BrowserCommand<[offline: boolean]> = async (commandContext, offline) => {
-  await sessionFor(commandContext).context.setOffline(offline);
+  const session = sessionFor(commandContext);
+  session.offline = offline;
+  await session.context.setOffline(offline);
+};
+
+/**
+ * Route the API origin to a GitHub-linked project's far side for this context
+ * (R15): a signed-in session, one GitHub account with one writable empty
+ * repository, and the git proxy served by `git http-backend`. Call it before
+ * the first navigation, so the page's first session read is answered.
+ */
+export const uiStartLinkedGithubFixture: BrowserCommand<[], TargetLinkedGithub> = async (commandContext) => {
+  const session = sessionFor(commandContext);
+  if (session.linkedGithub) {
+    throw new Error('This target already has a linked GitHub fixture.');
+  }
+  session.linkedGithub = await startLinkedGithubFixture({
+    context: session.context,
+    apiOrigin: new URL(tauApiUrl).origin,
+    pageOrigin: testBaseURL,
+    isOffline: () => session.offline === true,
+  });
+  return session.linkedGithub.describe();
+};
+
+/**
+ * Press a control that leaves for GitHub's authorize flow, finish that flow as
+ * one of the two GitHub test identities, and return once the page is back on
+ * Tau (C10, A4; R17). The identity's secrets are read and typed here, never
+ * sent to the spec, and the context's trace is stopped first: a trace records
+ * every filled value, and CI uploads it.
+ *
+ * Resolves with the `prompt` the authorize request carried, read off the wire,
+ * including when GitHub first sends a signed-out browser to `/login` with the
+ * authorize address in `return_to`.
+ */
+export const uiAuthorizeGithub: BrowserCommand<
+  [identity: TargetGithubIdentity, trigger: string],
+  TargetGithubAuthorization
+> = async (commandContext, identity, trigger) => {
+  const session = sessionFor(commandContext);
+  if (session.tracing) {
+    session.tracing = false;
+    await session.context.tracing.stop();
+  }
+  const page = session.primary;
+  const prompts: string[] = [];
+  const observe = (request: { url: () => string }): void => {
+    const url = new URL(request.url());
+    if (url.hostname !== 'github.com') {
+      return;
+    }
+    const returnTo = url.pathname === '/login' ? url.searchParams.get('return_to') : null;
+    const authorize = returnTo === null ? url : new URL(returnTo, 'https://github.com');
+    if (authorize.pathname === '/login/oauth/authorize') {
+      prompts.push(authorize.searchParams.get('prompt') ?? '');
+    }
+  };
+  page.on('request', observe);
+  try {
+    await page.locator(trigger).click();
+    const tau = new URL(testBaseURL).origin;
+    await completeGithubAuthorization(page, identity, (url) => url.origin === tau);
+  } finally {
+    page.off('request', observe);
+  }
+  const prompt = prompts.find((value) => value !== '');
+  return prompt === undefined ? {} : { prompt };
+};
+
+/** What reached the linked GitHub fixture's repository so far. */
+export const uiReadLinkedGithubFixture: BrowserCommand<[], TargetLinkedGithubState> = async (commandContext) => {
+  const fixture = sessionFor(commandContext).linkedGithub;
+  if (!fixture) {
+    throw new Error('This target has no linked GitHub fixture; call uiStartLinkedGithubFixture first.');
+  }
+  return fixture.read();
 };
 
 export const uiWaitForTarget: BrowserCommand<
@@ -2948,6 +3044,7 @@ export const uiBrowserCommands = {
   uiAddCookies,
   uiAddInitScript,
   uiAuthenticateTauTestUser,
+  uiAuthorizeGithub,
   uiCaptureTargetDiagnostics,
   uiChooseTargetFile,
   uiClickTarget,
@@ -2978,6 +3075,7 @@ export const uiBrowserCommands = {
   uiInstallAgentHostGatewayFixture,
   uiInstallPostHogFixture,
   uiReadAgentHostApiRequests,
+  uiReadLinkedGithubFixture,
   uiReadPostHogSummary,
   uiReadAgentHostGatewayState,
   uiReleaseAgentHostGatewayRequest,
@@ -3005,6 +3103,7 @@ export const uiBrowserCommands = {
   uiSetTargetOffline,
   uiSetViewport,
   uiStartHostFixture,
+  uiStartLinkedGithubFixture,
   uiStartTauServeFixture,
   uiTargetWorkers,
   uiProjectionImportWork,

@@ -1,3 +1,7 @@
+import type { MetaFunction } from 'react-router';
+import type { Handle } from '#types/matches.types.js';
+import { PageContent } from '#components/layout/page-content.js';
+import { PageHeader } from '#components/layout/page-header.js';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
@@ -9,6 +13,9 @@ import {
   githubSetupReturn,
   safeReturnPath,
 } from '#lib/github-connections.js';
+
+export const meta: MetaFunction = () => [{ title: 'GitHub connection · Tau' }];
+export const handle: Handle = { enableOverflowY: true };
 
 /** What the page says; `code` is the refusal's, when it named one. */
 type Outcome = Readonly<{ title: string; detail: string; failed: boolean; code?: string | undefined }>;
@@ -116,20 +123,16 @@ export default function GithubConnectionCompleteRoute(): React.JSX.Element {
   const offersConnectAgain = !desktopPolling && outcome?.code !== undefined && expiredAttemptCodes.has(outcome.code);
 
   return (
-    <main className='flex min-h-full items-center justify-center p-6'>
-      <div
-        role={outcome?.failed === true ? 'alert' : 'status'}
-        aria-busy={outcome === undefined}
-        className='flex max-w-md flex-col items-center gap-4 text-center'
-      >
+    <PageContent>
+      <div role={outcome?.failed === true ? 'alert' : 'status'} aria-busy={outcome === undefined} className='space-y-6'>
         <div>
-          <h1 className='text-xl font-semibold'>{outcome?.title ?? 'Connecting GitHub…'}</h1>
+          <PageHeader title={outcome?.title ?? 'Connecting GitHub…'} />
           <p className='mt-2 text-sm text-muted-foreground'>
             {outcome?.detail ?? 'You will return to Tau automatically.'}
           </p>
         </div>
         {outcome === undefined || desktopPolling ? undefined : (
-          <div className='flex flex-wrap justify-center gap-2'>
+          <div className='flex flex-wrap gap-2'>
             {offersConnectAgain ? (
               <Button
                 disabled={restarting}
@@ -146,6 +149,6 @@ export default function GithubConnectionCompleteRoute(): React.JSX.Element {
           </div>
         )}
       </div>
-    </main>
+    </PageContent>
   );
 }

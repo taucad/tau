@@ -36,20 +36,35 @@ export function ChatQuestionCard({
   readonly className?: string;
 }): React.JSX.Element | undefined {
   const questions = useOptionalChatQuestions();
+  const [failure, setFailure] = useState(false);
+  const [isPending, setIsPending] = useState(false);
+  const writing = useRef(false);
   const [element, setElement] = useState<HTMLDivElement | undefined>();
   useReportAskOnScreen(shouldReportOnScreen ? ask.id : undefined, element);
   if (questions === undefined) {
     return undefined;
   }
-  const record = (label: string, write: () => Promise<void>): void => {
-    // async-iife: bootstrap — the record change re-renders the card; a failed write is logged.
-    void (async () => {
-      try {
-        await write();
-      } catch (error) {
-        console.error(`[questions] ${label} failed`, error);
+  const record = async (label: string, write: () => Promise<void>): Promise<void> => {
+    const isDecision = label !== 'hold';
+    if (isDecision && writing.current) {
+      return;
+    }
+    if (isDecision) {
+      writing.current = true;
+      setIsPending(true);
+    }
+    setFailure(false);
+    try {
+      await write();
+    } catch (error) {
+      console.error(`[questions] ${label} failed`, error);
+      setFailure(true);
+    } finally {
+      if (isDecision) {
+        writing.current = false;
+        setIsPending(false);
       }
-    })();
+    }
   };
   return (
     <div
@@ -63,17 +78,28 @@ export function ChatQuestionCard({
         answers={questions.answers[ask.id]}
         now={questions.now}
         isFlat={isFlat}
+        isPending={isPending}
         {...(ask.agentId === undefined ? {} : { agentName: externalAgentDisplayName(ask.agentId) })}
         onAnswer={(questionId, reply) => {
-          record('answer', async () => questions.answer(ask.id, questionId, reply));
+          void record('answer', async () => questions.answer(ask.id, questionId, reply));
         }}
         onHold={() => {
-          record('hold', async () => questions.hold(ask.id));
+          void record('hold', async () => questions.hold(ask.id));
         }}
         onDecline={() => {
-          record('decline', async () => questions.decline(ask.id));
+          void record('decline', async () => questions.decline(ask.id));
         }}
       />
+      {isPending ? (
+        <p role='status' className='px-2 text-xs/5 text-muted-foreground'>
+          Saving response…
+        </p>
+      ) : null}
+      {failure ? (
+        <p role='alert' className='px-2 text-xs/5'>
+          Your response was not saved. Try again.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -257,7 +283,7 @@ export function ChatQuestionQueue({
           aria-label='Questions'
           // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable list must be keyboard reachable (WCAG 2.1.1)
           tabIndex={0}
-          className='flex max-h-[min(22rem,45cqh)] scroll-shadows-y flex-col divide-y overflow-y-auto overscroll-contain border-t bg-background px-2 pb-3 focus-visible:focus-outline'
+          className='flex max-h-[min(22rem,45cqh)] scroll-shadows-y flex-col divide-y overflow-y-auto overscroll-contain border-t bg-background px-2 pb-2 focus-visible:focus-outline'
         >
           {offScreenWaiting.map((ask) => (
             <li key={ask.id}>

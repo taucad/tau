@@ -770,8 +770,11 @@ describe('Print pane prepare and send', () => {
     await waitFor(() => {
       expect(quality).toHaveTextContent('Fine0.12 mm');
     });
-    // The choice is the project's: saved as the only changed key beside the printer model.
-    expect(preferencesText()).toBe('{\n  "preset": "fine"\n}\n');
+    // The choice is the project's: saved as the only changed key beside the printer model. The combobox shows the
+    // store's draft at once and the file write lands after it, so wait for the file too.
+    await waitFor(() => {
+      expect(preferencesText()).toBe('{\n  "preset": "fine"\n}\n');
+    });
 
     const material = screen.getByRole('group', { name: 'Material' });
     expect(within(material).getByRole('combobox', { name: 'Material' })).toHaveTextContent('A1');

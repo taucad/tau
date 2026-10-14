@@ -245,6 +245,3 @@ export type TagsItemProps = ComponentProps<typeof CommandItem>;
 export function TagsItem({ className, ...props }: TagsItemProps): React.JSX.Element {
   return <CommandItem className={cn('items-center justify-between', className)} {...props} />;
 }
-
-// oxlint-disable-next-line no-barrel-files/no-barrel-files -- allowed for component reuse.
-export { CommandGroup as TagsGroup } from '@taucad/ui/components/command';

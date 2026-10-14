@@ -183,11 +183,13 @@ describe('RevisionOutcomes', () => {
 
   it('should refresh a cached empty chat inventory after remote chats are projected', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    await queryClient.prefetchQuery({
-      queryKey: ['chats', 'p', { includeDeleted: false }],
-      queryFn: async () => projectedChats,
-      staleTime: Number.POSITIVE_INFINITY,
-    });
+    await queryClient
+      .query({
+        queryKey: ['chats', 'p', { includeDeleted: false }],
+        queryFn: async () => projectedChats,
+        staleTime: Number.POSITIVE_INFINITY,
+      })
+      .catch(() => undefined);
     queryClient.setQueryData(['all-chats'], []);
     queryClient.setQueryData(['chat', 'remote-chat'], { id: 'remote-chat', name: 'Stale name' });
     queryClient.setQueryData(['chat', 'unrelated-chat'], { id: 'unrelated-chat' });

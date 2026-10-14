@@ -1,3 +1,4 @@
+import { usePublishCloudProjectPreview } from '#hooks/use-publish-cloud-project-preview.js';
 import {
   Activity,
   Clipboard,
@@ -29,6 +30,7 @@ import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
@@ -48,11 +50,10 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
 }
 
 function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch }): undefined {
-  const { projectRef, geometryUnits, mainEntryPath } = useProject();
+  const { projectId, projectRef, geometryUnits, mainEntryPath } = useProject();
   const { openPanel } = useProjectWorkspace();
   const isTauDebugEnabled = useFeature('tauDebug');
   const mainGraphicsRef = useMainGraphics();
-  const { regenerate: regenerateThumbnail } = useThumbnailGenerator();
   const fileManager = useFileManager();
   const imageService = useHeadlessImageService();
   const fileTree = useFileTreeMap();
@@ -69,6 +70,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
     artifactMimeType === 'image/svg+xml' || (artifactMimeType === 'model/gltf-binary' && cameraReady),
   );
   const fileCount = fileTree.size;
+  const isProjectReady = useProjectAvailability() === 'ready';
 
   /* The Sync region is the surface; the palette is the keyboard path to it
    * (DESIGN: a feature that only exists behind a pointer gesture is
@@ -76,6 +78,19 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
    * page-side place that knows (S34). */
   const revisionStatus = useRevisionStatus();
   const projectRole = useProjectRole();
+  const canPublishCapture =
+    revisionStatus?.remote.kind === 'tau' &&
+    revisionStatus.remote.phase === 'connected' &&
+    !revisionStatus.remote.fetchOnly &&
+    revisionStatus.sync.hasAppliedRemote === true &&
+    (projectRole === 'owner' || projectRole === 'write');
+  const publishCapture = usePublishCloudProjectPreview({
+    projectId,
+    captureEnabled: canPublishCapture,
+    backfill: false,
+    enabled: canPublishCapture && revisionStatus.sync.state === 'backedUp',
+  });
+  const { regenerate: regenerateThumbnail } = useThumbnailGenerator({ onStored: publishCapture });
   /* F1: the palette offers exactly what the Sync region offers. `fetchOnly`
      alone left an enabled *Sync now* for a read collaborator, whose push the
      API refuses — one shared predicate rather than two conditions. */
@@ -375,7 +390,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         group: 'Code',
         icon: <Download />,
         action: handleDownloadZip,
-        disabled: fileCount === 0,
+        disabled: !isProjectReady || fileCount === 0,
       },
       {
         id: 'update-thumbnail',
@@ -383,7 +398,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         group: 'Preview',
         icon: <GalleryThumbnails />,
         action: handleUpdateThumbnail,
-        disabled: !mainCadRef,
+        disabled: !isProjectReady || !mainCadRef,
       },
       {
         id: 'copy-png',
@@ -391,7 +406,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         group: 'Preview',
         icon: <Clipboard />,
         action: handleCopyPngToClipboard,
-        disabled: !canCapturePng,
+        disabled: !isProjectReady || !canCapturePng,
         visible: import.meta.env.DEV,
       },
       {
@@ -400,7 +415,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         group: 'Preview',
         icon: <ImageDown />,
         action: async () => handleDownloadPng(`${projectName}.png`),
-        disabled: !canCapturePng,
+        disabled: !isProjectReady || !canCapturePng,
       },
     ],
     [
@@ -415,6 +430,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       handleOpenExporter,
       handleDownloadZip,
       fileCount,
+      isProjectReady,
       isRemoteConnected,
       isLineKnown,
       handleOpenSync,

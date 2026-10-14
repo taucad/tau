@@ -44,7 +44,7 @@ import type { RevisionActors, RevisionActorsOptions, RevisionFileSystem } from '
 import { StepClock } from '@taucad/xstate-testing/clock';
 
 import type { ParameterRecordCodec, RevisionId } from '#algorithms/index.js';
-import type { SyncFetchActorOutput, SyncMergeActorOutput } from '#sync.machine.js';
+import type { SyncFetchActorOutput, SyncMergeActorOutput, SyncProjectRecordsActorOutput } from '#sync.machine.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { syncPullDeadlineMilliseconds } from '#sync.machine.js';
 
@@ -2326,10 +2326,13 @@ describe('independent sync record failures', () => {
 
     let settled = false;
     const fetching = (async () => {
-      const result = await run<Readonly<{ records?: ReadonlyArray<Readonly<{ name: string; status: string }>> }>>(
-        actors.sync.fetch,
-        { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 },
-      );
+      const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+        remote: 'tau',
+        branch: 'main',
+        deadlineMilliseconds: 10_000,
+      });
+      expect(fetched.recordProjection).toBeDefined();
+      const result = await run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, fetched.recordProjection);
       settled = true;
       return result;
     })();
@@ -2390,6 +2393,65 @@ describe('independent sync record failures', () => {
     expect(result.refs.map((entry) => entry.name)).not.toContain(refused);
   }, 30_000);
 
+  it('bounds optional chat projection to 16 refs while preserving every per-ref outcome', async () => {
+    const context = await fixture({});
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['events/device-a.jsonl', '{"sequence":0}\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Chat records' },
+    });
+    const references = Array.from({ length: 20 }, (_, index) => ({
+      name: `refs/remotes/tau/tau/chats/chat-${String(index)}`,
+      head: revisionId(receipt.commitId),
+    }));
+    const release = Promise.withResolvers<void>();
+    let active = 0;
+    let peak = 0;
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        readTree: async (head) => {
+          active++;
+          peak = Math.max(peak, active);
+          try {
+            await release.promise;
+            return await context.port.readTree(head);
+          } finally {
+            active--;
+          }
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+      deviceId: () => 'device-b',
+    });
+    const pending = run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, {
+      remote: 'tau',
+      fetchRefs: [],
+      refs: references,
+      syncChats: true,
+      syncLargeExports: false,
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(active).toBe(16);
+      });
+      expect(peak).toBe(16);
+    } finally {
+      release.resolve();
+    }
+    const result = await pending;
+    expect(peak).toBeLessThanOrEqual(16);
+    expect(result.chats).toBe('ready');
+    expect(result.records).toHaveLength(20);
+    expect(result.records.every((record) => record.status === 'updated')).toBe(true);
+    expect(await context.filesystem.readFile('.tau/chats/chat-19/events/device-a.jsonl', 'utf8')).toBe(
+      '{"sequence":0}\n',
+    );
+  }, 30_000);
+
   /* RV-W7 #5: a record conflict still wrote the other device's log, and the page has to hear of it. */
   it('announces a chat whose record conflicted, because its segments were still written', async () => {
     const context = await fixture({ '.tau/chats/talk/chat.json': '{"name":"Local name"}' });
@@ -2418,10 +2480,12 @@ describe('independent sync record failures', () => {
       onChatsProjected: (chatIds) => projected.push([...chatIds]),
     });
 
-    const result = await run<Readonly<{ records?: ReadonlyArray<Readonly<{ name: string; status: string }>> }>>(
-      actors.sync.fetch,
-      { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 },
-    );
+    const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+      remote: 'tau',
+      branch: 'main',
+      deadlineMilliseconds: 10_000,
+    });
+    const result = await run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, fetched.recordProjection);
 
     expect(result.records).toContainEqual(expect.objectContaining({ name: 'refs/tau/chats/talk', status: 'rejected' }));
     expect(await context.filesystem.readFile('.tau/chats/talk/events/device-a.jsonl', 'utf8')).toBe('{"sequence":0}\n');
@@ -2505,12 +2569,17 @@ describe('independent sync record failures', () => {
         filesystem: () => context.filesystem,
       });
 
-      await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+      const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+        remote: 'tau',
+        branch: 'main',
+        deadlineMilliseconds: 10_000,
+      });
+      await run(actors.sync.projectRecords, fetched.recordProjection);
 
       expect(requested).toEqual(
         remotePreference
           ? [['refs/heads/main', unrelated], [evidence]]
-          : [['refs/heads/main', unrelated, ...(localManifest === '{"syncLargeExports":true}\n' ? [evidence] : [])]],
+          : [['refs/heads/main', unrelated], ...(localManifest === '{"syncLargeExports":true}\n' ? [[evidence]] : [])],
       );
     },
     30_000,
@@ -2594,7 +2663,12 @@ describe('independent sync record failures', () => {
       filesystem: () => context.filesystem,
     });
 
-    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+      remote: 'tau',
+      branch: 'main',
+      deadlineMilliseconds: 10_000,
+    });
+    await run(actors.sync.projectRecords, fetched.recordProjection);
     expect(await context.filesystem.readFile('exports/shared.step', 'utf8')).toBe('new remote output\n');
     expect(await context.filesystem.readFile('exports/local.step', 'utf8')).toBe('local only\n');
     expect(await context.filesystem.readFile('exports/remote.step', 'utf8')).toBe('remote only\n');
@@ -2950,6 +3024,7 @@ for (const actorSet of actorSets) {
         expect(await context.port.readRef('main')).toBe(finished.revisionId);
         const landed = await context.port.readRevision(revisionId(finished.revisionId));
         expect(landed?.parents).toStrictEqual([context.ours, revision]);
+        expect(landed?.summary.generated).toBe('Resolved 1 file on main');
         const resolvedTree = await context.port.readTree(revisionId(finished.revisionId));
         expect(new TextDecoder().decode(resolvedTree?.get('a.txt'))).toBe('mine\n');
         /* Everything that settled rides through untouched, and no marker byte
@@ -2960,6 +3035,24 @@ for (const actorSet of actorSets) {
         expect(await context.filesystem.readFile('settled.txt', 'utf8')).toBe('theirs only\n');
         expect(await context.port.readRef(line)).toBe(revision);
         expect(await listed(context)).toStrictEqual([]);
+      }, 30_000);
+
+      it('should name no file count when a later merge left nothing to choose (R13)', async () => {
+        const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+        const revision = await conflicted(context);
+        /* The main line took the other side after the conflict was recorded, so no file still differs. */
+        const later = await context.write({ 'a.txt': 'theirs\n' }, [context.ours], 'Took theirs');
+        await context.port.updateRef({ name: 'main', expectedHead: revisionId(context.ours), head: revisionId(later) });
+        await context.filesystem.writeFile('a.txt', 'theirs\n');
+
+        const finished = await run<{ revisionId: string }>(context.actors.resolution.finishMerge, {
+          projectId: 'project-1',
+          revisionId: revision,
+        });
+
+        const landed = await context.port.readRevision(revisionId(finished.revisionId));
+        expect(landed?.summary.generated).toBe('Finished the merge into main');
+        expect(landed?.parents).toStrictEqual([later, revision]);
       }, 30_000);
 
       /* RV-W7 #7: a decision made here is a merge, and Undo never reaches past it. */
@@ -3431,6 +3524,74 @@ describe('connecting a remote', () => {
     expect(await port.listRemotes()).toEqual([
       expect.objectContaining({ name: 'github-22', url: 'https://github.com/new/project.git', repositoryId: '22' }),
     ]);
+  });
+
+  /* R2: *Change backup* asks the new remote `validate`'s question before `writeRemote` replaces the old one. */
+  it('probes a replacing remote under the name it would be recorded with, and records nothing (R2)', async () => {
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'origin', url: 'https://github.com/old/project.git' });
+    const before = await port.listRemotes();
+    const asked: unknown[] = [];
+    const registerRemoteProject = vi.fn(async (_id: string) => undefined);
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async (remote) => {
+          asked.push(remote);
+          return [];
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      remoteUrl: (id) => `https://api.tau.new/v1/git/${id}.git`,
+      registerRemoteProject,
+    });
+
+    await run(actors.remote.probe, {
+      projectId: 'project-1',
+      kind: 'git',
+      url: 'https://github.com/new/project.git',
+      provider: 'github',
+      repositoryId: '22',
+    });
+    await run(actors.remote.probe, { projectId: 'project-1', kind: 'git', url: 'https://gitlab.example.com/o/r.git' });
+    expect(registerRemoteProject).not.toHaveBeenCalled();
+    /* Tau Cloud answers only for a registered project (P51). */
+    await run(actors.remote.probe, { projectId: 'project-1', kind: 'tau', url: undefined });
+
+    expect(asked).toStrictEqual([
+      { name: 'github-22', url: 'https://github.com/new/project.git' },
+      { name: 'origin', url: 'https://gitlab.example.com/o/r.git' },
+      { name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' },
+    ]);
+    expect(registerRemoteProject).toHaveBeenCalledWith('project-1');
+    expect(await port.listRemotes()).toStrictEqual(before);
+  });
+
+  it('fails the probe with the new remote’s refusal and leaves the recorded remote alone (R2)', async () => {
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'origin', url: 'https://github.com/old/project.git' });
+    const before = await port.listRemotes();
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async () => {
+          throw new RevisionPortError(
+            'REMOTE_NOT_FOUND',
+            'This remote has no repository at this address for your account.',
+          );
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+    });
+
+    await expect(
+      run(actors.remote.probe, { projectId: 'project-1', kind: 'git', url: 'https://github.com/gone/project.git' }),
+    ).rejects.toThrow('This remote has no repository at this address for your account.');
+    expect(await port.listRemotes()).toStrictEqual(before);
   });
 
   it('registers the project on Tau Cloud, and only on Tau Cloud', async () => {

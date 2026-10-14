@@ -4,10 +4,11 @@
  * It walks the production dependency closure of `apps/ui` and `apps/desktop`
  * (through the workspace libraries they bundle), lists every third-party
  * package with its declared license, names the vendored tscircuit engine
- * components from their own license record, and carries the Open CASCADE
- * Technology notice with the unmodified LGPL-2.1 and Open CASCADE exception
- * texts. The UI renders the file at `/legal/open-source`; the macOS package
- * ships the same file inside the app bundle.
+ * components from their own license record, lists the MIT components of the
+ * desktop app's C# runtime, and carries the Open CASCADE Technology notice with
+ * the unmodified LGPL-2.1 and Open CASCADE exception texts. The UI renders the
+ * file at `/legal/open-source`; the macOS package ships the same file inside the
+ * app bundle.
  *
  * Usage: node --import tsx scripts/src/update-open-source-notices.mts [--check]
  */
@@ -30,6 +31,8 @@ const appDirectories = [join(rootDirectory, 'apps/ui'), join(rootDirectory, 'app
 const occtLicenseDirectory = join(rootDirectory, 'packages/geospec-engine-native/licenses');
 const tscircuitLicenseFile = join(rootDirectory, 'packages/plugins/tscircuit/THIRD_PARTY_LICENSES.md');
 export const outputFile = join(rootDirectory, 'apps/ui/app/routes/legal.open-source/open-source-notices.txt');
+const desktopRuntimeFile = join(rootDirectory, 'apps/ui/app/routes/legal.open-source/desktop-runtime-notices.json');
+const picoGkWorkerLockFile = join(rootDirectory, 'packages/plugins/picogk/dotnet/Tau.PicoGK.Worker/packages.lock.json');
 
 /** Workspace devDependencies that only serve tests or the build, never the shipped bundle. */
 const isBuildOnlyWorkspaceProject = (name: string): boolean => name.endsWith('-testing') || name === '@taucad/vite';
@@ -136,6 +139,35 @@ export function parseVendoredComponents(record: string): VendoredComponent[] {
   return components;
 }
 
+export type DesktopRuntimeComponent = {
+  name: string;
+  package: string;
+  version: string;
+  copyright: string;
+  source: string;
+};
+
+export type DesktopRuntimeNotices = { components: DesktopRuntimeComponent[]; mitLicense: string };
+
+/**
+ * Check each listed NuGet package against the version the PicoGK worker's lock resolves, so the
+ * notices cannot name a Roslyn or SkiaSharp the desktop app no longer ships.
+ *
+ * @returns The packages whose listed version differs from the lock, as `<package> <listed> != <locked>`.
+ */
+export function desktopRuntimeDrift(
+  notices: DesktopRuntimeNotices,
+  lock: { dependencies: Record<string, Record<string, { resolved: string }>> },
+): string[] {
+  const locked = lock.dependencies['net10.0'] ?? {};
+  return notices.components.flatMap((component) => {
+    const resolved = locked[component.package]?.resolved;
+    return resolved === undefined || resolved === component.version
+      ? []
+      : [`${component.package} ${component.version} != ${resolved}`];
+  });
+}
+
 /** Fence a license text so Markdown renders it verbatim. */
 const fence = (text: string): string[] => ['```text', text.replace(/\s+$/, ''), '```'];
 
@@ -145,10 +177,11 @@ const repositoryLink = (packageInfo: PackageInfo): string =>
 export function generateNotices(input: {
   packages: PackageInfo[];
   vendored: VendoredComponent[];
+  desktopRuntime: DesktopRuntimeNotices;
   lgpl: string;
   occtException: string;
 }): string {
-  const { packages, vendored, lgpl, occtException } = input;
+  const { packages, vendored, desktopRuntime, lgpl, occtException } = input;
   const sorted = packages.toSorted((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
   const occtPackages = sorted.filter(({ name }) =>
     ['libcascade', 'occt-import-js', 'replicad-opencascadejs'].includes(name),
@@ -208,6 +241,24 @@ export function generateNotices(input: {
         `| ${component.name} | ${component.version} | ${component.status === 'CLEARED' ? component.license : `${component.license}, license text pending`} |`,
     ),
     '',
+    '## Desktop C# Runtime',
+    '',
+    "The desktop app's PicoGK C# kernel runs on the following components, each licensed under the",
+    '[MIT License](#mit-license) reproduced below with its copyright notice. Their license files, and the',
+    'third-party notices of the .NET runtime and SkiaSharp, ship beside the kernel inside the app bundle, under',
+    '`Tau.app/Contents/Resources/picogk/darwin-arm64`.',
+    '',
+    '| Component | Package | Version | Copyright |',
+    '|-----------|---------|---------|-----------|',
+    ...desktopRuntime.components.map(
+      (component) =>
+        `| [${component.name}](${component.source}) | ${component.package} | ${component.version} | ${component.copyright} |`,
+    ),
+    '',
+    '## MIT License',
+    '',
+    ...fence(desktopRuntime.mitLicense),
+    '',
     '## GNU Lesser General Public License version 2.1',
     '',
     ...fence(lgpl),
@@ -238,14 +289,28 @@ async function main(): Promise<void> {
       ]),
     ).values(),
   ];
-  const [tscircuitRecord, lgpl, occtException] = await Promise.all([
+  const [tscircuitRecord, desktopRuntimeRecord, picoGkWorkerLock, lgpl, occtException] = await Promise.all([
     readFile(tscircuitLicenseFile, 'utf8'),
+    readFile(desktopRuntimeFile, 'utf8'),
+    readFile(picoGkWorkerLockFile, 'utf8'),
     readFile(join(occtLicenseDirectory, 'OCCT-LGPL-2.1.txt'), 'utf8'),
     readFile(join(occtLicenseDirectory, 'OCCT-LGPL-exception.txt'), 'utf8'),
   ]);
+  const desktopRuntime = JSON.parse(desktopRuntimeRecord) as DesktopRuntimeNotices;
+  const drift = desktopRuntimeDrift(
+    desktopRuntime,
+    JSON.parse(picoGkWorkerLock) as Parameters<typeof desktopRuntimeDrift>[1],
+  );
+  if (drift.length > 0) {
+    console.error(
+      `\n\u001B[31mERROR\u001B[0m  ${desktopRuntimeFile} disagrees with the PicoGK worker lock: ${drift.join('; ')}\n`,
+    );
+    process.exit(1);
+  }
   const notices = generateNotices({
     packages,
     vendored: parseVendoredComponents(tscircuitRecord),
+    desktopRuntime,
     lgpl,
     occtException,
   });

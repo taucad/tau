@@ -1,8 +1,8 @@
 /* oxlint-disable @typescript-eslint/no-unnecessary-condition -- TODO: review these types, some are actually required */
 import { useThree } from '@react-three/fiber';
-import type { GizmoAxisOptions, GizmoOptions } from 'three-viewport-gizmo';
+import type { GizmoOptions } from 'three-viewport-gizmo';
 import { ViewportGizmo } from 'three-viewport-gizmo';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Object3D, Camera } from 'three';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
@@ -19,6 +19,8 @@ import { useCameraRetarget, useCameraRig, useGraphics, useGraphicsSelector } fro
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import { resolveGizmoContainer, syncGizmoFov, useGizmoResizeSync } from '#graphics/three/utils/gizmo.utils.js';
 import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
+import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
+import { applyViewportGizmoSurface } from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
 
 type ViewportGizmoCubeProps = {
   readonly size?: number;
@@ -50,8 +52,10 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
   const gizmoRef = useRef<ViewportGizmo | undefined>(undefined);
   const controlsBindingRef = useRef<ViewportGizmoControlsBinding | undefined>(undefined);
   const initialCameraRef = useRef(cameraRig.activeCamera);
+  const [loadedFont, setLoadedFont] = useState('');
 
   const retargetCamera = useCallback((camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
+    initialCameraRef.current = camera;
     const gizmo = gizmoRef.current;
     if (!gizmo) {
       return;
@@ -78,64 +82,34 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
       return;
     }
 
-    const faceColor = isHighContrast
-      ? colorScheme === 'dark'
-        ? 0x66_66_66
-        : 0x8c_8c_8c
-      : colorScheme === 'dark'
-        ? 0x33_33_33
-        : 0xdd_dd_dd;
-    const edgeColor = isHighContrast
-      ? colorScheme === 'dark'
-        ? 0xff_ff_ff
-        : 0x22_22_22
-      : colorScheme === 'dark'
-        ? 0x55_55_55
-        : 0xee_ee_ee;
+    const style = readViewportGizmoStyle({ container: containerToUse, colorScheme, isHighContrast, accentColor });
     const faceConfig = {
-      color: faceColor,
-      labelColor: colorScheme === 'dark' ? 0xff_ff_ff : 0x00_00_00,
-      hover: {
-        color: accentColor,
-      },
-    } as const satisfies GizmoAxisOptions;
-    const edgeConfig = {
-      color: edgeColor,
-      opacity: 1,
-      hover: {
-        color: accentColor,
-      },
-    } as const satisfies GizmoAxisOptions;
-    const cornerConfig = {
-      ...faceConfig,
-      color: faceColor,
-      hover: {
-        color: accentColor,
-      },
-    } as const satisfies GizmoAxisOptions;
-
+      color: style.face,
+      labelColor: style.label,
+      hover: { color: style.hover, labelColor: style.hoverLabel },
+    };
     const gizmoConfig: GizmoOptions = {
       type: 'rounded-cube',
       up: upDirection,
       placement: container ? 'top-right' : 'bottom-right',
       size,
       font: {
-        weight: 'normal',
-        family: 'monospace',
+        weight: 500,
+        family: style.font,
       },
-      radius: 0.3,
+      radius: viewportGizmoMetrics.radius,
       offset: {
         bottom: 0,
         right: 0,
       },
       className,
-      resolution: 256,
+      resolution: viewportGizmoMetrics.textureSize,
       container: containerToUse,
       background: {
         enabled: false,
       },
-      corners: cornerConfig,
-      edges: edgeConfig,
+      corners: faceConfig,
+      edges: faceConfig,
       right: faceConfig,
       top: faceConfig,
       front: faceConfig,
@@ -145,6 +119,7 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
     };
 
     const gizmo = new ViewportGizmo(initialCameraRef.current, gl, gizmoConfig);
+    applyViewportGizmoSurface(gizmo, style);
     gizmoRef.current = gizmo;
 
     syncGizmoFov(gizmo, cameraRig.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView);
@@ -155,15 +130,15 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
     const gizmoAxes = createViewportGizmoCubeAxes({
       axesSize: 2.1,
       rendererSize: size,
-      xAxisColor: 'red',
-      yAxisColor: 'green',
-      // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js axis color
-      zAxisColor: 'rgb(37, 78, 136)',
-      xLabelColor: 'red',
-      yLabelColor: 'green',
-      // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js axis color
-      zLabelColor: 'rgb(37, 78, 136)',
-      lineWidth: 2,
+      xAxisColor: style.axes.x,
+      yAxisColor: style.axes.y,
+      zAxisColor: style.axes.z,
+      xLabelColor: style.axes.x,
+      yLabelColor: style.axes.y,
+      zLabelColor: style.axes.z,
+      lineWidth: 1.5,
+      lineOpacity: 1,
+      fontFamily: style.font,
       renderingBackend: graphicsBackendThree,
     });
     gizmo.add(gizmoAxes);
@@ -202,12 +177,28 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
     controlsBindingRef.current = controlsBinding;
 
     // Pipeline pre-warm (Policy Rule 13): when the WebGPU backend is active the gizmo
-    // axes use Tau's `Line2NodeMaterial`, so the first `gizmo.render()` call would
+    // surface and axes need GPU pipelines, so the first `gizmo.render()` call would
     // otherwise pay the `createRenderPipelineAsync` latency and skip frames until the
     // pipeline resolves. `WebGPURenderer.compileAsync(scene, camera)` warms the pipeline
     // off the critical path. Same warmup contract as `AxesWebGpuFatLine` and
     // `post-processing-webgpu.tsx`.
     const warmupCancellation = { cancelled: false };
+    const font = `500 ${viewportGizmoMetrics.fontSize}px ${style.font}`;
+    if (document.fonts && loadedFont !== style.font && !document.fonts.check(font)) {
+      // Canvas text does not repaint when a web font arrives. Rebuild both face and
+      // axis labels once it loads, keeping system-font labels usable in the meantime.
+      // async-iife: bootstrap — font readiness is asynchronous; teardown cancels the rebuild.
+      void (async () => {
+        try {
+          await document.fonts.load(font);
+        } catch {
+          return; // A failed font request keeps the system-font fallback.
+        }
+        if (!warmupCancellation.cancelled) {
+          setLoadedFont(style.font);
+        }
+      })();
+    }
     const renderer = gl as unknown as {
       compileAsync?: (scene: Object3D, camera: Camera) => Promise<unknown>;
     };
@@ -218,8 +209,8 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
       void (async () => {
         try {
           await Promise.all([
-            warmupCompile.call(renderer, gizmoAxes, cameraRig.perspectiveCamera),
-            warmupCompile.call(renderer, gizmoAxes, cameraRig.orthographicCamera),
+            warmupCompile.call(renderer, gizmo, cameraRig.perspectiveCamera),
+            warmupCompile.call(renderer, gizmo, cameraRig.orthographicCamera),
           ]);
         } catch (error) {
           console.error('ViewportGizmoCube pipeline warm-up failed', error);
@@ -261,6 +252,7 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
     graphicsActor,
     cameraRig,
     upDirection,
+    loadedFont,
   ]);
 
   useGizmoResizeSync(gizmoRef);

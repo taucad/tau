@@ -1,20 +1,9 @@
-import { Link } from 'react-router';
 import privacyPolicy from '#routes/legal.privacy/privacy-policy.txt?raw';
-import { Button } from '@taucad/ui/components/button';
-import { markdownHeaderAnchorComponents } from '#components/markdown/markdown-header-anchor.js';
-import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
-import type { Handle } from '#types/matches.types.js';
+import { LegalDocument } from '#routes/legal/legal-document.js';
+import type { MetaFunction } from 'react-router';
 
-export const handle: Handle = {
-  breadcrumb() {
-    return (
-      <Button asChild variant='ghost'>
-        <Link to='/legal/privacy'>Privacy Policy</Link>
-      </Button>
-    );
-  },
-};
+export const meta: MetaFunction = () => [{ title: 'Privacy Policy · Tau' }];
 
 export default function Privacy(): React.JSX.Element {
-  return <MarkdownViewer components={markdownHeaderAnchorComponents}>{privacyPolicy}</MarkdownViewer>;
+  return <LegalDocument>{privacyPolicy}</LegalDocument>;
 }

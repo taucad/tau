@@ -96,6 +96,15 @@ Parameter discovery uses Roslyn symbols only; it does not execute model code. De
 
 One preset, `default`, selecting `kernels.default`.
 
+## Large models
+
+Mechanism serialization retains large payloads without a fixed byte or value-count ceiling. Cancellation, cycle detection and JSON nesting validation still apply.
+
+Native requests run until completion or cancellation by default (`requestTimeout: 0`). Hosts may
+set a positive deadline in milliseconds or a `maxArtifactBytes` policy under `kernels.default`.
+The default artifact allowance is `Number.MAX_SAFE_INTEGER`; actual allocation and filesystem
+limits still apply. Workspace mirroring has no fixed byte, file-count or directory-depth quota.
+
 ## Environment
 
 | Host           | Supported | Notes                                                        |

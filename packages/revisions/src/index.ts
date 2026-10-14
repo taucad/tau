@@ -55,6 +55,7 @@ export type {
   RevisionReceipt,
   RevisionRecord,
   RemoteRef,
+  RevisionRemoteAddress,
   RevisionFetchInput,
   RevisionFetchResult,
   RevisionPushInput,
@@ -159,6 +160,7 @@ export type {
 export type {
   RemoteFacet,
   RemoteMachineEvent,
+  RemoteRefusedReplacement,
   RemoteStorage,
   RemoteStorageSupplier,
   RevisionChildToast,

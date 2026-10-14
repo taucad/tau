@@ -1,7 +1,7 @@
 /**
  * Serves the static marketing site (`apps/www`) on the app's own hostname.
  *
- * A full page load of `/` and of the marketing pages is proxied to the
+ * A full page load of `/` without an app preference and of marketing pages is proxied to the
  * marketing deploy named by the `MARKETING_ORIGIN` site variable. Every app
  * route, the app's own `/` with a query (`/?settings=…`, OAuth `/?code=…`) and
  * client-side navigation inside the app are untouched. With the variable
@@ -32,7 +32,7 @@ export function resolveMarketingUrl(requestUrl: URL, method: string, origin: str
   const { pathname, searchParams } = requestUrl;
   if (pathname === '/') {
     for (const name of searchParams.keys()) {
-      if (!campaignParameters.has(name)) {
+      if (!campaignParameters.has(name) && name !== 'website') {
         return undefined;
       }
     }
@@ -63,9 +63,20 @@ function readSiteVariable(name: string): string | undefined {
 
 export default async function marketing(request: Request, context: EdgeContext): Promise<Response> {
   const requestUrl = new URL(request.url);
-  const upstream = resolveMarketingUrl(requestUrl, request.method, readSiteVariable('MARKETING_ORIGIN'));
+  // Presentation only: the API still authorizes every protected operation.
+  // Ambiguous duplicate cookies do not select the app.
+  const entries = (request.headers.get('cookie') ?? '')
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith('tau-entry='));
+  const prefersApp = entries.length === 1 && entries[0] === 'tau-entry=app';
+  const upstream =
+    requestUrl.pathname === '/' && prefersApp && !requestUrl.searchParams.has('website')
+      ? undefined
+      : resolveMarketingUrl(requestUrl, request.method, readSiteVariable('MARKETING_ORIGIN'));
   if (!upstream) {
-    return context.next();
+    const response = await context.next();
+    return requestUrl.pathname === '/' ? privateDocument(response) : response;
   }
 
   const response = await fetch(upstream, {
@@ -75,11 +86,22 @@ export default async function marketing(request: Request, context: EdgeContext):
   });
   const location = response.headers.get('location');
   if (!location) {
-    return response;
+    return requestUrl.pathname === '/' ? privateDocument(response) : response;
   }
 
   const headers = new Headers(response.headers);
   headers.set('location', rewriteLocation(location, upstream, requestUrl));
+  const rewritten = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  return requestUrl.pathname === '/' ? privateDocument(rewritten) : rewritten;
+}
+
+/** Keep both root variants out of shared and browser document caches. */
+function privateDocument(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set('cache-control', 'private, no-store');
+  headers.set('cdn-cache-control', 'no-store');
+  headers.set('netlify-cdn-cache-control', 'no-store');
+  headers.delete('netlify-vary');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 

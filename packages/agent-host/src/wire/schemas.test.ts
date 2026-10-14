@@ -84,3 +84,17 @@ describe('the wire module (SC-R1, SC-R2)', () => {
     ).toBe(false);
   });
 });
+
+it('should carry explicit commentary and reasoning summaries across the live wire', () => {
+  const identity = { chatId: 'chat', runId: 'run', messageId: 'message', contentIndex: 0 };
+  for (const event of [
+    { ...identity, type: 'text-start', phase: 'commentary' },
+    { ...identity, type: 'text-delta', delta: 'Checking', phase: 'commentary' },
+    { ...identity, type: 'text-end', content: 'Checking', phase: 'commentary' },
+    { ...identity, type: 'thinking-start', reasoningSummary: 'Checking plot quality' },
+    { ...identity, type: 'thinking-delta', delta: 'Checking', reasoningSummary: 'Checking plot quality' },
+    { ...identity, type: 'thinking-end', content: 'Checking', reasoningSummary: 'Checking plot quality' },
+  ]) {
+    expect(wire.agentLiveEventSchema.parse(event)).toEqual(event);
+  }
+});

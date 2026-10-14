@@ -16,11 +16,13 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { CloudProjectPreview } from '#components/project-library/cloud-project-preview.js';
 import { ArrowRight, Cloud, Users } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardFooter, CardHeader } from '@taucad/ui/components/card';
 import {
+  isCloudProjectPending,
   materializedCloudProjects,
   tauCloudIntent,
   useMaterializeOnSignInLocation,
@@ -77,7 +79,18 @@ export const toLibraryRows = ({
   const onCloud = new Set(cloud.map((entry) => entry.id));
   const held = new Set([...heldProjects, ...projects].map((project) => project.id));
   return [
-    ...projects.map((project) => (onCloud.has(project.id) ? { ...project, onCloud: true } : project)),
+    ...projects.map((project): LibraryRow => {
+      if (includeCloudOnly && isCloudProjectPending(project.id)) {
+        const entry = cloud.find((candidate) => candidate.id === project.id);
+        return {
+          ...(entry ?? { id: project.id, name: project.name, role: 'owner' }),
+          cloudOnly: true,
+          lastActivityAt: entry?.updatedAt ?? project.lastActivityAt,
+          description: '',
+        };
+      }
+      return onCloud.has(project.id) ? { ...project, onCloud: true } : project;
+    }),
     ...(includeCloudOnly
       ? cloud
           .filter((entry) => !held.has(entry.id))
@@ -103,9 +116,6 @@ const collaborationCopy = (role: CloudProject['role']): Readonly<{ badge: string
   }
   return undefined;
 };
-
-const cloudOnlyLine = (entry: CloudProject): string =>
-  collaborationCopy(entry.role)?.line ?? 'Backed up on Tau Cloud. This device does not have it yet.';
 
 /**
  * The glyph a row carries when Tau Cloud holds it too: the Sync region's own
@@ -199,21 +209,17 @@ function CloudOnlyWhere({ entry }: { readonly entry: CloudProject }): React.JSX.
 export function CloudProjectNameCell({ entry }: { readonly entry: CloudProject }): React.JSX.Element {
   return (
     <div className='flex items-center gap-3 pr-2'>
-      <div className='flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground'>
-        <Cloud aria-hidden className='size-4' />
-      </div>
+      <CloudProjectPreview isCompact projectId={entry.id} name={entry.name} />
       <div className='min-w-0 pl-2'>
         <div className='truncate font-medium'>{entry.name}</div>
         <CloudOnlyWhere entry={entry} />
-        <div className='text-xs text-muted-foreground'>{cloudOnlyLine(entry)}</div>
       </div>
     </div>
   );
 }
 
 /**
- * The grid's card for a project only Tau Cloud holds: no thumbnail or preview,
- * because this device has no files to draw one from.
+ * The grid's cloud card uses a small saved preview without downloading project files.
  *
  * @param props - The row and the open verb.
  * @returns The card.
@@ -228,14 +234,11 @@ export function CloudProjectCard({
 }): React.JSX.Element {
   return (
     <Card data-slot='cloud-project-card' className='flex h-full flex-col overflow-hidden pt-0'>
-      <div className='flex aspect-4/3 w-full items-center justify-center bg-muted text-muted-foreground'>
-        <Cloud aria-hidden className='size-8' strokeWidth={1} />
-      </div>
+      <CloudProjectPreview projectId={entry.id} name={entry.name} />
       <CardHeader>
         <div className='flex min-w-0 flex-col gap-1 py-1'>
           <span className='truncate text-base font-semibold'>{entry.name}</span>
           <CloudOnlyWhere entry={entry} />
-          <p className='text-xs text-muted-foreground'>{cloudOnlyLine(entry)}</p>
         </div>
       </CardHeader>
       <CardFooter className='mt-auto'>

@@ -1,3 +1,4 @@
+import { installBrowserHost } from '#main/browser-host.js';
 /**
  * Electron main process (work item E2).
  *
@@ -8,8 +9,10 @@
  */
 
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
   app,
@@ -18,6 +21,8 @@ import {
   dialog,
   ipcMain,
   MessageChannelMain,
+  Menu,
+  MenuItem,
   net,
   protocol,
   safeStorage,
@@ -91,9 +96,11 @@ import { createOpenFileQueue } from '#main/open-files.js';
 import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
+import { prepareOtaProbe } from '#main/ota-probe.js';
 import { startDesktopUpdater } from '#main/updater.js';
 import {
   appIconThemeChannel,
+  openDirectoryChannel,
   agentHostSessionChannels,
   machinesChannels,
   externalAgentsChannel,
@@ -103,6 +110,7 @@ import {
   computeControlChannels,
   servicesPortRelayTag,
   slicersChannels,
+  windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
 import {
@@ -129,6 +137,19 @@ if (environmentLocked) {
 /* A staging package (`TAU_DESKTOP_CHANNEL=staging` at packaging time) defaults
  * to taucad.dev and never follows the production update feed. */
 const desktopChannel = app.isPackaged ? packagedChannel(app.getAppPath()) : 'production';
+app.setName(desktopChannel === 'staging' ? 'Tau Staging' : 'Tau');
+if (desktopChannel === 'staging') {
+  app.setPath('userData', join(app.getPath('appData'), 'Tau Staging'));
+  app.setPath('sessionData', app.getPath('userData'));
+}
+const otaProbe = prepareOtaProbe({
+  arguments: process.argv,
+  profile: app.getPath('userData'),
+  appPath: app.getAppPath(),
+  version: app.getVersion(),
+  channel: desktopChannel,
+  packaged: app.isPackaged,
+});
 const isDevelopment = process.env.ELECTRON_RENDERER_URL !== undefined;
 const hideTestWindow = process.env['TAU_E2E_HIDE_WINDOW'] === '1';
 /* Packaged executable launches skip Playwright's readiness loader. Hold window
@@ -315,7 +336,6 @@ app.on('second-instance', (_event, argv) => {
   focusMainWindow();
 });
 
-app.setName('Tau');
 process.title = 'Tau';
 /* Unpackaged on Windows and Linux the registration has to name the executable
  * and the script Electron was started with, or the OS records `electron` itself
@@ -375,7 +395,14 @@ const bootstrapElectronApp = async (): Promise<void> => {
   );
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   const log = createDiagnosticsLog({ directory: logDirectory, echo: isDevelopment });
-  log.log('info', 'main.ready', { electron: process.versions.electron, packaged: app.isPackaged, isDevelopment });
+  log.log('info', 'main.ready', {
+    electron: process.versions.electron,
+    packaged: app.isPackaged,
+    isDevelopment,
+    version: app.getVersion(),
+    channel: desktopChannel,
+    pid: process.pid,
+  });
   if (loginShell !== undefined) {
     /* A fallback means the shell timed out or failed: only well-known CLI
      * directories were added, and nothing from its rc files applied. */
@@ -392,7 +419,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * (`tau serve` opens it too), never under an authored root. The app's old
    * `userData/machines` is imported from once, and only when it is another
    * directory: on a case-insensitive volume `…/Tau` and `…/tau` are one. */
-  const tauConfigDirectory = defaultConfigDirectory();
+  const tauConfigDirectory =
+    desktopChannel === 'staging' ? join(app.getPath('userData'), 'config') : defaultConfigDirectory();
   const machinesDirectory = join(tauConfigDirectory, 'machines');
   mkdirSync(machinesDirectory, { recursive: true, mode: 0o700 });
   const legacyMachinesDirectory = join(app.getPath('userData'), 'machines');
@@ -441,6 +469,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   /* Deny by default; see `grantedPermissions` for the explicit grants and why. */
   const origins = rendererOrigins({ appOrigin, devServerUrl: environment.ELECTRON_RENDERER_URL });
+  installBrowserHost({ origins, userDataPath: app.getPath('userData') });
   // The macOS consent prompt appears once; later answers come from System Settings without a prompt.
   session.defaultSession.setPermissionRequestHandler(async (...[contents, permission, callback, details]) => {
     const microphone = isMicrophonePermissionGranted({
@@ -481,39 +510,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
     allowedOrigins: authenticatedOrigins,
     token: () => auth.token(),
     clientHeader: `tau-desktop/${app.getVersion()}`,
-  });
-
-  /* Packaged releases follow the latest GitHub Release's update feed; see `updater.ts`. */
-  startDesktopUpdater({
-    platform: process.platform,
-    arch: process.arch,
-    currentVersion: app.getVersion(),
-    packaged: app.isPackaged,
-    channel: desktopChannel,
-    environment,
-    autoUpdater,
-    fetchJson: async (url) => {
-      const response = await net.fetch(url);
-      if (!response.ok) {
-        throw new Error(`update feed answered ${response.status}`);
-      }
-      return response.json() as Promise<unknown>;
-    },
-    confirm: async ({ title, detail, accept }) => {
-      const { response } = await dialog.showMessageBox({
-        type: 'info',
-        message: title,
-        detail,
-        buttons: [accept, 'Later'],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      return response === 0;
-    },
-    openExternal: async (url) => shell.openExternal(url),
-    log: (level, event, detail) => {
-      log.log(level, event, detail);
-    },
   });
 
   if (!isDevelopment) {
@@ -1024,6 +1020,24 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * observable behaviour, which is what the shared picker seam promises. */
   const lastDirectoryById = new Map<string, string>();
 
+  ipcMain.handle(openDirectoryChannel, async (event, path: unknown) => {
+    if (!trusted(event.senderFrame) || typeof path !== 'string' || path.includes('\0')) {
+      throw new Error('Desktop shell refused the directory request.');
+    }
+    const directory = roots.canonical(path);
+    if (directory === undefined) {
+      throw new Error('Reopen this folder from Tau before opening it in the file manager.');
+    }
+    const info = await stat(directory);
+    if (!info.isDirectory()) {
+      throw new Error('The project directory is no longer a folder.');
+    }
+    const error = await shell.openPath(directory);
+    if (error) {
+      throw new Error(error);
+    }
+  });
+
   ipcMain.handle('tau:select-directory', async (event, options: unknown) => {
     if (!trusted(event.senderFrame)) {
       return undefined;
@@ -1191,6 +1205,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
         }),
       );
     }
+    const publishFullscreen = (): void => {
+      window.webContents.send(windowFullscreenChannel, window.isFullScreen());
+    };
+    window.on('enter-full-screen', publishFullscreen);
+    window.on('leave-full-screen', publishFullscreen);
+    window.webContents.on('did-finish-load', publishFullscreen);
     window.once('close', () => {
       try {
         writeWindowState(windowStatePath, {
@@ -1324,7 +1344,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   });
 
   let shutdownComplete = false;
-  let shutdown: Promise<void> | undefined;
+  let shutdown: Promise<boolean> | undefined;
   /**
    * Tell the person a quit could not settle, and offer to quit anyway (C69, R13).
    *
@@ -1346,101 +1366,207 @@ const bootstrapElectronApp = async (): Promise<void> => {
     });
     return response === 1;
   };
-  app.on('before-quit', (event) => {
+  const executeShutdown = async (): Promise<boolean> => {
+    try {
+      /*
+       * The quit hold (D31, W19).
+       *
+       * Every project the services utility serves takes its close cut and
+       * waits for W13's `awaitSyncSettled` before this process ends. Without
+       * this round trip `services.dispose()` killed the utility outright —
+       * `ServicesHost.dispose()` is synchronous fire-and-forget — so the last
+       * edits of a quit were recorded by nothing. A timeout or negative
+       * acknowledgement leaves the app live so the same owners can retry.
+       */
+      /*
+       * The renderer's half first (P49): the browser-side registry owns the
+       * file manager, compute admission and every `chat-session`, and only
+       * it can cancel runs and release the leases its turns took. It shows
+       * the *Backing up…* overlay while it does, with *Quit anyway*.
+       */
+      const rendererOutcome = await askRendererToQuiesce(quitRendererMilliseconds);
+      log.log('info', 'main.renderer-quiesce', { outcome: rendererOutcome });
+      let forced = rendererOutcome === 'forced';
+      if (
+        rendererOutcome === 'timeout' &&
+        !(await askToQuitAnyway('This window did not finish closing its projects.'))
+      ) {
+        quitting = false;
+        shutdown = undefined;
+        return false;
+      }
+      forced ||= rendererOutcome === 'timeout';
+      const utilityOutcome = await services.quiesce(quitQuiesceMilliseconds);
+      log.log(
+        utilityOutcome.status === 'quiesced' || utilityOutcome.status === 'no-utility' ? 'info' : 'error',
+        'main.quiesce',
+        { outcome: utilityOutcome },
+      );
+      if (
+        !forced &&
+        utilityOutcome.status !== 'quiesced' &&
+        utilityOutcome.status !== 'no-utility' &&
+        !(await askToQuitAnyway('Tau could not finish saving every open project.'))
+      ) {
+        quitting = false;
+        shutdown = undefined;
+        return false;
+      }
+      try {
+        showOpenFileImport = undefined;
+        for (const controller of quickLookControllers.values()) {
+          controller.dispose();
+        }
+        quickLookControllers.clear();
+        auth.dispose();
+      } catch (error) {
+        log.log('error', 'main.shutdown', error);
+      }
+      try {
+        await services.dispose();
+      } catch (error) {
+        log.log('error', 'main.shutdown', error);
+      }
+      try {
+        await geometry.dispose();
+      } catch (error) {
+        log.log('error', 'main.shutdown', error);
+      }
+      zooProxyToken.dispose();
+      try {
+        runtimeMain.dispose();
+      } catch (error) {
+        log.log('error', 'main.shutdown', error);
+      }
+      try {
+        for (const connection of computeConnections.values()) {
+          connection.dispose();
+        }
+        computeConnections.clear();
+        await computeWorker?.terminate();
+        computeWorker = undefined;
+      } catch (error) {
+        log.log('error', 'main.shutdown', error);
+      }
+      shutdownComplete = true;
+      return true;
+    } catch (error) {
+      quitting = false;
+      shutdown = undefined;
+      log.log('error', 'main.shutdown', error);
+      return false;
+    }
+  };
+  const prepareToQuit = async (): Promise<boolean> => {
     quitting = true;
+    if (shutdownComplete) {
+      return true;
+    }
+    shutdown ??= executeShutdown();
+    return shutdown;
+  };
+  let pendingQuit: Promise<void> | undefined;
+  const quitWhenReady = async (): Promise<void> => {
+    try {
+      if (await prepareToQuit()) {
+        app.quit();
+      }
+    } finally {
+      pendingQuit = undefined;
+    }
+  };
+  app.on('before-quit', (event) => {
     if (shutdownComplete) {
       return;
     }
     event.preventDefault();
-    if (!shutdown) {
-      shutdown = (async () => {
-        /*
-         * The quit hold (D31, W19).
-         *
-         * Every project the services utility serves takes its close cut and
-         * waits for W13's `awaitSyncSettled` before this process ends. Without
-         * this round trip `services.dispose()` killed the utility outright —
-         * `ServicesHost.dispose()` is synchronous fire-and-forget — so the last
-         * edits of a quit were recorded by nothing. A timeout or negative
-         * acknowledgement leaves the app live so the same owners can retry.
-         */
-        /*
-         * The renderer's half first (P49): the browser-side registry owns the
-         * file manager, compute admission and every `chat-session`, and only
-         * it can cancel runs and release the leases its turns took. It shows
-         * the *Backing up…* overlay while it does, with *Quit anyway*.
-         */
-        const rendererOutcome = await askRendererToQuiesce(quitRendererMilliseconds);
-        log.log('info', 'main.renderer-quiesce', { outcome: rendererOutcome });
-        let forced = rendererOutcome === 'forced';
-        if (
-          rendererOutcome === 'timeout' &&
-          !(await askToQuitAnyway('This window did not finish closing its projects.'))
-        ) {
-          quitting = false;
-          shutdown = undefined;
-          return;
-        }
-        forced ||= rendererOutcome === 'timeout';
-        const utilityOutcome = await services.quiesce(quitQuiesceMilliseconds);
-        log.log(
-          utilityOutcome.status === 'quiesced' || utilityOutcome.status === 'no-utility' ? 'info' : 'error',
-          'main.quiesce',
-          { outcome: utilityOutcome },
-        );
-        if (
-          !forced &&
-          utilityOutcome.status !== 'quiesced' &&
-          utilityOutcome.status !== 'no-utility' &&
-          !(await askToQuitAnyway('Tau could not finish saving every open project.'))
-        ) {
-          quitting = false;
-          shutdown = undefined;
-          return;
-        }
-        try {
-          showOpenFileImport = undefined;
-          for (const controller of quickLookControllers.values()) {
-            controller.dispose();
-          }
-          quickLookControllers.clear();
-          auth.dispose();
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
-        }
-        try {
-          await services.dispose();
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
-        }
-        try {
-          await geometry.dispose();
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
-        }
-        zooProxyToken.dispose();
-        try {
-          runtimeMain.dispose();
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
-        }
-        try {
-          for (const connection of computeConnections.values()) {
-            connection.dispose();
-          }
-          computeConnections.clear();
-          await computeWorker?.terminate();
-          computeWorker = undefined;
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
-        }
-        shutdownComplete = true;
-        app.quit();
-      })();
-      // async-iife: bootstrap -- Electron event callbacks cannot return shutdown completion.
-      void shutdown;
-    }
+    pendingQuit ??= quitWhenReady();
   });
+  if (otaProbe) {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (!window) {
+      throw new Error('OTA probe has no renderer window');
+    }
+    const deadline = Date.now() + 120_000;
+    let ready = false;
+    /* oxlint-disable no-await-in-loop -- Observe one renderer's real quit registration before updater admission. */
+    while (Date.now() < deadline) {
+      const observed: unknown = await window.webContents.executeJavaScript(
+        'location.protocol === "app:" && location.host === "tau" && document.querySelector("main") !== null && globalThis.tau?.quit?.isReady() === true',
+      );
+      if (observed === true) {
+        ready = true;
+        break;
+      }
+      await sleep(250);
+    }
+    /* oxlint-enable no-await-in-loop */
+    if (!ready) {
+      throw new Error('OTA renderer did not become ready with its save handler');
+    }
+    otaProbe.complete();
+  }
+  /* Start only once the shared shutdown owner and normal application startup are ready. */
+  const updater = startDesktopUpdater({
+    platform: process.platform,
+    arch: process.arch,
+    currentVersion: app.getVersion(),
+    packaged: app.isPackaged,
+    channel: desktopChannel,
+    environment,
+    autoUpdater,
+    prepareToRestart: prepareToQuit,
+    ...(otaProbe ? { candidateTag: otaProbe.candidateTag } : {}),
+    fetchJson: async (url) => {
+      const response = await net.fetch(url);
+      if (!response.ok) {
+        throw new Error(`update feed answered ${response.status}`);
+      }
+      return response.json() as Promise<unknown>;
+    },
+    confirm: async ({ title, detail, accept }) => {
+      if (otaProbe) {
+        return true;
+      }
+      const { response } = await dialog.showMessageBox({
+        type: 'info',
+        message: title,
+        detail,
+        buttons: [accept, 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      return response === 0;
+    },
+    openExternal: async (url) => shell.openExternal(url),
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  });
+
+  const checkForUpdates = async (): Promise<void> => {
+    await updater.check();
+    const { response } = await dialog.showMessageBox({
+      type: 'info',
+      message: `Tau ${app.getVersion()} · ${desktopChannel}`,
+      detail: updater.status(),
+      buttons: ['OK', 'Restart to install'],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (response === 1) {
+      await updater.install();
+    }
+  };
+  Menu.getApplicationMenu()?.items[0]?.submenu?.insert(
+    1,
+    new MenuItem({
+      label: 'Check for Updates…',
+      click: () => {
+        void checkForUpdates();
+      },
+    }),
+  );
 };
 
 /* Electron fires `ready` only after the main ESM module finishes evaluating, so

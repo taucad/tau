@@ -10,7 +10,10 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createPackageWithOptions, statFile } from '@electron/asar';
 
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import {
@@ -19,7 +22,12 @@ import {
   desktopPackagePlans,
   parseDesktopPackageArguments,
 } from './desktop-package-target.mjs';
-import { desktopManifestFields, desktopPackageChannel, runtimePlatformPackages } from './runtime-stage.mjs';
+import {
+  desktopManifestFields,
+  desktopPackageChannel,
+  runtimeAsarOptions,
+  runtimePlatformPackages,
+} from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
 
 /* Target selection: exactly one supported target, on its own host. */
@@ -79,13 +87,43 @@ assert.deepEqual(
 );
 assert.equal(desktopPackagePlans['win32-x64'].icon, 'icon.ico');
 assert.ok(desktopPackagePlans['win32-x64'].branding.includes('icon.ico'), 'main loads branding/icon.ico on Windows');
-assert.ok(desktopPackagePlans['linux-x64'].asarUnpack.includes('bin/esbuild'));
-assert.ok(desktopPackagePlans['win32-x64'].asarUnpack.includes('esbuild.exe'));
-for (const plan of Object.values(desktopPackagePlans)) {
-  assert.ok(plan.asarUnpack.includes('*.node'), `${plan.target} unpacks native addons`);
-  assert.ok(plan.asarUnpack.includes('@agentclientprotocol/**'), `${plan.target} unpacks the spawned ACP adapters`);
+console.log('✓ each plan names its archive and icon');
+
+/* ASAR matches absolute filenames: hidden checkout ancestors must not hide spawned payloads. */
+const fixtureParent = fileURLToPath(new URL('../../../out/test-results/desktop-package/', import.meta.url));
+await mkdir(fixtureParent, { recursive: true });
+const fixtureRoot = await mkdtemp(join(fixtureParent, '.hidden-checkout-'));
+try {
+  const source = join(fixtureRoot, 'stage');
+  const archive = join(fixtureRoot, 'app.asar');
+  const unpacked = [
+    'node_modules/native/addon.node',
+    'node_modules/native/engine.dll',
+    'node_modules/@esbuild/darwin-arm64/bin/esbuild',
+    'node_modules/@esbuild/win32-x64/esbuild.exe',
+    'node_modules/@agentclientprotocol/codex-acp/dist/index.js',
+    'node_modules/@agentclientprotocol/codex-acp/node_modules/dependency/index.js',
+    'node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips.dylib',
+    'node_modules/@gltf-transform/functions/node_modules/ndarray-pixels/node_modules/sharp/node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips.dylib',
+  ];
+  await Promise.all(
+    [...unpacked, 'app.js'].map(async (file) => {
+      const path = join(source, file);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, 'fixture');
+    }),
+  );
+  await createPackageWithOptions(source, archive, runtimeAsarOptions);
+  for (const file of unpacked) {
+    const entry = statFile(archive, file);
+    assert.ok('unpacked' in entry && entry.unpacked, `${file} must exist outside the archive`);
+    assert.equal(readFileSync(join(`${archive}.unpacked`, file), 'utf8'), 'fixture');
+  }
+  assert.ok(!('unpacked' in statFile(archive, 'app.js')), 'ordinary JavaScript remains packed');
+} finally {
+  await rm(fixtureRoot, { recursive: true, force: true });
 }
-console.log('✓ each plan names its archive, icon and unpacked native payloads');
+console.log('✓ native binaries and spawned adapters stay unpacked beneath hidden checkout directories');
 
 /* Omissions: GeoSpec native and PicoGK are always named; git only when it is absent. */
 const linux = desktopPackagePlans['linux-x64'];
@@ -121,7 +159,7 @@ assert.equal(desktopArchiveCommand(windows, '/out', undefined).command, String.r
 console.log('✓ archives are written by tar, and on Windows by its inbox bsdtar');
 
 /* Runtime platform packages: each name is one its engine declares as an optional dependency. */
-assert.deepEqual(Object.keys(runtimePlatformPackages).sort(), ['darwin-arm64', 'linux-x64', 'win32-x64']);
+assert.deepEqual(Object.keys(runtimePlatformPackages).sort(), ['darwin-arm64', 'darwin-x64', 'linux-x64', 'win32-x64']);
 assert.deepEqual(runtimePlatformPackages['darwin-arm64'], {
   openrscadEngine: '@taulabs/openrscad-engine-darwin-arm64',
   esbuild: '@esbuild/darwin-arm64',
@@ -132,10 +170,14 @@ assert.deepEqual(runtimePlatformPackages['darwin-arm64'], {
     '@img/sharp-darwin-arm64',
     '@parcel/watcher-darwin-arm64',
   ],
+  unusedSandboxHelpers: ['vendor/seccomp', 'vendor/srt-win'],
 });
 for (const [target, packages] of Object.entries(runtimePlatformPackages)) {
   const [platform, arch] = target.split('-') as [string, string];
   for (const name of [packages.openrscadEngine, packages.esbuild, packages.libassimp, packages.nanoraster]) {
+    if (name === undefined) {
+      continue;
+    }
     assert.ok(name.includes(`${platform}-${arch}`), `${name} is a ${target} package`);
   }
   assert.ok(packages.bundledOptionalDependencies.includes(`@img/sharp-${target}`), `${target} stages sharp's addon`);
@@ -144,7 +186,36 @@ for (const [target, packages] of Object.entries(runtimePlatformPackages)) {
     `${target} stages the file watcher's addon`,
   );
 }
+const assimpManifest = JSON.parse(
+  readFileSync(
+    new URL('../../../packages/plugins/assimp/node_modules/libassimp/package.json', import.meta.url),
+    'utf8',
+  ),
+) as { optionalDependencies: Record<string, string> };
+for (const packages of Object.values(runtimePlatformPackages)) {
+  if (packages.libassimp !== undefined) {
+    assert.ok(
+      assimpManifest.optionalDependencies[packages.libassimp],
+      `${packages.libassimp} must be published by the pinned engine`,
+    );
+  }
+}
+assert.equal(runtimePlatformPackages['darwin-x64'].libassimp, undefined, 'Intel uses the staged Assimp WASM backend');
 console.log('✓ each target stages its own native platform packages');
+
+/* Sandbox helpers: a target keeps only the one it executes, for its own architecture. */
+const sandboxHelpers = ['vendor/seccomp/arm64', 'vendor/seccomp/x64', 'vendor/srt-win/arm64', 'vendor/srt-win/x64'];
+const keptSandboxHelpers = (target: keyof typeof runtimePlatformPackages): string[] =>
+  sandboxHelpers.filter(
+    (helper) =>
+      !runtimePlatformPackages[target].unusedSandboxHelpers.some(
+        (unused) => helper === unused || helper.startsWith(`${unused}/`),
+      ),
+  );
+assert.deepEqual(keptSandboxHelpers('darwin-arm64'), []);
+assert.deepEqual(keptSandboxHelpers('linux-x64'), ['vendor/seccomp/x64']);
+assert.deepEqual(keptSandboxHelpers('win32-x64'), ['vendor/srt-win/x64']);
+console.log('✓ macOS stages no sandbox helper; Linux keeps x64 apply-seccomp and Windows x64 srt-win');
 
 /* The licence gate precedes every archive the script writes. */
 const packageSource = readFileSync(new URL('package-desktop.mts', import.meta.url), 'utf8');

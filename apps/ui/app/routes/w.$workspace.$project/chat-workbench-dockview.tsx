@@ -1,3 +1,9 @@
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { BrowserPane } from '#components/browser/browser-pane.js';
+import { getBrowserBridge } from '#components/browser/browser-bridge.js';
+import { connectBrowserWorkbench } from '#components/browser/browser-workbench.js';
+import type { BrowserPanelParameters } from '#components/browser/browser-workbench.js';
 import {
   createContext,
   Fragment,
@@ -14,6 +20,7 @@ import type { ComponentProps, ReactNode } from 'react';
 import { useSelector } from '@xstate/react';
 import {
   Activity,
+  Globe,
   Bot,
   Box,
   BriefcaseBusiness,
@@ -266,6 +273,10 @@ function EditorPanel(properties: IDockviewPanelProps<EditorPanelParameters>): Re
   );
 }
 
+function BrowserWorkbenchPanel({ params }: IDockviewPanelProps<BrowserPanelParameters>): React.JSX.Element {
+  return <BrowserPane tabId={params.browserTabId} />;
+}
+
 function ParametersWorkbenchPanel(): React.JSX.Element {
   return <ParametersPanelBody />;
 }
@@ -400,6 +411,12 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
     label: 'Activity',
     surfaces: [
       {
+        id: 'browser',
+        label: paneTitle('browser'),
+        icon: Globe,
+        panel: { id: 'workbench:browser', component: 'browser', title: paneTitle('browser') },
+      },
+      {
         id: 'revisions',
         label: paneTitle('revisions'),
         icon: History,
@@ -531,7 +548,7 @@ export function replaceWorkbenchPlaceholderWithUtility({
   readonly panelId: WorkbenchUtilityPanelId;
 }): void {
   const definition = workbenchPanels[panelId];
-  const existing = api.panels.find((panel) => panel.id === definition.id);
+  const existing = panelId === 'browser' ? undefined : api.panels.find((panel) => panel.id === definition.id);
   if (existing) {
     existing.api.setActive();
     placeholder.api.close();
@@ -542,6 +559,7 @@ export function replaceWorkbenchPlaceholderWithUtility({
   const index = group.panels.findIndex((panel) => panel.id === placeholder.id);
   api.addPanel({
     ...definition,
+    ...(panelId === 'browser' ? { id: `browser:${generatePrefixedId(idPrefix.pane)}` } : {}),
     position: { direction: 'within', referenceGroup: group, ...(index === -1 ? {} : { index }) },
   });
   placeholder.api.close();
@@ -791,6 +809,7 @@ export function WorkbenchLeftActions(properties: IDockviewHeaderActionsProps): R
 }
 
 const components = {
+  browser: BrowserWorkbenchPanel,
   editor: EditorPanel,
   newTab: WorkbenchPlaceholderPanel,
   parameters: ParametersWorkbenchPanel,
@@ -810,6 +829,7 @@ const components = {
 };
 
 export const workbenchPanels = {
+  browser: getWorkbenchSurface('browser').panel!,
   parameters: getWorkbenchSurface('parameters').panel!,
   model: getWorkbenchSurface('model').panel!,
   kinematics: getWorkbenchSurface('kinematics').panel!,
@@ -833,7 +853,9 @@ export const workbenchPanels = {
  */
 export const getWorkbenchTabIcon: DockviewTabIconRenderer = (properties) => {
   const mode = getPlaceholderParameters(properties)?.mode;
-  const surface = workbenchSurfaces.find((candidate) => candidate.panel?.id === properties.api.id);
+  const surface = workbenchSurfaces.find((candidate) =>
+    properties.api.component === 'browser' ? candidate.id === 'browser' : candidate.panel?.id === properties.api.id,
+  );
   const filePath = getFileParameters(properties)?.filePath;
   const Icon =
     mode === 'open-file'
@@ -861,7 +883,7 @@ export function openWorkbenchUtility(
   group?: DockviewGroupPanel,
 ): void {
   const definition = workbenchPanels[panelId];
-  const existing = api.panels.find((panel) => panel.id === definition.id);
+  const existing = panelId === 'browser' ? undefined : api.panels.find((panel) => panel.id === definition.id);
   if (existing) {
     existing.api.setActive();
     return;
@@ -870,6 +892,7 @@ export function openWorkbenchUtility(
   const referenceGroup = group ?? api.activeGroup ?? api.groups[0];
   api.addPanel({
     ...definition,
+    ...(panelId === 'browser' ? { id: `browser:${generatePrefixedId(idPrefix.pane)}` } : {}),
     ...(referenceGroup ? { position: { direction: 'within', referenceGroup } } : {}),
   });
 }
@@ -1373,6 +1396,7 @@ export const FileEditor = memo(function ({
   let body: ReactNode;
   let resolvedViewer: ResolvedFileViewer | undefined;
   let viewerRequest: Omit<FileViewerRenderRequest, 'renderPane'> | undefined;
+  const availability = useProjectAvailability();
   switch (result.kind) {
     case 'loading': {
       body = <EditorPanePlaceholder label={`Loading ${filePath.split('/').pop() ?? filePath}`} />;
@@ -1387,6 +1411,10 @@ export const FileEditor = memo(function ({
       break;
     }
     case 'orphaned': {
+      if (availability !== 'ready') {
+        body = <ProjectSyncPlaceholder state={availability} />;
+        break;
+      }
       body = (
         <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
           <FileX className='size-12 stroke-1' />
@@ -1507,6 +1535,10 @@ export const FileEditor = memo(function ({
       </div>
     </FileWorkbenchPane>
   );
+
+  if (availability !== 'ready') {
+    return <ProjectSyncPlaceholder state={availability} />;
+  }
 
   if (result.kind === 'binary' || result.kind === 'text') {
     return <RoutedFileViewer viewer={resolvedViewer!} request={viewerRequest!} renderPane={renderPane} />;
@@ -1687,6 +1719,21 @@ export const WorkbenchDockview = memo(function ({
   const monaco = useConfiguredMonaco();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
+
+  useEffect(() => {
+    const bridge = getBrowserBridge();
+    if (!api || !bridge || profile === 'shared') {
+      return;
+    }
+    return connectBrowserWorkbench({
+      api,
+      bridge,
+      isRestoring: () => isRestoringLayout.current,
+      onError: (message) => {
+        toast.error(message);
+      },
+    });
+  }, [api, profile]);
 
   useEffect(() => {
     onApiChange?.(api);

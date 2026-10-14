@@ -1,4 +1,5 @@
 import { expectTypeOf } from 'vitest';
+import type { SyncFacet as PublishedSyncFacet } from '@taucad/revisions';
 import type { AnyStateMachine } from 'xstate';
 
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
@@ -36,3 +37,11 @@ expectTypeOf<SyncActors>().toHaveProperty('push');
 expectTypeOf<SyncActors>().toHaveProperty('fetch');
 expectTypeOf<SyncActors>().toHaveProperty('merge');
 expectTypeOf<SyncActors>().toHaveProperty('connectivity');
+
+expectTypeOf<SyncFacet['pullPhase']>().toEqualTypeOf<'idle' | 'fetching' | 'applying' | 'records' | undefined>();
+expectTypeOf<SyncFacet['hasAppliedRemote']>().toEqualTypeOf<boolean | undefined>();
+expectTypeOf<SyncFacet['chats']>().toEqualTypeOf<'unknown' | 'loading' | 'ready' | 'disabled' | 'failed' | undefined>();
+
+/* The same additive contract is reachable from the package's published root. */
+expectTypeOf<PublishedSyncFacet>().toEqualTypeOf<SyncFacet>();
+expectTypeOf<Omit<PublishedSyncFacet, 'pullPhase' | 'hasAppliedRemote' | 'chats'>>().toExtend<PublishedSyncFacet>();

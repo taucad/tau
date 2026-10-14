@@ -16,7 +16,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "redis_connection_state{service_name=\"tau-api\"} == 0",
+            "expr": "redis_connection_state{app=~\".*\",service_name=\"tau-api\"} == 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "redis_down"
@@ -126,7 +126,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "max(max_over_time(tau_billing_ledger_drift{service_name=\"tau-api\"}[15m]))",
+            "expr": "max(max_over_time(tau_billing_ledger_drift{app=~\".*\",service_name=\"tau-api\"}[15m]))",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "drift"
@@ -159,7 +159,7 @@
       "execErrState": "OK",
       "for": "5m",
       "annotations": {
-        "summary": "SUM(credit_transaction.deltaMicro) disagrees with materialised balances (C12). Money invariant broken \u2014 treat as a page, not a log line. Runbook: repos/tau-cloud/docs/stripe-iac-runbook.md.",
+        "summary": "SUM(credit_transaction.deltaMicro) disagrees with materialised balances (C12). Money invariant broken — treat as a page, not a log line. Runbook: repos/tau-cloud/docs/stripe-iac-runbook.md.",
         "runbook_url": "docs/handbooks/cloud/playbooks/ledger-drift.md"
       },
       "labels": {
@@ -182,7 +182,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum by (app, gen_ai_provider_name) (increase(gen_ai_client_operation_duration_count{service_name=\"tau-api\",error_type=\"upstream_auth\"}[5m])) > 0",
+            "expr": "sum by (app, gen_ai_provider_name) (increase(gen_ai_client_operation_duration_count{app=~\".*\",service_name=\"tau-api\",error_type=\"upstream_auth\"}[5m])) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "supplier_auth"
@@ -216,7 +216,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum by (app, providerId) (increase(tau_billing_provider_account_refusals_total{service_name=\"tau-api\",reason!=\"credential_rejected\"}[5m])) > 0",
+            "expr": "sum by (app, providerId) (increase(tau_billing_provider_account_refusals_total{app=~\".*\",service_name=\"tau-api\",reason!=\"credential_rejected\"}[5m])) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "supplier_credit"
@@ -250,7 +250,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum by (app, tau_worker) (max_over_time(tau_billing_worker_passes_total{service_name=\"tau-api\"}[24h])) unless sum by (app, tau_worker) (increase(tau_billing_worker_passes_total{service_name=\"tau-api\",outcome=\"ok\"}[15m]) > 0)",
+            "expr": "sum by (app, tau_worker) (max_over_time(tau_billing_worker_passes_total{app=~\".*\",service_name=\"tau-api\"}[24h])) unless sum by (app, tau_worker) (increase(tau_billing_worker_passes_total{app=~\".*\",service_name=\"tau-api\",outcome=\"ok\"}[15m]) > 0)",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "worker_stalled"
@@ -284,7 +284,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "max by (app, kind) (tau_billing_open_financial_cases{service_name=\"tau-api\",kind=~\"dispute_unresolved|orphan_local_receipt|invalid_grant_cause|entitlement_source_disagreement|journal_.+\"}) > 0",
+            "expr": "max by (app, kind) (tau_billing_open_financial_cases{app=~\".*\",service_name=\"tau-api\",kind=~\"dispute_unresolved|orphan_local_receipt|invalid_grant_cause|entitlement_source_disagreement|journal_.+\"}) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "account_spend_blocked"

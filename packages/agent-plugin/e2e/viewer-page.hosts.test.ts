@@ -320,10 +320,7 @@ beforeAll(async () => {
   );
   await writeFile(join(project, 'surface.glb'), surfaceGlb(850));
   /* Exchange formats the server converts to GLB (W7). */
-  await copyFile(
-    join(repoRoot, 'packages/geospec-engine/src/model/__fixtures__/intersecting-cylinders.step'),
-    join(project, 'cylinders.step'),
-  );
+  await copyFile(join(here, 'fixtures/intersecting-cylinders.step'), join(project, 'cylinders.step'));
   await writeFile(join(project, 'wedge.stl'), wedgeStl);
   await writeFile(join(project, 'wedge.obj'), wedgeObject);
   await writeFile(join(project, 'small.glb'), surfaceGlb(8));

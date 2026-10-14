@@ -2,6 +2,8 @@
 
 Portable parameter declarations, unit inference, record projection and checked change planning. Runtime produces manifests; this package does not import runtime or own a filesystem.
 
+Manifest source-file identities scale with the workspace and retain every file digest. Their count and path lengths do not consume parameter metadata budgets; declaration and record validation remain bounded independently.
+
 ## Entry points
 
 - `@taucad/parameters`: pure manifest admission, English inference, value projection, explicit snapshots and operation planning.

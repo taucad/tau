@@ -49,7 +49,8 @@ export function LinkedAccount({ account, provider }: LinkedAccountProps): React.
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
   const { data: accountInfo, isPending: isLoadingInfo } = useAccountInfo(authClient, {
-    query: { accountId: account?.accountId },
+    query: { accountId: account?.id ?? '' },
+    enabled: Boolean(account),
   });
 
   const { mutate: linkSocial, isPending: isLinking } = useLinkSocial(authClient);
@@ -120,7 +121,7 @@ export function LinkedAccount({ account, provider }: LinkedAccountProps): React.
                     variant='destructive'
                     disabled={isUnlinking}
                     onClick={() => {
-                      unlinkAccount({ providerId: account.providerId });
+                      unlinkAccount({ accountId: account.id });
                     }}
                   >
                     {isUnlinking ? <Spinner /> : null}

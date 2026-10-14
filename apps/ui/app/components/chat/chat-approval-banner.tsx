@@ -1,14 +1,12 @@
-import { ShieldQuestion } from 'lucide-react';
 import { getToolPartName, isAnyToolPart } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
-import { Button } from '@taucad/ui/components/button';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { agentApprovalToolName, parseAgentHostApproval } from '#services/agent-host-event-projection.js';
-import type { AgentHostApproval, AgentHostApprovalOption } from '#services/agent-host-event-projection.js';
-import { toast } from '#components/ui/sonner.js';
+import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
+import { ChatPermissionRequest } from '#components/chat/chat-permission-request.js';
 import { ChatLoginAffordance } from '#components/chat/chat-login-affordance.js';
 
 /** One unresolved interrupt, located in the transcript that projected it. @public */
@@ -68,7 +66,9 @@ export const pendingAgentHostApprovals = (messages: readonly MyUIMessage[]): rea
       options: projected?.options ?? [],
       ...(projected?.agentId === undefined ? {} : { agentId: projected.agentId }),
       ...(projected?.login === undefined ? {} : { login: projected.login }),
-      ...(projected === undefined ? { tauTool: true } : {}),
+      ...(projected?.context === undefined ? {} : { context: projected.context }),
+      ...(projected?.request === undefined ? {} : { request: projected.request }),
+      ...(projected === undefined ? { tauTool: true, request: { input: part.input } } : {}),
     });
   }
   return pending;
@@ -132,33 +132,6 @@ const requesterName = (agentId: string | undefined, execution: CadAgentExecution
 };
 
 /**
- * The option a keyboard lands on, and the one a bare Approve would have meant.
- *
- * `allow_once` is one turn's consent; `allow_always` is a standing grant the
- * user has to *choose* rather than fall onto (EQ5). The host already resolves a
- * bare approval the same way, so this is the presentation half of one ruling,
- * not a second default.
- *
- * @param options - Options the agent offered, in its own order.
- * @returns The option focus lands on, or `undefined` when none is an allowance.
- */
-const defaultOption = (options: readonly AgentHostApprovalOption[]): AgentHostApprovalOption | undefined =>
-  options.find((option) => option.kind === 'allow_once') ?? options.find((option) => option.kind?.startsWith('allow'));
-
-/**
- * What approving actually buys, per placement.
- *
- * SP-4 Result 3 bounds both halves: an external agent inherits its own CLI's
- * approval policy, so Tau gates nothing inside the run and the only real
- * boundary is the materialized branch. A Tau turn has no branch of its own
- * unless the user chose one, so it must not claim one.
- */
-const continuationNote = (execution: CadAgentExecution | undefined, name: string): string =>
-  execution?.kind === 'acp'
-    ? `Approving lets ${name} keep working in this chat's tree; Tau does not gate each action it takes there.`
-    : `Approving lets ${name} continue this turn; Tau does not ask again for each action it takes.`;
-
-/**
  * The one presenter for a paused run's interrupt, wherever the run is placed.
  *
  * Mounted above the composer (`chat-textarea.tsx`), because a run that is
@@ -187,79 +160,12 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
   }
 
   const name = approval.tauTool ? 'Tau' : requesterName(approval.agentId, activeExecution);
-  const focused = defaultOption(approval.options);
-  const respond = (approved: boolean, optionId?: string): void => {
-    const resolve = async (): Promise<void> => {
-      try {
-        await respondToToolApproval(approval.approvalId, approved, { optionId });
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'The host did not accept that decision.');
-      }
-    };
-    // async-iife: the banner clears when the durable resolution arrives, not here.
-    void resolve();
-  };
-
   return (
-    <section
-      aria-label='Approval required'
-      className='mb-2 flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm'
-    >
-      <div className='flex min-w-0 items-center gap-2'>
-        <ShieldQuestion className='size-4 shrink-0 text-warning' />
-        <p className='min-w-0 truncate font-medium'>{`${name} is waiting for approval`}</p>
-      </div>
-      <p className='min-w-0 break-words text-foreground/90'>{approval.prompt}</p>
-      <p className='text-xs text-muted-foreground'>
-        {continuationNote(approval.tauTool ? undefined : activeExecution, name)}
-      </p>
-      {approval.options.some((option) => option.kind === 'allow_always') ? (
-        <p className='text-xs text-muted-foreground'>
-          Standing-grant persistence is controlled by the connected agent or MCP server; Tau only forwards this exact
-          choice.
-        </p>
-      ) : undefined}
-      <div className='flex flex-row flex-wrap gap-2'>
-        {approval.options.length > 0 ? (
-          /* The agent's own options, in its own order and its own words (EQ5).
-           * A binary Approve/Deny cannot say "allow once" from "allow always",
-           * so answering with one substituted a guess for the user's choice. */
-          approval.options.map((option) => (
-            <Button
-              key={option.optionId}
-              size='sm'
-              variant={option.kind?.startsWith('allow') === true ? 'default' : 'outline'}
-              autoFocus={option.optionId === focused?.optionId}
-              onClick={() => {
-                respond(option.kind?.startsWith('allow') ?? true, option.optionId);
-              }}
-            >
-              {option.name}
-            </Button>
-          ))
-        ) : (
-          <>
-            <Button
-              size='sm'
-              autoFocus
-              onClick={() => {
-                respond(true);
-              }}
-            >
-              Approve
-            </Button>
-            <Button
-              size='sm'
-              variant='outline'
-              onClick={() => {
-                respond(false);
-              }}
-            >
-              Deny
-            </Button>
-          </>
-        )}
-      </div>
-    </section>
+    <ChatPermissionRequest
+      key={approval.approvalId}
+      approval={approval}
+      name={name}
+      onRespond={async (approved, optionId) => respondToToolApproval(approval.approvalId, approved, { optionId })}
+    />
   );
 }

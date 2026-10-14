@@ -61,6 +61,9 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
     getProjection: () => undefined,
     requestTurn: vi.fn(),
     startPendingSeed: vi.fn(),
+    refreshMessageQueue: vi.fn(),
+    captureMessageQueueIntent: vi.fn(() => ({})),
+    subscribeProjection: vi.fn(() => vi.fn()),
     setTurnPlacement: vi.fn(),
   }),
 }));

@@ -1,8 +1,31 @@
 diff --git a/dist/index.js b/dist/index.js
-index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..0a810574d3d0958f614813ff2c4c29a1bb412aed 100755
+index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..60033d1a1e3ef88b3f8fc270cbe77393fcafa9a0 100755
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -24929,6 +24929,7 @@ ${event.stdin}
+@@ -24532,7 +24532,9 @@ ${event.details}` : event.summary;
+   }
+   createReasoningDeltaEvent(event) {
+     this.seenReasoningDeltaItemIds.add(event.itemId);
+-    return this.createAgentThoughtEvent(event.delta, event.itemId);
++    return createAgentTextThoughtChunk(event.delta, event.itemId, "summaryIndex" in event ? {
++      codex: { reasoningSummary: { index: event.summaryIndex, text: event.delta } }
++    } : void 0);
+   }
+   createPlanDeltaEvent(event) {
+     if (event.delta.length === 0) {
+@@ -24666,7 +24668,10 @@ ${event.details}` : event.summary;
+     if (text.length === 0) {
+       return null;
+     }
+-    return this.createAgentThoughtEvent(text, item.id);
++    const index = item.summary.findLastIndex((part) => part.length > 0);
++    return createAgentTextThoughtChunk(text, item.id, index >= 0 ? {
++      codex: { reasoningSummary: { index, text: item.summary[index] } }
++    } : void 0);
+   }
+   async createCompletedPlanEvent(item, deltaText) {
+     const text = item.text.length > 0 ? item.text : deltaText;
+@@ -24929,6 +24934,7 @@ ${event.stdin}
        actions: actionsOverride ?? policy.actions
      };
      this.failuresById.set(id, failure);
@@ -10,7 +33,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..0a810574d3d0958f614813ff2c4c29a1
      this.failureTurnIdById.set(id, attributeToTurn ? turnId : void 0);
      this.activeFailureIdByScope.set(scope, id);
      this.sessionState.sessionFailure = failure;
-@@ -24991,8 +24992,24 @@ ${event.stdin}
+@@ -24991,8 +24997,24 @@ ${event.stdin}
      const combinedTitle = `${summary} \u2014 ${details}`;
      return combinedTitle.length <= MAX_SESSION_FAILURE_TITLE_LENGTH ? [combinedTitle] : [summary, details];
    }
@@ -35,7 +58,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..0a810574d3d0958f614813ff2c4c29a1
        [JETBRAINS_META_KEY]: {
          [AIR_META_KEY]: {
            [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
-@@ -28255,7 +28272,7 @@ var CodexAcpClient = class {
+@@ -28255,7 +28277,7 @@ var CodexAcpClient = class {
      return this.codexClient.getMcpServerStartupVersion();
    }
    async createSessionConfig(projectPath, additionalDirectories, mcpServers) {
@@ -44,7 +67,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..0a810574d3d0958f614813ff2c4c29a1
      const activeProvider = this.gatewayConfig ? {
        apiType: gatewayApiTypeFromConfig(this.gatewayConfig),
        baseUrl: this.gatewayConfig.config.base_url
-@@ -28273,7 +28290,7 @@ var CodexAcpClient = class {
+@@ -28273,7 +28295,7 @@ var CodexAcpClient = class {
          trust_level: "trusted"
        }]))
      };
@@ -53,7 +76,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..0a810574d3d0958f614813ff2c4c29a1
      if (mcpServers.length === 0) {
        return configWithWorkspaceRoots;
      }
-@@ -28421,7 +28438,7 @@ var CodexAcpClient = class {
+@@ -28421,7 +28443,7 @@ var CodexAcpClient = class {
        input,
        approvalPolicy: agentMode.approvalPolicy,
        approvalsReviewer: agentMode.approvalsReviewer,
@@ -62,7 +85,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..0a810574d3d0958f614813ff2c4c29a1
        summary: disableSummary ? "none" : "auto",
        effort,
        model: modelId.model,
-@@ -29769,6 +29786,7 @@ var CodexCommands = class {
+@@ -29769,6 +29791,7 @@ var CodexCommands = class {
      }
      for (const entry of skillsEntries) {
        for (const skill of entry.skills) {
@@ -70,7 +93,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..0a810574d3d0958f614813ff2c4c29a1
          const name = `$${skill.name}`;
          if (commands.has(name)) continue;
          const description = skill.shortDescription ?? skill.description ?? skill.name;
-@@ -29933,7 +29951,7 @@ var CodexCommands = class {
+@@ -29933,7 +29956,7 @@ var CodexCommands = class {
        }
        case "skills": {
          const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));

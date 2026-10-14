@@ -89,13 +89,3 @@ export type TransportHostOptions<H extends (...args: never) => unknown> =
   Parameters<H> extends readonly [infer First, ...infer _Rest] ? First : Readonly<Record<string, unknown>>;
 
 // oxlint-enable @typescript-eslint/no-explicit-any
-
-/* Re-export the phantom slot type alias so conformance tests satisfy
- * structural compatibility checks against {@link TransportPlugin}. */
-
-export type {
-  TransportIdPhantomSlot,
-  TransportProtocolPhantomSlot,
-  TransportBindingsExtraPhantomSlot,
-  TransportRuntimePhantomSlot,
-} from '#transport/runtime-transport.types.js';

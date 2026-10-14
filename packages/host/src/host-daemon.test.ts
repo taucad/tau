@@ -745,6 +745,83 @@ describe('startHostDaemon', () => {
     }
   }, 30_000);
 
+  it('should let the process exit while it keeps a project whose close was refused', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-refused-close-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    revisionsSpy.mockImplementationOnce((options) => {
+      const tree = realCreateProjectRevisions(options);
+      return {
+        ...tree,
+        release: async (): Promise<void> => {
+          await tree.release();
+          throw new Error('revision close refused');
+        },
+      };
+    });
+    const messagePorts = (): number =>
+      process.getActiveResourcesInfo().filter((resource) => resource === 'MessagePort').length;
+    const before = messagePorts();
+    const relay = await startRelay();
+    const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
+    try {
+      await daemon.ready;
+
+      await expect(daemon.close()).rejects.toThrow('revision close refused');
+
+      /* R5: the kept authority's channel no longer holds the event loop, so a
+       * `tau serve` that closes once and reports the refusal exits. */
+      expect(messagePorts()).toBe(before);
+    } finally {
+      await daemon.close().catch(() => undefined);
+    }
+  }, 30_000);
+
+  it('should fail to start when the workspace store refuses to open', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-refused-open-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const main = join(temporaryDirectory, 'main');
+    const linked = join(temporaryDirectory, 'linked');
+    execFileSync('git', ['init', '--quiet', '--initial-branch=main', main]);
+    await writeFile(join(main, 'a.txt'), 'a\n');
+    execFileSync('git', ['-C', main, 'add', 'a.txt']);
+    execFileSync('git', [
+      '-C',
+      main,
+      '-c',
+      'user.name=Ada',
+      '-c',
+      'user.email=ada@example.com',
+      'commit',
+      '--quiet',
+      '-m',
+      'A',
+    ]);
+    execFileSync('git', ['-C', main, 'worktree', 'add', '--quiet', '-b', 'side', linked]);
+    const events: HostDaemonEvent[] = [];
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), workspaceRoot: linked },
+      onEvent: (event) => events.push(event),
+    });
+    try {
+      /* R3: refused at start, never served and then refused at close. */
+      await expect(daemon.ready).rejects.toMatchObject({ code: 'INVALID_REPOSITORY' });
+      expect(events).not.toContainEqual(expect.objectContaining({ type: 'agent', state: 'ready' }));
+      await expect(daemon.close()).resolves.toBeUndefined();
+    } finally {
+      await daemon.close().catch(() => undefined);
+    }
+  }, 30_000);
+
   /*
    * The agent channel is not a client of the compute child: it needs one only
    * for the geometry tools, which answer a typed refusal without it. A child
@@ -1054,6 +1131,52 @@ describe('startHostDaemon', () => {
   /* G0-2/W14: the runtime child executes project code the agent wrote, so the
    * daemon binds it the agent's view. The trusted planes beside it — the
    * parameter authority and the revisions engine — keep the working copy. */
+  /* W8b-f1: a stored credential is read before the agent channel opens, so a Tau run sent the instant the channel is
+   * ready is admitted rather than told to pair a host that already is. */
+  it('should admit a Tau run sent as soon as the agent channel is ready on a stored credential', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-stored-pairing-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    agentServerSpy.mockClear();
+    let started: ReturnType<agentServer.AgentServerOptions['launcher']['execute']> | undefined;
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), testModel: false },
+      onEvent: (event) => {
+        /* Synchronously inside the channel's `ready` event: no later turn of the daemon has run yet. */
+        if (event.type === 'agent' && event.state === 'ready') {
+          started = agentServerSpy.mock.calls.at(-1)?.[0].launcher.execute({
+            type: 'start',
+            commandId: 'start-on-channel-ready',
+            payload: {
+              trigger: 'submit',
+              chatId: 'chat-channel-ready',
+              runId: 'run-channel-ready',
+              message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+            },
+          });
+        }
+      },
+    });
+    try {
+      await daemon.ready;
+      if (started === undefined) {
+        throw new TypeError('Expected a start sent on the agent channel ready event.');
+      }
+
+      await expect(started).resolves.toMatchObject({ status: 'applied' });
+    } finally {
+      await daemon.close();
+    }
+  }, 30_000);
+
   /* RH-A14 (RH-S6): the relay revoked the stored credential; until pairing returns a new one the daemon admits no
    * Tau run on it, so the served launcher refuses a start with HOST_NOT_PAIRED. */
   it('should refuse start with HOST_NOT_PAIRED while the daemon re-pairs', async () => {

@@ -9,6 +9,7 @@ let activeExecution: ChatComposerContextValue['execution']['execution'] = { kind
 let browserHostAvailability: Record<string, unknown> = { status: 'available', durability: 'exclusive-append' };
 let hostPlacements: Array<Record<string, unknown>> = [];
 let modelProviderKind: 'anthropic' | 'ollama' | 'openai' = 'openai';
+let canSelectExecution = true;
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: (): ChatComposerContextValue =>
@@ -16,6 +17,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
       execution: { execution: activeExecution, setActiveExecution },
       model: { modelId: 'gpt-test', model: { provider: { id: modelProviderKind } } },
       agentActivity: 'ready',
+      canSelectExecution,
     }) as unknown as ChatComposerContextValue,
 }));
 
@@ -40,6 +42,7 @@ describe('ChatExecutionSelector', () => {
     browserHostAvailability = { status: 'available', durability: 'exclusive-append' };
     hostPlacements = [];
     modelProviderKind = 'openai';
+    canSelectExecution = true;
     globalThis.HTMLElement.prototype.scrollIntoView = vi.fn();
   });
 
@@ -114,6 +117,42 @@ describe('ChatExecutionSelector', () => {
     hostPlacements = [{ hostId: 'origin', rung: 1, label: 'studio-mini', workspaceRoot: '/srv/tau', online: true }];
     render(<OfferedProbe />);
     expect(screen.getByText('offered:Tau')).toBeInTheDocument();
+  });
+
+  it('should offer a switch to Tau when the saved Codex host is absent from discovery', async () => {
+    activeExecution = { kind: 'acp', hostId: 'desktop', agentId: 'codex', model: 'gpt-6-sol' };
+    render(
+      <>
+        <OfferedProbe />
+        <ChatExecutionSelector>
+          {({ label }) => <button type='button'>Select agent: {label}</button>}
+        </ChatExecutionSelector>
+      </>,
+    );
+
+    expect(screen.getByText('offered:codex')).toBeInTheDocument();
+    expect(setActiveExecution).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Select agent: codex' }));
+    await userEvent.click(screen.getByRole('option', { name: /^Tau/u }));
+
+    expect(setActiveExecution).toHaveBeenCalledExactlyOnceWith({ kind: 'tau', model: 'gpt-test' });
+  });
+
+  it('should offer browser Tau when the saved Tau host is absent from discovery', () => {
+    activeExecution = { kind: 'tau', hostId: 'desktop', model: 'gpt-test' };
+    render(<OfferedProbe />);
+
+    expect(screen.getByText('offered:Tau')).toBeInTheDocument();
+    expect(setActiveExecution).not.toHaveBeenCalled();
+  });
+
+  it('should not offer agent switching when execution cannot be selected', () => {
+    activeExecution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    hostPlacements = [{ hostId: 'origin', rung: 1, label: 'studio-mini', workspaceRoot: '/srv/tau', online: true }];
+    canSelectExecution = false;
+    render(<OfferedProbe />);
+
+    expect(screen.getByText('hidden:codex')).toBeInTheDocument();
   });
 
   it('offers one row per external agent a daemon advertises, without a credential note', async () => {

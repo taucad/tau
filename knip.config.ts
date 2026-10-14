@@ -273,6 +273,7 @@ const config: KnipConfig = {
       entry: [
         'src/client.mjs',
         'src/site.css',
+        'src/principle-diagrams.css',
         'scripts/{build,serve,browser-check,check-story,render-assets,optimize-assets,capture-metal-hero,export-story-assets}.mjs',
         'scripts/metal-hero-entry.mjs',
         'tests/*.test.mjs',

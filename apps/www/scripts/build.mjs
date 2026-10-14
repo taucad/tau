@@ -66,7 +66,11 @@ const rootTokens = baseTokens.slice(
   baseTokens.indexOf(':root {'),
   baseTokens.indexOf('\n}', baseTokens.indexOf(':root {')) + 2,
 );
-const css = rootTokens + '\n' + (await readFile(join(root, 'src/site.css'), 'utf8'));
+const css = [
+  rootTokens,
+  await readFile(join(root, 'src/site.css'), 'utf8'),
+  await readFile(join(root, 'src/principle-diagrams.css'), 'utf8'),
+].join('\n');
 // Esbuild and Three are declared by this app. Isolated tooling supports source-only review.
 const dependencyRoot = process.env.WWW_RENDER_TOOLS;
 const dependencyRequire = createRequire(
@@ -153,7 +157,7 @@ const hashes = [
 ];
 await writeFile(
   join(output, '_headers'),
-  `/*\n  Content-Security-Policy: default-src 'self'; script-src 'self' ${hashes.join(' ')}; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n  Permissions-Policy: camera=(), microphone=(), geolocation=()\n  Cache-Control: public, max-age=0, must-revalidate\n${launch ? '' : '  X-Robots-Tag: noindex, nofollow\n'}\n/_www/assets/*\n  Cache-Control: public, max-age=3600, must-revalidate\n`,
+  `/*\n  Content-Security-Policy: default-src 'self'; script-src 'self' ${hashes.join(' ')}; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self' https://api.tau.new https://api.taucad.dev; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n  Permissions-Policy: camera=(), microphone=(), geolocation=()\n  Cache-Control: public, max-age=0, must-revalidate\n${launch ? '' : '  X-Robots-Tag: noindex, nofollow\n'}\n/_www/assets/*\n  Cache-Control: public, max-age=3600, must-revalidate\n`,
 );
 await writeFile(
   join(output, '_redirects'),

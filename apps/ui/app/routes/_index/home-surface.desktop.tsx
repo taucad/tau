@@ -23,7 +23,7 @@ export default function DesktopHome(): React.JSX.Element {
   return (
     <>
       <HomepageChatHero />
-      <ProjectLibrary />
+      <ProjectLibrary headingLevel={2} />
       {/* DR-C4: the desktop has no marketing page, so the gallery's strip lives under the library. */}
       <section className='container mx-auto px-4 pb-8'>
         <div className='mb-4 flex items-center justify-between gap-4'>

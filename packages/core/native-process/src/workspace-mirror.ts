@@ -8,14 +8,10 @@ import { dirname, join } from 'node:path';
 import { assertRootedPath, joinRelativePath, sha256Bytes } from '@taucad/runtime/kernel';
 import type { KernelFileSystem } from '@taucad/runtime/kernel';
 
-const maxDepth = 32;
-const maxEntries = 10_000;
-const maxFileBytes = 32 * 1024 * 1024;
-const maxWorkspaceBytes = 512 * 1024 * 1024;
 const defaultExcludedDirectories = ['.git', '.hg', '.svn', '.tau', 'node_modules'];
 const encoder = new TextEncoder();
 
-/** Configuration for one bounded native workspace projection. @public */
+/** Configuration for one native workspace projection. @public */
 export type WorkspaceMirrorOptions = {
   readonly temporaryPrefix: string;
   readonly displayName: string;
@@ -50,7 +46,7 @@ export type WorkspaceMirror = {
   cleanup(): Promise<void>;
 };
 
-/** Create a bounded, disposable physical projection of Tau's rooted filesystem. @public */
+/** Create a disposable physical projection of Tau's rooted filesystem. @public */
 export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Promise<WorkspaceMirror> => {
   const excludedPaths = new Set((options.excludedPaths ?? []).map((path) => assertRootedPath(path)));
   const temporaryRoot = await mkdtemp(join(tmpdir(), options.temporaryPrefix));
@@ -82,13 +78,8 @@ export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Pr
     const started = Date.now();
     const files: Array<{ readonly path: string; readonly size: number; readonly mtimeMs: number }> = [];
     const folded = new Map<string, string>();
-    let entryCount = 0;
-    let totalBytes = 0;
 
-    const visit = async (directory: string, depth: number): Promise<void> => {
-      if (depth > maxDepth) {
-        throw new Error(`${options.displayName} workspace exceeds ${String(maxDepth)} directory levels.`);
-      }
+    const visit = async (directory: string): Promise<void> => {
       // One listing carries every child's stat, so a directory costs one call rather than 1 + N.
       const listing = await filesystem.readdirStat(directory);
       for (const entry of listing.toSorted((left, right) => (left.name < right.name ? -1 : 1))) {
@@ -104,23 +95,18 @@ export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Pr
         folded.set(canonicalName, path);
         if (entry.type === 'dir') {
           if (!excludedDirectories.has(entry.name)) {
-            await visit(path, depth + 1);
+            await visit(path);
           }
           continue;
         }
         if (excludedFileSuffixes.some((suffix) => path.endsWith(suffix))) {
           continue;
         }
-        entryCount += 1;
-        totalBytes += entry.size;
-        if (entryCount > maxEntries || entry.size > maxFileBytes || totalBytes > maxWorkspaceBytes) {
-          throw new Error(`${options.displayName} workspace exceeds its mirror size limits.`);
-        }
         files.push({ path, size: entry.size, mtimeMs: entry.mtimeMs });
       }
     };
 
-    await visit('', 0);
+    await visit('');
     for (const file of files) {
       const previous = mirrored.get(file.path);
       if (

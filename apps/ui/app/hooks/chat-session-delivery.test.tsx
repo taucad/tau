@@ -1,18 +1,31 @@
 // @vitest-environment jsdom
 import { act, render, screen } from '@testing-library/react';
 import { createActor } from 'xstate';
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { KeyedMutex } from '#db/keyed-mutex.js';
+import type * as ChatMessageQueueModule from '#db/chat-message-queue-store.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
 import { lifecycleRow, logRow, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 
-const dependencies = vi.hoisted(() => {
-  const missing = async (): Promise<never> => {
-    throw Object.assign(new Error('Missing record'), { code: 'ENOENT' });
-  };
+const queueMutex = new KeyedMutex<string>();
+vi.mock('#db/chat-message-queue-store.js', async (importOriginal) => {
+  const original = await importOriginal<typeof ChatMessageQueueModule>();
   return {
+    ...original,
+    createChatMessageQueueStore: (...[client, path]: Parameters<typeof original.createChatMessageQueueStore>) =>
+      original.createChatMessageQueueStore(client, path, queueMutex.run.bind(queueMutex)),
+  };
+});
+
+const dependencies = vi.hoisted(() => {
+  const files = new Map<string, Uint8Array<ArrayBuffer>>();
+  return {
+    clear: () => {
+      files.clear();
+    },
     activeSession: undefined as ChatSession | undefined,
     getChat: async () => ({ id: 'mounted', resourceId: 'project', name: '', messages: [], createdAt: 0, updatedAt: 0 }),
     patchChat: async () => undefined,
@@ -20,15 +33,37 @@ const dependencies = vi.hoisted(() => {
     consumeChatStartupRequest: async () => undefined,
     commitCancelledDraftRestore: async () => undefined,
     client: {
-      readFile: missing,
-      readdir: async () => [],
-      exists: async () => false,
-      writeFile: async () => undefined,
-      rmdir: async () => undefined,
-      unlink: async () => undefined,
+      async readFile(path: string) {
+        const bytes = files.get(path);
+        if (bytes === undefined) {
+          throw Object.assign(new Error(`Missing record: ${path}`), { code: 'ENOENT' });
+        }
+        return bytes;
+      },
+      readdir: async (path: string) =>
+        [...files.keys()].filter((entry) => entry.startsWith(`${path}/`)).map((entry) => entry.slice(path.length + 1)),
+      exists: async (path: string) => files.has(path),
+      async writeFile(path: string, data: Uint8Array<ArrayBuffer>) {
+        files.set(path, data);
+      },
+      async rmdir(path: string) {
+        for (const entry of files.keys()) {
+          if (entry.startsWith(`${path}/`)) {
+            files.delete(entry);
+          }
+        }
+      },
+      async unlink(path: string) {
+        files.delete(path);
+      },
     },
   };
 });
+beforeEach(() => {
+  dependencies.clear();
+  dependencies.activeSession = undefined;
+});
+
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => dependencies }));
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({ recordFiles: dependencies.client }) }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
@@ -108,11 +143,12 @@ it('should deliver a reply through the retained active session without a sidebar
     close: async () => undefined,
   }));
   const message = { id: 'u', role: 'user', parts: [{ type: 'text', text: 'hi' }] } as const;
-  const unadmit = publishChatTurnAdmission('mounted', async () => ({
+  const unadmit = publishChatTurnAdmission('mounted', async (gesture) => ({
     runId: 'run',
     leaseTurnId: undefined,
     request: {
       kind: 'send',
+      queueId: gesture.kind === 'send' ? gesture.queueId : undefined,
       message: { ...message, parts: [...message.parts] },
       command: {
         type: 'start',
@@ -131,7 +167,11 @@ it('should deliver a reply through the retained active session without a sidebar
       await vi.waitFor(() => {
         expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       });
-      await current.requestTurn('mounted', { kind: 'send', message: { ...message, parts: [...message.parts] } });
+      await current.requestTurn('mounted', {
+        kind: 'send',
+        requestId: 'run',
+        message: { ...message, parts: [...message.parts] },
+      });
     });
     await vi.waitFor(() => {
       expect(screen.getByTestId('transcript')).toHaveTextContent('hi|Unique mounted reply');
@@ -231,11 +271,12 @@ it('should publish the first held live reasoning chunk through the actual SDK be
     close: async () => undefined,
   }));
   const message = { id: 'u', role: 'user', parts: [{ type: 'text', text: 'hi' }] } as const;
-  const unadmit = publishChatTurnAdmission('mounted', async () => ({
+  const unadmit = publishChatTurnAdmission('mounted', async (gesture) => ({
     runId: 'run',
     leaseTurnId: undefined,
     request: {
       kind: 'send',
+      queueId: gesture.kind === 'send' ? gesture.queueId : undefined,
       message: { ...message, parts: [...message.parts] },
       command: {
         type: 'start',
@@ -254,7 +295,15 @@ it('should publish the first held live reasoning chunk through the actual SDK be
       await vi.waitFor(() => {
         expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       });
-      await current.requestTurn('mounted', { kind: 'send', message: { ...message, parts: [...message.parts] } });
+      await current.requestTurn('mounted', {
+        kind: 'send',
+        requestId: 'run',
+        message: { ...message, parts: [...message.parts] },
+      });
+    });
+    await vi.waitFor(() => {
+      expect(hostCommand).toHaveBeenCalledTimes(1);
+      expect(deliverLive).toBeDefined();
     });
     await act(async () => {
       rows = [

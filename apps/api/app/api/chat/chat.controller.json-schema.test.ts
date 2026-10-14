@@ -747,6 +747,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                                   },
                                   "pane": {
                                     "enum": [
+                                      "browser",
                                       "parameters",
                                       "model",
                                       "print",
@@ -815,6 +816,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                     "unavailable": {
                       "items": {
                         "enum": [
+                          "browser",
                           "parameters",
                           "model",
                           "print",
@@ -928,6 +930,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                               },
                               "pane": {
                                 "enum": [
+                                  "browser",
                                   "parameters",
                                   "model",
                                   "print",

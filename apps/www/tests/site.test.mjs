@@ -1,3 +1,4 @@
+import { detectDesktopPlatform, desktopDownloadHref } from '#www/downloads.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -6,7 +7,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { ctaPlacements, sanitizeEvent } from '#www/analytics.js';
-import { environmentHref, stagingDesktop } from '#www/environment.js';
+import { environmentHref, stagingDesktopNote } from '#www/environment.js';
 import { pages, renderPage } from '#www/templates.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const eventId = '83efb3b9-a92c-444f-99ef-c67f8c9573d7';
@@ -219,6 +220,74 @@ await test('should open Pro in the billing settings and keep it and the legal li
   }
 });
 await test('only staging offers the staging desktop builds', () => {
-  assert.match(stagingDesktop('taucad.dev')?.href ?? '', /releases\?q=desktop-staging/u);
-  assert.equal(stagingDesktop('tau.new'), undefined);
+  assert.match(stagingDesktopNote('taucad.dev') ?? '', /signed without notarization/u);
+  assert.equal(
+    environmentHref('https://downloads.tau.new/latest/Tau-macos-arm64.zip', 'taucad.dev'),
+    'https://downloads.taucad.dev/latest/Tau-macos-arm64.zip',
+  );
+  assert.equal(stagingDesktopNote('tau.new'), undefined);
+});
+
+await test('header actions open the app and sign in while the hero opens host downloads', () => {
+  const home = pages.find((page) => page.path === '/');
+  const downloads = pages.find((page) => page.path === '/download/');
+  assert.ok(home && downloads);
+  const html = renderPage({
+    page: home,
+    origin: 'https://tau.new',
+    launch: true,
+    asset: { css: '/a.css', js: '/a.js' },
+    analyticsEndpoint: '',
+  });
+  assert.match(
+    html,
+    /href="https:\/\/tau.new\/projects\/new" data-event="cta" data-placement="header">Start designing/u,
+  );
+  assert.match(html, /href="https:\/\/tau.new\/auth\/sign-in">Sign in/u);
+  assert.match(
+    home.body(),
+    /href="\/download\/" data-event="cta" data-placement="hero" data-host-download="page">Download Tau/u,
+  );
+  assert.match(downloads.body(), /https:\/\/downloads.tau.new\/latest\/Tau-macos-arm64.zip/u);
+  assert.match(downloads.body(), /https:\/\/downloads.tau.new\/latest\/Tau-macos-x64.zip/u);
+  assert.match(downloads.body(), /data-mac-intel hidden/u);
+  assert.match(downloads.body(), /Download for Intel/u);
+  assert.doesNotMatch(downloads.body(), /No installer is published/u);
+});
+
+await test('desktop downloads detect all supported hosts and keep mobile or unknown hosts neutral', () => {
+  const cases = [
+    [{ userAgentData: { platform: 'macOS' } }, 'mac'],
+    [{ platform: 'MacIntel', userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' }, 'mac'],
+    [{ userAgentData: { platform: 'Windows' } }, 'windows'],
+    [{ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, 'windows'],
+    [{ platform: 'Linux x86_64' }, 'linux'],
+    [{ userAgentData: { platform: 'Android', mobile: true }, platform: 'Linux armv8l' }, undefined],
+    [{ platform: 'MacIntel', maxTouchPoints: 5 }, undefined],
+    [{ userAgent: 'Mozilla/5.0 (X11; CrOS x86_64)' }, undefined],
+    [{ platform: 'Linux aarch64' }, undefined],
+    [{}, undefined],
+  ];
+  for (const [browser, expected] of cases) {
+    assert.equal(detectDesktopPlatform(browser), expected);
+  }
+  for (const platform of ['mac', 'macIntel', 'windows', 'linux']) {
+    assert.match(desktopDownloadHref(platform), /^https:\/\/downloads.tau.new\/latest\/Tau-/u);
+  }
+});
+
+await test('Linux ARM hints prevent an x64 recommendation even when another hint only names Linux', () => {
+  for (const architecture of ['aarch64', 'armv8l', 'arm64']) {
+    for (const browser of [
+      {
+        userAgentData: { platform: 'Linux' },
+        platform: `Linux ${architecture}`,
+        userAgent: 'Mozilla/5.0 (X11; Linux)',
+      },
+      { userAgentData: { platform: `Linux ${architecture}` }, platform: 'Linux' },
+      { userAgentData: { platform: 'Linux' }, userAgent: `Mozilla/5.0 (X11; Linux ${architecture})` },
+    ]) {
+      assert.equal(detectDesktopPlatform(browser), undefined);
+    }
+  }
 });

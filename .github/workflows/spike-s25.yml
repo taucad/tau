@@ -7,11 +7,6 @@
 name: Spike S25 (MCP env, progress, cancellation)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/spike-s25.yml'
-      - 'scripts/spikes/s25/**'
-      - 'scripts/spikes/native-deps/linux/annotate.sh'
   workflow_dispatch:
 
 permissions:

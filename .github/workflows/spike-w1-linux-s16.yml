@@ -4,9 +4,6 @@
 name: Spike S16 (linux-arm64 build123d)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/spike-w1-linux-s16.yml'
   workflow_dispatch:
 
 permissions:

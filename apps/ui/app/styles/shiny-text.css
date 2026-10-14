@@ -10,14 +10,14 @@
    */
   .animate-activity-shimmer {
     color: transparent;
-    background-color: var(--foreground);
+    background-color: var(--muted-foreground);
     background-image: linear-gradient(
       90deg,
-      var(--foreground),
-      color-mix(in srgb, var(--background) 45%, var(--foreground)) 25%,
-      color-mix(in srgb, var(--background) 90%, var(--foreground)) 50%,
-      color-mix(in srgb, var(--background) 45%, var(--foreground)) 75%,
-      var(--foreground)
+      var(--muted-foreground),
+      color-mix(in srgb, var(--background) 45%, var(--muted-foreground)) 25%,
+      color-mix(in srgb, var(--background) 90%, var(--muted-foreground)) 50%,
+      color-mix(in srgb, var(--background) 45%, var(--muted-foreground)) 75%,
+      var(--muted-foreground)
     );
     background-repeat: no-repeat;
     background-size: 10ch 100%;

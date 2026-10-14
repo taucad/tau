@@ -25,6 +25,10 @@ const openProject = async (): Promise<Readonly<Record<string, string>>> => {
   await target.setViewport({ width: 1440, height: 900 });
   await target.navigate(`/__e2e/project-file-tree?workspace=${workspace}`);
   await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
+  const decline = selectors.getByRole('button', { name: 'Decline', exact: true });
+  if (await target.isVisible(decline)) {
+    await target.click(decline);
+  }
   await expect
     .poll(
       async () => {
@@ -138,6 +142,9 @@ test('reloads authored records and preserves invalid and newer bytes', async () 
     await target.emulateColorScheme('dark');
     await target.screenshot(undefined, 'record-recovery-dark.png');
     await target.setViewport({ width: 320, height: 720 });
+    // Responsive layout replacement closes the old popover; reopen the surviving action by keyboard.
+    await target.focus(settingsTrigger);
+    await target.keyboardPress('Enter');
     const popover = selectors.getByRole('dialog', { name: 'Settings not applied', exact: true });
     await target.expectVisible(popover);
     const bounds = await target.boundingBox(popover);
@@ -145,6 +152,8 @@ test('reloads authored records and preserves invalid and newer bytes', async () 
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320);
     await target.screenshot(undefined, 'record-recovery-320.png');
     await target.setViewport({ width: 1440, height: 900 });
+    await target.focus(settingsTrigger);
+    await target.keyboardPress('Enter');
     await target.evaluate(() => {
       document.documentElement.style.fontSize = '200%';
     });

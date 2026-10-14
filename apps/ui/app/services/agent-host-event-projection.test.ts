@@ -1421,9 +1421,9 @@ describe('external tool-call chunks', () => {
     expect(chunk).toMatchObject({ toolMetadata: { tau: { kind: 'read', nativeName: 'list_directory' } } });
   });
 
-  it('keeps a normalized external Tau MCP call on one dynamic SDK identity', async () => {
+  it.each(['codex', 'grok'])('keeps a normalized %s Tau MCP call on one dynamic SDK identity', async (agentId) => {
     const metadata = {
-      tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex', presentation: 'tau-mcp' },
+      tauInternal: { kind: 'external-tool', origin: 'external', agentId, presentation: 'tau-mcp' },
     } as const;
     const [input] = chunksOf({
       id: 'tau-mcp-input',
@@ -1433,7 +1433,7 @@ describe('external tool-call chunks', () => {
       call: {
         toolCallId: 'vendor-call',
         kind: 'execute',
-        nativeName: 'screenshot',
+        ...(agentId === 'codex' ? { nativeName: 'screenshot' } : {}),
         content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
       },
       content: { targetFile: 'main.ts', mode: 'single' },
@@ -1446,14 +1446,18 @@ describe('external tool-call chunks', () => {
       toolName: 'screenshot',
       content: { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
       isError: false,
-      call: { toolCallId: 'vendor-call', kind: 'execute', nativeName: 'screenshot' },
+      call: {
+        toolCallId: 'vendor-call',
+        kind: 'execute',
+        ...(agentId === 'codex' ? { nativeName: 'screenshot' } : {}),
+      },
       metadata,
     });
 
     expect(input).toMatchObject({ type: 'tool-input-available', toolName: 'screenshot' });
     expect(input).toHaveProperty('dynamic', true);
     expect(input).toMatchObject({
-      toolMetadata: { tau: { origin: 'external', agentId: 'codex', presentation: 'tau-mcp' } },
+      toolMetadata: { tau: { origin: 'external', agentId, presentation: 'tau-mcp', nativeName: 'screenshot' } },
     });
     expect(output).toMatchObject({ type: 'tool-output-available', output: { images: [{ view: 'isometric' }] } });
     expect(output).toHaveProperty('dynamic', true);

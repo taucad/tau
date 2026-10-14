@@ -80,9 +80,33 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
         'Use the cad-build123d skill to create a simple 20 mm cube in main.py. Check it with Tau evaluate_model and a geometry assertion in main.geospec.ts using test_model. Capture all six views of main.py with screenshot mode multi_angle, then briefly report the results. Do not export anything.',
       );
       let approvals = 0;
+      const observedToolLabels = new Set<string>();
+      const observedActivities = new Set<string>();
+      const rawMcpLabels = new Set<string>();
       await expect
         .poll(
           async () => {
+            const activity = await page.getByRole('status', { name: 'Current activity' }).allTextContents();
+            const loading = await page.locator('[data-status="loading"]:visible').allTextContents();
+            for (const label of [...activity, ...loading]) {
+              if (/tau__(?:evaluate_model|test_model|screenshot)/u.test(label)) {
+                rawMcpLabels.add(label);
+              }
+            }
+            for (const label of activity) {
+              observedActivities.add(label.trim());
+            }
+            for (const [phase, prefix] of [
+              ['rendering', 'Rendering'],
+              ['testing', 'Running tests'],
+              ['capturing', 'Capturing'],
+            ] as const) {
+              if (!observedToolLabels.has(phase) && loading.some((label) => label.trim().startsWith(prefix))) {
+                observedToolLabels.add(phase);
+                // oxlint-disable-next-line no-await-in-loop -- Capture each observed UI phase before the next poll.
+                await session?.capture(`grok-mcp-${phase}`);
+              }
+            }
             const approve = page.getByRole('button', { name: /^(?:Yes|allow once)$/u });
             if (await approve.isVisible()) {
               if (approvals === 0) {
@@ -97,6 +121,9 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
         )
         .not.toBe(secondRun);
       expect(approvals).toBeGreaterThan(0);
+      expect([...observedToolLabels]).toEqual(expect.arrayContaining(['rendering', 'testing', 'capturing']));
+      expect([...observedActivities]).toContain('Running tests');
+      expect([...rawMcpLabels]).toEqual([]);
       const cadRun = latestCompletedRun(readEvents());
       expect(
         evaluateModelOutputSchema.parse(

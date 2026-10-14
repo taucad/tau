@@ -39,7 +39,7 @@ export type WorkbenchPanelId =
 export type WorkbenchUtilityPanelId = Exclude<WorkbenchPanelId, 'files'>;
 
 type ProjectWorkspaceContextValue = {
-  openPanel: (panelId: WorkbenchPanelId) => void;
+  openPanel: (panelId: WorkbenchPanelId, onOpened?: () => void) => void;
   setWorkbenchOpen: (open: boolean) => void;
   setChatOpen: (open: boolean) => void;
   connectWorkbench: (openPanel: (panelId: WorkbenchPanelId) => void) => () => void;
@@ -154,7 +154,7 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
   const isMobile = useIsMobile();
   const isEditorReady = useSelector(editorRef, (snapshot) => snapshot.matches('ready'));
   const openerRef = useRef<((panelId: WorkbenchPanelId) => void) | undefined>(undefined);
-  const pendingFilesRef = useRef<string | undefined>(undefined);
+  const pendingFilesRef = useRef<{ readonly routeKey: string; readonly onOpened?: () => void } | undefined>(undefined);
   const committedRouteKeyRef = useRef(routeKey);
   useLayoutEffect(() => {
     if (committedRouteKeyRef.current !== routeKey) {
@@ -259,22 +259,25 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
   );
 
   const openPanel = useCallback(
-    (panelId: WorkbenchPanelId) => {
+    (panelId: WorkbenchPanelId, onOpened?: () => void) => {
       pendingFilesRef.current = undefined;
       if (isMobile) {
         const mobilePanel = mobilePanelByWorkbenchPanel[panelId];
         if (mobilePanel) {
           editorRef.send({ type: 'setPanelState', panelState: { mobileActiveTab: mobilePanel } });
+          onOpened?.();
         }
         return;
       }
       setWorkbenchOpen(true);
       if (openerRef.current) {
         openerRef.current(panelId);
+        onOpened?.();
       } else if (panelId === 'files') {
-        pendingFilesRef.current = routeKey;
+        pendingFilesRef.current = { routeKey, onOpened };
       } else {
         layoutController.personWorkbenchChanged((node) => addPane(node, panelId));
+        onOpened?.();
       }
     },
     [editorRef, isMobile, layoutController, setWorkbenchOpen, routeKey],
@@ -288,8 +291,9 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
       openerRef.current = opener;
       const pendingFiles = pendingFilesRef.current;
       pendingFilesRef.current = undefined;
-      if (pendingFiles !== undefined && pendingFiles === routeKey) {
+      if (pendingFiles !== undefined && pendingFiles.routeKey === routeKey) {
         opener('files');
+        pendingFiles.onOpened?.();
       }
       return () => {
         if (openerRef.current === opener) {

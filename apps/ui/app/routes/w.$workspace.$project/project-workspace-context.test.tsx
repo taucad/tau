@@ -85,9 +85,11 @@ describe('ProjectWorkspaceProvider', () => {
       </ProjectWorkspaceProvider>,
     );
 
+    const onOpened = vi.fn();
     act(() => {
-      workspace.openPanel('files');
+      workspace.openPanel('files', onOpened);
     });
+    expect(onOpened).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledExactlyOnceWith({
       type: 'setPanelState',
       panelState: {
@@ -103,6 +105,7 @@ describe('ProjectWorkspaceProvider', () => {
       workspace.connectWorkbench(opener);
     });
     expect(opener).toHaveBeenCalledExactlyOnceWith('files');
+    expect(onOpened).toHaveBeenCalledExactlyOnceWith();
     const replacement = vi.fn();
     act(() => {
       workspace.connectWorkbench(replacement);

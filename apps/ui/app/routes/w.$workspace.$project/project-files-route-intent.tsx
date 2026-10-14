@@ -14,10 +14,11 @@ export function ProjectFilesRouteIntent(): undefined {
     if (parameters.get(searchParameterName.workbench) !== 'files') {
       return;
     }
-    openPanel('files');
-    parameters.delete(searchParameterName.workbench);
-    const search = parameters.toString();
-    void navigate(`${location.pathname}${search ? `?${search}` : ''}${location.hash}`, { replace: true });
+    openPanel('files', () => {
+      parameters.delete(searchParameterName.workbench);
+      const search = parameters.toString();
+      void navigate(`${location.pathname}${search ? `?${search}` : ''}${location.hash}`, { replace: true });
+    });
   }, [location.hash, location.pathname, location.search, navigate, openPanel]);
 
   return undefined;

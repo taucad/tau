@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, useLocation } from 'react-router';
 import { ProjectFilesRouteIntent } from '#routes/w.$workspace.$project/project-files-route-intent.js';
@@ -27,9 +27,14 @@ describe('project files navigation', () => {
         <Location />
       </MemoryRouter>,
     );
+    expect(screen.getByRole('status')).toHaveTextContent('/w/home/one?chat=chat_1&workbench=files#detail');
+    expect(openPanel).toHaveBeenCalledWith('files', expect.any(Function));
+    const onOpened = openPanel.mock.calls[0]?.[1] as () => void;
+    await act(async () => {
+      onOpened();
+    });
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent('/w/home/one?chat=chat_1#detail');
     });
-    expect(openPanel).toHaveBeenCalledWith('files');
   });
 });

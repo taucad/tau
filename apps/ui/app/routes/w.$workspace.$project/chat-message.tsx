@@ -17,7 +17,6 @@ import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
 import type { DynamicToolUIPart } from 'ai';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
-import type { CombinedChatState } from '#hooks/use-chat.js';
 import { serializeMessage } from '#utils/chat.utils.js';
 import { parseInlineReferences } from '#utils/at-reference.utils.js';
 import type { ActivityFamily, ActivityGroup, AggregatedGroup } from '#utils/assistant-message-activity.js';
@@ -74,9 +73,6 @@ import {
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 import { useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
-import { ChatStreamingStopButton } from '#components/chat/chat-textarea-submit-button.js';
-import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
-import { formatKeyCombination } from '@taucad/ui/utils/keys';
 import { FileLink } from '#components/files/file-link.js';
 import { isSafeRelativePath } from '@taucad/utils/path';
 import { isRecord } from '@taucad/utils/schema';
@@ -711,17 +707,6 @@ function ChatMessageTimestamp({
   );
 }
 
-function selectLastUserMessageId(state: CombinedChatState): string | undefined {
-  for (let index = state.messages.length - 1; index >= 0; index--) {
-    const entry = state.messages[index];
-    if (entry?.role === messageRole.user) {
-      return entry.id;
-    }
-  }
-
-  return undefined;
-}
-
 // oxlint-disable-next-line complexity -- split render paths for user collapse/edit vs assistant tools would churn without UX benefit
 export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProperties): React.JSX.Element {
   const userMessageCollapseRowThreshold = 8;
@@ -750,19 +735,11 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
 
     return usageDataParts;
   });
-  const { startEditingMessage, exitEditMode, stop } = useChatActions();
+  const { startEditingMessage, exitEditMode } = useChatActions();
   const cadChat = useCadChatClient();
-  const chatStatus = useChatSelector((state) => state.status);
-  const lastUserMessageId = useChatSelector(selectLastUserMessageId);
-  const formattedCancelKeyCombination = formatKeyCombination(cancelChatStreamKeyCombination);
   const [isEditing, setIsEditing] = useState(false);
 
   const isUser = message?.role === messageRole.user;
-  const showUserBubbleStopShortcut =
-    isUser &&
-    !isEditing &&
-    lastUserMessageId === messageId &&
-    (chatStatus === 'streaming' || chatStatus === 'submitted');
   const isCollapsedUserMessage = isUser && !isEditing;
 
   const collapsedUserRows = useMemo(() => {
@@ -955,25 +932,6 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               ) : (
                 <AssistantParts parts={inlineParts} messageId={displayMessage.id} />
               )}
-              {/* Flush under the activity rows, so the indicator keeps their pitch. */}
-              {showUserBubbleStopShortcut ? (
-                <div
-                  className={cn(
-                    'absolute right-1 bottom-1 z-10 transition-opacity duration-150',
-                    'pointer-events-none opacity-0',
-                    'group-hover/chat-message:pointer-events-auto group-hover/chat-message:opacity-100',
-                    'group-focus-within/chat-message:pointer-events-auto group-focus-within/chat-message:opacity-100',
-                  )}
-                >
-                  <ChatStreamingStopButton
-                    variant='compact'
-                    formattedCancelKeyCombination={formattedCancelKeyCombination}
-                    onCancel={() => {
-                      stop('message-stop');
-                    }}
-                  />
-                </div>
-              ) : null}
             </div>
           </When>
           {footer}

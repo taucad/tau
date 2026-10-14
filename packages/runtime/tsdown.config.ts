@@ -36,6 +36,7 @@ const baseConfig: UserConfig = {
     'src/machines/settings.ts',
     'src/host/index.ts',
     'src/host/node.ts',
+    'src/preparation/node.ts',
     'src/types/index.ts',
     'src/plugins/plugin-entry.ts',
     'src/plugins/kernel-plugin-entry.ts',

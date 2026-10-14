@@ -58,6 +58,7 @@ describe('AI SDK reentrant finish contract', () => {
     const finished: Array<{ id: string; isAbort: boolean; isError: boolean }> = [];
     let nestedRequest: Promise<void> | undefined;
     let requests = 0;
+    let requestsBeforeFinishReturns = 0;
     const transport: ChatTransport<UIMessage> = {
       reconnectToStream: async () => null,
       sendMessages: async ({ abortSignal }) => {
@@ -86,7 +87,10 @@ describe('AI SDK reentrant finish contract', () => {
       onFinish({ message, isAbort, isError }) {
         finished.push({ id: message.id, isAbort, isError });
         if (message.id === 'first-assistant') {
-          nestedRequest = chat.sendMessage({ text: 'Follow up' });
+          // Parts bypass asynchronous file conversion, replacing the response before this callback returns.
+          nestedRequest = chat.sendMessage({ parts: [{ type: 'text', text: 'Follow up' }] });
+          requestsBeforeFinishReturns = requests;
+          expect(requests).toBe(2);
         }
       },
     });
@@ -107,6 +111,7 @@ describe('AI SDK reentrant finish contract', () => {
     }
 
     expect(requests).toBe(2);
+    expect(requestsBeforeFinishReturns).toBe(2);
     expect(signal?.aborted).toBe(abort);
     expect(finished).toEqual([
       { id: 'first-assistant', isAbort: false, isError: false },

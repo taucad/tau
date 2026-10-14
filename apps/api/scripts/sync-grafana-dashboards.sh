@@ -1,25 +1,31 @@
 #!/usr/bin/env bash
 #
-# Idempotent Grafana dashboard & alert sync.
+# Local Grafana dashboard & alert sync.
 #
 # Pushes all dashboard JSONs and alert rule groups from infra/grafana/ to any
-# Grafana instance via the HTTP API. Safe to run repeatedly — uses overwrite
+# local Grafana instance via the HTTP API. Safe to run repeatedly — uses overwrite
 # mode for dashboards and the rule-group PUT endpoint for alerts.
 #
 # Environment variables:
 #   GRAFANA_URL      Base URL (default: http://localhost:6100)
-#   GRAFANA_API_KEY  Service account token for Bearer auth.
-#                    When unset, falls back to Basic admin:admin (local dev).
+#   GRAFANA_API_KEY  Optional local service-account token; defaults to admin:admin.
 #
 # Usage:
 #   ./apps/api/scripts/sync-grafana-dashboards.sh
-#   GRAFANA_URL=https://mystack.grafana.net GRAFANA_API_KEY=glsa_... ./apps/api/scripts/sync-grafana-dashboards.sh
+#   GRAFANA_URL=http://localhost:6100 ./apps/api/scripts/sync-grafana-dashboards.sh
+#
+# Exit codes: 0 success; 1 invalid target or failed sync.
+# Hosted Grafana is owned exclusively by Tau Cloud Terraform.
 
 set -euo pipefail
 
 GRAFANA_URL="${GRAFANA_URL:-http://localhost:6100}"
 GRAFANA_URL="${GRAFANA_URL%/}"
 
+if [[ ! "$GRAFANA_URL" =~ ^http://(localhost|127\.0\.0\.1):[0-9]+$ ]]; then
+  echo "ERROR: local sync only; use Tau Cloud Terraform for hosted Grafana." >&2
+  exit 1
+fi
 if [[ -n "${GRAFANA_API_KEY:-}" ]]; then
   AUTH_HEADER="Authorization: Bearer ${GRAFANA_API_KEY}"
 else
@@ -97,28 +103,16 @@ sync_dashboards() {
   done
 }
 
-delete_alert_rule() {
-  local uid="$1"
-  curl -s -o /dev/null -w "%{http_code}" \
-    -X DELETE "${GRAFANA_URL}/api/v1/provisioning/alert-rules/${uid}" \
-    -H "${AUTH_HEADER}" \
-    -H "X-Disable-Provenance: true"
-}
-
 sync_alert_rule_groups() {
-  local file group_name status response rule_uids uid
+  local file group_name status response
 
   for file in "${ALERTS_DIR}"/*.json; do
     [[ -f "$file" ]] || continue
 
     group_name=$(grep -o '"title"[[:space:]]*:[[:space:]]*"[^"]*"' "$file" | head -1 | sed 's/.*: *"//;s/"$//')
 
-    # Delete existing rules by UID first to clear any provenance conflicts
-    rule_uids=$(grep -o '"uid"[[:space:]]*:[[:space:]]*"[^"]*"' "$file" | sed 's/.*: *"//;s/"$//')
-    for uid in $rule_uids; do
-      delete_alert_rule "$uid" >/dev/null 2>&1 || true
-    done
-
+    # Update in place, so each rule keeps its identity and alert state. Grafana 12 moves a rule that
+    # sits in another group and takes over one created without X-Disable-Provenance.
     response=$(curl -s -w "\n%{http_code}" \
       -X PUT "${GRAFANA_URL}/api/v1/provisioning/folder/${ALERTS_FOLDER_UID}/rule-groups/${group_name}" \
       -H "Content-Type: application/json" \

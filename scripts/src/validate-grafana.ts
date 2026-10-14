@@ -7,9 +7,10 @@
  *
  * Usage: pnpm nx run scripts:validate-grafana
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { load } from 'js-yaml';
@@ -143,6 +144,7 @@ const ruleUids = (groups: readonly RuleGroup[]): string[] =>
 const jsonFiles = (directory: string): string[] =>
   readdirSync(directory)
     .filter((name) => name.endsWith('.json'))
+    .toSorted()
     .map((name) => join(directory, name));
 
 const main = (): void => {
@@ -162,6 +164,28 @@ const main = (): void => {
       (file): UidSource => ({ file, kind: 'dashboard', uids: [read(file).uid ?? ''] }),
     ),
   ];
+
+  // A tiny, content-addressed distribution index lets deployment consume only
+  // these definitions at a pinned commit, without cloning the application history.
+  const bundleFile = join(grafanaRoot, 'bundle.json');
+  const bundle = {
+    schemaVersion: 1,
+    files: Object.fromEntries(
+      ['dashboards', 'alerts'].flatMap((directory) =>
+        jsonFiles(join(grafanaRoot, directory)).map((file) => [
+          `${directory}/${basename(file)}`,
+          createHash('sha256').update(readFileSync(file)).digest('hex'),
+        ]),
+      ),
+    ),
+  };
+  const bundleJson = `${JSON.stringify(bundle, null, 2)}\n`;
+  if (process.argv.includes('--write-bundle')) {
+    writeFileSync(bundleFile, bundleJson);
+  }
+  if (readFileSync(bundleFile, 'utf8') !== bundleJson) {
+    throw new Error('Grafana bundle is stale. Run pnpm nx run scripts:grafana-bundle after editing definitions.');
+  }
 
   const problems = [
     ...grafanaUidProblems(sources),

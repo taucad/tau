@@ -129,6 +129,8 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
   },
 }));
 
+// Queue behavior is covered by its view and session-store suites; this leaf fixture owns history composition.
+vi.mock('#components/chat/chat-message-queue.js', () => ({ ChatMessageQueue: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({
   ChatMessagePlanning: () => (
     <div role='status' aria-label='Current activity'>

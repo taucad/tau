@@ -123,6 +123,8 @@ type ProjectedMessageRange = Readonly<{
   to: number;
   blockKeys?: readonly string[];
   evicted?: true;
+  /** Explicit output facts, without inherited input metadata, for envelope correction replay. */
+  toolOutput?: Pick<Extract<UIMessageChunk, { type: 'tool-output-available' }>, 'toolCallId' | 'toolMetadata'>;
 }>;
 
 /** A visible input and the assistant output before the next authentic user input. */
@@ -641,6 +643,19 @@ const foldRunViews = (
       }
     }
     const chunks = projectAgentHostEvent(row, blocks);
+    const explicitOutput =
+      message?.role === 'tool-output'
+        ? projectAgentHostEvent(row).find(
+            (chunk) => chunk.type === 'tool-output-available' || chunk.type === 'tool-output-error',
+          )
+        : undefined;
+    const toolOutput =
+      explicitOutput === undefined
+        ? undefined
+        : {
+            toolCallId: explicitOutput.toolCallId,
+            toolMetadata: explicitOutput.toolMetadata,
+          };
     if (rewriteMessage && toolKey !== undefined && previousTool?.closed) {
       // A corrected input precedes its already projected output; it cannot reopen that settled live block.
       blocks.set(toolKey, previousTool);
@@ -724,7 +739,40 @@ const foldRunViews = (
     views ??= { ...previousViews };
     const { terminal: _terminal, ...prior } = previous ?? {};
     const finalState = row.type === 'run.lifecycle' ? terminal : previous?.terminal;
-    const rewrittenPrefix = rewriteMessage ? chunksOf(initialChunks) : undefined;
+    const rewrittenPrefix = rewriteMessage ? [...chunksOf(initialChunks)] : undefined;
+    const correctedInput =
+      rewriteMessage && message.role === 'tool-input'
+        ? chunks.find((chunk) => chunk.type === 'tool-input-available')
+        : undefined;
+    if (rewrittenPrefix !== undefined && correctedInput !== undefined && messageRange !== undefined) {
+      let metadata = correctedInput.toolMetadata;
+      for (const range of messageSource?.messages ?? []) {
+        if (range.from < messageRange.to || range.toolOutput?.toolCallId !== correctedInput.toolCallId) {
+          continue;
+        }
+        const explicit = range.toolOutput.toolMetadata;
+        metadata = {
+          tau: {
+            ...(isRecord(metadata?.['tau']) ? metadata['tau'] : {}),
+            ...(isRecord(explicit?.['tau']) ? explicit['tau'] : {}),
+          },
+        };
+        for (let index = range.from; index < range.to; index++) {
+          const chunk = rewrittenPrefix[index];
+          if (
+            (chunk?.type === 'tool-output-available' || chunk?.type === 'tool-output-error') &&
+            chunk.toolCallId === correctedInput.toolCallId
+          ) {
+            rewrittenPrefix[index] = { ...chunk, toolMetadata: metadata };
+          }
+        }
+      }
+      if (toolKey !== undefined && previous?.terminal === 'completed') {
+        blocks.delete(toolKey);
+      } else if (toolKey !== undefined && previousTool?.type === 'tool' && previousTool.closed) {
+        blocks.set(toolKey, { ...previousTool, toolMetadata: metadata });
+      }
+    }
     const nextChunks =
       rewrittenPrefix !== undefined && messageRange !== undefined
         ? [...rewrittenPrefix.slice(0, messageRange.from), ...chunks, ...rewrittenPrefix.slice(messageRange.to)]
@@ -738,8 +786,10 @@ const foldRunViews = (
       messageRange !== undefined && segmentMessages !== undefined
         ? segmentMessages.map((entry) => {
             if (entry === messageRange) {
+              const { toolOutput: _priorOutput, ...range } = entry;
               return {
-                ...entry,
+                ...range,
+                ...(toolOutput === undefined ? {} : { toolOutput }),
                 to: rewriteMessage ? entry.from + chunks.length : nextChunks.length,
                 ...(projectedBlockKeys === undefined ? {} : { blockKeys: projectedBlockKeys }),
               };
@@ -757,6 +807,7 @@ const foldRunViews = (
               ...(segmentMessages ?? []),
               {
                 id: appended,
+                ...(toolOutput === undefined ? {} : { toolOutput }),
                 from: initialChunks.length,
                 to: nextChunks.length,
                 ...(projectedBlockKeys === undefined ? {} : { blockKeys: projectedBlockKeys }),

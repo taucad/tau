@@ -4,7 +4,7 @@ import type { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrument
 import type { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 
 const { instrumentationConfigs, exporterConfigs, sdkConfigs } = vi.hoisted(() => ({
@@ -83,12 +83,28 @@ describe('OTEL incoming request span redaction', () => {
 });
 
 describe('OTEL Prometheus exporter', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('should label every series with service_name but leave other resource attributes off (OBS-13)', async () => {
     await import('#telemetry/otel.js');
     const labels = exporterConfigs[0]?.withResourceConstantLabels;
 
     expect(labels?.test('service.name')).toBe(true);
+    expect(labels?.test('tau.process')).toBe(true);
     expect(labels?.test('deployment.environment')).toBe(false);
+  });
+
+  it.each([
+    ['billing-operations', 'billing-operations'],
+    [undefined, undefined],
+  ])('should name the Fly process group %s as tau.process', async (group, expected) => {
+    vi.resetModules();
+    vi.stubEnv('FLY_PROCESS_GROUP', group);
+    await import('#telemetry/otel.js');
+
+    expect(sdkConfigs.at(-1)?.resource?.attributes['tau.process']).toBe(expected);
   });
 });
 

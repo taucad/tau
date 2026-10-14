@@ -187,11 +187,11 @@ for (const width of [320, 600]) {
           bounds.bottom - action.getBoundingClientRect().bottom - Number.parseFloat(style.borderBottomWidth);
 
         expect(top).toBeCloseTo(12, 1);
-        expect(bottom).toBeCloseTo(12, 1);
-        expect(bottom).toBeCloseTo(top, 1);
+        expect(bottom).toBeCloseTo(8, 1);
         if (mode === 'main' && action.getAttribute('aria-label') !== 'Resume') {
           const right = bounds.right - action.getBoundingClientRect().right - Number.parseFloat(style.borderRightWidth);
           expect(right).toBeCloseTo(8, 1);
+          expect(bottom).toBeCloseTo(right, 1);
         }
         expect(container.scrollWidth).toBe(container.clientWidth);
         if (mode === 'main' && ['empty', 'mixed attachments', 'blocked attachment', 'context chip'].includes(name)) {

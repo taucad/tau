@@ -168,6 +168,8 @@ try {
     .getByRole('link', { name: 'Pricing', exact: true })
     .click();
   assert.ok(nojsPage.url().endsWith('/pricing/'));
+  await nojsPage.goto(origin + '/privacy/');
+  assert.equal(await nojsPage.getByRole('button', { name: 'Reset analytics preference' }).isDisabled(), true);
   await nojs.close();
   const context = await browser.newContext();
   const page = await context.newPage();

@@ -36,9 +36,10 @@ export const content = (): React.JSX.Element => (
         a returning visit without sending a persistent visitor identifier. You can withdraw consent and clear these
         markers below.
       </p>
-      <Button variant='outline' data-consent-reset>
+      <Button variant='outline' data-consent-reset disabled>
         Reset analytics preference
       </Button>
+      <noscript>Enable JavaScript to reset this preference, or clear this site’s data in your browser.</noscript>
       <p role='status' id='privacy-status' />
       <h2>Hosting and external links</h2>
       <p>

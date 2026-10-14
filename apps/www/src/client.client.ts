@@ -194,6 +194,9 @@ export function initializePage(signal: AbortSignal): () => void {
     },
     { signal },
   );
+  if (privacyReset instanceof HTMLButtonElement) {
+    privacyReset.disabled = false;
+  }
   globalThis.addEventListener(
     'storage',
     (event) => {

@@ -50,6 +50,7 @@ export class ProjectPreviewController {
     return new StreamableFile(bytes, { type: 'image/webp', length: bytes.length });
   }
 
+  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest parameter decorators bind project, session, body and conditional header independently.
   @Put(':projectId/preview')
   @Header('Cache-Control', 'private, no-store')
   public async put(

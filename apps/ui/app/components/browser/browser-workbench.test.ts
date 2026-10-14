@@ -149,4 +149,31 @@ describe('browser workbench tabs', () => {
     publish({ ...snapshot(), tabs: [], activeTabId: undefined });
     expect(api.panels.map((panel) => panel.id)).toEqual(['file']);
   });
+  it('should preserve Files selected while a restored browser placeholder creates its native page', async () => {
+    const { api, bridge } = await setup();
+    const { command } = bridge;
+    let finishCreate: (() => void) | undefined;
+    const creating = new Promise<void>((resolve) => {
+      finishCreate = resolve;
+    });
+    bridge.command = vi.fn<BrowserBridge['command']>(async (request) => {
+      if (request.kind === 'new-tab') {
+        await creating;
+      }
+      return command(request);
+    });
+    api.addPanel({ id: 'restored-browser', component: 'browser', title: 'Browser' });
+    api.addPanel({
+      id: 'files',
+      component: 'newTab',
+      title: 'Open file',
+      params: { mode: 'open-file', filesOpen: true },
+    });
+    expect(api.activePanel?.id).toBe('files');
+    finishCreate?.();
+    await vi.waitFor(() => {
+      expect(browserPanelTabId(api.getPanel('restored-browser')!)).toBe('1');
+    });
+    expect(api.activePanel?.id).toBe('files');
+  });
 });

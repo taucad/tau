@@ -76,7 +76,11 @@ export const connectBrowserWorkbench = ({
         if (panel.api.title !== tab.title) {
           panel.api.setTitle(tab.title);
         }
-        if (snapshot.activeTabId === tab.id && previousActiveId !== tab.id) {
+        if (
+          snapshot.activeTabId === tab.id &&
+          previousActiveId !== tab.id &&
+          (!isCreating || api.activePanel?.api.component === 'browser')
+        ) {
           panel.api.setActive();
         }
       }

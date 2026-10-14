@@ -554,7 +554,7 @@ describe('Home storage persistence', () => {
   it('should serialize a status refresh behind an in-flight grant', async () => {
     const grant = Promise.withResolvers<boolean>();
     const persisted = vi.fn(async () => false);
-    const persist = vi.fn(() => grant.promise);
+    const persist = vi.fn(async () => grant.promise);
     stubStorage({ persist, persisted });
     const store = await loadStore();
     const request = store.requestHomeStoragePersistence();
@@ -603,7 +603,7 @@ describe('Home storage persistence', () => {
     const persist = vi.fn(async () => true);
     stubStorage({ persist, persisted: async () => false });
     const store = await loadStore();
-    const put = IDBObjectStore.prototype.put;
+    const { put } = IDBObjectStore.prototype;
     vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value: unknown) {
       const request = put.call(this, value);
       this.transaction.abort();

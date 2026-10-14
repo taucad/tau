@@ -31,14 +31,14 @@ describe('storage status settings lifecycle', () => {
     });
     state.refresh.mockClear();
     act(() => {
-      window.dispatchEvent(new Event('focus'));
+      globalThis.dispatchEvent(new Event('focus'));
       state.status = 'persistent';
       state.listener?.();
     });
     expect(state.refresh).toHaveBeenCalledOnce();
     expect(result.current).toBe('persistent');
     unmount();
-    window.dispatchEvent(new Event('focus'));
+    globalThis.dispatchEvent(new Event('focus'));
     expect(state.refresh).toHaveBeenCalledOnce();
   });
 });

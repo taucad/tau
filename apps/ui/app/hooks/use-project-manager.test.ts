@@ -2573,7 +2573,12 @@ describe('useProjectManager.createProject', () => {
 
   it('uses the filesystem authority commit before restoring local resources and clearing the journal', async () => {
     // An open browser prompt must not delay project creation.
-    mockRequestHomeStoragePersistence.mockImplementationOnce(() => new Promise<void>(() => undefined));
+    mockRequestHomeStoragePersistence.mockImplementationOnce(
+      async () =>
+        new Promise<void>(() => {
+          // Intentionally leave the browser permission request open.
+        }),
+    );
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
     await act(async () =>
       result.current.createProject({

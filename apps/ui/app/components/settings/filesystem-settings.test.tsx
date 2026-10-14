@@ -1,10 +1,11 @@
-vi.mock('#filesystem/use-persistent-storage-status.js', () => ({ usePersistentStorageStatus: () => 'best-effort' }));
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { ProjectFileSystemConfig, Workspace, WorkspaceConnection } from '#filesystem/handle-store.js';
 import type { ConnectedWorkspace } from '#hooks/use-project-manager.js';
 import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
+
+vi.mock('#filesystem/use-persistent-storage-status.js', () => ({ usePersistentStorageStatus: () => 'best-effort' }));
 
 type ToastSuccessOptions = {
   readonly action: { readonly label: string; readonly onClick: () => void | Promise<void> };

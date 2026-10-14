@@ -421,8 +421,12 @@ async function readPersistentStorageStatus(): Promise<void> {
 }
 
 /** Refresh status without prompting. Serialize reads so an older read cannot undo a grant. */
-export function refreshPersistentStorageStatus(): Promise<void> {
-  persistenceOperation = persistenceOperation.then(readPersistentStorageStatus);
+export async function refreshPersistentStorageStatus(): Promise<void> {
+  const previous = persistenceOperation;
+  persistenceOperation = (async () => {
+    await previous;
+    await readPersistentStorageStatus();
+  })();
   return persistenceOperation;
 }
 
@@ -431,12 +435,14 @@ export function refreshPersistentStorageStatus(): Promise<void> {
  * participates in the save transaction. The durable claim precedes the browser
  * request, so tabs, reloads and refused requests do not repeatedly prompt.
  */
-export function requestHomeStoragePersistence(): Promise<void> {
+export async function requestHomeStoragePersistence(): Promise<void> {
   if (persistenceRequestedThisSession || isDesktopTarget) {
     return persistenceOperation;
   }
   persistenceRequestedThisSession = true;
-  persistenceOperation = persistenceOperation.then(async () => {
+  const previous = persistenceOperation;
+  persistenceOperation = (async () => {
+    await previous;
     await readPersistentStorageStatus();
     const storage = globalThis.navigator.storage as StorageManager | undefined;
     if (persistentStorageStatus !== 'best-effort' || typeof storage?.persist !== 'function') {
@@ -451,7 +457,7 @@ export function requestHomeStoragePersistence(): Promise<void> {
       setPersistentStorageStatus('unknown');
       console.warn('Could not request persistent storage', error);
     }
-  });
+  })();
   return persistenceOperation;
 }
 

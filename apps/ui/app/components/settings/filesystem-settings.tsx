@@ -375,7 +375,7 @@ export function FileSystemSettings(): React.JSX.Element {
       ) : undefined}
 
       {/* Desktop's Home is a folder on disk, so the origin's storage quota says nothing about it. */}
-      {!isDesktopTarget() ? (
+      {isDesktopTarget() ? undefined : (
         <SettingsItem settingId='browser-storage'>
           <SettingsSectionCard>
             <CardHeader>
@@ -419,7 +419,7 @@ export function FileSystemSettings(): React.JSX.Element {
             </CardContent>
           </SettingsSectionCard>
         </SettingsItem>
-      ) : undefined}
+      )}
     </div>
   );
 }

@@ -146,6 +146,8 @@ try {
     .getByRole('link', { name: 'Pricing' })
     .click();
   await navigationPage.waitForURL(`${origin}/pricing/`);
+  // React Router updates history before React commits the destination metadata.
+  await navigationPage.waitForFunction(() => /Pricing/u.test(document.title));
   assert.match(await navigationPage.title(), /Pricing/u);
   await navigationPage.getByRole('link', { name: 'Tau home' }).first().click();
   await navigationPage.waitForURL(`${origin}/`);

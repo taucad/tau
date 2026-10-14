@@ -67,7 +67,7 @@ const outputs = [
     component,
   ],
   [join(workspaceRoot, 'apps/docs/app/components/tau-wordmark.tsx'), component],
-  [join(workspaceRoot, 'apps/www/src/wordmark.mjs'), marketingModule],
+  [join(workspaceRoot, 'apps/www/src/wordmark.ts'), marketingModule],
 ] as const;
 
 if (process.argv.includes('--check')) {

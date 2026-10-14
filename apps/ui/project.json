@@ -304,7 +304,8 @@
           "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts"
+          "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'"
         ],
         "parallel": false
       }
@@ -321,12 +322,22 @@
     },
     "render-calibration-lighting": {
       "executor": "nx:run-commands",
-      "options": { "command": "node apps/ui/scripts/render-calibration/pack-lighting.mts" }
+      "options": {
+        "command": "node apps/ui/scripts/render-calibration/pack-lighting.mts"
+      }
     },
     "render-calibration-physical": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node --import tsx apps/ui/scripts/render-calibration/generate-physical.mts"
+      }
+    },
+    "test-print-browser": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'"
       }
     }
   }

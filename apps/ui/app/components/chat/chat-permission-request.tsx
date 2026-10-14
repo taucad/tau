@@ -45,7 +45,9 @@ export function permissionContent(approval: AgentHostApproval): {
         ? isOpaque
           ? 'Ask the agent to describe this action before allowing it.'
           : undefined
-        : 'This starts a physical print.',
+        : approval.context.jobId === undefined
+          ? 'This changes the machine. Review the action before allowing it.'
+          : 'Review the job and confirm the work area is clear in the Print pane.',
   };
 }
 
@@ -55,10 +57,12 @@ export function ChatPermissionRequest({
   name,
   outcome,
   onRespond,
+  onReview,
 }: {
   readonly approval: AgentHostApproval;
   readonly name: string;
   readonly outcome?: string | undefined;
+  readonly onReview?: (() => void) | undefined;
   readonly onRespond?: ((approved: boolean, optionId?: string) => Promise<void>) | undefined;
 }): React.JSX.Element {
   const isDebug = useFeature('tauDebug');
@@ -161,7 +165,23 @@ export function ChatPermissionRequest({
       ) : null}
       {!isSettled && onRespond ? (
         <div className='flex flex-wrap gap-2'>
-          {approval.options.length > 0 ? (
+          {onReview ? (
+            <>
+              <Button size='xs' onClick={onReview}>
+                Review in the Print pane
+              </Button>
+              <Button
+                size='xs'
+                variant='outline'
+                disabled={isSending}
+                onClick={() => {
+                  void respond(false);
+                }}
+              >
+                Deny
+              </Button>
+            </>
+          ) : approval.options.length > 0 ? (
             approval.options.map((option) => (
               <Button
                 key={option.optionId}

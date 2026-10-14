@@ -115,7 +115,7 @@ describe('serveLocalHostMcp', () => {
     try {
       const asked: string[] = [];
       await dispatch(
-        { toolName: toolName.requestPrint, args: { targetFile: 'plate.ts' } },
+        { toolName: toolName.requestJob, args: { targetFile: 'plate.ts' } },
         {
           toolCallId: 'print-1',
           confirm: async ({ message }) => {
@@ -124,7 +124,7 @@ describe('serveLocalHostMcp', () => {
           },
         },
       );
-      await dispatch({ toolName: toolName.requestPrint, args: { targetFile: 'plate.ts' } }, { toolCallId: 'print-2' });
+      await dispatch({ toolName: toolName.requestJob, args: { targetFile: 'plate.ts' } }, { toolCallId: 'print-2' });
 
       const [withForm, withoutForm] = invocations;
       expect(await withForm?.approve?.({ prompt: 'Print plate.3mf on X1C?' })).toEqual({
@@ -144,7 +144,7 @@ describe('serveLocalHostMcp', () => {
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
       await dispatch(
-        { toolName: toolName.requestPrint, args: { targetFile: 'plate.ts' } },
+        { toolName: toolName.requestJob, args: { targetFile: 'plate.ts' } },
         {
           toolCallId: 'print-1',
           confirm: async () => {

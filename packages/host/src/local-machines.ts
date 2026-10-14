@@ -14,7 +14,7 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
-import type { HostSessionHandle } from '@taucad/runtime/host';
+import type { HostAdmissionAuthority, HostSessionHandle } from '@taucad/runtime/host';
 import { createNodeMachineHost } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
 import type { MachineClient } from '@taucad/runtime/machine';
@@ -33,7 +33,11 @@ import type { CreateNodeMachineRuntimeOptions } from '#machine-host.js';
 import { openSecretVault } from '#secret-vault.js';
 
 /** A machine host over the shared store, with the one session its route and tools use. @public */
-export type SharedMachineHost = Readonly<{ host: NodeMachineHost; session: HostSessionHandle }>;
+export type SharedMachineHost = Readonly<{
+  host: NodeMachineHost;
+  session: HostSessionHandle;
+  admission: HostAdmissionAuthority;
+}>;
 
 /** Options for {@link openSharedMachineHost}. @public */
 export type OpenSharedMachineHostOptions = Readonly<{
@@ -65,12 +69,13 @@ export const openSharedMachineHost = async (
 ): Promise<SharedMachineHost | undefined> => {
   const storeRoot = options.storeRoot ?? join(defaultConfigDirectory(), 'machines');
   const identity = await openMachineHostIdentity(storeRoot);
+  const admission = createHostAdmissionAuthority({ hostId: identity.hostId });
   let host: NodeMachineHost;
   try {
     host = await createNodeMachineHost({
       storeRoot,
       ...identity,
-      admission: createHostAdmissionAuthority({ hostId: identity.hostId }),
+      admission,
       providers: options.providers,
       runtime: createNodeMachineRuntime({
         secrets: createMachineSecretStore({
@@ -96,6 +101,7 @@ export const openSharedMachineHost = async (
   }
   return {
     host,
+    admission,
     session: host.issueSession({ actor: { kind: 'user', id: options.actorId }, grants: machineRouteGrants }),
   };
 };

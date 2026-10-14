@@ -819,11 +819,11 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
       const { configDirectory, environment } = await isolatedStore('config-codex');
       /* The simulator, bound in the store before the server starts, as the person binds a printer in Tau. */
       /* Loaded on demand, as the CLI loads the vendor package. */
-      const { bambuSimulatorMachine } = await import('@taucad/bambu');
+      const { defaultMachineProviders } = await import('@taucad/host');
       const vault = process.env['TAU_SECRET_VAULT'];
       process.env['TAU_SECRET_VAULT'] = 'memory';
       const store = await openSharedMachineHost({
-        providers: [bambuSimulatorMachine()],
+        providers: (await defaultMachineProviders()).filter((provider) => provider.id === 'bambu-simulator'),
         readArtifact: async () => {
           throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
         },

@@ -20,6 +20,7 @@ export default defineConfig({
     include: [
       'app/routes/w.$workspace.$project/chat-print.browser.test.tsx',
       'app/components/select-alignment.browser.test.tsx',
+      'app/components/machines/machines.browser.test.tsx',
     ],
     fileParallelism: false,
     browser: {

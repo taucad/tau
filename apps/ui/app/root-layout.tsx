@@ -1,5 +1,6 @@
+import { onDesktopMachineNavigation } from '#filesystem/desktop-bridge.js';
 import type { ComponentType, ReactNode } from 'react';
-import { Links, Meta, Scripts, ScrollRestoration, useMatch, useRouteLoaderData } from 'react-router';
+import { Links, Meta, Scripts, ScrollRestoration, useMatch, useNavigate, useRouteLoaderData } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
 import { Fragment, useEffect, useMemo } from 'react';
@@ -253,6 +254,14 @@ function LayoutDocument({
 }
 
 export function ProductApp(): React.JSX.Element {
+  const navigate = useNavigate();
+  useEffect(
+    () =>
+      onDesktopMachineNavigation((route) => {
+        void navigate(route);
+      }),
+    [navigate],
+  );
   useCloudPaymentActionReturn();
   const data = useRouteLoaderData<RootLoaderData>('root');
   const page = <Page />;

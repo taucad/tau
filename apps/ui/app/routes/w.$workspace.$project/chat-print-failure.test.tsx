@@ -4,7 +4,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
-import { FailureEvidence } from '#routes/w.$workspace.$project/chat-print-controls.js';
+import { FailureEvidence } from '#components/machines/machine-controls.js';
 import { entry as createEntry } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 
 const entry = createEntry();
@@ -12,7 +12,7 @@ const failed = (): MachineDirectoryEntry => ({
   ...entry,
   snapshot: {
     ...entry.snapshot,
-    alerts: [{ code: '0500-402F', message: 'The microSD card has damaged sector data.' }],
+    alerts: [{ blocks: 'nothing', code: '0500-402F', message: 'The microSD card has damaged sector data.' }],
   },
 });
 const captureStill = vi.fn<MachineClient['captureStill']>();
@@ -76,7 +76,7 @@ describe('failure camera evidence', () => {
               connection: condition === 'disconnected' ? 'disconnected' : 'connected',
               alerts:
                 condition === 'warning' || condition === 'info'
-                  ? [{ code: 'notice', message: 'Notice', severity: condition }]
+                  ? [{ blocks: 'nothing', code: 'notice', message: 'Notice', severity: condition }]
                   : machine.snapshot.alerts,
             },
           }}
@@ -124,14 +124,38 @@ describe('failure camera evidence', () => {
     const view = render(
       <FailureEvidence
         client={client}
-        entry={{ ...machine, snapshot: { ...machine.snapshot, activeRunId: 'run-1', run: { state: 'printing' } } }}
+        entry={{
+          ...machine,
+          snapshot: {
+            ...machine.snapshot,
+            run: {
+              runId: 'run-1',
+              origin: 'tau',
+              delivery: 'stored',
+              progress: { basis: 'executed', counters: [] },
+              state: 'running',
+            },
+          },
+        }}
       />,
     );
     await screen.findByRole('img');
     view.rerender(
       <FailureEvidence
         client={client}
-        entry={{ ...machine, snapshot: { ...machine.snapshot, run: { state: 'failed' } } }}
+        entry={{
+          ...machine,
+          snapshot: {
+            ...machine.snapshot,
+            run: {
+              runId: 'run-1',
+              origin: 'tau',
+              delivery: 'stored',
+              progress: { basis: 'executed', counters: [] },
+              state: 'failed',
+            },
+          },
+        }}
       />,
     );
     expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:failure');
@@ -142,14 +166,38 @@ describe('failure camera evidence', () => {
   it('should explain unsupported cameras and capture a failed run without an alert code', async () => {
     const machine = failed();
     const view = render(
-      <FailureEvidence client={client} entry={{ ...machine, descriptor: { ...machine.descriptor, operations: [] } }} />,
+      <FailureEvidence
+        client={client}
+        entry={{
+          ...machine,
+          descriptor: {
+            ...machine.descriptor,
+            capabilities: {
+              ...machine.descriptor.capabilities,
+              components: machine.descriptor.capabilities.components.filter((component) => component.kind !== 'camera'),
+            },
+          },
+        }}
+      />,
     );
     expect(screen.getByText('Still capture is unavailable for this printer.')).toBeVisible();
     expect(captureStill).not.toHaveBeenCalled();
     view.rerender(
       <FailureEvidence
         client={client}
-        entry={{ ...entry, snapshot: { ...entry.snapshot, run: { state: 'failed' } } }}
+        entry={{
+          ...entry,
+          snapshot: {
+            ...entry.snapshot,
+            run: {
+              runId: 'run-1',
+              origin: 'tau',
+              delivery: 'stored',
+              progress: { basis: 'executed', counters: [] },
+              state: 'failed',
+            },
+          },
+        }}
       />,
     );
     await screen.findByRole('img');

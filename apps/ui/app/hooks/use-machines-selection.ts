@@ -37,15 +37,18 @@ export type MachineSelection = Readonly<{
  * stored id that no longer exists in the directory falls back to the first
  * entry, so a removed machine never leaves the pane empty.
  *
- * @param projectId - The project the selection belongs to.
+ * @param sourceProjectId - The project the selection belongs to.
  * @param entries - The current directory entries.
+ * @param hostId - Host authority that qualifies persisted selection.
  * @returns The selected entry and the selector.
  * @public
  */
 export const useMachinesSelection = (
-  projectId: string,
+  sourceProjectId: string,
   entries: readonly MachineDirectoryEntry[],
+  hostId = '',
 ): MachineSelection => {
+  const projectId = JSON.stringify([hostId, sourceProjectId]);
   // ponytail: per-project browser storage behind this one seam; move to `PanelState.printMachineId` once the panel-state types admit it.
   const [state, setState] = useState(() => ({ projectId, machineId: readSelection(projectId) }));
   if (state.projectId !== projectId) {

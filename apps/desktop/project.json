@@ -314,6 +314,69 @@
       "options": {
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-ota.mts"
       }
+    },
+    "prepare-build123d-python-macos-intel": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/python/darwin-x64"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-build123d-python.mts --target darwin-x64"
+      }
+    },
+    "prepare-git-macos-intel": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/git/darwin-x64", "{projectRoot}/resources/git/SOURCES"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-git.mts --target darwin-x64"
+      }
+    },
+    "package-macos-intel": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "build",
+        "check-renderer-payload",
+        "prepare-build123d-python-macos-intel",
+        "prepare-git-macos-intel"
+      ],
+      "outputs": ["{projectRoot}/package-out"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts"
+      }
+    },
+    "package-macos-release-intel": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "build",
+        "check-renderer-payload",
+        "prepare-build123d-python-macos-intel",
+        "prepare-git-macos-intel"
+      ],
+      "outputs": ["{projectRoot}/package-out"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release"
+      },
+      "configurations": {
+        "staging": {
+          "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release --skip-notarization"
+        }
+      }
+    },
+    "package-macos-unsigned-intel": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "build",
+        "check-renderer-payload",
+        "prepare-build123d-python-macos-intel",
+        "prepare-git-macos-intel"
+      ],
+      "outputs": ["{projectRoot}/package-out"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --unsigned"
+      }
     }
   }
 }

@@ -17,7 +17,7 @@ const fixture = () => {
   roots.push(root);
   const assets = join(root, 'assets');
   mkdirSync(assets);
-  for (const name of ['Tau-macos-arm64.zip', 'Tau-linux-x64.tar.gz', 'Tau-win32-x64.zip']) {
+  for (const name of ['Tau-macos-arm64.zip', 'Tau-macos-x64.zip', 'Tau-linux-x64.tar.gz', 'Tau-win32-x64.zip']) {
     writeFileSync(join(assets, name), `fixture bytes: ${name}`);
   }
   const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim();
@@ -54,6 +54,14 @@ describe('desktop publication', () => {
     expect(availableUpdate(feed, '1.1.1', { channel: 'staging', platform: 'darwin', arch: 'arm64' })?.version).toBe(
       '1.1.2',
     );
+
+    const intelFeed: unknown = JSON.parse(readFileSync(join(assets, 'desktop-update-darwin-x64.json'), 'utf8'));
+    expect(availableUpdate(intelFeed, '1.1.1', { channel: 'staging', platform: 'darwin', arch: 'x64' })?.version).toBe(
+      '1.1.2',
+    );
+    expect(() =>
+      availableUpdate(intelFeed, '1.1.1', { channel: 'staging', platform: 'darwin', arch: 'arm64' }),
+    ).toThrow(new TypeError('Update feed channel, version, tag or archive disagree'));
     const manifest = z
       .object({ assets: z.record(z.string(), z.object({ sha256: z.string(), size: z.number() })) })
       .parse(JSON.parse(readFileSync(join(assets, 'download.json'), 'utf8')));
@@ -64,7 +72,30 @@ describe('desktop publication', () => {
     });
   });
 
-  it('should prevent an older promotion after a newer partial feed write', () => {
+  it('should reject promotion without acceptance from both Mac architectures', () => {
+    const { assets, sourceCommit, run } = fixture();
+    const tag = 'desktop@1.0.3';
+    expect(run('prepare', tag).status).toBe(0);
+    writeFileSync(
+      join(assets, 'ota-receipt-darwin-arm64.json'),
+      JSON.stringify({ status: 'passed', target: 'darwin-arm64', tag, version: '1.0.3', sourceCommit }),
+    );
+    const result = run('promote', tag, { DESKTOP_R2_BUCKET: 'unused', DESKTOP_R2_ENDPOINT: 'https://unused.invalid' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('ota-receipt-darwin-x64.json');
+    writeFileSync(
+      join(assets, 'ota-receipt-darwin-x64.json'),
+      JSON.stringify({ status: 'passed', target: 'darwin-arm64', tag, version: '1.0.3', sourceCommit }),
+    );
+    const wrongArchitecture = run('promote', tag, {
+      DESKTOP_R2_BUCKET: 'unused',
+      DESKTOP_R2_ENDPOINT: 'https://unused.invalid',
+    });
+    expect(wrongArchitecture.status).toBe(1);
+    expect(wrongArchitecture.stderr).toContain('darwin-x64');
+  });
+
+  it('should prevent an older promotion after a newer partial feed write', { timeout: 30_000 }, () => {
     const { root, assets, sourceCommit, run } = fixture();
     const bin = join(root, 'bin');
     const store = join(root, 'store');
@@ -99,7 +130,12 @@ if (op === 'get-object') {
       const tag = `desktop@${version}`;
       const result = run('prepare', tag);
       expect(result.status, result.stderr).toBe(0);
-      writeFileSync(join(assets, 'ota-receipt.json'), JSON.stringify({ status: 'passed', tag, version, sourceCommit }));
+      for (const target of ['darwin-arm64', 'darwin-x64']) {
+        writeFileSync(
+          join(assets, `ota-receipt-${target}.json`),
+          JSON.stringify({ status: 'passed', target, tag, version, sourceCommit }),
+        );
+      }
       return tag;
     };
     const newest = run('promote', prepare('1.0.3'), environment);

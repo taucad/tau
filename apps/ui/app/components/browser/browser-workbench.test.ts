@@ -12,7 +12,9 @@ afterEach(() => {
   }
 });
 
-const setup = async (): Promise<{
+const setup = async (
+  beforeConnect?: (api: DockviewApi, bridge: BrowserBridge) => Promise<void>,
+): Promise<{
   api: DockviewApi;
   bridge: BrowserBridge;
   publish: (value: BrowserSnapshot) => void;
@@ -84,6 +86,7 @@ const setup = async (): Promise<{
       return state;
     }),
   };
+  await beforeConnect?.(api, bridge);
   disposals.push(
     connectBrowserWorkbench({
       api,
@@ -174,6 +177,19 @@ describe('browser workbench tabs', () => {
     await vi.waitFor(() => {
       expect(browserPanelTabId(api.getPanel('restored-browser')!)).toBe('1');
     });
+    expect(api.activePanel?.id).toBe('files');
+  });
+  it('should restore the initial native browser snapshot without stealing the selected Files tab', async () => {
+    const { api } = await setup(async (dockview, bridge) => {
+      await bridge.command({ kind: 'new-tab' });
+      dockview.addPanel({
+        id: 'files',
+        component: 'newTab',
+        title: 'Open file',
+        params: { mode: 'open-file', filesOpen: true },
+      });
+    });
+    expect(api.panels.some((panel) => browserPanelTabId(panel) === '1')).toBe(true);
     expect(api.activePanel?.id).toBe('files');
   });
 });

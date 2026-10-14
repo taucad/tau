@@ -41,7 +41,8 @@ export default defineConfig({
     },
     rehypeCodeOptions: {
       themes: {
-        light: 'github-light',
+        // The standard light palette's parameter orange fails AA on the docs code surface.
+        light: 'github-light-high-contrast',
         dark: 'github-dark',
         'high-contrast-light': 'github-light-high-contrast',
         'high-contrast-dark': 'github-dark-high-contrast',

@@ -1,3 +1,4 @@
+vi.mock('#filesystem/use-persistent-storage-status.js', () => ({ usePersistentStorageStatus: () => 'best-effort' }));
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -95,6 +96,7 @@ vi.mock('#constants/browser.constants.js', () => ({
 }));
 
 vi.mock('#filesystem/handle-store.js', () => ({
+  refreshPersistentStorageStatus: vi.fn(async () => undefined),
   checkHandlePermission: mockCheckHandlePermission,
   createWorkspace: mockCreateWorkspace,
   getWorkspace: mockGetWorkspace,
@@ -151,7 +153,7 @@ describe('FileSystemSettings storage usage', () => {
 
     render(<FileSystemSettings />);
 
-    await screen.findByText(/available/i);
+    await screen.findByText(/total/i);
     expect(screen.queryByText(/storage is nearly full/i)).not.toBeInTheDocument();
   });
 
@@ -166,6 +168,7 @@ describe('FileSystemSettings storage usage', () => {
     await waitFor(() => {
       expect(warn).toHaveBeenCalled();
     });
+    expect(screen.getByRole('status')).toHaveTextContent('Saved in this browser');
   });
 });
 

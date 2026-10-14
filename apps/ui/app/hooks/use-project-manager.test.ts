@@ -298,7 +298,9 @@ const mockRepairWorkspaceBindings = vi.fn(async () => ({
   skipped: [],
 }));
 
+const mockRequestHomeStoragePersistence = vi.fn(async () => undefined);
 vi.mock('#filesystem/handle-store.js', () => ({
+  requestHomeStoragePersistence: mockRequestHomeStoragePersistence,
   createWorkspace: mockCreateWorkspaceConnection,
   createNodeWorkspace: mockCreateNodeWorkspace,
   getWorkspaceMetadata: mockGetWorkspaceMetadata,
@@ -2500,6 +2502,7 @@ describe('useProjectManager.createProject', () => {
       });
     });
     expect(mockCompletePending).not.toHaveBeenCalled();
+    expect(mockRequestHomeStoragePersistence).not.toHaveBeenCalled();
   });
 
   /*
@@ -2569,6 +2572,8 @@ describe('useProjectManager.createProject', () => {
   });
 
   it('uses the filesystem authority commit before restoring local resources and clearing the journal', async () => {
+    // An open browser prompt must not delay project creation.
+    mockRequestHomeStoragePersistence.mockImplementationOnce(() => new Promise<void>(() => undefined));
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
     await act(async () =>
       result.current.createProject({
@@ -2601,6 +2606,10 @@ describe('useProjectManager.createProject', () => {
       providerBasePath: pendingCreate.providerBasePath,
     });
     expect(phaseOrder).toEqual(['pending', 'commit', 'locator', 'roots', 'resources', 'complete', 'preference']);
+    expect(mockRequestHomeStoragePersistence).toHaveBeenCalledOnce();
+    expect(mockRequestHomeStoragePersistence.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockCompletePending.mock.invocationCallOrder[0]!,
+    );
     expect(mockGetProjectCreationLocation).not.toHaveBeenCalled();
     expect(mockSetProjectCreationLocation).toHaveBeenCalledWith({ kind: 'home' });
   });

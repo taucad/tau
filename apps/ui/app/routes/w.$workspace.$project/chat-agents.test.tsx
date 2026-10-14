@@ -7,6 +7,8 @@ import type * as AgentProjectionsModule from '#hooks/use-agent-projections.js';
 import { useAgentProjections } from '#hooks/use-agent-projections.js';
 import { AgentList, AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
 
+vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+
 vi.mock('#components/icons/svg-icon.js', () => ({
   SvgIcon: ({ id }: { readonly id: string }) => <span data-testid={`model-icon-${id}`} />,
 }));

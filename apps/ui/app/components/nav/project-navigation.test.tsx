@@ -1,10 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
+import type { SyncFacet } from '@taucad/revisions';
 import type { useProjects } from '#hooks/use-projects.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 
 const mockUseProjects = vi.fn();
+const mockCloudIntent = vi.fn();
+vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: () => mockCloudIntent() as string | undefined }));
 const mockCreateChat = vi.fn();
 const mockIsProjectExpanded = vi.fn();
 const mockSetProjectDisclosure = vi.fn();
@@ -212,6 +215,7 @@ describe('ProjectNavigation', () => {
     search = '';
     pendingLocation = undefined;
     mockUseProjects.mockReturnValue(projectsResult);
+    mockCloudIntent.mockReturnValue(undefined);
     mockIsProjectExpanded.mockImplementation((_projectId: string, active: boolean) => active);
     mockSetProjectDisclosure.mockResolvedValue(undefined);
     mockNavigate.mockResolvedValue(undefined);
@@ -224,6 +228,37 @@ describe('ProjectNavigation', () => {
       liveChatIds: [],
       continuingRuns: [],
     });
+  });
+
+  it('blocks both new-chat paths until the first remote checkout is ready', async () => {
+    mockCloudIntent.mockReturnValue('open');
+    const { rerender } = render(<ProjectNavigation />);
+    const newChat = screen.getByRole('button', { name: 'New chat in One' });
+    expect(newChat).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(newChat);
+    expect(mockCreateChat).not.toHaveBeenCalled();
+    expect(
+      screen.getAllByRole('button', { name: /^New chat$/u }).every((button) => button.hasAttribute('disabled')),
+    ).toBe(true);
+    mockRow.mockImplementation((projectId: string) => ({
+      ...closedRow(projectId),
+      sync: {
+        state: 'backedUp',
+        hasAppliedRemote: true,
+        chats: 'ready',
+        online: true,
+        pendingCount: 0,
+        conflictRef: undefined,
+        error: undefined,
+        reason: undefined,
+      } satisfies SyncFacet,
+    }));
+    rerender(<ProjectNavigation />);
+    expect(newChat).toHaveAttribute('aria-disabled', 'true');
+    mockCloudIntent.mockReturnValue(undefined);
+    rerender(<ProjectNavigation />);
+    expect(newChat).toHaveAttribute('aria-disabled', 'false');
+    expect(screen.queryByRole('button', { name: /^Project sync:/u })).not.toBeInTheDocument();
   });
 
   it('renders one Projects group with every project in deterministic activity order', () => {
@@ -432,15 +467,17 @@ describe('ProjectNavigation', () => {
   });
 
   /* D15: the name dissolves at the row's edge rather than clipping. */
-  it('dissolves the name and overlays the actions without reserving width', () => {
+  it('keeps project actions in flow beside the name', () => {
     render(<ProjectNavigation />);
     const link = screen.getByRole('link', { name: 'Two' });
     const row = link.closest<HTMLElement>('[data-slot=project-trigger]');
     expect(row).toHaveClass('fade-row', 'h-7');
     expect(link.querySelector('.fade-label')).toHaveTextContent('Two');
     expect(row?.querySelector('.truncate')).toBeNull();
-    const actions = screen.getByRole('button', { name: 'More actions for Two' }).closest('.fade-action');
-    expect(actions).toHaveClass('absolute', 'hidden', 'group-hover/row:flex', 'pointer-coarse:flex');
+    const more = screen.getByRole('button', { name: 'More actions for Two' });
+    const newChat = screen.getByRole('button', { name: 'New chat in Two' });
+    expect(more.compareDocumentPosition(newChat)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.queryByRole('button', { name: /^Project sync:/u })).not.toBeInTheDocument();
   });
 
   /* D17: renaming outlines the row, and the Save button stays hidden. */

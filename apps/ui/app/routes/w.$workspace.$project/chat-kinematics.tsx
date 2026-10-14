@@ -1,3 +1,5 @@
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import {
   createContext,
   memo,
@@ -1290,7 +1292,7 @@ function KinematicsContent({
 /** The dockview API of the workbench panel hosting the pane; dockview keeps a hidden panel mounted. */
 type KinematicsHostPanelApi = Pick<DockviewPanelApi, 'isVisible' | 'onDidVisibilityChange'>;
 
-export function KinematicsPanelBody({ panelApi }: { readonly panelApi?: KinematicsHostPanelApi }): React.JSX.Element {
+function KinematicsPanelBodyContent({ panelApi }: { readonly panelApi?: KinematicsHostPanelApi }): React.JSX.Element {
   const { editorRef } = useProject();
   const [filterTerm, setFilterTerm] = useState('');
   const [reveal, setReveal] = useState<KinematicsReveal>();
@@ -1352,5 +1354,14 @@ export function KinematicsPanelBody({ panelApi }: { readonly panelApi?: Kinemati
         <KinematicsContent filterTerm={filterTerm} isShown={isShown} reveal={reveal} />
       </div>
     </div>
+  );
+}
+
+export function KinematicsPanelBody(props: Parameters<typeof KinematicsPanelBodyContent>[0]): React.JSX.Element {
+  const availability = useProjectAvailability();
+  return availability === 'ready' ? (
+    <KinematicsPanelBodyContent {...props} />
+  ) : (
+    <ProjectSyncPlaceholder state={availability} />
   );
 }

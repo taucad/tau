@@ -131,6 +131,28 @@ describe('createProjectManifestChangeObserver', () => {
     expect(report).not.toHaveBeenCalled();
   });
 
+  it('acknowledges first-open readiness only after the mounted manifest is reconciled', async () => {
+    let current = project('Local placeholder');
+    const remote = project('Remote project');
+    const reload = vi.fn();
+    const onSettled = vi.fn();
+    const observer = createProjectManifestChangeObserver({
+      projectId: current.id,
+      getCurrent: () => ({ project: current, issue: undefined }),
+      reload,
+      report: vi.fn(),
+      onSettled,
+    });
+    const readManifest = async (): Promise<Uint8Array<ArrayBuffer>> => serializeProjectManifest(remote);
+    await observer.check({ readManifest });
+    expect(reload).toHaveBeenCalledOnce();
+    expect(onSettled).not.toHaveBeenCalled();
+    current = remote;
+    await observer.check({ readManifest });
+    expect(onSettled).toHaveBeenCalledOnce();
+    observer.dispose();
+  });
+
   it('reloads an externally changed manifest once', async () => {
     const current = project('Current');
     const changed = project('External change');

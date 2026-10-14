@@ -1,3 +1,5 @@
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { XIcon, Box, Eye, EyeOff, Target } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
@@ -142,7 +144,7 @@ function getIsolationAction({
   };
 }
 
-export function ModelPanelBody({ onRequestOpen }: { readonly onRequestOpen?: () => void }): React.JSX.Element {
+function ModelPanelBodyContent({ onRequestOpen }: { readonly onRequestOpen?: () => void }): React.JSX.Element {
   const project = useProject({ enableNoContext: true });
   const [query, setQuery] = useState('');
   const [revealTarget, setRevealTarget] = useState<ModelComponentRevealTarget>();
@@ -1450,4 +1452,13 @@ function ExplorerUnavailableState(): React.JSX.Element {
 
 function ExplorerNoMatchesState(): React.JSX.Element {
   return <PanelEmptyState icon={Box} title='No matching parts' className='min-h-16 break-all' />;
+}
+
+export function ModelPanelBody(props: Parameters<typeof ModelPanelBodyContent>[0]): React.JSX.Element {
+  const availability = useProjectAvailability();
+  return availability === 'ready' ? (
+    <ModelPanelBodyContent {...props} />
+  ) : (
+    <ProjectSyncPlaceholder state={availability} />
+  );
 }

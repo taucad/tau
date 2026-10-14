@@ -1,3 +1,5 @@
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import {
   createContext,
   Fragment,
@@ -1373,6 +1375,7 @@ export const FileEditor = memo(function ({
   let body: ReactNode;
   let resolvedViewer: ResolvedFileViewer | undefined;
   let viewerRequest: Omit<FileViewerRenderRequest, 'renderPane'> | undefined;
+  const availability = useProjectAvailability();
   switch (result.kind) {
     case 'loading': {
       body = <EditorPanePlaceholder label={`Loading ${filePath.split('/').pop() ?? filePath}`} />;
@@ -1387,6 +1390,10 @@ export const FileEditor = memo(function ({
       break;
     }
     case 'orphaned': {
+      if (availability !== 'ready') {
+        body = <ProjectSyncPlaceholder state={availability} />;
+        break;
+      }
       body = (
         <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
           <FileX className='size-12 stroke-1' />
@@ -1507,6 +1514,10 @@ export const FileEditor = memo(function ({
       </div>
     </FileWorkbenchPane>
   );
+
+  if (availability !== 'ready') {
+    return <ProjectSyncPlaceholder state={availability} />;
+  }
 
   if (result.kind === 'binary' || result.kind === 'text') {
     return <RoutedFileViewer viewer={resolvedViewer!} request={viewerRequest!} renderPane={renderPane} />;

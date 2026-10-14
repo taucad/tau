@@ -38,15 +38,19 @@ describe('durable chat message queue', () => {
     await a.enqueue(item('two'));
     await f.open().enqueue(item('three'));
     await a.move('one', undefined);
-    expect((await f.open().read()).items).toEqual([item('two'), item('three'), item('one')]);
+    const reordered1 = await f.open().read();
+    expect(reordered1.items).toEqual([item('two'), item('three'), item('one')]);
     f.client.writeFile.mockRejectedValueOnce(new Error('disk full'));
     await expect(a.move('one', 'three')).rejects.toThrow('disk full');
-    expect((await f.open().read()).items).toEqual([item('two'), item('three'), item('one')]);
+    const reordered2 = await f.open().read();
+    expect(reordered2.items).toEqual([item('two'), item('three'), item('one')]);
     await a.move('one', 'three');
     await a.move('one', 'three');
-    expect((await f.open().read()).items).toEqual([item('two'), item('one'), item('three')]);
+    const reordered3 = await f.open().read();
+    expect(reordered3.items).toEqual([item('two'), item('one'), item('three')]);
     await expect(a.move('one', 'missing')).rejects.toThrow('changed');
-    expect((await f.open().read()).items).toEqual([item('two'), item('one'), item('three')]);
+    const reordered4 = await f.open().read();
+    expect(reordered4.items).toEqual([item('two'), item('one'), item('three')]);
   });
   it('should reject a stale reorder after another client prepares steering', async () => {
     const f = fixture();

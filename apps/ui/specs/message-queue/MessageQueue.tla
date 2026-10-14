@@ -2,7 +2,8 @@
 \* Presentation changes preserve admission, cancellation and command identity.
 \* Explicit reorder changes only the saved queue sequence under delivery exclusion.
 \* Enlarged-text reflow and readable busy labels retain the same disabled guards.
-\* Pending view actions remain serialized until settlement.
+\* Pending view actions remain serialized until settlement. Pointer cancellation,
+\* dropping outside the queue and unsaved inline edits further restrict Reorder.
 \* Failed steering retains its durable cancel identity; a removed item's view-only
 \* action error cannot offer a retry. Admission bridge hashing fences Prepare inputs.
 EXTENDS Naturals, Sequences, FiniteSets, TLC

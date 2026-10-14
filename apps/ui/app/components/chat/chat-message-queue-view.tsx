@@ -123,7 +123,7 @@ export function ChatMessageQueueView({
                     pointer.current = { id: item.id, startY: event.clientY, moved: false };
                   }}
                   onPointerMove={(event) => {
-                    const current = pointer.current;
+                    const { current } = pointer;
                     if (current?.id !== item.id || (Math.abs(event.clientY - current.startY) < 4 && !current.moved)) {
                       return;
                     }
@@ -146,7 +146,7 @@ export function ChatMessageQueueView({
                     }
                   }}
                   onPointerUp={(event) => {
-                    const current = pointer.current;
+                    const { current } = pointer;
                     pointer.current = undefined;
                     setDrag(undefined);
                     event.currentTarget.releasePointerCapture(event.pointerId);

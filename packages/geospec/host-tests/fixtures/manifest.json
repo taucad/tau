@@ -556,6 +556,11 @@
       "byteLength": 1624763,
       "sha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86"
     },
+    "packages/geospec/host-tests/m3-corpus/native-target-expectations-v1.json": {
+      "path": "packages/geospec/host-tests/fixtures/data/abe02dfd61b3cb4aa14aeb64bb180f8b93e092084595e64295b207bc0ee51bef",
+      "byteLength": 5732,
+      "sha256": "abe02dfd61b3cb4aa14aeb64bb180f8b93e092084595e64295b207bc0ee51bef"
+    },
     "packages/geospec/host-tests/m3-corpus/authored-v5-identity-amendment.json": {
       "path": "packages/geospec/host-tests/fixtures/data/0e1de1773cc470afd9b4a1898958a49502881c1e31bd6d39f35199fb9f004c8e",
       "byteLength": 649433,

@@ -9,7 +9,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from 'geospec/assertion-client';
 import { createGeoSpecVitestAdapter } from 'geospec/vitest';
 import { loadM3CorpusProfileV3 } from './profile-v3.mjs';
-import { loadCurrentM3Campaign, requireDefinitionsInBinary, requireEvaluationEnvelope } from './corpus.mjs';
+import {
+  loadCurrentM3Campaign,
+  nativeTargetOf,
+  requireDefinitionsInBinary,
+  requireEvaluationEnvelope,
+} from './corpus.mjs';
 import { fixturePath, locateFixture, readFixture } from '../fixtures/read-fixture.mjs';
 
 const backend = process.env.GEOSPEC_INSTALLED_BACKEND ?? 'native';
@@ -270,8 +275,7 @@ const materializeCampaignRow = (campaignPath, row) => {
 const installedNativeBinding = () => {
   const engineManifestPath = fileURLToPath(import.meta.resolve('geospec-engine/package.json'));
   const engineManifest = JSON.parse(readFileSync(engineManifestPath, 'utf8'));
-  const libc = process.platform === 'linux' ? '-gnu' : '';
-  const name = `geospec-engine-${process.platform}-${process.arch}${libc}`;
+  const name = `geospec-engine-${nativeTargetOf()}`;
   assert.equal(
     engineManifest.optionalDependencies?.[name],
     engineManifest.version,
@@ -291,10 +295,13 @@ const loadDefaultInstalledCampaign = () => {
   if (backend === 'native') {
     engineBinaries.push(installedNativeBinding());
   }
-  const campaign = loadCurrentM3Campaign(backend, requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'), (definitions) => {
-    for (const binary of engineBinaries) {
-      requireDefinitionsInBinary(definitions, readFileSync(binary), binary);
-    }
+  const campaign = loadCurrentM3Campaign(backend, requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'), {
+    requireDefinitions: (definitions) => {
+      for (const binary of engineBinaries) {
+        requireDefinitionsInBinary(definitions, readFileSync(binary), binary);
+      }
+    },
+    nativeTarget: backend === 'native' ? nativeTargetOf() : undefined,
   });
   // The 18 held controls stay out of the installed campaign, as in the v4 selection.
   const ordinary = campaign.rows.filter((row) => row.authority.scope === 'ordinary');
@@ -1126,6 +1133,7 @@ const compareCampaigns = () => {
     schemaVersion: 1,
     taskId: campaign.taskId,
     sourceCorpusFingerprint: campaign.sourceCorpusFingerprint,
+    nativeTargetExpectations: campaign.nativeTargetExpectations ?? null,
     routeFiles: routePaths,
     summary: {
       rows: rows.length,

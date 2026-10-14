@@ -4,9 +4,9 @@
 retained bytes. Original paths inside the documents remain unchanged: they identify
 the historical source, not a requirement for a local Brain or build cache.
 
-The closure contains 136 original paths. Seventeen reuse byte-identical tracked
-fixtures under `packages/geospec-engine/fixtures`; the other 119 resolve to 94 loose
-files under `data/` totalling 22,765,000 bytes. The 27 inputs that lived in the
+The closure contains 137 original paths. Seventeen reuse byte-identical tracked
+fixtures under `packages/geospec-engine/fixtures`; the other 120 resolve to 95 loose
+files under `data/` totalling 22,770,732 bytes. The 27 inputs that lived in the
 compiled engine's source tree (its conformance corpora and OCCT test STEP files)
 moved into `data/` byte for byte when the engine left this repository for
 taucad/geospec. The current M3 campaign names 24 more of the engine's OCCT test STEP
@@ -24,7 +24,10 @@ Membership comes from data-only reads of the M3 corpus/profile and F1 authority
 loaders, plus source-traced independent F2, model STEP/GLB, current/early mesh, and
 continuous campaign input reads. The existing 334-row corpus and 18 continuous
 rows (352 combined), 12 separate continuous budget runs, all original expected
-statuses and metadata promotions remain unchanged. The manifest does not add
+statuses and metadata promotions remain unchanged. Separately,
+`native-target-expectations-v1.json` is a pinned, principal-ruled file that gives the native backend on a listed NAPI target its own status for named rows, bound
+to the unchanged v5 row, claim and recorded operand. Other targets and the mixed
+backend keep the v5 status. The manifest does not add
 runtime test execution or claim native acceptance.
 
 Promotion evidence: M5-CI-FIXTURE-CLOSURE-A13 at source HEAD

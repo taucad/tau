@@ -2,7 +2,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { loadM3Corpus, projectCurrentM3Campaign, requireDefinitionsInBinary } from './corpus.mjs';
+import {
+  loadCurrentM3Campaign,
+  loadM3Corpus,
+  nativeTargetOf,
+  projectCurrentM3Campaign,
+  requireDefinitionsInBinary,
+  selectNativeTargetExpectations,
+} from './corpus.mjs';
 import { readFixture } from '../fixtures/read-fixture.mjs';
 import { loadAuthority } from '../f1-public-a1/authority.mjs';
 
@@ -161,4 +168,132 @@ void test('should bind pinned definitions to the consumed engine binary bytes', 
   assert.throws(() => {
     requireDefinitionsInBinary({ f1: { path: 'f1.rs', sha256: 'D0AF' } }, binary, 'engine.wasm');
   }, /pinned definition identity/u);
+});
+
+const CENTER_OF_MASS = ['family/toHaveCenterOfMass/positive', 'family/toHaveCenterOfMass/negative'];
+const statusesOf = (campaign) => new Map(campaign.rows.map((row) => [row.id, row.expected.status]));
+const acceptDefinitions = (definitions) => {
+  assert.match(definitions.f1.sha256, /^[\da-f]{64}$/u);
+};
+
+void test('should apply the per-target native expectation only on the listed native target', () => {
+  const darwin = loadCurrentM3Campaign('native', undefined, {
+    requireDefinitions: acceptDefinitions,
+    nativeTarget: 'darwin-arm64',
+  });
+  const linux = loadCurrentM3Campaign('native', undefined, {
+    requireDefinitions: acceptDefinitions,
+    nativeTarget: 'linux-x64-gnu',
+  });
+  const darwinStatuses = statusesOf(darwin);
+  const linuxStatuses = statusesOf(linux);
+  assert.deepEqual(
+    CENTER_OF_MASS.map((id) => darwinStatuses.get(id)),
+    ['failed', 'passed'],
+  );
+  assert.deepEqual(
+    CENTER_OF_MASS.map((id) => linuxStatuses.get(id)),
+    ['passed', 'failed'],
+  );
+  assert.equal(darwin.nativeTargetExpectations, null);
+  assert.deepEqual(linux.nativeTargetExpectations, {
+    target: 'linux-x64-gnu',
+    sha256: 'abe02dfd61b3cb4aa14aeb64bb180f8b93e092084595e64295b207bc0ee51bef',
+    rows: CENTER_OF_MASS,
+  });
+  for (const [index, row] of linux.rows.entries()) {
+    const base = darwin.rows[index];
+    assert.deepEqual(
+      { ...row, expected: { ...row.expected, status: null } },
+      { ...base, expected: { ...base.expected, status: null } },
+    );
+    if (!CENTER_OF_MASS.includes(row.id)) {
+      assert.equal(row.expected.status, base.expected.status, row.id);
+    }
+  }
+  for (const target of ['linux-arm64-gnu', 'win32-x64', 'toString']) {
+    assert.deepEqual(
+      statusesOf(
+        loadCurrentM3Campaign('native', undefined, { requireDefinitions: acceptDefinitions, nativeTarget: target }),
+      ),
+      darwinStatuses,
+    );
+  }
+  assert.throws(
+    () => loadCurrentM3Campaign('native', undefined, { requireDefinitions: acceptDefinitions }),
+    /running NAPI target/u,
+  );
+});
+
+void test('should keep the mixed backend on its own expectations for every target', () => {
+  const mixed = loadCurrentM3Campaign('mixed', undefined, { requireDefinitions: acceptDefinitions });
+  const statuses = statusesOf(mixed);
+  assert.deepEqual(
+    CENTER_OF_MASS.map((id) => statuses.get(id)),
+    ['passed', 'failed'],
+  );
+  assert.equal(mixed.nativeTargetExpectations, null);
+  for (const target of ['darwin-arm64', 'linux-x64-gnu']) {
+    const other = loadCurrentM3Campaign('mixed', undefined, {
+      requireDefinitions: acceptDefinitions,
+      nativeTarget: target,
+    });
+    assert.deepEqual(statusesOf(other), statuses);
+    assert.equal(other.nativeTargetExpectations, null);
+  }
+});
+
+void test('should refuse a per-target expectation its operand, claim or base no longer decides', () => {
+  const expectations = JSON.parse(
+    readFixture('packages/geospec/host-tests/m3-corpus/native-target-expectations-v1.json'),
+  );
+  const campaign = projectCurrentM3Campaign(
+    JSON.parse(readFixture('packages/geospec/host-tests/m3-corpus/current-authority-v5.json')),
+  );
+  assert.deepEqual(
+    [...selectNativeTargetExpectations(expectations, campaign, { backend: 'native', nativeTarget: 'linux-x64-gnu' })],
+    [
+      ['family/toHaveCenterOfMass/positive', 'passed'],
+      ['family/toHaveCenterOfMass/negative', 'failed'],
+    ],
+  );
+  for (const change of [
+    (value) => {
+      value.targets['linux-x64-gnu'].rows[0].to = 'failed';
+    },
+    (value) => {
+      value.targets['linux-x64-gnu'].rows[0].from = 'passed';
+    },
+    (value) => {
+      value.targets['linux-x64-gnu'].rows[0].operand[2] = 15.000000000000004;
+    },
+    (value) => {
+      value.targets['linux-x64-gnu'].rows[1].binding.payload.expected.tolerance = 1e-9;
+    },
+    (value) => {
+      value.targets['linux-x64-gnu'].rows[1].binding.polarity = 'positive';
+    },
+    (value) => {
+      value.targets['linux-x64-gnu'].rows[1].binding.primarySha256 = '0'.repeat(64);
+    },
+    (value) => {
+      value.targets['linux-x64-gnu'].rows[1].id = 'family/toHaveMass/negative';
+    },
+    (value) => {
+      value.base.sha256 = '0'.repeat(64);
+    },
+  ]) {
+    const changed = structuredClone(expectations);
+    change(changed);
+    assert.throws(
+      () => selectNativeTargetExpectations(changed, campaign, { backend: 'native', nativeTarget: 'linux-x64-gnu' }),
+      assert.AssertionError,
+    );
+  }
+});
+
+void test('should name the NAPI target as the engine platform packages do', () => {
+  assert.equal(nativeTargetOf('linux', 'x64'), 'linux-x64-gnu');
+  assert.equal(nativeTargetOf('linux', 'arm64'), 'linux-arm64-gnu');
+  assert.equal(nativeTargetOf('darwin', 'arm64'), 'darwin-arm64');
 });

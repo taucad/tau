@@ -105,13 +105,13 @@ const matchesExternal = async (rule: unknown, id: string): Promise<boolean> => {
   return false;
 };
 
-type MainExternals = {
+type ProcessExternals = {
   readonly isExternal: (id: string) => Promise<boolean>;
   /** `externalizeDeps.include` as the config declares it. */
   readonly include: readonly string[];
 };
 
-const resolveMainExternals = async (): Promise<MainExternals> => {
+const resolveProcessExternals = async (processType: 'main' | 'preload' = 'main'): Promise<ProcessExternals> => {
   const electronVite = (await import(
     pathToFileURL(join(appRoot, 'node_modules/electron-vite/dist/index.js')).href
   )) as ElectronViteApi;
@@ -126,22 +126,22 @@ const resolveMainExternals = async (): Promise<MainExternals> => {
       'build',
       'production',
     );
-    const mainConfig = resolved.config?.['main'];
-    if (!mainConfig) {
-      throw new TypeError('electron-vite did not resolve a main config');
+    const processConfig = resolved.config?.[processType];
+    if (!processConfig) {
+      throw new TypeError(`electron-vite did not resolve a ${processType} config`);
     }
     const viteConfig = await vite.resolveConfig(
-      { ...mainConfig, configFile: false, logLevel: 'silent' },
+      { ...processConfig, configFile: false, logLevel: 'silent' },
       'build',
       'production',
     );
     const external = viteConfig.build.rolldownOptions?.external ?? viteConfig.build.rollupOptions?.external;
-    const declared = (mainConfig['build'] as { externalizeDeps?: { include?: readonly string[] } } | undefined)
+    const declared = (processConfig['build'] as { externalizeDeps?: { include?: readonly string[] } } | undefined)
       ?.externalizeDeps?.include;
-    if (!declared) {
+    if (!declared && processType === 'main') {
       throw new TypeError('electron-vite main config declares no externalizeDeps.include');
     }
-    return { isExternal: async (id: string) => matchesExternal(external, id), include: declared };
+    return { isExternal: async (id: string) => matchesExternal(external, id), include: declared ?? [] };
   } finally {
     process.chdir(previousDirectory);
     if (previousNodeEnvironment === undefined) {
@@ -154,10 +154,11 @@ const resolveMainExternals = async (): Promise<MainExternals> => {
 
 describe('electron-vite main externalization', () => {
   it('bundles workspace sources and keeps host/runtime imports external', async () => {
-    const { isExternal, include } = await resolveMainExternals();
+    const { isExternal, include } = await resolveProcessExternals();
     expect(include).toContain('@taucad/geospec-engine-native');
     for (const id of [
       '@taucad/events',
+      '@taucad/types/browser',
       '@taucad/openrscad',
       '@taucad/middleware',
       '@taucad/filesystem',
@@ -175,8 +176,15 @@ describe('electron-vite main externalization', () => {
     }
   }, 60_000);
 
+  it('should bundle the browser contract and validator into the preload', async () => {
+    const { isExternal } = await resolveProcessExternals('preload');
+    expect(await isExternal('@taucad/types/browser')).toBe(false);
+    expect(await isExternal('zod')).toBe(false);
+    expect(await isExternal('electron')).toBe(true);
+  });
+
   it('declares runtime-loaded packages as direct dependencies', async () => {
-    const { include } = await resolveMainExternals();
+    const { include } = await resolveProcessExternals();
     const manifest = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')) as {
       readonly dependencies?: Readonly<Record<string, string>>;
     };

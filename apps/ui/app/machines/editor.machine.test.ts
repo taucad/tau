@@ -46,7 +46,9 @@ type EnsureFocusedChatInput = {
   requestedChatId: string | undefined;
   persistedChatId: string | undefined;
 };
-type EnsureFocusedChatResult = { type: 'focusedChatEnsured'; focusedChatId: string };
+type EnsureFocusedChatResult =
+  | { type: 'focusedChatEnsured'; focusedChatId: string }
+  | { type: 'focusedChatDeferred'; focusedChatId?: undefined };
 
 /**
  * Default `ensureFocusedChatActor` behaviour used by the test factory:
@@ -819,6 +821,22 @@ describe('ready – deferred model materialisation', () => {
 // State: loading.ensuringFocusedChat (load-time invariant)
 // ===========================================================================
 describe('loading.ensuringFocusedChat', () => {
+  it('keeps file operations ready while chat discovery is deferred, then focuses a discovered chat', async () => {
+    let isDiscovered = false;
+    const actor = await startAndLoad({
+      ensureResult: async () =>
+        isDiscovered ? { type: 'focusedChatEnsured', focusedChatId: 'chat_remote' } : { type: 'focusedChatDeferred' },
+    });
+    expect(actor.getSnapshot().matches({ ready: { operation: 'focusedChatDeferred' } })).toBe(true);
+    expect(actor.getSnapshot().context.focusedChatId).toBeUndefined();
+    actor.send({ type: 'openFile', path: 'gear.ts', source: 'user' });
+    expect(actor.getSnapshot().context.openFiles.some((file) => file.path === 'gear.ts')).toBe(true);
+    isDiscovered = true;
+    actor.send({ type: 'retryEnsureFocusedChat' });
+    await waitFor(actor, (snapshot) => snapshot.context.focusedChatId === 'chat_remote');
+    actor.stop();
+  });
+
   it('passes through a valid candidate focusedChatId from loaded state', async () => {
     const ensureCalls: EnsureFocusedChatInput[] = [];
     const actor = createTestActor({

@@ -1,138 +1,266 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Chat } from '@ai-sdk/react';
+import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai';
 
-/**
- * Contract test for the public resumable-stream continuation path used by
- * `chat-session-store.ts`. A continue operation must attach to the admitted
- * transport run without mutating the transcript or creating a fresh submit.
- */
+const completedReply = (id: string): ReadableStream<UIMessageChunk> =>
+  new ReadableStream({
+    start(controller) {
+      controller.enqueue({ type: 'start', messageId: id });
+      controller.enqueue({ type: 'text-start', id: `${id}-text` });
+      controller.enqueue({ type: 'text-delta', id: `${id}-text`, delta: 'Reply' });
+      controller.enqueue({ type: 'text-end', id: `${id}-text` });
+      controller.enqueue({ type: 'finish', finishReason: 'stop' });
+      controller.close();
+    },
+  });
+
+/** A resume attaches to an admitted run, without submitting a new user turn. */
 describe('AI SDK resume-stream contract', () => {
-  it('new Chat instances own a `resumeStream` method', () => {
-    const instance = new Chat({ id: 'chat_contract_test' });
-    expect(Object.hasOwn(instance, 'resumeStream')).toBe(true);
-  });
+  it.each([false, true])(
+    'should preserve the user transcript when an admitted stream exists: %s',
+    async (hasStream) => {
+      const user: UIMessage = { id: 'persisted-user', role: 'user', parts: [{ type: 'text', text: 'Continue' }] };
+      const transport = {
+        sendMessages: vi.fn<ChatTransport<UIMessage>['sendMessages']>(),
+        reconnectToStream: vi.fn(async () => (hasStream ? completedReply('resumed-assistant') : null)),
+      } satisfies ChatTransport<UIMessage>;
+      const chat = new Chat({ id: 'resume-contract', messages: [user], transport });
 
-  it('Chat instance carries a callable `resumeStream`', () => {
-    const instance = new Chat({ id: 'chat_contract_test' });
-    expect(typeof instance.resumeStream).toBe('function');
-  });
+      await chat.resumeStream();
 
-  it('`resumeStream()` returns a Promise without throwing synchronously', async () => {
-    const instance = new Chat({ id: 'chat_contract_test' });
-    let result: Promise<void> | undefined;
-    expect(() => {
-      result = instance.resumeStream();
-    }).not.toThrow();
-    expect(result).toBeInstanceOf(Promise);
-    // Drain the promise so the test runner doesn't see an unhandled rejection.
+      expect(transport.reconnectToStream).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ chatId: 'resume-contract' }),
+      );
+      expect(transport.sendMessages).not.toHaveBeenCalled();
+      expect(chat.messages.filter((message) => message.role === 'user')).toEqual([user]);
+      expect(chat.status).toBe('ready');
+      expect(chat.error).toBeUndefined();
+      expect(chat.messages).toHaveLength(hasStream ? 2 : 1);
+      if (hasStream) {
+        expect(chat.messages.at(-1)).toMatchObject({
+          id: 'resumed-assistant',
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'Reply', state: 'done' }],
+        });
+      }
+    },
+  );
+});
+
+/** An outer request finishing must not retire the response started synchronously by its callback. */
+describe('AI SDK reentrant finish contract', () => {
+  it.each([false, true])('should keep the nested response finishable and stoppable (abort: %s)', async (abort) => {
+    const nestedStream = Promise.withResolvers<{
+      controller: ReadableStreamDefaultController<UIMessageChunk>;
+      signal: AbortSignal | undefined;
+    }>();
+    const finished: Array<{ id: string; isAbort: boolean; isError: boolean }> = [];
+    let nestedRequest: Promise<void> | undefined;
+    let requests = 0;
+    let requestsBeforeFinishReturns = 0;
+    const transport: ChatTransport<UIMessage> = {
+      reconnectToStream: async () => null,
+      sendMessages: async ({ abortSignal }) => {
+        requests += 1;
+        if (requests === 1) {
+          return completedReply('first-assistant');
+        }
+        return new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: 'start', messageId: 'nested-assistant' });
+            abortSignal?.addEventListener(
+              'abort',
+              () => {
+                controller.error(new DOMException('Stopped', 'AbortError'));
+              },
+              { once: true },
+            );
+            nestedStream.resolve({ controller, signal: abortSignal });
+          },
+        });
+      },
+    };
+    const chat = new Chat({
+      id: 'reentrant-contract',
+      transport,
+      onFinish({ message, isAbort, isError }) {
+        finished.push({ id: message.id, isAbort, isError });
+        if (message.id === 'first-assistant') {
+          // Parts bypass asynchronous file conversion, replacing the response before this callback returns.
+          nestedRequest = chat.sendMessage({ parts: [{ type: 'text', text: 'Follow up' }] });
+          requestsBeforeFinishReturns = requests;
+          expect(requests).toBe(2);
+        }
+      },
+    });
+
+    await chat.sendMessage({ text: 'First turn' });
+    const { controller, signal } = await nestedStream.promise;
     try {
-      await result;
-    } catch {
-      // Network/transport rejection is expected in the contract harness.
+      if (abort) {
+        await chat.stop();
+      }
+    } finally {
+      // Drain even a regressed SDK whose outer finish lost the nested abort controller.
+      if (!signal?.aborted) {
+        controller.enqueue({ type: 'finish', finishReason: 'stop' });
+        controller.close();
+      }
+      await nestedRequest;
     }
+
+    expect(requests).toBe(2);
+    expect(requestsBeforeFinishReturns).toBe(2);
+    expect(signal?.aborted).toBe(abort);
+    expect(finished).toEqual([
+      { id: 'first-assistant', isAbort: false, isError: false },
+      { id: 'nested-assistant', isAbort: abort, isError: false },
+    ]);
+    expect(chat.messages.filter((message) => message.role === 'user').map((message) => message.parts)).toEqual([
+      [{ type: 'text', text: 'First turn' }],
+      [{ type: 'text', text: 'Follow up' }],
+    ]);
+    expect(chat.status).toBe('ready');
+    expect(chat.error).toBeUndefined();
   });
 });
 
-/**
- * Source-shape probe for the "preempt clobber" bug documented in
- * `docs/research/chat-followup-message-swallow.md`.
- *
- * AI SDK v6's `Chat.makeRequest` ends with a `finally` block that (a) reads
- * `this.activeResponse.state.message` WITHOUT optional chaining and (b)
- * unconditionally executes `this.activeResponse = void 0` AFTER calling
- * `onFinish`. Together those two facts let an `onFinish` callback that
- * synchronously triggers a nested `makeRequest` get silently broken: the
- * outer finally nulls out the nested run's freshly-assigned
- * `this.activeResponse`, and the nested run's own finally then throws a
- * swallowed `TypeError: Cannot read properties of undefined`.
- *
- * The defensive `queueMicrotask` wrapper in
- * `chat-session-store.ts`'s `dispatchRequest` listener exists solely to
- * dodge this. The wrapper can be removed once upstream AI SDK either:
- *
- *   - adds optional chaining (`this.activeResponse?.state.message`), or
- *   - moves the `this.activeResponse = void 0` reset to BEFORE `onFinish`.
- *
- * The assertions below grep the compiled SDK source so a non-trivial SDK
- * upgrade that fixes either condition flips this test red and signals the
- * maintainer that the workaround can be retired. The grep is intentionally
- * loose (matches the relevant access patterns rather than full whitespace)
- * so minor bundler reformatting doesn't trip a false positive.
- *
- * `require.resolve` is used (instead of `import.meta.resolve` or a hard-coded
- * path) so the test resolves whatever `ai` version pnpm has actually wired
- * into this workspace. The vitest config for `app/services/*.contract.test.ts`
- * runs in the `node` environment so `require` is available.
- */
-describe('AI SDK preempt-clobber source contract', () => {
-  // `createRequire(import.meta.url)` is the ESM-friendly way to ask Node
-  // where pnpm wired up the `ai` package; using `require.resolve` directly
-  // is forbidden by the unicorn/prefer-module rule.
-  const aiEntryPath = createRequire(import.meta.url).resolve('ai');
-  const aiSource = readFileSync(aiEntryPath, 'utf8');
+/** Awaited cancellation drains pending work and prevents stale continuations from reviving a response. */
+describe('AI SDK awaited stop contract', () => {
+  it('should drain a blocked tool callback and its queued update before stop resolves', async () => {
+    const enteredTool = Promise.withResolvers<void>();
+    const releaseTool = Promise.withResolvers<void>();
+    const cancel = vi.fn();
+    const transport = {
+      reconnectToStream: async () => null,
+      sendMessages: vi.fn(
+        async () =>
+          new ReadableStream<UIMessageChunk>({
+            start(controller) {
+              controller.enqueue({ type: 'start', messageId: 'tool-assistant' });
+              controller.enqueue({ type: 'text-start', id: 'text' });
+              controller.enqueue({ type: 'text-delta', id: 'text', delta: 'Before stop' });
+              controller.enqueue({
+                type: 'tool-input-available',
+                toolCallId: 'local-call',
+                toolName: 'local',
+                input: {},
+                dynamic: true,
+              });
+              controller.enqueue({ type: 'text-delta', id: 'text', delta: ' late text' });
+            },
+            cancel,
+          }),
+      ),
+    } satisfies ChatTransport<UIMessage>;
+    const chat = new Chat<UIMessage>({
+      id: 'stop-tool-contract',
+      transport,
+      sendAutomaticallyWhen: () => true,
+      async onToolCall() {
+        enteredTool.resolve();
+        await releaseTool.promise;
+        void chat.addToolOutput({ tool: 'local', toolCallId: 'local-call', output: 'Settled tool' });
+      },
+    });
+    const request = chat.sendMessage({ text: 'Run tool' });
+    await enteredTool.promise;
+    let stopped = false;
+    const stopping = (async () => {
+      await chat.stop();
+      stopped = true;
+    })();
+    try {
+      await Promise.resolve();
+      expect(stopped).toBe(false);
+    } finally {
+      releaseTool.resolve();
+      await Promise.all([stopping, request]);
+    }
 
-  it('Chat.makeRequest still reads `this.activeResponse.state.message` without optional chaining inside the `onFinish` invocation', () => {
-    // Matches the exact failure-mode access pattern from ai@6.0.x makeRequest
-    // finally block:
-    //   message: this.activeResponse.state.message,
-    // The `message:` object-key prefix distinguishes the bug site from
-    // guarded uses of `this.activeResponse.state.message.parts` elsewhere
-    // in the file (those sit behind an `if (this.activeResponse)` check).
-    // If AI SDK adds optional chaining (`this.activeResponse?.state.message`)
-    // or restructures away from this access, this assertion fails and signals
-    // that the `queueMicrotask` workaround in chat-session-store.ts can be
-    // removed.
-    expect(
-      aiSource.includes('message: this.activeResponse.state.message'),
-      'AI SDK upgraded past the preempt-clobber bug; remove the queueMicrotask wrapper in chat-session-store.ts and the matching coverage in chat-session-store.test.ts ("preempt-clobber defense" describe block).',
-    ).toBe(true);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(chat.messages.at(-1)?.parts).toEqual([
+      expect.objectContaining({ type: 'text', text: 'Before stop' }),
+      expect.objectContaining({ type: 'dynamic-tool', state: 'output-available', output: 'Settled tool' }),
+    ]);
+    const afterStop = structuredClone(chat.messages);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(chat.messages).toEqual(afterStop);
+    expect(transport.sendMessages).toHaveBeenCalledOnce();
+    expect(chat.status).toBe('ready');
+    expect(chat.error).toBeUndefined();
   });
 
-  it('Chat.makeRequest still resets `this.activeResponse = void 0` (the trailing clobber)', () => {
-    expect(
-      aiSource.includes('this.activeResponse = void 0'),
-      'AI SDK changed how `this.activeResponse` is reset; re-audit the preempt-clobber assumptions documented in docs/research/chat-followup-message-swallow.md before removing or relaxing the queueMicrotask workaround.',
-    ).toBe(true);
+  it('should invalidate an automatic-send decision that resolves after awaited stop', async () => {
+    const deciding = Promise.withResolvers<void>();
+    const decision = Promise.withResolvers<boolean>();
+    const transport = {
+      reconnectToStream: async () => null,
+      sendMessages: vi.fn(async () => completedReply('automatic-assistant')),
+    } satisfies ChatTransport<UIMessage>;
+    const chat = new Chat({
+      id: 'stop-automatic-contract',
+      transport,
+      sendAutomaticallyWhen: async () => {
+        if (transport.sendMessages.mock.calls.length > 1) {
+          return false;
+        }
+        deciding.resolve();
+        return decision.promise;
+      },
+    });
+    const request = chat.sendMessage({ text: 'First turn' });
+    await deciding.promise;
+    await chat.stop();
+    const afterStop = structuredClone(chat.messages);
+    decision.resolve(true);
+    await request;
+
+    expect(transport.sendMessages).toHaveBeenCalledOnce();
+    expect(chat.messages).toEqual(afterStop);
+    expect(chat.status).toBe('ready');
+    expect(chat.error).toBeUndefined();
   });
 
-  it('the clobber assignment still appears AFTER the `onFinish` invocation in the same finally block (preempt re-entrancy is still exploitable)', () => {
-    // The bug exists only because the clobber runs after onFinish returns.
-    // If AI SDK moves the reset BEFORE the onFinish call, a nested
-    // makeRequest's assignment survives, the nested finally's access
-    // succeeds, and the workaround becomes unnecessary.
-    //
-    // Anchor on the specific bug-site access pattern. The makeRequest
-    // finally block passes `message: this.activeResponse.state.message,` to
-    // `onFinish` -- the `message:` prefix distinguishes it from the
-    // `this.activeResponse.state.message.parts = ...` mutations elsewhere in
-    // the file (which take the activeResponse guard).
-    const accessIndex = aiSource.indexOf('message: this.activeResponse.state.message');
-    expect(
-      accessIndex,
-      'AI SDK changed the shape of the `onFinish` invocation; the dangerous unguarded access may have been removed or the call was restructured.',
-    ).toBeGreaterThan(-1);
+  it('should cancel a pending reconnect without consuming its late response', async () => {
+    const connection = Promise.withResolvers<Awaited<ReturnType<ChatTransport<UIMessage>['reconnectToStream']>>>();
+    const connecting = Promise.withResolvers<AbortSignal | undefined>();
+    const cancel = vi.fn();
+    const user: UIMessage = { id: 'persisted-user', role: 'user', parts: [{ type: 'text', text: 'Continue' }] };
+    const transport = {
+      sendMessages: vi.fn<ChatTransport<UIMessage>['sendMessages']>(),
+      reconnectToStream: vi.fn<ChatTransport<UIMessage>['reconnectToStream']>(async ({ abortSignal }) => {
+        connecting.resolve(abortSignal);
+        return connection.promise;
+      }),
+    } satisfies ChatTransport<UIMessage>;
+    const onFinish = vi.fn();
+    const chat = new Chat({ id: 'stop-reconnect-contract', messages: [user], transport, onFinish });
+    const resuming = chat.resumeStream();
+    const signal = await connecting.promise;
+    const stopping = chat.stop();
+    const wasAborted = signal?.aborted;
+    connection.resolve(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: 'start', messageId: 'stale-assistant' });
+          controller.enqueue({ type: 'text-start', id: 'stale-text' });
+          controller.enqueue({ type: 'text-delta', id: 'stale-text', delta: 'Must not appear' });
+        },
+        cancel,
+      }),
+    );
+    await Promise.all([stopping, resuming]);
 
-    // The finally block that exhibits the bug is small. Look ~800 chars
-    // around the dangerous access for both `this.onFinish` (preceding) and
-    // `this.activeResponse = void 0` (following).
-    const window = aiSource.slice(Math.max(0, accessIndex - 200), accessIndex + 800);
-    const onFinishOffset = window.indexOf('this.onFinish');
-    const clobberOffset = window.indexOf('this.activeResponse = void 0');
-
-    expect(
-      onFinishOffset,
-      'AI SDK restructured the makeRequest finally block; re-audit the preempt-clobber workaround.',
-    ).toBeGreaterThan(-1);
-    expect(
-      clobberOffset,
-      'AI SDK moved the trailing `this.activeResponse = void 0` clobber out of the makeRequest finally block; the preempt-clobber bug is likely gone -- remove the queueMicrotask workaround in chat-session-store.ts.',
-    ).toBeGreaterThan(-1);
-    expect(
-      clobberOffset > onFinishOffset,
-      'AI SDK now resets `this.activeResponse` before invoking `onFinish`; the preempt-clobber re-entrancy bug is gone and the queueMicrotask wrapper in chat-session-store.ts can be removed.',
-    ).toBe(true);
+    expect(wasAborted).toBe(true);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(chat.messages).toEqual([user]);
+    expect(transport.sendMessages).not.toHaveBeenCalled();
+    expect(onFinish).not.toHaveBeenCalled();
+    expect(chat.status).toBe('ready');
+    expect(chat.error).toBeUndefined();
   });
 });

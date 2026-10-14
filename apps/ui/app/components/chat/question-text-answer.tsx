@@ -7,7 +7,6 @@ import { InputGroup, InputGroupTextarea } from '@taucad/ui/components/input-grou
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { DictationButton, DictationFeedback, DictationRecording } from '#components/dictation/dictation-controls.js';
 import { useDictation } from '#components/dictation/use-dictation.js';
-import { chatComposerActionButtonClassName } from '#components/chat/chat-textarea-submit-button.js';
 
 /** Own-words reply. Stop reviews the transcript; Send finishes dictation and submits the final answer. */
 export function QuestionTextAnswer({
@@ -137,10 +136,10 @@ export function QuestionTextAnswer({
               <Button
                 type='button'
                 variant='ghost'
-                size='icon-sm'
+                size='icon-xs'
                 aria-label='Send answer'
                 className={cn(
-                  chatComposerActionButtonClassName,
+                  'primary-action rounded-full',
                   'shrink-0 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
                 )}
                 aria-disabled={!canSend}

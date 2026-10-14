@@ -30,9 +30,10 @@ import { ProjectChatList } from '#components/nav/project-chat-list.js';
 import { sidebarDisclosureButtonClass } from '#components/nav/sidebar-disclosure.styles.js';
 import { toast } from '#components/ui/sonner.js';
 import { StatusMark } from '#components/nav/status-mark.js';
+import { ProjectSyncStatus } from '#components/nav/project-sync-status.js';
+import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import {
   SidebarFailureRow,
-  SidebarRowActions,
   SidebarRowContextMenu,
   SidebarRowLink,
   SidebarRowMenuButton,
@@ -254,6 +255,8 @@ function ProjectNavigationItem({
   readonly onDelete: () => Promise<void>;
 }): React.JSX.Element {
   const { isMobile } = useSidebar();
+  const navigate = useNavigate();
+  const location = useLocation();
   const chatsId = `project-chats-${project.id}`;
   const target = projectUrlOr(project.slugs);
   /* S46's "one coalesced status object per project", in the render tree too
@@ -261,6 +264,16 @@ function ProjectNavigationItem({
    * it, instead of three folds and three subscription trees per row. */
   const row = useProjectSidebarRow(project.id);
   const facts = selectProjectFacts(row, isExpanded);
+  const isCloudPending = useTauCloudIntent(project.id) === 'open';
+  const canCreateChat = Boolean(project.slugs) && !isCloudPending;
+  const openSyncDetails = (): void => {
+    if (!project.slugs) {
+      return;
+    }
+    const parameters = new URLSearchParams(isActive ? location.search : '');
+    parameters.set(searchParameterName.workbench, 'revisions');
+    void navigate(`${projectUrl(project.slugs)}?${parameters.toString()}`);
+  };
   /* D3: a mark sits on the disclosure control; hover or focus returns the
    * chevron, so the control always shows what it does when it is reached. */
   const hasMark = facts.mark !== 'none';
@@ -294,13 +307,18 @@ function ProjectNavigationItem({
   const menuItems: SidebarRowMenuItems = ({ Item, Separator }) => (
     <>
       <Item
-        disabled={!project.slugs}
+        disabled={!canCreateChat}
         onSelect={() => {
-          void onCreateChat();
+          if (canCreateChat) {
+            void onCreateChat();
+          }
         }}
       >
         <SquarePen aria-hidden />
         New chat
+      </Item>
+      <Item disabled={!project.slugs} onSelect={openSyncDetails}>
+        View sync status
       </Item>
       <Item onSelect={onRename}>
         <Pencil aria-hidden />
@@ -409,7 +427,16 @@ function ProjectNavigationItem({
                 isPending={isPending}
                 onClick={onOpen}
               />
-              <SidebarRowActions>
+              <span
+                className='flex shrink-0 items-center'
+                onClick={(event) => {
+                  event.stopPropagation();
+                }}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                }}
+              >
+                <ProjectSyncStatus sync={row.sync} isCloudPending={isCloudPending} onOpenDetails={openSyncDetails} />
                 <SidebarRowMenuButton
                   name={project.name}
                   items={menuItems}
@@ -425,17 +452,25 @@ function ProjectNavigationItem({
                       size='icon'
                       className={sidebarRowButtonClass}
                       aria-label={`New chat in ${project.name}`}
-                      disabled={!project.slugs}
+                      aria-disabled={!canCreateChat}
                       onClick={() => {
-                        void onCreateChat();
+                        if (canCreateChat) {
+                          void onCreateChat();
+                        }
                       }}
                     >
                       <SquarePen aria-hidden className='size-3.5' />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side='right'>New chat</TooltipContent>
+                  <TooltipContent side='bottom'>
+                    {isCloudPending
+                      ? 'New chat — Wait for project files to be ready.'
+                      : project.slugs
+                        ? 'New chat'
+                        : 'New chat — Project address is not ready.'}
+                  </TooltipContent>
                 </Tooltip>
-              </SidebarRowActions>
+              </span>
             </>
           )}
         </div>

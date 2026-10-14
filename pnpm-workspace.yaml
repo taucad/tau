@@ -49,7 +49,7 @@ catalog:
   '@agentclientprotocol/sdk': 1.4.0
   '@agentclientprotocol/claude-agent-acp': 0.70.0
   '@agentclientprotocol/codex-acp': 1.7.0
-  '@ai-sdk/provider-utils': ^4.0.30
+  '@ai-sdk/provider-utils': ^4.0.57
   '@arethetypeswrong/cli': ^0.18.3
   '@aws-sdk/client-s3': ^3.1073.0
   '@aws-sdk/lib-storage': ^3.1073.0
@@ -65,41 +65,41 @@ catalog:
   '@gltf-transform/functions': ^4.5.1
   '@inkjs/ui': ^2.0.0
   '@jscad/modeling': ^2.13.0
-  '@kittycad/lib': ^2.0.48
+  '@kittycad/lib': 2.0.48
   '@langchain/anthropic': ^1.5.0
   '@langchain/cerebras': ^1.0.4
-  '@langchain/core': ^1.2.0
+  '@langchain/core': ^1.2.17
   '@langchain/google-vertexai': ^2.2.0
   '@langchain/langgraph': ^1.4.4
   '@langchain/ollama': ^1.3.0
   '@langchain/openai': ^1.5.1
   '@langchain/xai': ^1.4.3
   '@modelcontextprotocol/ext-apps': 1.7.5
-  '@modelcontextprotocol/sdk': ^1.29.0
+  '@modelcontextprotocol/sdk': ^1.32.1
   '@msgpack/msgpack': ^3.1.3
   '@nestjs/common': ^11.1.27
   '@nestjs/core': ^11.1.27
   '@nestjs/platform-fastify': ^11.2.4
   '@nestjs/terminus': ^11.1.1
   '@nestjs/testing': ^11.1.27
-  '@nx/devkit': 22.7.1
-  '@nx/eslint': 22.7.1
-  '@nx/eslint-plugin': 22.7.1
-  '@nx/js': 22.7.1
-  '@nx/nest': 22.7.1
-  '@nx/node': 22.7.1
-  '@nx/react': 22.7.1
-  '@nx/vite': 22.7.1
-  '@nx/web': 22.7.1
-  '@nx/webpack': 22.7.1
+  '@nx/devkit': 22.7.12
+  '@nx/eslint': 22.7.12
+  '@nx/eslint-plugin': 22.7.12
+  '@nx/js': 22.7.12
+  '@nx/nest': 22.7.12
+  '@nx/node': 22.7.12
+  '@nx/react': 22.7.12
+  '@nx/vite': 22.7.12
+  '@nx/web': 22.7.12
+  '@nx/webpack': 22.7.12
   '@opentelemetry/api': ^1.9.1
-  '@opentelemetry/auto-instrumentations-node': ^0.71.0
-  '@opentelemetry/exporter-logs-otlp-http': ^0.213.0
-  '@opentelemetry/exporter-prometheus': ^0.213.0
-  '@opentelemetry/exporter-trace-otlp-http': ^0.213.0
+  '@opentelemetry/auto-instrumentations-node': ^0.81.0
+  '@opentelemetry/exporter-logs-otlp-http': ^0.223.0
+  '@opentelemetry/exporter-prometheus': ^0.223.0
+  '@opentelemetry/exporter-trace-otlp-http': ^0.223.0
   '@opentelemetry/resources': ^2.8.0
-  '@opentelemetry/sdk-logs': ^0.213.0
-  '@opentelemetry/sdk-node': ^0.213.0
+  '@opentelemetry/sdk-logs': ^0.223.0
+  '@opentelemetry/sdk-node': ^0.223.0
   '@oxc-node/core': ^0.0.35
   buffer: 6.0.3
   playwright: ^1.61.0
@@ -155,25 +155,25 @@ catalog:
   spicey: 0.0.14
   '@taucad/kcl-wasm-lib': 0.1.191
   '@testing-library/jest-dom': 6.6.3
-  '@testing-library/react': 16.2.0
-  '@tiptap/core': ^3.27.1
-  '@tiptap/extension-document': ^3.27.1
-  '@tiptap/extension-hard-break': ^3.27.1
-  '@tiptap/extension-history': ^3.27.1
-  '@tiptap/extension-paragraph': ^3.27.1
-  '@tiptap/extension-placeholder': ^3.27.1
-  '@tiptap/extension-text': ^3.27.1
-  '@tiptap/pm': ^3.27.1
-  '@tiptap/react': ^3.27.1
-  '@tiptap/suggestion': ^3.27.1
-  '@traceloop/instrumentation-langchain': ^0.22.6
+  '@testing-library/react': 16.3.2
+  '@tiptap/core': ^3.30.5
+  '@tiptap/extension-document': ^3.30.5
+  '@tiptap/extension-hard-break': ^3.30.5
+  '@tiptap/extension-history': ^3.30.5
+  '@tiptap/extension-paragraph': ^3.30.5
+  '@tiptap/extension-placeholder': ^3.30.5
+  '@tiptap/extension-text': ^3.30.5
+  '@tiptap/pm': ^3.30.5
+  '@tiptap/react': ^3.30.5
+  '@tiptap/suggestion': ^3.30.5
+  '@traceloop/instrumentation-langchain': ^0.27.0
   '@types/express': ^5.0.0
   '@types/js-yaml': ^4.0.9
   '@types/json-schema': ^7.0.15
   '@types/madge': ^5.0.3
   '@types/node': ~24.0.15
-  '@types/react': 19.0.12
-  '@types/react-dom': 19.0.4
+  '@types/react': 19.2.17
+  '@types/react-dom': 19.2.3
   '@types/semver': ^7.5.8
   '@types/three': ^0.184.1
   '@typescript/native-preview': 7.0.0-dev.20260223.1
@@ -220,25 +220,25 @@ catalog:
   ink: ^6.8.0
   ipaddr.js: 2.4.0
   isbot: ^5.1.43
-  js-yaml: 4.3.0
+  js-yaml: 4.3.2
   jsdom: ~26.0.0
   '@types/jsdom': ^21.1.7
-  katex: ^0.16.47
-  knip: ^6.17.1
+  katex: 0.18.2
+  knip: 6.41.0
   libassimp: ^0.3.0
   libcascade: 3.1.0
-  lighthouse: ^13.4.0
+  lighthouse: ^13.5.0
   lint-staged: ^16.4.0
   lucide-react: ^0.552.0
   madge: ^8.0.0
   manifold-3d: 3.4.1
-  mermaid: ^11.15.0
+  mermaid: ^11.17.2
   # Also an undeclared runtime import of @tscircuit/infgrid-ijump-astar's dist; @taucad/tscircuit owns it so it hoists.
-  nanoid: ^5.1.14
-  netlify-cli: ^25.6.2
-  next: ^16.2.12
+  nanoid: ^5.1.16
+  netlify-cli: ^27.12.0
+  next: ^16.4.0
   next-themes: ^0.4.6
-  nx: 22.7.1
+  nx: 22.7.12
   '@taulabs/openrscad-engine': 0.11.0-beta.4
   oxfmt: ^0.36.0
   oxlint: ^1.80.0
@@ -268,13 +268,13 @@ catalog:
   size-limit: ^12.1.0
   sonner: ^2.0.7
   source-map-explorer: ^2.5.3
-  source-map-js: ^1.2.1
+  source-map-js: ^1.2.2
   strip-literal: ^3.1.0
-  stripe: ^22.3.2
+  stripe: 22.6.2
   shiki: ^3.23.0
   tailwind-merge: ^3.6.0
   tailwindcss: ^4.3.3
-  three: ^0.184.0
+  three: 0.184.0
   tsdown: ^0.22.14
   tslib: ^2.8.1
   tsx: ^4.22.4
@@ -284,18 +284,18 @@ catalog:
   uint8array-extras: ^1.5.0
   unified: ^11.0.5
   unist-util-visit: ^5.1.0
-  vite: 8.0.10
+  vite: 8.0.16
   vite-plugin-mkcert: 2.0.0
   vite-plugin-singlefile: 2.3.3
   vite-plugin-static-copy: ^4.1.1
   vitest: 4.1.11
-  vitest-mock-extended: ^3.1.1
+  vitest-mock-extended: ^4.0.0
   vscode-uri: 3.1.0
   web-vitals: ^5.3.0
-  ws: ^8.21.0
+  ws: ^8.22.0
   isomorphic-git: 1.38.5
   xstate: 6.0.0-alpha.59
-  zod: ^4.4.3
+  zod: 4.4.3
   nanoraster: ^0.6.0
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
   picovoxel: 0.1.0
@@ -303,11 +303,11 @@ catalog:
   postprocessing: 6.39.1
   '@cfworker/json-schema': 4.1.1
   '@standard-schema/spec': 1.1.0
-  ai: 6.0.208
+  ai: 6.0.304
   '@ai-sdk/openai': 3.0.73
   pino-pretty: ^13.1.3
   '@anthropic-ai/sandbox-runtime': 0.0.75
-  '@lhncbc/ucum-lhc': 7.1.9
+  '@lhncbc/ucum-lhc': 7.1.10
   '@json-structure/sdk': 0.7.0
   mqtt: 5.15.2
   basic-ftp: 6.2.1
@@ -321,14 +321,21 @@ catalog:
   '@napi-rs/cli': 3.8.6
   '@parcel/watcher': ^2.6.0
   cheerio: 1.2.0
-  sharp: 0.34.5
+  sharp: 0.35.5
+  '@types/web-app-manifest': 1.0.9
+  '@nx/vitest': 22.7.12
+  happy-dom: ^21.0.1
+  dompurify: 3.4.16
+  postcss: ^8.5.29
+  '@swc-node/register': 1.11.1
+  '@swc/core': 1.15.8
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0
     vite: 7.3.6
   electron-vite8:
     electron-vite: 6.0.0-beta.1
-    vite: 8.0.10
+    vite: 8.0.16
   react-router7:
     '@react-router/dev': 7.18.2
     '@react-router/node': 7.18.2
@@ -338,11 +345,11 @@ catalogs:
     '@react-router/dev': 8.3.0
     '@react-router/node': 8.3.0
     react-router: 8.3.0
-    vite: 8.0.10
+    vite: 8.0.16
   next15:
-    next: 15.5.22
+    next: 15.5.27
   next16:
-    next: 16.3.0
+    next: 16.4.0
 catalogMode: prefer
 minimumReleaseAgeExclude:
   - '@taucad/*'
@@ -417,12 +424,36 @@ patchedDependencies:
   vaul@1.1.2: patches/vaul@1.1.2.patch
   three@0.184.0: patches/three@0.184.0.patch
   '@react-three/fiber@9.6.1': patches/@react-three__fiber@9.6.1.patch
+  monaco-editor@0.55.1: patches/monaco-editor@0.55.1.patch
 overrides:
+  '@ai-sdk/provider-utils@>=4.0.0 <4.0.33': 4.0.57
+  '@esbuild-kit/core-utils>esbuild': 0.28.2
+  '@langchain/cerebras@1.0.4>uuid': 11.1.1
   '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
+  '@react-three/fiber': 9.6.1
+  '@streamdown/math>katex': 0.18.2
+  '@tailwindcss/typography@0.5.20>postcss-selector-parser': 7.1.6
   '@types/express': 'catalog:'
+  '@types/react-dom@>=19.0.0 <20.0.0': 19.2.3
+  '@types/react@>=19.0.0 <20.0.0': 19.2.17
   fastify: 'catalog:'
+  graphics-debug@0.0.100>react-router-dom: 7.18.2
+  graphics-debug@0.0.99>react-router-dom: 7.18.2
+  ipx@3.1.1>sharp: 0.35.5
+  mermaid>dompurify: 3.4.16
+  mermaid>katex: 0.18.2
+  micromark-extension-math>katex: 0.18.2
+  monaco-editor>dompurify: 3.4.16
+  next@15.5.27>postcss: 8.5.29
+  next@15.5.27>sharp: 0.35.5
+  nx@22.7.12>axios: 1.20.0
+  nx@22.7.12>brace-expansion: 5.0.12
+  nx@22.7.12>smol-toml: 1.9.1
+  oxfmt@0.36.0>tinypool: 2.1.2
+  rehype-katex>katex: 0.18.2
   replicad: 'catalog:'
   replicad-opencascadejs: 'catalog:'
+  sockjs@0.3.24>uuid: 11.1.1
   vitest: 'catalog:'
 ignoreWorkspaceRootCheck: true
 pmOnFail: error

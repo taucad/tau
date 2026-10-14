@@ -14,7 +14,7 @@
  */
 
 import { memo, useCallback, useId, useMemo, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { SubmitEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { ChevronDown, CircleAlert, LoaderCircle, Trash2 } from 'lucide-react';
 import type {
@@ -448,7 +448,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     }
   };
 
-  const onBindSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+  const onBindSubmit = async (event: SubmitEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);

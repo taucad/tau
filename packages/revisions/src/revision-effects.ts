@@ -93,6 +93,7 @@ import type {
   BranchRenameActorOutput,
 } from '#branch.machine.js';
 import type { AddCheckoutActorOutput, CheckoutsActors, ListCheckoutsActorOutput } from '#checkouts.machine.js';
+import { chatProjectionConcurrency, settleBounded } from '#chat-projection-pool.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
 import { cleanLargeObjects } from '#lfs.js';
@@ -141,6 +142,8 @@ import type {
   SyncFastForwardActorOutput,
   SyncFetchActorInput,
   SyncFetchActorOutput,
+  SyncProjectRecordsActorInput,
+  SyncProjectRecordsActorOutput,
   SyncIntegrateActorInput,
   SyncMergeActorOutput,
   SyncMovedCheckout,
@@ -4192,8 +4195,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               name !== candidateTrackingRef &&
               !name.startsWith(`${candidateTrackingRef}/`) &&
               !name.startsWith(`${opsRefPrefix}/`) &&
-              (!name.startsWith(`${chatRefPrefix}/`) || syncChats) &&
-              (!name.startsWith('refs/tau/evidence/') || syncLargeExports),
+              !name.startsWith(`${chatRefPrefix}/`) &&
+              !name.startsWith('refs/tau/evidence/'),
           );
         /* Nothing new — this device's own push, echoed back by the stream,
          * included (W13d): every wanted tip is the one already tracked, so the
@@ -4204,30 +4207,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           const tracked = trackedByName.get(remoteTrackingRef(input.remote, name));
           return tracked !== undefined && String(tracked.head) === advertisedHeads.get(name) ? [tracked] : [];
         });
-        let fetched =
-          advertised.length === 0 || wanted.length === 0
-            ? { refs: [] }
-            : current.length === wanted.length
-              ? { refs: current }
-              : await Promise.race([
-                  /* The signal goes *into* the port, so the deadline ends the socket and
-                   * not only this host's wait (review 2 P36). */
-                  port.fetch({ remote: input.remote, signal: abort, refs: wanted }),
-                  deadline,
-                ]);
+        if (wanted.length > 0 && current.length !== wanted.length) {
+          await Promise.race([port.fetch({ remote: input.remote, signal: abort, refs: wanted }), deadline]);
+        }
         signal.throwIfAborted();
         if (!syncLargeExports && (await fetchedProjectSyncsLargeExports(input.remote, input.branch))) {
           syncLargeExports = true;
-          const evidence = advertised
-            .map((entry) => entry.name)
-            .filter((name) => name.startsWith('refs/tau/evidence/'));
-          if (evidence.length > 0) {
-            const evidenceFetched = await Promise.race([
-              port.fetch({ remote: input.remote, signal: abort, refs: evidence }),
-              deadline,
-            ]);
-            fetched = { refs: [...fetched.refs, ...evidenceFetched.refs] };
-          }
         }
 
         /*
@@ -4408,90 +4393,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             /* Every listed branch has a local ref by now; this is what *Remote only* may claim (D93). */
             onRemote: advertisedBranches.has(name as `refs/heads/${string}`),
           }));
-        const context = await chatContext();
-        const recordTasks: Array<Promise<SyncRefOutcome>> = [];
-        if (context !== undefined && syncChats) {
-          for (const ref of fetched.refs) {
-            const chatId = chatIdOfRef(ref.name);
-            if (chatId === undefined) {
-              continue;
-            }
-            recordTasks.push(
-              (async (): Promise<SyncRefOutcome> => {
-                /* Every chat whose files changed is announced, a conflicted record
-                 * included: its segments were written (RV-W7 #5). */
-                const written: string[] = [];
-                try {
-                  const projected = await projectChats({
-                    ...context,
-                    refs: [ref],
-                    signal,
-                    onWritten: (id) => written.push(id),
-                  });
-                  return {
-                    name: chatRefName(chatId),
-                    status: projected.length > 0 ? 'updated' : 'upToDate',
-                    head: ref.head,
-                  };
-                } catch (error) {
-                  return {
-                    name: chatRefName(chatId),
-                    status: 'rejected',
-                    head: ref.head,
-                    reason: error instanceof Error ? error.message : 'This chat could not be restored.',
-                  };
-                } finally {
-                  if (written.length > 0) {
-                    options.onChatsProjected?.(written);
-                  }
-                }
-              })(),
-            );
-          }
-        }
-        const fetchedEvidence = fetched.refs.find(
-          (ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'),
-        );
-        /*
-         * A record the remote has not moved is not restored again (C21, R11).
-         *
-         * `projectEvidence` is preserve-then-replace: it copies whatever is on
-         * disk into `.tau/artifacts/sync-conflicts/` and writes the recorded
-         * bytes over it. Run on every pull that is what it should do for a
-         * record that *changed* — and what it must never do for one that did
-         * not, which is how a device that had already restored an export, and
-         * then edited it, had its own file replaced by the same remote bytes on
-         * the very next pull. The remote-tracking ref this host held before the
-         * fetch is exactly "what I have already applied".
-         */
-        const priorEvidenceHead = trackingBefore.find((entry) => entry.name === fetchedEvidence?.name)?.head;
-        const fetchedEvidenceHead = fetchedEvidence?.head;
-        if (fetchedEvidenceHead !== undefined && String(priorEvidenceHead) === fetchedEvidenceHead) {
-          recordTasks.push(
-            Promise.resolve<SyncRefOutcome>({
-              name: evidenceRefName,
-              status: 'upToDate',
-              head: fetchedEvidenceHead,
-            }),
-          );
-        } else if (syncLargeExports && fetchedEvidence !== undefined) {
-          recordTasks.push(
-            (async (): Promise<SyncRefOutcome> => {
-              try {
-                await projectEvidence([fetchedEvidence], signal);
-                return { name: evidenceRefName, status: 'upToDate', head: fetchedEvidence.head };
-              } catch (error) {
-                return {
-                  name: evidenceRefName,
-                  status: 'rejected',
-                  head: fetchedEvidence.head,
-                  reason: error instanceof Error ? error.message : 'Generated exports could not be restored.',
-                };
-              }
-            })(),
-          );
-        }
-        const records = await Promise.all(recordTasks);
         /* The lease is keyed by the ref this host would *offer*, not by the
          * remote-tracking ref it landed in (P18). */
         const leases = Object.fromEntries(advertised.map((entry) => [entry.name, String(entry.head)]));
@@ -4534,16 +4435,162 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            */
           return relation === 'upToDate' ? 'ahead' : relation;
         })();
+        const recordReferences = advertised.filter(
+          (ref) => ref.name.startsWith(`${chatRefPrefix}/`) || (syncLargeExports && ref.name === evidenceRefName),
+        );
+        const pending = await readPendingQueue();
         return {
           leases,
           integration,
           branches,
-          records,
+          recordProjection: {
+            remote: input.remote,
+            fetchRefs: recordReferences
+              .filter(
+                (ref) =>
+                  String(trackedByName.get(remoteTrackingRef(input.remote, ref.name))?.head) !== String(ref.head),
+              )
+              .map((ref) => ref.name),
+            refs: recordReferences.map((ref) => ({ name: remoteTrackingRef(input.remote, ref.name), head: ref.head })),
+            syncChats,
+            syncLargeExports,
+            priorEvidenceHead: pending.entries.some(
+              (entry) => entry.operation === 'projection' && entry.ref === evidenceRefName,
+            )
+              ? undefined
+              : trackingBefore.find((ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'))
+                  ?.head,
+          },
           ...(advanced.length === 0 ? {} : { advanced }),
           ...(merged.length === 0 ? {} : { merged }),
           ...(conflicts.length === 0 ? {} : { conflicts }),
         };
       }),
+
+      projectRecords: fromAuthorityPromise<SyncProjectRecordsActorOutput, SyncProjectRecordsActorInput>(
+        async ({ input, signal }) => {
+          const { syncChats } = await projectSyncPreferences();
+          const fetchReferences = input.fetchRefs.filter((ref) => syncChats || !ref.startsWith(`${chatRefPrefix}/`));
+          const fetched =
+            fetchReferences.length > 0
+              ? await port.fetch({ remote: input.remote, refs: fetchReferences, signal })
+              : undefined;
+          const references = input.refs.map((ref) => fetched?.refs.find((entry) => entry.name === ref.name) ?? ref);
+          signal.throwIfAborted();
+          const context =
+            syncChats && references.some((ref) => chatIdOfRef(ref.name) !== undefined)
+              ? await chatContext()
+              : undefined;
+          const recordTasks: Array<() => Promise<SyncRefOutcome>> = [];
+          if (context === undefined && syncChats) {
+            for (const ref of references) {
+              const id = chatIdOfRef(ref.name);
+              if (id !== undefined) {
+                recordTasks.push(async () => ({
+                  name: chatRefName(id),
+                  status: 'rejected',
+                  head: ref.head,
+                  reason: 'Chat synchronization could not establish this device’s record identity.',
+                }));
+              }
+            }
+          }
+          if (context !== undefined && syncChats) {
+            for (const ref of references) {
+              const chatId = chatIdOfRef(ref.name);
+              if (chatId === undefined) {
+                continue;
+              }
+              recordTasks.push(async (): Promise<SyncRefOutcome> => {
+                /* Every chat whose files changed is announced, a conflicted record
+                 * included: its segments were written (RV-W7 #5). */
+                const written: string[] = [];
+                try {
+                  const projected = await projectChats({
+                    ...context,
+                    refs: [ref],
+                    signal,
+                    onWritten: (id) => written.push(id),
+                  });
+                  return {
+                    name: chatRefName(chatId),
+                    status: projected.length > 0 ? 'updated' : 'upToDate',
+                    head: ref.head,
+                  };
+                } catch (error) {
+                  return {
+                    name: chatRefName(chatId),
+                    status: 'rejected',
+                    head: ref.head,
+                    reason: error instanceof Error ? error.message : 'This chat could not be restored.',
+                  };
+                } finally {
+                  if (written.length > 0 && !signal.aborted) {
+                    options.onChatsProjected?.(written);
+                  }
+                }
+              });
+            }
+          }
+          const fetchedEvidence = references.find(
+            (ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'),
+          );
+          /*
+           * A record the remote has not moved is not restored again (C21, R11).
+           *
+           * `projectEvidence` is preserve-then-replace: it copies whatever is on
+           * disk into `.tau/artifacts/sync-conflicts/` and writes the recorded
+           * bytes over it. Run on every pull that is what it should do for a
+           * record that *changed* — and what it must never do for one that did
+           * not, which is how a device that had already restored an export, and
+           * then edited it, had its own file replaced by the same remote bytes on
+           * the very next pull. The remote-tracking ref this host held before the
+           * fetch is exactly "what I have already applied".
+           */
+          const { priorEvidenceHead } = input;
+          const fetchedEvidenceHead = fetchedEvidence?.head;
+          if (fetchedEvidenceHead !== undefined && String(priorEvidenceHead) === fetchedEvidenceHead) {
+            recordTasks.push(async () => ({
+              name: evidenceRefName,
+              status: 'upToDate',
+              head: fetchedEvidenceHead,
+            }));
+          } else if (input.syncLargeExports && fetchedEvidence !== undefined) {
+            recordTasks.push(async (): Promise<SyncRefOutcome> => {
+              try {
+                await projectEvidence([fetchedEvidence], signal);
+                return { name: evidenceRefName, status: 'upToDate', head: fetchedEvidence.head };
+              } catch (error) {
+                return {
+                  name: evidenceRefName,
+                  status: 'rejected',
+                  head: fetchedEvidence.head,
+                  reason: error instanceof Error ? error.message : 'Generated exports could not be restored.',
+                };
+              }
+            });
+          }
+          const settled = await settleBounded(recordTasks, chatProjectionConcurrency, async (run) => {
+            signal.throwIfAborted();
+            return run();
+          });
+          const rejected = settled.find((result) => result.status === 'rejected');
+          if (rejected?.status === 'rejected') {
+            throw rejected.reason instanceof Error
+              ? rejected.reason
+              : new Error('Optional records could not be restored.', { cause: rejected.reason });
+          }
+          const records = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
+          return {
+            records,
+            chats: syncChats
+              ? records.some((record) => record.name.startsWith(`${chatRefPrefix}/`) && record.status === 'rejected')
+                ? 'failed'
+                : 'ready'
+              : 'disabled',
+          };
+        },
+      ),
 
       /** A clean checkout takes the remote head; nothing is composed (A2). */
       fastForward: fromAuthorityPromise<SyncFastForwardActorOutput, Readonly<{ remote: string; branch: string }>>(

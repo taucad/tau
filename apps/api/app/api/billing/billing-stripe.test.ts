@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Stripe wire fixtures use provider field names. */
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import StripeClient from 'stripe';
 import type { Stripe } from 'stripe';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   stripeApiVersion,
   cancelStripePaymentIntent,
@@ -80,6 +81,101 @@ async function createFixture(
 }
 
 describe('billing Stripe transport', () => {
+  it('should retain the pinned API version and persisted idempotency key on the wire', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ id: 'cus_contract', object: 'customer' }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    try {
+      const stripe = createBillingStripeClient({ secretKey: 'sk_test_fixture' });
+      const customer = await stripe.customers.create(
+        { name: 'Contract fixture' },
+        { idempotencyKey: 'tau:leg_contract' },
+      );
+
+      expect(customer.id).toBe('cus_contract');
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const [url, init] = fetchSpy.mock.calls[0] ?? [];
+      expect(url).toBe('https://api.stripe.com/v1/customers');
+      const headers = new Headers(init?.headers);
+      expect(headers.get('stripe-version')).toBe('2026-07-29.dahlia');
+      expect(headers.get('idempotency-key')).toBe('tau:leg_contract');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it.each(['@attacker.invalid/v1/customers', '.attacker.invalid/v1/customers', '//attacker.invalid/v1/customers'])(
+    'should reject unsafe request path %s before sending credentials',
+    async (path) => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected network request'));
+      try {
+        const stripe = createBillingStripeClient({ secretKey: 'sk_test_fixture' });
+        await expect(stripe.rawRequest('GET', path)).rejects.toThrow(
+          new Error(`Request path must be a string beginning with a single "/", got: ${JSON.stringify(path)}`),
+        );
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    },
+  );
+
+  it('should reject a webhook signed with an empty secret', () => {
+    const stripe = createBillingStripeClient({ secretKey: 'sk_test_fixture' });
+    const payload = JSON.stringify({
+      id: 'evt_empty_secret',
+      object: 'event',
+      api_version: stripeApiVersion,
+      created: 1,
+      livemode: false,
+      type: 'payment_intent.succeeded',
+      data: { object: { id: 'pi_empty_secret', object: 'payment_intent' } },
+    });
+    const signature = stripe.webhooks.generateTestHeaderString({ payload, secret: '' });
+    const parse = () =>
+      parseVerifiedStripeEvent(stripe, {
+        rawBody: new TextEncoder().encode(payload),
+        signature,
+        secret: '',
+        livemode: false,
+      });
+
+    expect(parse).toThrow(StripeClient.errors.StripeSignatureVerificationError);
+    expect(parse).toThrow('No webhook secret value was provided');
+  });
+
+  it('should keep caller-supplied file metadata from injecting multipart headers', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ id: 'file_fixture', object: 'file' }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    try {
+      const stripe = createBillingStripeClient({ secretKey: 'sk_test_fixture' });
+      const file = await stripe.files.create({
+        purpose: 'dispute_evidence',
+        file: {
+          data: Buffer.from('fixture bytes'),
+          name: 'evidence.txt\r\nX-Injected: filename',
+          type: 'text/plain\r\nX-Injected: content-type',
+        },
+      });
+
+      expect(file.id).toBe('file_fixture');
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const [, init] = fetchSpy.mock.calls[0] ?? [];
+      const body = await new Response(init?.body).text();
+      expect(body).toContain('fixture bytes');
+      expect(body).toContain('filename="evidence.txt X-Injected: filename"');
+      expect(body).toContain('Content-Type: text/plain X-Injected: content-type');
+      expect(body).not.toContain('\r\nX-Injected:');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('rejects non-loopback fixture origins', () => {
     expect(() =>
       createBillingStripeClient({ secretKey: 'sk_test_fixture', fixtureUrl: 'https://stripe.example/' }),

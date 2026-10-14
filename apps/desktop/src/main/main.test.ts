@@ -309,6 +309,7 @@ vi.mock('#main/utility-environment.js', () => ({
     return {};
   }),
 }));
+vi.mock('#main/browser-host.js', () => ({ installBrowserHost: vi.fn() }));
 vi.mock('#main/quick-look.js', () => ({
   createQuickLookController: vi.fn(() => ({ dispose: vi.fn() })),
   removeStaleQuickLookSessions: vi.fn(),

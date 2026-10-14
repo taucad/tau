@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-10-13'
+updated: '2026-10-14'
 related:
   - docs/research/revisions-always-on-sync-charter.md
   - docs/research/git-storage-substrate-charter.md
@@ -241,7 +241,9 @@ Use the project's remote as the only chat sync plane. Include chats when a remot
 
 ### 13. Use Git LFS for large authored objects
 
-Generate `.gitattributes` from the registry for new Tau-authored content. Track new binary formats and files at or above 1 MiB with LFS. Preserve an unchanged imported Git entry's existing blob or LFS pointer representation; do not convert an external repository merely by opening or saving it. A later changed entry follows its reviewed effective attributes, and every generated attribute or representation change appears in the revision delta. Always sync large authored inputs; classify large generated outputs and `thumbnail.webp` as records/evidence and keep them local unless **Sync large exports** is enabled.
+Generate `.gitattributes` from the registry for new Tau-authored content. Track new binary formats and files at or above 1 MiB with LFS. Preserve an unchanged imported Git entry's existing blob or LFS pointer representation; do not convert an external repository merely by opening or saving it. A later changed entry follows its reviewed effective attributes, and every generated attribute or representation change appears in the revision delta. Always sync large authored inputs; classify large generated outputs and `thumbnail.webp` as records/evidence and keep them local unless **Sync large exports** is enabled, except for the bounded catalog preview below.
+
+For a connected Tau Cloud project, permit one representative **saved preview** independently of **Sync large exports**. Derive it from the existing successful thumbnail capture, cap the non-animated WebP at 768 × 576 pixels and 256 KiB, and store it privately beneath the authorized owner’s repository prefix. Require authenticated project read access for every image fetch and write access for replacement. Never make it a public CDN asset, use it as evidence that project files are local/current, or start a kernel/full model download while browsing the library. A project with no capture has no preview. Keep original `thumbnail.webp` and other generated exports under the existing evidence preference. Replace the one preview object rather than accumulating generated versions; return a content hash for its identity and discard account-scoped UI leases on access failure or account change.
 
 Hide LFS terminology from users. Show storage usage against the plan in Sync, surface Git-host LFS limits before first push, and reject an over-quota push atomically with the affected file list. Let `remote.machine` alone own and present that list.
 

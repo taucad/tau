@@ -14,6 +14,7 @@ import {
   externalToolPresentation,
   sanitizeAgentText,
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
+import type { AgentHostLiveBlocks } from '#services/agent-host-event-projection.js';
 import { projectAgentHostEvent } from '#services/agent-host-event-projection.js';
 import { ChatAttachmentDirectoriesContext } from '#components/chat/attachment-preview.js';
 import { classifyActivityPart } from '#utils/assistant-message-activity.js';
@@ -65,7 +66,10 @@ const externalMetadata = { tauInternal: { kind: 'external-tool', origin: 'extern
 const partFromLog = async (
   rows: ReadonlyArray<Extract<AgentLogEvent, { type: 'message.appended' }>['message']>,
 ): Promise<DynamicToolUIPart> => {
-  const chunks = rows.flatMap((message) => [...projectAgentHostEvent({ ...base, type: 'message.appended', message })]);
+  const blocks: AgentHostLiveBlocks = new Map();
+  const chunks = rows.flatMap((message) => [
+    ...projectAgentHostEvent({ ...base, type: 'message.appended', message }, blocks),
+  ]);
   const stream = new ReadableStream<UIMessageChunk>({
     start(controller) {
       for (const chunk of chunks) {
@@ -84,9 +88,10 @@ const partFromLog = async (
 };
 
 const partFromEvents = async (events: readonly AgentLogEvent[]): Promise<DynamicToolUIPart> => {
+  const blocks: AgentHostLiveBlocks = new Map();
   const stream = new ReadableStream<UIMessageChunk>({
     start(controller) {
-      for (const chunk of events.flatMap((event) => [...projectAgentHostEvent(event)])) {
+      for (const chunk of events.flatMap((event) => [...projectAgentHostEvent(event, blocks)])) {
         controller.enqueue(chunk);
       }
       controller.close();
@@ -349,11 +354,11 @@ describe('the external tool-call renderer', () => {
     const user = userEvent.setup();
     const part = await partFromLog(listFilesRows);
     expect(part.title).toBe('List files');
-    /* No `status`: the part's own state is the lifecycle, and the SDK carries a
-     * part's metadata from the call chunk, where the emitter's status is stale. */
+    // Terminal output facts replace transient input facts without losing identity.
     expect(part.toolMetadata).toEqual({
       tau: {
         toolCallId: 'list-1',
+        status: 'completed',
         kind: 'read',
         title: 'List files',
         nativeName: 'listFiles',

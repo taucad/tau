@@ -9,6 +9,7 @@ import { enumParameter, stringParameter } from '#utils/search-parameter.codecs.j
 /** Sections the dialog can show, and the single source of truth for `?settings=`. */
 export const settingsSectionSchema = z.enum([
   'general',
+  'browser',
   'filesystem',
   'account',
   'security',

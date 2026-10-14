@@ -191,3 +191,30 @@ exclusions and aggregate line-only threshold are not reused. The existing
 `packages/geospec-engine/scripts/coverage-source-policy.test.mts` establishes a
 source-exclusion regression check; this inventory additionally checks live bytes,
 new files and frozen coordinate sets.
+
+## Vendored dependency lock adaptation
+
+The Manifold source identity remains upstream commit
+`f3aab1414e5b45037b848624b143d3287d8d3842`. Its original archive and
+`source-manifest.json` selected-file hashes remain unchanged; those hashes describe
+the upstream import, not locally adapted bytes.
+
+The source workspace's `Cargo.lock` is non-executable data in `inventory.json`.
+The security remediation changes only `crossbeam-epoch` 0.9.18 to 0.9.20 and its
+registry checksum, addressing RUSTSEC-2026-0204. Cargo generated the change with:
+
+```sh
+cargo update --manifest-path packages/geospec-engine-native/native/manifold-rust/source/Cargo.toml --package crossbeam-epoch --precise 0.9.20
+```
+
+- Original upstream lock SHA-256: `303c1d6e87add0e261fd11d3d6a531159f5f2401df22618c656339e5057e679f`.
+- Tau lock before this adaptation: `b92bd5a7cdd59cad7206804581235ef178920bfe22bea36d4c2fcd0731205a0c`.
+- Tau lock after this adaptation: `4db7c4c84e237544ed0bb2e03c18a85caea721716bbbbfa2946799915fafbd1d`.
+
+The existing inventory data row pins the resulting bytes and retains its data
+classification. This is a local lock adaptation, not a new upstream revision or
+a coverage qualification. Executable vendor files and owned-source patch spans
+are unchanged. The optional `parallel` feature resolves Rayon and crossbeam;
+the product adapter disables default features, and its locked normal/build tree
+does not resolve either dependency. Validate those scopes separately whenever
+the adapter feature selection changes.

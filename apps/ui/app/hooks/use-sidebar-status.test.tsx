@@ -37,6 +37,7 @@ import type { SnapshotListener } from '#lib/xstate-test.utils.js';
 
 /* The registry and the revision clients are the hooks' two inputs; the chat
  * machines below are real, because the pins are about what they say. */
+vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: () => undefined }));
 vi.mock('#hooks/use-sessions.js', () => ({
   useSessions: vi.fn(),
   useLiveProjectIds: () => Object.keys(fakeRegistry.refs),
@@ -1012,6 +1013,22 @@ describe('use-sidebar-status — pin (R3/R4): the bind key carries what the row 
       first.stop();
       replacement.stop();
     }
+  });
+
+  it('repaints when only the inbound sync phase changes', () => {
+    liveProject('enclosure');
+    revisions('enclosure', { sync: { state: 'backedUp', pullPhase: 'fetching' } });
+    function SyncRow(): React.JSX.Element {
+      const row = useProjectSidebarRow('enclosure');
+      return <span>{row.sync?.pullPhase}</span>;
+    }
+    render(<SyncRow />);
+    expect(screen.getByText('fetching')).toBeInTheDocument();
+    act(() => {
+      revisions('enclosure', { sync: { state: 'backedUp', pullPhase: 'applying' } });
+      notifyRegistry();
+    });
+    expect(screen.getByText('applying')).toBeInTheDocument();
   });
 
   it('rebinds a replaced revision client while its project session stays live', () => {

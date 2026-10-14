@@ -8,7 +8,7 @@ import { kernelLibraries } from '#utils/kernel-libraries.js';
 import { getKernelDependencies, kernelsWithLibraries } from '#utils/kernel.utils.js';
 
 describe('getKernelDependencies', () => {
-  it('should keep renderer metadata identical to every executable kernel', () => {
+  it('should match every kernel without loading executable plugins into the renderer', () => {
     expect(kernelLibraries).toEqual({
       replicad: replicadKernel().builtinDependencies,
       jscad: jscadKernel().builtinDependencies,

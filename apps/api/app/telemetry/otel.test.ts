@@ -1,20 +1,23 @@
 /* eslint-disable @typescript-eslint/naming-convention -- instrumentation names and OTEL attribute names are wire names. */
 import type { IncomingMessage } from 'node:http';
 import type { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import type { NodeSDK } from '@opentelemetry/sdk-node';
+import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
+import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 
-const { instrumentationConfigs, exporterConfigs, sdkResources } = vi.hoisted(() => ({
+const { instrumentationConfigs, exporterConfigs, sdkConfigs } = vi.hoisted(() => ({
   instrumentationConfigs: [] as Array<Record<string, unknown>>,
-  sdkResources: [] as Array<Record<string, unknown>>,
   exporterConfigs: [] as Array<{ withResourceConstantLabels?: RegExp }>,
+  sdkConfigs: [] as Array<ConstructorParameters<typeof NodeSDK>[0]>,
 }));
 
 // Importing otel.ts starts the SDK; stub every exporter and the SDK so only the instrumentation config is observed.
 vi.mock('@opentelemetry/sdk-node', () => ({
   NodeSDK: class {
-    public constructor(config: { resource: { attributes: Record<string, unknown> } }) {
-      sdkResources.push(config.resource.attributes);
+    public constructor(config: ConstructorParameters<typeof NodeSDK>[0]) {
+      sdkConfigs.push(config);
     }
 
     public start(): void {
@@ -101,6 +104,38 @@ describe('OTEL Prometheus exporter', () => {
     vi.stubEnv('FLY_PROCESS_GROUP', group);
     await import('#telemetry/otel.js');
 
-    expect(sdkResources.at(-1)?.['tau.process']).toBe(expected);
+    expect(sdkConfigs.at(-1)?.resource?.attributes['tau.process']).toBe(expected);
+  });
+});
+
+describe('OTEL log export configuration', () => {
+  it('should connect the configured OTLP exporter to the SDK log processor', async () => {
+    vi.resetModules();
+    vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://otel.invalid:4318');
+    try {
+      await import('#telemetry/otel.js');
+
+      const processors = sdkConfigs.at(-1)?.logRecordProcessors;
+      expect(processors).toHaveLength(1);
+      expect(processors?.[0]).toBeInstanceOf(BatchLogRecordProcessor);
+      const options = vi.mocked(BatchLogRecordProcessor).mock.calls.at(-1)?.[0];
+      expect(options?.exporter).toBeInstanceOf(OTLPLogExporter);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+
+  it('should leave log export disabled when no OTLP endpoint is configured', async () => {
+    vi.resetModules();
+    vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', '');
+    try {
+      await import('#telemetry/otel.js');
+
+      expect(sdkConfigs.at(-1)?.logRecordProcessors).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 });

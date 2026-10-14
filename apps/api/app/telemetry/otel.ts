@@ -77,7 +77,7 @@ const sdk = new NodeSDK({
     withResourceConstantLabels: /^(?:service\.name|tau\.process)$/u,
   }),
 
-  logRecordProcessor: hasOtlpEndpoint ? new BatchLogRecordProcessor(new OTLPLogExporter()) : undefined,
+  logRecordProcessors: hasOtlpEndpoint ? [new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() })] : undefined,
 
   instrumentations: [
     new LangChainInstrumentation(),
@@ -85,7 +85,6 @@ const sdk = new NodeSDK({
       '@opentelemetry/instrumentation-fs': { enabled: false },
       '@opentelemetry/instrumentation-dns': { enabled: false },
       '@opentelemetry/instrumentation-net': { enabled: false },
-      '@opentelemetry/instrumentation-fastify': { enabled: false },
       '@opentelemetry/instrumentation-http': {
         ignoreIncomingRequestHook: (request) => {
           const host = request.headers.host ?? '';

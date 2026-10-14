@@ -28,8 +28,10 @@ import {
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
 import { useAtReferenceContext } from '#components/chat/at-reference-context.js';
 import { ContextChip } from '#components/chat/context-chip.js';
+import { ChatPermissionRequest } from '#components/chat/chat-permission-request.js';
+import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { ChatActivityGroup } from '#components/chat/chat-activity-group.js';
-import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
+import { agentApprovalToolName, parseAgentHostApproval } from '#services/agent-host-event-projection.js';
 import { ChatMessageReasoning } from '#routes/w.$workspace.$project/chat-message-reasoning.js';
 import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat-message-context-compaction.js';
@@ -268,11 +270,26 @@ function renderAssistantPart(
     }
 
     case 'dynamic-tool': {
-      // A host's durable interrupt is presented by `ChatApprovalBanner` above
-      // the composer; rendering its projected part here would show the same
-      // request twice.
+      // Pending decisions belong above the composer; their settled record stays inspectable here.
       if (part.toolName === agentApprovalToolName) {
-        return undefined;
+        const approval = parseAgentHostApproval(part.input);
+        const outcome = isRecord(part.output) ? part.output['outcome'] : undefined;
+        if (
+          approval === undefined ||
+          approval.login !== undefined ||
+          part.state !== 'output-available' ||
+          typeof outcome !== 'string'
+        ) {
+          return undefined;
+        }
+        return (
+          <ChatPermissionRequest
+            key={part.toolCallId}
+            approval={approval}
+            name={approval.agentId ? externalAgentDisplayName(approval.agentId) : 'Agent'}
+            outcome={outcome}
+          />
+        );
       }
       const tau = isRecord(part.toolMetadata?.['tau']) ? part.toolMetadata['tau'] : undefined;
       const nativeName = typeof tau?.['nativeName'] === 'string' ? tau['nativeName'] : undefined;

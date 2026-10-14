@@ -1,3 +1,5 @@
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { memo, useCallback } from 'react';
 import { XIcon } from 'lucide-react';
 import { FloatingPanel, FloatingPanelClose } from '#components/ui/floating-panel.js';
@@ -33,6 +35,10 @@ export const FileTreePanelBody = memo(function ({
   readonly shouldHandleReveal?: () => boolean;
   readonly readOnly?: boolean;
 }): React.JSX.Element {
+  const availability = useProjectAvailability();
+  if (availability !== 'ready') {
+    return <ProjectSyncPlaceholder state={availability} />;
+  }
   return (
     <FloatingPanel isOpen={isOpen} side='right' className={className} onOpenChange={onOpenChange}>
       <ChatEditorFileTree

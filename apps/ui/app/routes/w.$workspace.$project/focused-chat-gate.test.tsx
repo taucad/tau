@@ -45,9 +45,17 @@ const buildState = ({
   matches: (target: StateValue) => matchesValue(value, target),
 });
 
-const { mockEditorRefSend, mockState } = vi.hoisted(() => ({
+const { mockEditorRefSend, mockState, syncNow, chatSync } = vi.hoisted(() => ({
   mockEditorRefSend: vi.fn(),
+  syncNow: vi.fn(),
+  chatSync: { state: 'loading' },
   mockState: { current: undefined as unknown },
+}));
+
+vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+vi.mock('#hooks/use-revision-status.js', () => ({
+  useRevisionStatus: () => ({ sync: { chats: chatSync.state } }),
+  useRevisionCommands: () => ({ syncNow }),
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -120,7 +128,23 @@ describe('FocusedChatErrorPanel', () => {
 
 describe('ChatHistoryGate', () => {
   beforeEach(() => {
+    chatSync.state = 'loading';
+    syncNow.mockClear();
     mockEditorRefSend.mockClear();
+  });
+
+  it('should retry failed chat discovery without hiding available project files', () => {
+    chatSync.state = 'failed';
+    mockState.current = buildState({ value: { ready: { operation: 'idle' } } });
+    render(
+      <ChatHistoryGate>
+        <div>Chat content</div>
+      </ChatHistoryGate>,
+    );
+    expect(screen.getByText('Couldn’t load chat history')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(syncNow).toHaveBeenCalledOnce();
+    expect(screen.queryByText('Chat content')).not.toBeInTheDocument();
   });
 
   it('renders the error panel when ensure has rejected (focusedChatUnresolved + error)', () => {
@@ -141,7 +165,7 @@ describe('ChatHistoryGate', () => {
     expect(screen.getByText('worker offline')).toBeDefined();
   });
 
-  it('renders the ensuring skeleton while ensureFocusedChatActor is in flight (load-time)', () => {
+  it('shows chat discovery while ensureFocusedChatActor is in flight (load-time)', () => {
     mockState.current = buildState({
       value: { loading: 'ensuringFocusedChat' },
       focusedChatId: undefined,
@@ -153,11 +177,11 @@ describe('ChatHistoryGate', () => {
       </ChatHistoryGate>,
     );
 
-    expect(screen.getByTestId('chat-pane-skeleton-ensuring')).toBeDefined();
+    expect(screen.getByText('Loading chat history')).toBeDefined();
     expect(screen.queryByTestId('chat-pane-child')).toBeNull();
   });
 
-  it('renders the ensuring skeleton while ensureFocusedChatActor is in flight (runtime)', () => {
+  it('shows chat discovery while ensureFocusedChatActor is in flight (runtime)', () => {
     mockState.current = buildState({
       value: { ready: { operation: 'ensuringFocusedChat' } },
       focusedChatId: undefined,
@@ -169,7 +193,7 @@ describe('ChatHistoryGate', () => {
       </ChatHistoryGate>,
     );
 
-    expect(screen.getByTestId('chat-pane-skeleton-ensuring')).toBeDefined();
+    expect(screen.getByText('Loading chat history')).toBeDefined();
   });
 
   it('renders children directly (no provider mount) when ready and not ensuring', () => {
@@ -193,6 +217,36 @@ describe('ChatHistoryGate', () => {
 });
 
 describe('ChatInterfaceSessionGate', () => {
+  it('should open the model while chat discovery is pending, then mounts the discovered session', () => {
+    mockState.current = buildState({ value: { ready: { operation: 'idle' } } });
+    const content = (
+      <ChatInterfaceSessionGate fallback={<div data-testid='session-gate-fallback' />}>
+        <div data-testid='model-pane'>Model controls</div>
+        <ChatHistoryGate>
+          <div data-testid='chat-pane-child'>Chat history</div>
+        </ChatHistoryGate>
+      </ChatInterfaceSessionGate>
+    );
+    const { rerender } = render(content);
+    expect(screen.getByTestId('model-pane')).toBeInTheDocument();
+    expect(screen.getByText('Loading chat history')).toBeInTheDocument();
+    expect(screen.queryByTestId('active-chat-provider')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('session-gate-fallback')).not.toBeInTheDocument();
+    mockState.current = buildState({ value: { ready: { operation: 'idle' } }, focusedChatId: 'discovered-chat' });
+    rerender(
+      <ChatInterfaceSessionGate fallback={<div data-testid='session-gate-fallback' />}>
+        <div data-testid='model-pane'>Model controls</div>
+        <ChatHistoryGate>
+          <div data-testid='chat-pane-child'>Chat history</div>
+        </ChatHistoryGate>
+      </ChatInterfaceSessionGate>,
+    );
+    expect(screen.getByTestId('active-chat-provider').dataset['chatId']).toBe('discovered-chat');
+    expect(screen.getByTestId('model-pane')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-pane-child')).toBeInTheDocument();
+    expect(screen.queryByText('Loading chat history')).not.toBeInTheDocument();
+  });
+
   it('mounts <ActiveChatProvider> with the focused chat id when one is set', () => {
     mockState.current = buildState({
       value: { ready: { operation: 'idle' } },

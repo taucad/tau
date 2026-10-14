@@ -9,9 +9,4 @@
  * @module
  */
 
-export {
-  canonicalSkillsDirectory,
-  fingerprintSkillContent,
-  mergeSkillMetadata,
-  parseSkillFrontmatter,
-} from '@taucad/agent-tools/skills';
+export { mergeSkillMetadata, parseSkillFrontmatter } from '@taucad/agent-tools/skills';

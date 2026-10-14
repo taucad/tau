@@ -100,6 +100,7 @@ import type {
 import type { SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { RevisionPortError } from '#revision-port.js';
+import { revisionId } from '#algorithms/index.js';
 import {
   createFakeCallbackActors,
   createFakeParent,
@@ -168,6 +169,7 @@ const start = (
     readRemote: effects.actor('readRemote'),
     push: effects.actor('push'),
     fetch: effects.actor('fetch'),
+    projectRecords: effects.actor('projectRecords'),
     fastForward: effects.actor('fastForward'),
     merge: effects.actor('merge'),
     connectivity: holds.actor('connectivity'),
@@ -227,6 +229,126 @@ const openCleanly = async (harness: Harness): Promise<void> => {
 const pushResult = (...outcomes: readonly SyncRefOutcome[]): SyncPushActorOutput => ({ refs: outcomes });
 
 describe('syncMachine', () => {
+  it('keeps authored readiness pending past the checking window and acknowledges apply before records settle', async () => {
+    const harness = start();
+    try {
+      await vi.waitFor(() => {
+        expect(harness.effects.running('fetch')).toBe(1);
+      });
+      harness.clock.advance(3001);
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+        pullPhase: 'fetching',
+        hasAppliedRemote: false,
+        chats: 'loading',
+      });
+      harness.effects.settle('fetch', {
+        output: {
+          leases: {},
+          integration: 'fastForward',
+          recordProjection: {
+            remote: 'tau',
+            fetchRefs: [chatRef],
+            refs: [{ name: 'refs/remotes/tau/tau/chats/c1', head: revisionId('chat-head') }],
+            // A pre-apply preference cannot confirm chats are disabled after apply.
+            syncChats: false,
+            syncLargeExports: false,
+          },
+        } satisfies SyncFetchActorOutput,
+      });
+      await vi.waitFor(() => {
+        expect(harness.effects.running('fastForward')).toBe(1);
+      });
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+        pullPhase: 'applying',
+        hasAppliedRemote: false,
+      });
+      harness.effects.settle('fastForward', { output: { checkoutId: 'live', revisionId: 'r1', treeId: 'tree1' } });
+      await vi.waitFor(() => {
+        expect(harness.effects.running('projectRecords')).toBe(1);
+      });
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+        pullPhase: 'records',
+        hasAppliedRemote: true,
+        chats: 'loading',
+      });
+      harness.clock.advance(7000);
+      await vi.waitFor(() => {
+        expect(harness.effects.running('writePending')).toBe(1);
+      });
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({ hasAppliedRemote: true, chats: 'failed' });
+      expect(harness.effects.inputsFor('writePending').at(-1)).toMatchObject({
+        record: { entries: [expect.objectContaining({ ref: chatRef, operation: 'projection' })] },
+      });
+      harness.effects.settle('projectRecords', { output: { records: [], chats: 'disabled' } });
+      await Promise.resolve();
+      expect(selectSyncFacet(harness.actor.getSnapshot()).chats).toBe('failed');
+      harness.effects.settle('writePending', { output: undefined });
+      await vi.waitFor(() => {
+        expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+      });
+      harness.actor.send({ type: 'remoteDisconnected' });
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({ hasAppliedRemote: false, chats: 'unknown' });
+    } finally {
+      harness.stop();
+    }
+  });
+
+  it('acknowledges a valid empty remote and independently reports disabled chats', async () => {
+    const harness = start();
+    try {
+      await settleWhenRunning(harness.effects, 'fetch', {
+        output: {
+          leases: {},
+          integration: 'upToDate',
+          recordProjection: { remote: 'tau', fetchRefs: [], refs: [], syncChats: false, syncLargeExports: false },
+        } satisfies SyncFetchActorOutput,
+      });
+      await vi.waitFor(() => {
+        expect(harness.effects.running('projectRecords')).toBe(1);
+      });
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({ hasAppliedRemote: true, chats: 'loading' });
+      harness.effects.settle('projectRecords', { output: { records: [], chats: 'disabled' } });
+      await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+      await vi.waitFor(() => {
+        expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+      });
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+        hasAppliedRemote: true,
+        chats: 'disabled',
+        pullPhase: 'idle',
+      });
+      harness.actor.send({ type: 'remoteConnected', remote: 'another' });
+      expect(selectSyncFacet(harness.actor.getSnapshot()).hasAppliedRemote).toBe(false);
+    } finally {
+      harness.stop();
+    }
+  });
+
+  it('ignores the former remote’s late pull answer after switching remote generation', async () => {
+    const harness = start();
+    try {
+      await vi.waitFor(() => {
+        expect(harness.effects.running('fetch')).toBe(1);
+      });
+      harness.actor.send({ type: 'remoteConnected', remote: 'another' });
+      await vi.waitFor(() => {
+        expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
+      });
+      harness.effects.settle('fetch', { output: { leases: {}, integration: 'upToDate' } });
+      await Promise.resolve();
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+        hasAppliedRemote: false,
+        pullPhase: 'fetching',
+      });
+      harness.effects.settle('fetch', { output: { leases: {}, integration: 'upToDate' } });
+      await vi.waitFor(() => {
+        expect(selectSyncFacet(harness.actor.getSnapshot()).hasAppliedRemote).toBe(true);
+      });
+    } finally {
+      harness.stop();
+    }
+  });
+
   it('row 1: a project with no remote schedules nothing', async () => {
     const harness = start({ remote: undefined });
 
@@ -315,6 +437,26 @@ describe('syncMachine', () => {
     });
     expect(harness.actor.getSnapshot().context.leases).toEqual({ [chatRef]: 'remote-chat-2' });
 
+    harness.stop();
+  });
+
+  it('resets readiness for a new remote without abandoning an in-flight push or queue write', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.actor.send({ type: 'remoteConnected', remote: 'other' });
+    expect(harness.actor.getSnapshot().matches('pushing')).toBe(true);
+    expect(selectSyncFacet(harness.actor.getSnapshot()).hasAppliedRemote).toBe(false);
+    harness.effects.settle('push', { output: pushResult() });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+    expect(harness.effects.inputsFor('fetch').at(-1)).toMatchObject({ remote: 'other' });
+    expect(selectSyncFacet(harness.actor.getSnapshot()).hasAppliedRemote).toBe(false);
     harness.stop();
   });
 
@@ -1355,6 +1497,7 @@ describe('syncMachine', () => {
       }),
       push: effects.actor('push'),
       fetch: effects.actor('fetch'),
+      projectRecords: effects.actor('projectRecords'),
       fastForward: effects.actor('fastForward'),
       merge: effects.actor('merge'),
       connectivity: holds.actor('connectivity'),
@@ -1987,6 +2130,16 @@ describe('syncMachine', () => {
           type: `xstate.done.actor.${fetchInvoke}`,
           output: { leases: { [mainRef]: 'remote-head' }, integration } satisfies SyncFetchActorOutput,
         })),
+        {
+          type: `xstate.done.actor.${fetchInvoke}`,
+          output: {
+            leases: {},
+            integration: 'upToDate',
+            recordProjection: { remote: 'tau', fetchRefs: [], refs: [], syncChats: true, syncLargeExports: false },
+          } satisfies SyncFetchActorOutput,
+        },
+        { type: 'xstate.done.actor.0.sync.opening.projectingRecords', output: { records: [], chats: 'ready' } },
+        { type: 'xstate.error.actor.0.sync.opening.projectingRecords', error: new Error('record failed') },
         { type: `xstate.error.actor.${fetchInvoke}`, error: new Error('offline') },
         {
           type: `xstate.done.actor.${fastForwardInvoke}`,

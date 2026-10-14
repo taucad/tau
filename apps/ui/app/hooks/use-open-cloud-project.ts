@@ -6,12 +6,14 @@
  * predicate as a value — a heavy import here would be a heavy import there.
  */
 
+import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { projectLibraryUrl, projectUrl } from '#utils/project-url.utils.js';
 import { toast } from '#components/ui/sonner.js';
+import { tauCloudIntent, withNamedLock } from '#hooks/use-cloud-projects.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import type { CreateProjectOptions } from '#hooks/use-project-manager.js';
 
@@ -61,7 +63,7 @@ export const cloudProjectStub = (entry: CloudProject): CreateProjectOptions => (
  */
 export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) => {
   const { projects } = useProjects({ includeDeleted: true });
-  const { createProject } = useProjectManager();
+  const { createProject, getProjects } = useProjectManager();
   const navigate = useNavigate();
 
   return useCallback(
@@ -83,13 +85,36 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
         await navigate(projectUrl(held.slugs));
         return;
       }
-      const created = await createProject(cloudProjectStub(entry));
+      const created = await withNamedLock(`tau:open-cloud-project:${entry.id}`, async () => {
+        const heldProjects = await getProjects({ includeDeleted: true });
+        const current = heldProjects.find((project) => project.manifest.id === entry.id);
+        if (current?.library.deletedAt !== undefined) {
+          throw new Error('Restore this project from Trash before opening it.');
+        }
+        if (current?.slugs !== undefined) {
+          return { slugs: current.slugs };
+        }
+        const previous = tauCloudIntent.get(entry.id);
+        tauCloudIntent.set(entry.id, 'open');
+        try {
+          return await createProject(cloudProjectStub(entry));
+        } catch (error) {
+          // Creation can fail after persisting its root. Preserve the pending marker
+          // so the next open never treats that partial stub as a usable checkout.
+          const mayBeMaterialized = await getProjectFileSystemConfig(entry.id).then(
+            (config) => config !== undefined,
+            () => true,
+          );
+          tauCloudIntent.set(entry.id, mayBeMaterialized ? 'open' : previous);
+          throw error;
+        }
+      });
       /* The library owns the root file-manager worker, while the project route
          owns a project-scoped worker. Carry the gesture across navigation so
          the owning worker records and opens the remote; sending it here loses
          the command when the project client replaces the root client. */
-      await navigate(`${projectUrl(created.slugs)}?cloudOpen=tau`, { state: { openFromTauCloud: true } });
+      await navigate(projectUrl(created.slugs));
     },
-    [createProject, navigate, projects],
+    [createProject, getProjects, navigate, projects],
   );
 };

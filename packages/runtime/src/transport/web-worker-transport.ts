@@ -55,9 +55,6 @@ import { webWorkerClientOptionsSchema } from '#transport/web-worker-transport.sc
 import { webWorkerId } from '#transport/_internal/web-worker-id.js';
 import { webWorkerClient } from '#transport/web-worker-client.js';
 
-export type { WebWorkerLike, WebWorkerTransportOptions } from '#transport/web-worker-client.js';
-export type { WebWorkerHostOptions } from '#transport/web-worker-host.js';
-
 /**
  * Bundled web-worker client transport plugin (`webWorkerTransport`).
  *

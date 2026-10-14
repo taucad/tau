@@ -44,6 +44,8 @@ jobs:
       api: ${{ steps.plan.outputs.api }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
+      browser: ${{ steps.plan.outputs.browser }}
+      browser-projects: ${{ steps.plan.outputs.browser-projects }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -83,6 +85,7 @@ jobs:
           api=$(pnpm nx show projects --affected --projects tag:scope:api --json | tail -1)
           size=$(pnpm nx show projects --affected --with-target size --json | tail -1)
           formal=$(pnpm nx show projects --affected --with-target formal --json | tail -1)
+          browser=$(pnpm nx show projects --affected --projects tag:ci:browser --with-target verify-browser --json | tail -1)
           echo "Affected apps: $apps"
           echo "Affected tag:scope:api: $api"
           echo "Affected with a size target: $size"
@@ -102,6 +105,7 @@ jobs:
           done
           echo "Staging deploys: $deploy_apps"
           {
+            echo "browser-projects=$browser"
             echo "apps<<EOF"
             echo "$apps"
             echo "EOF"
@@ -109,7 +113,7 @@ jobs:
             echo "$deploy_apps"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          for lane in "api=$api" "size=$size" "formal=$formal"; do
+          for lane in "api=$api" "size=$size" "formal=$formal" "browser=$browser"; do
             if [ "${lane#*=}" = '[]' ]; then
               echo "${lane%%=*}=false" >> "$GITHUB_OUTPUT"
             else
@@ -290,10 +294,53 @@ jobs:
         if: always()
         run: pnpm nx run scripts:validate-workspace-root
 
-  # The required check. It passes only when the plan and every affected lane passed.
+  browser:
+    name: Browser, accessibility and Lighthouse
+    needs: plan
+    if: needs.plan.outputs.browser == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      WWW_LAUNCH: 'true'
+      WWW_ORIGIN: https://tau.new
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Use the pinned browser for Lighthouse
+        run: node --input-type=module -e "import { chromium } from 'playwright'; console.log('CHROME_PATH=' + chromium.executablePath())" >> "$GITHUB_ENV"
+      - name: Verify affected browser applications
+        env:
+          BROWSER_PROJECTS: ${{ needs.plan.outputs.browser-projects }}
+        run: |
+          projects=$(jq -r 'join(",")' <<< "$BROWSER_PROJECTS")
+          test -n "$projects"
+          pnpm nx run-many -t verify-browser --projects "$projects" --parallel=1
+      - name: Package the marketing SSR function
+        if: contains(fromJSON(needs.plan.outputs.apps), 'www')
+        working-directory: apps/www
+        run: |
+          "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" functions:build \
+            --src "$GITHUB_WORKSPACE/apps/www/.netlify/v1/functions" \
+            --functions "$GITHUB_WORKSPACE/out/reports/www/functions"
+      - name: Upload browser and Lighthouse evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-evidence
+          path: out/reports/
+          retention-days: 14
+
+  # The required check. It passes only when the plan and every affected lane passed, and the
+  # browser lane too when this run needed it.
   affected:
     name: Run affected tasks
-    needs: [plan, affected-lane]
+    needs: [plan, affected-lane, browser]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -301,9 +348,12 @@ jobs:
         env:
           PLAN_RESULT: ${{ needs.plan.result }}
           LANES_RESULT: ${{ needs.affected-lane.result }}
+          BROWSER_REQUIRED: ${{ needs.plan.outputs.browser }}
+          BROWSER_RESULT: ${{ needs.browser.result }}
         run: |
           test "$PLAN_RESULT" = success
           test "$LANES_RESULT" = success
+          if [ "$BROWSER_REQUIRED" = true ]; then test "$BROWSER_RESULT" = success; fi
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
   # of every affected project with a `formal` target. A known counterexample is an
@@ -835,11 +885,12 @@ jobs:
 
   deploy-www-staging:
     name: Deploy www (Staging)
-    needs: [workspace, affected-lane, plan]
+    needs: [workspace, affected-lane, plan, browser]
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
       needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'www') &&
-      needs.workspace.result == 'success' && needs.affected-lane.result == 'success'
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
+      (needs.plan.outputs.browser != 'true' || needs.browser.result == 'success')
     permissions:
       contents: read
       actions: read

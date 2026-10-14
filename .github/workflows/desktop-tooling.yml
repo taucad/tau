@@ -25,11 +25,13 @@ jobs:
     name: Typecheck runner (${{ matrix.runner }})
     strategy:
       fail-fast: false
-      # A run Dependabot triggered (each lockfile bump) requests no macOS runner from the
-      # shared pool; a maintainer's push or re-run, and every dispatch, keeps both macOS legs.
+      # A pull request, from any actor, requests no macOS runner from the shared pool; it
+      # runs the Linux and Windows legs only. macOS portability runs by dispatch: dispatch
+      # this workflow on the branch before a desktop release, and after a change to the
+      # compiler runner, tsgo plugin or Nx setup it exercises. A dispatch runs all four legs.
       matrix:
         runner: >-
-          ${{ github.event_name == 'pull_request' && github.triggering_actor == 'dependabot[bot]'
+          ${{ github.event_name == 'pull_request'
           && fromJSON('["ubuntu-24.04", "windows-2025"]')
           || fromJSON('["ubuntu-24.04", "windows-2025", "macos-15", "macos-15-intel"]') }}
     runs-on: ${{ matrix.runner }}

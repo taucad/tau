@@ -2958,12 +2958,8 @@ export class ChatSessionStore {
     if (run !== undefined && present !== 'none' && (present !== 'open' || opensRun(phase) || phase === 'paused')) {
       this.#presentRun(session, { runId: run.runId, phase, reason: selectRunFailure(projection, run.runId) });
     }
-    if (
-      session.watchedRunId !== undefined &&
-      session.watchedRunId === run?.runId &&
-      !opensRun(phase) &&
-      phase !== 'paused'
-    ) {
+    if (session.watchedRunId !== undefined && session.watchedRunId === run?.runId && !opensRun(phase)) {
+      // The SDK stream closes on pause; ACP can continue the same attempt after approval.
       session.watch?.stop();
       session.watch = undefined;
       session.watchedRunId = undefined;

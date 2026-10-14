@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Grok configuration keys retain their vendor wire names. */
 /**
  * One *real* turn through each pinned ACP adapter, on the machine running it.
  *
@@ -7,9 +8,9 @@
  * exists, whether the user's own CLI login reaches the vendor at all. Those only
  * fail against the real thing, and they fail silently in production.
  *
- * It spends the operator's own Codex and Claude quota, so it is opt-in twice
+ * It spends the operator's own selected agent quota, so it is opt-in twice
  * over: its own Nx target (`nx run host:test:acp-live`) sets `TAU_ACP_LIVE`, and
- * the suite still skips unless both adapters resolve and both CLIs answer.
+ * the suite still skips unless selected adapters resolve and their CLIs answer.
  */
 
 import { access, chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
@@ -279,7 +280,7 @@ describe.skipIf(!liveEnabled)('a live ACP turn', () => {
         messages
           .filter((message) => message.role === 'assistant')
           .map((message) => textOf(message))
-          .at(-1) ?? '',
+          .findLast((text) => text !== '') ?? '',
       ).toMatch(/10|ten/iu);
 
       /* The shared tool vocabulary, not an external one (N11): whatever the
@@ -310,118 +311,136 @@ describe.skipIf(!liveEnabled)('a live ACP turn', () => {
 
 const codexAdapter = adapters.find((adapter) => adapter.id === 'codex');
 
-describe.skipIf(!liveEnabled || codexAdapter === undefined)('live Codex screenshot carrier', () => {
-  it('opens all six persisted MCP images through the installed ACP client', async () => {
-    if (!codexAdapter) {
-      throw new Error('The selected Codex adapter is unavailable.');
-    }
-    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-capture-'));
-    roots.push(workspaceRoot);
-    const views = ['front', 'back', 'right', 'left', 'top', 'bottom'] as const;
-    const pixels = [
-      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4z8AARAAI/gH/xp559wAAAABJRU5ErkJggg==',
-      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGNg+M8ARAAHAAH/YKtA0QAAAABJRU5ErkJggg==',
-      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGNgYPgPRAAFAgH/wSuWnwAAAABJRU5ErkJggg==',
-      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4/58BiAAP9wP96sqNrAAAAABJRU5ErkJggg==',
-      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4z/AfiAAN+QP9Wkb9ewAAAABJRU5ErkJggg==',
-      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGNg+P8fiAAL+wP9PaUBYwAAAABJRU5ErkJggg==',
-    ];
-    const registry: ToolRegistry = {
-      list: () => [],
-      invoke: async () => ({
-        isError: false,
-        content: {
-          success: true,
-          images: views.map((view, index) => ({ view, dataUrl: `data:image/png;base64,${pixels[index]}` })),
+describe.each(adapters.filter((adapter) => adapter.id === 'codex' || adapter.id === 'grok'))(
+  'live $id screenshot carrier',
+  (adapter) => {
+    it('preserves all six persisted MCP images through the installed ACP client', async () => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-capture-'));
+      roots.push(workspaceRoot);
+      const views = ['front', 'back', 'right', 'left', 'top', 'bottom'] as const;
+      const pixels = [
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4z8AARAAI/gH/xp559wAAAABJRU5ErkJggg==',
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGNg+M8ARAAHAAH/YKtA0QAAAABJRU5ErkJggg==',
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGNgYPgPRAAFAgH/wSuWnwAAAABJRU5ErkJggg==',
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4/58BiAAP9wP96sqNrAAAAABJRU5ErkJggg==',
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4z/AfiAAN+QP9Wkb9ewAAAABJRU5ErkJggg==',
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGNg+P8fiAAL+wP9PaUBYwAAAABJRU5ErkJggg==',
+      ];
+      const registry: ToolRegistry = {
+        list: () => [],
+        invoke: async (invocation) => {
+          const content: JsonObject =
+            invocation.toolName === toolName.testModel
+              ? { success: true, failures: [], passes: [], passed: 0, total: 0 }
+              : {
+                  success: true,
+                  images: views.map((view, index) => ({ view, dataUrl: `data:image/png;base64,${pixels[index]}` })),
+                };
+          return { isError: false, content };
         },
-      }),
-    };
-    const endpoint = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), workspaceRoot, registry });
-    const server = createServer((request, response) => {
-      void endpoint.handle(request, response);
-    });
-    await new Promise<void>((resolve) => {
-      server.listen(0, '127.0.0.1', resolve);
-    });
-    const address = server.address();
-    if (!address || typeof address === 'string') {
-      throw new Error('The capture MCP server did not open a TCP port.');
-    }
-    const chatId = 'chat-live-capture';
-    const runId = 'run-live-capture';
-    const capability = endpoint.mint({ chatId, runId });
-    const release = endpoint.activate({ token: capability.token, chatId, runId, signal: new AbortController().signal });
-    let session: Awaited<ReturnType<typeof openAcpSession>> | undefined;
-    const events: ExternalAgentLogEvent[] = [];
-    try {
-      session = await openAcpSession({
-        adapter: codexAdapter,
-        cwd: workspaceRoot,
-        createId: randomUUID,
-        mcpServers: [
-          {
-            type: 'http',
-            name: 'tau',
-            url: `http://127.0.0.1:${String(address.port)}/mcp`,
-            headers: [{ name: 'Authorization', value: `Bearer ${capability.token}` }],
-          },
-        ],
+      };
+      const endpoint = createHostMcpEndpoint({
+        secret: randomBytes(32).toString('base64url'),
+        workspaceRoot,
+        registry,
       });
-      await session.prompt(
-        'Call mcp.tau.screenshot with targetFile main.scad and mode multi_angle. Open each of the six returned local PNG files with your image viewing tool, then list the six view names. Do not edit files.',
-        {
-          append: async (batch) => {
-            events.push(...batch);
-          },
-          approve: async () => ({ interruptId: 'capture', outcome: 'approved' }),
-          publishLive: async () => undefined,
-          signal: AbortSignal.timeout(180_000),
-        },
-        selectedModel('codex'),
-      );
-      const messages = events.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
-      expect(
-        messages.some(
-          (message) => message.role === 'tool-output' && message.toolName === 'screenshot' && !message.isError,
-        ),
-      ).toBe(true);
-      const attachments = await readdir(join(workspaceRoot, '.tau', 'chats', chatId, 'attachments'));
-      expect(attachments).toHaveLength(6);
-      const stored = await Promise.all(
-        attachments.map(async (name) => readFile(join(workspaceRoot, '.tau', 'chats', chatId, 'attachments', name))),
-      );
-      expect(stored.map((bytes) => bytes.toString('base64')).sort()).toEqual([...pixels].sort());
-      const imageViews = messages.flatMap((message) =>
-        message.role === 'tool-input' && message.toolName.startsWith('View Image ') ? [message.toolName] : [],
-      );
-      expect(imageViews).toHaveLength(6);
-      expect(new Set(imageViews).size).toBe(6);
-      expect(
-        messages.filter(
-          (message) => message.role === 'tool-output' && message.toolName.startsWith('View Image ') && !message.isError,
-        ),
-      ).toHaveLength(6);
-    } finally {
-      await session?.close();
-      await release();
-      await endpoint.close();
+      const server = createServer((request, response) => {
+        void endpoint.handle(request, response);
+      });
       await new Promise<void>((resolve) => {
-        server.close(() => {
-          resolve();
-        });
+        server.listen(0, '127.0.0.1', resolve);
       });
-    }
-  }, 240_000);
-});
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        throw new Error('The capture MCP server did not open a TCP port.');
+      }
+      const chatId = 'chat-live-capture';
+      const runId = 'run-live-capture';
+      const capability = endpoint.mint({ chatId, runId });
+      const release = endpoint.activate({
+        token: capability.token,
+        chatId,
+        runId,
+        signal: new AbortController().signal,
+      });
+      let session: Awaited<ReturnType<typeof openAcpSession>> | undefined;
+      const events: ExternalAgentLogEvent[] = [];
+      try {
+        session = await openAcpSession({
+          adapter,
 
-/* Codex in its default mode has no question tool of its own (request_user_input is a Plan-mode
- * tool), so a hard fork reaches the person through Tau's `ask_questions` (agent questions
- * blueprint W4): the real handler over the workspace record, and a person who answers B. */
-describe.skipIf(!liveEnabled || codexAdapter === undefined)('live Codex question through Tau', () => {
+          cwd: workspaceRoot,
+          createId: randomUUID,
+          mcpServers: [
+            {
+              type: 'http',
+              name: 'tau',
+              url: `http://127.0.0.1:${String(address.port)}/mcp`,
+              headers: [{ name: 'Authorization', value: `Bearer ${capability.token}` }],
+            },
+          ],
+        });
+        await session.prompt(
+          adapter.id === 'codex'
+            ? 'Call mcp.tau.screenshot with targetFile main.scad and mode multi_angle. Open each of the six returned local PNG files with your image viewing tool, then list the six view names. Do not edit files.'
+            : 'Call tau test_model with files ["main.geospec.ts"], then call tau screenshot with targetFile main.scad and mode multi_angle. Report the test counts and list the six view names from the results. Do not edit files or call other Tau tools.',
+          {
+            append: async (batch) => {
+              events.push(...batch);
+            },
+            approve: async () => ({ interruptId: 'capture', outcome: 'approved' }),
+            publishLive: async () => undefined,
+            signal: AbortSignal.timeout(180_000),
+          },
+          selectedModel(adapter.id),
+        );
+        const messages = events.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+        expect(
+          messages.some(
+            (message) => message.role === 'tool-output' && message.toolName === 'screenshot' && !message.isError,
+          ),
+        ).toBe(true);
+        if (adapter.id === 'grok') {
+          expect(
+            messages.find((message) => message.role === 'tool-output' && message.toolName === toolName.testModel),
+          ).toMatchObject({ isError: false, content: { failures: [], passed: 0, total: 0 } });
+        }
+        const attachments = await readdir(join(workspaceRoot, '.tau', 'chats', chatId, 'attachments'));
+        expect(attachments).toHaveLength(6);
+        const stored = await Promise.all(
+          attachments.map(async (name) => readFile(join(workspaceRoot, '.tau', 'chats', chatId, 'attachments', name))),
+        );
+        expect(stored.map((bytes) => bytes.toString('base64')).sort()).toEqual([...pixels].sort());
+        if (adapter.id === 'codex') {
+          const imageViews = messages.flatMap((message) =>
+            message.role === 'tool-input' && message.toolName.startsWith('View Image ') ? [message.toolName] : [],
+          );
+          expect(imageViews).toHaveLength(6);
+          expect(new Set(imageViews).size).toBe(6);
+          expect(
+            messages.filter(
+              (message) =>
+                message.role === 'tool-output' && message.toolName.startsWith('View Image ') && !message.isError,
+            ),
+          ).toHaveLength(6);
+        }
+      } finally {
+        await session?.close();
+        await release();
+        await endpoint.close();
+        await new Promise<void>((resolve) => {
+          server.close(() => {
+            resolve();
+          });
+        });
+      }
+    }, 240_000);
+  },
+);
+
+/* Every selected agent must round-trip a real Tau MCP question and its answer. */
+describe.each(adapters)('live $id question through Tau', (adapter) => {
   it("asks through mcp.tau.ask_questions and continues with the person's answer", async () => {
-    if (!codexAdapter) {
-      throw new Error('The selected Codex adapter is unavailable.');
-    }
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-questions-'));
     roots.push(workspaceRoot);
     const chatId = 'chat-live-questions';
@@ -498,7 +517,7 @@ describe.skipIf(!liveEnabled || codexAdapter === undefined)('live Codex question
     const events: ExternalAgentLogEvent[] = [];
     try {
       session = await openAcpSession({
-        adapter: codexAdapter,
+        adapter,
         cwd: workspaceRoot,
         createId: randomUUID,
         mcpServers: [
@@ -520,13 +539,12 @@ describe.skipIf(!liveEnabled || codexAdapter === undefined)('live Codex question
           publishLive: async () => undefined,
           signal: AbortSignal.timeout(240_000),
         },
-        selectedModel('codex'),
+        selectedModel(adapter.id),
       );
       const messages = events.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
       const answered = messages.find(
         (message) => message.role === 'tool-output' && message.toolName === toolName.askQuestions && !message.isError,
       );
-      console.log(`[acp-live] codex questions result=${JSON.stringify(answered?.content).slice(0, 400)}`);
       expect(JSON.stringify(answered?.content)).toContain('"source":"person"');
       const { asks } = parseQuestionsFile(await record.readFile(questionsPath(chatId)));
       expect(asks).toHaveLength(1);
@@ -549,75 +567,85 @@ describe.skipIf(!liveEnabled || codexAdapter === undefined)('live Codex question
   }, 300_000);
 });
 
-/* In Plan mode Codex has its own question tool, `request_user_input`; codex-acp sends it as a form
- * elicitation, which Tau records as an ask in the chat (agent questions blueprint D6). */
-describe.skipIf(!liveEnabled || codexAdapter === undefined)('live Codex plan-mode question', () => {
-  it("records request_user_input as a chat question and returns the person's answer", async () => {
-    const { launcher, workspaceRoot } = await startHarness();
-    const chatId = 'chat-live-plan-question';
-    const runId = 'run-live-plan-question';
-    const recordPath = join(workspaceRoot, questionsPath(chatId));
-    let answered = false;
-    /* The person answers B once the card appears. */
-    const answerOnce = async (): Promise<void> => {
-      const { asks } = parseQuestionsFile(await readFile(recordPath, 'utf8').catch(() => undefined));
-      if (answered || asks.length === 0) {
-        return;
-      }
-      answered = true;
-      const at = new Date().toISOString();
-      const choices = (ask: (typeof asks)[number]) =>
-        Object.fromEntries(
-          ask.questions.map((question) => [question.id, { choice: question.options[1]?.label ?? 'B', at }]),
+/* Native agent questions share the same durable question record as Tau tools. */
+describe.each(adapters.filter((adapter) => adapter.id === 'codex' || adapter.id === 'grok'))(
+  'live $id native question',
+  (adapter) => {
+    it("records the native question and returns the person's answer", async () => {
+      const { launcher, workspaceRoot } = await startHarness();
+      const chatId = 'chat-live-plan-question';
+      const runId = 'run-live-plan-question';
+      const recordPath = join(workspaceRoot, questionsPath(chatId));
+      let answered = false;
+      /* The person answers B once the card appears. */
+      const answerOnce = async (): Promise<void> => {
+        const { asks } = parseQuestionsFile(await readFile(recordPath, 'utf8').catch(() => undefined));
+        if (answered || asks.length === 0) {
+          return;
+        }
+        answered = true;
+        const at = new Date().toISOString();
+        const choices = (ask: (typeof asks)[number]) =>
+          Object.fromEntries(
+            ask.questions.map((question) => [question.id, { choice: question.options[1]?.label ?? 'B', at }]),
+          );
+        const answers = Object.fromEntries(asks.map((ask) => [ask.id, { questions: choices(ask) }]));
+        await writeFile(
+          join(workspaceRoot, answersPath(chatId)),
+          serializeAnswersFile({ version: 1, answers }),
+          'utf8',
         );
-      const answers = Object.fromEntries(asks.map((ask) => [ask.id, { questions: choices(ask) }]));
-      await writeFile(join(workspaceRoot, answersPath(chatId)), serializeAnswersFile({ version: 1, answers }), 'utf8');
-    };
-    const person = setInterval(() => {
-      void answerOnce();
-    }, 500);
-    try {
-      await launcher.execute({
-        type: 'start',
-        commandId: `start-${runId}`,
-        payload: {
-          trigger: 'submit',
-          chatId,
-          runId,
-          message: {
-            id: `user-${runId}`,
-            role: 'user',
-            content:
-              'Use your request_user_input tool to ask me one question: should the desk ornament be printed in PLA or PETG? Recommend PLA. After I answer, reply with one sentence naming the material I chose and stop. Do not edit files.',
+      };
+      const person = setInterval(() => {
+        void answerOnce();
+      }, 500);
+      try {
+        await launcher.execute({
+          type: 'start',
+          commandId: `start-${runId}`,
+          payload: {
+            trigger: 'submit',
+            chatId,
+            runId,
+            message: {
+              id: `user-${runId}`,
+              role: 'user',
+              content: `Use your ${adapter.id === 'grok' ? 'ask_user_question' : 'request_user_input'} tool to ask me one question: should the desk ornament be printed in PLA or PETG? Recommend PLA. After I answer, reply with one sentence naming the material I chose and stop. Do not edit files.`,
+            },
+            config: {
+              agent: {
+                kind: 'acp',
+                id: adapter.id,
+                ...(adapter.id === 'codex' ? { config: { collaboration_mode: 'plan' } } : {}),
+              },
+              systemPrompt: '',
+              toolChoice: 'auto',
+            },
           },
-          config: {
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- codex-acp's config option id
-            agent: { kind: 'acp', id: 'codex', config: { collaboration_mode: 'plan' } },
-            systemPrompt: '',
-            toolChoice: 'auto',
-          },
-        },
-      });
-      const state = await settled(async () => readLog(workspaceRoot, chatId));
-      const events = await readLog(workspaceRoot, chatId);
-      const { asks } = parseQuestionsFile(await readFile(recordPath, 'utf8').catch(() => undefined));
-      console.log(`[acp-live] codex plan question state=${state} asks=${JSON.stringify(asks).slice(0, 600)}`);
-      expect(state, JSON.stringify(events.slice(-3))).toBe('completed');
-      expect(asks).toHaveLength(1);
-      expect(asks[0]).toMatchObject({ source: 'acp', agentId: 'codex', resolution: { outcome: 'answered' } });
-      expect(asks[0]?.questions).toHaveLength(1);
-      expect(asks[0]?.questions[0]?.question).toMatch(/PLA|PETG/u);
-      expect(asks[0]?.questions[0]?.allowsText).toBe(true);
-      const reply = messagesOf(events)
-        .filter((message) => message.role === 'assistant')
-        .map((message) => textOf(message))
-        .join(' ');
-      expect(reply).toMatch(/PETG/u);
-    } finally {
-      clearInterval(person);
-    }
-  }, 300_000);
-});
+        });
+        const state = await settled(async () => readLog(workspaceRoot, chatId));
+        const events = await readLog(workspaceRoot, chatId);
+        const { asks } = parseQuestionsFile(await readFile(recordPath, 'utf8').catch(() => undefined));
+        console.log(
+          `[acp-live] ${adapter.id} native question state=${state} asks=${JSON.stringify(asks).slice(0, 600)}`,
+        );
+        expect(state, JSON.stringify(events.slice(-3))).toBe('completed');
+        expect(asks).toHaveLength(1);
+        expect(asks[0]).toMatchObject({ source: 'acp', agentId: adapter.id, resolution: { outcome: 'answered' } });
+        expect(asks[0]?.questions).toHaveLength(1);
+        expect(asks[0]?.questions[0]?.question).toMatch(/PLA|PETG/u);
+        expect(asks[0]?.questions[0]?.allowsText).toBe(true);
+        const reply = messagesOf(events)
+          .filter((message) => message.role === 'assistant')
+          .map((message) => textOf(message))
+          .join(' ');
+        expect(reply).toMatch(/PETG/u);
+      } finally {
+        clearInterval(person);
+      }
+    }, 300_000);
+  },
+);
 
 describe.skipIf(!liveEnabled || codexAdapter === undefined)('native Codex skill discovery through ACP', () => {
   it('keeps a manual-only native skill out of implicit context and loads it on explicit invocation', async () => {
@@ -703,7 +731,6 @@ describe.skipIf(!liveEnabled || codexAdapter === undefined)('native Codex skill 
       await chmod(wrapper, 0o700);
       const frames: AcpWireFrame[] = [];
       const session = await openAcpSession({
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- The native adapter reads this environment name.
         adapter: { ...codexAdapter, spawnEnv: { ...codexAdapter.spawnEnv, CODEX_PATH: wrapper } },
         cwd,
         createId: randomUUID,
@@ -925,4 +952,206 @@ describe.skipIf(!liveEnabled || codexAdapter === undefined)('a live ACP chat acr
     expect(sentFrames(frames, 'session/new')).toBe(1);
     expect(sentFrames(frames, 'session/prompt')).toBe(2);
   }, 600_000);
+});
+
+const grokAdapter = adapters.find((adapter) => adapter.id === 'grok');
+
+describe.skipIf(!liveEnabled || grokAdapter === undefined)('native Grok skills through ACP', () => {
+  it('should read a published skill support file through the ACP filesystem', async () => {
+    if (!grokAdapter) {
+      throw new Error('The selected Grok adapter is unavailable.');
+    }
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-grok-skills-project-'));
+    const publication = await mkdtemp(join(tmpdir(), 'tau-grok-skills-publication-'));
+    roots.push(cwd, publication);
+    const slug = 'tau-acp-skill-probe';
+    const marker = `skill-proof-${randomUUID()}`;
+    const skill = join(publication, '.agents/skills', slug);
+    await mkdir(join(skill, 'references'), { recursive: true });
+    await writeFile(
+      join(skill, 'SKILL.md'),
+      `---\nname: ${slug}\ndescription: Read the conformance marker on explicit request.\n---\nRead references/marker.txt beside this skill with your filesystem read tool, then reply with the exact marker. Do not use the shell.\n`,
+    );
+    await writeFile(join(skill, 'references/marker.txt'), marker);
+    const appended: ExternalAgentLogEvent[] = [];
+    const session = await openAcpSession({
+      adapter: grokAdapter,
+      cwd,
+      additionalDirectories: [publication],
+      createId: randomUUID,
+    });
+    try {
+      await session.prompt(`Use the ${slug} skill.`, {
+        append: async (events) => {
+          appended.push(...events);
+        },
+        approve: async () => ({ interruptId: 'skill-probe', outcome: 'denied' }),
+        publishLive: async () => undefined,
+        signal: AbortSignal.timeout(120_000),
+      });
+      const messages = appended.flatMap((event) =>
+        event.type === 'message.appended'
+          ? [event.message]
+          : event.type === 'message.envelope-replaced'
+            ? [event.replacement]
+            : [],
+      );
+      expect(
+        messages
+          .filter((message) => message.role === 'assistant')
+          .map((message) => textOf(message))
+          .join('\n'),
+      ).toContain(marker);
+      expect(messages.some((message) => message.role === 'tool-output' && message.isError)).toBe(false);
+    } finally {
+      await session.close();
+    }
+  }, 150_000);
+});
+
+describe.skipIf(!liveEnabled || grokAdapter === undefined)('Grok session lifecycle', () => {
+  it('should configure models, resume context, cancel, and answer again', async () => {
+    if (!grokAdapter) {
+      throw new Error('The selected Grok adapter is unavailable.');
+    }
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-grok-lifecycle-'));
+    roots.push(cwd);
+    const events: ExternalAgentLogEvent[] = [];
+    const frames: AcpWireFrame[] = [];
+    const options = {
+      adapter: grokAdapter,
+      cwd,
+      createId: randomUUID,
+      onFrame: (frame: AcpWireFrame) => frames.push(frame),
+    };
+    let session = await openAcpSession(options);
+    const turn = () => ({
+      append: async (batch: readonly ExternalAgentLogEvent[]) => {
+        events.push(...batch);
+      },
+      approve: async () => ({ interruptId: 'lifecycle', outcome: 'denied' }) as const,
+      publishLive: async () => undefined,
+      signal: AbortSignal.timeout(120_000),
+    });
+    try {
+      for (const [model, effort] of [
+        ['grok-4.5', 'low'],
+        ['grok-4.6', 'medium'],
+        ['grok-4.7-build-fast', 'high'],
+        ['grok-4.7', 'xhigh'],
+      ] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- model changes are serialized in one ACP session.
+        const config = await session.probeModel(model);
+        expect(config?.find((option) => option.category === 'model')?.currentValue).toBe(model);
+        events.length = 0;
+        // oxlint-disable-next-line no-await-in-loop -- each model must answer before selecting the next.
+        await session.prompt('Reply only pong. Do not use tools.', turn(), model, { reasoning_effort: effort });
+        expect(
+          events.some(
+            (event) =>
+              event.type === 'message.appended' &&
+              event.message.role === 'assistant' &&
+              /pong/iu.test(textOf(event.message)),
+          ),
+        ).toBe(true);
+      }
+      await session.prompt('Remember the number 68319. Reply only ok. Do not use tools.', turn(), 'grok-4.7', {
+        reasoning_effort: 'low',
+      });
+      const { acpSessionId } = session;
+      const priorUsage = session.usage;
+      expect(priorUsage?.totalTokens).toBeGreaterThan(0);
+      await session.close();
+      session = await openAcpSession({ ...options, acpSessionId, priorUsage });
+      expect(session.contextLost).toBe(false);
+      expect(session.acpSessionId).toBe(acpSessionId);
+      const cancellation = new AbortController();
+      await expect(
+        session.prompt('Write the numbers from 1 to 500, one per line. Do not use tools.', {
+          ...turn(),
+          signal: cancellation.signal,
+          publishLive: async (event) => {
+            if (event.type === 'text-delta') {
+              cancellation.abort();
+            }
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'EXTERNAL_AGENT_CANCELLED' });
+      events.length = 0;
+      await session.prompt('What number did I ask you to remember? Reply with only that number.', turn());
+      const text = events
+        .flatMap((event) =>
+          event.type === 'message.appended' && event.message.role === 'assistant' ? [textOf(event.message)] : [],
+        )
+        .join(' ');
+      expect(text).toContain('68319');
+      expect(sentFrames(frames, 'session/resume')).toBe(1);
+      expect(sentFrames(frames, 'session/cancel')).toBe(1);
+      events.length = 0;
+      await session.prompt('/session-info', turn());
+      expect(
+        events.some((event) => event.type === 'message.appended' && /grok-4\.7/u.test(textOf(event.message))),
+      ).toBe(true);
+      events.length = 0;
+      await session.prompt(
+        [
+          {
+            type: 'text',
+            text: 'Read the attached note and reply with only its verification number. Do not use tools.',
+          },
+          {
+            type: 'resource',
+            resource: {
+              uri: 'tau://validation/note.txt',
+              mimeType: 'text/plain',
+              text: 'The verification number is 92741.',
+            },
+          },
+        ],
+        turn(),
+      );
+      expect(events.some((event) => event.type === 'message.appended' && /92741/u.test(textOf(event.message)))).toBe(
+        true,
+      );
+    } finally {
+      await session.close();
+    }
+  }, 300_000);
+});
+
+describe.skipIf(!liveEnabled || grokAdapter === undefined)('Grok native plan approval', () => {
+  it('should ask Tau before leaving plan mode', async () => {
+    if (!grokAdapter) {
+      throw new Error('The selected Grok adapter is unavailable.');
+    }
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-grok-plan-'));
+    roots.push(cwd);
+    const approvals: string[] = [];
+    const events: ExternalAgentLogEvent[] = [];
+    const session = await openAcpSession({ adapter: grokAdapter, cwd, createId: randomUUID });
+    try {
+      await session.prompt(
+        'Use enter_plan_mode, propose a one-step plan to create a cube (do not edit files), and use exit_plan_mode to request my approval. After approval, reply only "Plan approved" and stop without implementing.',
+        {
+          append: async (batch) => {
+            events.push(...batch);
+          },
+          approve: async (request) => {
+            approvals.push(request.prompt);
+            return { interruptId: 'plan-test', outcome: 'approved' };
+          },
+          publishLive: async () => undefined,
+          signal: AbortSignal.timeout(120_000),
+        },
+        'grok-4.7',
+        { reasoning_effort: 'low' },
+      );
+      expect(approvals.join(' '), JSON.stringify({ approvals, events })).toMatch(/plan/iu);
+      expect(
+        events.some((event) => event.type === 'message.appended' && /Plan approved/iu.test(textOf(event.message))),
+      ).toBe(true);
+    } finally {
+      await session.close();
+    }
+  }, 150_000);
 });

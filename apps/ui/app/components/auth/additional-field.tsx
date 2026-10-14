@@ -1,4 +1,4 @@
-import { resolveInputType } from '@better-auth-ui/core';
+import { getAdditionalFieldDefaultValue, resolveInputType, validateAdditionalFieldValue } from '@better-auth-ui/core';
 import type { AdditionalField as AdditionalFieldConfig, AdditionalFieldOption } from '@better-auth-ui/core';
 import { useAuth } from '@better-auth-ui/react';
 import { format } from 'date-fns';
@@ -90,6 +90,60 @@ function CopyButton({ getValue, isDisabled }: { getValue: () => string | undefin
   );
 }
 
+/** Bridge controlled custom renderers to the sign-up form's FormData submission. */
+function CustomAdditionalField({ name, field, isPending }: AdditionalFieldProps) {
+  const [state, setState] = useState<{
+    value: ReturnType<typeof getAdditionalFieldDefaultValue>;
+    error: string | undefined;
+    validation: symbol | undefined;
+  }>(() => ({
+    value: getAdditionalFieldDefaultValue(field),
+    error: undefined,
+    validation: undefined,
+  }));
+  const { value, error } = state;
+  const handleBlur = async () => {
+    // A new blur or value change invalidates every earlier asynchronous result.
+    const validation = Symbol('blur validation');
+    setState((current) => ({ ...current, validation }));
+    const validationError = await validateAdditionalFieldValue(field, value);
+    setState((current) => (current.validation === validation ? { ...current, error: validationError } : current));
+  };
+
+  return (
+    <>
+      <input
+        type='hidden'
+        name={name}
+        disabled={field.readOnly}
+        value={
+          value === null
+            ? ''
+            : value instanceof Date
+              ? Number.isNaN(value.getTime())
+                ? ''
+                : value.toISOString()
+              : String(value)
+        }
+      />
+      {field.render?.({
+        name,
+        field,
+        value,
+        onChange(nextValue) {
+          setState({ value: nextValue, error: undefined, validation: undefined });
+        },
+        onBlur() {
+          void handleBlur();
+        },
+        isInvalid: Boolean(error),
+        errors: error ? [error] : [],
+        isPending,
+      })}
+    </>
+  );
+}
+
 /** Renders a single additional user field via shadcn primitives. */
 export function AdditionalField({ name, field, isPending }: AdditionalFieldProps): React.JSX.Element {
   const inputType = resolveInputType(field);
@@ -98,7 +152,7 @@ export function AdditionalField({ name, field, isPending }: AdditionalFieldProps
   const inputRef = useRef<HTMLInputElement>(null);
 
   if (field.render) {
-    return <>{field.render({ name, field, isPending })}</>;
+    return <CustomAdditionalField name={name} field={field} isPending={isPending} />;
   }
 
   if (inputType === 'hidden') {

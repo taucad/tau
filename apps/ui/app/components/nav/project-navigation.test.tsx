@@ -1,5 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
+import { mock } from 'vitest-mock-extended';
+import { toast } from '#components/ui/sonner.js';
 import type { ReactNode } from 'react';
 import type { SyncFacet } from '@taucad/revisions';
 import type { useProjects } from '#hooks/use-projects.js';
@@ -13,6 +16,11 @@ const mockIsProjectExpanded = vi.fn();
 const mockSetProjectDisclosure = vi.fn();
 const mockNavigate = vi.fn();
 const mockInvalidateQueries = vi.fn();
+let bridge: DesktopBridge | undefined;
+const mockOpenDirectory = vi.fn(async (_path: string) => undefined);
+const mockWorkspaceRoot = vi.fn(async (_projectId: string) => '/picked/Two space');
+vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => bridge }));
+vi.mock('#lib/agent-host-placement.js', () => ({ desktopWorkspaceRoot: async (id: string) => mockWorkspaceRoot(id) }));
 let pathname = '/';
 let search = '';
 let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
@@ -178,6 +186,7 @@ const closedRow = (projectId: string): SidebarStatusModule.ProjectSidebarRow => 
 });
 
 const firstProject = {
+  locator: { backend: 'node', path: '/picked', relativeDirectory: 'one' },
   id: 'proj_one',
   name: 'One',
   description: 'First',
@@ -210,6 +219,9 @@ const descriptionOf = (link: HTMLElement) =>
 
 describe('ProjectNavigation', () => {
   beforeEach(() => {
+    bridge = undefined;
+    mockOpenDirectory.mockReset();
+    mockWorkspaceRoot.mockClear();
     vi.clearAllMocks();
     pathname = '/';
     search = '';
@@ -347,6 +359,50 @@ describe('ProjectNavigation', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?chat=chat%2Ftwo', {
         state: { focusChatComposer: true },
       });
+    });
+  });
+
+  it('should omit folder access when the host has no native directory capability', () => {
+    render(<ProjectNavigation />);
+    expect(screen.queryByRole('button', { name: /Open in/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open files' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { openLabel: 'Open in Finder', openIcon: 'finder', selector: 'use[href="#finder"]' },
+    { openLabel: 'Open in File Explorer', openIcon: 'file-explorer', selector: '.lucide-panels-top-left' },
+    { openLabel: 'Open in file manager', openIcon: 'folder', selector: '.lucide-folder-open' },
+  ] as const)(
+    'should use the host label and icon for $openLabel and resolve the selected project directory',
+    async ({ openLabel, openIcon, selector }) => {
+      bridge = mock<DesktopBridge>({ directories: { openLabel, openIcon, open: mockOpenDirectory } });
+      render(<ProjectNavigation />);
+      expect(screen.queryByRole('button', { name: 'Open files' })).not.toBeInTheDocument();
+      const action = screen.getAllByRole('button', { name: openLabel })[0]!;
+      expect(action.querySelector(selector)).toBeInTheDocument();
+      expect(action.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+      fireEvent.click(action);
+      await waitFor(() => {
+        expect(mockOpenDirectory).toHaveBeenCalledWith('/picked/Two space');
+      });
+      expect(mockWorkspaceRoot).toHaveBeenCalledWith('proj_two');
+      expect(mockNavigate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should hide native access for browser storage and report native opening failures', async () => {
+    bridge = mock<DesktopBridge>({
+      directories: { openLabel: 'Open in Finder', openIcon: 'finder', open: mockOpenDirectory },
+    });
+    mockUseProjects.mockReturnValue({
+      ...projectsResult,
+      projects: [{ ...firstProject, locator: { backend: 'indexeddb', relativeDirectory: 'one' } }, secondProject],
+    });
+    mockOpenDirectory.mockRejectedValueOnce(new Error('Folder is unavailable'));
+    render(<ProjectNavigation />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open in Finder' }));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Could not open Two', { description: 'Folder is unavailable' });
     });
   });
 

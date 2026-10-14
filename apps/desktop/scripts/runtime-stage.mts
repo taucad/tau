@@ -22,6 +22,12 @@ import { copyRuntimeClosure, copyTree } from './runtime-closure.mjs';
 /** A `<platform>-<arch>` the desktop app is packaged for. */
 export type RuntimeTarget = 'darwin-arm64' | 'linux-x64' | 'win32-x64';
 
+/** Match binary basenames and relative package directories so hidden checkout ancestors cannot defeat ASAR unpacking. */
+export const runtimeAsarOptions = {
+  unpack: '{*.node,*.dll,esbuild,esbuild.exe}',
+  unpackDir: '**/node_modules/{@agentclientprotocol,@img}',
+};
+
 /** The optional platform package each runtime engine loads its native payload from. */
 export type RuntimePlatformPackages = Readonly<{
   openrscadEngine: string;

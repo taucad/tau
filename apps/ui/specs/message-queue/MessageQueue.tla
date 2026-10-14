@@ -77,6 +77,8 @@ Complete == /\ s.phase[s.active] = "running"
             /\ s' = [s EXCEPT !.phase[s.active] = "completed"]
 Pause == /\ s.phase[s.active] = "running"
          /\ s' = [s EXCEPT !.phase[s.active] = "paused"]
+\* Reattaching the SDK watch after ACP approval observes the same resumed run;
+\* it changes no admission identity and cannot release queued work while paused.
 Resume == /\ s.phase[s.active] = "paused"
           /\ s' = [s EXCEPT !.phase[s.active] = "running"]
 Fail == /\ Live(s.phase[s.active])

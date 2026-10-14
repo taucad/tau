@@ -41,6 +41,7 @@ import {
   desktopPackageVersion,
   excludesBuildDiagnostics,
   resolveRuntimePackages,
+  runtimeAsarOptions,
   stageRuntimePackages,
 } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
@@ -116,7 +117,7 @@ const packagePaths = await packager({
   ...(plan.icon === undefined ? {} : { icon: resolve(desktopRoot, 'resources', plan.icon) }),
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Windows version-resource field names.
   win32metadata: { CompanyName: 'Tau', FileDescription: 'Tau', ProductName: 'Tau', InternalName: 'Tau' },
-  asar: { unpack: plan.asarUnpack },
+  asar: runtimeAsarOptions,
   prune: false,
 });
 if (packagePaths.length !== 1 || resolve(packagePaths[0]!) !== resolve(outputRoot, plan.appDirectory)) {

@@ -23,6 +23,7 @@
  * `turnEnded` and, from the final state, `closed`.
  */
 
+import type { GrokQuestionRequest, GrokQuestionResponse } from '#acp/grok-questions.js';
 import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import type {
@@ -56,6 +57,7 @@ import {
   loginOf,
   modelChoice,
   presentationAfter,
+  promptUsageOf,
   protocolVersion,
   providerSentence,
   recoverableSessionLoss,
@@ -185,20 +187,29 @@ export type AcpAnswer = {
 }[AcpCallMethod];
 
 /** The client methods an agent calls on a child. */
-export type AcpVendorMethod =
+type AcpStandardVendorMethod =
   | 'session/request_permission'
   | 'fs/read_text_file'
   | 'fs/write_text_file'
   | 'elicitation/create';
 
-/** One vendor request, by method. */
-export type AcpVendorRequest = {
-  [M in AcpVendorMethod]: { readonly method: M; readonly params: ClientRequestParamsByMethod[M] };
-}[AcpVendorMethod];
+/** Client methods supported by the turn, including Grok questions. */
+export type AcpVendorMethod = AcpStandardVendorMethod | '_x.ai/ask_user_question';
+
+export type AcpVendorRequest =
+  | {
+      [M in AcpStandardVendorMethod]: { readonly method: M; readonly params: ClientRequestParamsByMethod[M] };
+    }[AcpStandardVendorMethod]
+  | { readonly method: '_x.ai/ask_user_question'; readonly params: GrokQuestionRequest };
+
+/** Each supported request's response at the connection boundary. */
+export type AcpVendorResponses = Pick<ClientRequestResponsesByMethod, AcpStandardVendorMethod> & {
+  readonly '_x.ai/ask_user_question': GrokQuestionResponse;
+};
 
 /** A vendor request's answer: its result, or a refusal. */
 export type AcpVendorAnswer =
-  | { readonly result: ClientRequestResponsesByMethod[AcpVendorMethod] }
+  | { readonly result: AcpVendorResponses[AcpVendorMethod] }
   | { readonly error: { readonly message: string; readonly code: string } };
 
 /** Input of the `adapterConnection` actor. */
@@ -225,6 +236,7 @@ export type AcpLentTurnInput = {
   readonly key: string;
   readonly adapter: AcpAdapter;
   readonly cwd: string;
+  readonly skillDirectories: readonly string[];
   readonly sessionMessageId: string;
   readonly sessionCommitted: boolean;
   readonly presentation: AcpSessionPresentation;
@@ -770,6 +782,10 @@ const refuseVendor = (enq: Enqueue, id: string, request: AcpVendorRequest): void
       respond(enq, id, { result: { outcome: { outcome: 'cancelled' } } });
       return;
     }
+    case '_x.ai/ask_user_question': {
+      respond(enq, id, { result: { outcome: 'cancelled' } });
+      return;
+    }
     case 'elicitation/create': {
       respond(enq, id, { result: { action: 'decline' } });
       return;
@@ -1276,6 +1292,7 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
           key: context.key,
           adapter: context.adapter,
           cwd: context.cwd,
+          skillDirectories: context.directories.map((directory) => `${directory}/.agents/skills`),
           sessionMessageId: context.sessionMessageId,
           sessionCommitted: context.sessionCommitted,
           presentation: context.presentation,
@@ -1403,14 +1420,15 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
                 const answered = event.answer.result;
                 /* Read back, not echoed: the model the agent actually finished on (V6). */
                 const model = modelChoice(context.configOptions)?.currentValue ?? context.lent.model;
-                const report = { usage: answered.usage ?? undefined, model };
+                const usage = promptUsageOf(answered, context.adapter.id, context.priorUsage);
+                const report = { usage, model };
                 /* A typed failure ends the turn `end_turn`: the stop reason alone would
                  * record a usage limit as a completed turn. */
                 const stop = airSessionFailureOf(answered._meta);
                 const ended = stop ? stopped(context, stop, { meta: answered._meta, at: event.at }) : undefined;
                 return flush(context, enq, {
                   report,
-                  answered: answered.usage ?? undefined,
+                  answered: usage,
                   outcome: ended ? failed(ended.failure) : { ok: true, stopReason: answered.stopReason },
                   ...(ended ? { limit: ended.limit } : {}),
                 });

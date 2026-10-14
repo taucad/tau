@@ -9,6 +9,9 @@
  * adapter behind.
  */
 
+import { grokPlanSchema, permissionOfGrokPlan, grokPlanResponseOf } from '#acp/grok-plan.js';
+import { grokQuestionSchema } from '#acp/grok-questions.js';
+
 import { client } from '@agentclientprotocol/sdk';
 import { createCallbackLogic } from 'xstate';
 import type { CallbackActorLogic } from 'xstate';
@@ -24,6 +27,7 @@ import type {
   AcpConnectionInput,
   AcpVendorMethod,
   AcpVendorRequest,
+  AcpVendorResponses,
 } from '#acp/acp-session.machine.js';
 import type { AcpSessionEvent } from '#acp/acp-machine-schemas.js';
 
@@ -58,9 +62,9 @@ export const createAdapterConnection = (
     const waiting = new Map<string, { resolve(result: unknown): void; reject(error: unknown): void }>();
     let requests = 0;
     /* A vendor request is answered by the machine's `respond`, whenever it decides. */
-    const ask = async <M extends AcpVendorMethod>(method: M, params: unknown): Promise<never> => {
+    const ask = async <M extends AcpVendorMethod>(method: M, params: unknown): Promise<AcpVendorResponses[M]> => {
       const id = `vendor-${String(requests++)}`;
-      const { promise, resolve, reject } = Promise.withResolvers<never>();
+      const { promise, resolve, reject } = Promise.withResolvers<AcpVendorResponses[M]>();
       waiting.set(id, { resolve: resolve as (result: unknown) => void, reject });
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the SDK validated `params` against `method`'s schema.
       send({ type: 'vendorRequest', id, request: { method, params } as unknown as AcpVendorRequest });
@@ -71,6 +75,18 @@ export const createAdapterConnection = (
         send({ type: 'sessionUpdate', sessionId: params.sessionId, update: params.update });
       })
       .onRequest('session/request_permission', async ({ params }) => ask('session/request_permission', params))
+      .onRequest('_x.ai/exit_plan_mode', grokPlanSchema, async ({ params }) => {
+        if (input.adapter.id !== 'grok') {
+          return { outcome: 'cancelled' };
+        }
+        return grokPlanResponseOf(await ask('session/request_permission', permissionOfGrokPlan(params)));
+      })
+      .onRequest('_x.ai/ask_user_question', grokQuestionSchema, async ({ params }) => {
+        if (input.adapter.id !== 'grok') {
+          return { outcome: 'cancelled' };
+        }
+        return ask('_x.ai/ask_user_question', params);
+      })
       .onRequest('elicitation/create', async ({ params }) => ask('elicitation/create', params))
       .onNotification('elicitation/complete', ({ params }) => {
         send({ type: 'elicitationComplete', elicitationId: params.elicitationId });

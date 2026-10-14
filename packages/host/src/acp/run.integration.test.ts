@@ -12,7 +12,7 @@ import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import type { Server } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -3138,6 +3138,53 @@ describe('external turns through the revision port', () => {
       code: 'WORKSPACE_MASKED_PATH',
     });
     await expect(writeSessionTextFile(cwd, { path: '.tau/AGENTS.md', content: 'mine' })).resolves.toBeUndefined();
+  });
+
+  it('should serve canonical paths under a symlinked session root without widening access', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-acp-root-alias-'));
+    roots.push(root);
+    const project = join(await realpath(root), 'project');
+    const cwd = join(root, 'alias');
+    await mkdir(project);
+    await symlink(project, cwd, 'dir');
+    await writeFile(join(project, 'main.scad'), 'cube(10);\n');
+
+    await expect(readSessionTextFile(cwd, { path: join(project, 'main.scad') })).resolves.toBe('cube(10);\n');
+    await writeSessionTextFile(cwd, { path: join(project, 'parts/new.scad'), content: 'cube(20);\n' });
+    await expect(readFile(join(project, 'parts/new.scad'), 'utf8')).resolves.toBe('cube(20);\n');
+    await expect(readSessionTextFile(cwd, { path: join(project, '../outside.txt') })).rejects.toMatchObject({
+      code: 'WORKSPACE_MASKED_PATH',
+    });
+    await expect(
+      writeSessionTextFile(cwd, { path: join(project, '.git/config'), content: 'forged' }),
+    ).rejects.toMatchObject({
+      code: 'WORKSPACE_MASKED_PATH',
+    });
+  });
+
+  it('should read published skill resources without granting writes or sibling reads', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-acp-skill-access-'));
+    roots.push(root);
+    const cwd = join(root, 'project');
+    const skills = join(root, 'publication/.agents/skills');
+    await mkdir(cwd);
+    await mkdir(join(skills, 'probe/references'), { recursive: true });
+    const resource = join(skills, 'probe/references/marker.txt');
+    await writeFile(resource, 'skill marker');
+    await writeFile(join(root, 'publication/private.txt'), 'private');
+    await symlink(join(root, 'publication'), join(skills, 'escape'), 'dir');
+
+    await expect(readSessionTextFile(cwd, { path: resource }, [skills])).resolves.toBe('skill marker');
+    await expect(writeSessionTextFile(cwd, { path: resource, content: 'changed' })).rejects.toMatchObject({
+      code: 'WORKSPACE_MASKED_PATH',
+    });
+    await expect(
+      readSessionTextFile(cwd, { path: join(root, 'publication/private.txt') }, [skills]),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_MASKED_PATH' });
+    await expect(
+      readSessionTextFile(cwd, { path: join(skills, 'escape/private.txt') }, [skills]),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_MASKED_PATH' });
+    await expect(readFile(resource, 'utf8')).resolves.toBe('skill marker');
   });
 
   it('refuses filesystem reads and writes through a symlink outside the session root', async () => {

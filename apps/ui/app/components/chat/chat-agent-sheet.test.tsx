@@ -438,6 +438,55 @@ describe('ChatAgentSheet', () => {
     expect(select).toHaveBeenCalledWith('thought_level', 'high');
   });
 
+  it('orders Grok reasoning from low to extra high while preserving the selected wire value', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'grok' };
+    state.placements = [
+      {
+        ...codex(),
+        externalAgents: [
+          {
+            id: 'grok',
+            displayName: 'Grok Build',
+            defaultModel: 'grok-4.7',
+            models: [{ id: 'grok-4.7', name: 'Grok 4.7' }],
+          },
+        ],
+      },
+    ];
+    const select = vi.fn();
+    renderSheet(vi.fn(), {
+      options: [
+        {
+          type: 'select',
+          id: 'reasoning_effort',
+          name: 'Reasoning effort',
+          category: 'thought_level',
+          currentValue: 'high',
+          options: [
+            { value: 'xhigh', name: 'Extra High' },
+            { value: 'high', name: 'High', description: 'Thorough reasoning and quality. Recommended.' },
+            { value: 'medium', name: 'Medium' },
+            { value: 'low', name: 'Low' },
+          ],
+        },
+      ],
+      valueOf: (option) => option.currentValue,
+      select,
+    });
+    await userEvent.click(screen.getByRole('button', { name: /Grok Build.*reasoning High/u }));
+    const reasoning = within(screen.getByRole('tablist', { name: /Reasoning for Grok Build/u }));
+    expect(reasoning.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      'Low',
+      'Medium',
+      'High',
+      'Extra High',
+    ]);
+    expect(reasoning.getByRole('tab', { name: 'High' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Thorough reasoning and quality. Recommended.')).toBeInTheDocument();
+    await userEvent.click(reasoning.getByRole('tab', { name: 'Extra High' }));
+    expect(select).toHaveBeenCalledWith('reasoning_effort', 'xhigh');
+  });
+
   it('clears a previous model’s reasoning choice when choosing another ACP model', async () => {
     state.execution = {
       kind: 'acp',

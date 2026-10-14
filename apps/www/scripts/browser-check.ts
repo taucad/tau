@@ -146,9 +146,13 @@ try {
     .getByRole('link', { name: 'Pricing' })
     .click();
   await navigationPage.waitForURL(`${origin}/pricing/`);
+  // History updates before React commits the destination metadata.
+  await navigationPage.waitForFunction(() => document.title.includes('Pricing'));
   assert.match(await navigationPage.title(), /Pricing/u);
   await navigationPage.getByRole('link', { name: 'Tau home' }).first().click();
   await navigationPage.waitForURL(`${origin}/`);
+  // Focus restoration runs in the destination's effect after its render commits.
+  await navigationPage.waitForFunction(() => document.activeElement?.id === 'main');
   assert.equal(await navigationPage.evaluate(() => document.documentElement.dataset['navigationProbe']), 'retained');
   assert.ok(dataRequests.some((url) => url.includes('/pricing.data?_routes=www-pricing')));
   assert.ok(dataRequests.some((url) => url.includes('/_root.data?_routes=www-home')));

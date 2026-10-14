@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { CirclePause } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
+import { defaultMorphTiming, metalMorphSpinnerSpeed } from '#components/geometry/loader/metal-morph-sequence.js';
+import '#styles/shiny-text.css';
 import { ChatActivitySpinner } from '#components/chat/chat-activity-spinner.js';
 import type { ChatActivityCue } from '#utils/chat-activity-cue.js';
 
@@ -9,6 +11,11 @@ type ChatActivityStatusProperties = {
   /** Request submission time in epoch milliseconds, preserved across remounts. */
   readonly startedAt?: number;
   readonly className?: string;
+};
+
+// One shimmer sweep per two rest+morph cycles; preserve the shared loader pace.
+const activityShimmerStyle = {
+  animationDuration: `${(2 * (defaultMorphTiming.restDuration + defaultMorphTiming.morphDuration)) / metalMorphSpinnerSpeed}ms`,
 };
 
 const formatElapsed = (elapsed: number): string => {
@@ -51,7 +58,16 @@ export const ChatActivityStatus = ({ cue, startedAt, className }: ChatActivitySt
   >
     <div className='flex max-w-full min-w-0 items-center gap-3'>
       {cue.kind === 'waiting' ? <CirclePause aria-hidden className='size-3 shrink-0' /> : <ChatActivitySpinner />}
-      <span role='status' aria-label='Current activity' className='min-w-0 truncate'>
+      <span
+        role='status'
+        aria-label='Current activity'
+        className={cn(
+          'min-w-0 truncate',
+          cue.kind !== 'waiting' &&
+            'animate-shiny-text bg-gradient-to-r from-muted-foreground via-foreground via-25% to-muted-foreground to-50% bg-clip-text text-transparent [background-size:170%_100%] motion-reduce:animate-none motion-reduce:bg-none motion-reduce:text-muted-foreground',
+        )}
+        style={activityShimmerStyle}
+      >
         {cue.sentence}
       </span>
     </div>

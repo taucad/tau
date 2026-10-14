@@ -1,0 +1,21 @@
+/* Shared by the app and component previews. */
+@layer utilities {
+  .animate-shiny-text {
+    animation: shiny-text 1.2s linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-shiny-text {
+      animation: none;
+    }
+  }
+}
+
+@keyframes shiny-text {
+  0% {
+    background-position: 75% 0;
+  }
+  100% {
+    background-position: -175% 0;
+  }
+}

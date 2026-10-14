@@ -12,4 +12,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 geospec-engine-native-core = { path = "../../rust" }
-wasm-bindgen = "=0.2.127"
+wasm-bindgen = "=0.2.129"

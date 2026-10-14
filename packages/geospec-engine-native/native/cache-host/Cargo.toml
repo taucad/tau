@@ -15,4 +15,4 @@ serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }
 sha2 = { version = "=0.11.0", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
-libc = "=0.2.189"
+libc = "=0.2.190"

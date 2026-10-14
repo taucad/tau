@@ -15,7 +15,7 @@ geospec-engine-native-cache-host = { path = "../../native/cache-host" }
 geospec-engine-native-runtime = { path = "../../native/runtime", default-features = false, features = ["binding-node"] }
 geospec-engine-native-core = { path = "../../rust" }
 napi = { version = "=3.12.2", default-features = false, features = ["napi8"] }
-napi-derive = "=3.6.3"
+napi-derive = "=3.6.12"
 
 [build-dependencies]
-napi-build = "=2.4.1"
+napi-build = "=2.6.0"

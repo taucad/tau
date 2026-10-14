@@ -15,7 +15,7 @@ geospec-engine-native-core = { path = "../../../rust" }
 serde = { version = "=1.0.219", features = ["derive"] }
 
 [build-dependencies]
-cc = "=1.4.4"
+cc = "=1.8.0"
 
 [features]
 # Compiles the bridge through native/occt/tests/qualification.cpp, the

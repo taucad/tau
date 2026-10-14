@@ -159,7 +159,7 @@ assert.equal(desktopArchiveCommand(windows, '/out', undefined).command, String.r
 console.log('✓ archives are written by tar, and on Windows by its inbox bsdtar');
 
 /* Runtime platform packages: each name is one its engine declares as an optional dependency. */
-assert.deepEqual(Object.keys(runtimePlatformPackages).sort(), ['darwin-arm64', 'linux-x64', 'win32-x64']);
+assert.deepEqual(Object.keys(runtimePlatformPackages).sort(), ['darwin-arm64', 'darwin-x64', 'linux-x64', 'win32-x64']);
 assert.deepEqual(runtimePlatformPackages['darwin-arm64'], {
   openrscadEngine: '@taulabs/openrscad-engine-darwin-arm64',
   esbuild: '@esbuild/darwin-arm64',
@@ -175,6 +175,9 @@ assert.deepEqual(runtimePlatformPackages['darwin-arm64'], {
 for (const [target, packages] of Object.entries(runtimePlatformPackages)) {
   const [platform, arch] = target.split('-') as [string, string];
   for (const name of [packages.openrscadEngine, packages.esbuild, packages.libassimp, packages.nanoraster]) {
+    if (name === undefined) {
+      continue;
+    }
     assert.ok(name.includes(`${platform}-${arch}`), `${name} is a ${target} package`);
   }
   assert.ok(packages.bundledOptionalDependencies.includes(`@img/sharp-${target}`), `${target} stages sharp's addon`);
@@ -183,6 +186,21 @@ for (const [target, packages] of Object.entries(runtimePlatformPackages)) {
     `${target} stages the file watcher's addon`,
   );
 }
+const assimpManifest = JSON.parse(
+  readFileSync(
+    new URL('../../../packages/plugins/assimp/node_modules/libassimp/package.json', import.meta.url),
+    'utf8',
+  ),
+) as { optionalDependencies: Record<string, string> };
+for (const packages of Object.values(runtimePlatformPackages)) {
+  if (packages.libassimp !== undefined) {
+    assert.ok(
+      assimpManifest.optionalDependencies[packages.libassimp],
+      `${packages.libassimp} must be published by the pinned engine`,
+    );
+  }
+}
+assert.equal(runtimePlatformPackages['darwin-x64'].libassimp, undefined, 'Intel uses the staged Assimp WASM backend');
 console.log('✓ each target stages its own native platform packages');
 
 /* Sandbox helpers: a target keeps only the one it executes, for its own architecture. */

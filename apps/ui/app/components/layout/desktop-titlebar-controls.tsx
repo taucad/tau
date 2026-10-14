@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { SidebarTrigger } from '#components/ui/sidebar.js';
+import { SidebarTrigger, useSidebar } from '#components/ui/sidebar.js';
+import { Link } from 'react-router';
+import { TauTextWordmark } from '#components/icons/tau-text-wordmark.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type BrowserNavigation = EventTarget & {
   readonly canGoBack: boolean;
@@ -15,9 +18,11 @@ const getNavigation = (): BrowserNavigation | undefined =>
 const HistoryButton = ({
   direction,
   isDisabled,
+  className,
 }: {
   readonly direction: 'Back' | 'Forward';
   readonly isDisabled: boolean;
+  readonly className?: string;
 }): React.JSX.Element => {
   const Icon = direction === 'Back' ? ArrowLeft : ArrowRight;
 
@@ -28,7 +33,7 @@ const HistoryButton = ({
           type='button'
           variant='ghost'
           size='icon-sm'
-          className='size-7 rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground'
+          className={cn('rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground', className)}
           aria-label={direction}
           disabled={isDisabled}
           onClick={() => {
@@ -47,14 +52,22 @@ const HistoryButton = ({
   );
 };
 
-export const DesktopTitlebarControls = ({
+export const TitlebarNavigation = ({
   onSidebarResize,
+  hasHistory = false,
+  hasWordmark = true,
 }: {
+  readonly hasHistory?: boolean;
+  readonly hasWordmark?: boolean;
   readonly onSidebarResize: (direction: 'narrower' | 'wider') => void;
 }): React.JSX.Element => {
+  const { open, isMobile } = useSidebar();
   const [availability, setAvailability] = useState({ back: false, forward: false });
 
   useEffect(() => {
+    if (!hasHistory) {
+      return;
+    }
     const navigation = getNavigation();
     if (!navigation) {
       return;
@@ -68,8 +81,42 @@ export const DesktopTitlebarControls = ({
     return () => {
       navigation.removeEventListener('currententrychange', update);
     };
-  }, []);
+  }, [hasHistory]);
 
+  return (
+    <>
+      <SidebarTrigger aria-label='Toggle Sidebar' onSidebarResize={onSidebarResize} />
+      {hasWordmark && open && !isMobile ? (
+        <Link
+          to='/'
+          aria-label='Home'
+          className='flex h-7 shrink-0 items-center rounded-sm outline-none [app-region:no-drag] focus-visible:focus-outline'
+        >
+          <TauTextWordmark aria-hidden className='h-5 w-auto text-primary' />
+        </Link>
+      ) : null}
+      {hasHistory ? (
+        <>
+          <HistoryButton
+            direction='Back'
+            isDisabled={!availability.back}
+            className={open && !isMobile ? 'ml-auto' : undefined}
+          />
+          <HistoryButton direction='Forward' isDisabled={!availability.forward} />
+        </>
+      ) : null}
+    </>
+  );
+};
+
+export const DesktopTitlebarControls = ({
+  onSidebarResize,
+  isFullscreen,
+}: {
+  readonly isFullscreen: boolean;
+  readonly onSidebarResize: (direction: 'narrower' | 'wider') => void;
+}): React.JSX.Element => {
+  const { open, isMobile } = useSidebar();
   return (
     <div
       data-slot='desktop-titlebar'
@@ -77,11 +124,12 @@ export const DesktopTitlebarControls = ({
     >
       <div
         data-slot='desktop-titlebar-controls'
-        className='flex h-9 items-center gap-1 bg-transparent pr-1 pl-(--desktop-titlebar-inset) [app-region:no-drag] [&_button]:[app-region:no-drag]'
+        className={cn(
+          'flex h-9 items-center gap-1 bg-transparent pl-(--desktop-titlebar-inset) [app-region:no-drag] [&_button]:[app-region:no-drag]',
+          open && !isMobile ? 'pr-2' : 'pr-1',
+        )}
       >
-        <SidebarTrigger aria-label='Toggle Sidebar' onSidebarResize={onSidebarResize} />
-        <HistoryButton direction='Back' isDisabled={!availability.back} />
-        <HistoryButton direction='Forward' isDisabled={!availability.forward} />
+        <TitlebarNavigation hasHistory hasWordmark={isFullscreen} onSidebarResize={onSidebarResize} />
       </div>
     </div>
   );

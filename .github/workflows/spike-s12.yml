@@ -4,11 +4,6 @@
 name: Spike S12 (serve UI layer)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/spike-s12.yml'
-      - 'scripts/spikes/native-deps/linux/s12/**'
-      - 'scripts/spikes/native-deps/linux/annotate.sh'
   workflow_dispatch:
 
 permissions:

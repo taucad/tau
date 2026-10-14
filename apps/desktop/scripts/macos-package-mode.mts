@@ -48,3 +48,13 @@ export const macosPackageFuses = (
   [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
   [FuseV1Options.OnlyLoadAppFromAsar]: true,
 });
+
+/** Select the native Mac host; cross-packaging cannot verify the installed payload. */
+export const macosPackageArchitecture = (platform: string, architecture: string): 'arm64' | 'x64' => {
+  if (platform !== 'darwin' || (architecture !== 'arm64' && architecture !== 'x64')) {
+    throw new Error(
+      `Mac packages require a native darwin-arm64 or darwin-x64 host, received ${platform}-${architecture}`,
+    );
+  }
+  return architecture;
+};

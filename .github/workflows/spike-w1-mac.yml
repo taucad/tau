@@ -26,9 +26,6 @@ on:
         required: false
         type: string
         default: '38124001817'
-  pull_request:
-    paths:
-      - '.github/workflows/spike-w1-mac.yml'
 
 permissions:
   actions: read # nrwl/nx-set-shas inside setup-nx, and the Tau.app artifact of another run
@@ -180,7 +177,10 @@ jobs:
             const metadataUrl = 'https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json';
             const metadata = await (await fetch(metadataUrl)).json();
             const release = metadata.releases.find((entry) => entry.runtime?.version === '10.0.11');
-            const file = release.runtime.files.find((entry) => entry.rid === 'osx-arm64' && entry.name.endsWith('.tar.gz'));
+            const candidates = release.runtime.files.filter((entry) => entry.rid === 'osx-arm64').map((entry) => entry.name);
+            console.log(`releases.json osx-arm64 runtime files: ${candidates.join(', ')}`);
+            const file = release.runtime.files.find((entry) => entry.rid === 'osx-arm64' && entry.name === 'dotnet-runtime-osx-arm64.tar.gz');
+            if (!file) throw new Error('releases.json lists no dotnet-runtime-osx-arm64.tar.gz for 10.0.11');
             const { bytes, milliseconds } = await fetchBytes(file.url);
             const sha512 = hex('sha512', bytes);
             if (sha512 !== file.hash.toLowerCase()) throw new Error(`.NET runtime digest mismatch ${sha512}`);
@@ -606,6 +606,31 @@ jobs:
           writeFileSync(join(out, 's15-cells.json'), `${JSON.stringify({ facts, cells: cells.map(([name, pass, detail]) => ({ name, pass, detail })) }, undefined, 2)}\n`);
           console.log(lines.join('\n'));
           SPIKE_EOF
+          cat > "$RUNNER_TEMP/spike/annotate.mjs" <<'SPIKE_EOF'
+          // Re-emit a spike summary as notice annotations (at most 9 chunks of about 3800 characters), so the
+          // numbers are readable through the check-runs REST API. Portable: no GNU split on macOS.
+          // Usage: node annotate.mjs <title> <file>
+          import { existsSync, readFileSync } from 'node:fs';
+
+          const [title, file] = process.argv.slice(2);
+          if (!existsSync(file)) {
+            console.log(`::warning title=${title}::no summary file ${file}`);
+            process.exit(0);
+          }
+          const escape = (value) => value.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+          const chunks = [];
+          let current = '';
+          for (const line of readFileSync(file, 'utf8').split('\n')) {
+            if (current.length + line.length + 1 > 3800 && current) {
+              chunks.push(current);
+              current = '';
+            }
+            current += `${line.slice(0, 3800)}\n`;
+          }
+          if (current.trim()) chunks.push(current);
+          chunks.slice(0, 9).forEach((chunk, index) => console.log(`::notice title=${title} (${index + 1})::${escape(chunk)}`));
+          if (chunks.length > 9) console.log(`::warning title=${title}::summary truncated after 9 notices`);
+          SPIKE_EOF
           {
             echo "OUT=$RUNNER_TEMP/out"
             echo "SPIKE=$RUNNER_TEMP/spike"
@@ -713,9 +738,7 @@ jobs:
         name: Publish the summary as check annotations
         if: always()
         run: |
-          if [ -f scripts/spikes/native-deps/linux/annotate.sh ]; then
-            scripts/spikes/native-deps/linux/annotate.sh "${{ github.job }}${{ matrix.role && format(' {0}', matrix.role) || '' }}${{ matrix.runner && format(' {0}', matrix.runner) || '' }}" "$OUT/summary.txt"
-          fi
+          node "$SPIKE/annotate.mjs" "${{ github.job }}${{ matrix.role && format(' {0}', matrix.role) || '' }}${{ matrix.runner && format(' {0}', matrix.runner) || '' }}" "$OUT/summary.txt"
 
       - &upload-evidence
         name: Upload the evidence
@@ -1084,3 +1107,26 @@ jobs:
 
       - *annotate
       - *upload-evidence
+
+  # The seed entries exist only for this run: delete them so the shared 10 GB cache keeps the
+  # GeoSpec entries. The cache REST path is unreachable from outside, so the run cleans up itself.
+  cleanup:
+    name: Delete this run's seed caches
+    needs: [seed, s14, s15]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete the spike-w1 seed cache entries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          gh cache list --key spike-w1-seed --limit 100 || true
+          for key in "spike-w1-seed-$RUN_KEY" "spike-w1-seed-miss-$RUN_KEY" spike-w1-seed-38381658620-1; do
+            gh cache delete "$key" || echo "no cache entry $key"
+          done
+          gh cache list --key spike-w1-seed --limit 100 || true

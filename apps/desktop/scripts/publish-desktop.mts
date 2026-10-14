@@ -2,7 +2,7 @@
 /**
  * Purpose: Prepare immutable desktop feeds, mirror qualified archives to R2, or promote a tested release.
  * Environment: DESKTOP_RELEASE_TAG, TAU_DESKTOP_SOURCE_SHA, DESKTOP_ASSETS_DIR; mirror/promote also
- * DESKTOP_R2_BUCKET, DESKTOP_R2_ENDPOINT and AWS credentials. Promotion requires ota-receipt.json.
+ * DESKTOP_R2_BUCKET, DESKTOP_R2_ENDPOINT and AWS credentials. Promotion requires an OTA receipt for each Mac architecture.
  * Usage: pnpm nx run desktop:publish -- prepare|mirror|promote
  * Exit: nonzero on mismatched bytes, stale source, missing acceptance, or failed publication.
  */
@@ -52,7 +52,7 @@ const main = async (): Promise<void> => {
   const sourceCommit = required('TAU_DESKTOP_SOURCE_SHA');
   const root = resolve(required('DESKTOP_ASSETS_DIR'));
   await mkdir(root, { recursive: true });
-  const platforms = ['darwin-arm64', 'linux-x64', 'win32-x64'];
+  const platforms = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'win32-x64'];
   const archives = platforms.map((target) => {
     const [platform, arch] = target.split('-');
     return desktopArchiveName(platform!, arch!);
@@ -189,7 +189,11 @@ const main = async (): Promise<void> => {
     sourceCommit: z.literal(sourceCommit),
     version: z.literal(version),
   });
-  acceptance.parse(JSON.parse(await readFile(resolve(root, 'ota-receipt.json'), 'utf8')));
+  for (const target of ['darwin-arm64', 'darwin-x64']) {
+    acceptance
+      .extend({ target: z.literal(target) })
+      .parse(JSON.parse(await readFile(resolve(root, `ota-receipt-${target}.json`), 'utf8')));
+  }
   const previousPath = resolve(root, 'previous-download.json');
   if (await readObject('latest/promotion.json', previousPath)) {
     const previous = manifestSchema.parse(JSON.parse(await readFile(previousPath, 'utf8')));

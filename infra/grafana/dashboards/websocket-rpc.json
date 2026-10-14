@@ -8,6 +8,15 @@
   "templating": {
     "list": [
       {
+        "name": "app",
+        "label": "Application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": { "text": ".*", "value": ".*" },
+        "hide": 2
+      },
+      {
         "name": "service",
         "label": "Service",
         "type": "custom",
@@ -20,8 +29,8 @@
       {
         "name": "instance",
         "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(process_uptime{service_name=\"$service\"}, instance)",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(process_uptime{app=~\"$app\",service_name=\"$service\"}, instance)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",
@@ -34,8 +43,15 @@
       "title": "Active WS Connections",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-      "targets": [{ "expr": "sum(ws_connections_active{service_name=~\"$service\"})" }],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      "targets": [
+        {
+          "expr": "sum(ws_connections_active{app=~\"$app\",service_name=~\"$service\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "id": 1
     },
     {
       "title": "Upgrade Rejections (1h)",
@@ -44,10 +60,13 @@
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "targets": [
         {
-          "expr": "sum(increase(ws_upgrade_rejections_total{service_name=~\"$service\"}[1h])) or vector(0)"
+          "expr": "sum(increase(ws_upgrade_rejections_total{app=~\"$app\",service_name=~\"$service\"}[1h])) or vector(0)"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "id": 2
     },
     {
       "title": "Disconnection Rate",
@@ -55,11 +74,14 @@
       "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 },
       "targets": [
         {
-          "expr": "sum by (ws_gateway) (rate(ws_disconnections_total{service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (ws_gateway) (rate(ws_disconnections_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
           "legendFormat": "{{ws_gateway}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "cps" } }
+      "fieldConfig": {
+        "defaults": { "unit": "cps" }
+      },
+      "id": 3
     },
     {
       "title": "Frames by Gateway and Direction",
@@ -67,11 +89,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "targets": [
         {
-          "expr": "sum by (ws_gateway, ws_direction) (rate(ws_message_size_count{service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (ws_gateway, ws_direction) (rate(ws_message_size_count{app=~\"$app\",service_name=~\"$service\"}[5m]))",
           "legendFormat": "{{ws_gateway}} {{ws_direction}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "cps" } }
+      "fieldConfig": {
+        "defaults": { "unit": "cps" }
+      },
+      "id": 4
     },
     {
       "title": "Upgrade Rejections by Reason",
@@ -79,11 +104,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "targets": [
         {
-          "expr": "sum by (ws_gateway, reason) (rate(ws_upgrade_rejections_total{service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (ws_gateway, reason) (rate(ws_upgrade_rejections_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
           "legendFormat": "{{ws_gateway}} {{reason}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "cps" } }
+      "fieldConfig": {
+        "defaults": { "unit": "cps" }
+      },
+      "id": 5
     },
     {
       "title": "Connections by Gateway",
@@ -91,11 +119,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "targets": [
         {
-          "expr": "sum by (ws_gateway) (ws_connections_active{service_name=~\"$service\"})",
+          "expr": "sum by (ws_gateway) (ws_connections_active{app=~\"$app\",service_name=~\"$service\"})",
           "legendFormat": "{{ws_gateway}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "id": 6
     },
     {
       "title": "Disconnections by Reason",
@@ -103,11 +134,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "targets": [
         {
-          "expr": "sum by (ws_gateway, ws_close_reason) (rate(ws_disconnections_total{service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (ws_gateway, ws_close_reason) (rate(ws_disconnections_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
           "legendFormat": "{{ws_gateway}} {{ws_close_reason}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "cps" } }
+      "fieldConfig": {
+        "defaults": { "unit": "cps" }
+      },
+      "id": 7
     },
     {
       "title": "WS Message Size (p95)",
@@ -115,18 +149,26 @@
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, ws_gateway, ws_direction) (rate(ws_message_size_bucket{service_name=~\"$service\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, ws_gateway, ws_direction) (rate(ws_message_size_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
           "legendFormat": "{{ws_gateway}} {{ws_direction}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "bytes" } }
+      "fieldConfig": {
+        "defaults": { "unit": "bytes" }
+      },
+      "id": 8
     },
     {
       "title": "Error Logs",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
+      "targets": [
+        {
+          "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"",
+          "refId": "A"
+        }
+      ],
       "options": {
         "showTime": true,
         "showLabels": true,
@@ -135,14 +177,22 @@
         "prettifyLogMessage": false,
         "enableLogDetails": true,
         "sortOrder": "Descending"
-      }
+      },
+      "id": 9
     },
     {
       "title": "Recent Traces",
       "type": "traces",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 108 },
       "datasource": { "type": "tempo", "uid": "tempo" },
-      "targets": [{ "query": "{resource.service.name=~\"$service\"}", "refId": "A", "queryType": "traceqlSearch" }]
+      "targets": [
+        {
+          "query": "{resource.service.name=~\"$service\"}",
+          "refId": "A",
+          "queryType": "traceqlSearch"
+        }
+      ],
+      "id": 10
     }
   ],
   "schemaVersion": 39

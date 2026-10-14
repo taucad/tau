@@ -8,6 +8,15 @@
   "templating": {
     "list": [
       {
+        "name": "app",
+        "label": "Application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": { "text": ".*", "value": ".*" },
+        "hide": 2
+      },
+      {
         "name": "service",
         "label": "Service",
         "type": "custom",
@@ -20,8 +29,8 @@
       {
         "name": "instance",
         "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(process_uptime{service_name=\"$service\"}, instance)",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(process_uptime{app=~\"$app\",service_name=\"$service\"}, instance)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",
@@ -36,10 +45,11 @@
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
       "targets": [
         {
-          "expr": "sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[5m])) by (http_route)",
+          "expr": "sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\"}[5m])) by (http_route)",
           "legendFormat": "{{http_route}}"
         }
-      ]
+      ],
+      "id": 1
     },
     {
       "title": "Error Rate (%)",
@@ -47,7 +57,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
       "targets": [
         {
-          "expr": "(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[5m])) or vector(0)) / sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[5m])) * 100"
+          "expr": "(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_response_status_code=~\"5..\"}[5m])) or vector(0)) / sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\"}[5m])) * 100"
         }
       ],
       "fieldConfig": {
@@ -61,7 +71,8 @@
             ]
           }
         }
-      }
+      },
+      "id": 2
     },
     {
       "title": "Latency (p50 / p95 / p99)",
@@ -69,19 +80,22 @@
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(http_server_request_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(http_server_request_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le))",
           "legendFormat": "p50"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le))",
           "legendFormat": "p95"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(http_server_request_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_request_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le))",
           "legendFormat": "p99"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "id": 3
     },
     {
       "title": "Request Rate by Route",
@@ -89,10 +103,11 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
         {
-          "expr": "sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[5m])) by (http_route, http_request_method)",
+          "expr": "sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\"}[5m])) by (http_route, http_request_method)",
           "legendFormat": "{{http_request_method}} {{http_route}}"
         }
-      ]
+      ],
+      "id": 4
     },
     {
       "title": "Latency by Route (p95)",
@@ -100,11 +115,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_bucket{service_name=~\"$service\"}[5m])) by (le, http_route))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le, http_route))",
           "legendFormat": "{{http_route}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "id": 5
     },
     {
       "title": "Outbound HTTP Latency (p95)",
@@ -112,11 +130,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_client_request_duration_bucket{service_name=~\"$service\"}[5m])) by (le, server_address))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_client_request_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le, server_address))",
           "legendFormat": "{{server_address}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "id": 6
     },
     {
       "title": "Event Loop Utilization",
@@ -124,18 +145,26 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
       "targets": [
         {
-          "expr": "nodejs_eventloop_utilization{service_name=~\"$service\"}",
+          "expr": "nodejs_eventloop_utilization{app=~\"$app\",service_name=~\"$service\"}",
           "legendFormat": "utilization"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "percentunit" } }
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit" }
+      },
+      "id": 7
     },
     {
       "title": "Error Logs",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 30 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
+      "targets": [
+        {
+          "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"",
+          "refId": "A"
+        }
+      ],
       "options": {
         "showTime": true,
         "showLabels": true,
@@ -144,21 +173,30 @@
         "prettifyLogMessage": false,
         "enableLogDetails": true,
         "sortOrder": "Descending"
-      }
+      },
+      "id": 8
     },
     {
       "title": "Recent Traces",
       "type": "traces",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 108 },
       "datasource": { "type": "tempo", "uid": "tempo" },
-      "targets": [{ "query": "{resource.service.name=~\"$service\"}", "refId": "A", "queryType": "traceqlSearch" }]
+      "targets": [
+        {
+          "query": "{resource.service.name=~\"$service\"}",
+          "refId": "A",
+          "queryType": "traceqlSearch"
+        }
+      ],
+      "id": 9
     },
     {
       "title": "Publications",
       "type": "row",
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 116 },
-      "panels": []
+      "panels": [],
+      "id": 10
     },
     {
       "title": "Publication Views by Dedupe",
@@ -166,11 +204,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 117 },
       "targets": [
         {
-          "expr": "sum by (deduped) (rate(publication_views_total{service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (deduped) (rate(publication_views_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
           "legendFormat": "{{deduped}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "reqps" } }
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      },
+      "id": 11
     },
     {
       "title": "View Rejections by Reason",
@@ -178,11 +219,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 117 },
       "targets": [
         {
-          "expr": "sum by (reason) (rate(publication_views_rejections_total{service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (reason) (rate(publication_views_rejections_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
           "legendFormat": "{{reason}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "reqps" } }
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      },
+      "id": 12
     },
     {
       "title": "File Requests by Outcome",
@@ -190,11 +234,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 125 },
       "targets": [
         {
-          "expr": "sum by (outcome) (rate(publication_file_requests_total{service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (outcome) (rate(publication_file_requests_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
           "legendFormat": "{{outcome}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "reqps" } }
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      },
+      "id": 13
     },
     {
       "title": "Invite Emails by Trigger and Outcome",
@@ -202,10 +249,11 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 125 },
       "targets": [
         {
-          "expr": "sum by (trigger, outcome) (increase(publication_invite_emails_total{service_name=~\"$service\"}[1h]))",
+          "expr": "sum by (trigger, outcome) (increase(publication_invite_emails_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
           "legendFormat": "{{trigger}} {{outcome}}"
         }
-      ]
+      ],
+      "id": 14
     }
   ],
   "schemaVersion": 39

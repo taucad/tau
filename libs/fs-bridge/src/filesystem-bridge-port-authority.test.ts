@@ -451,17 +451,30 @@ describe('filesystem bridge authority over a Port pair (dialler = client, dialee
 
     try {
       await proxy.ready;
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
       const pending = proxy.writeFileChecked({ path: 'target.txt', data: 'new', preconditions: [] });
-      await applied;
-      server.dispose();
-      await expect(pending).rejects.toMatchObject({
+      const outcome = expect(pending).rejects.toMatchObject({
         applicationState: 'potentially-applied',
         metadata: { applicationState: 'potentially-applied' },
       });
+      await applied;
+      await vi.advanceTimersByTimeAsync(slowFileSystemBridgeCallThreshold);
+      const diagnostic = slowFileSystemBridgeCalls().at(-1)!;
+      expect(diagnostic).toMatchObject({ method: 'writeFileChecked', outcome: 'pending' });
+      server.dispose();
+      await outcome;
       expect(writeFileChecked).toHaveBeenCalledOnce();
+      expect(slowFileSystemBridgeCalls().find((entry) => entry.callId === diagnostic.callId)).toMatchObject({
+        outcome: 'rejected',
+      });
+      proxy.dispose();
+      expect(slowFileSystemBridgeCalls().find((entry) => entry.callId === diagnostic.callId)?.outcome).not.toBe(
+        'pending',
+      );
     } finally {
       proxy.dispose();
       server.dispose();
+      vi.useRealTimers();
     }
   });
 

@@ -292,7 +292,12 @@ export const selectModel = async (name: string): Promise<void> => {
   await target.click(selectors.getByCss(composerSelector).first());
   await target.keyboardPress('ControlOrMeta+Slash');
   await target.click(selectors.getByRole('button', { name: /^Model: .*\. Change$/u }));
-  await target.click(selectors.getByRole('option', { name, exact: true }).first());
+  await target.click(
+    selectors
+      .getByRole('option')
+      .filter({ has: selectors.getByText(name, { exact: true }) })
+      .first(),
+  );
   // Choosing returns to the sheet with the model's settings; close it back to the editor.
   await target.expectVisible(selectors.getByRole('button', { name: `Model: ${name}. Change` }));
   await target.keyboardPress('Escape');

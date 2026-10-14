@@ -61,11 +61,7 @@ export const ChatActivityStatus = ({ cue, startedAt, className }: ChatActivitySt
       <span
         role='status'
         aria-label='Current activity'
-        className={cn(
-          'min-w-0 truncate',
-          cue.kind !== 'waiting' &&
-            'animate-shiny-text bg-gradient-to-r from-muted-foreground via-foreground via-25% to-muted-foreground to-50% bg-clip-text text-transparent [background-size:170%_100%] motion-reduce:animate-none motion-reduce:bg-none motion-reduce:text-muted-foreground',
-        )}
+        className={cn('min-w-0 truncate', cue.kind !== 'waiting' && 'animate-activity-shimmer')}
         style={activityShimmerStyle}
       >
         {cue.sentence}

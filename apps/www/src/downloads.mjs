@@ -45,9 +45,8 @@ export const desktopDownloads = {
  */
 export const detectDesktopPlatform = (browser) => {
   const ua = browser.userAgent ?? '';
-  const platform =
-    [browser.userAgentData?.platform, browser.platform, ua].find((value) => value !== undefined && value.length > 0) ??
-    '';
+  const hints = [browser.userAgentData?.platform, browser.platform, ua];
+  const platform = hints.find((value) => value !== undefined && value.length > 0) ?? '';
   if (
     browser.userAgentData?.mobile === true ||
     /Android|iPhone|iPad|iPod|CrOS|Mobile/iu.test(`${platform} ${ua}`) ||
@@ -61,7 +60,7 @@ export const detectDesktopPlatform = (browser) => {
   if (/Win/iu.test(platform)) {
     return 'windows';
   }
-  if (/Linux/iu.test(platform) && !/aarch64|armv/iu.test(`${platform} ${ua}`)) {
+  if (/Linux/iu.test(platform) && !/aarch64|arm/iu.test(hints.join(' '))) {
     return 'linux';
   }
   return undefined;

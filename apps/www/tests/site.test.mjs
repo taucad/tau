@@ -275,3 +275,19 @@ await test('desktop downloads detect all supported hosts and keep mobile or unkn
     assert.match(desktopDownloadHref(platform), /^https:\/\/downloads.tau.new\/latest\/Tau-/u);
   }
 });
+
+await test('Linux ARM hints prevent an x64 recommendation even when another hint only names Linux', () => {
+  for (const architecture of ['aarch64', 'armv8l', 'arm64']) {
+    for (const browser of [
+      {
+        userAgentData: { platform: 'Linux' },
+        platform: `Linux ${architecture}`,
+        userAgent: 'Mozilla/5.0 (X11; Linux)',
+      },
+      { userAgentData: { platform: `Linux ${architecture}` }, platform: 'Linux' },
+      { userAgentData: { platform: 'Linux' }, userAgent: `Mozilla/5.0 (X11; Linux ${architecture})` },
+    ]) {
+      assert.equal(detectDesktopPlatform(browser), undefined);
+    }
+  }
+});

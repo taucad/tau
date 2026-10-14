@@ -4,11 +4,6 @@
 name: Spike S7 (Node proxy and CA)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/spike-s7.yml'
-      - 'scripts/spikes/native-deps/linux/s7/**'
-      - 'scripts/spikes/native-deps/linux/annotate.sh'
   workflow_dispatch:
 
 permissions:

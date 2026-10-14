@@ -9,8 +9,8 @@
  * optional TAU_MACOS_PACKAGE_OUTPUT_ROOT; optional TAU_DESKTOP_CHANNEL (production, the default, or staging);
  * Apple credentials only for --release; --unsigned skips all package signing.
  * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release | --unsigned] [--zip]
- * Output: <output root>/Tau-darwin-arm64/Tau.app, copied as APFS clones of its inputs; the distribution archive
- * <output root>/Tau-macos-arm64.zip only for --release or when --zip is passed.
+ * Output: <output root>/Tau-darwin-<arch>/Tau.app, copied as APFS clones of its inputs; the distribution archive
+ * <output root>/Tau-macos-<arch>.zip only for --release or when --zip is passed.
  * Exit codes: 0 on a verified app/ZIP; non-zero on missing artifacts, credentials, or validation failure.
  */
 
@@ -30,7 +30,7 @@ import { packager } from '@electron/packager';
 import { isQuickLookEnabled } from '#shared/quick-look.js';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
+import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import { copyGeoSpecNativeAssembly, copyGeoSpecSourceRelink, copyTree } from './runtime-closure.mjs';
 import {
@@ -69,6 +69,11 @@ const outputRoot = resolve(process.env['TAU_MACOS_PACKAGE_OUTPUT_ROOT'] ?? resol
 if (process.platform !== 'darwin') {
   throw new Error('The macOS package can only be assembled on macOS.');
 }
+const architecture = macosPackageArchitecture(process.platform, process.arch);
+const target = `darwin-${architecture}` as const;
+const machArchitecture = architecture === 'arm64' ? 'arm64' : 'x86_64';
+// Intel has the portable desktop feature set; native GeoSpec and PicoGK remain ARM-only.
+const shipsNativeGeometry = architecture === 'arm64';
 const stageRoot = resolve(outputRoot, 'stage');
 const extensionRoot = resolve(desktopRoot, 'macos/dist/extensions');
 const hostInfo = resolve(desktopRoot, 'macos/generated/TauHost-Info.plist');
@@ -79,7 +84,7 @@ const picoGkResourceRoot = resolve(desktopRoot, 'resources/picogk');
 /* The `git` this app records revisions with, prepared beside python and picogk
  * (OQ3). One payload, not two: `git-lfs` lives inside this git's own exec path,
  * so `git lfs` resolves through the binary main points the services host at. */
-const gitResourceRoot = resolve(desktopRoot, 'resources/git/darwin-arm64');
+const gitResourceRoot = resolve(desktopRoot, `resources/git/${target}`);
 const shipsGit = existsSync(gitResourceRoot);
 /* GPL-2.0 §3(a): the exact source the payload was built from travels with it
  * (`prepare-git.mts`). A payload without it is not shipped. */
@@ -100,7 +105,10 @@ if (zip) {
   });
 }
 // ponytail: no Quick Look extensions in the bundle while `isQuickLookEnabled()` is off.
-const extensions = isQuickLookEnabled() ? (['TauQuickLookPreview.appex', 'TauQuickLookThumbnail.appex'] as const) : [];
+const extensions =
+  isQuickLookEnabled() && shipsNativeGeometry
+    ? (['TauQuickLookPreview.appex', 'TauQuickLookThumbnail.appex'] as const)
+    : [];
 const adhocAppEntitlements = [
   'com.apple.security.cs.allow-jit',
   'com.apple.security.cs.disable-library-validation',
@@ -114,8 +122,9 @@ const adhocAppEntitlements = [
 ];
 const universalMagics = new Set([0xca_fe_ba_be, 0xbe_ba_fe_ca, 0xca_fe_ba_bf, 0xbf_ba_fe_ca]);
 const machObjectMagics = new Set([...universalMagics, 0xfe_ed_fa_ce, 0xce_fa_ed_fe, 0xfe_ed_fa_cf, 0xcf_fa_ed_fe]);
-/** `CPU_TYPE_ARM64`; with subtype `CPU_SUBTYPE_ARM64_ALL` (0) it is the header `lipo -archs` names `arm64`. */
-const arm64CpuType = 0x01_00_00_0c;
+/** Native Mach-O CPU identity; Intel uses CPU_TYPE_X86_64 / CPU_SUBTYPE_X86_64_ALL. */
+const cpuTypeForTarget = architecture === 'arm64' ? 0x01_00_00_0c : 0x01_00_00_07;
+const cpuSubtypeForTarget = architecture === 'arm64' ? 0 : 3;
 
 /* A shipped app records revisions with the binaries it carries: a machine
  * launched from Finder has `/usr/bin:/bin:/usr/sbin:/sbin` and no `git-lfs`, so
@@ -134,23 +143,27 @@ const selectedGeoSpecAssembly = process.env['TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT'];
 if (selectedGeoSpecAssembly === '') {
   throw new Error('TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT must name a qualified native assembly.');
 }
-let geospecAssemblyInput: string;
-if (selectedGeoSpecAssembly === undefined) {
-  const output = execFileSync(
-    process.execPath,
-    [resolve(workspaceRoot, 'packages/geospec-engine-native/scripts/ci-artifacts.mjs'), 'snapshot-delivery'],
-    { cwd: workspaceRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
-  );
-  const selections = [...output.matchAll(/^ASSEMBLY_ROOT=(.+)$/gmu)].map((match) => match[1]?.trim());
-  if (selections.length !== 1 || !selections[0]) {
-    throw new Error('GeoSpec delivery did not select one verified immutable assembly snapshot.');
+let geospecAssemblyInput: string | undefined;
+if (shipsNativeGeometry) {
+  if (selectedGeoSpecAssembly === undefined) {
+    const output = execFileSync(
+      process.execPath,
+      [resolve(workspaceRoot, 'packages/geospec-engine-native/scripts/ci-artifacts.mjs'), 'snapshot-delivery'],
+      { cwd: workspaceRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
+    );
+    const selections = [...output.matchAll(/^ASSEMBLY_ROOT=(.+)$/gmu)].map((match) => match[1]?.trim());
+    if (selections.length !== 1 || !selections[0]) {
+      throw new Error('GeoSpec delivery did not select one verified immutable assembly snapshot.');
+    }
+    geospecAssemblyInput = selections[0];
+  } else {
+    geospecAssemblyInput = selectedGeoSpecAssembly;
   }
-  geospecAssemblyInput = selections[0];
-} else {
-  geospecAssemblyInput = selectedGeoSpecAssembly;
 }
 const ownedGeoSpecSnapshot =
-  selectedGeoSpecAssembly === undefined ? resolve(workspaceRoot, geospecAssemblyInput) : undefined;
+  selectedGeoSpecAssembly === undefined && geospecAssemblyInput
+    ? resolve(workspaceRoot, geospecAssemblyInput)
+    : undefined;
 if (
   ownedGeoSpecSnapshot !== undefined &&
   (dirname(ownedGeoSpecSnapshot) !== resolve(workspaceRoot, 'node_modules/.cache/geospec-engine-native') ||
@@ -159,11 +172,14 @@ if (
   throw new Error('GeoSpec delivery selected an assembly snapshot outside its owned cache.');
 }
 try {
-  const geospecAssemblyRoot = await realpath(resolve(workspaceRoot, geospecAssemblyInput));
+  const geospecAssemblyRoot = geospecAssemblyInput
+    ? await realpath(resolve(workspaceRoot, geospecAssemblyInput))
+    : undefined;
   if (
-    geospecAssemblyRoot === outputRoot ||
-    geospecAssemblyRoot.startsWith(`${outputRoot}/`) ||
-    outputRoot.startsWith(`${geospecAssemblyRoot}/`)
+    geospecAssemblyRoot &&
+    (geospecAssemblyRoot === outputRoot ||
+      geospecAssemblyRoot.startsWith(`${outputRoot}/`) ||
+      outputRoot.startsWith(`${geospecAssemblyRoot}/`))
   ) {
     throw new Error('GeoSpec native assembly must be outside the disposable package output root.');
   }
@@ -192,7 +208,7 @@ try {
     return machHeader(bytes) !== undefined;
   };
 
-  const thinIntelSlices = async (root: string): Promise<number> => {
+  const thinOtherSlices = async (root: string): Promise<number> => {
     const entries = await readdir(root, { recursive: true, withFileTypes: true });
     const files = entries.filter((entry) => entry.isFile()).map((entry) => resolve(entry.parentPath, entry.name));
     const universal: string[] = [];
@@ -220,9 +236,9 @@ try {
             const cpuType = header.getUint32(4, littleEndian);
             // oxlint-disable-next-line no-bitwise -- The high byte of a CPU subtype holds capability flags.
             const cpuSubtype = header.getUint32(8, littleEndian) & 0x00_ff_ff_ff;
-            if (cpuType !== arm64CpuType || cpuSubtype !== 0) {
+            if (cpuType !== cpuTypeForTarget || cpuSubtype !== cpuSubtypeForTarget) {
               throw new Error(
-                `${path} has no arm64 slice: CPU type 0x${cpuType.toString(16)}, subtype ${String(cpuSubtype)}`,
+                `${path} has no ${machArchitecture} slice: CPU type 0x${cpuType.toString(16)}, subtype ${String(cpuSubtype)}`,
               );
             }
           }
@@ -232,12 +248,12 @@ try {
     let count = 0;
     for (const path of universal) {
       const architectures = execFileSync('lipo', ['-archs', path], { encoding: 'utf8' }).trim().split(/\s+/u);
-      if (!architectures.includes('arm64')) {
-        throw new Error(`${path} has no arm64 slice: ${architectures.join(', ')}`);
+      if (!architectures.includes(machArchitecture)) {
+        throw new Error(`${path} has no ${machArchitecture} slice: ${architectures.join(', ')}`);
       }
-      if (architectures.includes('x86_64')) {
-        const output = `${path}.arm64`;
-        execFileSync('lipo', [path, '-thin', 'arm64', '-output', output]);
+      if (architectures.length > 1) {
+        const output = `${path}.${architecture}`;
+        execFileSync('lipo', [path, '-thin', machArchitecture, '-output', output]);
         // oxlint-disable-next-line no-await-in-loop -- Each replacement follows its synchronous lipo operation.
         await rename(output, path);
         count += 1;
@@ -271,17 +287,18 @@ try {
   };
 
   /* Every runtime package is resolved before the previous output is removed. */
-  const runtimePackages = await resolveRuntimePackages({ desktopRoot, workspaceRoot, target: 'darwin-arm64' });
+  const runtimePackages = await resolveRuntimePackages({ desktopRoot, workspaceRoot, target });
 
   await rm(outputRoot, { recursive: true, force: true });
-  const geospecNativeDependencies = await copyGeoSpecNativeAssembly(
-    geospecAssemblyRoot,
-    resolve(stageRoot, 'node_modules'),
-  );
-  const geospecSourceRelinkReceipt = await readFile(
-    resolve(stageRoot, 'node_modules/@taucad/geospec-engine-native/licenses/SOURCE-RELINK.json'),
-    'utf8',
-  );
+  const geospecNativeDependencies = geospecAssemblyRoot
+    ? await copyGeoSpecNativeAssembly(geospecAssemblyRoot, resolve(stageRoot, 'node_modules'))
+    : {};
+  const geospecSourceRelinkReceipt = geospecAssemblyRoot
+    ? await readFile(
+        resolve(stageRoot, 'node_modules/@taucad/geospec-engine-native/licenses/SOURCE-RELINK.json'),
+        'utf8',
+      )
+    : undefined;
 
   const metadata = await readJson<PackageMetadata>(resolve(desktopRoot, 'package.json'));
   const electron = await readJson<{ readonly version: string }>(
@@ -295,7 +312,7 @@ try {
     /* Ad-hoc and unsigned packages back the packaged e2e lane, which points
      * the app at local services; a release ignores those overrides
      * (`packagedOverridesEnabled` in src/main/environment.ts). A staging
-     * package defaults to taucad.dev and never checks for updates. */
+     * package defaults to taucad.dev and follows its isolated update feed. */
     manifestFields: desktopManifestFields({
       environmentOverrides: !release,
       channel: desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']),
@@ -309,7 +326,7 @@ try {
     tmpdir: resolve(tmpdir(), `tau-packager-${createHash('sha256').update(outputRoot).digest('hex').slice(0, 16)}`),
     overwrite: true,
     platform: 'darwin',
-    arch: 'arm64',
+    arch: architecture,
     name: 'Tau',
     appBundleId: 'com.taucad.tau.desktop',
     appCategoryType: 'public.app-category.graphics-design',
@@ -330,7 +347,7 @@ try {
   });
 
   if (packagePaths.length !== 1) {
-    throw new Error(`Expected one arm64 app, received ${String(packagePaths.length)}`);
+    throw new Error(`Expected one ${architecture} app, received ${String(packagePaths.length)}`);
   }
   const appPath = resolve(packagePaths[0]!, 'Tau.app');
   const resources = resolve(appPath, 'Contents/Resources');
@@ -348,12 +365,16 @@ try {
       resolve(workspaceRoot, 'apps/ui/app/routes/legal.open-source/open-source-notices.txt'),
       resolve(resources, 'legal/OPEN-SOURCE-NOTICES.md'),
     ),
-    copyTree(resolve(pythonResourceRoot, 'darwin-arm64'), resolve(resources, 'python/darwin-arm64')),
-    copyTree(resolve(picoGkResourceRoot, 'darwin-arm64'), resolve(resources, 'picogk/darwin-arm64')),
-    copyGeoSpecSourceRelink(geospecAssemblyRoot, geospecSourceRelinkReceipt, resources),
+    copyTree(resolve(pythonResourceRoot, target), resolve(resources, `python/${target}`)),
+    ...(shipsNativeGeometry
+      ? [copyTree(resolve(picoGkResourceRoot, target), resolve(resources, `picogk/${target}`))]
+      : []),
+    ...(geospecAssemblyRoot && geospecSourceRelinkReceipt
+      ? [copyGeoSpecSourceRelink(geospecAssemblyRoot, geospecSourceRelinkReceipt, resources)]
+      : []),
     ...(shipsGit
       ? [
-          copyTree(gitResourceRoot, resolve(resources, 'git/darwin-arm64')),
+          copyTree(gitResourceRoot, resolve(resources, `git/${target}`)),
           copyTree(gitSourceRoot, resolve(resources, 'git/SOURCES')),
         ]
       : []),
@@ -361,10 +382,10 @@ try {
       copyTree(resolve(extensionRoot, extension), resolve(plugins, extension), excludesBuildDiagnostics),
     ),
   ]);
-  if (selectedGeoSpecAssembly === undefined) {
+  if (selectedGeoSpecAssembly === undefined && geospecAssemblyRoot) {
     await rm(geospecAssemblyRoot, { recursive: true, force: true });
   }
-  console.log(`Removed Intel slices from ${String(await thinIntelSlices(appPath))} bundled Mach-O files`);
+  console.log(`Retained ${machArchitecture} slices in ${String(await thinOtherSlices(appPath))} bundled Mach-O files`);
 
   /* Before the first signature: flipping rewrites the Electron Framework binary.
    * An unsigned arm64 binary must keep a valid ad-hoc signature to launch at all. */
@@ -419,7 +440,7 @@ try {
     });
   }
 
-  const packagedPythonRoot = resolve(resources, 'python/darwin-arm64');
+  const packagedPythonRoot = resolve(resources, `python/${target}`);
   const packagedPythonManifestPath = resolve(packagedPythonRoot, 'tau-runtime-manifest.json');
   const packagedPythonManifest = await readJson<PythonResourceManifest>(packagedPythonManifestPath);
   packagedPythonManifest.pythonSha256 = await sha256(
@@ -427,16 +448,18 @@ try {
   );
   await writeFile(packagedPythonManifestPath, `${JSON.stringify(packagedPythonManifest, undefined, 2)}\n`);
 
-  const packagedPicoGkRoot = resolve(resources, 'picogk/darwin-arm64');
-  const packagedPicoGkManifestPath = resolve(packagedPicoGkRoot, 'tau-runtime-manifest.json');
-  const packagedPicoGkManifest = await readJson<PicoGkResourceManifest>(packagedPicoGkManifestPath);
-  packagedPicoGkManifest.workerSha256 = await sha256(resolve(packagedPicoGkRoot, packagedPicoGkManifest.workerPath));
-  await Promise.all(
-    packagedPicoGkManifest.resourceFiles.map(async (resource) => {
-      resource.sha256 = await sha256(resolve(packagedPicoGkRoot, resource.path));
-    }),
-  );
-  await writeFile(packagedPicoGkManifestPath, `${JSON.stringify(packagedPicoGkManifest, undefined, 2)}\n`);
+  if (shipsNativeGeometry) {
+    const packagedPicoGkRoot = resolve(resources, 'picogk/darwin-arm64');
+    const packagedPicoGkManifestPath = resolve(packagedPicoGkRoot, 'tau-runtime-manifest.json');
+    const packagedPicoGkManifest = await readJson<PicoGkResourceManifest>(packagedPicoGkManifestPath);
+    packagedPicoGkManifest.workerSha256 = await sha256(resolve(packagedPicoGkRoot, packagedPicoGkManifest.workerPath));
+    await Promise.all(
+      packagedPicoGkManifest.resourceFiles.map(async (resource) => {
+        resource.sha256 = await sha256(resolve(packagedPicoGkRoot, resource.path));
+      }),
+    );
+    await writeFile(packagedPicoGkManifestPath, `${JSON.stringify(packagedPicoGkManifest, undefined, 2)}\n`);
+  }
 
   // The inner signing pass mutates Mach-O bytes. Refresh their integrity hashes, then reseal only the
   // outer bundle so runtime verification covers the exact executable macOS will launch.
@@ -461,17 +484,19 @@ try {
   if (!unsigned) {
     execFileSync('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath], { stdio: 'inherit' });
   }
-  const assertArm64 = (path: string): void => {
+  const assertArchitecture = (path: string): void => {
     const architectures = execFileSync('lipo', ['-archs', path], { encoding: 'utf8' }).trim();
-    if (architectures !== 'arm64') {
-      throw new Error(`${path} is not arm64-only: ${architectures}`);
+    if (architectures !== machArchitecture) {
+      throw new Error(`${path} is not ${machArchitecture}-only: ${architectures}`);
     }
   };
-  assertArm64(resolve(appPath, 'Contents/MacOS/Tau'));
-  assertArm64(resolve(packagedPicoGkRoot, packagedPicoGkManifest.workerPath));
+  assertArchitecture(resolve(appPath, 'Contents/MacOS/Tau'));
+  if (shipsNativeGeometry) {
+    assertArchitecture(resolve(resources, `picogk/${target}/Tau.PicoGK.Worker`));
+  }
   for (const extension of extensions) {
     const name = extension.slice(0, -'.appex'.length);
-    assertArm64(resolve(plugins, extension, `Contents/MacOS/${name}`));
+    assertArchitecture(resolve(plugins, extension, `Contents/MacOS/${name}`));
   }
 
   if (shouldNotarize) {
@@ -481,7 +506,7 @@ try {
     execFileSync('spctl', ['--assess', '--type', 'execute', '--verbose=2', appPath], { stdio: 'inherit' });
   }
 
-  const zipPath = resolve(outputRoot, 'Tau-macos-arm64.zip');
+  const zipPath = resolve(outputRoot, `Tau-macos-${architecture}.zip`);
   if (zip) {
     execFileSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath], { stdio: 'inherit' });
   }

@@ -17,7 +17,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 import { z } from 'zod';
 
-import { desktopReleaseIdentity } from '#shared/desktop-release.js';
+import { desktopArchiveName, desktopReleaseIdentity } from '#shared/desktop-release.js';
 
 const required = (name: string): string => {
   const value = process.env[name];
@@ -31,7 +31,12 @@ const main = async (): Promise<void> => {
   const { channel, version } = desktopReleaseIdentity(tag);
   const root = resolve(required('DESKTOP_ASSETS_DIR'));
   const outputRoot = resolve(root, 'ota-install');
-  const installation = resolve(outputRoot, 'Tau-darwin-arm64');
+  const target = `darwin-${process.arch}`;
+  const archive = desktopArchiveName(process.platform, process.arch);
+  if (process.platform !== 'darwin') {
+    throw new Error('Native macOS OTA must run on a Mac');
+  }
+  const installation = resolve(outputRoot, `Tau-${target}`);
   const profile = resolve(homedir(), 'Library/Application Support', channel === 'staging' ? 'Tau Staging' : 'Tau');
   try {
     await access(profile);
@@ -121,7 +126,7 @@ const main = async (): Promise<void> => {
     }
     const candidate = resolve(root, 'ota-candidate');
     await mkdir(candidate, { recursive: true });
-    execFileSync('ditto', ['-xk', resolve(root, 'Tau-macos-arm64.zip'), candidate]);
+    execFileSync('ditto', ['-xk', resolve(root, archive), candidate]);
     // The signed ASAR is the complete application code; compare it byte for byte after ShipIt.
     const hash = async (path: string): Promise<string> => {
       const value = createHash('sha256');
@@ -156,11 +161,12 @@ const main = async (): Promise<void> => {
     );
     const { writeFile } = await import('node:fs/promises');
     await writeFile(
-      resolve(root, 'ota-receipt.json'),
+      resolve(root, `ota-receipt-${target}.json`),
       JSON.stringify(
         {
           ...receipt,
           status: 'passed',
+          target,
           tag,
           sourceCommit: required('TAU_DESKTOP_SOURCE_SHA'),
           asarSha256: installedHash,

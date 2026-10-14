@@ -10,6 +10,7 @@ import { LinkedAccount } from '#components/auth/settings/security/linked-account
 
 const authState = vi.hoisted(() => ({
   unlinkAccount: vi.fn(),
+  accountInfo: vi.fn(),
   linkSocial: vi.fn(),
 }));
 
@@ -28,10 +29,7 @@ vi.mock('@better-auth-ui/react', () => ({
       },
     },
   }),
-  useAccountInfo: () => ({
-    data: { user: { id: 'octocat', email: 'octo@example.com', name: 'Octo' } },
-    isPending: false,
-  }),
+  useAccountInfo: authState.accountInfo,
   useLinkSocial: () => ({ mutate: authState.linkSocial, isPending: false }),
   useUnlinkAccount: () => ({ mutate: authState.unlinkAccount, isPending: false }),
 }));
@@ -48,10 +46,24 @@ const githubAccount = {
 describe('LinkedAccount', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authState.accountInfo.mockReturnValue({
+      data: { user: { email: 'octo@example.com', name: 'Octo' }, account: { accountId: '583231' } },
+      isPending: false,
+    });
   });
 
   afterEach(() => {
     cleanup();
+  });
+
+  it('should select account info by local row ID and disable it without an account', () => {
+    const { rerender } = render(<LinkedAccount account={githubAccount} provider='github' />);
+    expect(authState.accountInfo).toHaveBeenLastCalledWith({}, { query: { accountId: 'account-1' }, enabled: true });
+
+    rerender(<LinkedAccount provider='github' />);
+    expect(authState.accountInfo).toHaveBeenLastCalledWith({}, { query: { accountId: '' }, enabled: false });
+    expect(screen.getByRole('button', { name: 'Link your GitHub account' })).toBeInTheDocument();
+    expect(authState.unlinkAccount).not.toHaveBeenCalled();
   });
 
   it('should ask before unlinking and name what the person loses (R7)', async () => {
@@ -67,7 +79,7 @@ describe('LinkedAccount', () => {
 
     await userEvent.click(within(dialog).getByRole('button', { name: 'Unlink GitHub' }));
 
-    expect(authState.unlinkAccount).toHaveBeenCalledExactlyOnceWith({ providerId: 'github' });
+    expect(authState.unlinkAccount).toHaveBeenCalledExactlyOnceWith({ accountId: 'account-1' });
   });
 
   it('should keep the account linked when the confirmation is cancelled', async () => {

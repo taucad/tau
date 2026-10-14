@@ -3,7 +3,12 @@ import { browserChannels } from '@taucad/types/browser';
 import { mock } from 'vitest-mock-extended';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
-import { openDirectoryChannel, quitChannels, slicersChannels } from '#shared/desktop-bootstrap.js';
+import {
+  openDirectoryChannel,
+  quitChannels,
+  slicersChannels,
+  windowFullscreenChannel,
+} from '#shared/desktop-bootstrap.js';
 import { generatedImageIpcChannel, isQuickLookEnabled } from '#shared/quick-look.js';
 
 const state = vi.hoisted(() => ({
@@ -98,6 +103,34 @@ describe('desktop machine navigation bridge', () => {
     vi.mocked(ipcRenderer.send).mockClear();
     quitApi().reportQuiesced('attempt-2', true);
     expect(ipcRenderer.send).toHaveBeenCalledExactlyOnceWith(quitChannels.quiesced, 'attempt-2', true);
+  });
+});
+
+describe('desktop preload fullscreen snapshot', () => {
+  it('should retain early native state, notify subscribers and stop notifications on unsubscribe', () => {
+    const { window } = state.exposed.get('tau') as {
+      readonly window: { isFullscreen(): boolean; onFullscreenChange(listener: () => void): () => void };
+    };
+    const emit = (value: unknown): void => {
+      for (const listener of state.listeners.get(windowFullscreenChannel) ?? []) {
+        listener({}, value);
+      }
+    };
+    expect(window.isFullscreen()).toBe(false);
+    emit(true);
+    expect(window.isFullscreen()).toBe(true);
+    const observed: boolean[] = [];
+    const unsubscribe = window.onFullscreenChange(() => {
+      observed.push(window.isFullscreen());
+    });
+    emit(false);
+    expect(observed).toEqual([false]);
+    unsubscribe();
+    emit(true);
+    expect(observed).toEqual([false]);
+    expect(window.isFullscreen()).toBe(true);
+    emit('not a boolean');
+    expect(window.isFullscreen()).toBe(true);
   });
 });
 

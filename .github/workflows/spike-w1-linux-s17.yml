@@ -6,9 +6,6 @@
 name: Spike S17 (glibc 2.28 floor)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/spike-w1-linux-s17.yml'
   workflow_dispatch:
 
 permissions:

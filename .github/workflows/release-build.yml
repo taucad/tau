@@ -217,11 +217,23 @@ jobs:
   desktop-macos:
     needs: [resolve, verify-app]
     if: needs.resolve.outputs.kind == 'desktop'
-    name: Package macOS (signed)
+    name: Package macOS ${{ matrix.arch }} (signed)
     permissions:
       contents: read
       actions: read
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+            machine: arm64
+            package-target: package-macos-release
+          - arch: x64
+            runner: macos-15-intel
+            machine: x86_64
+            package-target: package-macos-release-intel
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
     environment:
       name: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop' }}
@@ -229,7 +241,7 @@ jobs:
       GEOSPEC_WORKERS: 1
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
       TAU_DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
-      TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/macos
+      TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/macos-${{ matrix.arch }}
     steps:
       - name: Checkout the release
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -244,11 +256,13 @@ jobs:
 
       # The GeoSpec native payload is produced on this host, as publish.yml does.
       - name: Setup producer Python
+        if: matrix.arch == 'arm64'
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13.14'
 
       - name: Setup selected CPython 3.13 tooling
+        if: matrix.arch == 'arm64'
         id: python313
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -256,6 +270,7 @@ jobs:
           update-environment: false
 
       - name: Setup selected CPython 3.14 tooling
+        if: matrix.arch == 'arm64'
         id: python314
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -265,13 +280,14 @@ jobs:
       - name: Check host, capacity and installed tools
         run: |
           test "$(uname -s)" = Darwin
-          test "$(uname -m)" = arm64
+          test "$(uname -m)" = "${{ matrix.machine }}"
           node --input-type=module -e 'import {statfsSync} from "node:fs"; const s=statfsSync("."); const available=s.bavail*s.bsize; const required=19*1024**3; console.log({available,required}); if(available<required) throw new Error("Desktop packaging capacity unavailable");'
           cmake --version
           ninja --version
           xcrun --find clang++
 
       - name: Provision pinned Python wrapper tooling
+        if: matrix.arch == 'arm64'
         env:
           GEOSPEC_PYTHON313: ${{ steps.python313.outputs.python-path }}
           GEOSPEC_PYTHON314: ${{ steps.python314.outputs.python-path }}
@@ -294,6 +310,7 @@ jobs:
           PYTHON
 
       - name: Install the selected native Rust toolchain
+        if: matrix.arch == 'arm64'
         run: |
           rustup toolchain install 1.88 --profile minimal
           rustup run 1.88 rustc --version
@@ -307,7 +324,7 @@ jobs:
 
       # A throwaway keychain holds the Developer ID identity and the notary
       # profile for this job only; it is deleted in the last step.
-      - name: Take the verified same-source GeoSpec native products
+      - name: Take the verified same-source GeoSpec products
         uses: ./.github/actions/geospec-artifact-from-main
         with:
           github-token: ${{ github.token }}
@@ -379,15 +396,15 @@ jobs:
         run: |
           config=()
           if [ "$TAU_DESKTOP_CHANNEL" = staging ]; then config+=(--configuration=staging); fi
-          pnpm nx run desktop:package-macos-release --parallel=1 "${config[@]}"
+          pnpm nx run desktop:${{ matrix.package-target }} --parallel=1 "${config[@]}"
 
       # Uploaded before verification so a failed verify leaves the signed app
       # for verify-desktop-macos.yml. Publishing still needs this whole job.
       - name: Upload the macOS archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: desktop-darwin-arm64
-          path: ${{ env.TAU_MACOS_PACKAGE_OUTPUT_ROOT }}/Tau-macos-arm64.zip
+          name: desktop-darwin-${{ matrix.arch }}
+          path: ${{ env.TAU_MACOS_PACKAGE_OUTPUT_ROOT }}/Tau-macos-${{ matrix.arch }}.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -579,11 +596,17 @@ jobs:
 
   desktop-ota:
     needs: [resolve, desktop-mirror]
-    name: Verify native macOS OTA replacement
-    runs-on: macos-15
+    name: Verify native macOS ${{ matrix.arch }} OTA replacement
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
-    outputs:
-      accepted: ${{ steps.baseline.outputs.found }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -600,10 +623,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
           CHANNEL: ${{ needs.resolve.outputs.channel }}
+          TARGET: darwin-${{ matrix.arch }}
         run: |
           set -euo pipefail
           mkdir -p out/desktop/assets
-          gh release download "$TAG" --dir out/desktop/assets --pattern 'Tau-macos-arm64.zip' --pattern download.json
+          gh release download "$TAG" --dir out/desktop/assets --pattern 'Tau-macos-${{ matrix.arch }}.zip' --pattern download.json
           version=$(jq -r .version out/desktop/assets/download.json)
           prefix=desktop@
           if [ "$CHANNEL" = staging ]; then prefix=desktop-staging@; fi
@@ -631,9 +655,11 @@ jobs:
             sha=$(jq -r .sourceCommit "$RUNNER_TEMP/previous.json")
             test "$sha" = "$(jq -r .sourceCommit "$RUNNER_TEMP/previous/mirror-receipt.json")"
             if ! git merge-base --is-ancestor "$sha" HEAD; then continue; fi
-            url=$(jq -r '.assets["darwin-arm64"].url' "$RUNNER_TEMP/previous.json")
+            # Older ARM-only releases cannot serve as an Intel baseline.
+            if ! jq -e --arg target "$TARGET" '.assets[$target]' "$RUNNER_TEMP/previous.json" > /dev/null; then continue; fi
+            url=$(jq -r --arg target "$TARGET" '.assets[$target].url' "$RUNNER_TEMP/previous.json")
             curl --fail --location --retry 3 "$url" --output "$RUNNER_TEMP/baseline.zip"
-            expected=$(jq -r '.assets["darwin-arm64"].sha256' "$RUNNER_TEMP/previous.json")
+            expected=$(jq -r --arg target "$TARGET" '.assets[$target].sha256' "$RUNNER_TEMP/previous.json")
             printf '%s  %s\n' "$expected" "$RUNNER_TEMP/baseline.zip" | shasum -a 256 -c -
             found=true
             break
@@ -652,13 +678,23 @@ jobs:
           TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)
           export TAU_DESKTOP_SOURCE_SHA
           pnpm nx run desktop:verify-ota
+      - name: Record architecture qualification
+        env:
+          ACCEPTED: ${{ steps.baseline.outputs.found }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          TARGET: darwin-${{ matrix.arch }}
+        run: |
+          if [ "$ACCEPTED" = true ]; then test -f "out/desktop/assets/ota-receipt-$TARGET.json"; fi
+          jq -n --arg tag "$TAG" --arg target "$TARGET" --argjson accepted "$ACCEPTED" \
+            '{tag:$tag,target:$target,accepted:$accepted}' > "out/desktop/assets/ota-qualification-$TARGET.json"
       - name: Retain OTA receipts and diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ota-acceptance
+          name: ota-acceptance-${{ matrix.arch }}
           path: |
-            out/desktop/assets/ota-receipt.json
+            out/desktop/assets/ota-receipt-*.json
+            out/desktop/assets/ota-qualification-*.json
             ~/Library/Application Support/Tau Staging/ota-probe*.json
             ~/Library/Application Support/Tau Staging/logs/
             ~/Library/Application Support/Tau/ota-probe*.json
@@ -668,7 +704,6 @@ jobs:
 
   desktop-promote:
     needs: [resolve, desktop-ota]
-    if: needs.desktop-ota.outputs.accepted == 'true'
     name: Promote the tested channel release
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -688,9 +723,25 @@ jobs:
       - uses: ./.github/actions/setup-nx
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ota-acceptance
+          pattern: ota-acceptance-*
+          merge-multiple: true
           path: out/desktop/acceptance
+      - name: Require qualification for both Mac architectures
+        id: qualification
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          accepted=true
+          for target in darwin-arm64 darwin-x64; do
+            file=$(find out/desktop/acceptance -name "ota-qualification-$target.json")
+            test -n "$file"
+            jq -e --arg tag "$TAG" --arg target "$target" '.tag == $tag and .target == $target and (.accepted | type == "boolean")' "$file" > /dev/null
+            if [ "$(jq -r .accepted "$file")" != true ]; then accepted=false; fi
+          done
+          echo "accepted=$accepted" >> "$GITHUB_OUTPUT"
+          if [ "$accepted" = false ]; then echo 'Both Mac architectures need an older qualified baseline. No channel pointers changed.' >> "$GITHUB_STEP_SUMMARY"; fi
       - name: Promote R2 pointers and the legacy GitHub feed
+        if: steps.qualification.outputs.accepted == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -708,12 +759,14 @@ jobs:
           TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)
           export TAU_DESKTOP_SOURCE_SHA
           gh release download "$DESKTOP_RELEASE_TAG" --dir "$DESKTOP_ASSETS_DIR" --pattern 'desktop-update-*.json' --pattern download.json
-          receipt=$(find out/desktop/acceptance -name ota-receipt.json)
-          test -n "$receipt"
-          cp "$receipt" "$DESKTOP_ASSETS_DIR/ota-receipt.json"
+          for target in darwin-arm64 darwin-x64; do
+            receipt=$(find out/desktop/acceptance -name "ota-receipt-$target.json")
+            test -n "$receipt"
+            cp "$receipt" "$DESKTOP_ASSETS_DIR/ota-receipt-$target.json"
+          done
           pnpm nx run desktop:publish --args=promote
           gh release upload "$FEED_TAG" "$DESKTOP_ASSETS_DIR"/desktop-update-*.json --clobber
-          gh release upload "$DESKTOP_RELEASE_TAG" "$DESKTOP_ASSETS_DIR/ota-receipt.json"
+          gh release upload "$DESKTOP_RELEASE_TAG" "$DESKTOP_ASSETS_DIR"/ota-receipt-*.json
           if [ "$CHANNEL" = production ]; then gh release edit "$DESKTOP_RELEASE_TAG" --latest; fi
 
   production-api:

@@ -49,6 +49,9 @@ export const gitTargets: Readonly<Record<string, Readonly<{ gitLfs: GitLfsArchiv
   'darwin-arm64': {
     gitLfs: gitLfsArchive('darwin-arm64', 'zip', 'caff76a7d070d8160c89bc39b6e85d98f24135b6fed038a3b4de2590d25102d8'),
   },
+  'darwin-x64': {
+    gitLfs: gitLfsArchive('darwin-amd64', 'zip', 'f1c17aeca0b4eaab9ea606226477dbed3b84b56fe0811a9f967d2ea2b2393c53'),
+  },
   'linux-x64': {
     gitLfs: gitLfsArchive('linux-amd64', 'tar.gz', 'e455e00f15d9b95661b8d53498ffb0c3367962cf1ec73c31ab7369516cd6ab8d'),
   },

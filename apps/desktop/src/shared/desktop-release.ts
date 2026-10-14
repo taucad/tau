@@ -25,8 +25,8 @@ export const desktopReleaseIdentity = (tag: string): { channel: DesktopReleaseCh
 };
 
 export const desktopArchiveName = (platform: string, arch: string): string => {
-  if (platform === 'darwin' && arch === 'arm64') {
-    return 'Tau-macos-arm64.zip';
+  if (platform === 'darwin' && (arch === 'arm64' || arch === 'x64')) {
+    return `Tau-macos-${arch}.zip`;
   }
   if (platform === 'linux' && arch === 'x64') {
     return 'Tau-linux-x64.tar.gz';

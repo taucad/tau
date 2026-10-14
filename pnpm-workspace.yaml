@@ -55,7 +55,7 @@ catalog:
   '@aws-sdk/lib-storage': ^3.1073.0
   '@aws-sdk/s3-request-presigner': ^3.1073.0
   '@base-ui/react': ^1.6.0
-  '@better-auth/api-key': ~1.6.33
+  '@better-auth/api-key': 1.7.7
   '@electron/fuses': ^2.1.3
   '@eslint-community/eslint-plugin-eslint-comments': ^4.7.2
   '@fastify/cookie': ^11.0.2
@@ -183,7 +183,7 @@ catalog:
   '@vitest/ui': 4.1.11
   '@xyflow/react': ^12.11.0
   axe-core: ^4.12.1
-  better-auth: ~1.6.33
+  better-auth: 1.7.7
   bowser: ^2.14.1
   cdn-resolve: ^2.1.2
   chrome-launcher: ^1.2.1
@@ -329,6 +329,8 @@ catalog:
   postcss: ^8.5.29
   '@swc-node/register': 1.11.1
   '@swc/core': 1.15.8
+  '@better-auth-ui/core': 1.7.29
+  '@better-auth-ui/react': 1.7.29
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

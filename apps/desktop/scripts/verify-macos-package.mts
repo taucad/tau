@@ -30,6 +30,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { FuseState, FuseV1Options, getCurrentFuseWire } from '@electron/fuses';
 
@@ -37,14 +38,16 @@ import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'jso
 import { isQuickLookEnabled } from '#shared/quick-look.js';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
+import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts share their packaging contract.
 import { desktopPackageChannel, desktopPackageVersion } from './runtime-stage.mjs';
 
 const desktopRoot = resolve(import.meta.dirname, '..');
 const workspaceRoot = resolve(desktopRoot, '../..');
 const outputRoot = resolve(process.env['TAU_MACOS_PACKAGE_OUTPUT_ROOT'] ?? resolve(desktopRoot, 'package-out'));
-const appPath = resolve(outputRoot, 'Tau-darwin-arm64/Tau.app');
+const architecture = macosPackageArchitecture(process.platform, process.arch);
+const machArchitecture = architecture === 'arm64' ? 'arm64' : 'x86_64';
+const appPath = resolve(outputRoot, `Tau-darwin-${architecture}/Tau.app`);
 const appExecutable = resolve(appPath, 'Contents/MacOS/Tau');
 const brandingRoot = resolve(appPath, 'Contents/Resources/branding');
 const extensionTemporaryRoot = resolve(tmpdir(), 'tau-quick-look');
@@ -541,27 +544,49 @@ if (stagedSandboxHelpers !== JSON.stringify([true, false, false])) {
   throw new Error(`The macOS package stages Linux or Windows sandbox helpers: ${stagedSandboxHelpers}`);
 }
 
-const libassimpAddon = resolve(
-  appPath,
-  'Contents/Resources/app.asar.unpacked/node_modules/libassimp-darwin-arm64/libassimp.darwin-arm64.node',
-);
-if (!existsSync(libassimpAddon)) {
-  throw new Error('The packaged app does not contain the adjacent libassimp-darwin-arm64 addon.');
-}
-const nativeIdentity = run('env', [
-  'ELECTRON_RUN_AS_NODE=1',
-  appExecutable,
-  '-e',
-  `const addon=require(${JSON.stringify(libassimpAddon)});process.stdout.write(JSON.stringify([addon.buildIdentity,addon.napiVersion,addon.packageVersion]))`,
-]);
-const libassimpVersion = run('env', [
-  'ELECTRON_RUN_AS_NODE=1',
-  appExecutable,
-  '-e',
-  `process.stdout.write(require(${JSON.stringify(resolve(appPath, 'Contents/Resources/app.asar/node_modules/libassimp/package.json'))}).version)`,
-]);
-if (nativeIdentity !== JSON.stringify(['darwin-arm64-napi8', 8, libassimpVersion])) {
-  throw new Error(`The packaged Electron runtime loaded an unexpected libassimp addon: ${nativeIdentity}`);
+if (architecture === 'arm64') {
+  const libassimpAddon = resolve(
+    appPath,
+    `Contents/Resources/app.asar.unpacked/node_modules/libassimp-darwin-${architecture}/libassimp.darwin-${architecture}.node`,
+  );
+  if (!existsSync(libassimpAddon)) {
+    throw new Error(`The packaged app does not contain the adjacent libassimp-darwin-${architecture} addon.`);
+  }
+  const nativeIdentity = run('env', [
+    'ELECTRON_RUN_AS_NODE=1',
+    appExecutable,
+    '-e',
+    `const addon=require(${JSON.stringify(libassimpAddon)});process.stdout.write(JSON.stringify([addon.buildIdentity,addon.napiVersion,addon.packageVersion]))`,
+  ]);
+  const libassimpVersion = run('env', [
+    'ELECTRON_RUN_AS_NODE=1',
+    appExecutable,
+    '-e',
+    `process.stdout.write(require(${JSON.stringify(resolve(appPath, 'Contents/Resources/app.asar/node_modules/libassimp/package.json'))}).version)`,
+  ]);
+  if (nativeIdentity !== JSON.stringify([`darwin-${architecture}-napi8`, 8, libassimpVersion])) {
+    throw new Error(`The packaged Electron runtime loaded an unexpected libassimp addon: ${nativeIdentity}`);
+  }
+} else {
+  const assimpEntry = pathToFileURL(
+    resolve(appPath, 'Contents/Resources/app.asar/node_modules/libassimp/dist/index.node.mjs'),
+  ).href;
+  const conversion = run('env', [
+    'ELECTRON_RUN_AS_NODE=1',
+    appExecutable,
+    '--input-type=module',
+    '-e',
+    `const {createAssimp}=await import(${JSON.stringify(assimpEntry)});
+const engine=await createAssimp({backend:"wasm"});
+try {
+  const result=await engine.convert({name:"triangle.obj",bytes:new TextEncoder().encode("v 0 0 0\\nv 1 0 0\\nv 0 1 0\\nf 1 2 3\\n")},{to:"glb"});
+  if(engine.backend!=="wasm" || !result.files.some(file=>file.bytes.length>0)) throw Error("Intel Assimp conversion failed");
+  process.stdout.write("wasm-conversion-passed");
+} finally {engine.dispose();}`,
+  ]);
+  if (conversion !== 'wasm-conversion-passed') {
+    throw new Error(`The packaged Intel Assimp backend failed conversion: ${conversion}`);
+  }
 }
 
 /* One package, two payloads. The engine always renders, so the version alone
@@ -570,10 +595,12 @@ if (nativeIdentity !== JSON.stringify(['darwin-arm64-napi8', 8, libassimpVersion
  * gave it, and it is read from the engine itself inside the packaged runtime. */
 const openrscadAddon = resolve(
   appPath,
-  'Contents/Resources/app.asar.unpacked/node_modules/@taulabs/openrscad-engine-darwin-arm64/openrscad.darwin-arm64.node',
+  `Contents/Resources/app.asar.unpacked/node_modules/@taulabs/openrscad-engine-darwin-${architecture}/openrscad.darwin-${architecture}.node`,
 );
 if (!existsSync(openrscadAddon)) {
-  throw new Error('The packaged app does not contain the adjacent @taulabs/openrscad-engine-darwin-arm64 addon.');
+  throw new Error(
+    `The packaged app does not contain the adjacent @taulabs/openrscad-engine-darwin-${architecture} addon.`,
+  );
 }
 const openrscadEntry = resolve(
   appPath,
@@ -599,10 +626,10 @@ if (openrscadIdentity !== JSON.stringify([openrscadEngineVersion, 'native'])) {
 
 const esbuildExecutable = resolve(
   appPath,
-  'Contents/Resources/app.asar.unpacked/node_modules/@esbuild/darwin-arm64/bin/esbuild',
+  `Contents/Resources/app.asar.unpacked/node_modules/@esbuild/darwin-${architecture}/bin/esbuild`,
 );
 if (!existsSync(esbuildExecutable)) {
-  throw new Error('The packaged app does not contain the adjacent @esbuild/darwin-arm64 executable.');
+  throw new Error(`The packaged app does not contain the adjacent @esbuild/darwin-${architecture} executable.`);
 }
 const esbuildEntry = resolve(appPath, 'Contents/Resources/app.asar/node_modules/esbuild/lib/main.js');
 const esbuildIdentity = run('env', [
@@ -624,17 +651,17 @@ if (esbuildIdentity !== esbuildVersion) {
 
 const nanorasterAddon = resolve(
   appPath,
-  'Contents/Resources/app.asar.unpacked/node_modules/nanoraster-darwin-arm64/nanoraster.darwin-arm64.node',
+  `Contents/Resources/app.asar.unpacked/node_modules/nanoraster-darwin-${architecture}/nanoraster.darwin-${architecture}.node`,
 );
 if (!existsSync(nanorasterAddon)) {
-  throw new Error('The packaged app does not contain the adjacent nanoraster-darwin-arm64 addon.');
+  throw new Error(`The packaged app does not contain the adjacent nanoraster-darwin-${architecture} addon.`);
 }
 const nanorasterEntry = resolve(appPath, 'Contents/Resources/app.asar/node_modules/nanoraster/dist/index.node.mjs');
 const nanorasterIdentity = run('env', [
   'ELECTRON_RUN_AS_NODE=1',
   appExecutable,
   '-e',
-  `import(${JSON.stringify(nanorasterEntry)}).then(async ({describeAdapter})=>{const adapter=await describeAdapter();const loaded=process.report.getReport().sharedObjects.filter((path)=>path.endsWith('nanoraster.darwin-arm64.node'));const rootVersion=require(${JSON.stringify(resolve(appPath, 'Contents/Resources/app.asar/node_modules/nanoraster/package.json'))}).version;const platformVersion=require(${JSON.stringify(resolve(appPath, 'Contents/Resources/app.asar/node_modules/nanoraster-darwin-arm64/package.json'))}).version;process.stdout.write(JSON.stringify([adapter.backend,loaded,rootVersion,platformVersion]))}).catch((error)=>{console.error(error);process.exitCode=1})`,
+  `import(${JSON.stringify(nanorasterEntry)}).then(async ({describeAdapter})=>{const adapter=await describeAdapter();const loaded=process.report.getReport().sharedObjects.filter((path)=>path.endsWith('nanoraster.darwin-${architecture}.node'));const rootVersion=require(${JSON.stringify(resolve(appPath, 'Contents/Resources/app.asar/node_modules/nanoraster/package.json'))}).version;const platformVersion=require(${JSON.stringify(resolve(appPath, `Contents/Resources/app.asar/node_modules/nanoraster-darwin-${architecture}/package.json`))}).version;process.stdout.write(JSON.stringify([adapter.backend,loaded,rootVersion,platformVersion]))}).catch((error)=>{console.error(error);process.exitCode=1})`,
 ]);
 const [nanorasterBackend, loadedNanorasterAddons, nanorasterVersion, nanorasterPlatformVersion] = JSON.parse(
   nanorasterIdentity,
@@ -650,16 +677,16 @@ if (
   );
 }
 
-let arm64MachObjectCount = 0;
+let machObjectCount = 0;
 for (const path of filesUnder(appPath)) {
   if (!isMachObject(path)) {
     continue;
   }
   const architectures = run('lipo', ['-archs', path]).trim().split(/\s+/u).sort();
-  if (architectures.join(' ') !== 'arm64') {
-    throw new Error(`${path} is not arm64-only: ${architectures.join(', ')}`);
+  if (architectures.join(' ') !== machArchitecture) {
+    throw new Error(`${path} is not ${machArchitecture}-only: ${architectures.join(', ')}`);
   }
-  arm64MachObjectCount += 1;
+  machObjectCount += 1;
 }
 
 /* A package with Electron's default fuses is a general-purpose Node runtime that
@@ -675,24 +702,118 @@ for (const [fuse, enabled] of Object.entries(macosPackageFuses({ release }))) {
   }
 }
 
-verifyPythonResource('arm64');
-const picoGkWorker = verifyPicoGkResource();
-if (!unsigned) {
-  const picoGkEntitlements = run('codesign', ['-d', '--entitlements', ':-', picoGkWorker]);
-  if (!picoGkEntitlements.includes('com.apple.security.cs.allow-jit')) {
-    throw new Error('The PicoGK worker is missing the CoreCLR JIT entitlement.');
+verifyPythonResource(architecture);
+if (architecture === 'arm64') {
+  const picoGkWorker = verifyPicoGkResource();
+  if (!unsigned) {
+    const picoGkEntitlements = run('codesign', ['-d', '--entitlements', ':-', picoGkWorker]);
+    if (!picoGkEntitlements.includes('com.apple.security.cs.allow-jit')) {
+      throw new Error('The PicoGK worker is missing the CoreCLR JIT entitlement.');
+    }
+    const disablesLibraryValidation = picoGkEntitlements.includes('com.apple.security.cs.disable-library-validation');
+    if ((!release && !disablesLibraryValidation) || (release && disablesLibraryValidation)) {
+      throw new Error(
+        release
+          ? 'The release PicoGK worker unnecessarily disables library validation.'
+          : 'The ad-hoc PicoGK worker must disable library validation for its independently signed CoreCLR dylibs.',
+      );
+    }
+    if (picoGkEntitlements.includes('com.apple.security.get-task-allow')) {
+      throw new Error('The PicoGK worker carries the debug get-task-allow entitlement.');
+    }
   }
-  const disablesLibraryValidation = picoGkEntitlements.includes('com.apple.security.cs.disable-library-validation');
-  if ((!release && !disablesLibraryValidation) || (release && disablesLibraryValidation)) {
+  const picoGkProbe = mkdtempSync(resolve(tmpdir(), 'tau-picogk-probe-'));
+  const picoGkWorkspace = resolve(picoGkProbe, 'workspace');
+  const picoGkArtifacts = resolve(picoGkProbe, 'artifacts');
+  mkdirSync(picoGkWorkspace);
+  mkdirSync(picoGkArtifacts);
+  writeFileSync(
+    resolve(picoGkWorkspace, 'main.cs'),
+    `using System.Numerics;
+using PicoGK;
+Library.Go(1f, () =>
+{
+    Library.oViewer().SetGroupMaterial(0, "4f7dd9", 0f, 0.7f);
+    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3f), 0);
+});
+`,
+  );
+  const picoGkInput = [
+    {
+      protocolVersion: picoGkWireProtocol,
+      requestId: 'verify-analyze',
+      method: 'analyze',
+      params: { entryPath: 'main.cs' },
+    },
+    {
+      protocolVersion: picoGkWireProtocol,
+      requestId: 'verify-build',
+      method: 'build',
+      params: { entryPath: 'main.cs', parameters: {} },
+    },
+    { protocolVersion: picoGkWireProtocol, requestId: 'verify-shutdown', method: 'shutdown', params: {} },
+  ]
+    .map((request) => JSON.stringify(request))
+    .join('\n');
+  const picoGkRun = spawnSync(
+    'env',
+    [
+      '-i',
+      'LANG=C.UTF-8',
+      picoGkWorker,
+      '--workspace',
+      picoGkWorkspace,
+      '--artifacts',
+      picoGkArtifacts,
+      '--parent-pid',
+      String(process.pid),
+    ],
+    { encoding: 'utf8', input: `${picoGkInput}\n`, timeout: 300_000 },
+  );
+  if (picoGkRun.error !== undefined || picoGkRun.status !== 0) {
+    rmSync(picoGkProbe, { recursive: true, force: true });
+    throw new Error(`The packaged PicoGK worker failed its JIT/native probe:\n${picoGkRun.stdout}${picoGkRun.stderr}`, {
+      cause: picoGkRun.error,
+    });
+  }
+  const picoGkFrames = picoGkRun.stdout
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const picoGkReady = picoGkFrames.find((frame) => frame['type'] === 'ready');
+  const picoGkBuild = picoGkFrames.find((frame) => frame['requestId'] === 'verify-build');
+  const picoGkResult = picoGkBuild?.['result'] as
+    | {
+        readonly artifactPath?: unknown;
+        readonly byteLength?: unknown;
+        readonly sha256?: unknown;
+        readonly prototypes?: unknown;
+        readonly occurrences?: unknown;
+      }
+    | undefined;
+  const picoGkArtifact = typeof picoGkResult?.artifactPath === 'string' ? resolve(picoGkResult.artifactPath) : '';
+  if (
+    picoGkReady?.['protocolVersion'] !== picoGkWireProtocol ||
+    !picoGkArtifact.startsWith(`${picoGkArtifacts}/`) ||
+    typeof picoGkResult?.byteLength !== 'number' ||
+    picoGkResult.byteLength <= 0 ||
+    typeof picoGkResult.sha256 !== 'string' ||
+    !Array.isArray(picoGkResult.prototypes) ||
+    picoGkResult.prototypes.length !== 1 ||
+    !Array.isArray(picoGkResult.occurrences) ||
+    picoGkResult.occurrences.length !== 1 ||
+    !existsSync(picoGkArtifact) ||
+    readFileSync(picoGkArtifact).byteLength !== picoGkResult.byteLength ||
+    sha256(picoGkArtifact) !== picoGkResult.sha256
+  ) {
+    rmSync(picoGkProbe, { recursive: true, force: true });
     throw new Error(
-      release
-        ? 'The release PicoGK worker unnecessarily disables library validation.'
-        : 'The ad-hoc PicoGK worker must disable library validation for its independently signed CoreCLR dylibs.',
+      `The packaged PicoGK worker did not complete a valid Roslyn/JIT/native sphere build: ${picoGkRun.stdout}`,
     );
   }
-  if (picoGkEntitlements.includes('com.apple.security.get-task-allow')) {
-    throw new Error('The PicoGK worker carries the debug get-task-allow entitlement.');
-  }
+  rmSync(picoGkProbe, { recursive: true, force: true });
+}
+if (!unsigned) {
   for (const helper of ['Tau Helper', 'Tau Helper (GPU)', 'Tau Helper (Plugin)', 'Tau Helper (Renderer)']) {
     const helperPath = resolve(appPath, `Contents/Frameworks/${helper}.app`);
     const entitlements = run('codesign', ['-d', '--entitlements', ':-', helperPath]);
@@ -706,104 +827,14 @@ if (!unsigned) {
     }
   }
 }
-const picoGkProbe = mkdtempSync(resolve(tmpdir(), 'tau-picogk-probe-'));
-const picoGkWorkspace = resolve(picoGkProbe, 'workspace');
-const picoGkArtifacts = resolve(picoGkProbe, 'artifacts');
-mkdirSync(picoGkWorkspace);
-mkdirSync(picoGkArtifacts);
-writeFileSync(
-  resolve(picoGkWorkspace, 'main.cs'),
-  `using System.Numerics;
-using PicoGK;
-Library.Go(1f, () =>
-{
-    Library.oViewer().SetGroupMaterial(0, "4f7dd9", 0f, 0.7f);
-    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3f), 0);
-});
-`,
-);
-const picoGkInput = [
-  {
-    protocolVersion: picoGkWireProtocol,
-    requestId: 'verify-analyze',
-    method: 'analyze',
-    params: { entryPath: 'main.cs' },
-  },
-  {
-    protocolVersion: picoGkWireProtocol,
-    requestId: 'verify-build',
-    method: 'build',
-    params: { entryPath: 'main.cs', parameters: {} },
-  },
-  { protocolVersion: picoGkWireProtocol, requestId: 'verify-shutdown', method: 'shutdown', params: {} },
-]
-  .map((request) => JSON.stringify(request))
-  .join('\n');
-const picoGkRun = spawnSync(
-  'env',
-  [
-    '-i',
-    'LANG=C.UTF-8',
-    picoGkWorker,
-    '--workspace',
-    picoGkWorkspace,
-    '--artifacts',
-    picoGkArtifacts,
-    '--parent-pid',
-    String(process.pid),
-  ],
-  { encoding: 'utf8', input: `${picoGkInput}\n`, timeout: 300_000 },
-);
-if (picoGkRun.error !== undefined || picoGkRun.status !== 0) {
-  rmSync(picoGkProbe, { recursive: true, force: true });
-  throw new Error(`The packaged PicoGK worker failed its JIT/native probe:\n${picoGkRun.stdout}${picoGkRun.stderr}`, {
-    cause: picoGkRun.error,
-  });
-}
-const picoGkFrames = picoGkRun.stdout
-  .trim()
-  .split('\n')
-  .map((line) => JSON.parse(line) as Record<string, unknown>);
-const picoGkReady = picoGkFrames.find((frame) => frame['type'] === 'ready');
-const picoGkBuild = picoGkFrames.find((frame) => frame['requestId'] === 'verify-build');
-const picoGkResult = picoGkBuild?.['result'] as
-  | {
-      readonly artifactPath?: unknown;
-      readonly byteLength?: unknown;
-      readonly sha256?: unknown;
-      readonly prototypes?: unknown;
-      readonly occurrences?: unknown;
-    }
-  | undefined;
-const picoGkArtifact = typeof picoGkResult?.artifactPath === 'string' ? resolve(picoGkResult.artifactPath) : '';
-if (
-  picoGkReady?.['protocolVersion'] !== picoGkWireProtocol ||
-  !picoGkArtifact.startsWith(`${picoGkArtifacts}/`) ||
-  typeof picoGkResult?.byteLength !== 'number' ||
-  picoGkResult.byteLength <= 0 ||
-  typeof picoGkResult.sha256 !== 'string' ||
-  !Array.isArray(picoGkResult.prototypes) ||
-  picoGkResult.prototypes.length !== 1 ||
-  !Array.isArray(picoGkResult.occurrences) ||
-  picoGkResult.occurrences.length !== 1 ||
-  !existsSync(picoGkArtifact) ||
-  readFileSync(picoGkArtifact).byteLength !== picoGkResult.byteLength ||
-  sha256(picoGkArtifact) !== picoGkResult.sha256
-) {
-  rmSync(picoGkProbe, { recursive: true, force: true });
-  throw new Error(
-    `The packaged PicoGK worker did not complete a valid Roslyn/JIT/native sphere build: ${picoGkRun.stdout}`,
-  );
-}
-rmSync(picoGkProbe, { recursive: true, force: true });
-const python = resolve(appPath, 'Contents/Resources/python/darwin-arm64/bin/python3');
+const python = resolve(appPath, `Contents/Resources/python/darwin-${architecture}/bin/python3`);
 run(
   'env',
   [
     '-i',
     'LANG=C.UTF-8',
     '/usr/bin/arch',
-    '-arm64',
+    `-${machArchitecture}`,
     python,
     '-I',
     '-B',
@@ -813,9 +844,9 @@ run(
   300_000,
 );
 
-if (!isQuickLookEnabled()) {
+if (!isQuickLookEnabled() || architecture === 'x64') {
   console.log(
-    `Verified ${String(arm64MachObjectCount)} arm64 Mach-O files. Quick Look is disabled (isQuickLookEnabled()); its checks were skipped.`,
+    `Verified ${String(machObjectCount)} ${machArchitecture} Mach-O files. Quick Look is disabled (isQuickLookEnabled()); its checks were skipped.`,
   );
 } else if (unsigned) {
   const probeRoot = mkdtempSync(join(tmpdir(), 'tau-quick-look-converter-probe-'));
@@ -899,7 +930,9 @@ if (!isQuickLookEnabled()) {
   } finally {
     rmSync(probeRoot, { recursive: true, force: true });
   }
-  console.log(`Verified ${String(arm64MachObjectCount)} arm64 Mach-O files and the unsigned Quick Look converter.`);
+  console.log(
+    `Verified ${String(machObjectCount)} ${machArchitecture} Mach-O files and the unsigned Quick Look converter.`,
+  );
 } else {
   run('open', ['-gj', appPath]);
   const extensionIdentifiers = [
@@ -1087,7 +1120,7 @@ if (!isQuickLookEnabled()) {
     rmSync(testRoot, { recursive: true, force: true });
   }
 
-  console.log(`Verified ${String(arm64MachObjectCount)} arm64 Mach-O files and both extension registrations.`);
+  console.log(`Verified ${String(machObjectCount)} ${machArchitecture} Mach-O files and both extension registrations.`);
   console.log(
     'Verified Finder-equivalent interactive preview, thumbnails, malformed input, cancellation, cleanup, and Open With.',
   );

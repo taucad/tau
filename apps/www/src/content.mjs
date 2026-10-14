@@ -16,21 +16,21 @@ export const navigation = [
 export const principles = [
   {
     id: 'design',
-    title: 'Start with a what if.',
-    body: 'Describe it in plain language, then shape every detail in editable code and named parameters.',
-    detail: 'Words → parametric source',
+    title: 'Start with a purpose.',
+    body: 'A mount that fits. A housing that protects. Describe the job, then shape the part with editable code and dimensions you control.',
+    detail: 'Your idea → editable CAD',
   },
   {
     id: 'verify',
-    title: 'Make it add up.',
-    body: 'Declare the envelope, clearances and hole patterns. GeoSpec checks them against the actual geometry, and reports what it cannot measure as unknown.',
-    detail: 'Measured, not guessed',
+    title: 'Check what matters.',
+    body: 'Set the dimensions, clearances and hole patterns your part needs. GeoSpec checks the geometry against them and shows where more evidence is needed.',
+    detail: 'Dimensions · clearances · fit',
   },
   {
-    id: 'print',
-    title: 'Take it off the screen.',
-    body: 'Export a mesh for your slicer or STEP for your next tool. The source and the files stay yours.',
-    detail: 'STL · 3MF · STEP',
+    id: 'make',
+    title: 'Put it to work.',
+    body: 'Export STEP for your machining workflow, or STL and 3MF for 3D printing. Make the part, assemble it and try it where it belongs.',
+    detail: 'Machine · print · assemble',
   },
 ];
 
@@ -43,7 +43,7 @@ export const storyChapters = [
     id: 'idea',
     label: 'Idea',
     title: 'Start with the constraints.',
-    body: 'A reduction you need, a size it has to fit, the hardware already in your drawer. The idea begins as numbers before it has a shape.',
+    body: 'A reduction you need, a space it has to fit, the hardware it will connect to. Start with the job the gearbox needs to do.',
     detail: '4:1 reduction · 174 mm rim · M3 socket screws',
   },
   {
@@ -91,10 +91,10 @@ export const storyChapters = [
   },
   {
     id: 'print',
-    label: 'Print',
-    title: 'Prepare it for the printer.',
-    body: 'Pick a part, check that it fits your build volume and export it for your slicer. Here the ring gear goes onto a 256 mm plate.',
-    detail: 'Illustration · no print job is sent',
+    label: 'Make',
+    title: 'Choose how to make it.',
+    body: 'Take STEP into your machining workflow, or export a mesh for a slicer. This print example places the ring gear on a 256 mm plate.',
+    detail: '3D printing illustration · no job is sent',
   },
   {
     id: 'devices',
@@ -148,10 +148,10 @@ export const ecosystem = [
 export const useCases = [
   {
     slug: 'prototyping',
-    title: 'A better first prototype.',
+    title: 'Make a part you can try.',
     audience: 'For makers & product designers',
     description:
-      'Turn a specific problem into an editable part. Explore an enclosure, a custom mount or a replacement component, then refine the dimensions that matter.',
+      'Design an enclosure, a custom mount or a replacement component around a real need. Check the fit in CAD, make a prototype and learn from using it.',
     image: 'quadcopter.webp',
     alt: 'Tau example of a parametric racing quadcopter frame',
     steps: [
@@ -160,21 +160,21 @@ export const useCases = [
         'Describe what the part needs to hold, where it needs to fit and which dimensions you already know.',
       ],
       [
-        'Refine the same design',
-        'Keep the source, adjust parameters and inspect the next revision. Your first result is a starting point.',
+        'Verify the fit',
+        'Check the dimensions, mounting holes and clearances against your requirements. Adjust the parameters as you learn.',
       ],
       [
-        'Prepare your next step',
-        'Export STL, 3MF or STEP for your fabrication workflow. Check material, tolerances and process settings before making the part.',
+        'Make it and try it',
+        'Export STEP for machining or STL and 3MF for printing. Choose the material and process, make the part, then bring what you learn back into the design.',
       ],
     ],
   },
   {
     slug: 'engineering',
-    title: 'Give every revision a question to answer.',
+    title: 'Design for the job ahead.',
     audience: 'For engineers & technical teams',
     description:
-      'Use code-based geometry and explicit checks to make design changes inspectable. Keep the requirements next to the model they constrain.',
+      'Develop parts around the interfaces, clearances and dimensions they need in use. Keep requirements beside the CAD source and carry the design into your manufacturing workflow.',
     image: 'engine.webp',
     alt: 'V8 engine model from the Tau example library',
     steps: [
@@ -184,8 +184,8 @@ export const useCases = [
         'GeoSpec evaluates declared geometric requirements. A pass is evidence about that requirement, not a general safety certification; unsupported evidence is reported as inconclusive.',
       ],
       [
-        'Review the evidence',
-        'Inspect the model and its source before moving to analysis, tooling or manufacture. Physical performance still needs appropriate validation.',
+        'Take it into manufacture',
+        'Export STEP to prepare machining in your CAM tools or share the model with a manufacturer. Review materials, tolerances and tooling, then validate the finished part in use.',
       ],
     ],
   },
@@ -194,18 +194,18 @@ export const useCases = [
     title: 'Understand it by changing it.',
     audience: 'For students & curious minds',
     description:
-      'Explore how geometry responds to code. Change a parameter, inspect the result and ask a more precise question.',
+      'Explore a mechanism, change its dimensions and check what happens. Connect the model on screen to a part you can make, assemble and learn from.',
     image: 'heat-exchanger.webp',
     alt: 'Parametric heat exchanger example in Tau',
     steps: [
       ['Open an example', 'Begin with a model you can inspect instead of an empty canvas.'],
       [
-        'Try one change',
-        'Adjust a dimension or ask the agent to explain a modeling choice. Compare the resulting geometry.',
+        'Change it and check it',
+        'Adjust a dimension or ask the agent to explain a modeling choice. Use geometric checks to see how the design meets its requirements.',
       ],
       [
-        'Keep asking why',
-        'Use the source and geometric checks to connect the visible object to the decisions behind it.',
+        'Learn by making',
+        'Export a model for a workshop project. Compare the finished part with the design, try it in an assembly and use what you learn in the next revision.',
       ],
     ],
   },
@@ -215,8 +215,8 @@ export const useCases = [
 export const visionChapters = [
   [
     'Today',
-    'Describe. Build. Check.',
-    'AI-assisted CAD authoring, editable source, parameters and geometric checks bring an idea into an inspectable form.',
+    'Design. Verify. Make.',
+    'Describe a useful part, shape it in editable CAD and check its geometry. Export files to take the design into machining, printing or your wider fabrication workflow.',
   ],
   [
     'Foundation',
@@ -225,13 +225,13 @@ export const visionChapters = [
   ],
   [
     'Direction',
-    'Connect design to making.',
-    'A connected workflow could carry intent through fabrication, sourcing and service. Machine connections and lifecycle coordination are development directions, not shipped features.',
+    'Bring the workshop closer.',
+    'We’re working toward a closer connection between design, fabrication, sourcing and service. Today, exports carry your model into the tools you use to make it; deeper manufacturing coordination is still in development.',
   ],
   [
     'Principle',
     'People keep the judgment.',
-    'More automation should make creating more accessible. People still choose what to make, weigh the evidence and authorize actions in the physical world.',
+    'Good tools help more people make useful things. You choose the materials and process, review the evidence and decide when a design is ready to become a physical part.',
   ],
 ];
 
@@ -240,7 +240,7 @@ export const plans = [
   {
     id: 'free',
     name: 'Free',
-    tagline: 'For your next idea.',
+    tagline: 'For the next thing you’ll make.',
     price: 'US$0',
     period: 'forever',
     features: [
@@ -256,7 +256,7 @@ export const plans = [
   {
     id: 'pro',
     name: 'Pro',
-    tagline: 'Keep the iterations coming.',
+    tagline: 'Keep designing, checking and making.',
     price: 'US$20',
     period: 'per month, plus applicable tax',
     features: [
@@ -267,7 +267,6 @@ export const plans = [
       ['Zoo KCL cloud kernel, metered'],
       ['Private and unlisted share links'],
       ['No training on your designs'],
-      ['Hosted design verification', 'soon'],
     ],
     cta: ['Choose Pro in Tau', '/?settings=billing'],
   },
@@ -284,7 +283,6 @@ export const plans = [
       ['Contractual no-train guarantee (DPA)'],
       ['Dedicated technical contact'],
       ['Invoicing and PO support'],
-      ['Signed evidence reports', 'soon'],
       ['Verification CI and org dashboards', 'soon'],
     ],
     cta: ['Talk to us', `mailto:${salesEmail}`],
@@ -312,9 +310,5 @@ export const pricingFaq = [
   [
     'What happens to unused Pro credits?',
     'Unused plan credits roll over up to 4,000. Purchased credits are separate and never expire. Review subscription and cancellation terms in the app before purchasing.',
-  ],
-  [
-    'Is hosted verification included?',
-    'GeoSpec checks run locally on every plan. Hosted design verification is in development and not part of any plan today.',
   ],
 ];

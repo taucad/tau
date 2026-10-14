@@ -255,6 +255,30 @@ describe('unrewrittenSiblings', () => {
 });
 
 describe('consumerZodVersion', () => {
+  it('takes an exact pin when every caret floor admits it', () => {
+    expect(
+      consumerZodVersion([
+        { name: '@taucad/cli', version: '1.0.0', dependencies: { zod: '4.4.3' } },
+        { name: 'geospec', version: '1.0.0', dependencies: { zod: '^4.1.0' } },
+      ]).version,
+    ).toBe('4.4.3');
+  });
+
+  it('rejects an exact pin below another floor, and two different pins', () => {
+    expect(() =>
+      consumerZodVersion([
+        { name: '@taucad/cli', version: '1.0.0', dependencies: { zod: '4.4.3' } },
+        { name: 'geospec', version: '1.0.0', dependencies: { zod: '^4.10.0' } },
+      ]),
+    ).toThrow('pinned exactly');
+    expect(() =>
+      consumerZodVersion([
+        { name: '@taucad/cli', version: '1.0.0', dependencies: { zod: '4.4.3' } },
+        { name: 'geospec', version: '1.0.0', dependencies: { zod: '4.4.4' } },
+      ]),
+    ).toThrow('different zod versions');
+  });
+
   it('keeps the declared floor when no package depends on a newer Zod', () => {
     expect(
       consumerZodVersion([
@@ -275,7 +299,7 @@ describe('consumerZodVersion', () => {
 
   it('refuses a Zod dependency range it cannot read a floor from', () => {
     expect(() => consumerZodVersion([{ name: 'x', version: '1.0.0', dependencies: { zod: '>=4' } }])).toThrow(
-      'not a caret range',
+      'neither a caret range nor a version',
     );
   });
 });

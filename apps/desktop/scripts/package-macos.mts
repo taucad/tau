@@ -36,8 +36,10 @@ import { copyGeoSpecNativeAssembly, copyGeoSpecSourceRelink, copyTree } from './
 import {
   desktopManifestFields,
   desktopPackageChannel,
+  desktopPackageVersion,
   excludesBuildDiagnostics,
   resolveRuntimePackages,
+  runtimeAsarOptions,
   stageRuntimePackages,
 } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
@@ -85,7 +87,12 @@ const gitSourceRoot = resolve(desktopRoot, 'resources/git/SOURCES');
 if (shipsGit && !existsSync(gitSourceRoot)) {
   throw new Error(`The git payload ships with its source; ${gitSourceRoot} is missing. Run prepare-git again.`);
 }
-const { release, unsigned, zip } = parseMacosPackageMode(process.argv.slice(2));
+const {
+  release,
+  unsigned,
+  zip,
+  notarize: shouldNotarize,
+} = parseMacosPackageMode(process.argv.slice(2), desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']));
 // Local non-ZIP packages remain development-only; every distribution archive is held.
 if (zip) {
   execFileSync(process.execPath, [resolve(workspaceRoot, 'packages/plugins/tscircuit/check-vendored-licenses.mjs')], {
@@ -306,9 +313,9 @@ try {
     name: 'Tau',
     appBundleId: 'com.taucad.tau.desktop',
     appCategoryType: 'public.app-category.graphics-design',
-    appVersion: metadata.version,
+    appVersion: desktopPackageVersion(metadata.version),
     /* Squirrel.Mac compares bundle versions, so the build version is the release version. */
-    buildVersion: metadata.version,
+    buildVersion: desktopPackageVersion(metadata.version),
     electronVersion: electron.version,
     icon: resolve(desktopRoot, 'resources/icon.icns'),
     extendInfo: hostInfo,
@@ -318,7 +325,7 @@ try {
      * and writes this key afterwards, and `TauHost-Info.plist` declares document
      * types and UTIs only, never a URL type. */
     protocols: [{ name: 'Tau', schemes: ['tau'] }],
-    asar: { unpack: '**/{*.node,bin/esbuild,@agentclientprotocol/**,@img/**}' },
+    asar: runtimeAsarOptions,
     prune: false,
   });
 
@@ -467,7 +474,7 @@ try {
     assertArm64(resolve(plugins, extension, `Contents/MacOS/${name}`));
   }
 
-  if (release) {
+  if (shouldNotarize) {
     await notarize({ appPath, keychainProfile: process.env['TAU_NOTARYTOOL_PROFILE'] ?? 'tau-notary' });
     execFileSync('xcrun', ['stapler', 'staple', appPath], { stdio: 'inherit' });
     execFileSync('xcrun', ['stapler', 'validate', appPath], { stdio: 'inherit' });
@@ -479,7 +486,9 @@ try {
     execFileSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath], { stdio: 'inherit' });
   }
   await rm(stageRoot, { recursive: true, force: true });
-  console.log(`${release ? 'Signed and notarized' : unsigned ? 'Unsigned' : 'Ad-hoc signed'} Tau: ${appPath}`);
+  console.log(
+    `${shouldNotarize ? 'Signed and notarized' : release ? 'Developer ID signed' : unsigned ? 'Unsigned' : 'Ad-hoc signed'} Tau: ${appPath}`,
+  );
   console.log(zip ? `Distribution archive: ${zipPath}` : 'No distribution archive; pass --zip to write one.');
 } finally {
   if (ownedGeoSpecSnapshot !== undefined) {

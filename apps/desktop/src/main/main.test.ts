@@ -8,6 +8,7 @@ import type * as WorkerThreads from 'node:worker_threads';
 
 import type * as Host from '@taucad/host';
 import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
+import type { DesktopUpdaterOptions } from '#main/updater.js';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -85,10 +86,18 @@ const state = vi.hoisted(() => ({
    * the ordering pin is about. */
   autoQuiesce: true,
   autoForced: false,
+  prepareToRestart: undefined as undefined | (() => Promise<boolean>),
   /* Lets a case hold ACP discovery open while the window boots (D17). */
   acpDiscovery: undefined as Promise<{ agents: never[]; refused: never[] }> | undefined,
   bambuStudioStatus: vi.fn(async () => ({ available: false, reason: 'not installed' })),
   log: vi.fn(),
+}));
+
+vi.mock('#main/updater.js', () => ({
+  startDesktopUpdater: (options: DesktopUpdaterOptions) => {
+    state.prepareToRestart = options.prepareToRestart;
+    return { check: async () => undefined, install: async () => undefined, status: () => 'disabled' };
+  },
 }));
 
 vi.mock('node:worker_threads', async (importOriginal) => {
@@ -177,6 +186,8 @@ const dialog = {
 
 vi.mock('electron', () => ({
   app,
+  Menu: { getApplicationMenu: vi.fn(() => undefined) },
+  MenuItem: vi.fn(function MenuItem() {}),
   autoUpdater: { setFeedURL: vi.fn(), checkForUpdates: vi.fn(), quitAndInstall: vi.fn(), on: vi.fn() },
   BrowserWindow: Object.assign(
     vi.fn(function BrowserWindow() {
@@ -373,6 +384,7 @@ afterEach(async () => {
   state.sentToRenderer.length = 0;
   state.autoQuiesce = true;
   state.autoForced = false;
+  state.prepareToRestart = undefined;
   getWindows.mockReturnValue([fakeWindow]);
   state.acpDiscovery = undefined;
   state.ready = undefined;
@@ -429,6 +441,36 @@ describe('desktop main compute owner', () => {
     });
     return resolve(join(state.userData, 'home', 'project'));
   };
+
+  it(
+    'settles restart without normal quit stealing the updater finalizer',
+    async () => {
+      await bootstrap();
+      const assessment = Promise.withResolvers<readonly StreamingMachine[]>();
+      state.servicesStreaming.mockReturnValueOnce(assessment.promise);
+      const restart = state.prepareToRestart!();
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      assessment.resolve([]);
+      await expect(restart).resolves.toBe(true);
+      expect(state.servicesDispose).toHaveBeenCalledOnce();
+      expect(app.quit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'refuses updater takeover of a normal quit attempt',
+    async () => {
+      await bootstrap();
+      const assessment = Promise.withResolvers<readonly StreamingMachine[]>();
+      state.servicesStreaming.mockReturnValueOnce(assessment.promise);
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await expect(state.prepareToRestart!()).resolves.toBe(false);
+      assessment.resolve([]);
+      await vi.waitFor(() => expect(app.quit).toHaveBeenCalledOnce());
+    },
+    bootMilliseconds,
+  );
 
   /* AF-L03-1: the descriptors used to be frozen into the window's
    * `additionalArguments`, so a vendor model probe on a 5 s clock was a
@@ -680,8 +722,9 @@ describe('desktop main compute owner', () => {
       });
       const attempt = fakeWindow.webContents.send.mock.calls.findLast(([channel]) => channel === quitChannels.ask)?.[1];
       const reply = (sender: typeof fakeWindow.webContents, id = attempt, frame = sender.mainFrame): void => {
-        for (const listener of state.ipcListeners.get(quitChannels.quiesced) ?? [])
-          {listener({ sender, senderFrame: frame }, id, false);}
+        for (const listener of state.ipcListeners.get(quitChannels.quiesced) ?? []) {
+          listener({ sender, senderFrame: frame }, id, false);
+        }
       };
       reply(fakeWindow.webContents, 'retired');
       reply(second.webContents, attempt, {});

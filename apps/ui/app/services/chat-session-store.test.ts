@@ -389,6 +389,32 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       lifecycleRow(1, 'running', runId),
     ];
   };
+  it('should reopen the transcript watch when an external approval resumes the same attempt', async () => {
+    const store = createStore();
+    const chatId = 'chat_external_approval';
+    const runId = 'run_external_approval';
+    const session = store.acquire(chatId, 'project_external_approval');
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    const message = { id: 'user_approval', role: 'user', content: 'Build a cube' };
+    publishLogRows(store, chatId, [
+      { ...lifecycleRow(0, 'admitted', runId), admission: { kind: 'external', turnId: message.id, message } },
+      lifecycleRow(1, 'running', runId),
+    ]);
+    const chat = harness.created.find((entry) => entry.id === chatId)!;
+    await vi.waitFor(() => {
+      expect(chat.resumeStream).toHaveBeenCalledTimes(1);
+    });
+    publishLogRows(store, chatId, [lifecycleRow(2, 'paused', runId)], 2);
+    publishLogRows(store, chatId, [lifecycleRow(3, 'running', runId)], 3);
+    await vi.waitFor(() => {
+      expect(chat.resumeStream).toHaveBeenCalledTimes(2);
+    });
+    publishLogRows(store, chatId, [lifecycleRow(4, 'completed', runId)], 4);
+    store.release(chatId);
+  });
+
   it('reopens a projected run watch after live delivery drops without another durable row or command', async () => {
     const store = createStore();
     const chatId = 'chat_live_drop';

@@ -475,7 +475,8 @@ const toolChunkFacts = (
     ...(call?.status === 'completed' || call?.status === 'failed' ? { status: call.status } : {}),
     ...(external ? { origin: 'external' } : {}),
     ...(typeof agentId === 'string' ? { agentId } : {}),
-    ...(presentation === 'tau-mcp' ? { presentation } : {}),
+    // Grok omits nativeName; its qualified Tau tool name is already canonical.
+    ...(presentation === 'tau-mcp' ? { presentation, nativeName: call?.nativeName ?? message.toolName } : {}),
   };
   const tau = durable as ToolChunkMetadata;
   return {

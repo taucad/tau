@@ -59,7 +59,7 @@ describe('shutdown owner', () => {
     const options = {
       input: { identity: 'test' },
       events: [...publicEvents, { type: 'xstate.error.execution' }],
-      limit: 200,
+      limit: 500,
       serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
     };
     expect(unansweredEvents(shutdownMachine, { ...options, ignore: shutdownIgnoredEvents })).toEqual([]);
@@ -97,6 +97,19 @@ describe('shutdown owner', () => {
     expect(actor.getSnapshot().matches('utility')).toBe(true);
     done('settled');
     expect(actor.getSnapshot().matches('exiting')).toBe(true);
+    actor.stop();
+  });
+  it('keeps restart ownership through repeated quit until cleanup is prepared', () => {
+    const { actor, done } = harness();
+    actor.send({ type: 'quit', purpose: 'restart' });
+    actor.send({ type: 'quit' });
+    done('clear');
+    done('settled');
+    done('settled');
+    expect(actor.getSnapshot().matches('exiting')).toBe(true);
+    done('settled');
+    expect(actor.getSnapshot().matches('prepared')).toBe(true);
+    expect(actor.getSnapshot().context.purpose).toBe('restart');
     actor.stop();
   });
   it('never treats a failed save or failed recovery as permission to exit', () => {

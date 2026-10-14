@@ -38,6 +38,8 @@ import { isQuickLookEnabled } from '#shared/quick-look.js';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Operational scripts share their packaging contract.
+import { desktopPackageChannel, desktopPackageVersion } from './runtime-stage.mjs';
 
 const desktopRoot = resolve(import.meta.dirname, '..');
 const workspaceRoot = resolve(desktopRoot, '../..');
@@ -46,7 +48,11 @@ const appPath = resolve(outputRoot, 'Tau-darwin-arm64/Tau.app');
 const appExecutable = resolve(appPath, 'Contents/MacOS/Tau');
 const brandingRoot = resolve(appPath, 'Contents/Resources/branding');
 const extensionTemporaryRoot = resolve(tmpdir(), 'tau-quick-look');
-const { release, unsigned } = parseMacosPackageMode(process.argv.slice(2));
+const {
+  release,
+  unsigned,
+  notarize: shouldNotarize,
+} = parseMacosPackageMode(process.argv.slice(2), desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']));
 const { picogkRuntimeManifestSchema } = await import('@taucad/picogk');
 /** The PicoGK worker protocol, which the prepared resource manifest also records. */
 const picoGkWireProtocol = picogkRuntimeManifestSchema.shape.protocolVersion.value;
@@ -469,6 +475,56 @@ if (!(JSON.parse(bundledUrlSchemes) as string[]).includes('tau')) {
 }
 run('plutil', ['-extract', 'CFBundleDocumentTypes', 'json', '-o', '-', resolve(appPath, 'Contents/Info.plist')]);
 if (release) {
+  const identity = run('codesign', ['--display', '--verbose=4', appPath]);
+  const team = process.env['APPLE_TEAM_ID'];
+  if (
+    !team ||
+    !identity.includes(`TeamIdentifier=${team}`) ||
+    !identity.includes('Authority=Developer ID Application:')
+  ) {
+    throw new Error('Release signature must be Developer ID Application for APPLE_TEAM_ID');
+  }
+}
+if (release) {
+  const source = JSON.parse(readFileSync(resolve(desktopRoot, 'package.json'), 'utf8')) as { version: string };
+  const expectedVersion = desktopPackageVersion(source.version);
+  for (const key of ['CFBundleVersion', 'CFBundleShortVersionString']) {
+    const actualVersion = run('plutil', [
+      '-extract',
+      key,
+      'raw',
+      '-o',
+      '-',
+      resolve(appPath, 'Contents/Info.plist'),
+    ]).trim();
+    if (actualVersion !== expectedVersion) {
+      throw new Error(`${key} disagrees with the release version: ${actualVersion}`);
+    }
+  }
+  const packaged = JSON.parse(
+    run('env', [
+      'ELECTRON_RUN_AS_NODE=1',
+      appExecutable,
+      '-e',
+      `process.stdout.write(JSON.stringify(require(${JSON.stringify(resolve(appPath, 'Contents/Resources/app.asar/package.json'))})))`,
+    ]),
+  ) as {
+    version: string;
+    tauDesktop?: { channel?: string; environmentOverrides?: boolean; releaseTag?: string; sourceCommit?: string };
+  };
+  if (
+    packaged.version !== expectedVersion ||
+    (packaged.tauDesktop?.channel ?? 'production') !== desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']) ||
+    packaged.tauDesktop?.environmentOverrides === true ||
+    !process.env['TAU_DESKTOP_RELEASE_TAG'] ||
+    packaged.tauDesktop?.releaseTag !== process.env['TAU_DESKTOP_RELEASE_TAG'] ||
+    !process.env['TAU_DESKTOP_SOURCE_SHA'] ||
+    packaged.tauDesktop.sourceCommit !== process.env['TAU_DESKTOP_SOURCE_SHA']
+  ) {
+    throw new Error('Packaged release identity or environment override policy disagrees with CI');
+  }
+}
+if (shouldNotarize) {
   run('xcrun', ['stapler', 'validate', appPath]);
   run('spctl', ['--assess', '--type', 'execute', '--verbose=2', appPath]);
 }

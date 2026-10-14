@@ -114,8 +114,8 @@ export function ProjectNavigation(): React.JSX.Element {
   };
 
   return (
-    /* R9: one row after another carries a tooltip, so a pointer travelling down
-     * the list waits before the first and then skips the delay. */
+    /* Chat rows and New chat shortcuts share a delay as the pointer travels
+     * down the list. Project status descriptions stay screen-reader-only. */
     <TooltipProvider delayDuration={500} skipDelayDuration={300}>
       <SidebarGroup className='px-2 group-data-[collapsible=icon]:hidden'>
         <ProjectsLabel />
@@ -425,6 +425,7 @@ function ProjectNavigationItem({
                 descriptionId={`project-status-${project.id}`}
                 isActive={isActive}
                 isPending={isPending}
+                hasTooltip={false}
                 onClick={onOpen}
               />
               <span

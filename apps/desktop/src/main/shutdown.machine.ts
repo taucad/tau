@@ -8,6 +8,7 @@ export type ShutdownMachineInput = { readonly identity: string };
 export type ShutdownMachineContext = {
   readonly identity: string;
   readonly sequence: number;
+  readonly purpose: 'quit' | 'restart';
   readonly attemptId: string;
   readonly machines: readonly StreamingMachine[] | undefined;
   readonly forceMachines: boolean;
@@ -28,7 +29,7 @@ export type ShutdownResult =
   | 'recover';
 /** Only the current invoked effect may complete its stage. */
 export type ShutdownMachineEvent =
-  | { readonly type: 'quit' }
+  | { readonly type: 'quit'; readonly purpose?: 'quit' | 'restart' }
   | {
       readonly type: 'done';
       readonly attemptId: string;
@@ -90,7 +91,7 @@ export const shutdownMachine = setup({
     input: types<ShutdownMachineInput>(),
     context: types<ShutdownMachineContext>(),
     events: {
-      quit: types<Record<never, never>>(),
+      quit: types<{ readonly purpose?: 'quit' | 'restart' }>(),
       done: types<Omit<Extract<ShutdownMachineEvent, { type: 'done' }>, 'type'>>(),
     },
   },
@@ -102,6 +103,7 @@ export const shutdownMachine = setup({
   context: ({ input }) => ({
     identity: input.identity,
     sequence: 0,
+    purpose: 'quit',
     attemptId: '',
     machines: undefined,
     forceMachines: false,
@@ -113,10 +115,11 @@ export const shutdownMachine = setup({
   states: {
     idle: {
       on: {
-        quit: ({ context }) => ({
+        quit: ({ context, event }) => ({
           target: 'assessing',
           context: {
             sequence: context.sequence + 1,
+            purpose: event.purpose ?? 'quit',
             attemptId: `${context.identity}:${String(context.sequence + 1)}`,
             machines: undefined,
             forceMachines: false,
@@ -227,14 +230,15 @@ export const shutdownMachine = setup({
       invoke: invoke('viewing'),
       on: { done: ({ context, event }) => (event.attemptId === context.attemptId ? { target: 'idle' } : {}) },
     },
+    prepared: { type: 'final' },
     exiting: {
       invoke: invoke('exiting'),
       on: {
         done: ({ context, event }) =>
           event.attemptId === context.attemptId
             ? {
-                target: 'recoveryReview',
-                context: { error: event.error ?? 'Tau could not exit. Retry recovery or quit.' },
+                target: event.result === 'settled' ? 'prepared' : 'recoveryReview',
+                context: { error: event.error },
               }
             : {},
       },

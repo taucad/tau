@@ -16,6 +16,7 @@ import { installBrowserHost } from '#main/browser-host.js';
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
   app,
@@ -24,6 +25,8 @@ import {
   dialog,
   ipcMain,
   MessageChannelMain,
+  Menu,
+  MenuItem,
   net,
   powerSaveBlocker,
   protocol,
@@ -100,6 +103,7 @@ import { createOpenFileQueue } from '#main/open-files.js';
 import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
+import { prepareOtaProbe } from '#main/ota-probe.js';
 import { startDesktopUpdater } from '#main/updater.js';
 import {
   appIconThemeChannel,
@@ -138,6 +142,19 @@ if (environmentLocked) {
 /* A staging package (`TAU_DESKTOP_CHANNEL=staging` at packaging time) defaults
  * to taucad.dev and never follows the production update feed. */
 const desktopChannel = app.isPackaged ? packagedChannel(app.getAppPath()) : 'production';
+app.setName(desktopChannel === 'staging' ? 'Tau Staging' : 'Tau');
+if (desktopChannel === 'staging') {
+  app.setPath('userData', join(app.getPath('appData'), 'Tau Staging'));
+  app.setPath('sessionData', app.getPath('userData'));
+}
+const otaProbe = prepareOtaProbe({
+  arguments: process.argv,
+  profile: app.getPath('userData'),
+  appPath: app.getAppPath(),
+  version: app.getVersion(),
+  channel: desktopChannel,
+  packaged: app.isPackaged,
+});
 const isDevelopment = process.env.ELECTRON_RENDERER_URL !== undefined;
 const hideTestWindow = process.env['TAU_E2E_HIDE_WINDOW'] === '1';
 /* Packaged executable launches skip Playwright's readiness loader. Hold window
@@ -354,7 +371,6 @@ app.on('second-instance', (_event, argv) => {
   focusMainWindow();
 });
 
-app.setName('Tau');
 process.title = 'Tau';
 /* Unpackaged on Windows and Linux the registration has to name the executable
  * and the script Electron was started with, or the OS records `electron` itself
@@ -414,7 +430,14 @@ const bootstrapElectronApp = async (): Promise<void> => {
   );
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   const log = createDiagnosticsLog({ directory: logDirectory, echo: isDevelopment });
-  log.log('info', 'main.ready', { electron: process.versions.electron, packaged: app.isPackaged, isDevelopment });
+  log.log('info', 'main.ready', {
+    electron: process.versions.electron,
+    packaged: app.isPackaged,
+    isDevelopment,
+    version: app.getVersion(),
+    channel: desktopChannel,
+    pid: process.pid,
+  });
   if (loginShell !== undefined) {
     /* A fallback means the shell timed out or failed: only well-known CLI
      * directories were added, and nothing from its rc files applied. */
@@ -431,7 +454,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * (`tau serve` opens it too), never under an authored root. The app's old
    * `userData/machines` is imported from once, and only when it is another
    * directory: on a case-insensitive volume `…/Tau` and `…/tau` are one. */
-  const tauConfigDirectory = defaultConfigDirectory();
+  const tauConfigDirectory =
+    desktopChannel === 'staging' ? join(app.getPath('userData'), 'config') : defaultConfigDirectory();
   const machinesDirectory = join(tauConfigDirectory, 'machines');
   mkdirSync(machinesDirectory, { recursive: true, mode: 0o700 });
   const legacyMachinesDirectory = join(app.getPath('userData'), 'machines');
@@ -521,39 +545,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
     allowedOrigins: authenticatedOrigins,
     token: () => auth.token(),
     clientHeader: `tau-desktop/${app.getVersion()}`,
-  });
-
-  /* Packaged releases follow the latest GitHub Release's update feed; see `updater.ts`. */
-  startDesktopUpdater({
-    platform: process.platform,
-    arch: process.arch,
-    currentVersion: app.getVersion(),
-    packaged: app.isPackaged,
-    channel: desktopChannel,
-    environment,
-    autoUpdater,
-    fetchJson: async (url) => {
-      const response = await net.fetch(url);
-      if (!response.ok) {
-        throw new Error(`update feed answered ${response.status}`);
-      }
-      return response.json() as Promise<unknown>;
-    },
-    confirm: async ({ title, detail, accept }) => {
-      const { response } = await dialog.showMessageBox({
-        type: 'info',
-        message: title,
-        detail,
-        buttons: [accept, 'Later'],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      return response === 0;
-    },
-    openExternal: async (url) => shell.openExternal(url),
-    log: (level, event, detail) => {
-      log.log(level, event, detail);
-    },
   });
 
   if (!isDevelopment) {
@@ -1552,6 +1543,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
             }
             resumeQueuedNavigation();
             done('settled');
+            settleShutdown?.(false);
+            shutdownPending = undefined;
+            settleShutdown = undefined;
             break;
           }
           case 'recoveryReview': {
@@ -1581,6 +1575,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
               focusMainWindow();
             }
             done('settled');
+            settleShutdown?.(false);
+            shutdownPending = undefined;
+            settleShutdown = undefined;
             break;
           }
           case 'exiting': {
@@ -1622,7 +1619,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
               log.log('error', 'main.shutdown', error);
             }
             shutdownComplete = true;
-            app.quit();
+            done('settled');
+            settleShutdown?.(true);
             break;
           }
         }
@@ -1635,14 +1633,124 @@ const bootstrapElectronApp = async (): Promise<void> => {
     };
   });
   const shutdown = createShutdownActor({ identity: randomUUID() }, { actors: { shutdownDriver } }).start();
+  let shutdownPending: Promise<boolean> | undefined;
+  let settleShutdown: ((settled: boolean) => void) | undefined;
+  const prepareToQuit = (purpose: 'quit' | 'restart'): Promise<boolean> => {
+    if (shutdownComplete) {
+      return Promise.resolve(true);
+    }
+    if (shutdownPending) {
+      return shutdown.getSnapshot().context.purpose === purpose ? shutdownPending : Promise.resolve(false);
+    }
+    quitting = true;
+    shutdownPending = new Promise<boolean>((resolve) => {
+      settleShutdown = resolve;
+    });
+    shutdown.send({ type: 'quit', purpose });
+    return shutdownPending;
+  };
+  let pendingQuit: Promise<void> | undefined;
+  const quitWhenReady = async (): Promise<void> => {
+    try {
+      if (await prepareToQuit('quit')) {
+        app.quit();
+      }
+    } finally {
+      pendingQuit = undefined;
+    }
+  };
   app.on('before-quit', (event) => {
     if (shutdownComplete) {
       return;
     }
     event.preventDefault();
-    quitting = true;
-    shutdown.send({ type: 'quit' });
+    pendingQuit ??= quitWhenReady();
   });
+  if (otaProbe) {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (!window) {
+      throw new Error('OTA probe has no renderer window');
+    }
+    const deadline = Date.now() + 120_000;
+    let ready = false;
+    /* oxlint-disable no-await-in-loop -- Observe one renderer's real quit registration before updater admission. */
+    while (Date.now() < deadline) {
+      const observed: unknown = await window.webContents.executeJavaScript(
+        'location.protocol === "app:" && location.host === "tau" && document.querySelector("main") !== null && globalThis.tau?.quit?.isReady() === true',
+      );
+      if (observed === true) {
+        ready = true;
+        break;
+      }
+      await sleep(250);
+    }
+    /* oxlint-enable no-await-in-loop */
+    if (!ready) {
+      throw new Error('OTA renderer did not become ready with its save handler');
+    }
+    otaProbe.complete();
+  }
+  /* Start only once the shared shutdown owner and normal application startup are ready. */
+  const updater = startDesktopUpdater({
+    platform: process.platform,
+    arch: process.arch,
+    currentVersion: app.getVersion(),
+    packaged: app.isPackaged,
+    channel: desktopChannel,
+    environment,
+    autoUpdater,
+    prepareToRestart: () => prepareToQuit('restart'),
+    ...(otaProbe ? { candidateTag: otaProbe.candidateTag } : {}),
+    fetchJson: async (url) => {
+      const response = await net.fetch(url);
+      if (!response.ok) {
+        throw new Error(`update feed answered ${response.status}`);
+      }
+      return response.json() as Promise<unknown>;
+    },
+    confirm: async ({ title, detail, accept }) => {
+      if (otaProbe) {
+        return true;
+      }
+      const { response } = await dialog.showMessageBox({
+        type: 'info',
+        message: title,
+        detail,
+        buttons: [accept, 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      return response === 0;
+    },
+    openExternal: async (url) => shell.openExternal(url),
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  });
+
+  const checkForUpdates = async (): Promise<void> => {
+    await updater.check();
+    const { response } = await dialog.showMessageBox({
+      type: 'info',
+      message: `Tau ${app.getVersion()} · ${desktopChannel}`,
+      detail: updater.status(),
+      buttons: ['OK', 'Restart to install'],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (response === 1) {
+      await updater.install();
+    }
+  };
+  Menu.getApplicationMenu()?.items[0]?.submenu?.insert(
+    1,
+    new MenuItem({
+      label: 'Check for Updates…',
+      click: () => {
+        void checkForUpdates();
+      },
+    }),
+  );
 };
 
 /* Electron fires `ready` only after the main ESM module finishes evaluating, so

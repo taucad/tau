@@ -30,6 +30,7 @@ import {
   Zap,
 } from 'lucide-react';
 import type { AcpAgentExecution, TauAgentHostId } from '@taucad/chat';
+import { reasoningLevels } from '@taucad/chat/constants';
 import type { ReasoningLevel } from '@taucad/chat/constants';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { Button } from '@taucad/ui/components/button';
@@ -91,6 +92,9 @@ export const openModelSelectorKeyCombination = { key: '/', modKey: true } satisf
 export const ghostPillClass = 'h-7 rounded-full px-2.5 font-normal text-muted-foreground hover:text-foreground';
 
 type Option = { readonly id: string; readonly name: string; readonly isDisabled?: boolean };
+
+/** ACP adds levels beyond Tau's catalog; unranked choices such as Default stay first. */
+const acpReasoningOrder: readonly string[] = ['none', 'minimal', ...reasoningLevels, 'ultra'];
 
 // ---------------------------------------------------------------------------
 // The segmented control
@@ -515,7 +519,11 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
   const selected = execution.kind === 'acp' ? execution.model : undefined;
   const modelId = selected ?? current.defaultModel;
   const thought = configOptionOf(agentConfig, 'thought_level');
-  const levels = thought ? configValues(thought).map((value) => ({ id: value.value, name: value.name })) : [];
+  const levels = thought
+    ? configValues(thought)
+        .map((value) => ({ id: value.value, name: value.name }))
+        .toSorted((left, right) => acpReasoningOrder.indexOf(left.id) - acpReasoningOrder.indexOf(right.id))
+    : [];
   const thoughtValue = thought ? agentConfig.valueOf(thought) : undefined;
   const level = levels.find((entry) => entry.id === thoughtValue);
   const settings = settingsOf(agentConfig);

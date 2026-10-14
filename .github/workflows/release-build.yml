@@ -1,55 +1,12 @@
-# Build, verify and deploy what a GitHub Release ships: one run per release.
-#
-# `release.yml` creates one GitHub Release per application version
-# (`<project>@<version>`) with the tau-release-bot token when its release pull
-# request is merged, and that `published` event starts this workflow at the tag.
-# Merging the release pull request is therefore the whole release act: this run
-# builds it and takes it to production with no further step
-# (docs/research/monorepo-app-release-practice.md, R8):
-#
-#   - `ui@*` and `api@*`: lint, typecheck, test and build that application (and
-#     its dependency closure) at the tagged commit, then deploy it to
-#     production in the `production` environment: `api@*` deploys the Fly API
-#     (`deploy.yml`), `ui@*` publishes tau.new and docs.tau.new (`deploy-ui.yml`
-#     and `deploy-docs.yml`). Staging needs nothing here: every push to `main`,
-#     the release merge included, already deployed it from `ci.yml`.
-#   - `desktop@*`: package the desktop app for macOS (Developer ID signed and
-#     notarized, after a release manager approves the `desktop` environment),
-#     Linux and Windows (unsigned), attach the archives to the release, mark the
-#     release "latest", then publish the update feeds to the fixed
-#     `desktop-feed` prerelease, which is the moment installed apps update.
-#   - `desktop-staging@<version>-staging.<n>`: the same desktop build, packaged
-#     for the staging channel (taucad.dev endpoints, no update checks) as a
-#     prerelease. `release-desktop-staging.yml` creates these. It signs from the
-#     `desktop-staging` environment, attaches the archives without update feeds
-#     and never marks the release latest, so installed production apps never
-#     see it.
-#   - `ui@*` and `desktop@*` also get the GeoSpec engine's complete source and
-#     relink kit and the OCCT licence texts as release assets (`source-kit`),
-#     because both ship OCCT compiled into the engine; so does a staging desktop
-#     prerelease.
-#
-# A dispatched rebuild, from `main` or at the tag, builds without deploying;
-# production deploys only from the `release` event's run at the tag. Rollbacks
-# and redeploys of an earlier release go through `deploy-production.yml`.
-#
-# Command Center contract: the release pull request's merge commit is the tag's
-# commit, so this workflow's run for that `head_sha` (event `release`, title the
-# tag) carries the release. Its production deploy jobs are `production-api`,
-# `production-ui` and `production-docs`, which start once `Verify <tag>` passes
-# (the desktop's macOS job waits on `desktop`), and the `production`
-# environment's deployment status for the tag is the outcome.
-#
-# Nothing here publishes an npm package.
-#
-# The macOS job reads its signing material from the `desktop` environment,
-# which only `desktop@*` tags may use and a release manager approves per run,
-# or for a staging prerelease from `desktop-staging`, which only
-# `desktop-staging@*` tags may use. It records a deployment so each desktop
-# release shows under its environment in the repository's Deployments sidebar.
-# Both environments hold the same values. Secrets: MACOS_CERTIFICATE_P12_BASE64,
-# MACOS_CERTIFICATE_PASSWORD, APPLE_API_KEY_P8_BASE64, APPLE_API_KEY_ID and
-# APPLE_API_ISSUER_ID, and the APPLE_TEAM_ID variable.
+# Build application releases from their exact tags. UI/API deploy through their
+# existing production jobs. Desktop candidates publish immutable GitHub assets,
+# mirror them to isolated channel R2 buckets, and advance public downloads/feeds
+# only after a real signed macOS A→B replacement and installed-payload verification.
+# Staging keeps Developer ID signing and release hardening but skips notarization;
+# production also notarizes and staples. Both retain source/relink release assets.
+# The first mirrored candidate establishes a baseline without changing live feeds.
+# Signing credentials stay in desktop/desktop-staging; R2 credentials are separately
+# scoped to each download bucket. Nothing here publishes npm packages.
 name: Release build
 run-name: ${{ github.event.release.tag_name || inputs.tag }}
 
@@ -261,6 +218,9 @@ jobs:
     needs: [resolve, verify-app]
     if: needs.resolve.outputs.kind == 'desktop'
     name: Package macOS (signed)
+    permissions:
+      contents: read
+      actions: read
     runs-on: macos-15
     timeout-minutes: 240
     environment:
@@ -268,6 +228,7 @@ jobs:
     env:
       GEOSPEC_WORKERS: 1
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
+      TAU_DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
       TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/macos
     steps:
       - name: Checkout the release
@@ -346,6 +307,15 @@ jobs:
 
       # A throwaway keychain holds the Developer ID identity and the notary
       # profile for this job only; it is deleted in the last step.
+      - name: Take the verified same-source GeoSpec native products
+        uses: ./.github/actions/geospec-artifact-from-main
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Record package source identity
+        shell: bash
+        run: echo "TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
       - name: Import the Developer ID identity and notary credentials
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
@@ -357,8 +327,11 @@ jobs:
           ENVIRONMENT: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop' }}
         run: |
           set -euo pipefail
-          for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_API_KEY_P8_BASE64 \
-            APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_TEAM_ID; do
+          names=(MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_TEAM_ID)
+          if [ "$TAU_DESKTOP_CHANNEL" = production ]; then
+            names+=(APPLE_API_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER_ID)
+          fi
+          for name in "${names[@]}"; do
             if [ -z "${!name}" ]; then
               echo "::error::$name is not set on the $ENVIRONMENT environment"
               exit 1
@@ -369,7 +342,6 @@ jobs:
           certificate="$RUNNER_TEMP/developer-id.p12"
           api_key="$RUNNER_TEMP/AuthKey.p8"
           printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate"
-          printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$api_key"
           security create-keychain -p "$keychain_password" "$keychain"
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$keychain_password" "$keychain"
@@ -391,17 +363,23 @@ jobs:
             exit 1
           fi
           # package-macos.mts notarizes through this keychain profile.
+          if [ "$TAU_DESKTOP_CHANNEL" = production ]; then
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$api_key"
           xcrun notarytool store-credentials tau-notary --key "$api_key" --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER_ID" --keychain "$keychain"
           rm -f "$api_key"
+          fi
           {
             echo "TAU_CODESIGN_IDENTITY=$identity"
             echo "TAU_NOTARYTOOL_PROFILE=tau-notary"
             echo "TAU_SIGNING_KEYCHAIN=$keychain"
           } >> "$GITHUB_ENV"
 
-      - name: Package, sign and notarize
-        run: pnpm nx run desktop:package-macos-release --parallel=1
+      - name: Package and sign; notarize production
+        run: |
+          config=()
+          if [ "$TAU_DESKTOP_CHANNEL" = staging ]; then config+=(--configuration=staging); fi
+          pnpm nx run desktop:package-macos-release --parallel=1 "${config[@]}"
 
       # Uploaded before verification so a failed verify leaves the signed app
       # for verify-desktop-macos.yml. Publishing still needs this whole job.
@@ -414,7 +392,12 @@ jobs:
           retention-days: 7
 
       - name: Verify the signed package
-        run: pnpm nx run desktop:verify-macos-release
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          config=()
+          if [ "$TAU_DESKTOP_CHANNEL" = staging ]; then config+=(--configuration=staging); fi
+          pnpm nx run desktop:verify-macos-release "${config[@]}"
 
       - name: Delete the signing keychain
         if: always()
@@ -446,6 +429,7 @@ jobs:
       actions: read
     env:
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
+      TAU_DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
       TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/${{ matrix.platform }}
     steps:
       # Windows checkouts default to CRLF, which changes the GeoSpec product key
@@ -482,6 +466,10 @@ jobs:
 
       # On Windows the archive and the Python payload use the inbox bsdtar,
       # which must come before Git Bash's GNU tar on PATH.
+      - name: Record package source identity
+        shell: bash
+        run: echo "TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
       - name: Package
         shell: bash
         run: |
@@ -502,13 +490,18 @@ jobs:
   desktop-publish:
     needs: [resolve, desktop-macos, desktop-portable, source-kit]
     if: needs.resolve.outputs.kind == 'desktop'
-    name: Attach assets and publish the update feeds
+    name: Attach immutable candidate assets
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     environment:
       name: release-pr
       deployment: false
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
       - name: Mint tau-release-bot token
         id: bot
         uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
@@ -518,96 +511,210 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-contents: write
-
-      - name: Download the archives
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: desktop-*
-          path: assets
+          path: out/desktop/assets
           merge-multiple: true
-
-      # A staging prerelease carries the archives only: staging apps never
-      # check for updates, and no feed should name a staging build.
-      - name: Attach the staging archives
-        if: needs.resolve.outputs.channel == 'staging'
+      - name: Prepare and attach the immutable candidate
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.resolve.outputs.tag }}
-        working-directory: assets
+          DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          DESKTOP_ASSETS_DIR: out/desktop/assets
+          FEED_TAG: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging-feed' || 'desktop-feed' }}
         run: |
           set -euo pipefail
-          sha256sum Tau-* > SHA256SUMS.txt
-          gh release upload "$TAG" Tau-* SHA256SUMS.txt --clobber
-
-      - name: Attach the archives and update feeds
-        if: needs.resolve.outputs.channel != 'staging'
-        env:
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.resolve.outputs.tag }}
-          VERSION: ${{ needs.resolve.outputs.version }}
-        run: |
-          set -euo pipefail
-          cd assets
-          sha256sum Tau-* > SHA256SUMS.txt
-          published=$(gh release view "$TAG" --json publishedAt --jq .publishedAt)
-          notes=$(gh release view "$TAG" --json body --jq .body)
-          encoded_tag=$(jq -rn --arg tag "$TAG" '$tag | @uri')
-          base="https://github.com/${GH_REPO}/releases/download/${encoded_tag}"
-          # One feed per platform, in the Squirrel.Mac JSON shape the desktop
-          # updater reads (apps/desktop/src/main/updater.ts), attached to this release.
-          for pair in darwin-arm64:Tau-macos-arm64.zip linux-x64:Tau-linux-x64.tar.gz win32-x64:Tau-win32-x64.zip; do
-            platform=${pair%%:*}
-            archive=${pair#*:}
-            jq -n --arg version "$VERSION" --arg date "$published" --arg notes "$notes" \
-              --arg url "$base/$archive" --arg name "$TAG" \
-              '{currentRelease: $version, releases: [{version: $version,
-                updateTo: {version: $version, pub_date: $date, notes: $notes, name: $name, url: $url}}]}' \
-              > "desktop-update-${platform}.json"
-          done
-          gh release upload "$TAG" Tau-* SHA256SUMS.txt desktop-update-*.json --clobber
-
-      # Builds before the fixed feed poll /releases/latest/download/desktop-update-<platform>.json,
-      # so a desktop release still becomes latest once its assets are in place.
-      - name: Mark the release latest
-        if: needs.resolve.outputs.channel != 'staging'
-        env:
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.resolve.outputs.tag }}
-        run: gh release edit "$TAG" --latest
-
-      # Installed apps read their feed from the fixed `desktop-feed` prerelease
-      # (apps/desktop/src/main/updater.ts), so the repository's "Latest" badge is
-      # not a production control and a UI or API release can never hide an
-      # update. Replacing these files is the moment the update goes out. A
-      # rebuild of an older tag leaves a newer feed alone.
-      - name: Publish the fixed update feed
-        if: needs.resolve.outputs.channel != 'staging'
-        env:
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.resolve.outputs.tag }}
-          VERSION: ${{ needs.resolve.outputs.version }}
-          FEED_TAG: desktop-feed
-        working-directory: assets
-        run: |
-          set -euo pipefail
-          if ! gh release view "$FEED_TAG" >/dev/null 2>&1; then
-            commit=$(gh api "repos/$GH_REPO/commits/$(jq -rn --arg t "$TAG" '$t | @uri')" --jq .sha)
-            gh release create "$FEED_TAG" --target "$commit" --prerelease --latest=false \
-              --title "Desktop update feed" \
-              --notes "Installed Tau desktop apps read their update feed from this prerelease's assets. Each desktop release replaces them; download the app from that release, not from here."
+          TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)
+          export TAU_DESKTOP_SOURCE_SHA
+          pnpm nx run desktop:publish --args=prepare
+          # A rerun never replaces signed bytes under an existing release/version.
+          gh release upload "$DESKTOP_RELEASE_TAG" out/desktop/assets/Tau-* out/desktop/assets/*.json out/desktop/assets/SHA256SUMS.txt
+          if ! gh api "repos/$GH_REPO/releases/tags/$FEED_TAG" --silent 2> "$RUNNER_TEMP/feed-error"; then
+            if ! grep -q 'HTTP 404' "$RUNNER_TEMP/feed-error"; then cat "$RUNNER_TEMP/feed-error" >&2; exit 1; fi
+            gh release create "$FEED_TAG" --target "$TAU_DESKTOP_SOURCE_SHA" --prerelease --latest=false \
+              --title "Desktop update feed" --notes "Channel pointer. Assets advance only after native OTA acceptance."
           fi
-          current=$(gh release download "$FEED_TAG" --pattern desktop-update-darwin-arm64.json --output - 2>/dev/null \
-            | jq -r '.currentRelease // empty' || true)
-          if [ -n "$current" ] && [ "$current" != "$VERSION" ] \
-            && [ "$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -1)" = "$current" ]; then
-            echo "::notice::The fixed feed already offers $current, newer than $VERSION; leaving it."
-            exit 0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-metadata
+          path: out/desktop/assets/*.json
+          retention-days: 30
+
+  desktop-mirror:
+    needs: [resolve, desktop-publish]
+    name: Mirror candidate to R2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    environment:
+      name: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop' }}
+      deployment: false
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - name: Mirror and verify public bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          DESKTOP_ASSETS_DIR: out/desktop/assets
+          DESKTOP_R2_BUCKET: ${{ vars.DESKTOP_R2_BUCKET }}
+          DESKTOP_R2_ENDPOINT: ${{ vars.DESKTOP_R2_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.DESKTOP_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.DESKTOP_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          set -euo pipefail
+          TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)
+          export TAU_DESKTOP_SOURCE_SHA
+          gh release download "$DESKTOP_RELEASE_TAG" --dir "$DESKTOP_ASSETS_DIR" --pattern 'Tau-*' --pattern '*.json' --pattern SHA256SUMS.txt
+          pnpm nx run desktop:publish --args=mirror
+          jq '{tag, sourceCommit, verified: true}' "$DESKTOP_ASSETS_DIR/download.json" > "$DESKTOP_ASSETS_DIR/mirror-receipt.json"
+          gh release upload "$DESKTOP_RELEASE_TAG" "$DESKTOP_ASSETS_DIR/mirror-receipt.json"
+
+  desktop-ota:
+    needs: [resolve, desktop-mirror]
+    name: Verify native macOS OTA replacement
+    runs-on: macos-15
+    timeout-minutes: 40
+    outputs:
+      accepted: ${{ steps.baseline.outputs.found }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+      - name: Find a qualified older candidate or establish the first baseline
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+        run: |
+          set -euo pipefail
+          mkdir -p out/desktop/assets
+          gh release download "$TAG" --dir out/desktop/assets --pattern 'Tau-macos-arm64.zip' --pattern download.json
+          version=$(jq -r .version out/desktop/assets/download.json)
+          prefix=desktop@
+          if [ "$CHANNEL" = staging ]; then prefix=desktop-staging@; fi
+          found=false
+          origin=https://downloads.tau.new
+          if [ "$CHANNEL" = staging ]; then origin=https://downloads.taucad.dev; fi
+          status=$(curl --silent --show-error --retry 3 --output "$RUNNER_TEMP/current.json" --write-out '%{http_code}' "$origin/latest/download.json")
+          if [ "$status" != 200 ] && [ "$status" != 404 ]; then echo "Current download pointer returned $status" >&2; exit 1; fi
+          # Prefer the actual installed channel baseline. Only initial bootstrap
+          # (or a retry of an already-promoted tag) falls back to mirrored candidates.
+          if [ "$status" = 200 ]; then jq -r .tag "$RUNNER_TEMP/current.json" > "$RUNNER_TEMP/baselines"; else : > "$RUNNER_TEMP/baselines"; fi
+          gh release list --limit 100 --json tagName --jq ".[] | select(.tagName | startswith(\"$prefix\")) | .tagName" >> "$RUNNER_TEMP/baselines"
+          while IFS= read -r previous; do
+            if [ "$previous" = "$TAG" ]; then continue; fi
+            mkdir -p "$RUNNER_TEMP/previous"
+            if ! gh release download "$previous" --pattern mirror-receipt.json --dir "$RUNNER_TEMP/previous" --clobber 2> "$RUNNER_TEMP/previous-error"; then
+              # Publication is not qualification: only completely mirrored candidates can bootstrap.
+              if grep -q 'no assets match' "$RUNNER_TEMP/previous-error"; then continue; fi
+              cat "$RUNNER_TEMP/previous-error" >&2; exit 1
+            fi
+            gh release download "$previous" --pattern download.json --output "$RUNNER_TEMP/previous.json" --clobber
+            jq --exit-status --arg tag "$previous" '.verified == true and .tag == $tag' "$RUNNER_TEMP/previous/mirror-receipt.json" > /dev/null
+            old=$(jq -r .version "$RUNNER_TEMP/previous.json")
+            if [ "$old" = "$version" ] || [ "$(printf '%s\n%s\n' "$old" "$version" | sort -V | tail -1)" != "$version" ]; then continue; fi
+            sha=$(jq -r .sourceCommit "$RUNNER_TEMP/previous.json")
+            test "$sha" = "$(jq -r .sourceCommit "$RUNNER_TEMP/previous/mirror-receipt.json")"
+            if ! git merge-base --is-ancestor "$sha" HEAD; then continue; fi
+            url=$(jq -r '.assets["darwin-arm64"].url' "$RUNNER_TEMP/previous.json")
+            curl --fail --location --retry 3 "$url" --output "$RUNNER_TEMP/baseline.zip"
+            expected=$(jq -r '.assets["darwin-arm64"].sha256' "$RUNNER_TEMP/previous.json")
+            printf '%s  %s\n' "$expected" "$RUNNER_TEMP/baseline.zip" | shasum -a 256 -c -
+            found=true
+            break
+          done < "$RUNNER_TEMP/baselines"
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+          if [ "$found" = false ]; then
+            echo 'First OTA-capable candidate established as baseline. Publish a second candidate to exercise native OTA; no live feed or website pointer was changed.' >> "$GITHUB_STEP_SUMMARY"
           fi
-          gh release upload "$FEED_TAG" desktop-update-*.json --clobber
+      - name: Observe the actual signed A to B update
+        if: steps.baseline.outputs.found == 'true'
+        env:
+          DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          DESKTOP_ASSETS_DIR: out/desktop/assets
+          OTA_BASELINE_ZIP: ${{ runner.temp }}/baseline.zip
+        run: |
+          TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)
+          export TAU_DESKTOP_SOURCE_SHA
+          pnpm nx run desktop:verify-ota
+      - name: Retain OTA receipts and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ota-acceptance
+          path: |
+            out/desktop/assets/ota-receipt.json
+            ~/Library/Application Support/Tau Staging/ota-probe*.json
+            ~/Library/Application Support/Tau Staging/logs/
+            ~/Library/Application Support/Tau/ota-probe*.json
+            ~/Library/Application Support/Tau/logs/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  desktop-promote:
+    needs: [resolve, desktop-ota]
+    if: needs.desktop-ota.outputs.accepted == 'true'
+    name: Promote the tested channel release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: desktop-promotion-${{ needs.resolve.outputs.channel }}
+      cancel-in-progress: false
+    environment:
+      name: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ota-acceptance
+          path: out/desktop/acceptance
+      - name: Promote R2 pointers and the legacy GitHub feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          DESKTOP_ASSETS_DIR: out/desktop/assets
+          DESKTOP_R2_BUCKET: ${{ vars.DESKTOP_R2_BUCKET }}
+          DESKTOP_R2_ENDPOINT: ${{ vars.DESKTOP_R2_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.DESKTOP_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.DESKTOP_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          FEED_TAG: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging-feed' || 'desktop-feed' }}
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+        run: |
+          set -euo pipefail
+          TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)
+          export TAU_DESKTOP_SOURCE_SHA
+          gh release download "$DESKTOP_RELEASE_TAG" --dir "$DESKTOP_ASSETS_DIR" --pattern 'desktop-update-*.json' --pattern download.json
+          receipt=$(find out/desktop/acceptance -name ota-receipt.json)
+          test -n "$receipt"
+          cp "$receipt" "$DESKTOP_ASSETS_DIR/ota-receipt.json"
+          pnpm nx run desktop:publish --args=promote
+          gh release upload "$FEED_TAG" "$DESKTOP_ASSETS_DIR"/desktop-update-*.json --clobber
+          gh release upload "$DESKTOP_RELEASE_TAG" "$DESKTOP_ASSETS_DIR/ota-receipt.json"
+          if [ "$CHANNEL" = production ]; then gh release edit "$DESKTOP_RELEASE_TAG" --latest; fi
 
   production-api:
     needs: [resolve, verify-app]

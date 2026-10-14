@@ -13,12 +13,20 @@ import { basename, dirname, resolve } from 'node:path';
 
 import { acpAgentProfiles } from '@taucad/host';
 
+import { desktopReleaseIdentity } from '#shared/desktop-release.js';
+
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import { copyRuntimeClosure, copyTree } from './runtime-closure.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
 
 /** A `<platform>-<arch>` the desktop app is packaged for. */
 export type RuntimeTarget = 'darwin-arm64' | 'linux-x64' | 'win32-x64';
+
+/** Match binary basenames and relative package directories so hidden checkout ancestors cannot defeat ASAR unpacking. */
+export const runtimeAsarOptions = {
+  unpack: '{*.node,*.dll,esbuild,esbuild.exe}',
+  unpackDir: '**/node_modules/{@agentclientprotocol,@img}',
+};
 
 /** The optional platform package each runtime engine loads its native payload from. */
 export type RuntimePlatformPackages = Readonly<{
@@ -203,6 +211,22 @@ export const desktopPackageChannel = (value: string | undefined): DesktopPackage
   throw new Error(`TAU_DESKTOP_CHANNEL must be production or staging, not ${channel}`);
 };
 
+/** Resolve one version for the manifest and native bundle metadata. */
+export const desktopPackageVersion = (sourceVersion: string): string => {
+  const tag = process.env['TAU_DESKTOP_RELEASE_TAG'];
+  if (!tag) {
+    return sourceVersion;
+  }
+  const identity = desktopReleaseIdentity(tag);
+  if (identity.channel !== desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL'])) {
+    throw new Error('Desktop release tag and packaged channel disagree');
+  }
+  if (identity.channel === 'production' && identity.version !== sourceVersion) {
+    throw new Error('Production release tag must match the source package version');
+  }
+  return identity.version;
+};
+
 /**
  * The staged manifest's `tauDesktop` block, which main reads at launch; nothing when it would be empty.
  * @param options - Whether the package honours environment overrides (ad-hoc and unsigned only) and its channel.
@@ -211,7 +235,13 @@ export const desktopPackageChannel = (value: string | undefined): DesktopPackage
 export const desktopManifestFields = (
   options: Readonly<{ environmentOverrides: boolean; channel: DesktopPackageChannel }>,
 ): Readonly<Record<string, unknown>> => {
+  const sourceCommit = process.env['TAU_DESKTOP_SOURCE_SHA'];
+  if (sourceCommit && !/^[a-f\d]{40}$/u.test(sourceCommit)) {
+    throw new TypeError('TAU_DESKTOP_SOURCE_SHA must be a full commit SHA');
+  }
   const tauDesktop = {
+    ...(process.env['TAU_DESKTOP_RELEASE_TAG'] ? { releaseTag: process.env['TAU_DESKTOP_RELEASE_TAG'] } : {}),
+    ...(sourceCommit ? { sourceCommit } : {}),
     ...(options.environmentOverrides ? { environmentOverrides: true } : {}),
     ...(options.channel === 'staging' ? { channel: 'staging' } : {}),
   };
@@ -282,7 +312,7 @@ export const stageRuntimePackages = async (
         {
           name: metadata.name,
           productName: metadata.productName,
-          version: metadata.version,
+          version: desktopPackageVersion(metadata.version),
           main: metadata.main,
           type: metadata.type,
           ...options.manifestFields,

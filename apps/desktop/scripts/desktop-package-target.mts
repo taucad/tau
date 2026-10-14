@@ -24,8 +24,6 @@ export type DesktopPackagePlan = Readonly<{
   icon: string | undefined;
   /** Branding files main loads from `resources/branding` (`icon.ico` is the Windows window icon). */
   branding: readonly string[];
-  /** Files left out of `app.asar` because they are spawned or loaded by the OS, not by Electron. */
-  asarUnpack: string;
   /** Whether `prepare-git.mts` can build this target's git payload. */
   gitPayloadSupported: boolean;
 }>;
@@ -39,7 +37,6 @@ export const desktopPackagePlans: Readonly<Record<DesktopPackageTarget, DesktopP
     archive: { name: 'Tau-linux-x64.tar.gz', format: 'tar.gz' },
     icon: undefined,
     branding: ['icon.png', 'icon-dark.png'],
-    asarUnpack: '**/{*.node,bin/esbuild,@agentclientprotocol/**,@img/**}',
     gitPayloadSupported: true,
   },
   'win32-x64': {
@@ -50,8 +47,6 @@ export const desktopPackagePlans: Readonly<Record<DesktopPackageTarget, DesktopP
     archive: { name: 'Tau-win32-x64.zip', format: 'zip' },
     icon: 'icon.ico',
     branding: ['icon.png', 'icon-dark.png', 'icon.ico'],
-    /* The Windows esbuild binary is `esbuild.exe` at its package root, and native addons load adjacent DLLs. */
-    asarUnpack: '**/{*.node,*.dll,esbuild.exe,@agentclientprotocol/**,@img/**}',
     gitPayloadSupported: false,
   },
 };

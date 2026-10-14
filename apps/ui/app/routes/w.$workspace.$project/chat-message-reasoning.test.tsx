@@ -201,6 +201,6 @@ describe('ChatMessageReasoning', () => {
     );
 
     expect(screen.getByTestId('reasoning-markdown')).toBe(body);
-    expect(body).toHaveTextContent('Check the grid');
+    expect(body).toMatchTextContent('Check the grid');
   });
 });

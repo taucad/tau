@@ -78,7 +78,7 @@ describe('ChatMessagePlanning', () => {
   it('should stay visible while response text streams', () => {
     setChat('streaming', [user('u1'), assistant('a1', [{ type: 'text', text: 'Drafting', state: 'streaming' }])]);
     render(<ChatMessagePlanning />);
-    expect(indicator()).toHaveTextContent('Writing response…');
+    expect(indicator()).toMatchTextContent('Writing response…');
   });
 
   it('should keep elapsed time across activity changes and remounts, then clean up on completion', () => {
@@ -87,18 +87,18 @@ describe('ChatMessagePlanning', () => {
       vi.setSystemTime(50_000);
       setChat('submitted', [user('u1')]);
       const view = render(<ChatMessagePlanning />);
-      expect(screen.getByRole('timer')).toHaveTextContent('50s');
+      expect(screen.getByRole('timer')).toMatchTextContent('50s');
       act(() => {
         vi.advanceTimersByTime(11_000);
       });
       setChat('streaming', [user('u1'), assistant('a1', [{ type: 'text', text: 'Draft', state: 'streaming' }])]);
       view.rerender(<ChatMessagePlanning />);
-      expect(screen.getByRole('timer')).toHaveTextContent('1m 1s');
+      expect(screen.getByRole('timer')).toMatchTextContent('1m 1s');
       expect(indicator()).not.toContainElement(screen.getByRole('timer'));
       view.unmount();
       expect(vi.getTimerCount()).toBe(0);
       const restored = render(<ChatMessagePlanning />);
-      expect(screen.getByRole('timer')).toHaveTextContent('1m 1s');
+      expect(screen.getByRole('timer')).toMatchTextContent('1m 1s');
       setRun('done');
       restored.rerender(<ChatMessagePlanning />);
       expect(indicator()).toBeNull();
@@ -115,10 +115,10 @@ describe('ChatMessagePlanning', () => {
       vi.setSystemTime(3_661_000);
       setChat('streaming', [user('u1')]);
       const view = render(<ChatMessagePlanning />);
-      expect(screen.getByRole('timer')).toHaveTextContent('1h 1m 1s');
+      expect(screen.getByRole('timer')).toMatchTextContent('1h 1m 1s');
       setChat('submitted', [{ ...user('u2'), metadata: { createdAt: Date.now() } }]);
       view.rerender(<ChatMessagePlanning />);
-      expect(screen.getByRole('timer')).toHaveTextContent('0s');
+      expect(screen.getByRole('timer')).toMatchTextContent('0s');
       setChat('streaming', [{ id: 'legacy', role: messageRole.user, parts: [] }]);
       view.rerender(<ChatMessagePlanning />);
       expect(screen.queryByRole('timer')).toBeNull();
@@ -133,11 +133,11 @@ describe('ChatMessagePlanning', () => {
     setChat('streaming', [user('u1'), assistant('a1', [tool('approval-requested')])]);
     setRun('approval');
     const view = render(<ChatMessagePlanning />);
-    expect(indicator()).toHaveTextContent('Waiting for approval');
+    expect(indicator()).toMatchTextContent('Waiting for approval');
     expect(screen.getByRole('timer')).toBeVisible();
     setRun('reconnecting');
     view.rerender(<ChatMessagePlanning />);
-    expect(indicator()).toHaveTextContent('Reconnecting…');
+    expect(indicator()).toMatchTextContent('Reconnecting…');
   });
 });
 
@@ -155,10 +155,10 @@ it('should show explicitly tagged progress, then clear it for a new request and 
     ]),
   ]);
   const view = render(<ChatMessagePlanning />);
-  expect(screen.getByRole('status', { name: 'Current activity' })).toHaveTextContent(text);
+  expect(screen.getByRole('status', { name: 'Current activity' })).toMatchTextContent(text);
   setChat('submitted', [...mockSelectorState.messages, user('u2')]);
   view.rerender(<ChatMessagePlanning />);
-  expect(screen.getByRole('status', { name: 'Current activity' })).toHaveTextContent('Planning next moves…');
+  expect(screen.getByRole('status', { name: 'Current activity' })).toMatchTextContent('Planning next moves…');
   setRun('stopped');
   setChat('ready', mockSelectorState.messages);
   view.rerender(<ChatMessagePlanning />);

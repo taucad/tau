@@ -123,7 +123,7 @@ describe('ChatQuestionQueue', () => {
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: /^B, Form two/u }));
       });
-      expect(screen.getByRole('alert')).toHaveTextContent('Your response was not saved. Try again.');
+      expect(screen.getByRole('alert')).toMatchTextContent('Your response was not saved. Try again.');
       expect(screen.getByRole('button', { name: /^B, Form two/u })).not.toBeDisabled();
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: /^B, Form two/u }));

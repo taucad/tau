@@ -190,7 +190,7 @@ describe('GithubRepositoryPicker', () => {
     renderPicker(<GithubRepositoryPicker onSelect={vi.fn()} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }));
 
-    expect(await screen.findByRole('alert', {}, { timeout: 4000 })).toHaveTextContent(
+    expect(await screen.findByRole('alert', {}, { timeout: 4000 })).toMatchTextContent(
       'GitHub access was not granted. Connect GitHub again to continue.',
     );
     expect(github.complete).toHaveBeenCalledTimes(2);
@@ -343,7 +343,7 @@ describe('GithubRepositoryPicker', () => {
 
     const option = await screen.findByRole('option', { name: /acme/u });
     expect(option).toHaveAttribute('aria-disabled', 'true');
-    expect(option).toHaveTextContent('Suspended on GitHub. An owner must unsuspend the Tau app for this account.');
+    expect(option).toMatchTextContent('Suspended on GitHub. An owner must unsuspend the Tau app for this account.');
     expect(github.repositories).not.toHaveBeenCalledWith('connection-1', 20);
   });
 
@@ -383,7 +383,7 @@ describe('GithubRepositoryPicker', () => {
 
     const option = await screen.findByRole('option', { name: /octo\/hidden/u });
     expect(option).toHaveAttribute('aria-disabled', 'true');
-    expect(option).toHaveTextContent("Your GitHub account can't read this repository.");
+    expect(option).toMatchTextContent("Your GitHub account can't read this repository.");
   });
   /* Each answer is a fresh object, as the parsed API response is. */
   const catalogPages = (...pages: Array<Array<ReturnType<typeof repositoryOf>>>): void => {

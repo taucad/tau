@@ -330,7 +330,7 @@ describe('question dictation', () => {
     const box = screen.getByRole('textbox', { name: 'Your answer' });
     await user.type(box, 'Keep this.');
     await user.click(screen.getByRole('button', { name: 'Dictate' }));
-    expect(await screen.findByRole('alert', { name: 'Dictation error' })).toHaveTextContent(
+    expect(await screen.findByRole('alert', { name: 'Dictation error' })).toMatchTextContent(
       'Microphone access was denied',
     );
     expect(box).toHaveValue('Keep this.');

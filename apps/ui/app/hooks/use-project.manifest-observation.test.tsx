@@ -119,7 +119,7 @@ it('should show manifest observation closure and retry without rewriting the hea
     closed.reject(new Error('Disconnected'));
   });
   await waitFor(() => {
-    expect(screen.getByRole('status')).toHaveTextContent('Observation connection closed.');
+    expect(screen.getByRole('status')).toMatchTextContent('Observation connection closed.');
   });
   act(() => {
     screen.getByRole('button', { name: 'Retry' }).click();
@@ -128,7 +128,7 @@ it('should show manifest observation closure and retry without rewriting the hea
     expect(fixture.watchReady).toHaveBeenCalledTimes(2);
   });
   await waitFor(() => {
-    expect(screen.getByRole('status')).toHaveTextContent('healthy');
+    expect(screen.getByRole('status')).toMatchTextContent('healthy');
   });
   expect(fixture.actor.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'repairManifest' }));
   mounted.unmount();
@@ -196,14 +196,14 @@ it('reloads the physical project manifest after held retry without accepting its
   );
   try {
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('healthy');
+      expect(screen.getByRole('status')).toMatchTextContent('healthy');
       expect(proxy.readFile).toHaveBeenCalledTimes(2);
     });
     await act(async () => {
       closed.resolve();
     });
     await waitFor(() => {
-      expect(screen.getByRole('status')).not.toHaveTextContent('healthy');
+      expect(screen.getByRole('status')).not.toMatchTextContent('healthy');
     });
     held = true;
     act(() => {

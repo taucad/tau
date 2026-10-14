@@ -100,7 +100,7 @@ describe('DockviewTab', () => {
 
     await user.hover(title);
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(expectedTitle);
+    expect(await screen.findByRole('tooltip')).toMatchTextContent(expectedTitle);
   });
 
   it('uses one native, named close button and keeps its events inside the tab action', async () => {

@@ -546,7 +546,7 @@ describe('the external tool-call renderer', () => {
 
     renderExternal(part);
     const header = screen.getByRole('button', { name: /skills cad-openscad, geospec-authoring/ });
-    expect(header).toHaveTextContent(/^Read skills cad-openscad, geospec-authoring$/u);
+    expect(header).toMatchTextContent(/^Read skills cad-openscad, geospec-authoring$/u);
     await user.click(header);
     expect(screen.getByText(/\$ sed -n '1,240p'.*--- name: cad-openscad/u)).toBeVisible();
     /* Each file read is linked, as an adapter-labelled read's locations are. */
@@ -582,7 +582,7 @@ describe('the external tool-call renderer', () => {
 
     renderExternal(part);
     const header = screen.getByRole('button', { name: /Attempted/u });
-    expect(header).toHaveTextContent(/^Attempted reading geospec-authoring\/api-types\.md, checking for dotnet$/u);
+    expect(header).toMatchTextContent(/^Attempted reading geospec-authoring\/api-types\.md, checking for dotnet$/u);
     await user.click(header);
     expect(screen.getByText(/GeoSpecMeshIntegrityExpectation: \{\s+Exit code 1/u)).toBeVisible();
     expect(document.body.textContent).not.toContain('formatted_output');

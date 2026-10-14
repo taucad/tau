@@ -170,8 +170,8 @@ describe('MachineDetails', () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
     const binding = openPart('Binding settings');
-    expect(binding).toHaveTextContent('Declared by bambu.machine.binding 1.0.0');
-    expect(binding).not.toHaveTextContent('Only the simulator reads these');
+    expect(binding).toMatchTextContent('Declared by bambu.machine.binding 1.0.0');
+    expect(binding).not.toMatchTextContent('Only the simulator reads these');
     const logicalId = await within(binding).findByRole('textbox', { name: 'Input for Logical Id' });
     expect(
       within(binding)
@@ -191,11 +191,11 @@ describe('MachineDetails', () => {
 
     const binding = openPart('Binding settings');
     expect(binding).toHaveAccessibleName('Binding settings 2 fields · Read-only');
-    expect(binding).toHaveTextContent('Only the simulator reads these; they are not printer settings.');
-    expect(binding).toHaveTextContent('Declared by bambu.simulator.binding 1.1.0');
+    expect(binding).toMatchTextContent('Only the simulator reads these; they are not printer settings.');
+    expect(binding).toMatchTextContent('Declared by bambu.simulator.binding 1.1.0');
     /* The declaration titles the field and starts it at real time. */
     const speed = await within(binding).findByRole('spinbutton', { name: 'Input for Demo Speed' });
-    expect(within(binding).getByLabelText('Parameter: Demo Speed')).toHaveTextContent('Demo Speed');
+    expect(within(binding).getByLabelText('Parameter: Demo Speed')).toMatchTextContent('Demo Speed');
     expect(speed).toHaveAttribute('readonly');
     expect(speed).toHaveValue('1');
     expect(
@@ -217,10 +217,10 @@ describe('MachineDetails', () => {
     for (const label of ['Expected Filament Diameter', 'Expected Nozzle Diameter']) {
       const diameter = within(options).getByRole('spinbutton', { name: `Input for ${label}` });
       expect(diameter).toHaveAttribute('readonly');
-      expect(within(options).getByLabelText(`Parameter: ${label}`)).toHaveTextContent(label);
+      expect(within(options).getByLabelText(`Parameter: ${label}`)).toMatchTextContent(label);
     }
-    expect(options).not.toHaveTextContent('Kind');
-    expect(options).not.toHaveTextContent('Space');
+    expect(options).not.toMatchTextContent('Kind');
+    expect(options).not.toMatchTextContent('Space');
     expect(within(options).queryByRole('button', { name: /^Add/u })).not.toBeInTheDocument();
     expect(within(options).queryByRole('button', { name: /^Reset/u })).not.toBeInTheDocument();
     fireEvent.click(within(options).getByRole('switch', { name: 'Toggle for Timelapse' }));

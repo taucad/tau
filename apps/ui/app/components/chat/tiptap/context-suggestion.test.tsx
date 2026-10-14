@@ -120,9 +120,9 @@ describe('ContextSuggestionDropdown', () => {
       const dropdown = screen.getByTestId('context-suggestion-dropdown');
       const buttons = within(dropdown).getAllByRole('button');
 
-      expect(buttons[0]).toHaveTextContent('main.ts');
-      expect(buttons[1]).toHaveTextContent('utils.ts');
-      expect(buttons[2]).toHaveTextContent('index.ts');
+      expect(buttons[0]).toMatchTextContent('main.ts');
+      expect(buttons[1]).toMatchTextContent('utils.ts');
+      expect(buttons[2]).toMatchTextContent('index.ts');
     });
 
     it('should render a divider between recent files and categories', () => {
@@ -182,7 +182,7 @@ describe('ContextSuggestionDropdown', () => {
       await user.click(within(dropdown).getByText(filesFoldersGroup));
 
       const backButton = within(dropdown).getAllByRole('button')[0]!;
-      expect(backButton).toHaveTextContent(filesFoldersGroup);
+      expect(backButton).toMatchTextContent(filesFoldersGroup);
     });
 
     it('should render the back button as sticky so it stays visible during scroll', async () => {
@@ -237,7 +237,7 @@ describe('ContextSuggestionDropdown', () => {
 
       const dropdown = screen.getByTestId('context-suggestion-dropdown');
       const buttons = within(dropdown).getAllByRole('button');
-      expect(buttons[0]).toHaveTextContent(pastChatsGroup);
+      expect(buttons[0]).toMatchTextContent(pastChatsGroup);
     });
 
     it('should render matched category headers as drillable with chevron', () => {
@@ -411,7 +411,7 @@ describe('ContextSuggestionDropdown', () => {
       await user.click(within(dropdown).getByText(filesFoldersGroup));
 
       const backButton = within(dropdown).getAllByRole('button')[0]!;
-      expect(backButton).toHaveTextContent(filesFoldersGroup);
+      expect(backButton).toMatchTextContent(filesFoldersGroup);
       expect(backButton.parentElement!.className).toContain('sticky');
 
       const virtuosoScroller = document.querySelector('[data-testid="virtuoso-scroller"]');

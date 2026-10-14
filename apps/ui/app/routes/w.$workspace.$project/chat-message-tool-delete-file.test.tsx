@@ -84,6 +84,6 @@ describe('ChatMessageToolDeleteFile', () => {
       input: { targetFile: 'skids.ts' },
       errorText: 'Permission denied',
     });
-    expect(screen.getByRole('alert')).toHaveTextContent('Permission denied');
+    expect(screen.getByRole('alert')).toMatchTextContent('Permission denied');
   });
 });

@@ -129,7 +129,7 @@ describe('ModelViewer', () => {
       render(<ModelViewer artifact={undefined} artifactHash={undefined} error={error} />);
 
       const alert = screen.getByRole('alert', { name: 'CAD runtime error' });
-      expect(alert).toHaveTextContent('Preview could not load. Open the project to see the error.');
+      expect(alert).toMatchTextContent('Preview could not load. Open the project to see the error.');
       // The runtime's own text is one disclosure away, not the headline.
       expect(within(alert).getByText('Something went wrong').closest('details')).not.toHaveAttribute('open');
       expect(within(alert).getByText('Details')).toBeInTheDocument();
@@ -140,7 +140,7 @@ describe('ModelViewer', () => {
       render(<ModelViewer artifact={testArtifact} artifactHash={testHash} error={new Error('rerender sentinel')} />);
 
       expect(screen.getByTestId('cad-viewer')).toBeInTheDocument();
-      expect(screen.getByRole('alert', { name: 'CAD runtime error' })).toHaveTextContent('rerender sentinel');
+      expect(screen.getByRole('alert', { name: 'CAD runtime error' })).toMatchTextContent('rerender sentinel');
     });
   });
 

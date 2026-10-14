@@ -43,9 +43,9 @@ describe('ChatMessageToolUpdateTodos', () => {
     await userEvent.keyboard('{Enter}');
 
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('Model the pyramid').parentElement).toHaveTextContent('done: Model the pyramid');
-    expect(screen.getByText('Slice the pyramid').parentElement).toHaveTextContent('in progress: Slice the pyramid');
-    expect(screen.getByText('Request the print').parentElement).toHaveTextContent('pending: Request the print');
+    expect(screen.getByText('Model the pyramid').parentElement).toMatchTextContent('done: Model the pyramid');
+    expect(screen.getByText('Slice the pyramid').parentElement).toMatchTextContent('in progress: Slice the pyramid');
+    expect(screen.getByText('Request the print').parentElement).toMatchTextContent('pending: Request the print');
   });
 
   it('should name the next pending task when nothing is in progress', () => {
@@ -87,6 +87,6 @@ describe('ChatMessageToolUpdateTodos', () => {
         }}
       />,
     );
-    expect(screen.getByRole('alert')).toHaveTextContent('task list: Every item id must be unique.');
+    expect(screen.getByRole('alert')).toMatchTextContent('task list: Every item id must be unique.');
   });
 });

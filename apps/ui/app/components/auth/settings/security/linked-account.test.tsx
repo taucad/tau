@@ -73,7 +73,7 @@ describe('LinkedAccount', () => {
 
     expect(authState.unlinkAccount).not.toHaveBeenCalled();
     const dialog = screen.getByRole('alertdialog', { name: 'Unlink GitHub?' });
-    expect(dialog).toHaveTextContent(
+    expect(dialog).toMatchTextContent(
       'You will no longer be able to sign in to Tau with GitHub (octo@example.com). Tau also uses this account to publish and manage your GitHub Gists.',
     );
 

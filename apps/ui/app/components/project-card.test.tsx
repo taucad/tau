@@ -50,7 +50,7 @@ describe('ProjectCard', () => {
     link.focus();
     expect(warmProjectWorkspaceMock).toHaveBeenCalledOnce();
     await userEvent.keyboard('{Enter}');
-    expect(screen.getByTestId('location')).toHaveTextContent('/w/home/project-1');
+    expect(screen.getByTestId('location')).toMatchTextContent('/w/home/project-1');
   });
 
   it('should leave the project editor asleep when a community card opens a share route', async () => {
@@ -83,7 +83,7 @@ describe('ProjectCard', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Card action' }));
     expect(onClick).toHaveBeenCalledOnce();
-    expect(screen.getByTestId('location')).toHaveTextContent('/projects');
+    expect(screen.getByTestId('location')).toMatchTextContent('/projects');
   });
 });
 

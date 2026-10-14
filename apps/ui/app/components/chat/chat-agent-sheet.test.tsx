@@ -211,7 +211,7 @@ describe('ChatAgentSheet', () => {
 
     const trigger = screen.getByRole('button', { name: 'Agent and model: Fable 5.1, reasoning High' });
     expect(within(trigger).getByTestId('svg-icon')).toHaveAttribute('data-icon', 'claude');
-    expect(trigger).toHaveTextContent('High');
+    expect(trigger).toMatchTextContent('High');
   });
 
   it('opens on the chosen level, so an arrow key changes it at once', async () => {
@@ -280,10 +280,10 @@ describe('ChatAgentSheet', () => {
       'Codex · studio, unavailable',
     ]);
     /* The host is the heading, so each row keeps the agent's own name. */
-    expect(within(screen.getByRole('group', { name: 'On this computer' })).getByRole('option')).toHaveTextContent(
+    expect(within(screen.getByRole('group', { name: 'On this computer' })).getByRole('option')).toMatchTextContent(
       /^Codex$/u,
     );
-    expect(within(screen.getByRole('group', { name: 'On studio' })).getByRole('option')).toHaveTextContent(
+    expect(within(screen.getByRole('group', { name: 'On studio' })).getByRole('option')).toMatchTextContent(
       "CodexCan't start",
     );
     expect(within(screen.getByRole('option', { name: 'Tau, in use' })).getByText('Fable 5.1')).toBeInTheDocument();
@@ -525,7 +525,7 @@ describe('ChatAgentSheet', () => {
 
     const settings = screen.getByRole('button', { name: /^Settings/u });
     expect(settings).toHaveAttribute('aria-expanded', 'false');
-    expect(settings).toHaveTextContent('Plan · Fast mode');
+    expect(settings).toMatchTextContent('Plan · Fast mode');
     expect(screen.queryByRole('switch', { name: 'Fast mode' })).toBeNull();
 
     await userEvent.click(settings);
@@ -597,7 +597,7 @@ describe('ChatAgentSheet', () => {
     await openSheet();
 
     const row = screen.getByRole('button', { name: 'Model: Fable 5.1. Change' });
-    expect(row).toHaveTextContent(/^ModelFable 5\.1$/u);
+    expect(row).toMatchTextContent(/^ModelFable 5\.1$/u);
   });
 
   it('sizes the model list to its rows and opens it on the model in use', async () => {

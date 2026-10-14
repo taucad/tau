@@ -14,6 +14,6 @@ describe('CollectionEmptyState', () => {
     const state = screen.getByRole('status', { name: 'Measurements unavailable' });
     expect(state).toHaveAttribute('data-slot', 'collection-empty-state');
     expect(state).toHaveClass('min-h-16');
-    expect(state).toHaveTextContent('No measurements');
+    expect(state).toMatchTextContent('No measurements');
   });
 });

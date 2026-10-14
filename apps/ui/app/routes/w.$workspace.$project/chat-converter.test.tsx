@@ -711,7 +711,7 @@ describe('ChatConverter', () => {
   it('should identify the export source when only one geometry unit exists', () => {
     render(<ChatConverter isExpanded />);
 
-    expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('main.ts');
+    expect(screen.getByRole('region', { name: 'Source' })).toMatchTextContent('main.ts');
     expect(screen.getByText('File to export')).toBeDefined();
   });
 
@@ -1183,7 +1183,7 @@ describe('ChatConverter', () => {
         'aria-busy',
         'true',
       );
-      expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('main.ts');
+      expect(screen.getByRole('region', { name: 'Source' })).toMatchTextContent('main.ts');
     });
 
     it('should show only replicad routes when activeKernelId is replicad', () => {

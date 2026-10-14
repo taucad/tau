@@ -441,7 +441,7 @@ describe('ProjectSharePanel', () => {
 
       const allow = await renderDesktopGist();
 
-      expect(await screen.findByRole('status')).toHaveTextContent('Finish in your browser.');
+      expect(await screen.findByRole('status')).toMatchTextContent('Finish in your browser.');
       expect(allow).toBeDisabled();
       grant(true);
       expect(await screen.findByRole('button', { name: 'Create Gist and copy link' })).toBeEnabled();
@@ -461,7 +461,7 @@ describe('ProjectSharePanel', () => {
       await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
 
       expect(signal?.aborted).toBe(true);
-      expect(screen.getByRole('status')).toHaveTextContent('Stopped waiting for your browser.');
+      expect(screen.getByRole('status')).toMatchTextContent('Stopped waiting for your browser.');
       expect(allow).toBeEnabled();
       /* The Cancel that was clicked is gone; focus returns to the grant rather than the page body. */
       expect(allow).toHaveFocus();
@@ -833,7 +833,7 @@ describe('ProjectSharePanel', () => {
 
     expect(await screen.findByText(/people with this link see the previous shared snapshot/i)).toBeInTheDocument();
     expect(screen.getByText('General access')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: /general access/i })).toHaveTextContent('Private');
+    expect(screen.getByRole('combobox', { name: /general access/i })).toMatchTextContent('Private');
     expect(screen.queryByRole('radio', { name: /private/i })).not.toBeInTheDocument();
   });
 
@@ -870,7 +870,7 @@ describe('ProjectSharePanel', () => {
       });
     });
     await waitFor(() => {
-      expect(screen.getByRole('combobox', { name: /general access/i })).toHaveTextContent('Public');
+      expect(screen.getByRole('combobox', { name: /general access/i })).toMatchTextContent('Public');
     });
 
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
@@ -917,7 +917,7 @@ describe('ProjectSharePanel', () => {
     await waitFor(() => {
       expect(toastErrorMock).toHaveBeenCalledWith('Could not update visibility');
     });
-    expect(screen.getByRole('combobox', { name: /general access/i })).toHaveTextContent('Private');
+    expect(screen.getByRole('combobox', { name: /general access/i })).toMatchTextContent('Private');
   });
 
   it('disables publish when a shared email is invalid', async () => {
@@ -946,7 +946,7 @@ describe('ProjectSharePanel', () => {
     renderPanel(<ProjectSharePanel projectId='proj_huge' projectName='Huge' entryPath='main.ts' />);
 
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('This version is larger than 50 MB. Remove some files and try again.');
+    expect(alert).toMatchTextContent('This version is larger than 50 MB. Remove some files and try again.');
     expect(within(alert).queryByRole('link', { name: /sign in/i })).not.toBeInTheDocument();
   });
 

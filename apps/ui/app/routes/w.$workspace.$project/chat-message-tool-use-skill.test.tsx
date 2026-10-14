@@ -34,14 +34,14 @@ describe('ChatMessageToolUseSkill', () => {
     'reads a named skill during %s without an empty disclosure',
     (state) => {
       render(<ChatMessageToolUseSkill part={{ toolCallId: 'skill', state, input: { skillName: 'woodworking' } }} />);
-      expect(screen.getByText('Reading').parentElement).toHaveTextContent('Reading woodworking skill…');
+      expect(screen.getByText('Reading').parentElement).toMatchTextContent('Reading woodworking skill…');
       expect(screen.queryByRole('button')).not.toBeInTheDocument();
     },
   );
 
   it('handles partial input without repeating the word skill', () => {
     render(<ChatMessageToolUseSkill part={{ toolCallId: 'skill', state: 'input-streaming' }} />);
-    expect(screen.getByText('Reading').parentElement).toHaveTextContent('Reading skill…');
+    expect(screen.getByText('Reading').parentElement).toMatchTextContent('Reading skill…');
   });
 
   it.each([
@@ -65,7 +65,7 @@ describe('ChatMessageToolUseSkill', () => {
       },
     };
     render(<ChatMessageToolUseSkill part={part} />);
-    expect(screen.getByText('Read').parentElement).toHaveTextContent(`Read woodworking skill${suffix}`);
+    expect(screen.getByText('Read').parentElement).toMatchTextContent(`Read woodworking skill${suffix}`);
     expect(screen.queryByText(part.output.resourceUri)).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     if (skillPath) {

@@ -108,7 +108,7 @@ describe('custom additional field form binding', () => {
       });
       expect(input).toHaveValue('new');
       if (scenario === 'stale success') {
-        expect(screen.getByRole('status')).toHaveTextContent('Current value is invalid');
+        expect(screen.getByRole('status')).toMatchTextContent('Current value is invalid');
       } else {
         expect(screen.getByRole('status')).toBeEmptyDOMElement();
       }

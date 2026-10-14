@@ -212,7 +212,7 @@ describe('RevisionSyncRegion', () => {
     const user = userEvent.setup();
     const { cancel } = renderRegion(facet({ kind: 'tau', phase: 'connecting' }));
 
-    expect(screen.getByRole('status')).toHaveTextContent('Connecting to Tau Cloud…');
+    expect(screen.getByRole('status')).toMatchTextContent('Connecting to Tau Cloud…');
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(cancel).toHaveBeenCalledTimes(1);
@@ -354,7 +354,7 @@ describe('RevisionSyncRegion', () => {
     );
 
     const alert = screen.getByRole('alert', { name: 'Backup change refused' });
-    expect(alert).toHaveTextContent(
+    expect(alert).toMatchTextContent(
       'This remote has no repository at this address for your account. o/design is still this project’s backup.',
     );
     /* One action: picking a backup again, not the kept repository's *Reconnect GitHub*. */
@@ -382,7 +382,7 @@ describe('RevisionSyncRegion', () => {
     );
 
     const alert = screen.getByRole('alert', { name: 'Backup change refused' });
-    expect(alert).toHaveTextContent(
+    expect(alert).toMatchTextContent(
       'Syncing files to Tau Cloud is a paid plan feature. gitlab.example.com/o/r is still this project’s backup.',
     );
     expect(within(alert).getAllByRole('button')).toHaveLength(1);
@@ -441,7 +441,7 @@ describe('RevisionSyncRegion', () => {
       },
     });
 
-    expect(await screen.findByRole('alert', { name: 'Backup change refused' })).toHaveTextContent(
+    expect(await screen.findByRole('alert', { name: 'Backup change refused' })).toMatchTextContent(
       'Repository not found. o/design is still this project’s backup.',
     );
     expect(connect).toHaveBeenCalledTimes(1);
@@ -527,7 +527,7 @@ describe('RevisionSyncRegion', () => {
       }),
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent('The remote did not answer.');
+    expect(screen.getByRole('alert')).toMatchTextContent('The remote did not answer.');
   });
 
   /*
@@ -569,7 +569,7 @@ describe('RevisionSyncRegion', () => {
       await user.click(screen.getByText('Advanced HTTPS remote'));
 
       const authority = screen.getByText(/^Advanced HTTPS remotes are anonymous/u);
-      expect(authority).toHaveTextContent('a GitHub address here is linked read-only');
+      expect(authority).toMatchTextContent('a GitHub address here is linked read-only');
       expect(authority.textContent.includes('GitHub picker above')).toBe(pointsAtPicker);
     },
   );
@@ -582,7 +582,7 @@ describe('RevisionSyncRegion', () => {
 
     await user.type(screen.getByRole('textbox', { name: 'Repository address' }), 'http://github.com/o/r.git');
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Only https addresses can be connected.');
+    expect(screen.getByRole('alert')).toMatchTextContent('Only https addresses can be connected.');
     expect(screen.getByRole('button', { name: 'Connect' })).toBeDisabled();
   });
 
@@ -637,7 +637,7 @@ describe('RevisionSyncRegion', () => {
       }),
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Your GitHub connection needs to be renewed.');
+    expect(screen.getByRole('alert')).toMatchTextContent('Your GitHub connection needs to be renewed.');
     await user.click(screen.getByRole('button', { name: 'Reconnect GitHub' }));
     expect(screen.getByRole('button', { name: 'Pick GitHub repository' })).toBeInTheDocument();
   });
@@ -661,7 +661,7 @@ describe('RevisionSyncRegion', () => {
     );
 
     /* D94: a connected GitHub account did save a credential, so its sentence stands. */
-    expect(screen.getByRole('alert', { name: 'GitHub connection' })).toHaveTextContent(
+    expect(screen.getByRole('alert', { name: 'GitHub connection' })).toMatchTextContent(
       'The remote rejected the saved credentials.',
     );
     await user.click(screen.getByRole('button', { name: 'Reconnect GitHub' }));
@@ -853,10 +853,10 @@ describe('RevisionSyncRegion', () => {
     );
 
     const alert = screen.getByRole('alert', { name: 'Remote sign-in' });
-    expect(alert).toHaveTextContent(
+    expect(alert).toMatchTextContent(
       'This remote asked for a sign-in Tau does not have, or has no repository at this address.',
     );
-    expect(alert).not.toHaveTextContent(/saved credentials/u);
+    expect(alert).not.toMatchTextContent(/saved credentials/u);
     expect(screen.queryByRole('button', { name: 'Reconnect GitHub' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Retry' }));
@@ -876,7 +876,7 @@ describe('RevisionSyncRegion', () => {
       }),
     );
 
-    expect(screen.getByRole('alert', { name: 'GitHub connection' })).toHaveTextContent(
+    expect(screen.getByRole('alert', { name: 'GitHub connection' })).toMatchTextContent(
       'GitHub needs a connected account to reach this repository.',
     );
     expect(screen.getByRole('button', { name: 'Reconnect GitHub' })).toBeInTheDocument();
@@ -913,8 +913,8 @@ describe('RevisionSyncRegion', () => {
       }),
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent('models/housing.step');
-    expect(screen.getByRole('alert')).toHaveTextContent('Connect Tau Cloud instead');
+    expect(screen.getByRole('alert')).toMatchTextContent('models/housing.step');
+    expect(screen.getByRole('alert')).toMatchTextContent('Connect Tau Cloud instead');
   });
 
   it('moves focus onto the disconnect confirmation, not to the document', async () => {
@@ -961,7 +961,7 @@ describe('RevisionSyncRegion', () => {
       syncFacet({ state, pendingCount }),
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent(copy);
+    expect(screen.getByRole('status')).toMatchTextContent(copy);
   });
 
   /*
@@ -1006,7 +1006,7 @@ describe('RevisionSyncRegion', () => {
     const row = screen.getByRole('status', { name: 'Backup status' });
     expect(within(row).getByText(copy, { exact: true })).toBeInTheDocument();
     expect(within(row).getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/auth/sign-in');
-    expect(row).not.toHaveTextContent('refused access');
+    expect(row).not.toMatchTextContent('refused access');
     expect(screen.queryByRole('button', { name: 'Reconnect GitHub' })).not.toBeInTheDocument();
   });
 
@@ -1039,8 +1039,8 @@ describe('RevisionSyncRegion', () => {
       syncFacet({ state: 'queued', pendingCount: 1, online: false }),
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent('Not backed up · 1 revision');
-    expect(screen.getByRole('status')).toHaveTextContent('Offline');
+    expect(screen.getByRole('status')).toMatchTextContent('Not backed up · 1 revision');
+    expect(screen.getByRole('status')).toMatchTextContent('Offline');
   });
 });
 
@@ -1222,7 +1222,7 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     );
 
     const alert = screen.getByRole('alert', { name: 'Backup connection error' });
-    expect(alert).toHaveTextContent('Syncing files to Tau Cloud is a paid plan feature.');
+    expect(alert).toMatchTextContent('Syncing files to Tau Cloud is a paid plan feature.');
     const actions = within(alert)
       .getAllByRole(action === 'Sign in' ? 'link' : 'button')
       .map((element) => element.textContent.trim());
@@ -1233,7 +1233,7 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     renderRegion(facet({ kind: 'tau', phase: 'failed', error: 'Tau Cloud has no project with this id.' }));
 
     const alert = screen.getByRole('alert', { name: 'Backup connection error' });
-    expect(alert).toHaveTextContent('Tau Cloud has no project with this id.');
+    expect(alert).toMatchTextContent('Tau Cloud has no project with this id.');
     const actions = within(alert)
       .getAllByRole('button')
       .map((button) => button.textContent.trim());
@@ -1256,7 +1256,7 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     renderRegion(connected, syncFacet({ state, pendingCount: 2, error: 'The plan does not allow it.', reason }));
 
     const row = screen.getByRole('status', { name: 'Backup status' });
-    expect(row).toHaveTextContent('The plan does not allow it.');
+    expect(row).toMatchTextContent('The plan does not allow it.');
     expect(within(row).getByRole(role, { name: action })).toBeInTheDocument();
   });
 
@@ -1264,7 +1264,7 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     renderRegion(connected, syncFacet({ state: 'failed', pendingCount: 1, error: 'Something went wrong.' }));
 
     const row = screen.getByRole('status', { name: 'Backup status' });
-    expect(row).toHaveTextContent('Something went wrong.');
+    expect(row).toMatchTextContent('Something went wrong.');
     expect(within(row).queryByRole('button')).not.toBeInTheDocument();
   });
 
@@ -1296,7 +1296,7 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
   it('should show a free account’s usage as x of 1 GB', () => {
     renderRegion(facet({ kind: 'tau', phase: 'connected', storage: { used: 340 * 1024 ** 2, quota: 1024 ** 3 } }));
 
-    expect(screen.getByRole('status', { name: 'Backup status' })).toHaveTextContent('340 MB of 1 GB');
+    expect(screen.getByRole('status', { name: 'Backup status' })).toMatchTextContent('340 MB of 1 GB');
   });
 
   /* RV-W8 F12: the used figure trims its zeros like the allowance does. */
@@ -1317,8 +1317,8 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     );
 
     const row = screen.getByRole('status', { name: 'Backup status' });
-    expect(row).toHaveTextContent('340 MB of 1 GB');
-    expect(row).toHaveTextContent('12 MB kept for recovery, not counted');
+    expect(row).toMatchTextContent('340 MB of 1 GB');
+    expect(row).toMatchTextContent('12 MB kept for recovery, not counted');
   });
 
   it('should keep retained packs out of the meter and name them in its caption', () => {
@@ -1368,7 +1368,7 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
       );
 
       const row = screen.getByRole('status', { name: 'Backup status' });
-      expect(row).toHaveTextContent('your 1 GB storage plan');
+      expect(row).toMatchTextContent('your 1 GB storage plan');
       expect(
         within(row)
           .getAllByRole('button')
@@ -1423,7 +1423,7 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
       );
 
       const row = screen.getByRole('status', { name: 'Backup status' });
-      expect(row).toHaveTextContent('Ask the owner to make room.');
+      expect(row).toMatchTextContent('Ask the owner to make room.');
       expect(within(row).queryByRole('button', { name: /Upgrade/u })).not.toBeInTheDocument();
       expect(
         screen.getByText('These files did not fit in the project owner’s plan and were not backed up:'),
@@ -1543,8 +1543,8 @@ describe('RevisionSyncRegion collaborators', () => {
 
     /* HQ3: calm, owner-directed, and nothing lost. */
     const backup = screen.getByRole('status', { name: 'Backup status' });
-    expect(backup).toHaveTextContent('Access removed');
-    expect(backup).toHaveTextContent(
+    expect(backup).toMatchTextContent('Access removed');
+    expect(backup).toMatchTextContent(
       'The owner removed your access to this project’s cloud copy. Ask them to add you again',
     );
     expect(screen.queryByRole('alert')).toBeNull();
@@ -1557,7 +1557,7 @@ describe('RevisionSyncRegion collaborators', () => {
     answer([], undefined, { status: 500 });
     renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'owner', projectId: 'proj_1' });
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('The list of people with access could not be loaded.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('The list of people with access could not be loaded.');
     expect(screen.queryByText('Nobody else has access to this project.')).toBeNull();
   });
 
@@ -1620,7 +1620,7 @@ describe('RevisionSyncRegion collaborators', () => {
     await userEvent.type(await screen.findByRole('textbox', { name: 'Invite by email' }), 'teammate@example.test');
     await userEvent.click(screen.getByRole('button', { name: 'Create invitation' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Too many invitations today. Try again tomorrow.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Too many invitations today. Try again tomorrow.');
   });
 
   it('revokes an address the owner has already invited', async () => {
@@ -1658,10 +1658,10 @@ describe('RevisionSyncRegion backup line', () => {
     );
 
     const backup = screen.getByRole('status', { name: 'Backup status' });
-    expect(backup).toHaveTextContent(
+    expect(backup).toMatchTextContent(
       'Tau has to repair this project’s copy on Tau Cloud before it can back it up again. Nothing on this device is lost.',
     );
-    expect(backup).not.toHaveTextContent('GIT_REPOSITORY_INCOMPLETE');
+    expect(backup).not.toMatchTextContent('GIT_REPOSITORY_INCOMPLETE');
     expect(within(backup).queryByRole('button')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
   });
@@ -1674,8 +1674,8 @@ describe('RevisionSyncRegion backup line', () => {
     expect(within(end as HTMLElement).getByRole('button', { name: 'Backup settings' })).toBeInTheDocument();
     await user.click(within(end as HTMLElement).getByRole('button', { name: 'Details' }));
     const facts = document.querySelector('dl[aria-label="Details for Tau Cloud"]');
-    expect(facts).toHaveTextContent('Read and write');
-    expect(facts).toHaveTextContent('Files, history and chats');
+    expect(facts).toMatchTextContent('Read and write');
+    expect(facts).toMatchTextContent('Files, history and chats');
   });
 
   it('disconnects from More only after it confirms, then hands focus back (A1 item 2)', async () => {

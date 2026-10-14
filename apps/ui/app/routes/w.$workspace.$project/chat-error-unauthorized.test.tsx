@@ -82,7 +82,7 @@ describe('ChatErrorUnauthorized', () => {
     try {
       await user.click(screen.getByRole('link', { name: label }));
       expect(router.state.navigation.state).toBe('loading');
-      expect(screen.getByRole('link', { name: label })).toHaveTextContent(label);
+      expect(screen.getByRole('link', { name: label })).toMatchTextContent(label);
     } finally {
       await act(async () => {
         destination.resolve();
@@ -106,7 +106,7 @@ describe('ChatErrorUnauthorized', () => {
     renderAt('/w/home/p?chat=chat_1&chatResume=1');
 
     expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('location')).toHaveTextContent('/w/home/p?chat=chat_1');
+    expect(screen.getByTestId('location')).toMatchTextContent('/w/home/p?chat=chat_1');
     expect(screen.getByTestId('location').textContent).not.toContain('chatResume');
   });
 });

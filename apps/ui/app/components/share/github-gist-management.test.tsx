@@ -98,7 +98,7 @@ describe('GithubGistManagement', () => {
     await waitFor(() => {
       expect(mocks.getStatus).toHaveBeenCalled();
       expect(toast.info).toHaveBeenCalledWith('GitHub Gist access was not granted.');
-      expect(screen.getByTestId('location')).toHaveTextContent('/s/github-gist~abc123?keep=1');
+      expect(screen.getByTestId('location')).toMatchTextContent('/s/github-gist~abc123?keep=1');
     });
     expect(screen.queryByText(/provider copy/i)).not.toBeInTheDocument();
   });
@@ -178,7 +178,7 @@ describe('GithubGistManagement', () => {
 
       await startDesktopGrant();
 
-      expect(await screen.findByRole('status')).toHaveTextContent('Finish in your browser');
+      expect(await screen.findByRole('status')).toMatchTextContent('Finish in your browser');
       grant(true);
       expect(await screen.findByRole('button', { name: 'Manage GitHub Gist' })).toBeEnabled();
       expect(toast.success).toHaveBeenCalledWith('GitHub Gist access granted.');

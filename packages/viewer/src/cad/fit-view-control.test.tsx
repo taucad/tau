@@ -36,7 +36,7 @@ describe('FitViewControl', () => {
 
     await user.hover(screen.getByRole('button', { name: 'Fit view' }));
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Fit viewF');
+    expect(await screen.findByRole('tooltip')).toMatchTextContent('Fit viewF');
   });
   it('should not claim to fit an empty model', async () => {
     mocks.canFit = false;

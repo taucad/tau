@@ -1,13 +1,15 @@
-import { expectTypeOf } from 'vitest';
+import { expectTypeOf, it } from 'vitest';
 import type { ExpandPluginKernels } from '@taucad/runtime/plugin';
 
 import { plugin, brep } from '#index.js';
 import type { brepKernel } from '#index.js';
 
-const selected = plugin();
+it('preserves the complete brep.plugin type contracts', () => {
+  const selected = plugin();
 
-expectTypeOf<ExpandPluginKernels<readonly [typeof selected]>>().toEqualTypeOf<
-  readonly [ReturnType<typeof brepKernel>]
->();
+  expectTypeOf<ExpandPluginKernels<readonly [typeof selected]>>().toEqualTypeOf<
+    readonly [ReturnType<typeof brepKernel>]
+  >();
 
-expectTypeOf(brep).toEqualTypeOf(plugin);
+  expectTypeOf(brep).toEqualTypeOf(plugin);
+});

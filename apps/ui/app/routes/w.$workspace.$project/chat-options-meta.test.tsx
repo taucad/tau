@@ -132,9 +132,9 @@ describe('ChatOptionsMeta — rows', () => {
   it('should list activity, model and credits as read-only rows, never as menu items', () => {
     renderMeta();
 
-    expect(valueOf('Activity')).toHaveTextContent('5 minutes ago');
-    expect(valueOf('Runs on')).toHaveTextContent('MANIFOLD-MODEL');
-    expect(valueOf('Credits')).toHaveTextContent('—');
+    expect(valueOf('Activity')).toMatchTextContent('5 minutes ago');
+    expect(valueOf('Runs on')).toMatchTextContent('MANIFOLD-MODEL');
+    expect(valueOf('Credits')).toMatchTextContent('—');
     expect(screen.queryByRole('menuitem')).toBeNull();
   });
 
@@ -156,7 +156,7 @@ describe('ChatOptionsMeta — rows', () => {
 
     renderMeta();
     expect(screen.queryByText('SHOULD-NOT-BE-DISPLAYED')).toBeNull();
-    expect(valueOf('Runs on')).toHaveTextContent('—');
+    expect(valueOf('Runs on')).toMatchTextContent('—');
   });
 });
 
@@ -247,12 +247,12 @@ describe('ChatOptionsMeta — receipt credits', () => {
   it('should show no credits when the cookie hides them or Tau Cloud is off', () => {
     cookie.showCredits = false;
     renderMeta();
-    expect(valueOf('Credits')).toHaveTextContent('—');
+    expect(valueOf('Credits')).toMatchTextContent('—');
     cleanup();
 
     cookie.showCredits = true;
     cloud.enabled = false;
     renderMeta();
-    expect(valueOf('Credits')).toHaveTextContent('—');
+    expect(valueOf('Credits')).toMatchTextContent('—');
   });
 });

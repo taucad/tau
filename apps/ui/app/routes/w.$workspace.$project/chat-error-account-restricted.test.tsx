@@ -45,6 +45,6 @@ describe('ChatErrorAccountRestricted', () => {
     expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Debug details' }));
 
-    expect(screen.getByTestId('code-viewer')).toHaveTextContent(raw);
+    expect(screen.getByTestId('code-viewer')).toMatchTextContent(raw);
   });
 });

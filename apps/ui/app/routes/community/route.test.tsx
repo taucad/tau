@@ -88,7 +88,7 @@ describe('Community route', () => {
     renderCommunity();
 
     expect(screen.getByRole('heading', { level: 1, name: 'Community' })).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('25 examples');
+    expect(screen.getByRole('status')).toMatchTextContent('25 examples');
     expect(screen.getAllByRole('listitem')).toHaveLength(20);
     expect(screen.getAllByRole('listitem')[0]).toHaveClass('col-span-2', 'lg:row-span-2');
     expect(screen.getByText('Featured')).toBeInTheDocument();
@@ -126,22 +126,22 @@ describe('Community route', () => {
 
     await userEvent.click(screen.getByRole('radio', { name: /^Replicad/u }));
 
-    expect(screen.getByTestId('location')).toHaveTextContent('/community?kernel=replicad');
-    expect(screen.getByRole('status')).toHaveTextContent('21 of 25 match');
+    expect(screen.getByTestId('location')).toMatchTextContent('/community?kernel=replicad');
+    expect(screen.getByRole('status')).toMatchTextContent('21 of 25 match');
     expect(screen.getAllByRole('listitem')).toHaveLength(20);
     expect(screen.queryByText('Featured')).not.toBeInTheDocument();
     expect(screen.getAllByRole('listitem')[0]).not.toHaveClass('col-span-2');
 
     await userEvent.type(screen.getByRole('searchbox', { name: 'Search examples' }), 'worm');
 
-    expect(screen.getByTestId('location')).toHaveTextContent('/community?kernel=replicad&q=worm');
-    expect(screen.getByRole('status')).toHaveTextContent('1 of 25 match');
+    expect(screen.getByTestId('location')).toMatchTextContent('/community?kernel=replicad&q=worm');
+    expect(screen.getByRole('status')).toMatchTextContent('1 of 25 match');
     expect(cardNames()).toEqual(['Example 3']);
 
     await userEvent.click(screen.getByRole('button', { name: 'Clear' }));
 
-    expect(screen.getByTestId('location')).toHaveTextContent(/^\/community$/u);
-    expect(screen.getByRole('status')).toHaveTextContent('25 examples');
+    expect(screen.getByTestId('location')).toMatchTextContent(/^\/community$/u);
+    expect(screen.getByRole('status')).toMatchTextContent('25 examples');
   });
 
   it('should reproduce the view from a shared URL and ignore a kernel without examples', () => {
@@ -149,14 +149,14 @@ describe('Community route', () => {
 
     expect(screen.getByRole('radio', { name: /^JSCAD/u })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('searchbox', { name: 'Search examples' })).toHaveValue('example');
-    expect(screen.getByRole('status')).toHaveTextContent('4 of 25 match');
+    expect(screen.getByRole('status')).toMatchTextContent('4 of 25 match');
   });
 
   it('should read an unknown kernel as every kernel', () => {
     renderCommunity('/community?kernel=zoo');
 
     expect(screen.getByRole('radio', { name: /^All kernels/u })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByRole('status')).toHaveTextContent('25 examples');
+    expect(screen.getByRole('status')).toMatchTextContent('25 examples');
   });
 
   it('should show a no-match state whose action clears every filter', async () => {
@@ -167,7 +167,7 @@ describe('Community route', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
 
-    expect(screen.getByTestId('location')).toHaveTextContent(/^\/community$/u);
+    expect(screen.getByTestId('location')).toMatchTextContent(/^\/community$/u);
     expect(screen.getAllByRole('listitem')).toHaveLength(20);
   });
 

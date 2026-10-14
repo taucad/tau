@@ -88,7 +88,7 @@ describe('BillingSettings', () => {
 
   it('renders source balances and holds from the C03 explanation', () => {
     renderSettings();
-    expect(screen.getByTestId('credit-balance')).toHaveTextContent('4 credits available');
+    expect(screen.getByTestId('credit-balance')).toMatchTextContent('4 credits available');
     expect(screen.getByText('Purchased credits · Never expire')).toBeInTheDocument();
     expect(screen.getByText('<1% left')).toBeInTheDocument();
     expect(screen.getByText('1 credit reserved for active work.')).toBeInTheDocument();
@@ -121,7 +121,7 @@ describe('BillingSettings', () => {
     });
     renderSettings();
     expect(screen.queryByTestId('credit-balance')).toBeNull();
-    expect(screen.getByRole('alert')).toHaveTextContent('Balance unavailable.');
+    expect(screen.getByRole('alert')).toMatchTextContent('Balance unavailable.');
     expect(screen.getByRole('button', { name: /add more/i })).toBeEnabled();
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(query.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['billing', 'credits'] });
@@ -131,7 +131,7 @@ describe('BillingSettings', () => {
     useCredits.mockReturnValue(undefined);
     query.fetching = 1;
     renderSettings();
-    expect(screen.getByRole('status')).toHaveTextContent('Loading balance…');
+    expect(screen.getByRole('status')).toMatchTextContent('Loading balance…');
     expect(screen.getByRole('button', { name: /add more/i })).toBeEnabled();
   });
 

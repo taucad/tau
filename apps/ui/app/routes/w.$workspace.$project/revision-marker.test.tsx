@@ -116,13 +116,13 @@ describe('RevisionRow', () => {
       'aria-expanded',
       'false',
     );
-    expect(item).toHaveTextContent('Tau agent');
+    expect(item).toMatchTextContent('Tau agent');
   });
 
   it('never shows who made your own revision, nor a raw actor id (HQ4)', () => {
     renderRow({ revision: card({ actor: 'You' }) });
     const item = screen.getByRole('listitem');
-    expect(item).not.toHaveTextContent('You');
+    expect(item).not.toMatchTextContent('You');
     expect(item.textContent).not.toMatch(/user_|anon:|^agent$/u);
   });
 
@@ -148,7 +148,7 @@ describe('RevisionRow', () => {
     expect(screen.getByText('Added')).toHaveClass('text-muted-foreground/90', 'group-hover/file:text-muted-foreground');
     await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
     expect(await screen.findByTestId('diff')).toHaveAttribute('data-language', 'openscad');
-    expect(screen.getByTestId('diff')).toHaveTextContent('cube(1);|cube(2);');
+    expect(screen.getByTestId('diff')).toMatchTextContent('cube(1);|cube(2);');
   });
 
   it('should keep dirty history on its parent comparison and offer live comparison explicitly', async () => {
@@ -164,7 +164,7 @@ describe('RevisionRow', () => {
     await openRow(user);
     expect(screen.getByRole('button', { name: 'Compare bracket.scad' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
-    expect(await screen.findByTestId('diff')).toHaveTextContent('parent|saved');
+    expect(await screen.findByTestId('diff')).toMatchTextContent('parent|saved');
     expect(revisionStatusHarness.comparisonRequests).toContain('rev-2:bracket.scad:parent');
     expect(screen.queryByText('Original bytes')).not.toBeInTheDocument();
     expect(screen.queryByText('Current bytes')).not.toBeInTheDocument();
@@ -224,7 +224,7 @@ describe('RevisionRow', () => {
     await openRow(user);
     await user.click(screen.getByRole('button', { name: 'Compare main.geospec.ts' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
+    expect(await screen.findByRole('alert')).toMatchTextContent(
       'Could not compare main.geospec.ts. Tree is unavailable',
     );
     revisionStatusHarness.comparisonError = undefined;
@@ -236,7 +236,7 @@ describe('RevisionRow', () => {
       notices: [],
     };
     await user.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByTestId('diff')).toHaveTextContent('a|b');
+    expect(await screen.findByTestId('diff')).toMatchTextContent('a|b');
   });
 
   it('restores a revision it is not on, naming it in the button’s accessible name', async () => {
@@ -251,7 +251,7 @@ describe('RevisionRow', () => {
   it('offers no Restore on the revision you are on, and reads Current', async () => {
     const user = userEvent.setup();
     renderRow({ isCurrent: true });
-    expect(screen.getByRole('listitem')).toHaveTextContent('Current');
+    expect(screen.getByRole('listitem')).toMatchTextContent('Current');
     await openRow(user);
     expect(screen.queryByRole('button', { name: /^Restore/u })).not.toBeInTheDocument();
   });
@@ -306,8 +306,8 @@ describe('RevisionRow', () => {
     expect(within(end as HTMLElement).getByRole('button', { name: 'More actions for Rev 2' })).toBeInTheDocument();
     await user.click(within(end as HTMLElement).getByRole('button', { name: 'Details' }));
     const details = document.querySelector('dl[aria-label="Details for Rev 2"]');
-    expect(details).toHaveTextContent('rev-2');
-    expect(details).toHaveTextContent('Agent turn');
+    expect(details).toMatchTextContent('rev-2');
+    expect(details).toMatchTextContent('Agent turn');
   });
 
   /* W1 Details: the revision a row follows, and a first revision that follows none. */
@@ -316,7 +316,7 @@ describe('RevisionRow', () => {
     renderRow({ revision: card({ parent: 'rev-1' }) });
     await openRow(user);
     await user.click(screen.getByRole('button', { name: 'Details' }));
-    expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(/Parent\s*rev-1/u);
+    expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toMatchTextContent(/Parent\s*rev-1/u);
   });
 
   /* Canvas DetailsList: the tree the revision carries, from the log row itself. */
@@ -325,7 +325,7 @@ describe('RevisionRow', () => {
     renderRow({ revision: card({ treeId: 'a'.repeat(40) }) });
     await openRow(user);
     await user.click(screen.getByRole('button', { name: 'Details' }));
-    expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(
+    expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toMatchTextContent(
       new RegExp(`Tree\\s*${'a'.repeat(40)}`, 'u'),
     );
   });
@@ -335,7 +335,7 @@ describe('RevisionRow', () => {
     renderRow({ revision: card({ revisionId: 'rev-1', n: 1 }) });
     await openRow(user, 'Rev 1 · Thicker base');
     await user.click(screen.getByRole('button', { name: 'Details' }));
-    expect(document.querySelector('dl[aria-label="Details for Rev 1"]')).toHaveTextContent(
+    expect(document.querySelector('dl[aria-label="Details for Rev 1"]')).toMatchTextContent(
       /Parent\s*None \(first revision\)/u,
     );
   });
@@ -359,7 +359,7 @@ describe('RevisionRow', () => {
     const since = await screen.findByRole('list', { name: 'Changed since Rev 2' });
     expect(revisionStatusHarness.diffRequests).toContain('rev-2..checkout');
     await user.click(within(since).getByRole('button', { name: 'Compare bracket.scad with the current file' }));
-    expect(await screen.findByTestId('diff')).toHaveTextContent('cube(1);|cube(5);');
+    expect(await screen.findByTestId('diff')).toMatchTextContent('cube(1);|cube(5);');
 
     await user.click(screen.getByRole('button', { name: 'Stop comparing' }));
     expect(screen.getByRole('list', { name: 'Changed files' })).toBeInTheDocument();
@@ -374,7 +374,7 @@ describe('RevisionRow', () => {
     revisionStatusHarness.diff = [];
     await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
     await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
-    expect(await screen.findByRole('note')).toHaveTextContent('No changes since Rev 2.');
+    expect(await screen.findByRole('note')).toMatchTextContent('No changes since Rev 2.');
   });
 
   it('should offer Compare with current on the current revision', async () => {
@@ -578,7 +578,7 @@ describe('RevisionMenu', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Remove version name…' }));
     await user.click(await screen.findByRole('button', { name: 'Remove name' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Tau Cloud is getting too many requests');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Tau Cloud is getting too many requests');
     expect(revisionStatusHarness.commands.deleteTag).not.toHaveBeenCalled();
   });
 

@@ -272,7 +272,7 @@ describe('PartGallery', () => {
     await user.click(await screen.findByRole('button', { name: 'Collapse Properties' }));
     expect(screen.queryByRole('region', { name: 'Physical facts' })).toBeNull();
     await user.keyboard('{ArrowRight}');
-    expect(screen.getByRole('button', { name: 'Expand Properties' })).toHaveTextContent('Sun');
+    expect(screen.getByRole('button', { name: 'Expand Properties' })).toMatchTextContent('Sun');
     expect(screen.queryByRole('region', { name: 'Physical facts' })).toBeNull();
   });
 
@@ -287,7 +287,7 @@ describe('PartGallery', () => {
     act(() => {
       service.publish(new Map([['housing', { status: 'failed' }]]));
     });
-    expect(screen.getByRole('alert')).toHaveTextContent('Preview unavailable');
+    expect(screen.getByRole('alert')).toMatchTextContent('Preview unavailable');
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => {
       expect(service.requestForOwner.mock.calls.at(-1)?.[3]).toEqual({ manualPartId: 'housing' });

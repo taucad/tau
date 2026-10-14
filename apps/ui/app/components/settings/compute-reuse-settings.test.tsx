@@ -70,9 +70,9 @@ it('offers labelled keyboard-native modes and applies the chosen mode', () => {
 it('reports bounded collection and continues from its returned cursor', async () => {
   render(<ComputeReuseSettings />);
   fireEvent.click(screen.getByRole('button', { name: 'Collect' }));
-  expect(await screen.findByRole('status')).toHaveTextContent('7 bytes reclaimed; more remain');
+  expect(await screen.findByRole('status')).toMatchTextContent('7 bytes reclaimed; more remain');
   fireEvent.click(screen.getByRole('button', { name: 'Continue collect' }));
-  expect(await screen.findByRole('status')).toHaveTextContent('3 bytes reclaimed; complete');
+  expect(await screen.findByRole('status')).toMatchTextContent('3 bytes reclaimed; complete');
   expect(state.collect).toHaveBeenLastCalledWith({ budget: 20, cursor: 'next' });
 });
 
@@ -87,11 +87,11 @@ it('disables controls without authority and reports failures and retained clear 
   state.clear.mockResolvedValueOnce({ status: 'cleared', generation: 2, retained: 11 });
   render(<ComputeReuseSettings />);
   fireEvent.click(screen.getByRole('button', { name: 'Inspect' }));
-  expect(await screen.findByRole('status')).toHaveTextContent('inspect failed');
+  expect(await screen.findByRole('status')).toMatchTextContent('inspect failed');
   fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
   expect(screen.getByRole('button', { name: 'Confirm clear' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Confirm clear' }));
-  expect(await screen.findByRole('status')).toHaveTextContent('11 bytes retained');
+  expect(await screen.findByRole('status')).toMatchTextContent('11 bytes retained');
 });
 
 it('keeps cache controls unavailable without an active project', () => {

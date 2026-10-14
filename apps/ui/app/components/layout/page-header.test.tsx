@@ -18,7 +18,7 @@ describe('PageHeader', () => {
     const { container } = render(<PageHeader title='Projects' />);
 
     expect(container.firstElementChild).toHaveClass('flex', 'flex-wrap', 'items-center', 'justify-between', 'gap-4');
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/^Projects$/u);
+    expect(screen.getByRole('heading', { level: 1 })).toMatchTextContent(/^Projects$/u);
     expect(container.querySelector('.tabular-nums')).toBeNull();
   });
 

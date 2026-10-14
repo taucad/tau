@@ -197,10 +197,10 @@ describe('Vitest Browser test-runner ownership', () => {
     const catalog = readFileSync(resolve(root, 'pnpm-workspace.yaml'), 'utf8');
     const lockfile = readFileSync(resolve(root, 'pnpm-lock.yaml'), 'utf8');
     const catalogEntries = [
-      "  '@vitest/browser-playwright': 4.1.11",
-      "  '@vitest/coverage-v8': 4.1.11",
-      "  '@vitest/ui': 4.1.11",
-      '  vitest: 4.1.11',
+      "  '@vitest/browser-playwright': 5.0.3",
+      "  '@vitest/coverage-v8': 5.0.3",
+      "  '@vitest/ui': 5.0.3",
+      '  vitest: 5.0.3',
     ];
     const lockedVersions = [
       ...lockfile.matchAll(/^\s{2}'?(?:@vitest\/(?:browser-playwright|coverage-v8|ui)|vitest)@([^':(]+)'?:$/gmu),
@@ -209,7 +209,7 @@ describe('Vitest Browser test-runner ownership', () => {
     for (const entry of catalogEntries) {
       expect(catalog).toContain(entry);
     }
-    expect(new Set(lockedVersions)).toEqual(new Set(['4.1.11']));
+    expect(new Set(lockedVersions)).toEqual(new Set(['5.0.3']));
   });
 
   it('launches every Vitest Playwright Chromium instance through managed full Chromium', () => {
@@ -226,6 +226,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/components/panes/editor-layout.vitest.browser.config.ts',
         'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
+        'apps/ui/app/lib/dom-text-matchers.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts',

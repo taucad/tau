@@ -46,7 +46,7 @@ describe('Revision file comparison with the actual line renderer', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Compare empty.ts' }));
     const comparison = await screen.findByRole('region', { name: 'Comparison for empty.ts' });
     expect(within(comparison).getByText('Empty file added.')).toBeVisible();
-    expect(comparison).not.toHaveTextContent(/Original bytes|Current bytes|sha256/u);
+    expect(comparison).not.toMatchTextContent(/Original bytes|Current bytes|sha256/u);
     expect(screen.queryByText('No changes in this file.')).not.toBeInTheDocument();
   });
   it.each([
@@ -91,7 +91,7 @@ describe('Revision file comparison with the actual line renderer', () => {
       await userEvent.click(await screen.findByRole('button', { name: 'Compare empty.ts' }));
       const comparison = await screen.findByRole('region', { name: 'Comparison for empty.ts' });
       expect(within(comparison).getByText(message)).toBeVisible();
-      expect(comparison).not.toHaveTextContent(/Original bytes|Current bytes|sha256/u);
+      expect(comparison).not.toMatchTextContent(/Original bytes|Current bytes|sha256/u);
     },
   );
   it('should render the actual deleted and added lines for a normal text edit', async () => {
@@ -123,6 +123,6 @@ describe('Revision file comparison with the actual line renderer', () => {
     const comparison = await screen.findByRole('region', { name: 'Comparison for empty.ts' });
     expect(within(comparison).getByText('const before = 1;')).toHaveClass('diff', 'remove');
     expect(within(comparison).getByText('const after = 2;')).toHaveClass('diff', 'add');
-    expect(comparison).not.toHaveTextContent(/Original bytes|Current bytes|sha256/u);
+    expect(comparison).not.toMatchTextContent(/Original bytes|Current bytes|sha256/u);
   });
 });

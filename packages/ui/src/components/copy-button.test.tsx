@@ -87,7 +87,7 @@ describe('CopyButton', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Copy failed. Select the text and copy it.');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Copy failed. Select the text and copy it.');
   });
 
   it('should report a failure when the context has no clipboard at all', async () => {

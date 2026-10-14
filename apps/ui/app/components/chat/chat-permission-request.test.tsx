@@ -44,7 +44,7 @@ describe('compact permission requests', () => {
     await user.click(screen.getByRole('button', { name: 'Allow for this session' }));
     expect(respond).toHaveBeenCalledExactlyOnceWith(true, 'session');
     expect(screen.getByRole('button', { name: 'Allow' })).toBeDisabled();
-    expect(screen.getByRole('status')).toHaveTextContent('waiting for confirmation');
+    expect(screen.getByRole('status')).toMatchTextContent('waiting for confirmation');
   });
   it('retains the request and permits retry after a failed response', async () => {
     const respond = vi
@@ -55,7 +55,7 @@ describe('compact permission requests', () => {
     render(<ChatPermissionRequest approval={approval} name='Codex' onRespond={respond} />);
     await user.click(screen.getByRole('button', { name: 'Allow' }));
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent('Try again');
+      expect(screen.getByRole('alert')).toMatchTextContent('Try again');
     });
     expect(screen.queryByText(/raw host detail/u)).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Allow' }));

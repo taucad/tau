@@ -114,7 +114,7 @@ describe('MeasureOptions', () => {
   it('should prompt for a feature or two points at zero, with nothing to list or clear', () => {
     renderRow(startMeasuring());
 
-    expect(screen.getByRole('status')).toHaveTextContent('Choose a feature or two points');
+    expect(screen.getByRole('status')).toMatchTextContent('Choose a feature or two points');
     expect(screen.queryByRole('button', { name: /measurement/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear all' })).toBeDisabled();
   });
@@ -124,10 +124,10 @@ describe('MeasureOptions', () => {
     renderRow(actor);
 
     measure(actor, 0.01);
-    expect(screen.getByRole('status')).toHaveTextContent('1 measurement');
+    expect(screen.getByRole('status')).toMatchTextContent('1 measurement');
 
     measure(actor, 0.02);
-    expect(screen.getByRole('status')).toHaveTextContent('2 measurements');
+    expect(screen.getByRole('status')).toMatchTextContent('2 measurements');
   });
 
   it('should identify an out-of-date value in the collapsed summary', async () => {
@@ -165,7 +165,7 @@ describe('MeasureOptions', () => {
     await user.click(screen.getByRole('button', { name: 'Clear all' }));
 
     expect(actor.getSnapshot().context.measurements).toEqual([]);
-    expect(screen.getByRole('status')).toHaveTextContent('Choose a feature or two points');
+    expect(screen.getByRole('status')).toMatchTextContent('Choose a feature or two points');
     expect(screen.getByRole('button', { name: 'Done with measure' })).toHaveFocus();
   });
 
@@ -191,7 +191,7 @@ describe('MeasureOptions', () => {
     );
     expect(within(older).queryByRole('button', { name: 'Pin 10.0 mm' })).not.toBeInTheDocument();
     await user.click(within(older).getByRole('button', { name: 'Point distance: 10.0 mm' }));
-    expect(older).toHaveTextContent('X 10.0Y 0.0Z 0.0');
+    expect(older).toMatchTextContent('X 10.0Y 0.0Z 0.0');
 
     await user.click(screen.getByRole('button', { name: 'Pin 10.0 mm', pressed: false }));
 
@@ -230,7 +230,7 @@ describe('MeasureOptions', () => {
     });
     await user.click(info);
 
-    expect(screen.getByRole('tooltip')).toHaveTextContent('Mesh: Source accuracy information is unavailable.');
+    expect(screen.getByRole('tooltip')).toMatchTextContent('Mesh: Source accuracy information is unavailable.');
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
@@ -277,7 +277,7 @@ describe('MeasureOptions', () => {
 
     await user.click(screen.getByRole('button', { name: 'Remove 20.0 mm' }));
 
-    expect(screen.getByRole('status')).toHaveTextContent('1 measurement');
+    expect(screen.getByRole('status')).toMatchTextContent('1 measurement');
     expect(screen.getByRole('button', { name: 'Point distance: 10.0 mm' })).toHaveFocus();
 
     await user.click(screen.getByRole('button', { name: 'Point distance: 10.0 mm' }));

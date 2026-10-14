@@ -89,7 +89,7 @@ describe('CadPreviewViewer', () => {
     render(<CadPreviewViewer className='size-full' />);
 
     expect(screen.getByTestId('cad-viewer')).toBeInTheDocument();
-    expect(screen.getByRole('alert', { name: 'CAD runtime error' })).toHaveTextContent('preview rerender sentinel');
+    expect(screen.getByRole('alert', { name: 'CAD runtime error' })).toMatchTextContent('preview rerender sentinel');
   });
 
   it('should not hand an artifact over its byte cap to the viewer', () => {
@@ -99,7 +99,7 @@ describe('CadPreviewViewer', () => {
 
     const view = render(<CadPreviewViewer className='size-full' maxArtifactBytes={3} />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Too large to preview. Open the project to view it.');
+    expect(screen.getByRole('status')).toMatchTextContent('Too large to preview. Open the project to view it.');
     expect(screen.queryByTestId('cad-viewer')).not.toBeInTheDocument();
 
     view.rerender(<CadPreviewViewer className='size-full' maxArtifactBytes={4} />);

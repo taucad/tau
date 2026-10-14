@@ -401,13 +401,13 @@ describe('ProjectChatList', () => {
     const link = screen.getByRole('link', { name: 'Chat 12' });
     expect(link).toHaveAttribute('aria-describedby', 'chat-status-chat_12');
     expect(document.querySelector('#chat-status-chat_12')?.textContent).toBe('Needs your approval · 1');
-    expect(screen.getByTestId('tooltip')).toHaveTextContent('Needs your approval · 1');
+    expect(screen.getByTestId('tooltip')).toMatchTextContent('Needs your approval · 1');
     expect(screen.queryByText('sweep')).not.toBeInTheDocument();
     const row = link.closest<HTMLElement>('[data-slot=chat-trigger]');
     const slot = row?.querySelector<HTMLElement>('[data-slot=chat-status]');
     expect(row?.firstElementChild).toBe(slot);
     expect(slot?.dataset['glyph']).toBe('attention');
-    expect(slot?.querySelector('.absolute')).toHaveTextContent('1');
+    expect(slot?.querySelector('.absolute')).toMatchTextContent('1');
     /* No bold for unread: the mark says it (D2). */
     expect(link.querySelector('.font-medium')).toBeNull();
   });
@@ -501,7 +501,7 @@ describe('ProjectChatList', () => {
         error: 'Provider offline\nprivate diagnostic',
       });
       rerender(<ProjectChatList project={project} isProjectActive />);
-      expect(document.querySelector('[data-slot=failure-row]')).toHaveTextContent("Couldn't load chats");
+      expect(document.querySelector('[data-slot=failure-row]')).toMatchTextContent("Couldn't load chats");
       expect(screen.queryByText(/private diagnostic/u)).not.toBeInTheDocument();
       expect(screen.queryAllByRole('link')).toEqual(links);
       fireEvent.click(screen.getByRole('button', { name: 'Retry loading chats' }));

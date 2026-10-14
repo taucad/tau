@@ -225,7 +225,7 @@ describe('ChatExecutionSelector', () => {
 
     await user.click(screen.getByRole('button', { name: 'Select agent: Tau' }));
     const row = await screen.findByRole('option', { name: /^Codex/u });
-    expect(row).toHaveTextContent('CLI_TOO_OLD');
+    expect(row).toMatchTextContent('CLI_TOO_OLD');
 
     await user.click(row);
     expect(setActiveExecution).not.toHaveBeenCalled();

@@ -229,7 +229,7 @@ describe('ChatTextareaAttachmentRail', () => {
       />,
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent(
+    expect(screen.getByRole('status')).toMatchTextContent(
       "Vision can't read PDFs. Remove the PDF or pick another model.",
     );
   });

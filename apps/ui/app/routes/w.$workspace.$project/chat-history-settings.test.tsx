@@ -89,7 +89,7 @@ describe('ChatHistorySettings', () => {
     const menu = screen.getByRole('menu');
     expect(menu.querySelector('[role=separator]')).toBeInTheDocument();
     await user.click(screen.getByRole('menuitem', { name: 'Archived chats' }));
-    expect(screen.getByRole('status', { name: 'Current URL' })).toHaveTextContent(
+    expect(screen.getByRole('status', { name: 'Current URL' })).toMatchTextContent(
       'chat=chat_active&workbench=share&archivedChats=1',
     );
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();

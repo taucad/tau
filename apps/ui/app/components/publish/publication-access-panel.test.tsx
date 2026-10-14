@@ -95,7 +95,7 @@ describe('PublicationAccessPanel', () => {
 
     await userEvent.hover(screen.getByRole('button', { name: /revoke friend@example.com/i }));
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Revoke access');
+    expect(await screen.findByRole('tooltip')).toMatchTextContent('Revoke access');
     expect(screen.getByRole('button', { name: /revoke friend@example.com/i })).toHaveAccessibleDescription(
       'Revoke access',
     );
@@ -186,7 +186,7 @@ describe('PublicationAccessPanel', () => {
       />,
     );
 
-    expect(screen.getByRole('combobox', { name: /general access/i })).toHaveTextContent('Public');
+    expect(screen.getByRole('combobox', { name: /general access/i })).toMatchTextContent('Public');
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: /share with emails/i })).not.toBeInTheDocument();
   });

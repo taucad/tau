@@ -92,7 +92,7 @@ describe('viewer kernel settings', () => {
     render(<SettingsMenu />);
     const disclosure = screen.getByRole('menuitem', { name: /Kernel settings/ });
     expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-    expect(disclosure).toHaveTextContent('Using kernel defaults');
+    expect(disclosure).toMatchTextContent('Using kernel defaults');
     expect(screen.queryByRole('menuitem', { name: /Linear tolerance/ })).not.toBeInTheDocument();
 
     fireEvent.click(disclosure);
@@ -118,7 +118,7 @@ describe('viewer kernel settings', () => {
       viewId: 'model',
       options: { tessellation: { linearTolerance: 0.02, angularTolerance: 22 } },
     });
-    expect(screen.getByRole('menuitem', { name: /Kernel settings/ })).toHaveTextContent('1 changed from its default');
+    expect(screen.getByRole('menuitem', { name: /Kernel settings/ })).toMatchTextContent('1 changed from its default');
     act(() => {
       vi.advanceTimersByTime(viewOptionsSaveDelay - 1);
     });
@@ -160,7 +160,7 @@ describe('viewer kernel settings', () => {
     offer([model]);
     render(<SettingsMenu />);
     const disclosure = screen.getByRole('menuitem', { name: /Kernel settings/ });
-    expect(disclosure).toHaveTextContent('1 changed from its default');
+    expect(disclosure).toMatchTextContent('1 changed from its default');
     fireEvent.click(disclosure);
     // A saved value past the drag window still shows as it is.
     expect(screen.getByRole('menuitem', { name: 'Linear tolerance, 5mm' })).toBeInTheDocument();

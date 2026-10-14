@@ -19,7 +19,7 @@ describe('LegalDocument', () => {
 
     expect(screen.getByRole('link', { name: 'All legal documents' })).toHaveAttribute('href', '/legal');
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Privacy Policy - TauCAD Limited');
+    expect(screen.getByRole('heading', { level: 1 })).toMatchTextContent('Privacy Policy - TauCAD Limited');
     expect(document.querySelector('#privacy-policy-taucad-limited')).toContainElement(
       screen.getByRole('heading', { level: 1 }),
     );

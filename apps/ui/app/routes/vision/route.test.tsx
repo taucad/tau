@@ -53,7 +53,7 @@ describe('Vision presentation', () => {
       );
     });
     fireEvent.click(screen.getByRole('button', { name: '04 Move' }));
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Design what happens next');
+    expect(screen.getByRole('heading', { level: 1 })).toMatchTextContent('Design what happens next');
     expect(screen.getByRole('slider', { name: 'Story position' })).toHaveValue('36');
     fireEvent.click(screen.getByRole('button', { name: 'Previous chapter' }));
     expect(screen.getByRole('slider', { name: 'Story position' })).toHaveValue('24');
@@ -87,7 +87,7 @@ describe('Vision presentation', () => {
     expect(screen.getByRole('button', { name: 'Replay the story' })).toBeInTheDocument();
     expect(screen.getByRole('slider')).toHaveValue('120');
     fireEvent.click(screen.getByRole('button', { name: 'Replay the story' }));
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Give ideas physical form');
+    expect(screen.getByRole('heading', { level: 1 })).toMatchTextContent('Give ideas physical form');
   });
 
   it('should retain every chapter and its future-workflow disclosure with reduced motion', () => {
@@ -99,7 +99,7 @@ describe('Vision presentation', () => {
     );
     expect(screen.getByRole('button', { name: 'Play the story' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '06 Make' }));
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('The next step is physical');
+    expect(screen.getByRole('heading', { level: 1 })).toMatchTextContent('The next step is physical');
     expect(
       screen.getByText('Ring gear on a 256 mm build plate · Illustration, no print job is sent'),
     ).toBeInTheDocument();
@@ -126,11 +126,11 @@ describe('Vision presentation', () => {
         </MemoryRouter>,
       );
     });
-    expect(screen.getByRole('status')).toHaveTextContent('3D is unavailable');
+    expect(screen.getByRole('status')).toMatchTextContent('3D is unavailable');
     expect(screen.getByAltText(/The assembled planetary gearbox/)).toBeInTheDocument();
     expect(screen.queryByText(/Preparing 3D/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '10 Begin' }));
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('What will you make real?');
+    expect(screen.getByRole('heading', { level: 1 })).toMatchTextContent('What will you make real?');
     expect(screen.getByRole('link', { name: 'Read the story' })).toHaveAttribute('href', '#full-story');
   });
 });

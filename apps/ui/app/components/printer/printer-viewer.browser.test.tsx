@@ -779,7 +779,7 @@ describe('Printer viewer framing', () => {
         await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
         await chooseFromMore(frame, 'menuitemradio', plate);
         await waitFor(() => {
-          expect(screen.getByRole('status', { name: 'Build plate preview' })).toHaveTextContent('schematic plate');
+          expect(screen.getByRole('status', { name: 'Build plate preview' })).toMatchTextContent('schematic plate');
         });
         await capture(frame, `failed-${mini ? 'mini' : 'x1c'}-${plate.toLowerCase().replaceAll(' ', '-')}.png`);
       } finally {

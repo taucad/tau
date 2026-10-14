@@ -216,15 +216,15 @@ describe('ChatConsole', () => {
         .getAllByText(/main (first|second)/)
         .map((row) => row.textContent),
     ).toEqual(['main first', 'main second']);
-    expect(screen.getByRole('log', { name: 'Console logs for helper.ts' })).toHaveTextContent('helper warning');
+    expect(screen.getByRole('log', { name: 'Console logs for helper.ts' })).toMatchTextContent('helper warning');
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Filter logs' }), {
       target: { value: 'helper' },
     });
     expect(screen.getByText('No matching logs.')).toBeInTheDocument();
-    expect(screen.getByRole('log', { name: 'Console logs for helper.ts' })).toHaveTextContent('helper warning');
-    expect(screen.getByTestId('console-header-main.ts')).toHaveTextContent('(0)');
-    expect(screen.getByTestId('console-header-helper.ts')).toHaveTextContent('(1)');
+    expect(screen.getByRole('log', { name: 'Console logs for helper.ts' })).toMatchTextContent('helper warning');
+    expect(screen.getByTestId('console-header-main.ts')).toMatchTextContent('(0)');
+    expect(screen.getByTestId('console-header-helper.ts')).toMatchTextContent('(1)');
     expect(paneviewMountCount).toBe(1);
   });
 

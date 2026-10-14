@@ -283,7 +283,7 @@ describe('ImportRoute GitHub card', () => {
 
     expect(
       await screen.findByText(/^Could not fetch branches\. Import will use the/u, {}, { timeout: 3000 }),
-    ).toHaveTextContent('Could not fetch branches. Import will use the trunk branch.');
+    ).toMatchTextContent('Could not fetch branches. Import will use the trunk branch.');
     expect(listBranches).toHaveBeenCalledWith(expect.objectContaining({ owner: 'octo', repo: 'part' }));
   });
 
@@ -293,7 +293,7 @@ describe('ImportRoute GitHub card', () => {
 
     expect(
       await screen.findByRole('alert', { name: 'Couldn’t open this repository' }, { timeout: 3000 }),
-    ).toHaveTextContent('Check the public repository address.');
+    ).toMatchTextContent('Check the public repository address.');
     expect(screen.queryByText(/choose a repository from your GitHub account/u)).not.toBeInTheDocument();
   });
 
@@ -310,7 +310,7 @@ describe('ImportRoute GitHub card', () => {
         'GitHub’s limit for public reads was reached. Try again in a few minutes, or choose a repository from your GitHub account.',
       ),
     ).toBeVisible();
-    expect(notice).not.toHaveTextContent(/repository address/u);
+    expect(notice).not.toMatchTextContent(/repository address/u);
   });
 
   it('should explain a branch list this server is not configured to provide', async () => {
@@ -325,7 +325,7 @@ describe('ImportRoute GitHub card', () => {
 
     const status = await screen.findByText(/isn’t set up to list branches/u, {}, { timeout: 3000 });
 
-    expect(status).toHaveTextContent(
+    expect(status).toMatchTextContent(
       'This server isn’t set up to list branches, so import will use the main branch. Its administrator can enable branch listing with GITHUB_API_TOKEN.',
     );
     expect(screen.queryByRole('alert', { name: 'Couldn’t open this repository' })).not.toBeInTheDocument();

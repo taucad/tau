@@ -199,7 +199,7 @@ describe('SelectWidget', () => {
       render(<SelectWidget {...props} />);
 
       const trigger = screen.getByRole('combobox');
-      expect(trigger).toHaveTextContent('20');
+      expect(trigger).toMatchTextContent('20');
     });
 
     it('should display the selected value after JSON round-trip (string value with numeric options)', () => {
@@ -211,7 +211,7 @@ describe('SelectWidget', () => {
       render(<SelectWidget {...props} />);
 
       const trigger = screen.getByRole('combobox');
-      expect(trigger).toHaveTextContent('20');
+      expect(trigger).toMatchTextContent('20');
     });
 
     it('should display labeled text for labeled numeric enums', () => {
@@ -223,7 +223,7 @@ describe('SelectWidget', () => {
       render(<SelectWidget {...props} />);
 
       const trigger = screen.getByRole('combobox');
-      expect(trigger).toHaveTextContent('Medium');
+      expect(trigger).toMatchTextContent('Medium');
     });
 
     it('should display labeled text after JSON round-trip (string value with labeled numeric options)', () => {
@@ -235,7 +235,7 @@ describe('SelectWidget', () => {
       render(<SelectWidget {...props} />);
 
       const trigger = screen.getByRole('combobox');
-      expect(trigger).toHaveTextContent('Medium');
+      expect(trigger).toMatchTextContent('Medium');
     });
   });
 
@@ -250,7 +250,7 @@ describe('SelectWidget', () => {
       render(<SelectWidget {...props} />);
 
       const trigger = screen.getByRole('combobox');
-      expect(trigger).toHaveTextContent('wood');
+      expect(trigger).toMatchTextContent('wood');
     });
   });
 
@@ -263,7 +263,7 @@ describe('SelectWidget', () => {
 
       const { rerender } = render(<SelectWidget {...props} />);
 
-      expect(screen.getByRole('combobox')).toHaveTextContent('30');
+      expect(screen.getByRole('combobox')).toMatchTextContent('30');
 
       // After a JSON round-trip, value might come back as a string
       rerender(
@@ -275,7 +275,7 @@ describe('SelectWidget', () => {
         />,
       );
 
-      expect(screen.getByRole('combobox')).toHaveTextContent('30');
+      expect(screen.getByRole('combobox')).toMatchTextContent('30');
     });
   });
 
@@ -289,7 +289,7 @@ describe('SelectWidget', () => {
       render(<SelectWidget {...props} />);
 
       const trigger = screen.getByRole('combobox');
-      expect(trigger).toHaveTextContent('Choose an option');
+      expect(trigger).toMatchTextContent('Choose an option');
     });
   });
 
@@ -518,9 +518,9 @@ describe('composite fields', () => {
       ?.querySelector(':scope > [data-slot="parameter-group-content"] > [data-slot="parameter-group-body"]');
     expect(screen.getAllByRole('button', { name: 'Group: Camera' })).toHaveLength(1);
     expect(cameraContent).toHaveClass('[&>.panel>.form-group]:flex', '[&>.panel>.form-group]:justify-end');
-    expect(screen.getByRole('combobox', { name: 'Select for Framing' })).toHaveTextContent('Fit');
+    expect(screen.getByRole('combobox', { name: 'Select for Framing' })).toMatchTextContent('Fit');
     expect(screen.getByRole('button', { name: 'Group: Projection' })).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Select for Kind' })).toHaveTextContent('Perspective');
+    expect(screen.getByRole('combobox', { name: 'Select for Kind' })).toMatchTextContent('Perspective');
     expect(screen.queryByText('Option 1')).toBeNull();
     expect(screen.queryByLabelText('Parameter: Framing')).toBeNull();
     expect(screen.queryByLabelText('Parameter: Kind')).toBeNull();
@@ -704,7 +704,7 @@ describe('field labels', () => {
       ['combobox', 'Select for Print Quality', 'Print Quality'],
       ['textbox', 'Input for Tags 1', 'Tags 1'],
     ] as const) {
-      expect(screen.getByLabelText(`Parameter: ${label}`)).toHaveTextContent(label);
+      expect(screen.getByLabelText(`Parameter: ${label}`)).toMatchTextContent(label);
       expect(screen.getByRole(role, { name })).toBeInTheDocument();
     }
   });

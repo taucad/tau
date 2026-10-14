@@ -143,13 +143,13 @@ describe('PrinterViewer', () => {
     const live = within(controls).getByRole('switch', { name: 'Live' });
     expect(live).toBeDisabled();
     expect(live).not.toBeChecked();
-    expect(controls).toHaveTextContent('No active run to follow');
+    expect(controls).toMatchTextContent('No active run to follow');
 
     const hud = within(region).getByRole('region', { name: 'Print HUD' });
     // The preview opens on the finished print: the last layer, with nothing left to run.
-    expect(within(hud).getByText('Layer').nextElementSibling).toHaveTextContent('3 / 3');
-    expect(within(hud).getByText('Remaining').nextElementSibling).toHaveTextContent('0:00:00');
-    expect(within(hud).getByText('Filament').nextElementSibling).toHaveTextContent(/^\d+ mm \/ \d+ mm$/u);
+    expect(within(hud).getByText('Layer').nextElementSibling).toMatchTextContent('3 / 3');
+    expect(within(hud).getByText('Remaining').nextElementSibling).toMatchTextContent('0:00:00');
+    expect(within(hud).getByText('Filament').nextElementSibling).toMatchTextContent(/^\d+ mm \/ \d+ mm$/u);
     expect(within(hud).queryByText('Preview shows known motion only')).not.toBeInTheDocument();
 
     expect(props.store.getSnapshot()).toMatchObject({ isPlaying: false, speed: 1, isLive: false });
@@ -257,9 +257,9 @@ describe('PrinterViewer', () => {
     expect(props.chamberLight).toBe('on');
     expect(props.liveNozzleTarget).toBe(250);
     const hud = screen.getByRole('region', { name: 'Print HUD' });
-    expect(within(hud).getByText('Machine').nextElementSibling).toHaveTextContent('X1C simulator · printing');
-    expect(within(hud).getByText('Nozzle').nextElementSibling).toHaveTextContent('250 °C');
-    expect(controls).not.toHaveTextContent('No active run to follow');
+    expect(within(hud).getByText('Machine').nextElementSibling).toMatchTextContent('X1C simulator · printing');
+    expect(within(hud).getByText('Nozzle').nextElementSibling).toMatchTextContent('250 °C');
+    expect(controls).not.toMatchTextContent('No active run to follow');
 
     const live = within(controls).getByRole('switch', { name: 'Live' });
     expect(live).toBeEnabled();
@@ -285,7 +285,7 @@ describe('PrinterViewer', () => {
     view.rerender(viewer());
     expect(within(controls).getByRole('switch', { name: 'Live' })).not.toBeChecked();
     expect(within(controls).getByRole('switch', { name: 'Live' })).toBeDisabled();
-    expect(controls).toHaveTextContent('No active run to follow');
+    expect(controls).toMatchTextContent('No active run to follow');
     expect(within(controls).getByRole('slider', { name: 'Time' })).toBeEnabled();
   });
 
@@ -295,7 +295,7 @@ describe('PrinterViewer', () => {
     const controls = await screen.findByRole('group', { name: 'Playback controls' });
 
     expect(within(controls).getByRole('switch', { name: 'Live' })).toBeDisabled();
-    expect(controls).toHaveTextContent('The printer is running another file');
+    expect(controls).toMatchTextContent('The printer is running another file');
     expect(within(screen.getByRole('region', { name: 'Print HUD' })).queryByText('Machine')).not.toBeInTheDocument();
     // The viewer names its file by the digest of the bytes it shows, as the print request ledger does.
     expect(mocks.liveDigest).toBe(await digestBytes(container));
@@ -470,7 +470,7 @@ describe('PrinterViewer', () => {
       />,
     );
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('The toolpath could not be read.');
+    expect(alert).toMatchTextContent('The toolpath could not be read.');
     expect(mocks.scene).not.toHaveBeenCalled();
   });
 });

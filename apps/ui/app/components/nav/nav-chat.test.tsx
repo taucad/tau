@@ -52,6 +52,6 @@ describe('NavChat', () => {
     await userEvent.keyboard('{Control>}n{/Control}');
 
     expect(await screen.findByText('Create New Project')).toBeInTheDocument();
-    expect(screen.getByTestId('navigation-type')).toHaveTextContent('REPLACE');
+    expect(screen.getByTestId('navigation-type')).toMatchTextContent('REPLACE');
   });
 });

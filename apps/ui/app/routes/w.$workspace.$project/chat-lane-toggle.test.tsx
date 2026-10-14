@@ -105,7 +105,7 @@ describe('ChatLaneToggle', () => {
     expect(mark).toHaveAttribute('data-mark', 'attention');
     expect(mark).toHaveAttribute('aria-hidden', 'true');
     // D16's numeral would hang into the tab; the description carries the count.
-    expect(mark).not.toHaveTextContent('2');
+    expect(mark).not.toMatchTextContent('2');
   });
 
   it('shows no mark for a quiet chat', () => {

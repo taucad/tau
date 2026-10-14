@@ -216,19 +216,19 @@ describe('UsagePage', () => {
 
     expect(screen.getByRole('heading', { name: 'Tau usage' })).toBeInTheDocument();
     expect(screen.getByText(/Usage through the Tau LLM provider/)).toBeInTheDocument();
-    expect(screen.getByTestId('credits-used')).toHaveTextContent('1 credit used');
+    expect(screen.getByTestId('credits-used')).toMatchTextContent('1 credit used');
     expect(screen.getByText('Across 1 action in the selected range')).toBeInTheDocument();
-    expect(screen.getByTestId('purchased-balance')).toHaveTextContent('4 credits available');
+    expect(screen.getByTestId('purchased-balance')).toMatchTextContent('4 credits available');
     expect(screen.getByText('<1% left')).toBeInTheDocument();
     expect(screen.getByText('Pending issuance: 1 credit')).toBeInTheDocument();
-    expect(screen.getByTestId('reserved-credits')).toHaveTextContent('Monthly credits: 3 credits');
-    expect(screen.getByTestId('reserved-credits')).toHaveTextContent('Purchased credits: 1 credit');
+    expect(screen.getByTestId('reserved-credits')).toMatchTextContent('Monthly credits: 3 credits');
+    expect(screen.getByTestId('reserved-credits')).toMatchTextContent('Purchased credits: 1 credit');
     expect(screen.queryByText('Available balance')).not.toBeInTheDocument();
     expect(screen.getByText(/Held for work in flight/)).toBeInTheDocument();
     expect(screen.getByText('2026-09-01 to 2026-09-12 (UTC)')).toBeInTheDocument();
     expect(screen.getByText('Luna')).toBeInTheDocument();
     expect(screen.getByText('Showing all 1 actions in this range.')).toBeInTheDocument();
-    expect(screen.getByTestId('usage-freshness')).toHaveTextContent('Updated');
+    expect(screen.getByTestId('usage-freshness')).toMatchTextContent('Updated');
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
   });
 
@@ -239,8 +239,8 @@ describe('UsagePage', () => {
       retry: vi.fn(),
     });
     renderPage();
-    expect(screen.getByTestId('credits-used')).toHaveTextContent('<1 credit used');
-    expect(screen.getByTestId('purchased-balance')).toHaveTextContent('4 credits available');
+    expect(screen.getByTestId('credits-used')).toMatchTextContent('<1 credit used');
+    expect(screen.getByTestId('purchased-balance')).toMatchTextContent('4 credits available');
   });
 
   it('opens the per-action credit explanation with whole credits, tokens and rates', async () => {
@@ -250,10 +250,10 @@ describe('UsagePage', () => {
     await userEvent.click(screen.getByText('agent'));
 
     const detail = screen.getByTestId('usage-event-detail');
-    expect(detail).toHaveTextContent('1 credit');
-    expect(detail).toHaveTextContent('Authorized maximum');
-    expect(detail).toHaveTextContent('Cache read');
-    expect(detail).toHaveTextContent('Reasoning (of output)');
+    expect(detail).toMatchTextContent('1 credit');
+    expect(detail).toMatchTextContent('Authorized maximum');
+    expect(detail).toMatchTextContent('Cache read');
+    expect(detail).toMatchTextContent('Reasoning (of output)');
   });
 
   // ── Names, never ids (Q9) ────────────────────────────────────────────────
@@ -262,8 +262,8 @@ describe('UsagePage', () => {
     await userEvent.click(screen.getByText('agent'));
 
     const detail = screen.getByTestId('usage-event-detail');
-    expect(detail).toHaveTextContent('Gearbox');
-    expect(detail).not.toHaveTextContent('project-a');
+    expect(detail).toMatchTextContent('Gearbox');
+    expect(detail).not.toMatchTextContent('project-a');
   });
 
   it('labels a project it cannot resolve rather than falling back to the id', async () => {
@@ -272,8 +272,8 @@ describe('UsagePage', () => {
     await userEvent.click(screen.getByText('agent'));
 
     const detail = screen.getByTestId('usage-event-detail');
-    expect(detail).toHaveTextContent('Project not available');
-    expect(detail).not.toHaveTextContent('project-a');
+    expect(detail).toMatchTextContent('Project not available');
+    expect(detail).not.toMatchTextContent('project-a');
   });
 
   it('names the chat the spend happened in, and never its id', async () => {
@@ -281,8 +281,8 @@ describe('UsagePage', () => {
     await userEvent.click(screen.getByText('agent'));
 
     const detail = screen.getByTestId('usage-event-detail');
-    expect(detail).toHaveTextContent('Bracket redesign');
-    expect(detail).not.toHaveTextContent('chat-a');
+    expect(detail).toMatchTextContent('Bracket redesign');
+    expect(detail).not.toMatchTextContent('chat-a');
     expect(useChatName).toHaveBeenCalledWith('project-a', 'chat-a');
   });
 
@@ -305,7 +305,7 @@ describe('UsagePage', () => {
 
     // Scoped to its own row: the Project row is a live region on the same terms.
     const status = within(detailRow('Chat')).getByRole('status');
-    expect(status).toHaveTextContent(text);
+    expect(status).toMatchTextContent(text);
     expect(status).toHaveAttribute('aria-busy', busy);
   });
 
@@ -317,7 +317,7 @@ describe('UsagePage', () => {
 
     const options = await screen.findAllByRole('menuitemcheckbox');
     expect(options).toHaveLength(1);
-    expect(options[0]).toHaveTextContent('Project not available');
+    expect(options[0]).toMatchTextContent('Project not available');
 
     await userEvent.click(options[0]!);
     expect(useUsageSnapshot).toHaveBeenLastCalledWith(
@@ -339,9 +339,9 @@ describe('UsagePage', () => {
 
     await userEvent.click(screen.getByText('agent'));
     const project = within(detailRow('Project')).getByRole('status');
-    expect(project).toHaveTextContent('Finding the project…');
+    expect(project).toMatchTextContent('Finding the project…');
     expect(project).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByTestId('usage-event-detail')).not.toHaveTextContent('project-a');
+    expect(screen.getByTestId('usage-event-detail')).not.toMatchTextContent('project-a');
   });
 
   it('stops looking once the page has given up refreshing, rather than waiting forever', async () => {
@@ -352,8 +352,8 @@ describe('UsagePage', () => {
     expect(useCloudProjects).toHaveBeenCalledWith({ enabled: false });
     await userEvent.click(screen.getByText('agent'));
     const detail = screen.getByTestId('usage-event-detail');
-    expect(detail).toHaveTextContent('Project not available');
-    expect(detail).not.toHaveTextContent('Finding the project…');
+    expect(detail).toMatchTextContent('Project not available');
+    expect(detail).not.toMatchTextContent('Finding the project…');
   });
 
   it('stops looking once the listing has failed, rather than waiting forever', async () => {
@@ -362,8 +362,8 @@ describe('UsagePage', () => {
 
     await userEvent.click(screen.getByText('agent'));
     const detail = screen.getByTestId('usage-event-detail');
-    expect(detail).toHaveTextContent('Project not available');
-    expect(detail).not.toHaveTextContent('Finding the project…');
+    expect(detail).toMatchTextContent('Project not available');
+    expect(detail).not.toMatchTextContent('Finding the project…');
   });
 
   it('offers the project filter by name', async () => {
@@ -392,7 +392,7 @@ describe('UsagePage', () => {
     useUsageSnapshot.mockReturnValue({ ...state, retry: vi.fn() });
     renderPage();
 
-    expect(screen.getByTestId('usage-freshness')).toHaveTextContent(label);
+    expect(screen.getByTestId('usage-freshness')).toMatchTextContent(label);
   });
 
   it('keeps the last good snapshot and offers a retry when a refresh fails', async () => {
@@ -400,7 +400,7 @@ describe('UsagePage', () => {
     useUsageSnapshot.mockReturnValue({ status: 'unable-to-refresh', snapshot, retry });
     renderPage();
 
-    expect(screen.getByTestId('credits-used')).toHaveTextContent('1 credit used');
+    expect(screen.getByTestId('credits-used')).toMatchTextContent('1 credit used');
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(retry).toHaveBeenCalled();
   });
@@ -432,10 +432,10 @@ describe('UsagePage', () => {
     useUsageSnapshot.mockReturnValue({ status: 'saved', snapshot, retry: vi.fn() });
     renderPage();
 
-    expect(screen.getByTestId('usage-freshness')).toHaveTextContent(
+    expect(screen.getByTestId('usage-freshness')).toMatchTextContent(
       /Offline — saved usage for a@example.test, last updated .+\. Reconnect for the latest usage\./u,
     );
-    expect(screen.getByTestId('credits-used')).toHaveTextContent('1 credit used');
+    expect(screen.getByTestId('credits-used')).toMatchTextContent('1 credit used');
     expect(screen.queryByRole('button', { name: /Models/u })).not.toBeInTheDocument();
   });
 
@@ -446,7 +446,7 @@ describe('UsagePage', () => {
     usePersistSavedUsage.mockReturnValue(outcome);
     renderPage();
 
-    expect(screen.getByTestId('usage-offline-saving')).toHaveTextContent(label);
+    expect(screen.getByTestId('usage-offline-saving')).toMatchTextContent(label);
   });
 
   it('keeps the balance card unavailable rather than zero when the balance read fails', () => {
@@ -464,14 +464,14 @@ describe('UsagePage', () => {
 
     const rows = screen.getAllByRole('row').filter((row) => row.closest('[data-testid="reserved-table"]') !== null);
     expect(rows).toHaveLength(3);
-    expect(rows[1]).toHaveTextContent('Astra');
-    expect(rows[1]).toHaveTextContent('308');
-    expect(rows[1]).toHaveTextContent('2 minutes ago');
-    expect(rows[1]).toHaveTextContent('Running');
+    expect(rows[1]).toMatchTextContent('Astra');
+    expect(rows[1]).toMatchTextContent('308');
+    expect(rows[1]).toMatchTextContent('2 minutes ago');
+    expect(rows[1]).toMatchTextContent('Running');
     /* Past `releaseAfter`, the reserve is coming back whatever the dispatch state says. */
-    expect(rows[2]).toHaveTextContent('gpt-5.6-luna');
-    expect(rows[2]).toHaveTextContent('7');
-    expect(rows[2]).toHaveTextContent('Being released');
+    expect(rows[2]).toMatchTextContent('gpt-5.6-luna');
+    expect(rows[2]).toMatchTextContent('7');
+    expect(rows[2]).toMatchTextContent('Being released');
   });
 
   it.each([
@@ -490,7 +490,7 @@ describe('UsagePage', () => {
     });
     renderPage();
 
-    expect(screen.getByTestId('reserved-credits')).toHaveTextContent('0 credits');
+    expect(screen.getByTestId('reserved-credits')).toMatchTextContent('0 credits');
     expect(screen.getByText('Nothing held for work in flight')).toBeInTheDocument();
   });
 });

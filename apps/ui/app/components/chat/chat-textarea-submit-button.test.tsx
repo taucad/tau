@@ -35,7 +35,7 @@ describe('ChatTextareaSubmitButton', () => {
     renderButton({ status: 'error', canResume: true, onSubmit });
 
     const resume = screen.getByRole('button', { name: 'Resume' });
-    expect(resume).toHaveTextContent('Resume');
+    expect(resume).toMatchTextContent('Resume');
     expect(resume).toHaveAttribute('aria-keyshortcuts', 'Enter');
     expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
     await userEvent.tab();

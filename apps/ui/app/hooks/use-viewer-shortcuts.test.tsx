@@ -268,10 +268,10 @@ describe('useViewerShortcuts', () => {
       expect(Number(perspective)).toBeGreaterThan(0);
 
       await user.keyboard('p');
-      expect(fieldOfView).toHaveTextContent('0');
+      expect(fieldOfView).toMatchTextContent('0');
 
       await user.keyboard('p');
-      expect(fieldOfView).toHaveTextContent(perspective);
+      expect(fieldOfView).toMatchTextContent(perspective);
     });
 
     it('should toggle the grid with G', async () => {
@@ -304,7 +304,7 @@ describe('useViewerShortcuts', () => {
       await user.keyboard('smp');
 
       expect(send).not.toHaveBeenCalled();
-      expect(screen.getByRole('status', { name: 'Viewer field of view' })).toHaveTextContent(fieldOfView);
+      expect(screen.getByRole('status', { name: 'Viewer field of view' })).toMatchTextContent(fieldOfView);
 
       await user.keyboard('fg');
 

@@ -388,7 +388,7 @@ describe('dictation recording and transcription', () => {
       });
       await expect
         .element(page.getByRole('textbox'))
-        .toHaveTextContent('Keep working on the bracket. Make the corners round.');
+        .toMatchTextContent('Keep working on the bracket. Make the corners round.');
       expect(submit).not.toHaveBeenCalled();
       expect(cancelChat).not.toHaveBeenCalled();
       if (status === 'streaming') {

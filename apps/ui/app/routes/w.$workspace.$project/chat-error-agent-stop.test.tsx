@@ -60,8 +60,8 @@ describe('ChatErrorAgentStop', () => {
     render(<ChatErrorAgentStop resumable stop={stopOf({})} />);
 
     const notice = screen.getByRole('status', { name: 'Codex usage limit reached' });
-    expect(notice).toHaveTextContent('try again at Sep 20th, 2026 4:07 PM.');
-    expect(notice).toHaveTextContent('Everything up to here is saved.');
+    expect(notice).toMatchTextContent('try again at Sep 20th, 2026 4:07 PM.');
+    expect(notice).toMatchTextContent('Everything up to here is saved.');
     expect(screen.getByRole('link', { name: 'chatgpt.com/codex/settings/usage' })).toHaveAttribute(
       'href',
       'https://chatgpt.com/codex/settings/usage',
@@ -90,8 +90,8 @@ describe('ChatErrorAgentStop', () => {
 
       const notice = screen.getByRole('status', { name: 'Claude Code usage limit reached' });
       expect(notice.textContent).toMatch(/^Claude Code usage limit reachedYour 5-hour limit resets at .+\./u);
-      expect(notice).toHaveTextContent('Everything up to here is saved.');
-      expect(notice).not.toHaveTextContent('Pacific/Auckland');
+      expect(notice).toMatchTextContent('Everything up to here is saved.');
+      expect(notice).not.toMatchTextContent('Pacific/Auckland');
       const held = screen.getByRole('button', { name: /^Resume at / });
       expect(held).toBeDisabled();
 
@@ -101,7 +101,7 @@ describe('ChatErrorAgentStop', () => {
 
       const live = screen.getByRole('button', { name: 'Resume' });
       expect(live).toBeEnabled();
-      expect(notice).toHaveTextContent("You've hit your usage limit");
+      expect(notice).toMatchTextContent("You've hit your usage limit");
     } finally {
       vi.useRealTimers();
     }
@@ -118,7 +118,7 @@ describe('ChatErrorAgentStop', () => {
     );
 
     const notice = screen.getByRole('status', { name: 'Codex usage limit reached' });
-    expect(notice).not.toHaveTextContent('Everything up to here is saved.');
+    expect(notice).not.toMatchTextContent('Everything up to here is saved.');
     expect(screen.queryByRole('button', { name: /resume/iu })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Switch agent']);
   });
@@ -131,7 +131,9 @@ describe('ChatErrorAgentStop', () => {
       />,
     );
 
-    expect(screen.getByRole('status', { name: 'Codex usage limit reached' })).toHaveTextContent('Usage limit reached.');
+    expect(screen.getByRole('status', { name: 'Codex usage limit reached' })).toMatchTextContent(
+      'Usage limit reached.',
+    );
     expect(screen.getByRole('button', { name: 'Resume' })).toBeEnabled();
   });
 
@@ -154,7 +156,7 @@ describe('ChatErrorAgentStop', () => {
     );
 
     const notice = screen.getByRole('status', { name: 'Claude Code is rate limited' });
-    expect(notice).toHaveTextContent('Everything up to here is saved.');
+    expect(notice).toMatchTextContent('Everything up to here is saved.');
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Resume', 'Switch agent']);
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Resume' }));
@@ -189,7 +191,7 @@ describe('ChatErrorAgentStop', () => {
       />,
     );
 
-    expect(screen.getByRole('alert', { name: 'Codex stopped unexpectedly' })).toHaveTextContent('Internal error');
+    expect(screen.getByRole('alert', { name: 'Codex stopped unexpectedly' })).toMatchTextContent('Internal error');
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /details/iu })).not.toBeInTheDocument();
     expect(screen.queryByText(/SYSTEM_ERROR/u)).not.toBeInTheDocument();
@@ -209,7 +211,7 @@ describe('ChatErrorAgentStop', () => {
     );
 
     const alert = screen.getByRole('alert', { name: 'Codex stopped unexpectedly' });
-    expect(alert).toHaveTextContent('Internal error');
+    expect(alert).toMatchTextContent('Internal error');
     expect(screen.queryByText(/SYSTEM_ERROR/u)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Debug details' }));

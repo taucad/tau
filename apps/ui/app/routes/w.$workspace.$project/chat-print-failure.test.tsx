@@ -92,7 +92,7 @@ describe('failure camera evidence', () => {
   it('should explain unavailable capture without retrying on every observation', async () => {
     captureStill.mockRejectedValue(new Error('BAMBU_CAMERA_UNAVAILABLE'));
     const view = render(<FailureEvidence client={client} entry={failed()} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent(/camera/i);
+    expect(await screen.findByRole('alert')).toMatchTextContent(/camera/i);
     view.rerender(<FailureEvidence client={client} entry={failed()} />);
     expect(captureStill).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Capture still' })).toBeEnabled();
@@ -174,7 +174,7 @@ describe('failure camera evidence', () => {
         await vi.advanceTimersByTimeAsync(15_000);
       });
       expect(screen.queryByRole('img')).not.toBeInTheDocument();
-      expect(screen.getByRole('alert')).toHaveTextContent('The failure still expired.');
+      expect(screen.getByRole('alert')).toMatchTextContent('The failure still expired.');
       expect(revokeObjectURL).toHaveBeenCalledWith('blob:failure');
       expect(captureStill).toHaveBeenCalledOnce();
     } finally {

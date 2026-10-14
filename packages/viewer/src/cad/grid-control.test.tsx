@@ -59,7 +59,7 @@ describe('GridSizeIndicator', () => {
     renderGridSizeIndicator();
 
     const trigger = screen.getByRole('button', { name: 'Grid 50 mm, units and grid' });
-    expect(trigger).toHaveTextContent(/^50 mm$/);
+    expect(trigger).toMatchTextContent(/^50 mm$/);
     expect(trigger).toHaveClass('h-7', 'font-mono', 'text-xs', 'tabular-nums');
     expect(trigger.className).not.toMatch(/text-\[/);
     expect(trigger.querySelector('.lucide-lock')).toBeNull();

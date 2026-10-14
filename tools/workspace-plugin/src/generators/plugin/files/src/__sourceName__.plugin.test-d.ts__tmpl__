@@ -1,4 +1,4 @@
-import { expectTypeOf } from 'vitest';
+import { expectTypeOf, it } from 'vitest';
 import type {
 <% if (capabilities.some(({ role }) => role === 'bundler')) { %>
   ExpandPluginBundlers,
@@ -30,29 +30,31 @@ import { plugin, <%= alias %> } from '#index.js';
 import type {<% capabilities.forEach((capability, index) => { %><%= index === 0 ? ' ' : ', ' %><%= capability.factoryName %><% }); %> } from '#index.js';
 <% } %>
 
-const selected = plugin();
-<% for (const capability of capabilities) { const projection = capability.role === 'kernel' ? 'ExpandPluginKernels' : capability.role === 'middleware' ? 'ExpandPluginMiddleware' : capability.role === 'bundler' ? 'ExpandPluginBundlers' : capability.role === 'job' ? 'ExpandPluginJobs' : capability.role === 'machine' ? 'ExpandPluginMachines' : 'ExpandPluginTranscoders'; %>
-expectTypeOf<<%= projection %><readonly [typeof selected]>>().toEqualTypeOf<
-  readonly [ReturnType<typeof <%= capability.factoryName %>>]
->();
-<% } %>
+it('preserves the complete <%= alias %> plugin type contracts', <% if (capabilities.some(({ role }) => role === 'job' || role === 'machine')) { %>async <% } %>() => {
+  const selected = plugin();
+  <% for (const capability of capabilities) { const projection = capability.role === 'kernel' ? 'ExpandPluginKernels' : capability.role === 'middleware' ? 'ExpandPluginMiddleware' : capability.role === 'bundler' ? 'ExpandPluginBundlers' : capability.role === 'job' ? 'ExpandPluginJobs' : capability.role === 'machine' ? 'ExpandPluginMachines' : 'ExpandPluginTranscoders'; %>
+  expectTypeOf<<%= projection %><readonly [typeof selected]>>().toEqualTypeOf<
+    readonly [ReturnType<typeof <%= capability.factoryName %>>]
+  >();
+  <% } %>
 
-expectTypeOf(<%= alias %>).toEqualTypeOf(plugin);
-<% if (capabilities.some(({ role }) => role === 'job')) { const job = capabilities.find(({ role }) => role === 'job'); %>
+  expectTypeOf(<%= alias %>).toEqualTypeOf(plugin);
+  <% if (capabilities.some(({ role }) => role === 'job')) { const job = capabilities.find(({ role }) => role === 'job'); %>
 
-const jobDefinition = await resolveRuntimePluginDefinition('job', <%= job.factoryName %>());
-type JobConfiguration = Parameters<typeof jobDefinition.execute>[0]['configuration'];
-expectTypeOf<JobConfiguration>().toEqualTypeOf<{ enabled: boolean }>();
-// @ts-expect-error -- execution receives the admitted Zod output, never an arbitrary value.
-const invalidJobConfiguration: JobConfiguration = { enabled: 'yes' };
-void invalidJobConfiguration;
-<% } %>
-<% if (capabilities.some(({ role }) => role === 'machine')) { const machine = capabilities.find(({ role }) => role === 'machine'); %>
+  const jobDefinition = await resolveRuntimePluginDefinition('job', <%= job.factoryName %>());
+  type JobConfiguration = Parameters<typeof jobDefinition.execute>[0]['configuration'];
+  expectTypeOf<JobConfiguration>().toEqualTypeOf<{ enabled: boolean }>();
+  // @ts-expect-error -- execution receives the admitted Zod output, never an arbitrary value.
+  const invalidJobConfiguration: JobConfiguration = { enabled: 'yes' };
+  void invalidJobConfiguration;
+  <% } %>
+  <% if (capabilities.some(({ role }) => role === 'machine')) { const machine = capabilities.find(({ role }) => role === 'machine'); %>
 
-const machineDefinition = await resolveRuntimePluginDefinition('machine', <%= machine.factoryName %>());
-type MachineBinding = Parameters<typeof machineDefinition.connect>[0]['configuration'];
-expectTypeOf<MachineBinding>().toEqualTypeOf<{ logicalId: string }>();
-// @ts-expect-error -- connection receives the admitted binding-schema output.
-const invalidMachineBinding: MachineBinding = { logicalId: 42 };
-void invalidMachineBinding;
-<% } %>
+  const machineDefinition = await resolveRuntimePluginDefinition('machine', <%= machine.factoryName %>());
+  type MachineBinding = Parameters<typeof machineDefinition.connect>[0]['configuration'];
+  expectTypeOf<MachineBinding>().toEqualTypeOf<{ logicalId: string }>();
+  // @ts-expect-error -- connection receives the admitted binding-schema output.
+  const invalidMachineBinding: MachineBinding = { logicalId: 42 };
+  void invalidMachineBinding;
+  <% } %>
+});

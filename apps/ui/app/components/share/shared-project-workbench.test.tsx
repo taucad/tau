@@ -163,7 +163,7 @@ describe('SharedProjectHydrator', () => {
       fileManager.releaseRootListing();
     });
 
-    expect(await screen.findByTestId('shared-tree')).toHaveTextContent(
+    expect(await screen.findByTestId('shared-tree')).toMatchTextContent(
       ['.tau/parameters/main.ts.json', 'lib/profile.ts', 'main.ts', 'node_modules', 'package.json', 'tau.json'].join(
         '|',
       ),

@@ -326,7 +326,7 @@ describe('live workbench record host', () => {
     });
     expect(host.writes).toHaveBeenCalledOnce();
     expect(workbenchRecords.view.read(host.viewBytes!)).toMatchObject({ status: 'current', record: viewSeed() });
-    expect(screen.getByRole('status')).toHaveTextContent('Restore written.');
+    expect(screen.getByRole('status')).toMatchTextContent('Restore written.');
     host.unmount();
   });
 

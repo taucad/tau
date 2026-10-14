@@ -11,7 +11,7 @@ describe('BrowserStorageStatus', () => {
   ] as const)('should describe %s without presenting a failed save', (status, title) => {
     const check = vi.fn();
     render(<BrowserStorageStatus status={status} onCheckStatus={check} />);
-    expect(screen.getByRole('status')).toHaveTextContent(title);
+    expect(screen.getByRole('status')).toMatchTextContent(title);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Check status' }));
     expect(check).toHaveBeenCalledOnce();

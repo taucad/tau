@@ -193,5 +193,5 @@ it('should preview deterministic replacement text while input streams', () => {
       }}
     />,
   );
-  expect(screen.getByRole('region', { name: 'File operation preview' })).toHaveTextContent('replacement in progress');
+  expect(screen.getByRole('region', { name: 'File operation preview' })).toMatchTextContent('replacement in progress');
 });

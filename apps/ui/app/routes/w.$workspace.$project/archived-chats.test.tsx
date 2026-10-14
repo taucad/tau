@@ -150,7 +150,7 @@ describe('project archived chats', () => {
     expect(currentURL().has('q')).toBe(false);
     expect(currentURL().get('workbench')).toBe('share');
     await user.type(input, 'absent');
-    expect(screen.getByRole('status', { name: '' })).toHaveTextContent('No archived chats match');
+    expect(screen.getByRole('status', { name: '' })).toMatchTextContent('No archived chats match');
   });
 
   it('goes back to the original chat without dropping unrelated query state', async () => {
@@ -266,7 +266,7 @@ describe('project archived chats', () => {
     open('?chat=original&archivedChats=1&q=Design%201');
     await user.click(screen.getByRole('button', { name: 'Delete all' }));
     const dialog = screen.getByRole('alertdialog');
-    expect(dialog).toHaveTextContent('all 2 archived chats in this project');
+    expect(dialog).toMatchTextContent('all 2 archived chats in this project');
     await user.click(within(dialog).getByRole('button', { name: 'Delete all' }));
     await waitFor(() => {
       expect(screen.getByText('No archived chats')).toBeInTheDocument();
@@ -293,7 +293,7 @@ describe('project archived chats', () => {
     open();
     await user.click(screen.getByRole('button', { name: 'Delete all' }));
     await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete all' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not delete 1 archived chat');
+    expect(await screen.findByRole('alert')).toMatchTextContent('Could not delete 1 archived chat');
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Design 2', hidden: true })).toBeInTheDocument();
     fixture.purge.mockImplementation(async (id: string) => {
@@ -319,7 +319,7 @@ describe('project archived chats', () => {
       fixture.error = 'Offline';
       notify();
     });
-    expect(screen.getByRole('alert')).toHaveTextContent('Could not load archived chats');
+    expect(screen.getByRole('alert')).toMatchTextContent('Could not load archived chats');
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(fixture.retry).toHaveBeenCalledOnce();
     act(() => {

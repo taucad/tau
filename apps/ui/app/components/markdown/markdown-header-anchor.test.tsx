@@ -65,7 +65,7 @@ describe('createHeaderAnchor', () => {
 
     const heading = screen.getByRole('heading', { level: 1 });
     expect(heading).toBeInTheDocument();
-    expect(heading).toHaveTextContent('Test Heading');
+    expect(heading).toMatchTextContent('Test Heading');
   });
 
   it('creates an h2 component', () => {

@@ -227,7 +227,7 @@ describe('Jobs workbench', () => {
       cancellationErrors: {},
     });
     render(<JobsPanelBody />);
-    expect(screen.getByRole('alert', { name: 'Jobs unavailable' })).toHaveTextContent(
+    expect(screen.getByRole('alert', { name: 'Jobs unavailable' })).toMatchTextContent(
       'Jobs unavailableSnapshot refresh failed.Retry',
     );
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));

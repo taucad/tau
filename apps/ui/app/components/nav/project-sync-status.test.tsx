@@ -74,10 +74,10 @@ describe('ProjectSyncStatus', () => {
     await user.tab();
     expect(trigger).toHaveFocus();
     await waitFor(() => {
-      expect(screen.getByRole('tooltip')).toHaveTextContent('Bringing this project to your device.');
+      expect(screen.getByRole('tooltip')).toMatchTextContent('Bringing this project to your device.');
     });
     await user.keyboard('{Enter}');
-    expect(screen.getByRole('dialog', { name: 'Project sync status' })).toHaveTextContent('Downloading files…');
+    expect(screen.getByRole('dialog', { name: 'Project sync status' })).toMatchTextContent('Downloading files…');
     await user.keyboard('{Escape}');
     await waitFor(() => {
       expect(trigger).toHaveFocus();

@@ -728,7 +728,7 @@ describe('ChatExplorerTree', () => {
       expect(exportImage).toHaveBeenCalledTimes(2);
     });
     const properties = screen.getByTestId('model-pane-properties');
-    expect(properties).toHaveTextContent('helper_part');
+    expect(properties).toMatchTextContent('helper_part');
     await act(async () => {
       second.resolve([{ name: 'render-part-0.webp', mimeType: 'image/webp', bytes: new Uint8Array([2]) }]);
     });
@@ -1455,7 +1455,7 @@ describe('Chat explorer component rows', () => {
     expect(icon).toHaveStyle({ fill: iconColor });
     expect(screen.queryByTestId('component-color-swatch')).not.toBeInTheDocument();
     expect(rowButton.children[0]).toBe(icon);
-    expect(rowButton.children[1]).toHaveTextContent('sun_gear');
+    expect(rowButton.children[1]).toMatchTextContent('sun_gear');
   });
 
   it('should keep isolate controls active for isolated rows while another row is hovered', () => {

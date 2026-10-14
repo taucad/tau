@@ -38,7 +38,7 @@ describe('GithubConnectionCompleteRoute', () => {
   it('should explain a callback failure and offer a way back instead of waiting', () => {
     renderAt('/github/complete?error=GITHUB_CONSENT_DENIED&attempt=attempt-1&returnTo=%2Fw%2Fhome%2Fpart');
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
+    expect(screen.getByRole('alert')).toMatchTextContent(
       'GitHub access was not granted. Connect GitHub again to continue.',
     );
     expect(screen.getByRole('link', { name: 'Back to Tau' })).toHaveAttribute('href', '/w/home/part');
@@ -81,7 +81,7 @@ describe('GithubConnectionCompleteRoute', () => {
     globalThis.sessionStorage.setItem('tau:github-connect-return', '/w/home/part');
     renderAt('/github/complete?error=GITHUB_CALLBACK_EXPIRED');
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
+    expect(screen.getByRole('alert')).toMatchTextContent(
       'The GitHub sign-in took too long or was already used. Connect GitHub again.',
     );
     await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub again' }));
@@ -106,7 +106,7 @@ describe('GithubConnectionCompleteRoute', () => {
   it('should leave a desktop attempt to the desktop app', () => {
     renderAt('/github/complete?error=GITHUB_CALLBACK_EXPIRED&attempt=attempt-1&returnTo=%2Fimport&mode=desktop-poll');
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Return to the Tau desktop app to try again.');
+    expect(screen.getByRole('alert')).toMatchTextContent('Return to the Tau desktop app to try again.');
     expect(screen.queryByRole('button', { name: 'Connect GitHub again' })).not.toBeInTheDocument();
   });
 

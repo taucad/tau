@@ -174,7 +174,7 @@ it('should deliver a reply through the retained active session without a sidebar
       });
     });
     await vi.waitFor(() => {
-      expect(screen.getByTestId('transcript')).toHaveTextContent('hi|Unique mounted reply');
+      expect(screen.getByTestId('transcript')).toMatchTextContent('hi|Unique mounted reply');
     });
     expect(current.get('mounted')?.chat).toBe(session.chat);
     expect(hostCommand).toHaveBeenCalledTimes(1);
@@ -338,7 +338,7 @@ it('should publish the first held live reasoning chunk through the actual SDK be
       });
     });
     await vi.waitFor(() => {
-      expect(screen.getByTestId('transcript')).toHaveTextContent('hiUnique mounted held reasoning');
+      expect(screen.getByTestId('transcript')).toMatchTextContent('hiUnique mounted held reasoning');
     });
     const presentation = current.getMessagePresentation('mounted');
     expect([...presentation.messagesById.values()].flatMap((entry) => entry.parts)).toContainEqual(

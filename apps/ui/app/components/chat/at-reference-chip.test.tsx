@@ -183,7 +183,7 @@ describe('AtReferenceChip', () => {
     );
 
     expect(container.querySelector('svg')).not.toBeInTheDocument();
-    expect(container).toHaveTextContent('$5');
+    expect(container).toMatchTextContent('$5');
   });
 
   it('should render fallback mark when neither data attribute is present', () => {

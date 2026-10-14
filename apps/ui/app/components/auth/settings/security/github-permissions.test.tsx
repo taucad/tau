@@ -24,7 +24,7 @@ describe('GithubPermissions (R9)', () => {
 
     render(<GithubPermissions />);
 
-    expect(screen.getByRole('region', { name: 'GitHub permissions' })).toHaveTextContent('Sign-in and Gist access');
+    expect(screen.getByRole('region', { name: 'GitHub permissions' })).toMatchTextContent('Sign-in and Gist access');
     expect(screen.getByRole('link', { name: 'Review GitHub permissions' })).toHaveAttribute(
       'href',
       'https://github.com/settings/applications',

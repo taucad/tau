@@ -107,21 +107,21 @@ describe('WorkbenchToggle', () => {
     workbench.setPanels(panels);
     expect(commit).not.toHaveBeenCalled();
     workbench.setPanels([...panels, createPanel('two')]);
-    expect(screen.getByRole('button', { name: 'Toggle Workbench lane' })).toHaveTextContent('2');
+    expect(screen.getByRole('button', { name: 'Toggle Workbench lane' })).toMatchTextContent('2');
   });
 
   it('should count workbench tabs while closed and follow panel changes', () => {
     const workbench = createApi(Array.from({ length: 12 }, (_, index) => createPanel(`tab-${index}`)));
     const { trigger } = renderToggle({ api: workbench.api });
     expect(trigger).toHaveAttribute('aria-pressed', 'false');
-    expect(trigger).toHaveTextContent('9+');
+    expect(trigger).toMatchTextContent('9+');
     expect(trigger).toHaveAttribute('aria-description', '12 open tabs. Press Down Arrow to list them.');
 
     workbench.setPanels([createPanel('one'), createPanel('two')]);
-    expect(trigger).toHaveTextContent('2');
+    expect(trigger).toMatchTextContent('2');
 
     workbench.setPanels([]);
-    expect(trigger).toHaveTextContent('');
+    expect(trigger).toMatchTextContent('');
     fireEvent.pointerEnter(trigger, { pointerType: 'mouse' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -129,7 +129,7 @@ describe('WorkbenchToggle', () => {
   it('should only toggle while open: split glyph, no count and no hover list', () => {
     const { trigger, onOpenChange } = renderToggle({ isOpen: true, api: createApi([createPanel('one')]).api });
     expect(trigger).toHaveAttribute('aria-pressed', 'true');
-    expect(trigger).toHaveTextContent('');
+    expect(trigger).toMatchTextContent('');
     expect(trigger).not.toHaveAttribute('aria-description');
     fireEvent.pointerEnter(trigger, { pointerType: 'mouse' });
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
@@ -147,9 +147,9 @@ describe('WorkbenchToggle', () => {
     expect(screen.getByRole('button', { name: 'Editor' })).toHaveFocus();
     const rows = within(menu).getAllByRole('option');
     // The pane chevron's menu: title only, the active tab checked.
-    expect(rows[0]).toHaveTextContent(/^main.txt$/);
+    expect(rows[0]).toMatchTextContent(/^main.txt$/);
     expect(within(rows[0]!).getByLabelText('Active tab')).toBeInTheDocument();
-    expect(rows[1]).toHaveTextContent(/^main.txt$/);
+    expect(rows[1]).toMatchTextContent(/^main.txt$/);
     fireEvent.click(rows[1]!);
     expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(true);
     expect(second.api.setActive).toHaveBeenCalledOnce();
@@ -165,7 +165,7 @@ describe('WorkbenchToggle', () => {
     });
     const menu = hover(screen.getByRole('button', { name: 'Toggle Workbench lane' }));
     expect(within(menu).getByLabelText('Parameters icon')).toBeInTheDocument();
-    expect(within(menu).getAllByRole('option')[1]).toHaveTextContent(/^main.py$/);
+    expect(within(menu).getAllByRole('option')[1]).toMatchTextContent(/^main.py$/);
   });
 
   it('should toggle the lane on click and close a hover-opened list until the pointer returns', () => {

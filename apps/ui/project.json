@@ -280,6 +280,14 @@
         "cwd": "{projectRoot}"
       }
     },
+    "test": {
+      "options": {
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=6144"
+        },
+        "maxWorkers": 1
+      }
+    },
     "typecheck": {
       "dependsOn": ["typegen"]
     },
@@ -304,7 +312,8 @@
           "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts"
+          "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config app/lib/dom-text-matchers.vitest.browser.config.ts"
         ],
         "parallel": false
       }

@@ -333,7 +333,7 @@ describe('MonitorStage', () => {
 
       const alerts = screen.getByRole('alert', { name: 'Printer alerts' });
       const [first, second, third, fourth] = within(alerts).getAllByRole('listitem');
-      expect(first).toHaveTextContent(
+      expect(first).toMatchTextContent(
         "Fatal: The printer's motion controller reported a fatal error.0300-0100-0001-0007Look up 0300-0100-0001-0007",
       );
       expect(within(first!).getByRole('link', { name: `Look up ${fatal.code}` })).toHaveAttribute(
@@ -344,11 +344,11 @@ describe('MonitorStage', () => {
         'target',
         '_blank',
       );
-      expect(second).toHaveTextContent(/^Warning: The printer's camera and AI inspection raised a warning\./u);
+      expect(second).toMatchTextContent(/^Warning: The printer's camera and AI inspection raised a warning\./u);
       /* A print error has no severity and no help page. */
-      expect(third).toHaveTextContent("The printer's motion controller reported a print error.0300-400C");
+      expect(third).toMatchTextContent("The printer's motion controller reported a print error.0300-400C");
       expect(within(third!).queryByRole('link')).not.toBeInTheDocument();
-      expect(fourth).toHaveTextContent('Notice: The printer reported an alert.0500-0400-0004-0001');
+      expect(fourth).toMatchTextContent('Notice: The printer reported an alert.0500-0400-0004-0001');
     });
 
     it('should name a single alert and link only an https help page', () => {
@@ -357,7 +357,7 @@ describe('MonitorStage', () => {
       );
 
       const alert = screen.getByRole('alert', { name: 'Printer alert' });
-      expect(alert).toHaveTextContent(warning.message!);
+      expect(alert).toMatchTextContent(warning.message!);
       expect(within(alert).queryByRole('link')).not.toBeInTheDocument();
     });
 
@@ -386,7 +386,7 @@ describe('MonitorStage', () => {
 
       await user.click(screen.getByRole('button', { name: 'Capture still' }));
 
-      expect(await screen.findByRole('alert')).toHaveTextContent(
+      expect(await screen.findByRole('alert')).toMatchTextContent(
         'Tau could not find ffmpeg, which capturing a still needs; install it (with Homebrew on macOS: brew install ffmpeg; on Windows: winget install ffmpeg), then capture again.',
       );
       expect(screen.queryByText(/MACHINE_STILL/u)).not.toBeInTheDocument();
@@ -418,7 +418,7 @@ describe('ControlCenterStage', () => {
       <ControlCenterStage client={mock<MachineClient>()} entry={printing()} manifest={qualified} apply={apply} />,
     );
     expect(screen.getByRole('switch', { name: 'Chamber light' })).toBeChecked();
-    expect(screen.getByRole('button', { name: /^Control center/u })).toHaveTextContent('Light on');
+    expect(screen.getByRole('button', { name: /^Control center/u })).toMatchTextContent('Light on');
   });
 
   it('should go back to the observed light and say why when the host refuses', async () => {
@@ -430,7 +430,7 @@ describe('ControlCenterStage', () => {
 
     await user.click(screen.getByRole('switch', { name: 'Chamber light' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
+    expect(await screen.findByRole('alert')).toMatchTextContent(
       'That action is not qualified on this printer yet, so nothing was sent.',
     );
     expect(screen.getByRole('switch', { name: 'Chamber light' })).toBeChecked();
@@ -495,14 +495,14 @@ describe('MaterialSlots', () => {
       />,
     );
     const slots = screen.getByRole('list', { name: 'Material slots' });
-    expect(within(slots).getAllByRole('listitem')[0]).toHaveTextContent('A1pla-blackIn use80 %');
+    expect(within(slots).getAllByRole('listitem')[0]).toMatchTextContent('A1pla-blackIn use80 %');
 
     await user.click(within(slots).getByRole('button', { name: /^A2/u }));
     const slot = screen.getByRole('group', { name: 'Slot A2' });
     expect(within(slot).getByRole('button', { name: 'All slots' })).toHaveFocus();
     await user.click(within(slot).getByRole('button', { name: 'Load into toolhead' }));
     const dialog = within(slot).getByRole('alertdialog', { name: 'Confirm load into toolhead' });
-    expect(dialog).toHaveTextContent(
+    expect(dialog).toMatchTextContent(
       'Load A2 (petg-grey) into the toolhead? The nozzle heats for petg-grey and A1 goes back first.',
     );
     expect(apply).not.toHaveBeenCalled();
@@ -511,7 +511,7 @@ describe('MaterialSlots', () => {
     expect(apply).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ machineId: 'machine-1', action: 'material.load', parameters: { slot: 1 } }),
     );
-    expect(await within(slot).findByRole('status')).toHaveTextContent('Waiting for Workshop X1C to confirm the load…');
+    expect(await within(slot).findByRole('status')).toMatchTextContent('Waiting for Workshop X1C to confirm the load…');
     await user.click(within(slot).getByRole('button', { name: 'All slots' }));
     expect(
       within(screen.getByRole('list', { name: 'Material slots' })).getByRole('button', { name: /^A2/u }),
@@ -556,9 +556,9 @@ describe('MaterialSlots', () => {
       </>,
     );
     const card = screen.getByRole('region', { name: 'Filament change' });
-    expect(within(card).getByRole('status')).toHaveTextContent('Feeding Ext · petg-white…');
-    expect(card).toHaveTextContent('Waiting for filament');
-    expect(card).toHaveTextContent("then confirm on the printer's screen");
+    expect(within(card).getByRole('status')).toMatchTextContent('Feeding Ext · petg-white…');
+    expect(card).toMatchTextContent('Waiting for filament');
+    expect(card).toMatchTextContent("then confirm on the printer's screen");
     expect(within(card).queryByRole('button', { name: 'Done' })).not.toBeInTheDocument();
 
     // The slot itself waits for the change the card shows.
@@ -587,8 +587,8 @@ describe('MaterialSlots', () => {
     ]);
     expect(steps[1]).toHaveAttribute('aria-current', 'step');
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
-    expect(screen.getByRole('status')).toHaveTextContent('Workshop X1C waits for you to push the filament in.');
-    expect(screen.getByRole('region', { name: 'Filament change' })).toHaveTextContent(
+    expect(screen.getByRole('status')).toMatchTextContent('Workshop X1C waits for you to push the filament in.');
+    expect(screen.getByRole('region', { name: 'Filament change' })).toMatchTextContent(
       'Push the petg-white into the toolhead until the extruder grips it; Workshop X1C carries on by itself.',
     );
     expect(screen.queryByRole('button', { name: 'Done' })).not.toBeInTheDocument();
@@ -603,7 +603,7 @@ describe('MaterialSlots', () => {
       }),
     );
     // Answered: the same prompt is not offered again while the printer moves on.
-    expect(within(check).getByRole('status')).toHaveTextContent('Waiting for Workshop X1C to continue…');
+    expect(within(check).getByRole('status')).toMatchTextContent('Waiting for Workshop X1C to continue…');
     expect(within(check).queryByRole('button', { name: 'Done' })).not.toBeInTheDocument();
 
     rerender(card(externalLoad('confirm', { kind: 'confirmation', promptId: 'prompt-3' })));
@@ -645,7 +645,7 @@ describe('MaterialSlots', () => {
         isStale={false}
       />,
     );
-    expect(screen.getByRole('button', { name: /^Ext/u })).toHaveTextContent('Not set');
+    expect(screen.getByRole('button', { name: /^Ext/u })).toMatchTextContent('Not set');
 
     await user.click(screen.getByRole('button', { name: /^Ext/u }));
     expect(screen.queryByRole('button', { name: 'Feed into toolhead' })).not.toBeInTheDocument();
@@ -654,7 +654,7 @@ describe('MaterialSlots', () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Set material' }));
     const form = screen.getByRole('form', { name: 'Set the material in Ext' });
-    expect(within(form).getByRole('combobox', { name: 'Material' })).toHaveTextContent('Generic PLA');
+    expect(within(form).getByRole('combobox', { name: 'Material' })).toMatchTextContent('Generic PLA');
     await user.click(within(form).getByRole('combobox', { name: 'Material' }));
     await user.click(screen.getByRole('option', { name: 'Generic PETG' }));
     await user.click(within(form).getByRole('button', { name: 'Save' }));
@@ -666,7 +666,7 @@ describe('MaterialSlots', () => {
         parameters: { slot: 254, profile: 'GFG99', color: '#FFFFFF' },
       }),
     );
-    expect(await screen.findByRole('status')).toHaveTextContent('Waiting for Workshop X1C to confirm the material…');
+    expect(await screen.findByRole('status')).toMatchTextContent('Waiting for Workshop X1C to confirm the material…');
   });
 
   it('should keep the material of a spool whose tag the AMS read', async () => {

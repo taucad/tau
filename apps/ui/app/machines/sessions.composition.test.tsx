@@ -1162,7 +1162,7 @@ describe('sessions composition', () => {
 
     /* W2: an unresolved slug is the `resolving` state, and its loader lives in
      * the notice the real route component renders below the outlet. */
-    expect(screen.getByTestId('route-state')).toHaveTextContent('resolving');
+    expect(screen.getByTestId('route-state')).toMatchTextContent('resolving');
     expect(projectProviderInputs).not.toContainEqual({
       projectId: 'route-chat-a',
       requestedChatId: 'chat-new',
@@ -1651,7 +1651,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
         await Promise.resolve();
       });
       await settle();
-      expect(view.getByRole('status')).toHaveTextContent('Workbench records could not be saved.');
+      expect(view.getByRole('status')).toMatchTextContent('Workbench records could not be saved.');
       expect(freshActor.getSnapshot().matches('ready')).toBe(true);
       expect(answers).toEqual([]);
       bytes = valid;

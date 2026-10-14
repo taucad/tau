@@ -453,7 +453,7 @@ describe('ChatMessage use_skill tool rendering', () => {
 
     render(<ChatMessage messageId='msg-1' />);
 
-    expect(screen.getByTestId('chat-message-tool-use-skill')).toHaveTextContent('woodworking');
+    expect(screen.getByTestId('chat-message-tool-use-skill')).toMatchTextContent('woodworking');
     expect(screen.queryByTestId('tool-unknown')).toBeNull();
   });
 });
@@ -486,8 +486,8 @@ describe('ChatMessage activity composition', () => {
     for (const block of reasoningBlocks) {
       expect(group).toContainElement(block);
     }
-    expect(reasoningBlocks[0]).toHaveTextContent('Inspecting the model|Confirming dimensions');
-    expect(reasoningBlocks[1]).toHaveTextContent('Preparing the answer');
+    expect(reasoningBlocks[0]).toMatchTextContent('Inspecting the model|Confirming dimensions');
+    expect(reasoningBlocks[1]).toMatchTextContent('Preparing the answer');
     expect(group).toHaveAttribute('data-summary', 'Reading files');
   });
 
@@ -606,8 +606,8 @@ describe('ChatMessage source part rendering', () => {
 
     render(<ChatMessage messageId='msg-source-document' />);
 
-    expect(screen.getByRole('article')).toHaveTextContent('Design brief');
-    expect(screen.getByRole('article')).toHaveTextContent('brief.pdf');
+    expect(screen.getByRole('article')).toMatchTextContent('Design brief');
+    expect(screen.getByRole('article')).toMatchTextContent('brief.pdf');
   });
 });
 
@@ -684,8 +684,8 @@ describe('ChatMessage ACP session state', () => {
 
     render(<ChatMessage messageId='msg-acp-plan' />);
 
-    expect(screen.getByRole('region', { name: 'Agent plan' })).toHaveTextContent('Inspect the model');
-    expect(screen.getByRole('region', { name: 'Agent plan' })).toHaveTextContent('Validate the kernel');
+    expect(screen.getByRole('region', { name: 'Agent plan' })).toMatchTextContent('Inspect the model');
+    expect(screen.getByRole('region', { name: 'Agent plan' })).toMatchTextContent('Validate the kernel');
     expect(screen.getAllByRole('checkbox')).toHaveLength(2);
     expect(screen.getAllByRole('checkbox')[0]).toBeChecked();
     expect(screen.getByText('in progress')).toBeInTheDocument();
@@ -716,7 +716,7 @@ describe('ChatMessage ACP session state', () => {
 
     expect(screen.queryByRole('link')).toBeNull();
     // oxlint-disable-next-line eslint/no-script-url -- Assertion names the malicious fixture literally.
-    expect(screen.getByRole('region', { name: 'Agent plan' })).toHaveTextContent('javascript:alert(1)');
+    expect(screen.getByRole('region', { name: 'Agent plan' })).toMatchTextContent('javascript:alert(1)');
     expect(screen.getByRole('region', { name: 'Agent plan' }).textContent).not.toContain('\u202E');
   });
 });
@@ -763,7 +763,7 @@ describe('ChatMessage external Tau MCP porcelain', () => {
 
       expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-summary', 'Read files');
       expect(screen.getByText('Arranged')).toBeVisible();
-      expect(screen.getByRole('status')).toHaveTextContent('Written');
+      expect(screen.getByRole('status')).toMatchTextContent('Written');
       expect(screen.queryByRole('button', { name: 'Restore previous layout' })).toBeNull();
       const header = screen.getByRole('button', { name: /Arranged 1 view/u });
       expect(header).toHaveAttribute('aria-expanded', 'false');
@@ -837,7 +837,7 @@ describe('ChatMessage external Tau MCP porcelain', () => {
       };
       setMessages([message]);
       rendered.rerender(<ChatMessage key='interrupted' messageId={message.id} />);
-      expect(screen.getByRole('alert')).toHaveTextContent('outcome is unconfirmed');
+      expect(screen.getByRole('alert')).toMatchTextContent('outcome is unconfirmed');
       expect(screen.queryByTestId('chat-activity-group')).toBeNull();
     },
   );
@@ -951,7 +951,7 @@ describe('ChatMessage slash command rendering', () => {
 
     render(<ChatMessage messageId='msg-1' />);
 
-    expect(screen.getByRole('article')).toHaveTextContent('Please do /plan later');
+    expect(screen.getByRole('article')).toMatchTextContent('Please do /plan later');
     expect(screen.queryByTestId('context-chip')).toBeNull();
   });
 
@@ -960,7 +960,7 @@ describe('ChatMessage slash command rendering', () => {
 
     render(<ChatMessage messageId='msg-1' />);
 
-    expect(screen.getByRole('article')).toHaveTextContent('Please do /nonsense later');
+    expect(screen.getByRole('article')).toMatchTextContent('Please do /nonsense later');
     expect(screen.queryByTestId('context-chip')).toBeNull();
   });
 });

@@ -50,7 +50,7 @@ describe('chat streaming fade', () => {
       </MarkdownViewerChat>,
     );
     expect(fadingText(view.container)).toEqual([]);
-    expect(view.container).toHaveTextContent(`${initial} first second`);
+    expect(view.container).toMatchTextContent(`${initial} first second`);
   });
 
   it('should support rolling reasoning windows without replaying retained text', () => {
@@ -67,7 +67,7 @@ describe('chat streaming fade', () => {
     );
 
     expect(fadingText(view.container)).toEqual([' new']);
-    expect(view.container).toHaveTextContent('stable tail new');
+    expect(view.container).toMatchTextContent('stable tail new');
   });
 
   it('should fade only new text after an equal-length rolling replacement', () => {
@@ -84,7 +84,7 @@ describe('chat streaming fade', () => {
     );
 
     expect(fadingText(view.container)).toEqual([' Delta']);
-    expect(view.container).toHaveTextContent('Beta Gamma Delta');
+    expect(view.container).toMatchTextContent('Beta Gamma Delta');
   });
 
   it('should preserve repeated and partial words while fading only their continuation', () => {
@@ -123,7 +123,7 @@ describe('chat streaming fade', () => {
     );
 
     expect(fadingText(view.container)).toEqual(['👩‍💻 é 好']);
-    expect(view.container).toHaveTextContent('Ready 👩‍💻 é 好');
+    expect(view.container).toMatchTextContent('Ready 👩‍💻 é 好');
   });
 
   it('should leave code tokens stable while adjacent prose fades', () => {
@@ -229,10 +229,10 @@ describe('chat streaming fade', () => {
       </StrictMode>,
     );
 
-    expect(view.container.querySelector('[data-streamdown="strong"]')).toHaveTextContent('Bold');
+    expect(view.container.querySelector('[data-streamdown="strong"]')).toMatchTextContent('Bold');
     expect(view.container.querySelector('a')).toHaveAttribute('href', 'https://example.com/');
     expect(view.container.querySelectorAll('li')).toHaveLength(2);
     expect(fadingText(view.container).join('')).not.toContain('Bold');
-    expect(view.container).toHaveTextContent('Bold and link');
+    expect(view.container).toMatchTextContent('Bold and link');
   });
 });

@@ -1,13 +1,15 @@
-import { expectTypeOf } from 'vitest';
+import { expectTypeOf, it } from 'vitest';
 import type { ExpandPluginKernels } from '@taucad/runtime/plugin';
 
 import { plugin, opencascade } from '#index.js';
 import type { opencascadeKernel } from '#index.js';
 
-const selected = plugin();
+it('preserves the complete opencascade.plugin type contracts', () => {
+  const selected = plugin();
 
-expectTypeOf<ExpandPluginKernels<readonly [typeof selected]>>().toEqualTypeOf<
-  readonly [ReturnType<typeof opencascadeKernel>]
->();
+  expectTypeOf<ExpandPluginKernels<readonly [typeof selected]>>().toEqualTypeOf<
+    readonly [ReturnType<typeof opencascadeKernel>]
+  >();
 
-expectTypeOf(opencascade).toEqualTypeOf(plugin);
+  expectTypeOf(opencascade).toEqualTypeOf(plugin);
+});

@@ -120,6 +120,40 @@ describe('saved catalog preview producer', () => {
     client.clear();
   });
 
+  it.each(['account', 'project', 'disconnect'] as const)(
+    'should discard a pending capture after its %s scope changes',
+    async (change) => {
+      vi.mocked(useRevisionSessionUser).mockReturnValue({ id: 'owner', name: 'Owner' });
+      vi.mocked(useProjectThumbnail).mockReturnValue({
+        url: undefined,
+        status: 'ready',
+        error: undefined,
+        refresh: vi.fn(),
+      });
+      const bitmap = vi.fn();
+      vi.stubGlobal('createImageBitmap', bitmap);
+      const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+      const { result, rerender, unmount } = renderHook((props) => usePublishCloudProjectPreview(props), {
+        initialProps: { projectId: 'project', enabled: false, captureEnabled: true },
+        wrapper: ({ children }) => createElement(QueryClientProvider, { client }, children),
+      });
+      act(() => {
+        result.current(new Uint8Array([1]));
+      });
+      if (change === 'account') {
+        vi.mocked(useRevisionSessionUser).mockReturnValue({ id: 'other', name: 'Other' });
+      }
+      const projectId = change === 'project' ? 'other-project' : 'project';
+      rerender({ projectId, enabled: false, captureEnabled: change !== 'disconnect' });
+      await act(async () => {
+        rerender({ projectId, enabled: true, captureEnabled: true });
+      });
+      expect(bitmap).not.toHaveBeenCalled();
+      unmount();
+      client.clear();
+    },
+  );
+
   it('should release the bitmap and refuse oversized derivatives without uploading', async () => {
     const close = vi.fn();
     vi.stubGlobal(

@@ -443,7 +443,7 @@ export const useTauCloudIntentConnection = ({
     intent === 'open' && !canOpenCloudProject(projectId) ? 'wait' : nextTauCloudStep(intent, eligibility, status);
   const { connectRemote } = commands;
   useEffect(() => {
-    if (tauCloudIntent.get(projectId) !== intent) {
+    if (getRevisionSessionUser()?.id !== account || tauCloudIntent.get(projectId) !== intent) {
       return;
     }
     switch (step) {

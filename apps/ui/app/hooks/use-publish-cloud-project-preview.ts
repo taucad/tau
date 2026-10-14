@@ -80,18 +80,24 @@ export const usePublishCloudProjectPreview = ({
   const queryClient = useQueryClient();
   const capture = useRef<AbortController | undefined>(undefined);
   const pendingCapture = useRef<Uint8Array<ArrayBuffer> | undefined>(undefined);
+  const previousScope = useRef({ projectId, userId, captureEnabled, enabled });
+  useEffect(() => {
+    const previous = previousScope.current;
+    const identityChanged = previous.projectId !== projectId || previous.userId !== userId;
+    if (identityChanged || previous.captureEnabled !== captureEnabled) {
+      pendingCapture.current = undefined;
+    }
+    if (identityChanged || previous.captureEnabled !== captureEnabled || previous.enabled !== enabled) {
+      capture.current?.abort();
+    }
+    previousScope.current = { projectId, userId, captureEnabled, enabled };
+  }, [captureEnabled, enabled, projectId, userId]);
   useEffect(
     () => () => {
       pendingCapture.current = undefined;
       capture.current?.abort();
     },
-    [captureEnabled, projectId, userId],
-  );
-  useEffect(
-    () => () => {
-      capture.current?.abort();
-    },
-    [enabled, projectId, userId],
+    [],
   );
   const { mutate } = useMutation({
     mutationFn: publishCloudProjectPreview,

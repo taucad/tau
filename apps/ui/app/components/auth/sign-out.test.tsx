@@ -36,6 +36,7 @@ describe('SignOut', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     Cookies.remove('tau-entry', { path: '/' });
@@ -60,18 +61,19 @@ describe('SignOut', () => {
 
 describe('SignOut entry routing', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     Cookies.remove('tau-entry', { path: '/' });
   });
-  it('should clear app preference only after successful web logout and reload bare root', () => {
+  it('should record website intent only after successful web logout and reload bare root', () => {
     Cookies.set('tau-entry', 'app', { path: '/' });
     vi.stubGlobal('location', { replace: replaceLocation });
     replaceLocation.mockClear();
     render(<SignOut />);
     expect(Cookies.get('tau-entry')).toBe('app');
     callbacks.onSuccess();
-    expect(Cookies.get('tau-entry')).toBeUndefined();
+    expect(Cookies.get('tau-entry')).toBe('website');
     expect(replaceLocation).toHaveBeenCalledWith('/');
   });
   it('should keep app preference when logout fails', () => {
@@ -82,6 +84,14 @@ describe('SignOut entry routing', () => {
     callbacks.onError(new Error('Session service unavailable'));
     expect(Cookies.get('tau-entry')).toBe('app');
     expect(replaceLocation).not.toHaveBeenCalled();
+  });
+  it('should keep logout on the website when preference storage is blocked', () => {
+    vi.stubGlobal('location', { replace: replaceLocation });
+    vi.spyOn(document, 'cookie', 'set').mockImplementation(() => undefined);
+    replaceLocation.mockClear();
+    render(<SignOut />);
+    callbacks.onSuccess();
+    expect(replaceLocation).toHaveBeenCalledWith('/?website=1');
   });
   it('should preserve the desktop navigation contract', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');

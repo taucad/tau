@@ -159,7 +159,7 @@ await test('should honor website choice, stale app responses, subpages and unkno
     assert.equal(view.classes.size, 0);
   }
 });
-await test('should not override a website choice made while session resolution is pending', async () => {
+await test('should not override website or successful logout intent with a late session response', async () => {
   const view = harness();
   view.document.cookie = 'tau-entry=website';
   await view.resolve({ session: {}, user: {} });

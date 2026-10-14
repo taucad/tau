@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { Spinner } from '#components/ui/spinner.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useCloudFinancialPurge } from '#cloud/financial-purge.js';
-import { clearEntryPreference } from '#lib/entry-preference.js';
+import { setEntryPreference } from '#lib/entry-preference.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { authErrorMessage } from '#utils/auth-error.utils.js';
 
@@ -34,8 +34,8 @@ export function SignOut({ className }: SignOutProps): React.JSX.Element {
     },
     onSuccess: () => {
       if (!isDesktopTarget()) {
-        clearEntryPreference();
-        globalThis.location.replace('/');
+        const prefersWebsite = setEntryPreference('website');
+        globalThis.location.replace(prefersWebsite ? '/' : '/?website=1');
         return;
       }
       navigate({

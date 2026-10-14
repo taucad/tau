@@ -15,14 +15,6 @@ export const setEntryPreference = (preference: 'app' | 'website'): boolean => {
   }
 };
 
-export const clearEntryPreference = (): void => {
-  try {
-    Cookies.remove('tau-entry', { path: '/' });
-  } catch {
-    // Storage restrictions must not prevent successful sign-out.
-  }
-};
-
 export const hasWebsitePreference = (): boolean => {
   try {
     return Cookies.get('tau-entry') === 'website';

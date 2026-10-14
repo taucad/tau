@@ -80,9 +80,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$SPIKE_TAG" -f sha="$GITHUB_SHA" --jq .ref
 
+  # S20 is the macOS producer and gate, so a run Dependabot triggered (an Actions bump to
+  # this file) skips `plan`, the producer and the dry run rather than request a macOS
+  # runner from the shared pool. A maintainer's push or re-run runs them.
   plan:
     name: Plan release artifact prerequisites
-    if: github.event_name == 'pull_request' || inputs.gate
+    if: >-
+      (github.event_name == 'pull_request' && github.triggering_actor != 'dependabot[bot]') ||
+      (github.event_name == 'workflow_dispatch' && inputs.gate)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -177,7 +182,9 @@ jobs:
   dry-run:
     name: Dry-run the publish (ubuntu-latest)
     needs: [throwaway-tag, plan, geospec-producer]
-    if: ${{ !cancelled() && needs.throwaway-tag.result != 'failure' }}
+    if: >-
+      !cancelled() && needs.throwaway-tag.result != 'failure' &&
+      (github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -300,7 +307,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15]
+        os: >-
+          ${{ github.event_name == 'pull_request' && github.triggering_actor == 'dependabot[bot]'
+          && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-15"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:

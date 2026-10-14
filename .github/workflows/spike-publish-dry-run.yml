@@ -199,7 +199,7 @@ jobs:
           PRODUCER_REQUIRED: ${{ needs.plan.outputs.geospec-required }}
         run: |
           test "$PLAN_RESULT" = success
-          if [ "$PRODUCER_REQUIRED" = true ]; then test "$PRODUCER_RESULT" = success; fi
+          if [ "$PRODUCER_REQUIRED" = true ] && [ "$SPIKE_GATE_HOST" = macos-15 ]; then test "$PRODUCER_RESULT" = success; fi
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

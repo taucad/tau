@@ -195,7 +195,8 @@ try {
       assert.equal(await page.locator('canvas').count(), 0, 'Client navigation removes the live renderer');
       await page.getByRole('link', { name: 'Tau home' }).first().click();
       await page.waitForURL(`${origin}/`);
-      await page.getByRole('button', { name: 'Explore in 3D' }).click();
+      // Scroll restoration may already activate the scene before the hero returns into view.
+      await page.locator('[data-hero-stage]').click({ position: { x: 10, y: 10 } });
       await page.waitForFunction(() => document.querySelector('[data-hero-stage]')?.classList.contains('is-live'));
       assert.equal(await page.locator('canvas').count(), 1, 'Returning home creates exactly one renderer');
     }

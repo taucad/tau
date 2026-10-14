@@ -79,6 +79,7 @@ export type NativeProcessSessionOptions<Issue> = {
   readonly protocolVersion: number;
   readonly parseReady: (value: unknown) => void;
   readonly parseResponse: (value: unknown) => NativeProtocolResponse<Issue>;
+  /** Milliseconds. Zero lets requests run until completion or cancellation. */
   readonly requestTimeout: number;
   readonly maxArtifactBytes: number;
   /** Maximum UTF-8 bytes per worker response/event line; positive safe integer, default 1 MiB. */
@@ -492,7 +493,7 @@ export class NativeProcessSession<Issue> {
     });
     const handshakeTimer = setTimeout(() => {
       this.requestTermination(new Error(`${this.options.sessionName} handshake timed out.`));
-    }, this.options.requestTimeout);
+    }, this.options.requestTimeout || 120_000);
     handshakeTimer.unref();
     try {
       await this.ready;
@@ -508,10 +509,13 @@ export class NativeProcessSession<Issue> {
     }
     const requestId = `${String(this.generation)}:${String(++this.requestSequence)}`;
     return new Promise<Result>((resolve, reject) => {
-      const requestTimer = setTimeout(() => {
-        this.requestTermination(new Error(`${this.options.sessionName} ${request.method} request timed out.`));
-      }, this.options.requestTimeout);
-      requestTimer.unref();
+      const requestTimer =
+        this.options.requestTimeout > 0
+          ? setTimeout(() => {
+              this.requestTermination(new Error(`${this.options.sessionName} ${request.method} request timed out.`));
+            }, this.options.requestTimeout)
+          : undefined;
+      requestTimer?.unref();
       const abort = (): void => {
         if (request.cancelMethod !== undefined && child.stdin.writable) {
           // Cooperative stop: the worker answers this request itself and keeps its resident prefix.

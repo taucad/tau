@@ -96,50 +96,6 @@ describe('Build123d workspace mirror', () => {
     await expect(projection.sync(racing)).rejects.toThrow(/changed while mirroring/);
   });
 
-  it('enforces depth, per-file, aggregate, and entry limits', async () => {
-    const projection = await mirror();
-    const deep = createMockFileSystem();
-    mockListing(
-      deep,
-      (directory) => [directory ? 'next' : 'root'],
-      () => ({ type: 'dir', size: 0, mtimeMs: 0 }),
-    );
-    await expect(projection.sync(deep)).rejects.toThrow(/directory levels/);
-
-    const oversized = createMockFileSystem();
-    mockListing(
-      oversized,
-      () => ['huge.py'],
-      () => ({ type: 'file', size: 32 * 1024 * 1024 + 1, mtimeMs: 0 }),
-    );
-    await expect(projection.sync(oversized)).rejects.toThrow(/size limits/);
-
-    const aggregateNames = Array.from({ length: 17 }, (_, index) => `${String(index)}.bin`);
-    const aggregate = createMockFileSystem();
-    mockListing(
-      aggregate,
-      () => aggregateNames,
-      () => ({ type: 'file', size: 32 * 1024 * 1024, mtimeMs: 0 }),
-    );
-    await expect(projection.sync(aggregate)).rejects.toThrow(/size limits/);
-
-    const entries = createMockFileSystem();
-    mockListing(
-      entries,
-      () => Array.from({ length: 10_001 }, (_, index) => `${String(index)}.pyc`),
-      () => ({ type: 'file', size: 0, mtimeMs: 0 }),
-    );
-    // Bytecode is excluded before it consumes the entry quota.
-    await expect(projection.sync(entries)).resolves.toEqual([]);
-
-    mockListing(
-      entries,
-      () => Array.from({ length: 10_001 }, (_, index) => `${String(index)}.py`),
-      () => ({ type: 'file', size: 0, mtimeMs: 0 }),
-    );
-    await expect(projection.sync(entries)).rejects.toThrow(/size limits/);
-  });
-
   it('rejects non-rooted directory entries', async () => {
     const projection = await mirror();
     const filesystem = createMockFileSystem();

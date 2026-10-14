@@ -202,8 +202,8 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     private long normalLayouts;
     private long uvLayouts;
     private long materialProjections;
-    // This bounds owned source arrays, separately from the final artifact and material limits.
-    private const long MaximumOwnedGeometryBytes = 256L * 1024 * 1024;
+    // Cache admission bounds retained reuse; live scene geometry follows available process memory.
+    private const long MaximumCachedLayoutBytes = 256L * 1024 * 1024;
     internal long GeometryBytes { get { lock (geometryGate) return geometryBytes; } }
     internal long GeometryCopies { get { lock (geometryGate) return geometryCopies; } }
     private readonly string artifactRoot;
@@ -777,9 +777,6 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 return new(existing, placement?.Matrix ?? Matrix4x4.Identity, placement?.IsPlaced ?? false, placement?.Bounds ?? BoundsOf(existing));
             }
             var bytes = checked(((long)capture.PositionCount + capture.IndexCount) * sizeof(uint));
-            if (bytes > MaximumOwnedGeometryBytes - geometryBytes)
-                throw new WorkerException(new Issue("PicoGK owned source geometry exceeds 256 MiB.",
-                    "CS_TAU_RUNTIME", "validation", "error"));
             var extraction = Stopwatch.StartNew();
             var positions = new float[capture.PositionCount];
             var indices = new uint[capture.IndexCount];
@@ -815,14 +812,10 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         }
     }
 
-    private long RemainingLayoutBytes { get { lock(geometryGate)return MaximumOwnedGeometryBytes-layoutBytes; } }
-
     private void ReserveLayout(GeometrySnapshot snapshot, long bytes)
     {
         lock (geometryGate)
         {
-            if (bytes > MaximumOwnedGeometryBytes - layoutBytes)
-                throw new WorkerException(new Issue("PicoGK derived layout geometry exceeds 256 MiB.", "CS_TAU_RUNTIME", "validation", "error"));
             layoutBytes += bytes;
             snapshot.LayoutBytes += bytes;
         }
@@ -883,7 +876,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                         var cached = compute.LookupLayout(new("mesh.normals", ComputeLayoutCodec.Arguments(source, baked)), ComputeLayoutCodec.Digest(positions, indices), out ticket);
                         if (cached is {} bytes) {
                             var template = new PrototypeLayout(new(item.Id,item.Geometry.Kind,item.Name,ColorValues(material.Color),material.Metallic,material.Roughness,positions,normals,indices),sources,stability);
-                            var decoded = ComputeLayoutCodec.Decode(bytes,template,(positions.Length/3,RemainingLayoutBytes));
+                            var decoded = ComputeLayoutCodec.Decode(bytes,template,(positions.Length/3,MaximumCachedLayoutBytes));
                             compute.RecordLayoutHit();
                             positions=decoded.Component.Positions;normals=decoded.Component.Normals;indices=decoded.Component.Indices;sources=decoded.Sources;stability=decoded.Stability;reused=true;
                         }
@@ -932,7 +925,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                     ExtractedComponent? cachedUv = null;
                     if(ComputeReuse is {} compute) try {
                         var cached=compute.LookupLayout(new("mesh.uv",ComputeLayoutCodec.Arguments(item.SourceMatrix,bakedMatrix,true)),ComputeLayoutCodec.Digest(modelPositions,component.Positions,component.Normals,component.Indices),out uvTicket);
-                        if(cached is {} bytes){cachedUv=ComputeLayoutCodec.Decode(bytes,new(component,Array.Empty<int>(),null),(component.Positions.Length/3,RemainingLayoutBytes)).Component;compute.RecordLayoutHit();}
+                        if(cached is {} bytes){cachedUv=ComputeLayoutCodec.Decode(bytes,new(component,Array.Empty<int>(),null),(component.Positions.Length/3,MaximumCachedLayoutBytes)).Component;compute.RecordLayoutHit();}
                     }catch(Exception error)when(ComputeWorkerSession.IsDisposableFailure(error)){ComputeWorkerSession.ReportBypass("uv-preload",error);}
                     if(cachedUv is not null)textured=cachedUv;
                     else {

@@ -484,20 +484,29 @@ public static class Params { {{property}} }
     }
 
     [Fact]
-    public void CompilationEnforcesProjectAndSyntaxLimits()
+    public void CompilationAcceptsLargeProjects()
+    {
+        Write("main.cs", "System.Console.WriteLine(C256.Value);");
+        for (var index = 0; index < 257; index++)
+            Write($"{index}.cs", $"public static class C{index} {{ public const int Value = {index}; }}");
+        Assert.Equal(258, CompilationService.SelectSources(root, "main.cs").Count);
+        Assert.NotEmpty(CompilationService.Compile(root, "main.cs").Assembly);
+    }
+
+    [Fact]
+    public void CompilationAcceptsLargeSourceFilesAndAggregateSource()
+    {
+        Write("main.cs", "System.Console.WriteLine(42);" + new string(' ', 1024 * 1024));
+        for (var index = 0; index < 8; index++)
+            Write($"{index}.cs", $"public static class C{index} {{ }}" + new string(' ', 1024 * 1024));
+        Assert.Equal(9, CompilationService.SelectSources(root, "main.cs").Count);
+        Assert.NotEmpty(CompilationService.Compile(root, "main.cs").Assembly);
+    }
+
+    [Fact]
+    public void CompilationRejectsMissingSourcesAndExcessiveSyntaxNesting()
     {
         Assert.Contains("no C#", Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "main.cs")).Message);
-        for (var index = 0; index < 257; index++)
-        {
-            Write($"{index}.cs", $"public static class C{index} {{ }}");
-        }
-        Assert.Contains("256", Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "main.cs")).Message);
-
-        Directory.Delete(root, recursive: true);
-        Directory.CreateDirectory(root);
-        Write("main.cs", new string(' ', 1024 * 1024 + 1));
-        Assert.Contains("byte limit", Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "main.cs")).Message);
-
         Write("main.cs", string.Concat(Enumerable.Repeat("(", 520)) + "1" + string.Concat(Enumerable.Repeat(")", 520)) + ";");
         Assert.Contains("depth", Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "main.cs")).Message, StringComparison.OrdinalIgnoreCase);
         Assert.Throws<InvalidOperationException>(() => CompilationService.CreateReferences(null));

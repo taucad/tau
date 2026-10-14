@@ -11,12 +11,10 @@ export const picogkOptionsSchema = z.object({
   workerExecutable: absolutePath,
   workerSha256: sha256,
   resourceFiles: z.array(z.object({ path: absolutePath, sha256, label: z.string().min(1) })).min(1),
-  requestTimeout: z.number().int().positive().default(120_000),
-  maxArtifactBytes: z
-    .number()
-    .int()
-    .positive()
-    .default(512 * 1024 * 1024),
+  /** Milliseconds. Zero waits for completion or cancellation. */
+  requestTimeout: z.number().int().nonnegative().default(0),
+  /** Optional host policy; by default only the representable byte length is bounded. */
+  maxArtifactBytes: z.number().int().positive().default(Number.MAX_SAFE_INTEGER),
 });
 
 /** Direct export formats implemented by the PicoGK kernel. @public */

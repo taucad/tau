@@ -71,7 +71,7 @@ public sealed partial class WorkerTests
     }
 
     [Fact]
-    public void SceneLayoutBudgetRejectsUnboundedVariantsAndReleasesOwnedArrays()
+    public void SceneLayoutAcceptsLargeScenesAndReleasesOwnedArrays()
     {
         using var library = new Library(1f); Library.RegisterGlobalLibrary(library);
         try
@@ -80,11 +80,11 @@ public sealed partial class WorkerTests
             backend.Add(mesh,0);
             var field = typeof(CaptureViewerBackend).GetField("layoutBytes",System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
             field.SetValue(backend,256L*1024*1024);
-            Assert.Throws<WorkerException>(()=>backend.Extract());
-            field.SetValue(backend,0L); Assert.Single(backend.Extract().Components);
-            Assert.True((long)field.GetValue(backend)! > 0);
+            Assert.Single(backend.Extract().Components);
+            Assert.True((long)field.GetValue(backend)! > 256L*1024*1024);
             backend.RemoveAllObjects(); Assert.Empty(backend.Extract().Components);
-            Assert.Equal(0L,(long)field.GetValue(backend)!);
+            Assert.Equal(256L*1024*1024,(long)field.GetValue(backend)!);
+            field.SetValue(backend,0L);
         }
         finally { Library.UnregisterGlobalLibrary(); }
     }

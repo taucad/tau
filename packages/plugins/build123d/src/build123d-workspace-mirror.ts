@@ -2,7 +2,7 @@ import { createWorkspaceMirror as createNativeWorkspaceMirror } from '@taucad/na
 import type { WorkspaceMirror } from '@taucad/native-process-core';
 
 /**
- * Create Build123d's private, bounded physical workspace projection.
+ * Create Build123d's private physical workspace projection.
  * @returns A fresh workspace mirror.
  */
 export const createWorkspaceMirror = async (): Promise<WorkspaceMirror> =>

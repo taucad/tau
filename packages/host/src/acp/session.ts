@@ -678,9 +678,10 @@ const mcpResult = (
     let structuredContent: unknown;
     if (qualified && typeof text === 'string') {
       try {
-        // Grok joins screenshot instructions and the final JSON block into one string.
+        // Grok joins Tau's summary text and the final structured JSON block into one string.
         const json =
-          tool.toolName === toolName.screenshot && /^Captured \d+ CAD views?\./u.test(text)
+          (tool.toolName === toolName.screenshot && /^Captured \d+ CAD views?\./u.test(text)) ||
+          (tool.toolName === toolName.testModel && /^GeoSpec passed \d+ of \d+ requirements\./u.test(text))
             ? text.slice(text.lastIndexOf('\n') + 1)
             : text;
         structuredContent = JSON.parse(json);

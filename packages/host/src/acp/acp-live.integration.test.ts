@@ -328,12 +328,15 @@ describe.each(adapters.filter((adapter) => adapter.id === 'codex' || adapter.id 
       ];
       const registry: ToolRegistry = {
         list: () => [],
-        invoke: async () => ({
+        invoke: async (invocation) => ({
           isError: false,
-          content: {
-            success: true,
-            images: views.map((view, index) => ({ view, dataUrl: `data:image/png;base64,${pixels[index]}` })),
-          },
+          content:
+            invocation.toolName === toolName.testModel
+              ? { success: true, failures: [], passes: [], passed: 0, total: 0 }
+              : {
+                  success: true,
+                  images: views.map((view, index) => ({ view, dataUrl: `data:image/png;base64,${pixels[index]}` })),
+                },
         }),
       };
       const endpoint = createHostMcpEndpoint({
@@ -380,7 +383,7 @@ describe.each(adapters.filter((adapter) => adapter.id === 'codex' || adapter.id 
         await session.prompt(
           adapter.id === 'codex'
             ? 'Call mcp.tau.screenshot with targetFile main.scad and mode multi_angle. Open each of the six returned local PNG files with your image viewing tool, then list the six view names. Do not edit files.'
-            : 'Call tau screenshot with targetFile main.scad and mode multi_angle. Then list the six view names from the returned result. Do not edit files or use other tools.',
+            : 'Call tau test_model with files ["main.geospec.ts"], then call tau screenshot with targetFile main.scad and mode multi_angle. Report the test counts and list the six view names from the results. Do not edit files or call other Tau tools.',
           {
             append: async (batch) => {
               events.push(...batch);
@@ -397,6 +400,11 @@ describe.each(adapters.filter((adapter) => adapter.id === 'codex' || adapter.id 
             (message) => message.role === 'tool-output' && message.toolName === 'screenshot' && !message.isError,
           ),
         ).toBe(true);
+        if (adapter.id === 'grok') {
+          expect(
+            messages.find((message) => message.role === 'tool-output' && message.toolName === toolName.testModel),
+          ).toMatchObject({ isError: false, content: { failures: [], passed: 0, total: 0 } });
+        }
         const attachments = await readdir(join(workspaceRoot, '.tau', 'chats', chatId, 'attachments'));
         expect(attachments).toHaveLength(6);
         const stored = await Promise.all(

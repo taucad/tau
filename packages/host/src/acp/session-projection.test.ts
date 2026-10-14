@@ -80,6 +80,41 @@ it('should normalize a qualified Grok MCP call and its JSON output', async () =>
   });
 });
 
+it.each([false, true])('should validate Grok GeoSpec summary and JSON blocks (invalid=%s)', async (invalid) => {
+  const output = { failures: [], passes: [], passed: 0, total: invalid ? 'invalid' : 0 };
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'geospec',
+        title: 'use_tool',
+        rawInput: { tool_name: 'tau__test_model', tool_input: { files: ['main.geospec.ts'] } },
+        _meta: { 'x.ai/tool': { name: 'use_tool', namespace: 'grok_build' } },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'geospec',
+        status: 'completed',
+        rawOutput: {
+          type: 'MCP',
+          tool_name: 'test_model',
+          server_name: 'tau',
+          output: { OkayOutput: `GeoSpec passed 0 of 0 requirements.\n${JSON.stringify(output)}` },
+        },
+      },
+    ],
+    'grok',
+    undefined,
+    'tau',
+  );
+  expect(messages[1]).toMatchObject({
+    role: 'tool-output',
+    toolName: 'test_model',
+    isError: invalid,
+    content: invalid ? { errorCode: 'MCP_RESULT_INVALID' } : output,
+  });
+});
+
 it.each([false, true])('should validate a Grok screenshot with flattened text blocks (invalid=%s)', async (invalid) => {
   const image = {
     view: 'front',

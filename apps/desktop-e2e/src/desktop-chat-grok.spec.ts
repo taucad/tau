@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { evaluateModelOutputSchema } from '@taucad/chat';
+import { evaluateModelOutputSchema, screenshotOutputSchema, testModelOutputSchema } from '@taucad/chat';
 import { latestCompletedRun, toolResult } from '#support/acp-evidence.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
@@ -66,7 +66,7 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
       const secondRun = latestCompletedRun(readEvents());
       await sendPrompt(
         page,
-        'Use the cad-build123d skill to create a simple 20 mm cube in main.py. Check it with Tau evaluate_model and briefly report the result. Do not export anything.',
+        'Use the cad-build123d skill to create a simple 20 mm cube in main.py. Check it with Tau evaluate_model and a geometry assertion in main.geospec.ts using test_model. Capture all six views of main.py with screenshot mode multi_angle, then briefly report the results. Do not export anything.',
       );
       let approvals = 0;
       await expect
@@ -92,6 +92,16 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
           toolResult(readEvents(), { runId: cadRun, toolName: 'evaluate_model', targetFile: 'main.py' }),
         ),
       ).toMatchObject({ status: 'ready', kernelIssues: [] });
+      const modelTest = testModelOutputSchema.parse(
+        toolResult(readEvents(), { runId: cadRun, toolName: 'test_model', targetFile: 'main.geospec.ts' }),
+      );
+      expect(modelTest.total).toBeGreaterThan(0);
+      expect(modelTest.passed).toBe(modelTest.total);
+      expect(
+        screenshotOutputSchema.parse(
+          toolResult(readEvents(), { runId: cadRun, toolName: 'screenshot', targetFile: 'main.py' }),
+        ).images,
+      ).toHaveLength(6);
       expect(readEvents()).toContain('cad-build123d');
       await session.capture('grok-composer-cad');
     } catch (error) {

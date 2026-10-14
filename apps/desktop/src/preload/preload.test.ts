@@ -1,3 +1,6 @@
+import type { BrowserBridge, BrowserSnapshot } from '@taucad/types/browser';
+import { browserChannels } from '@taucad/types/browser';
+import { mock } from 'vitest-mock-extended';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
 import { openDirectoryChannel, quitChannels, slicersChannels } from '#shared/desktop-bootstrap.js';
@@ -143,5 +146,30 @@ describe('native directory access', () => {
     );
     await tau.directories.open('/picked/Project');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(openDirectoryChannel, '/picked/Project');
+  });
+});
+
+describe('desktop browser bridge', () => {
+  it('should expose a finite command API and strip Electron events from subscriptions', async () => {
+    const bridge = state.exposed.get('tauBrowser') as BrowserBridge;
+    expect(Object.keys(bridge).sort()).toEqual(['command', 'subscribe']);
+    const snapshot: BrowserSnapshot = {
+      tabs: [],
+      settings: { searchEngine: 'duckduckgo', rememberHistory: true, defaultZoom: 1 },
+      history: [],
+      downloads: [],
+    };
+    vi.mocked(ipcRenderer.invoke).mockReset().mockResolvedValue(snapshot);
+    await expect(bridge.command({ kind: 'snapshot' })).resolves.toEqual(snapshot);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(browserChannels.command, { kind: 'snapshot' });
+    const listener = vi.fn();
+    const unsubscribe = bridge.subscribe(listener);
+    const registration = vi
+      .mocked(ipcRenderer.on)
+      .mock.calls.findLast(([channel]) => channel === browserChannels.state)!;
+    registration[1](mock<Electron.IpcRendererEvent>(), snapshot);
+    expect(listener).toHaveBeenCalledExactlyOnceWith(snapshot);
+    unsubscribe();
+    expect(ipcRenderer.off).toHaveBeenCalledWith(browserChannels.state, registration[1]);
   });
 });

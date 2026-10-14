@@ -26,6 +26,7 @@ export const workbenchIdSchema = z
  */
 /** @public */
 export const paneIds = [
+  'browser',
   'parameters',
   'model',
   'print',

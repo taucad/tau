@@ -1,3 +1,4 @@
+import { BrowserSettingsPanel } from '#components/browser/browser-settings.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefCallback } from 'react';
 import { ArrowLeft } from 'lucide-react';
@@ -36,6 +37,13 @@ import { SettingsItem } from '#components/settings/settings-item.js';
 /** Keep authenticated sections behind their existing gate and mount only the active section. */
 function SettingsContent({ section }: { readonly section: SettingsSection }): React.JSX.Element {
   switch (section) {
+    case 'browser': {
+      return (
+        <SettingsItem settingId='web-browser'>
+          <BrowserSettingsPanel />
+        </SettingsItem>
+      );
+    }
     case 'general': {
       return <GeneralSettings />;
     }

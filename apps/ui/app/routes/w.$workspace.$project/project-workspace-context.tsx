@@ -22,6 +22,7 @@ export const projectWorkspaceKeyCombinations = {
 } as const;
 
 export type WorkbenchPanelId =
+  | 'browser'
   | 'parameters'
   | 'kinematics'
   | 'files'

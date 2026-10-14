@@ -4,12 +4,6 @@
 name: Spike S8 (readWheel)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/spike-s8.yml'
-      - 'scripts/spikes/native-deps/linux/s8/**'
-      - 'packages/plugins/build123d/python/requirements.lock'
-      - 'scripts/spikes/native-deps/linux/annotate.sh'
   workflow_dispatch:
 
 permissions:

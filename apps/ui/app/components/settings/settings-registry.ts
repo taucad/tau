@@ -9,6 +9,7 @@ import {
   Printer,
   Settings2,
   Globe,
+  FolderGit2,
   User,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -105,8 +106,8 @@ const settingsCatalog = [
       },
       {
         id: 'github-permissions',
-        label: 'GitHub permissions',
-        description: "Review or revoke Tau's sign-in and Gist access on GitHub",
+        label: 'GitHub connections',
+        description: 'Manage separate GitHub sign-in, Gist and repository connections',
         keywords: ['github', 'gist', 'revoke', 'authorization', 'oauth', 'consent'],
       },
       {
@@ -114,6 +115,20 @@ const settingsCatalog = [
         label: 'Active sessions',
         description: 'Review devices and revoke sessions',
         keywords: ['logout', 'sign out'],
+      },
+    ],
+  },
+  {
+    id: 'repositories',
+    label: 'Repositories',
+    icon: FolderGit2,
+    group: 'Personal',
+    entries: [
+      {
+        id: 'github-repositories',
+        label: 'GitHub repositories',
+        description: 'Manage repository connections and enable writes per repository',
+        keywords: ['github', 'write', 'permissions', 'installation', 'push'],
       },
     ],
   },

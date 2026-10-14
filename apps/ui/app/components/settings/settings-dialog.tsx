@@ -1,3 +1,4 @@
+import { GithubRepositorySettings } from '#components/settings/github-repository-settings.js';
 import { BrowserSettingsPanel } from '#components/browser/browser-settings.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefCallback } from 'react';
@@ -60,6 +61,13 @@ function SettingsContent({ section }: { readonly section: SettingsSection }): Re
       return (
         <SettingsAuthGate>
           <SecuritySettings />
+        </SettingsAuthGate>
+      );
+    }
+    case 'repositories': {
+      return (
+        <SettingsAuthGate>
+          <GithubRepositorySettings />
         </SettingsAuthGate>
       );
     }

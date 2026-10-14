@@ -67,6 +67,8 @@ export type RevisionClient = Readonly<{
    * credential. Memory only, on both sides (I8).
    */
   remoteCredential: (credential: GitRemoteCredential) => void;
+  /** Send a credential for one explicit push; the host discards it when the operation settles. */
+  pushGithub: (credential: GitRemoteCredential) => Promise<void>;
   /**
    * Say whether this project is the page's focused one (RV-W5b F12): only the
    * focused project holds the `revision` long poll. A port frame, kept across
@@ -448,6 +450,9 @@ export const createHostRevisionClient = (input: {
 
   return {
     status: () => status,
+    pushGithub: async (credential) => {
+      await ask({ command: 'pushGithub', ...credential });
+    },
     remoteCredential: (credential) => {
       // async-iife: bootstrap -- credential updates report through the same toast topic.
       void (async (): Promise<void> => {
@@ -716,7 +721,10 @@ const mintGithubCredential = async (
   const current = (): boolean =>
     lease.epoch === epoch && githubProjectBinding.get(projectId)?.repositoryUrl === binding.repositoryUrl;
   try {
-    const token = await githubConnections.token(binding.connectionId);
+    const token = await githubConnections.token(binding.connectionId, {
+      repositoryId: Number(binding.repositoryId),
+      operation: 'read',
+    });
     if (!current()) {
       return false;
     }
@@ -1065,7 +1073,7 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
    * @param request - The verb, without its correlation id.
    * @returns The answer's payload.
    */
-  const ask = async (request: WorkerRevisionCommand): Promise<WorkerRevisionResult> => {
+  const ask = async (request: WorkerRevisionRequest): Promise<WorkerRevisionResult> => {
     nextRequestId += 1;
     const id = nextRequestId;
     const answer = Promise.withResolvers<WorkerRevisionResult>();
@@ -1082,6 +1090,9 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
   };
   const client: RevisionClient = {
     status: () => status,
+    pushGithub: async (credential) => {
+      await ask({ command: 'pushGithub', ...credential });
+    },
     remoteCredential: (credential) => {
       post({ command: 'remoteCredential', ...credential });
     },
@@ -1574,6 +1585,8 @@ export type RevisionCommands = Readonly<{
   cancelRemote: () => void;
   /** Ask the existing project scheduler to fetch and push now. */
   syncNow: () => void;
+  /** Mint and use one repository-scoped write credential for this gesture only. */
+  pushGithub: () => Promise<void>;
   /**
    * Record what is on disk now (S30, AC12).
    *
@@ -1780,6 +1793,29 @@ export const useRevisionCommands = (): RevisionCommands => {
       },
       cancelRemote: () => client?.send({ command: 'cancelRemote' }),
       syncNow: () => client?.send({ command: 'syncNow' }),
+      pushGithub: async () => {
+        const binding = githubProjectBinding.get(projectId);
+        if (binding === undefined || client === undefined) {
+          throw new Error('Connect this repository before pushing.');
+        }
+        const token = await githubConnections.token(binding.connectionId, {
+          repositoryId: Number(binding.repositoryId),
+          operation: 'write',
+        });
+        if (
+          githubProjectBinding.get(projectId)?.repositoryUrl !== binding.repositoryUrl ||
+          githubProjectBinding.get(projectId)?.connectionId !== binding.connectionId
+        ) {
+          throw new Error('The repository connection changed. Try again.');
+        }
+        await client.pushGithub({
+          apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
+          origin: 'https://github.com',
+          repositoryUrl: binding.repositoryUrl,
+          authorization: `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`,
+          expiresAt: token.expiresAt,
+        });
+      },
       saveRevision: async (trigger?: 'save' | 'hidden' | 'close') => client?.saveRevision(trigger),
       tag: async (input) => client?.tag(input),
       deleteTag: async (name) => client?.deleteTag(name),

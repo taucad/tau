@@ -70,6 +70,7 @@ export const createChatEffects = (
     input: Readonly<{
       name: string;
       remote: string;
+      repositoryUrl?: string;
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
     }>,
@@ -84,7 +85,9 @@ export const createChatEffects = (
   pushRecordSet: (
     input: Readonly<{
       names: readonly string[];
+      retryRejected?: boolean;
       remote: string;
+      repositoryUrl?: string;
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
     }>,
@@ -100,6 +103,7 @@ export const createChatEffects = (
       chatId: string;
       name: string;
       remote: string;
+      repositoryUrl?: string;
       syncChats: boolean;
       refusal: string | undefined;
     }>,
@@ -257,6 +261,7 @@ export const createChatEffects = (
     input: Readonly<{
       name: string;
       remote: string;
+      repositoryUrl?: string;
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
     }>,
@@ -269,7 +274,11 @@ export const createChatEffects = (
     }>
   > => {
     try {
-      const pushed = await port.push({ remote: input.remote, refs: [offerOf(input.name, input.leases)] });
+      const pushed = await port.push({
+        remote: input.remote,
+        repositoryUrl: input.repositoryUrl,
+        refs: [offerOf(input.name, input.leases)],
+      });
       const [entry] = pushed.refs;
       return {
         outcome:
@@ -321,7 +330,9 @@ export const createChatEffects = (
   const pushRecordSet = async (
     input: Readonly<{
       names: readonly string[];
+      retryRejected?: boolean;
       remote: string;
+      repositoryUrl?: string;
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
     }>,
@@ -329,14 +340,21 @@ export const createChatEffects = (
     try {
       const pushed = await port.push({
         remote: input.remote,
+        repositoryUrl: input.repositoryUrl,
         refs: input.names.map((name) => offerOf(name, input.leases)),
       });
-      return pushed.refs.every((entry) => entry.status === 'rejected')
+      return input.retryRejected !== false && pushed.refs.every((entry) => entry.status === 'rejected')
         ? undefined
         : new Map(pushed.refs.map((entry) => [entry.name, outcomeOf(entry, input.offered)]));
     } catch (error) {
       if (rateLimited(error)) {
         throw error;
+      }
+      if (input.retryRejected === false) {
+        const reason = error instanceof Error ? error.message : 'The repository refused this push.';
+        return new Map(
+          input.names.map((name) => [name, { name, status: 'rejected', head: input.offered.get(name), reason }]),
+        );
       }
       return undefined;
     }
@@ -365,6 +383,7 @@ export const createChatEffects = (
       chatId: string;
       name: string;
       remote: string;
+      repositoryUrl?: string;
       syncChats: boolean;
       refusal: string | undefined;
     }>,
@@ -424,6 +443,7 @@ export const createChatEffects = (
      * own value: `refs/tau/chats/*` is an orphan chain per host (W17 a2.9/5). */
     const pushed = await port.push({
       remote: input.remote,
+      repositoryUrl: input.repositoryUrl,
       refs: [{ name: chatRefName(input.chatId), ...(remoteHead === undefined ? {} : { expected: remoteHead }) }],
     });
     const [entry] = pushed.refs;

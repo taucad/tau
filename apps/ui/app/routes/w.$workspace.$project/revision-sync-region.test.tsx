@@ -262,7 +262,7 @@ describe('RevisionSyncRegion', () => {
     /* A1 item 6: nothing waits, so there is nothing for Sync now to do. */
     expect(screen.queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
     show(remote, syncFacet({ state: 'queued', pendingCount: 2 }));
-    await user.click(screen.getByRole('button', { name: 'Sync now' }));
+    await user.click(screen.getByRole('button', { name: 'Fetch latest' }));
     expect(syncNow).toHaveBeenCalledTimes(1);
     expect(screen.getByText('o/design')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Backup settings' }));
@@ -680,7 +680,10 @@ describe('RevisionSyncRegion', () => {
         }),
       );
     });
-    expect(githubToken).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001');
+    expect(githubToken).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001', {
+      repositoryId: 99,
+      operation: 'read',
+    });
     expect(screen.queryByText(/^Replace /u)).not.toBeInTheDocument();
   });
 
@@ -1121,7 +1124,7 @@ describe('RevisionSyncRegion with a moved GitHub repository (D11)', () => {
       });
     });
     /* The same connection, with a fresh token. */
-    expect(githubToken).toHaveBeenCalledWith(connectionId);
+    expect(githubToken).toHaveBeenCalledWith(connectionId, { repositoryId: 99, operation: 'read' });
   });
 
   it('should keep the remote when the person declines, and return focus to the offer', async () => {
@@ -1458,7 +1461,9 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     const user = userEvent.setup();
     renderRegion(connected, undefined, { isGeoSpecCandidateSharingUnavailable: true });
     await user.click(screen.getByRole('button', { name: 'Backup settings' }));
-    expect(screen.getByText('GeoSpec candidate sharing is available in the browser only.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Automatic GeoSpec candidate sharing is available for Tau Cloud in the browser.'),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: /Share derived GeoSpec/u })).not.toBeInTheDocument();
   });
 });

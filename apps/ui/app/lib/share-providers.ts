@@ -1,10 +1,11 @@
+import { z } from 'zod';
 import { createShareArtifactWorkerCodec } from '@taucad/share/artifact-worker';
 import { directShareProvider, directShareProviderDescriptor } from '@taucad/share/direct';
 import { bitbucketShareProvider, bitbucketShareProviderDescriptor } from '@taucad/share/bitbucket';
 import { githubShareProvider, githubShareProviderDescriptor } from '@taucad/share/github';
 import { githubGistShareProvider, githubGistShareProviderDescriptor } from '@taucad/share/github-gist';
 import { gitlabShareProvider, gitlabShareProviderDescriptor } from '@taucad/share/gitlab';
-import type { ShareCredentialBroker, ShareProviderContext } from '@taucad/share/provider';
+import type { GithubGistTransport, ShareProviderContext } from '@taucad/share/provider';
 import { ShareError } from '@taucad/share/provider';
 import { createShareProviderRegistry } from '@taucad/share/registry';
 import { tauShareProvider, tauShareProviderDescriptor } from '@taucad/share/tau';
@@ -24,19 +25,59 @@ export const shareProviderRegistry = createShareProviderRegistry([
   { descriptor: bitbucketShareProviderDescriptor, load: async () => bitbucketShareProvider },
 ]);
 
-const requireGithubAccount = async () => {
-  const result = await authClient.listAccounts();
-  if (result.error) {
-    throw new ShareError('SHARE_AUTH_REQUIRED', 'Sign in to connect GitHub.');
+const gistCapabilitySchema = z.object({
+  status: z.enum(['connected', 'permission-required', 'not-connected', 'reconnect-required', 'disabled']),
+  enabled: z.boolean(),
+  grantedScopes: z.array(z.string()),
+  authorizationUrl: z.url(),
+  account: z.object({ id: z.number(), login: z.string() }).optional(),
+  verifiedAt: z.string().optional(),
+});
+export type GithubGistConnectionStatus = z.infer<typeof gistCapabilitySchema>['status'] | 'signed-out';
+
+const gistApi = async (path: string, init?: RequestInit): Promise<unknown> => {
+  let response: Response;
+  try {
+    response = await fetch(`${ENV.TAU_API_URL.replace(/\/$/u, '')}/v1/github/gists/${path}`, {
+      ...init,
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+    });
+  } catch {
+    init?.signal?.throwIfAborted();
+    throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'GitHub sharing is temporarily unavailable. Try again.');
   }
-  const account = result.data.find(({ providerId }) => providerId === 'github');
-  if (!account) {
-    throw new ShareError('SHARE_AUTH_REQUIRED', 'Connect GitHub to share a Gist.');
+  const body: unknown = await response.json().catch(() => undefined);
+  if (response.status === 401) {
+    throw new ShareError('SHARE_AUTH_REQUIRED', 'Sign in or reconnect GitHub to continue.');
   }
-  return account;
+  if (response.status === 403 && z.object({ code: z.literal('GITHUB_GIST_USE_DISABLED') }).safeParse(body).success) {
+    throw new ShareError(
+      'SHARE_PROVIDER_UNAVAILABLE',
+      'Gist sharing is off in Tau. Enable it in Security settings before sharing.',
+    );
+  }
+  if (response.status === 403) {
+    throw new ShareError('SHARE_PERMISSION_REQUIRED', 'Check GitHub Gist access in Security settings, then try again.');
+  }
+  if (response.status === 409) {
+    throw new ShareError(
+      'SHARE_PROVIDER_UNAVAILABLE',
+      'This Gist changed on GitHub. Reopen the latest publication before changing it.',
+    );
+  }
+  if (!response.ok) {
+    throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'GitHub sharing is temporarily unavailable. Try again.');
+  }
+  return body;
 };
 
-export type GithubGistConnectionStatus = 'connected' | 'permission-required' | 'not-connected' | 'signed-out';
+export const getGithubGistCapability = async (): Promise<z.infer<typeof gistCapabilitySchema>> =>
+  gistCapabilitySchema.parse(await gistApi('capability'));
+export const setGithubGistEnabled = async (enabled: boolean): Promise<void> => {
+  await gistApi('use', { method: 'POST', body: JSON.stringify({ enabled }) });
+};
 
 export type GithubGistAuthorizationSurface = 'editor' | 'share-page';
 
@@ -96,15 +137,15 @@ export const parseGithubGistAuthorizationReturn = (search: string): GithubGistAu
 };
 
 export const getGithubGistConnectionStatus = async (): Promise<GithubGistConnectionStatus> => {
-  const result = await authClient.listAccounts();
-  if (result.error) {
-    return 'signed-out';
+  try {
+    const capability = await getGithubGistCapability();
+    return capability.status;
+  } catch (error) {
+    if (error instanceof ShareError && error.code === 'SHARE_AUTH_REQUIRED') {
+      return 'signed-out';
+    }
+    throw error;
   }
-  const account = result.data.find(({ providerId }) => providerId === 'github');
-  if (!account) {
-    return 'not-connected';
-  }
-  return account.scopes.includes('gist') ? 'connected' : 'permission-required';
 };
 
 /** The web page that runs the Gist grant for the desktop app (D16c). */
@@ -180,30 +221,10 @@ export const awaitGithubGistConnection = async (signal: AbortSignal): Promise<bo
   return false;
 };
 
-export const githubShareCredentialBroker: ShareCredentialBroker = {
-  async getAccessToken(request) {
-    /* D23: the sign-in token serves Gist sharing only; repositories use the GitHub App connection. */
-    if (
-      request.connectionId !== 'github' ||
-      request.audience !== 'https://api.github.com' ||
-      request.scopes.length !== 1 ||
-      request.scopes[0] !== 'gist'
-    ) {
-      throw new ShareError('SHARE_PERMISSION_REQUIRED', 'The requested GitHub authority is not allowed.');
-    }
-    const account = await requireGithubAccount();
-    const result = await authClient.getAccessToken({ accountId: account.id });
-    if (result.error) {
-      throw new ShareError('SHARE_AUTH_REQUIRED', 'The GitHub connection needs to be renewed.');
-    }
-    if (!result.data.accessToken) {
-      throw new ShareError('SHARE_AUTH_REQUIRED', 'The GitHub connection needs to be renewed.');
-    }
-    return {
-      accessToken: result.data.accessToken,
-      grantedScopes: result.data.scopes,
-      ...(result.data.accessTokenExpiresAt ? { expiresAt: result.data.accessTokenExpiresAt } : {}),
-    };
+export const githubGistTransport: GithubGistTransport = {
+  async mutate({ signal, ...input }) {
+    const result = await gistApi('mutate', { method: 'POST', body: JSON.stringify(input), signal });
+    return input.action === 'delete' ? {} : z.record(z.string(), z.unknown()).parse(result);
   },
 };
 
@@ -220,7 +241,7 @@ export const createBrowserShareProviderContext = (): BrowserShareProviderContext
     archiveUrl,
     artifactCodec,
     fetch: globalThis.fetch.bind(globalThis),
-    credentialBroker: githubShareCredentialBroker,
+    githubGist: githubGistTransport,
     dispose: artifactCodec.dispose,
   };
 };

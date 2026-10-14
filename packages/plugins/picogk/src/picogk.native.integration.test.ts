@@ -272,7 +272,7 @@ describe.runIf(nativeEngineAvailable)('PicoGK native C# kernel', () => {
       const document = client.open({ source: { path: 'main.cs' } });
       const result = await document.view('model').rendering();
       assert.ok(!result.superseded);
-      assert.ok(result.rendering.success);
+      assert.ok(result.rendering.success, JSON.stringify(result.rendering));
       const gltf = extractGltfFromResult(result.rendering);
       assert.ok(gltf);
       validateGlbData(gltf);

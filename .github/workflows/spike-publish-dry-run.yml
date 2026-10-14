@@ -296,7 +296,8 @@ jobs:
 
   cli-pack-install:
     name: S24 CLI closure pack-install (${{ matrix.os }})
-    if: github.event_name == 'pull_request' || inputs.s24
+    needs: [plan, geospec-producer]
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || inputs.s24) }}
     strategy:
       fail-fast: false
       matrix:
@@ -304,17 +305,41 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
+      - name: Require artifact producer success
+        if: env.SPIKE_GATE == 'true'
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          PRODUCER_RESULT: ${{ needs.geospec-producer.result }}
+          PRODUCER_REQUIRED: ${{ needs.plan.outputs.geospec-required }}
+        run: |
+          test "$PLAN_RESULT" = success
+          if [ "$PRODUCER_REQUIRED" = true ]; then test "$PRODUCER_RESULT" = success; fi
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
+          node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '24.20.0' }}
           save-pnpm-store: 'false'
+
+      # Use this checkout's producer on gated runs; older main products may have a different source closure.
+      - name: Download same-run GeoSpec transport
+        if: env.SPIKE_GATE == 'true' && needs.plan.outputs.geospec-required == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: spike-geospec-ci-${{ github.sha }}
+          path: .
+
+      - name: Verify GeoSpec transport against this checkout
+        if: env.SPIKE_GATE == 'true' && needs.plan.outputs.geospec-required == 'true'
+        run: pnpm nx run-many -t require-geospec-delivery --parallel=1
 
       # `@taucad/host` builds against the GeoSpec engine it peers optionally, so the build needs the products.
       - name: Find the newest green main CI run
         id: products
+        if: env.SPIKE_GATE != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PRODUCTS_SHA: ${{ inputs.products-sha }}
@@ -324,6 +349,7 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - name: GeoSpec products from main
+        if: env.SPIKE_GATE != 'true'
         uses: ./.github/actions/geospec-artifact-from-main
         with:
           sha: ${{ steps.products.outputs.sha }}

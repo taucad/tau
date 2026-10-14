@@ -68,15 +68,18 @@ body {
   -webkit-font-smoothing: antialiased;
   overflow-x: clip;
 }
-a {
-  color: inherit;
-  text-underline-offset: 0.25em;
-  text-decoration-thickness: 1px;
-}
-button,
-input {
-  font: inherit;
-  color: inherit;
+/* Resets must not override the shared components' utility-layer foregrounds. */
+@layer base {
+  a {
+    color: inherit;
+    text-underline-offset: 0.25em;
+    text-decoration-thickness: 1px;
+  }
+  button,
+  input {
+    font: inherit;
+    color: inherit;
+  }
 }
 button,
 summary,

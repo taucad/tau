@@ -73,6 +73,19 @@ try {
         false,
         `${name} ${path} overflow`,
       );
+      // Axe cannot infer text contrast over the metallic gradient; verify token composition directly.
+      const primaryForegroundsMatch = await page.evaluate(() => {
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--primary-action-foreground)';
+        document.body.append(probe);
+        const expected = getComputedStyle(probe).color;
+        const matches = [...document.querySelectorAll('.primary-action')].every(
+          (button) => getComputedStyle(button).color === expected,
+        );
+        probe.remove();
+        return matches;
+      });
+      assert.equal(primaryForegroundsMatch, true, `${name} ${path} primary action foreground`);
       const audit = await auditPage(page, axe, ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']);
       results.push({
         viewport: name,

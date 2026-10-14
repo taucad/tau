@@ -85,7 +85,11 @@ try {
       await page.evaluate(
         async () =>
           new Promise<void>((resolve) => {
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                resolve();
+              }),
+            );
           }),
       );
       const settled = await frames(page, '[data-hero-stage]');

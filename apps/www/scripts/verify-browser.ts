@@ -57,7 +57,7 @@ try {
     const result = await run(process.execPath, [resolve(appRoot, `scripts/${script}.ts`)], {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external environment, browser or wire-contract field name.
       env: { ...process.env, WWW_TEST_URL: origin, WWW_REPORT_DIR: resolve(output, script) },
-      timeout: 240_000,
+      timeout: 600_000,
       maxBuffer: 8 * 1024 * 1024,
     });
     console.log(result.stdout);

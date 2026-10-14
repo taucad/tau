@@ -27,10 +27,10 @@
     "apps/ui/app/hooks/use-chat.tsx": "6de4bf1438424a5c885cd0df851ed1656ab66d877f2903d2ef0da0fb22768fff",
     "apps/ui/app/machines/chat-message-queue.machine.ts": "044716f3d08abfe25150f6026c8d03df271cce6b9d30fd489476a3c50a0f04dd",
     "apps/ui/app/machines/chat-session.machine.ts": "9d3180fe7082223fddcc7ff798bad3cd522c0d1b70cf77d91cd34ba7cffa221d",
-    "apps/ui/app/services/chat-session-store.ts": "991cd8f639859624a4868c8da6f97e7fec878863b0297094e559765517e7b62d"
+    "apps/ui/app/services/chat-session-store.ts": "0042c213456c8e1101d2447943287850d00080624c96115abe6afae90c019645"
   },
   "specs": {
-    "MessageQueue.tla": "6674d54b4b826bb8ec0a73a0363f4ff41ff18070f655ca308a3263dc6d07d82c"
+    "MessageQueue.tla": "67c43c112e8d6ffe65e841ac9347d38d0811a8a4b01949f22027676abc747feb"
   },
   "tables": {
     "MessageQueue.duplicate.cfg": "9d566ac1a0f357cd7744cdf8594fbaa4554d7c262a0fadf921c45b66b9ffb9da",

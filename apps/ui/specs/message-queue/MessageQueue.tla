@@ -1,5 +1,7 @@
 -------------------------- MODULE MessageQueue --------------------------
 \* Presentation changes preserve admission, cancellation and command identity.
+\* Composer Stop and its shortcut retain Stop; removing the duplicate message
+\* button and its diagnostic origin does not change cancellation or queue delivery.
 \* Explicit reorder changes only the saved queue sequence under delivery exclusion.
 \* Enlarged-text reflow and readable busy labels retain the same disabled guards.
 \* Pending view actions remain serialized until settlement. Pointer cancellation,

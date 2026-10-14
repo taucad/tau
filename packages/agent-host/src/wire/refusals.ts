@@ -70,6 +70,10 @@ export const refusals = {
   MODEL_ATTEMPT_OTHER_ACCOUNT: { owner: 'host', retry: 'reauth' },
   /** The model stream went silent past its stall bound (T9 E9). */
   MODEL_STREAM_STALLED: { owner: 'host', retry: 'resume' },
+  /** Automatic output-limit continuation exhausted its bound; offer Resume with the saved progress. */
+  MODEL_OUTPUT_LIMIT: { owner: 'host', retry: 'resume' },
+  /** A dispatched tool's result could not be saved; resume verifies uncertain effects before retrying. */
+  TOOL_RESULT_PERSISTENCE_FAILED: { owner: 'host', retry: 'resume' },
   /** A prepared model invocation has no recorded resolution; Resume reconciles it first (W3, RV1-F3). */
   INVOCATION_UNRESOLVED: { owner: 'host', retry: 'resume' },
   /** The host is closing (was `LAUNCHER_CLOSED`); re-send to its successor. */

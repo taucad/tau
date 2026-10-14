@@ -4,9 +4,9 @@ import { ENV } from '#environment.config.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
 
 class PreviewResponseError extends Error {
-  readonly status: number;
+  public readonly status: number;
 
-  constructor(status: number) {
+  public constructor(status: number) {
     super(`Saved preview unavailable (${String(status)})`);
     this.status = status;
   }

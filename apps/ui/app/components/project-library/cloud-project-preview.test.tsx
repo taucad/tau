@@ -18,10 +18,10 @@ beforeEach(() => {
   vi.stubGlobal(
     'IntersectionObserver',
     class {
-      observe() {
+      public observe() {
         /* Visibility is controlled by the hook fixture. */
       }
-      disconnect() {
+      public disconnect() {
         /* No observer resources in this fixture. */
       }
     },

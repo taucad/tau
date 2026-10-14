@@ -1438,9 +1438,14 @@ const bootstrapElectronApp = async (): Promise<void> => {
     shutdown ??= executeShutdown();
     return shutdown;
   };
+  let pendingQuit: Promise<void> | undefined;
   const quitWhenReady = async (): Promise<void> => {
-    if (await prepareToQuit()) {
-      app.quit();
+    try {
+      if (await prepareToQuit()) {
+        app.quit();
+      }
+    } finally {
+      pendingQuit = undefined;
     }
   };
   app.on('before-quit', (event) => {
@@ -1448,7 +1453,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       return;
     }
     event.preventDefault();
-    void quitWhenReady();
+    pendingQuit ??= quitWhenReady();
   });
   if (otaProbe) {
     const window = BrowserWindow.getAllWindows()[0];

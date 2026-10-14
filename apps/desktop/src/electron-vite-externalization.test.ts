@@ -33,7 +33,7 @@ describe('macOS GeoSpec assembly selection', () => {
 
   it('should select and finish copying a verified snapshot for the default assembly', () => {
     const source = readFileSync(join(appRoot, 'scripts/package-macos.mts'), 'utf8');
-    const mode = source.indexOf('parseMacosPackageMode(process.argv.slice(2))');
+    const mode = source.indexOf('parseMacosPackageMode(');
     const unsafeOutput = source.indexOf('Refusing unsafe package output root:');
     const selection = source.indexOf(
       "const selectedGeoSpecAssembly = process.env['TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT'];",

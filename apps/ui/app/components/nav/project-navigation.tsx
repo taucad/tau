@@ -76,7 +76,7 @@ const projectsPerPage = 5;
 export const sortProjectsByActivity = (projects: readonly ProjectListItem[]): ProjectListItem[] =>
   [...projects].sort((left, right) => right.lastActivityAt - left.lastActivityAt || left.id.localeCompare(right.id));
 
-export function ProjectNavigation(): React.JSX.Element {
+export function ProjectNavigation({ className }: { readonly className?: string }): React.JSX.Element {
   const { projects, isLoading, error, deleteProject, duplicateProject, updateName } = useProjects();
   const { createChat } = useProjectManager();
   const { isProjectExpanded, setProjectDisclosure } = useAppUiPreferences();
@@ -133,7 +133,7 @@ export function ProjectNavigation(): React.JSX.Element {
     /* Chat rows and New chat shortcuts share a delay as the pointer travels
      * down the list. Project status descriptions stay screen-reader-only. */
     <TooltipProvider delayDuration={500} skipDelayDuration={300}>
-      <SidebarGroup className='px-2 group-data-[collapsible=icon]:hidden'>
+      <SidebarGroup className={cn('px-2 group-data-[collapsible=icon]:hidden', className)}>
         <ProjectsLabel />
         {/* One row pitch throughout: projects, a project and its first chat, and
           chats between themselves all sit `gap-0.5` apart, so expanding or

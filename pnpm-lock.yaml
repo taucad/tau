@@ -3583,8 +3583,13 @@ importers:
         specifier: ^8.18.1
         version: 8.18.2
 
+  packages/core/archive: {}
+
   packages/core/bundler:
     dependencies:
+      '@taucad/archive-core':
+        specifier: workspace:*
+        version: link:../archive
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../filesystem
@@ -4924,6 +4929,9 @@ importers:
       '@parcel/watcher':
         specifier: 'catalog:'
         version: 2.6.0
+      '@taucad/archive-core':
+        specifier: workspace:*
+        version: link:../core/archive
       '@taucad/events':
         specifier: workspace:*
         version: link:../../libs/events

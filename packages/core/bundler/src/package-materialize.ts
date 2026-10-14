@@ -8,9 +8,10 @@ import type {
   PackageLockEntry,
 } from '#package-lock.types.js';
 import { isRecord, stringRecord } from '#package-registry.js';
-import { gunzip, readBoundedStream, readTarEntries } from '#tarball.js';
+import { gunzip, readTarEntries } from '#tarball.js';
 import type { TarEntry } from '#tarball.js';
 
+import { ArchiveError, fetchVerified } from '@taucad/archive-core';
 import { assertRootedPath } from '@taucad/runtime/kernel';
 
 /** Input to {@link materializePackages}. @public */
@@ -43,9 +44,6 @@ type Download =
   | { readonly code: DownloadFailureCode; readonly reason: string };
 
 const maximumTarballBytes = 256 * 1024 * 1024;
-const fetchTimeoutMilliseconds = 60_000;
-const fetchAttempts = 3;
-const digestAlgorithms = { sha512: 'SHA-512', sha384: 'SHA-384', sha256: 'SHA-256', sha1: 'SHA-1' } as const;
 const recovery: Readonly<Record<DownloadFailureCode, string>> = {
   'registry-unavailable': 'Retry Install when online.',
   'integrity-mismatch': 'Nothing was written; check the registry or reinstall.',
@@ -80,64 +78,6 @@ const writeState = async (filesystem: BundlerFileSystem, installed: ReadonlyMap<
   await filesystem.writeFile(installStatePath, `${JSON.stringify(state, undefined, 2)}\n`);
 };
 
-// Verify bytes against an SRI string with its strongest supported algorithm.
-const integrityMatches = async (bytes: Uint8Array<ArrayBuffer>, integrity: string): Promise<boolean> => {
-  const hashes = integrity
-    .split(/\s+/u)
-    .map((token) => /^(sha512|sha384|sha256|sha1)-([A-Za-z\d+/]+={0,2})$/u.exec(token))
-    .filter((match) => match !== null);
-  const strongest = Object.entries(digestAlgorithms).find(([name]) => hashes.some(([, hash]) => hash === name));
-  if (strongest === undefined) {
-    return false;
-  }
-  const [algorithm, webCryptoName] = strongest;
-  const digest = new Uint8Array(await crypto.subtle.digest(webCryptoName, bytes));
-  // oxlint-disable-next-line no-restricted-globals -- bundler-core has no base64 dependency; btoa exists in every host it targets
-  const actual = btoa(String.fromCodePoint(...digest));
-  return hashes.some(([, hash, value]) => hash === algorithm && value === actual);
-};
-
-const delay = async (milliseconds: number): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
-  });
-
-// Same bounded retry rules as the registry client: transport errors, 429 and 5xx retry; other statuses do not.
-const fetchTarball = async (input: {
-  readonly url: string;
-  readonly fetch: typeof fetch;
-  readonly signal: AbortSignal;
-}): Promise<Uint8Array<ArrayBuffer>> => {
-  let failure = 'no response';
-  for (let attempt = 0; attempt < fetchAttempts; attempt += 1) {
-    if (attempt > 0) {
-      // ponytail: backoff ignores abort for at most 200 ms; the signal is checked right after.
-      // oxlint-disable-next-line no-await-in-loop -- bounded retry backoff avoids hammering the registry
-      await delay(100 * 2 ** (attempt - 1));
-      input.signal.throwIfAborted();
-    }
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- bounded sequential tarball retries
-      const response = await input.fetch(input.url, {
-        signal: AbortSignal.any([input.signal, AbortSignal.timeout(fetchTimeoutMilliseconds)]),
-        credentials: 'omit',
-      });
-      if (response.ok && response.body !== null) {
-        // oxlint-disable-next-line no-await-in-loop -- consume the successful response
-        return await readBoundedStream(response.body, maximumTarballBytes);
-      }
-      failure = `HTTP ${response.status}`;
-      if (response.status !== 429 && response.status < 500) {
-        break;
-      }
-    } catch (error) {
-      input.signal.throwIfAborted();
-      failure = errorMessage(error);
-    }
-  }
-  throw new Error(failure);
-};
-
 // Fetch, verify and unpack one tarball in memory; nothing touches the filesystem until this succeeds.
 const download = async (input: {
   readonly url: string;
@@ -147,13 +87,14 @@ const download = async (input: {
 }): Promise<Download> => {
   let tarball: Uint8Array<ArrayBuffer>;
   try {
-    tarball = await fetchTarball(input);
+    tarball = await fetchVerified({ ...input, maximumBytes: maximumTarballBytes });
   } catch (error) {
     input.signal.throwIfAborted();
-    return { code: 'registry-unavailable', reason: `tarball download failed (${errorMessage(error)})` };
-  }
-  if (!(await integrityMatches(tarball, input.integrity))) {
-    return { code: 'integrity-mismatch', reason: 'tarball does not match the integrity in package-lock.json' };
+    if (error instanceof ArchiveError && error.code === 'INTEGRITY_MISMATCH') {
+      return { code: 'integrity-mismatch', reason: 'tarball does not match the integrity in package-lock.json' };
+    }
+    const reason = error instanceof ArchiveError ? (error.detail ?? error.message) : errorMessage(error);
+    return { code: 'registry-unavailable', reason: `tarball download failed (${reason})` };
   }
   try {
     const { entries } = readTarEntries(await gunzip(tarball));

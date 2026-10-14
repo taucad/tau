@@ -30,7 +30,9 @@ describe('saved catalog preview producer', () => {
       'OffscreenCanvas',
       class {
         public convertToBlob = convertToBlob;
+        // oxlint-disable-next-line @typescript-eslint/parameter-properties -- Vitest specs use erasableSyntaxOnly, which forbids parameter properties.
         public width: number;
+        // oxlint-disable-next-line @typescript-eslint/parameter-properties -- Vitest specs use erasableSyntaxOnly, which forbids parameter properties.
         public height: number;
         public constructor(width: number, height: number) {
           this.width = width;

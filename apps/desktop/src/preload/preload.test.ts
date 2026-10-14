@@ -136,13 +136,18 @@ describe('desktop preload Quick Look bridge', () => {
 
 describe('native directory access', () => {
   it('should advertise the native file manager and forward the selected directory', async () => {
-    const tau = state.exposed.get('tau') as { directories: { openLabel: string; open(path: string): Promise<void> } };
+    const tau = state.exposed.get('tau') as {
+      directories: { openLabel: string; openIcon: string; open(path: string): Promise<void> };
+    };
     expect(tau.directories.openLabel).toBe(
       process.platform === 'darwin'
         ? 'Open in Finder'
         : process.platform === 'win32'
           ? 'Open in File Explorer'
           : 'Open in file manager',
+    );
+    expect(tau.directories.openIcon).toBe(
+      process.platform === 'darwin' ? 'finder' : process.platform === 'win32' ? 'file-explorer' : 'folder',
     );
     await tau.directories.open('/picked/Project');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(openDirectoryChannel, '/picked/Project');

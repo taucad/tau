@@ -341,12 +341,19 @@ describe('ProjectNavigation', () => {
     expect(screen.queryByRole('button', { name: /Open in/u })).not.toBeInTheDocument();
   });
 
-  it.each(['Open in Finder', 'Open in File Explorer', 'Open in file manager'])(
-    'should use the host label %s and resolve the selected project directory',
-    async (openLabel) => {
-      bridge = mock<DesktopBridge>({ directories: { openLabel, open: mockOpenDirectory } });
+  it.each([
+    { openLabel: 'Open in Finder', openIcon: 'finder', selector: 'use[href="#finder"]' },
+    { openLabel: 'Open in File Explorer', openIcon: 'file-explorer', selector: '.lucide-panels-top-left' },
+    { openLabel: 'Open in file manager', openIcon: 'folder', selector: '.lucide-folder-open' },
+  ] as const)(
+    'should use the host label and icon for $openLabel and resolve the selected project directory',
+    async ({ openLabel, openIcon, selector }) => {
+      bridge = mock<DesktopBridge>({ directories: { openLabel, openIcon, open: mockOpenDirectory } });
       render(<ProjectNavigation />);
-      fireEvent.click(screen.getAllByRole('button', { name: openLabel })[0]!);
+      const action = screen.getAllByRole('button', { name: openLabel })[0]!;
+      expect(action.querySelector(selector)).toBeInTheDocument();
+      expect(action.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+      fireEvent.click(action);
       await waitFor(() => {
         expect(mockOpenDirectory).toHaveBeenCalledWith('/picked/Two space');
       });
@@ -356,7 +363,9 @@ describe('ProjectNavigation', () => {
   );
 
   it('should hide native access for browser storage and report native opening failures', async () => {
-    bridge = mock<DesktopBridge>({ directories: { openLabel: 'Open in Finder', open: mockOpenDirectory } });
+    bridge = mock<DesktopBridge>({
+      directories: { openLabel: 'Open in Finder', openIcon: 'finder', open: mockOpenDirectory },
+    });
     mockUseProjects.mockReturnValue({
       ...projectsResult,
       projects: [{ ...firstProject, locator: { backend: 'indexeddb', relativeDirectory: 'one' } }, secondProject],

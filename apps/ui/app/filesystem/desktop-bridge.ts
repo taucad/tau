@@ -264,6 +264,7 @@ export type DesktopBridge = {
   /** Present only when this shell can open native directories. */
   readonly directories?: {
     readonly openLabel: string;
+    readonly openIcon: 'finder' | 'file-explorer' | 'folder';
     open(path: string): Promise<void>;
   };
   readonly dialog: {

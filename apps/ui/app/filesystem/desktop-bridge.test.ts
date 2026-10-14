@@ -107,10 +107,11 @@ describe('desktopBridge', () => {
     const legacy = await loadBridge();
     expect(legacy.desktopBridge()?.directories).toBeUndefined();
     const open = vi.fn(async (_path: string) => undefined);
-    installShellGlobal({ directories: { openLabel: 'Open in Finder', open } });
+    installShellGlobal({ directories: { openLabel: 'Open in Finder', openIcon: 'finder', open } });
     const current = await loadBridge();
     const directories = current.desktopBridge()?.directories;
     expect(directories?.openLabel).toBe('Open in Finder');
+    expect(directories?.openIcon).toBe('finder');
     await directories?.open('/picked/project');
     expect(open).toHaveBeenCalledWith('/picked/project');
   });

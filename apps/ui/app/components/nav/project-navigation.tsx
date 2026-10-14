@@ -1,5 +1,17 @@
 import { Fragment, useMemo, useState } from 'react';
-import { ChevronRight, Copy, FolderOpen, Forward, EllipsisVertical, Pencil, SquarePen, Trash2, X } from 'lucide-react';
+import { SvgIcon } from '#components/icons/svg-icon.js';
+import {
+  ChevronRight,
+  Copy,
+  FolderOpen,
+  PanelsTopLeft,
+  Forward,
+  EllipsisVertical,
+  Pencil,
+  SquarePen,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -346,7 +358,13 @@ function ProjectNavigationItem({
             void openDirectory();
           }}
         >
-          <FolderOpen aria-hidden />
+          {directories.openIcon === 'finder' ? (
+            <SvgIcon id='finder' aria-hidden />
+          ) : directories.openIcon === 'file-explorer' ? (
+            <PanelsTopLeft aria-hidden />
+          ) : (
+            <FolderOpen aria-hidden />
+          )}
           {directories.openLabel}
         </Item>
       ) : null}

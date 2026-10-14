@@ -122,6 +122,7 @@ contextBridge.exposeInMainWorld('tau', {
     },
   },
   directories: {
+    openIcon: process.platform === 'darwin' ? 'finder' : process.platform === 'win32' ? 'file-explorer' : 'folder',
     openLabel:
       process.platform === 'darwin'
         ? 'Open in Finder'

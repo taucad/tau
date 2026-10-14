@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 geospec-engine-native-core = { path = "../../rust" }
-getrandom = "=0.2.17"
+getrandom = "=0.4.3"
 hmac = "=0.13.0"
 serde = { version = "=1.0.219", features = ["derive"] }
 serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }

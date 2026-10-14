@@ -46,7 +46,7 @@ export function BrowserPane({ tabId }: { readonly tabId?: string } = {}): React.
       let captured = false;
       try {
         const result = await bridge.command({ kind: 'capture-preview', tabId: activeTabId });
-        if (!isDisposed && generation === captureGeneration && result.preview?.url === activeUrl) {
+        if (!isDisposed && generation === captureGeneration && result.preview && result.preview.url === activeUrl) {
           previewUrl = result.preview.dataUrl;
           capturedVersion = version;
           captured = true;
@@ -185,7 +185,7 @@ export function BrowserPane({ tabId }: { readonly tabId?: string } = {}): React.
         open('browser');
       }}
     >
-      {preview?.tabId === activeTabId && preview.url === activeUrl ? (
+      {preview && preview.tabId === activeTabId && preview.url === activeUrl ? (
         <img
           src={preview.dataUrl}
           alt=''

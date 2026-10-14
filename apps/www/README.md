@@ -56,21 +56,17 @@ Marketing events: `marketing_page_view`, `marketing_cta_click`, `marketing_downl
 
 `signup_completed`, `first_successful_geometry`, `first_export_completed`, `first_share_created` belong to verified app/server completion events. Do not emit them from CTA clicks. App owner must carry consent and add stable operation-scoped dedup without transmitting account PII. Parent observed no dedicated signup/download/activation events in recent PostHog schema; absence is not evidence of zero conversions. No metrics are displayed publicly.
 
-## Same-domain integration proposal — not enabled
+## Same-domain integration
 
-Marketing `/` and its explicit content paths remain public, static and cacheable. The app retains explicit `/projects`, `/projects/new`, `/w/*`, `/auth/*`, `/settings/*`, `/invitations/*`, existing share/preview routes, API paths and all asset/build paths. Inventory `apps/ui/app/routes.ts` and generated route manifest at integration time; this list is not an exhaustive rewrite configuration. Do not install a catch-all marketing rewrite or move deep links speculatively. Billing currently returns to `/?settings=billing`; preserve that verified settings behavior before switching the root. Existing `/?settings=*` compatibility is a launch blocker that requires the app owner’s routing decision.
+`apps/ui/netlify/edge-functions/marketing.ts` owns the explicit marketing document and React Router data paths. The app retains project/share/auth/settings routes, its assets, `/sitemap.xml` and crawler exclusions. Marketing assets use `/_www/`; its sitemap is exposed at `/sitemap-marketing.xml`. The production robots response appends that sitemap only when marketing is configured. `/vision/` is marketing; `/vision` stays in the app.
 
-If root personalization is later wanted, use the existing authenticated server/session mechanism after verifying cookie scope and API origin behavior. Treat anonymous/unknown state explicitly. Personalized redirects/responses must use `Cache-Control: private, no-store`; never cache them in the public marketing cache. Do not trust `tau-authed` hints, custom client headers or unverified cookies for authority. Redirect destinations must be fixed same-origin routes, never arbitrary query URLs. Serve the same content/routing policy to crawlers and people.
+The proxy preserves only the router's `_routes` query on data requests and does not forward cookies or authorization. Root responses remain private/no-store, and existing settings/callback and returning-app behavior stays in the app. Initial route discovery avoids a shared `/__manifest` endpoint collision. The proxy's regression tests define these boundaries.
 
-## Netlify and deferred DNS
+## Netlify deployment
 
-`netlify.toml` is for a separate authorized marketing review project. Direct Git builds use repository `taucad/tau`, branch `feature/marketing-www-design-verify-print`, repository root (`.`) as the base, `apps/www` as the UI package directory, `node apps/www/scripts/build.ts` as the command and `apps/www/dist` as publish directory. The package directory selects this app’s Netlify configuration. Node 24 matches the root engine requirement; pnpm 11.7.0 comes from root `packageManager`. The install flags select this app and its workspace dependency closure with the frozen lock and scripts suppressed. No Nx Cloud token, API secret or app runtime credential is needed.
+`netlify.toml` and the paired Tau Cloud change configure the existing dedicated marketing site: base `apps/www`, Nx `www:build`, publish `build/client` and functions `.netlify/v1/functions`. `.github/workflows/deploy-www-review.yml` uses the Netlify CLI to build and deploy the SSR function together with client assets. Node 24 matches the workspace requirement; pnpm comes from the root package manager declaration. Production context compiles launch metadata for `https://tau.new`; preview builds remain noindex.
 
-The operator must complete any explicitly approved Netlify/GitHub authorization before creating the project. Existing app connectivity does not prove the browser session already has that grant. Build settings are prepared for Terraform management in the existing `TauCAD/tau-cloud-staging` workspace, using its existing provider credential and a new, separately verified site UUID. PR previews and other branch deploys are disabled for the review project. It has no custom domain. Netlify calls its selected-branch deploy context "production"; this isolated review project does not replace any existing Tau app or production deployment. Preview noindex and analytics-off remain enabled.
-
-No production app routing or DNS change is part of this setup. If CLI deployment is selected later, it requires an existing authorized session and an explicit review-site UUID; do not use another site or the earlier denied Library artifact.
-
-**Queued DNS task (deferred by user):** after preview acceptance, release owner inventories existing deep links/assets/auth callbacks/settings query routes, implements and tests path ownership and cache isolation, verifies rollback on staging, then requests the previously deferred production/domain action. Do not mutate DNS during this task.
+The migration PR does not apply Terraform or change DNS. Coordinate the reviewed Tau Cloud settings plan and staging deployment with the handbook's DEL-24 hosted-qualification gate. Validate source HTML, deep links, assets, router data, canonical/noindex, 404 and app settings/callback isolation before promotion. Operational authority and rollback remain in `docs/handbooks/cloud/`.
 
 ## Reference guidance checked 2026-10-01
 
@@ -88,7 +84,7 @@ The site leads with “Design. Verify. Make.” and one real model: the committe
 - `src/hero-view.ts` holds the hero camera, including a small lens shift, and projects the drawing beneath the model with it: the floor dial that carries the input arc, the centre lines, and the rim dimension spanning the rim’s projected silhouette. The page, the poster and the social card therefore register with the render at every size.
 - `src/live.ts` reparents that one canvas between the hero and the story, whichever is on screen. It draws only when the input angle, scroll position or size changes; idle, hidden, offscreen and still-frame states draw nothing. The hero range input is the non-drag path for the pointer drag (WCAG 2.5.7).
 - `src/story-timeline.ts` maps continuous chapter progress to pure per-part state: three agent lanes, formation, an axial assembly in the order an engineer would build it (every part slides in along the gearbox axis from a non-overlapping exploded stack, so nothing passes through anything else), one input revolution, the face-width change, the ring sliced on a print plate, and the device view.
-- `src/client.ts` keeps still frames in sync with the reading position whenever the live scene is not running. Desktop upgrades the hero after load and idle; touch and narrow screens load on intent or as the story approaches. Reduced motion, Save-Data, no WebGL2 or no `DecompressionStream` never request the 3D bundle.
+- `src/client.client.ts` keeps still frames in sync with the reading position whenever the live scene is not running. The hero upgrades on the explicit control or pointer intent; touch and narrow screens load on intent or as the story approaches. Reduced motion, Save-Data, no WebGL2 or no `DecompressionStream` never request the 3D bundle.
 
 Kinematics follow the source constraints: fixed ring; sun θ; carrier θ/4; planet absolute rotation −θ/2. The model, kinematics, assembly order and recorded GeoSpec run come from `@taucad/planetary-gearbox` (`apps/libs/planetary-gearbox`), which the Tau app's vision page and design story share; the build copies its geometry assets to `/_www/assets/`. The parameter beat is real geometry: `planetary-face18.{json,bin.gz}` holds per-vertex z offsets from the authored `faceWidth` 14 → 18 export, applied as a relative morph target (axial envelope 68 → 72 mm). The verification beat renders the library's `assets/geospec-run.json`, a recorded run of the example spec (3 passed, 0 failed, 7 inconclusive, with unsupported-evidence codes shown as such). The agent lanes, prompt and device frames are labelled illustration. Printing previews a slice; it sends no job.
 
@@ -101,7 +97,7 @@ Use an isolated tooling directory (outside the app dependency graph) with `type:
 3. `CHROME_CHANNEL=chrome node apps/www/scripts/capture-stills.ts` renders the hero poster and the nine story stills from the shipped `scene.ts` on a GPU-backed Chrome, so the fallbacks show exactly what the live renderer draws.
 4. `WWW_RENDER_TOOLS=/path/to/tools node apps/www/scripts/optimize-assets.ts` regenerates responsive sizes and the social card. `capture-metal-hero.ts` still reproduces the metal star.
 
-The default build only copies committed, reviewed assets; it never runs CAD.
+The default build copies committed assets and derives smaller AVIF/WebP delivery images; it never runs CAD.
 
 ## Verify
 
@@ -115,4 +111,4 @@ Tau Cloud backup and sync are presented as available on Pro (10 GB) and Enterpri
 
 ## Lint
 
-Run oxlint (with `oxlint-tsgolint` on `PATH`) and ESLint against the `.ts` files in `src`, `scripts` and `tests` plus `scripts/tooling.js`. `tsconfig.json` gives them project-service membership without enabling JavaScript compilation. The Nx module-boundary rule skips without a cached project graph, so a scoped pass is not a full Nx workspace pass.
+Run `pnpm nx lint www` and `pnpm nx typecheck www`. Route type generation precedes both targets. Application, renderer, scripts and tests use strict TypeScript without JavaScript exclusions.

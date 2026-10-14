@@ -36,6 +36,8 @@ const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastErro
     mockExportBody: vi.fn(),
   }));
 
+vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+
 vi.mock('#routes/w.$workspace.$project/chat-print.js', () => ({
   PrintPanelBody: ({ isShown }: { readonly isShown?: boolean }) => {
     mockPrintBody(isShown);

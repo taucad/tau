@@ -32,6 +32,7 @@ vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
   }),
 }));
 vi.mock('#routes/w.$workspace.$project/focused-chat-gate.js', () => ({
+  ChatHistoryGate: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
   ChatInterfaceSessionGate: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', () => ({

@@ -17,6 +17,7 @@ import {
   parseAgentHostApproval,
   projectTurnSettlement,
 } from '#services/agent-host-event-projection.js';
+import type { AgentHostLiveBlocks } from '#services/agent-host-event-projection.js';
 import { chatTooLongMessage, parseErrorForPersistence } from '#utils/error.utils.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
 import { userProviderMessageOf } from '#chat-clients/turn-intent.js';
@@ -389,6 +390,7 @@ describe('projectAgentHostEvent', () => {
     expect(part).toEqual({
       type: 'reasoning',
       text: 'Inspecting.',
+      id: 'assistant-live:thinking:0',
       state: 'done',
       providerMetadata: { common: { reasoningStartedAtMs: 100, reasoningEndedAtMs: 2100 } },
     });
@@ -1346,8 +1348,8 @@ describe('projectTurnFinalized', () => {
 
 describe('external tool-call chunks', () => {
   const externalMetadata = { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } } as const;
-  const chunksOf = (message: unknown): readonly UIMessageChunk[] =>
-    projectAgentHostEvent({ ...base, type: 'message.appended', message } as AgentLogEvent);
+  const chunksOf = (message: unknown, blocks?: AgentHostLiveBlocks): readonly UIMessageChunk[] =>
+    projectAgentHostEvent({ ...base, type: 'message.appended', message } as AgentLogEvent, blocks);
 
   it("marks every external call dynamic, and carries the emitter's own facts", () => {
     const [chunk] = chunksOf({
@@ -1421,34 +1423,94 @@ describe('external tool-call chunks', () => {
     expect(chunk).toMatchObject({ toolMetadata: { tau: { kind: 'read', nativeName: 'list_directory' } } });
   });
 
+  it.each([false, true])(
+    'merges sparse results (isError=%s) without leaking facts or retaining replaced content',
+    (isError) => {
+      const blocks: AgentHostLiveBlocks = new Map();
+      const input = {
+        id: 'input',
+        role: 'tool-input',
+        toolCallId: 'shared-id',
+        toolName: 'shell',
+        call: { toolCallId: 'vendor-id', title: 'Run script', content: [{ type: 'text', text: 'Old content' }] },
+        content: { command: 'script' },
+        metadata: externalMetadata,
+      } as const;
+      const output = {
+        id: 'output',
+        role: 'tool-output',
+        toolCallId: 'shared-id',
+        toolName: 'shell',
+        call: { toolCallId: 'vendor-id', status: isError ? 'failed' : 'completed', content: [] },
+        content: 'Captured output',
+        isError,
+        metadata: externalMetadata,
+      } as const;
+      projectAgentHostEvent({ ...base, type: 'message.appended', message: input }, blocks);
+      const [sameRun] = projectAgentHostEvent({ ...base, type: 'message.appended', message: output }, blocks);
+      expect(sameRun).toMatchObject({
+        type: isError ? 'tool-output-error' : 'tool-output-available',
+        ...(isError ? { errorText: 'Captured output' } : { output: 'Captured output' }),
+        toolMetadata: {
+          tau: { toolCallId: 'vendor-id', title: 'Run script', status: isError ? 'failed' : 'completed', content: [] },
+        },
+      });
+      const { call: _call, ...outputWithoutCall } = output;
+      const [otherRun] = projectAgentHostEvent(
+        { ...base, runId: 'another-run', type: 'message.appended', message: outputWithoutCall },
+        blocks,
+      );
+      expect(otherRun).toMatchObject({
+        toolMetadata: {
+          tau: { origin: 'external', agentId: 'codex' },
+        },
+      });
+      expect(otherRun).not.toHaveProperty('toolMetadata.tau.title');
+      expect(otherRun).not.toHaveProperty('toolMetadata.tau.toolCallId');
+      const [otherCall] = projectAgentHostEvent(
+        { ...base, type: 'message.appended', message: { ...outputWithoutCall, toolCallId: 'another-call' } },
+        blocks,
+      );
+      expect(otherCall).not.toHaveProperty('toolMetadata.tau.title');
+      expect(otherCall).not.toHaveProperty('toolMetadata.tau.toolCallId');
+    },
+  );
+
   it('keeps a normalized external Tau MCP call on one dynamic SDK identity', async () => {
+    const blocks: AgentHostLiveBlocks = new Map();
     const metadata = {
       tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex', presentation: 'tau-mcp' },
     } as const;
-    const [input] = chunksOf({
-      id: 'tau-mcp-input',
-      role: 'tool-input',
-      toolCallId: 'call-mcp',
-      toolName: 'screenshot',
-      call: {
-        toolCallId: 'vendor-call',
-        kind: 'execute',
-        nativeName: 'screenshot',
-        content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+    const [input] = chunksOf(
+      {
+        id: 'tau-mcp-input',
+        role: 'tool-input',
+        toolCallId: 'call-mcp',
+        toolName: 'screenshot',
+        call: {
+          toolCallId: 'vendor-call',
+          kind: 'execute',
+          nativeName: 'screenshot',
+          content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+        },
+        content: { targetFile: 'main.ts', mode: 'single' },
+        metadata,
       },
-      content: { targetFile: 'main.ts', mode: 'single' },
-      metadata,
-    });
-    const [output] = chunksOf({
-      id: 'tau-mcp-output',
-      role: 'tool-output',
-      toolCallId: 'call-mcp',
-      toolName: 'screenshot',
-      content: { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
-      isError: false,
-      call: { toolCallId: 'vendor-call', kind: 'execute', nativeName: 'screenshot' },
-      metadata,
-    });
+      blocks,
+    );
+    const [output] = chunksOf(
+      {
+        id: 'tau-mcp-output',
+        role: 'tool-output',
+        toolCallId: 'call-mcp',
+        toolName: 'screenshot',
+        content: { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
+        isError: false,
+        call: { toolCallId: 'vendor-call', kind: 'execute', nativeName: 'screenshot' },
+        metadata,
+      },
+      blocks,
+    );
 
     expect(input).toMatchObject({ type: 'tool-input-available', toolName: 'screenshot' });
     expect(input).toHaveProperty('dynamic', true);
@@ -1468,11 +1530,17 @@ describe('external tool-call chunks', () => {
     for await (const message of readUIMessageStream<MyUIMessage>({ stream })) {
       parts = message.parts;
     }
+    expect(parts.filter((part) => part.type === 'dynamic-tool')).toHaveLength(1);
     expect(parts.find((part) => part.type === 'dynamic-tool')).toMatchObject({
       type: 'dynamic-tool',
       state: 'output-available',
       toolMetadata: {
         tau: {
+          toolCallId: 'vendor-call',
+          origin: 'external',
+          agentId: 'codex',
+          presentation: 'tau-mcp',
+          nativeName: 'screenshot',
           content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
         },
       },

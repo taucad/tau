@@ -79,7 +79,7 @@ export default function WebHome(): React.JSX.Element {
   return (
     <>
       <HomepageChatHero />
-      <ProjectLibrary />
+      <ProjectLibrary headingLevel={2} />
     </>
   );
 }

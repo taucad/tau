@@ -45,7 +45,14 @@ const state: {
   model: Model;
   effort: ChatComposerContextValue['model']['effort'];
   placements: readonly AgentHostPlacementTarget[];
-} = { execution: { kind: 'tau', model: fable.id }, model: fable, effort: 'high', placements: [] };
+  canSelectExecution: boolean;
+} = {
+  execution: { kind: 'tau', model: fable.id },
+  model: fable,
+  effort: 'high',
+  placements: [],
+  canSelectExecution: true,
+};
 const setActiveModel = vi.fn();
 const setActiveEffort = vi.fn();
 const setActiveExecution = vi.fn();
@@ -60,7 +67,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
       setActiveEffort,
     },
     execution: { execution: state.execution, setActiveExecution },
-    canSelectExecution: true,
+    canSelectExecution: state.canSelectExecution,
   }),
 }));
 
@@ -193,6 +200,7 @@ describe('ChatAgentSheet', () => {
     state.model = fable;
     state.effort = 'high';
     state.placements = [];
+    state.canSelectExecution = true;
     models.defaultExecution = { kind: 'tau', model: fable.id, effort: 'low' };
     models.catalog = { status: 'loaded', models: catalog };
     preferences.clear();
@@ -316,6 +324,29 @@ describe('ChatAgentSheet', () => {
     await userEvent.click(screen.getByRole('option', { name: /^Haiku 5\.5/u }));
 
     expect(setActiveExecution).toHaveBeenCalledWith({ kind: 'tau', model: haiku.id, effort: 'low' });
+  });
+
+  it('should let a saved Codex chat switch to Tau when its host is absent from discovery', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex', model: 'gpt-6-sol' };
+    renderSheet();
+    await openSheet();
+
+    expect(setActiveExecution).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: /^Agent: codex/u }));
+    await userEvent.click(screen.getByRole('option', { name: /^Tau/u }));
+    await userEvent.click(screen.getByRole('option', { name: /^Haiku 5\.5/u }));
+
+    expect(setActiveExecution).toHaveBeenCalledExactlyOnceWith({ kind: 'tau', model: haiku.id, effort: 'low' });
+  });
+
+  it('should hide agent switching for a read-only saved Codex chat', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex', model: 'gpt-6-sol' };
+    state.canSelectExecution = false;
+    renderSheet();
+    await openSheet();
+
+    expect(screen.queryByRole('button', { name: /^Agent:/u })).not.toBeInTheDocument();
+    expect(setActiveExecution).not.toHaveBeenCalled();
   });
 
   it('says before send that Tau cannot start while its model list is unreachable', async () => {

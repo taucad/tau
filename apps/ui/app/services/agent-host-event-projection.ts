@@ -117,7 +117,13 @@ export type AgentHostLiveBlocks = Map<
       /** A text block whose last applied frame was a durable checkpoint: open, but nothing is arriving. */
       resting?: boolean;
     }
-  | { readonly type: 'tool'; content: ''; closed: boolean; input: 'started' | 'available' }
+  | {
+      readonly type: 'tool';
+      content: '';
+      closed: boolean;
+      input: 'started' | 'available';
+      toolMetadata?: ToolChunkMetadata | undefined;
+    }
 >;
 
 /**
@@ -425,24 +431,28 @@ type ToolChunkMetadata = NonNullable<Extract<UIMessageChunk, { type: 'tool-input
  * renderer reads one shape for both emitters.
  *
  * @param message - The durable tool row.
+ * @param previous - Facts from the same run and tool identity.
  * @returns Chunk fields shared by the input and output chunks.
  */
 const toolChunkFacts = (
   message: ToolProviderMessage,
+  previous?: ToolChunkMetadata,
 ): { dynamic?: true; title?: string; toolMetadata?: ToolChunkMetadata } => {
   const tauInternal = isRecord(message.metadata?.tauInternal) ? message.metadata.tauInternal : undefined;
   const external = tauInternal?.['origin'] === 'external';
   const { call } = message;
   const agentId = tauInternal?.['agentId'];
   const presentation = tauInternal?.['presentation'];
-  /* The SDK carries a part's `toolMetadata` from the *input* chunk and reuses it
-   * for the result. Omit transient status, but retain a terminal replacement so
-   * the real SDK consumer sees the final ACP facts.
+  /* The SDK replaces tool metadata when an output chunk supplies it. Carry
+   * earlier run-scoped facts forward, with explicitly supplied fields replacing
+   * them, so sparse results cannot erase captured content or terminal updates.
+   * Omit transient status while preserving the final ACP facts.
    *
    * The durable log's JSON and the SDK's `JSONValue` describe the same bytes and
    * differ only in array readonly-ness, so this asserts rather than re-copies. */
   const { status: _status, ...facts } = call ?? {};
   const durable = {
+    ...(isRecord(previous?.['tau']) ? previous['tau'] : {}),
     ...facts,
     ...(call?.status === 'completed' || call?.status === 'failed' ? { status: call.status } : {}),
     ...(external ? { origin: 'external' } : {}),
@@ -471,28 +481,42 @@ const messageChunks = (
     }
     case 'tool-input': {
       const key = toolKey(runId, message.toolCallId);
-      if (streamedBlocks?.get(key)?.closed) {
+      const current = streamedBlocks?.get(key);
+      if (current?.closed) {
         return [];
       }
-      streamedBlocks?.set(key, { type: 'tool', content: '', closed: false, input: 'available' });
+      const facts = toolChunkFacts(message, current?.type === 'tool' ? current.toolMetadata : undefined);
+      streamedBlocks?.set(key, {
+        type: 'tool',
+        content: '',
+        closed: false,
+        input: 'available',
+        toolMetadata: facts.toolMetadata,
+      });
       return [
         {
           type: 'tool-input-available',
           toolCallId: message.toolCallId,
           toolName: message.toolName,
           input: message.content,
-          ...toolChunkFacts(message),
+          ...facts,
         },
       ];
     }
     case 'tool-output': {
-      streamedBlocks?.set(toolKey(runId, message.toolCallId), {
+      const key = toolKey(runId, message.toolCallId);
+      const current = streamedBlocks?.get(key);
+      const { title: _title, ...facts } = toolChunkFacts(
+        message,
+        current?.type === 'tool' ? current.toolMetadata : undefined,
+      );
+      streamedBlocks?.set(key, {
         type: 'tool',
         content: '',
         closed: true,
         input: 'available',
+        toolMetadata: facts.toolMetadata,
       });
-      const { title: _title, ...facts } = toolChunkFacts(message);
       const output: UIMessageChunk = message.isError
         ? {
             type: 'tool-output-error',

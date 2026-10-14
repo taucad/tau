@@ -493,82 +493,125 @@ describe('createWorkspace marker identity', () => {
 // R1 — persistent storage
 // ===========================================================================
 
-describe('createWorkspace persistent storage', () => {
-  it('requests persistence once per connect and records the outcome', async () => {
-    const persist = vi.fn(async () => true);
-    const persisted = vi.fn(async () => false);
-    stubStorage({ persist, persisted });
-    const { createWorkspace } = await loadStore();
-
-    const workspace = await createWorkspace(makeHandle('tau-workspace'));
-
-    expect(persisted).toHaveBeenCalledTimes(1);
-    expect(persist).toHaveBeenCalledTimes(1);
-    expect(workspace.storagePersisted).toBe(true);
+describe('Home storage persistence', () => {
+  it('should never request on startup or when connecting a disk workspace', async () => {
+    const persist = vi.fn(async () => false);
+    stubStorage({ persist, persisted: async () => false });
+    const store = await loadStore();
+    await store.getProjectRootConfigs();
+    await store.createWorkspace(makeHandle('tau-workspace'));
+    expect(persist).not.toHaveBeenCalled();
   });
 
-  it('does not re-request persistence when it is already granted', async () => {
+  it('should request once across simultaneous saves and a fresh module sharing the same database', async () => {
+    const persist = vi.fn(async () => false);
+    stubStorage({ persist, persisted: async () => false });
+    const firstTab = await loadStore();
+    vi.resetModules();
+    const secondTab = await import('#filesystem/handle-store.js');
+    await Promise.all([
+      firstTab.requestHomeStoragePersistence(),
+      firstTab.requestHomeStoragePersistence(),
+      secondTab.requestHomeStoragePersistence(),
+    ]);
+    expect(persist).toHaveBeenCalledOnce();
+    vi.resetModules();
+    const reloaded = await import('#filesystem/handle-store.js');
+    await reloaded.requestHomeStoragePersistence();
+    expect(persist).toHaveBeenCalledOnce();
+    expect(reloaded.getPersistentStorageStatus()).toBe('best-effort');
+  });
+
+  it('should skip requesting when already protected', async () => {
     const persist = vi.fn(async () => true);
     stubStorage({ persist, persisted: async () => true });
-    const { createWorkspace } = await loadStore();
-
-    const workspace = await createWorkspace(makeHandle('tau-workspace'));
-
+    const store = await loadStore();
+    await store.requestHomeStoragePersistence();
     expect(persist).not.toHaveBeenCalled();
-    expect(workspace.storagePersisted).toBe(true);
+    expect(store.getPersistentStorageStatus()).toBe('persistent');
   });
 
-  it('tolerates a browser without the Storage Manager API', async () => {
-    stubStorage(undefined);
-    const { createWorkspace, isPersistentStorageRefused } = await loadStore();
-
-    const workspace = await createWorkspace(makeHandle('tau-workspace'));
-
-    expect(workspace.storagePersisted).toBeUndefined();
-    expect(isPersistentStorageRefused()).toBe(false);
-  });
-
-  /* R14: the refusal was recorded on the workspace row and read by nothing. */
-  it('reports a refused request to its subscribers once', async () => {
-    stubStorage({ persist: async () => false, persisted: async () => false });
-    const { createWorkspace, isPersistentStorageRefused, subscribePersistentStorageRefusal } = await loadStore();
+  it('should refresh both grants and revocations without requesting', async () => {
+    const persisted = vi.fn(async () => false);
+    const persist = vi.fn(async () => false);
+    stubStorage({ persist, persisted });
+    const store = await loadStore();
     const listener = vi.fn();
-    subscribePersistentStorageRefusal(listener);
-
-    await createWorkspace(makeHandle('tau-workspace'));
-    await createWorkspace(makeHandle('second-workspace'));
-
-    expect(isPersistentStorageRefused()).toBe(true);
-    expect(listener).toHaveBeenCalledOnce();
+    const unsubscribe = store.subscribePersistentStorageStatus(listener);
+    await store.refreshPersistentStorageStatus();
+    expect(store.getPersistentStorageStatus()).toBe('best-effort');
+    persisted.mockResolvedValue(true);
+    await store.refreshPersistentStorageStatus();
+    expect(store.getPersistentStorageStatus()).toBe('persistent');
+    persisted.mockResolvedValue(false);
+    await store.refreshPersistentStorageStatus();
+    expect(store.getPersistentStorageStatus()).toBe('best-effort');
+    expect(persist).not.toHaveBeenCalled();
+    expect(listener).toHaveBeenCalledTimes(3);
+    unsubscribe();
   });
 
-  it('reports a refusal from the boot-time request too', async () => {
-    stubStorage({ persist: async () => false, persisted: async () => false });
-    const { getProjectRootConfigs, isPersistentStorageRefused, subscribePersistentStorageRefusal } = await loadStore();
-    const refused = new Promise<void>((resolve) => {
-      subscribePersistentStorageRefusal(resolve);
+  it('should serialize a status refresh behind an in-flight grant', async () => {
+    const grant = Promise.withResolvers<boolean>();
+    const persisted = vi.fn(async () => false);
+    const persist = vi.fn(async () => grant.promise);
+    stubStorage({ persist, persisted });
+    const store = await loadStore();
+    const request = store.requestHomeStoragePersistence();
+    await vi.waitFor(() => {
+      expect(persist).toHaveBeenCalledOnce();
     });
-
-    await getProjectRootConfigs();
-    await refused;
-
-    expect(isPersistentStorageRefused()).toBe(true);
+    const refresh = store.refreshPersistentStorageStatus();
+    persisted.mockResolvedValue(true);
+    grant.resolve(true);
+    await Promise.all([request, refresh]);
+    expect(store.getPersistentStorageStatus()).toBe('persistent');
   });
 
-  it('does not report a granted request', async () => {
-    stubStorage({ persist: async () => true, persisted: async () => false });
-    const { createWorkspace, isPersistentStorageRefused } = await loadStore();
-
-    await createWorkspace(makeHandle('tau-workspace'));
-
-    expect(isPersistentStorageRefused()).toBe(false);
+  it('should treat missing APIs and failed checks as unknown protection rather than refused saves', async () => {
+    stubStorage(undefined);
+    const store = await loadStore();
+    await store.refreshPersistentStorageStatus();
+    expect(store.getPersistentStorageStatus()).toBe('unavailable');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    stubStorage({
+      persisted: async () => {
+        throw new Error('unavailable');
+      },
+    });
+    await store.refreshPersistentStorageStatus();
+    expect(store.getPersistentStorageStatus()).toBe('unknown');
   });
 
-  it('lets a profile claim the refusal warning only once', async () => {
-    const { claimPersistentStorageWarning } = await loadStore();
+  it('should retain the claim even if the browser request throws', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const persist = vi.fn(async () => {
+      throw new Error('refused API');
+    });
+    stubStorage({ persist, persisted: async () => false });
+    const store = await loadStore();
+    await expect(store.requestHomeStoragePersistence()).resolves.toBeUndefined();
+    expect(store.getPersistentStorageStatus()).toBe('unknown');
+    vi.resetModules();
+    const reloaded = await import('#filesystem/handle-store.js');
+    await reloaded.requestHomeStoragePersistence();
+    expect(persist).toHaveBeenCalledOnce();
+  });
 
-    await expect(claimPersistentStorageWarning()).resolves.toBe(true);
-    await expect(claimPersistentStorageWarning()).resolves.toBe(false);
+  it('should not prompt when the durable claim fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const persist = vi.fn(async () => true);
+    stubStorage({ persist, persisted: async () => false });
+    const store = await loadStore();
+    const { put } = IDBObjectStore.prototype;
+    vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value: unknown) {
+      const request = put.call(this, value);
+      this.transaction.abort();
+      return request;
+    });
+    await expect(store.requestHomeStoragePersistence()).resolves.toBeUndefined();
+    expect(persist).not.toHaveBeenCalled();
+    expect(store.getPersistentStorageStatus()).toBe('unknown');
   });
 });
 

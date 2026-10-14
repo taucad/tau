@@ -4,10 +4,12 @@ Tau owns instrumentation, reusable dashboards, alert expressions and the local
 Grafana stack. Hosted deployment, datasource credentials, environment selection,
 alert policy and notification recipients belong to the deployment repository.
 
-`bundle/` is a provider-free Terraform module exposing the canonical JSON files.
-Consume it with a full Git commit in `source`, never a floating branch. Promoting
-that commit updates the definitions; reverting it restores the previous version.
-It creates no infrastructure and requires no private repository access.
+`bundle.json` indexes the canonical JSON files with SHA-256 hashes. Deployment
+fetches that index and its files at one immutable Git commit, verifies the hashes,
+and renders the definitions. It never clones application history or executes
+application code. Run `pnpm nx run scripts:grafana-bundle` after changing JSON;
+the ordinary validator rejects a stale index. Promotion and rollback change the
+pinned commit in the deployment repository.
 
 ## Binding contract (version 1)
 

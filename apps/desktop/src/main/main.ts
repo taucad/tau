@@ -1635,7 +1635,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const shutdown = createShutdownActor({ identity: randomUUID() }, { actors: { shutdownDriver } }).start();
   let shutdownPending: Promise<boolean> | undefined;
   let settleShutdown: ((settled: boolean) => void) | undefined;
-  const prepareToQuit = (purpose: 'quit' | 'restart'): Promise<boolean> => {
+  const prepareToQuit = async (purpose: 'quit' | 'restart'): Promise<boolean> => {
     if (shutdownComplete) {
       return Promise.resolve(true);
     }
@@ -1699,7 +1699,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     channel: desktopChannel,
     environment,
     autoUpdater,
-    prepareToRestart: () => prepareToQuit('restart'),
+    prepareToRestart: async () => prepareToQuit('restart'),
     ...(otaProbe ? { candidateTag: otaProbe.candidateTag } : {}),
     fetchJson: async (url) => {
       const response = await net.fetch(url);

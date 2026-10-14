@@ -35,14 +35,8 @@ import {
  * a Grbl router and a Carvera with Control open (presence, jog pad, spindle).
  */
 
-vi.doMock('#hooks/use-project.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  ...projectMock,
-}));
-vi.doMock('#hooks/use-file-manager.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  ...fileManagerMock,
-}));
+vi.doMock('#hooks/use-project.js', () => projectMock);
+vi.doMock('#hooks/use-file-manager.js', () => fileManagerMock);
 vi.doMock('#components/machines/configuration-manifest.js', async (importOriginal) =>
   converterMock(await importOriginal()),
 );

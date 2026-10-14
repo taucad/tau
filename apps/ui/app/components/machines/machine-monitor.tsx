@@ -281,7 +281,7 @@ function TemperatureGroup({
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <div className='flex min-w-0 items-center gap-2'>
-        <h4 className='min-w-0 flex-1 truncate text-xs font-medium'>Temperatures</h4>
+        <h3 className='min-w-0 flex-1 truncate text-xs font-medium'>Temperatures</h3>
         {isStale ? <StaleBadge /> : null}
       </div>
       <dl className='grid grid-cols-3 gap-x-3 gap-y-1'>
@@ -338,9 +338,9 @@ function OtherReadings({
       {observations.map(({ componentId, group, readings }) => (
         <div key={`${componentId}:${group}`} className='flex min-w-0 flex-col gap-1'>
           <div className='flex min-w-0 items-center gap-2'>
-            <h4 className='min-w-0 flex-1 truncate text-xs font-medium'>
+            <h3 className='min-w-0 flex-1 truncate text-xs font-medium'>
               {components.find((component) => component.id === componentId)?.label ?? componentId}
-            </h4>
+            </h3>
             {isObservationStale({ entry, componentId, group, now }) ? <StaleBadge /> : null}
           </div>
           <dl className='flex flex-col gap-1'>
@@ -388,7 +388,7 @@ function Position({
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <div className='flex items-center justify-between gap-2 text-xs'>
-        <h4 className='font-medium'>{title}</h4>
+        <h3 className='font-medium'>{title}</h3>
         <span className='flex items-center gap-2'>
           {isObservationStale({ entry, componentId: motionId, group: positionGroup, now }) ? <StaleBadge /> : null}
           <Badge

@@ -58,7 +58,7 @@ describe('production Machines navigation and layout', () => {
     await page.screenshot({
       path: `../../../../../out/research/global-machines/implementation/browser/directory-${width}-${theme}.png`,
     });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search machines' }), { target: { value: 'Workshop 42' } });
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search machines' }), { target: { value: 'Workshop 42' } });
     const machine = await screen.findByRole('link', { name: /Workshop 42/u });
     fireEvent.click(machine);
     await screen.findByRole('heading', { name: 'Workshop 42' });

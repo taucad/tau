@@ -287,7 +287,7 @@ function JobReview({
           <ShieldCheck aria-hidden className='mt-0.5 size-4 shrink-0 text-muted-foreground' />
         )}
         <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
-          <h4 className='truncate text-sm font-medium'>{job.program.name}</h4>
+          <h3 className='truncate text-sm font-medium'>{job.program.name}</h3>
           <p className='text-xs text-muted-foreground'>
             {[
               describeProgram(job.program),

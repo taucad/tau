@@ -187,7 +187,9 @@ const dialog = {
 vi.mock('electron', () => ({
   app,
   Menu: { getApplicationMenu: vi.fn(() => undefined) },
-  MenuItem: vi.fn(function MenuItem() {}),
+  MenuItem: vi.fn(function MenuItem() {
+    return {};
+  }),
   autoUpdater: { setFeedURL: vi.fn(), checkForUpdates: vi.fn(), quitAndInstall: vi.fn(), on: vi.fn() },
   BrowserWindow: Object.assign(
     vi.fn(function BrowserWindow() {
@@ -467,7 +469,9 @@ describe('desktop main compute owner', () => {
       state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
       await expect(state.prepareToRestart!()).resolves.toBe(false);
       assessment.resolve([]);
-      await vi.waitFor(() => expect(app.quit).toHaveBeenCalledOnce());
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
     },
     bootMilliseconds,
   );

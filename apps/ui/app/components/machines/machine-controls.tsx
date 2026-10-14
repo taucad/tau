@@ -463,7 +463,7 @@ export function Consequences({
 
 const group = (title: string, children: React.ReactNode): React.JSX.Element => (
   <div role='group' aria-label={title} className='flex min-w-0 flex-col gap-2'>
-    <h4 className='text-xs font-medium text-muted-foreground'>{title}</h4>
+    <h3 className='text-xs font-medium text-muted-foreground'>{title}</h3>
     {children}
   </div>
 );

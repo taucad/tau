@@ -371,6 +371,7 @@ main > .band:first-child::before {
   display: grid;
   gap: calc(var(--spacing) * 4);
 }
+.download-actions .fine,
 .download-options .fine {
   margin-top: 0;
 }

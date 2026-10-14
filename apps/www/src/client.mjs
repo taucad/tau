@@ -16,6 +16,10 @@ if (hostPlatform) {
       link.setAttribute('href', environmentHref(desktopDownloadHref(hostPlatform), location.hostname));
     }
   }
+  const intelDownload = document.querySelector('[data-mac-intel]');
+  if (intelDownload instanceof HTMLElement) {
+    intelDownload.hidden = hostPlatform !== 'mac';
+  }
   const detail = document.querySelector('[data-download-detail]');
   const instructions = document.querySelector('[data-install-instructions]');
   const note = document.querySelector('[data-platform-note]');

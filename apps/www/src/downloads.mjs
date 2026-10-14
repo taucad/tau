@@ -11,6 +11,14 @@ export const desktopDownloads = {
     install: 'Open the ZIP, move Tau to Applications, then launch Tau and sign in.',
     updates: 'Updates download automatically. Tau asks before restarting and saves your projects first.',
   },
+  macIntel: {
+    label: 'Intel',
+    icon: platformIcons.apple,
+    file: 'Tau-macos-x64.zip',
+    detail: 'Intel Mac · ZIP download',
+    install: 'Open the ZIP, move Tau to Applications, then launch Tau and sign in.',
+    updates: 'Updates download automatically. Tau asks before restarting and saves your projects first.',
+  },
   windows: {
     label: 'Windows',
     icon: platformIcons.windows,

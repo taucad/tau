@@ -249,6 +249,9 @@ await test('header actions open the app and sign in while the hero opens host do
     /href="\/download\/" data-event="cta" data-placement="hero" data-host-download="page">Download Tau/u,
   );
   assert.match(downloads.body(), /https:\/\/downloads.tau.new\/latest\/Tau-macos-arm64.zip/u);
+  assert.match(downloads.body(), /https:\/\/downloads.tau.new\/latest\/Tau-macos-x64.zip/u);
+  assert.match(downloads.body(), /data-mac-intel hidden/u);
+  assert.match(downloads.body(), /Download for Intel/u);
   assert.doesNotMatch(downloads.body(), /No installer is published/u);
 });
 
@@ -268,7 +271,7 @@ await test('desktop downloads detect all supported hosts and keep mobile or unkn
   for (const [browser, expected] of cases) {
     assert.equal(detectDesktopPlatform(browser), expected);
   }
-  for (const platform of ['mac', 'windows', 'linux']) {
+  for (const platform of ['mac', 'macIntel', 'windows', 'linux']) {
     assert.match(desktopDownloadHref(platform), /^https:\/\/downloads.tau.new\/latest\/Tau-/u);
   }
 });

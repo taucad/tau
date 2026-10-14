@@ -223,7 +223,7 @@ export const pages = [
     description:
       'Download Tau for Mac, Windows or Linux. Work with local files, native CAD kernels and your coding agents.',
     body: () =>
-      `<section class="band">${intro({ eyebrow: 'Tau Desktop', title: 'Your workshop.<br>On your computer.', body: 'Design with local files, native CAD kernels and your own coding agents. Choose Tau for Mac, Windows or Linux.', aside: `<div><div class="actions"><a class="button primary" href="#downloads" data-host-download="direct" data-event="download" data-placement="download">Choose your download ${down}</a></div><p class="fine" data-download-detail>Mac · Windows · Linux</p></div>` })}<div class="download-grid"><article class="cell" data-platform-card="desktop"><p class="kicker">Get started</p><h2>Make room for your next idea.</h2><p data-install-instructions>Choose the build for your computer below, extract the archive, then launch Tau and sign in.</p><p data-platform-note>Mac builds update automatically. Windows and Linux builds are updated manually.</p><a class="text-link" href="${sourceUrl}/releases">Release notes ${out}</a></article><article class="cell" id="downloads"><p class="kicker">All desktop downloads</p><h2>Pick your workspace.</h2><div class="download-options">${Object.entries(
+      `<section class="band">${intro({ eyebrow: 'Tau Desktop', title: 'Your workshop.<br>On your computer.', body: 'Design with local files, native CAD kernels and your own coding agents. Choose Tau for Mac, Windows or Linux.', aside: `<div class="actions download-actions"><div><a class="button primary" href="#downloads" data-host-download="direct" data-event="download" data-placement="download">Choose your download ${down}</a><p class="fine" data-download-detail>Mac · Windows · Linux</p></div><div data-mac-intel hidden><a class="button" href="${desktopDownloadHref('macIntel')}" data-event="download" data-placement="download" aria-label="Download for Intel Mac">${desktopDownloadLabel('macIntel')}</a><p class="fine">Intel Mac · ZIP download</p></div></div>` })}<div class="download-grid"><article class="cell" data-platform-card="desktop"><p class="kicker">Get started</p><h2>Make room for your next idea.</h2><p data-install-instructions>Choose the build for your computer below, extract the archive, then launch Tau and sign in.</p><p data-platform-note>Mac builds update automatically. Windows and Linux builds are updated manually.</p><a class="text-link" href="${sourceUrl}/releases">Release notes ${out}</a></article><article class="cell" id="downloads"><p class="kicker">All desktop downloads</p><h2>Pick your workspace.</h2><div class="download-options"><p class="fine">On a Mac, choose Apple silicon or Intel. Find your chip in Apple menu → About This Mac.</p><div class="actions">${Object.entries(
         desktopDownloads,
       )
         .map(
@@ -232,7 +232,7 @@ export const pages = [
         )
         .join(
           '',
-        )}</div><a class="text-link" href="${appOrigin}/projects" data-event="cta" data-placement="download-web">Open in browser ${out}</a></article></div></section>`,
+        )}</div></div><a class="text-link" href="${appOrigin}/projects" data-event="cta" data-placement="download-web">Open in browser ${out}</a></article></div></section>`,
   },
   {
     path: '/blog/',

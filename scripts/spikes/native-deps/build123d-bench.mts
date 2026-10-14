@@ -24,6 +24,7 @@ import {
   build123dAnalysisSchema,
   build123dArtifactSchema,
   build123dBuildSchema,
+  build123dEmptySchema,
 } from '../../../packages/plugins/build123d/src/build123d.protocol.ts';
 import { PythonSession } from '../../../packages/plugins/build123d/src/python-session.ts';
 import { emit, parseFlags, requiredFlag } from './spike-common.mts';
@@ -123,6 +124,9 @@ const main = async (): Promise<void> => {
       schema: build123dArtifactSchema,
       signal,
     });
+  // The worker retains every built handle until released, as benchmark-native does.
+  const release = async (handleId: string) =>
+    session.request({ method: 'release', params: { handleId }, schema: build123dEmptySchema, signal });
   try {
     const cold = await time(analyze);
     const firstBox = await time(async () => {
@@ -130,6 +134,7 @@ const main = async (): Promise<void> => {
       await session.readArtifact(await mesh(result.handleId));
       return result;
     });
+    await release(firstBox.value.handleId);
     let workload: Record<string, number> = {};
     if (loop > 0) {
       writeFileSync(
@@ -140,12 +145,14 @@ const main = async (): Promise<void> => {
       const v8Build = await time(async () => build({}));
       const v8Mesh = await time(async () => session.readArtifact(await mesh(v8Build.value.handleId)));
       const v8Export = await time(async () => session.readArtifact(await exportStep(v8Build.value.handleId)));
+      await release(v8Build.value.handleId);
       writeFileSync(join(workspacePath, 'main.py'), boxSource(40));
       await analyze();
       const boxLoop = await time(async () => {
         for (let index = 0; index < loop; index += 1) {
           const result = await build({ width: 40 + (index % 20) });
           await session.readArtifact(await mesh(result.handleId));
+          await release(result.handleId);
         }
       });
       workload = {

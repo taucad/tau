@@ -5,7 +5,10 @@
 # absolute budget re-based on the runner. One job per spike after a producer job
 # that runs the existing desktop producers once and hands their trees on as an
 # artifact. Each spike job writes raw JSON records, a summary with its verdict
-# (scripts/spikes/native-deps/summarize.mts) and a job summary, and uploads them.
+# (scripts/spikes/native-deps/summarize.mts) and a job summary, uploads them, and
+# re-emits them as check annotations (readable through the REST API where the
+# log and artifact hosts are not). Dispatch only: `spikes` selects jobs and
+# `trees-run-id` reuses an earlier run's producer artifacts.
 #
 # Read-only beyond its own jobs: the producers run as CI already runs them;
 # downloaded registry bytes are hashed and unpacked as data (S13) and never
@@ -16,10 +19,17 @@ name: Spike wave 0 (macOS)
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/spike-wave0-macos.yml'
-      - 'scripts/spikes/native-deps/**'
+    inputs:
+      spikes:
+        description: 'Comma-separated spikes to run (S1,S2,S3,S5,S6,S13)'
+        required: false
+        type: string
+        default: 'S1,S2,S3,S5,S6,S13'
+      trees-run-id:
+        description: 'Reuse the spike-trees and spike-producer artifacts of this earlier run instead of producing them'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   actions: read # nrwl/nx-set-shas inside setup-nx
@@ -27,7 +37,7 @@ permissions:
 
 concurrency:
   group: spike-wave0-macos-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -36,6 +46,7 @@ defaults:
 jobs:
   produce:
     name: Produce the build123d and PicoGK trees
+    if: inputs.trees-run-id == ''
     runs-on: macos-15
     timeout-minutes: 180
     steps:
@@ -120,6 +131,9 @@ jobs:
   s1:
     name: S1 bytecode precompilation
     needs: produce
+    if: >-
+      !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
+      contains(format(',{0},', inputs.spikes), ',S1,')
     runs-on: macos-15
     timeout-minutes: 60
     env:
@@ -134,6 +148,8 @@ jobs:
         with:
           name: spike-trees
           path: ${{ runner.temp }}/artifact
+          run-id: ${{ inputs.trees-run-id || github.run_id }}
+          github-token: ${{ github.token }}
       - &unpack-trees
         name: Unpack the trees
         run: |
@@ -217,6 +233,9 @@ jobs:
   s2:
     name: S2 ReadyToRun Tau layer
     needs: produce
+    if: >-
+      !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
+      contains(format(',{0},', inputs.spikes), ',S2,')
     runs-on: macos-15
     timeout-minutes: 60
     env:
@@ -232,6 +251,8 @@ jobs:
         with:
           name: spike-producer
           path: ${{ runner.temp }}/producer
+          run-id: ${{ inputs.trees-run-id || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Measure cold handshake and first build (purged page cache, interleaved, three runs each)
         run: |
@@ -256,6 +277,9 @@ jobs:
   s3:
     name: S3 full receipt verification
     needs: produce
+    if: >-
+      !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
+      contains(format(',{0},', inputs.spikes), ',S3,')
     runs-on: macos-15
     timeout-minutes: 60
     env:
@@ -309,6 +333,9 @@ jobs:
   s5:
     name: S5 macOS wheel tier (${{ matrix.runner }})
     needs: produce
+    if: >-
+      !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
+      contains(format(',{0},', inputs.spikes), ',S5,')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
@@ -352,6 +379,9 @@ jobs:
   s6:
     name: S6 Rosetta x64 closure
     needs: produce
+    if: >-
+      !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
+      contains(format(',{0},', inputs.spikes), ',S6,')
     runs-on: macos-15
     timeout-minutes: 90
     env:
@@ -419,6 +449,9 @@ jobs:
   s13:
     name: S13 Node unpack of the registry-native closures
     needs: produce
+    if: >-
+      !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
+      contains(format(',{0},', inputs.spikes), ',S13,')
     runs-on: macos-15
     timeout-minutes: 60
     env:

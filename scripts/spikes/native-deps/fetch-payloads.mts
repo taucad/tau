@@ -127,6 +127,8 @@ const main = async (): Promise<void> => {
   );
   const sitePackagesRelative = 'lib/python3.13/site-packages';
   const sitePackages = join(pythonTree, sitePackagesRelative);
+  const baseDistributions = new Set(['pip']);
+  const skipped: string[] = [];
   const wheels: Array<{
     name: string;
     version: string;
@@ -140,6 +142,11 @@ const main = async (): Promise<void> => {
     .sort()) {
     const [distribution, version] = directory.replace(/\.dist-info$/u, '').split('-') as [string, string];
     const pin = pins.get(`${normalizeName(distribution)}==${version}`);
+    if (!pin && baseDistributions.has(normalizeName(distribution))) {
+      // Shipped inside the python-build-standalone archive itself, not a wheel payload.
+      skipped.push(directory);
+      continue;
+    }
     if (!pin) {
       throw new Error(`installed ${directory} is not pinned in requirements.lock`);
     }
@@ -250,6 +257,7 @@ const main = async (): Promise<void> => {
     spike: 'fetch-payloads',
     pythonBuildStandalone: { archive: archiveName, sha256: expectedPbs, byteLength: pbsBytes },
     wheelCount: wheels.length,
+    skippedBaseDistributions: skipped,
     wheelBytes: wheels.reduce((sum, wheel) => sum + wheel.byteLength, 0),
     wheels,
     dotnetRuntime: {

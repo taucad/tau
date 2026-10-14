@@ -328,16 +328,16 @@ describe.each(adapters.filter((adapter) => adapter.id === 'codex' || adapter.id 
       ];
       const registry: ToolRegistry = {
         list: () => [],
-        invoke: async (invocation) => ({
-          isError: false,
-          content:
+        invoke: async (invocation) => {
+          const content: JsonObject =
             invocation.toolName === toolName.testModel
               ? { success: true, failures: [], passes: [], passed: 0, total: 0 }
               : {
                   success: true,
                   images: views.map((view, index) => ({ view, dataUrl: `data:image/png;base64,${pixels[index]}` })),
-                },
-        }),
+                };
+          return { isError: false, content };
+        },
       };
       const endpoint = createHostMcpEndpoint({
         secret: randomBytes(32).toString('base64url'),

@@ -39,6 +39,9 @@ export type WorkbenchPanelId =
 export type WorkbenchUtilityPanelId = Exclude<WorkbenchPanelId, 'files'>;
 
 type ProjectWorkspaceContextValue = {
+  /** Survives Dockview header replacement during reviewed layout recovery. */
+  registerRecordRecoveryFocus: React.RefCallback<HTMLButtonElement>;
+  restoreRecordRecoveryFocus: () => void;
   openPanel: (panelId: WorkbenchPanelId) => void;
   setWorkbenchOpen: (open: boolean) => void;
   setChatOpen: (open: boolean) => void;
@@ -149,6 +152,31 @@ const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelI
 
 export function ProjectWorkspaceProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const { editorRef, mainEntryPath } = useProject();
+  const recordRecoveryFocusRef = useRef<HTMLButtonElement>(null);
+  const pendingRecordRecoveryFocus = useRef(false);
+  const registerRecordRecoveryFocus = useCallback((node: HTMLButtonElement | null): void => {
+    if (!node && recordRecoveryFocusRef.current === document.activeElement) {
+      pendingRecordRecoveryFocus.current = true;
+    }
+    recordRecoveryFocusRef.current = node;
+    if (node && pendingRecordRecoveryFocus.current) {
+      pendingRecordRecoveryFocus.current = false;
+      // Header replacement may briefly leave focus on body. Respect any focus the person moved elsewhere.
+      if (document.activeElement === document.body && !node.closest('[inert]')) {
+        node.focus();
+      }
+    }
+  }, []);
+  const restoreRecordRecoveryFocus = useCallback((): void => {
+    if (!providerActiveRef.current) {
+      return;
+    }
+    const target = recordRecoveryFocusRef.current;
+    pendingRecordRecoveryFocus.current = !target;
+    if (target?.isConnected && !target.closest('[inert]')) {
+      target.focus();
+    }
+  }, []);
   const location = useLocation();
   const routeKey = location.key;
   const isMobile = useIsMobile();
@@ -405,8 +433,26 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
   }, [editorRef, openPanel]);
 
   const value = useMemo(
-    () => ({ openPanel, setWorkbenchOpen, setChatOpen, connectWorkbench, registerLayoutController, layoutController }),
-    [connectWorkbench, layoutController, openPanel, registerLayoutController, setChatOpen, setWorkbenchOpen],
+    () => ({
+      openPanel,
+      setWorkbenchOpen,
+      setChatOpen,
+      connectWorkbench,
+      registerLayoutController,
+      layoutController,
+      registerRecordRecoveryFocus,
+      restoreRecordRecoveryFocus,
+    }),
+    [
+      connectWorkbench,
+      layoutController,
+      openPanel,
+      registerLayoutController,
+      setChatOpen,
+      setWorkbenchOpen,
+      registerRecordRecoveryFocus,
+      restoreRecordRecoveryFocus,
+    ],
   );
   return (
     <ProjectWorkspaceContext.Provider value={value}>

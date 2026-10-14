@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { act, fireEvent, render } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkbenchLaneNode, WorkbenchLayout } from '@taucad/workbench';
 import type * as KeyboardModule from '@taucad/ui/components/keyboard';
@@ -77,6 +77,48 @@ describe('ProjectWorkspaceProvider', () => {
     listeners.clear();
     keyboard.useKeybinding.mockImplementation(stubKeybinding);
   });
+
+  it.each(['replace', 'gap', 'moved'] as const)(
+    'should preserve recovery focus across header %s without stealing it',
+    (mode) => {
+      function Header(): React.JSX.Element {
+        const { registerRecordRecoveryFocus } = useProjectWorkspace();
+        return (
+          <button ref={registerRecordRecoveryFocus} type='button'>
+            Share
+          </button>
+        );
+      }
+      const tree = (header: string | undefined) => (
+        <ProjectWorkspaceProvider>
+          <Probe />
+          {header && <Header key={header} />}
+          <button type='button'>Export</button>
+        </ProjectWorkspaceProvider>
+      );
+      const view = render(tree('old'));
+      act(() => {
+        workspace.restoreRecordRecoveryFocus();
+      });
+      expect(screen.getByRole('button', { name: 'Share' })).toHaveFocus();
+      if (mode !== 'replace') {
+        view.rerender(tree(undefined));
+        if (mode === 'moved') {
+          screen.getByRole('button', { name: 'Export' }).focus();
+        } else {
+          act(() => {
+            workspace.restoreRecordRecoveryFocus();
+          });
+        }
+      }
+      view.rerender(tree('replacement'));
+      expect(screen.getByRole('button', { name: mode === 'moved' ? 'Export' : 'Share' })).toHaveFocus();
+      const restore = workspace.restoreRecordRecoveryFocus;
+      view.unmount();
+      expect(() => restore()).not.toThrow();
+      expect(document.body).toHaveFocus();
+    },
+  );
 
   it('reveals the Workbench lane and fulfills Files once when its launcher mounts', () => {
     render(

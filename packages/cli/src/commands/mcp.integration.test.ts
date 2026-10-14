@@ -12,7 +12,7 @@
 
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { availableParallelism, loadavg, tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
@@ -24,7 +24,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { CallToolResultSchema, ElicitRequestSchema, JSONRPCMessageSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { openSharedMachineHost } from '@taucad/host';
+import { defaultMachineProviders, openSharedMachineHost } from '@taucad/host';
 import { connectMachineChannel } from '@taucad/runtime/machine';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -711,10 +711,12 @@ describe('tau mcp viewer presentation', () => {
 describe("tau mcp with this computer's printers (blueprint W11)", () => {
   const printTools = [
     'get_print_profiles',
-    'request_print',
-    'get_print_request',
-    'list_print_requests',
-    'cancel_print',
+    'list_machines',
+    'get_machine',
+    'machine_action',
+    'stop_machine',
+    'request_job',
+    'check_job',
   ];
   const projectId = 'proj_abcdefghijklmnopqrstu';
 
@@ -770,7 +772,7 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
       const holder = new Client({ name: 'tau-mcp-printers', version: '1' });
       await connect(holder, first);
       expect(await namesOf(holder)).toEqual(expect.arrayContaining(printTools));
-      const listed = CallToolResultSchema.parse(await holder.callTool({ name: 'list_print_requests', arguments: {} }));
+      const listed = CallToolResultSchema.parse(await holder.callTool({ name: 'list_machines', arguments: {} }));
       expect(listed.isError ?? false, textOf(listed)).toBe(false);
 
       const second = launch(project, undefined, { env: environment });
@@ -814,12 +816,10 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
   );
 
   it(
-    "should print from the folder Codex names with each call, only on the person's answer in its form",
+    'should request a job in the folder Codex names and preserve machine approval ownership',
     async () => {
       const { configDirectory, environment } = await isolatedStore('config-codex');
       /* The simulator, bound in the store before the server starts, as the person binds a printer in Tau. */
-      /* Loaded on demand, as the CLI loads the vendor package. */
-      const { defaultMachineProviders } = await import('@taucad/host');
       const vault = process.env['TAU_SECRET_VAULT'];
       process.env['TAU_SECRET_VAULT'] = 'memory';
       const providers = await defaultMachineProviders();
@@ -890,7 +890,7 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
         CallToolResultSchema.parse(
           await client.callTool(
             {
-              name: 'request_print',
+              name: 'request_job',
               arguments: { targetFile: 'plate.ts' },
               _meta: { 'codex/sandbox-state-meta': { sandboxCwd: pathToFileURL(folder).href } },
             },
@@ -901,7 +901,8 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
       type Answer = {
         approval?: string;
         machineName?: string;
-        request?: { state: string; artifact: { path: string } };
+        job: { state: string; program: { name: string } };
+        nextStep?: string;
       };
 
       const unnamedFolder = await requestIn(join(scratch, 'codex-unnamed'));
@@ -911,22 +912,24 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
       const denied = await requestIn(project);
       expect(denied.isError ?? false, textOf(denied)).toBe(false);
       const deniedAnswer = JSON.parse(textOf(denied)) as Answer;
-      expect(deniedAnswer).toMatchObject({ approval: 'denied', request: { state: 'denied' } });
+      expect(deniedAnswer).toMatchObject({ approval: 'denied', job: { state: 'withdrawn' } });
       expect(asked).toHaveLength(1);
       /* The form names the sliced file and the machine it would print on. */
-      expect(asked[0]).toContain(deniedAnswer.request?.artifact.path.split('/').at(-1));
+      expect(asked[0]).toContain(deniedAnswer.job.program.name);
       expect(asked[0]).toContain(deniedAnswer.machineName);
 
-      /* Approved, the machine host reads the slice back from the folder the call named, by that folder's project. */
+      /* An MCP form cannot grant machine attestations: acceptance still waits for the person's Print pane. */
       approve = true;
       const approved = await requestIn(project);
       expect(approved.isError ?? false, textOf(approved)).toBe(false);
       const approvedAnswer = JSON.parse(textOf(approved)) as Answer;
       expect(approvedAnswer, textOf(approved)).toMatchObject({
         approval: 'approved',
-        request: { state: expect.stringMatching(/^(?:uploading|starting|confirming|started)$/u) as string },
+        job: { state: 'awaiting-approval' },
       });
-      await expect(access(join(project, approvedAnswer.request?.artifact.path ?? 'missing'))).resolves.toBeUndefined();
+      expect(approvedAnswer.nextStep).toContain('Print pane');
+      const artifacts = await readdir(join(project, '.tau/artifacts'), { recursive: true });
+      expect(artifacts.some((path) => path.endsWith(approvedAnswer.job.program.name))).toBe(true);
       await client.close();
     },
     kernelCallLimit,

@@ -8,6 +8,15 @@
   "templating": {
     "list": [
       {
+        "name": "app",
+        "label": "Application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": { "text": ".*", "value": ".*" },
+        "hide": 2
+      },
+      {
         "name": "service",
         "label": "Service",
         "type": "custom",
@@ -20,8 +29,8 @@
       {
         "name": "instance",
         "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(process_uptime{service_name=\"$service\"}, instance)",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(process_uptime{app=~\"$app\",service_name=\"$service\"}, instance)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",
@@ -36,10 +45,11 @@
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
       "targets": [
         {
-          "expr": "sum(rate(kernel_executions_total{service_name=~\"$service\"}[5m])) by (kernel_status)",
+          "expr": "sum(rate(kernel_executions_total{app=~\"$app\",service_name=~\"$service\"}[5m])) by (kernel_status)",
           "legendFormat": "{{kernel_status}}"
         }
-      ]
+      ],
+      "id": 1
     },
     {
       "title": "Kernel Execution Duration (p50 / p95)",
@@ -47,15 +57,18 @@
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(kernel_execution_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(kernel_execution_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le))",
           "legendFormat": "p50"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(kernel_execution_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(kernel_execution_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le))",
           "legendFormat": "p95"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "id": 2
     },
     {
       "title": "Error Rate",
@@ -63,7 +76,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
       "targets": [
         {
-          "expr": "sum(rate(kernel_executions_total{service_name=~\"$service\",kernel_status=\"error\"}[5m])) / sum(rate(kernel_executions_total{service_name=~\"$service\"}[5m])) * 100"
+          "expr": "sum(rate(kernel_executions_total{app=~\"$app\",service_name=~\"$service\",kernel_status=\"error\"}[5m])) / sum(rate(kernel_executions_total{app=~\"$app\",service_name=~\"$service\"}[5m])) * 100"
         }
       ],
       "fieldConfig": {
@@ -77,7 +90,8 @@
             ]
           }
         }
-      }
+      },
+      "id": 3
     },
     {
       "title": "Export Duration by Format",
@@ -85,18 +99,26 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(kernel_geometry_export_duration_bucket{service_name=~\"$service\"}[5m])) by (le, export_format))",
+          "expr": "histogram_quantile(0.95, sum(rate(kernel_geometry_export_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le, export_format))",
           "legendFormat": "{{export_format}} p95"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s", "noValue": "No export data" } }
+      "fieldConfig": {
+        "defaults": { "unit": "s", "noValue": "No export data" }
+      },
+      "id": 4
     },
     {
       "title": "Error Logs",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
+      "targets": [
+        {
+          "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"",
+          "refId": "A"
+        }
+      ],
       "options": {
         "showTime": true,
         "showLabels": true,
@@ -105,14 +127,22 @@
         "prettifyLogMessage": false,
         "enableLogDetails": true,
         "sortOrder": "Descending"
-      }
+      },
+      "id": 5
     },
     {
       "title": "Recent Traces",
       "type": "traces",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 108 },
       "datasource": { "type": "tempo", "uid": "tempo" },
-      "targets": [{ "query": "{resource.service.name=~\"$service\"}", "refId": "A", "queryType": "traceqlSearch" }]
+      "targets": [
+        {
+          "query": "{resource.service.name=~\"$service\"}",
+          "refId": "A",
+          "queryType": "traceqlSearch"
+        }
+      ],
+      "id": 6
     }
   ],
   "schemaVersion": 39

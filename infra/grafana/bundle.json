@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "files": {
+    "dashboards/agents.json": "1f4ff0f653774c503a9ac115a33cbe422d50033b2730058aff49e43616bf63ed",
+    "dashboards/ai-agent.json": "f7b09ce82690b8f55dfffc6bd516b5a4693e2360b4c010ed08b2a3978ca71ef9",
+    "dashboards/api-overview.json": "c7f62b6475ea6b93c26be58a8f3d337583222afda58f88fe8bb650c410c73a69",
+    "dashboards/billing.json": "454fbeea3576d582d7c7013e2900ef7c4031fd41de7dd208360c0d4bbbf6b57e",
+    "dashboards/cad-kernel.json": "30a705f5a17fcfb3b448759be880c28a16c2a1a2371f69f7598eb2192c5411a6",
+    "dashboards/infrastructure.json": "cabd3764cf29b50550f69ef6a5e834c8f37908f930471fa159b9054a5f99dee9",
+    "dashboards/postgresql.json": "527dcfe59050ce67154e504fb4756f3a7279cf9f9329106afd8406161c315ae5",
+    "dashboards/profiling.json": "51436f6ad4244dd7db2844aff04eebb04c6c5f414ff80eedb0d2dcb7b9ea39e3",
+    "dashboards/redis.json": "b62d94e1b03a4271694ce516674c983aca275de5e4409b6c7d5fbd5a5c8c7d8d",
+    "dashboards/runtime.json": "3cc9701e351d0c30355cb786776faedcc35e2af08746c7b745b1135788facb44",
+    "dashboards/slo-executive.json": "11ea2521423ee30a22e413b87b3d3f23b32edede4ba3bb154562686e77c8ef8d",
+    "dashboards/system-overview.json": "76c15090dce7ef3cfad2ae92d0ce3846026e220ff099b42d0e1fee6ce09c8f8c",
+    "dashboards/tau-sync.json": "3af2f4a48ed8c22c9d40c3a2c8db20f00720926e07ac4225890c587b6117bcb4",
+    "dashboards/websocket-rpc.json": "4b79c58efc8e1ae5215b956e1346d4629a4f83a50215eb1b5ba4fc0fcd05a3fd",
+    "alerts/tau-critical.json": "f817b156107b5a3b3b218c03fdff895d5dd732d2ef03f6b53c1384c1776f4134",
+    "alerts/tau-warning.json": "581074f205a2dea288465c234ea59c5cc9eea2b5255d860896d5c3fd2379831b"
+  }
+}

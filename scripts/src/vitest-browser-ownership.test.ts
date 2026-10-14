@@ -219,6 +219,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/react-e2e/vitest.bundlers.config.ts',
         'apps/react-e2e/vitest.config.ts',
         'apps/ui-e2e/vitest.config.ts',
+        'apps/ui/app/components/chat/chat-message-queue.vitest.browser.config.ts',
         'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',
         'apps/ui/app/components/code/code-editor.vitest.browser.config.ts',
         'apps/ui/app/components/geometry/viewer-resize.vitest.browser.config.ts',

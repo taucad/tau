@@ -1,0 +1,58 @@
+/* Shared by the app and component previews. */
+@layer utilities {
+  .animate-shiny-text {
+    animation: shiny-text 1.2s linear infinite;
+  }
+
+  /* Codex TUI's 10-character band; CSS stops approximate its cosine falloff.
+   * Source: openai/codex@1b6e0d8145e1fe5b2663d32fbe7ee02f51a10e1c
+   * codex-rs/tui/src/shimmer.rs (Apache-2.0). The caller sets the loader cadence.
+   */
+  .animate-activity-shimmer {
+    color: transparent;
+    background-color: var(--muted-foreground);
+    background-image: linear-gradient(
+      90deg,
+      var(--muted-foreground),
+      color-mix(in srgb, var(--background) 45%, var(--muted-foreground)) 25%,
+      color-mix(in srgb, var(--background) 90%, var(--muted-foreground)) 50%,
+      color-mix(in srgb, var(--background) 45%, var(--muted-foreground)) 75%,
+      var(--muted-foreground)
+    );
+    background-repeat: no-repeat;
+    background-size: 10ch 100%;
+    background-clip: text;
+    animation: activity-shimmer 2.8s linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-shiny-text {
+      animation: none;
+    }
+
+    .animate-activity-shimmer {
+      color: var(--muted-foreground);
+      background: none;
+      animation: none;
+    }
+  }
+}
+
+@keyframes shiny-text {
+  0% {
+    background-position: 75% 0;
+  }
+  100% {
+    background-position: -175% 0;
+  }
+}
+
+/* Ten characters of offscreen travel at either end, matching Codex's padding. */
+@keyframes activity-shimmer {
+  from {
+    background-position: -15ch 0;
+  }
+  to {
+    background-position: calc(100% + 15ch) 0;
+  }
+}

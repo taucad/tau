@@ -38,6 +38,7 @@
     "netlify/edge-functions/*.ts",
     "netlify/*.test.ts",
     "scripts/**/*.ts",
+    "specs/**/*.ts",
     "scripts/**/*.mts",
     "vite-environment.d.ts",
     "package.json"

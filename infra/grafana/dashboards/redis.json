@@ -7,6 +7,15 @@
   "templating": {
     "list": [
       {
+        "name": "app",
+        "label": "Application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": { "text": ".*", "value": ".*" },
+        "hide": 2
+      },
+      {
         "name": "service",
         "label": "Service",
         "type": "custom",
@@ -20,7 +29,7 @@
         "name": "instance",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(process_uptime{service_name=~\"$service\"}, instance)",
+        "query": "label_values(process_uptime{app=~\"$app\",service_name=~\"$service\"}, instance)",
         "multi": true,
         "includeAll": true,
         "current": { "text": "All", "value": "$__all" }
@@ -34,21 +43,29 @@
       "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
       "datasource": { "type": "redis-datasource", "uid": "redis" },
       "targets": [{ "command": "info", "section": "server", "refId": "A", "type": "command" }],
-      "options": { "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"] } }
+      "options": {
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        }
+      },
+      "id": 1
     },
     {
       "title": "Connected Clients",
       "type": "stat",
       "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
       "datasource": { "type": "redis-datasource", "uid": "redis" },
-      "targets": [{ "command": "info", "section": "clients", "refId": "A", "type": "command" }]
+      "targets": [{ "command": "info", "section": "clients", "refId": "A", "type": "command" }],
+      "id": 2
     },
     {
       "title": "Key Count",
       "type": "stat",
       "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
       "datasource": { "type": "redis-datasource", "uid": "redis" },
-      "targets": [{ "command": "info", "section": "keyspace", "refId": "A", "type": "command" }]
+      "targets": [{ "command": "info", "section": "keyspace", "refId": "A", "type": "command" }],
+      "id": 3
     },
     {
       "title": "Memory Usage",
@@ -69,10 +86,14 @@
         ]
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/^used_memory$/" },
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "/^used_memory$/"
+        },
         "textMode": "value_and_name",
         "graphMode": "none"
-      }
+      },
+      "id": 4
     },
     {
       "title": "Operations/sec",
@@ -81,10 +102,14 @@
       "datasource": { "type": "redis-datasource", "uid": "redis" },
       "targets": [{ "command": "info", "section": "stats", "refId": "A", "type": "command" }],
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/^instantaneous_ops_per_sec$/" },
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "/^instantaneous_ops_per_sec$/"
+        },
         "textMode": "value_and_name",
         "graphMode": "none"
-      }
+      },
+      "id": 5
     },
     {
       "title": "Keyspace Hit Rate",
@@ -95,30 +120,46 @@
           "expr": "sum(rate(redis_keyspace_hits_total[5m])) / clamp_min(sum(rate(redis_keyspace_hits_total[5m])) + sum(rate(redis_keyspace_misses_total[5m])), 1e-10)"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "percentunit" } }
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit" }
+      },
+      "id": 6
     },
     {
       "title": "Redis Connection State",
       "type": "timeseries",
       "gridPos": { "h": 4, "w": 12, "x": 12, "y": 12 },
       "targets": [
-        { "expr": "redis_connection_state{service_name=~\"$service\"}", "legendFormat": "{{redis_role}}", "refId": "A" }
+        {
+          "expr": "redis_connection_state{app=~\"$app\",service_name=~\"$service\"}",
+          "legendFormat": "{{redis_role}}",
+          "refId": "A"
+        }
       ],
-      "fieldConfig": { "defaults": { "min": 0, "max": 1 } }
+      "fieldConfig": {
+        "defaults": { "min": 0, "max": 1 }
+      },
+      "id": 7
     },
     {
       "title": "Slow Log",
       "type": "table",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
       "datasource": { "type": "redis-datasource", "uid": "redis" },
-      "targets": [{ "command": "slowlogGet", "refId": "A", "type": "command" }]
+      "targets": [{ "command": "slowlogGet", "refId": "A", "type": "command" }],
+      "id": 8
     },
     {
       "title": "Error Logs",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
+      "targets": [
+        {
+          "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"",
+          "refId": "A"
+        }
+      ],
       "options": {
         "showTime": true,
         "showLabels": true,
@@ -127,14 +168,22 @@
         "prettifyLogMessage": false,
         "enableLogDetails": true,
         "sortOrder": "Descending"
-      }
+      },
+      "id": 9
     },
     {
       "title": "Recent Traces",
       "type": "traces",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
       "datasource": { "type": "tempo", "uid": "tempo" },
-      "targets": [{ "query": "{resource.service.name=~\"$service\"}", "refId": "A", "queryType": "traceqlSearch" }]
+      "targets": [
+        {
+          "query": "{resource.service.name=~\"$service\"}",
+          "refId": "A",
+          "queryType": "traceqlSearch"
+        }
+      ],
+      "id": 10
     }
   ],
   "schemaVersion": 39

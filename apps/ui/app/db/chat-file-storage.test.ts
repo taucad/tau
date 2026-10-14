@@ -1,3 +1,4 @@
+import { KeyedMutex } from '#db/keyed-mutex.js';
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect import polyfills IndexedDB for the library-row tests
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
@@ -42,6 +43,7 @@ const createStoreWithFiles = (): {
   exists: (path: string) => Promise<boolean>;
   directoriesRead: string[];
 } => {
+  const mutex = new KeyedMutex<string>();
   let filesystem: FileSystemProvider | undefined;
   const provider = async (): Promise<FileSystemProvider> => {
     filesystem ??= await createMemoryProvider();
@@ -108,7 +110,8 @@ const createStoreWithFiles = (): {
   };
   const reopen = (
     projectIds: () => Promise<string[]> = async () => [...seen],
-  ): ReturnType<typeof createChatFileStore> => createChatFileStore({ client, projectIds });
+  ): ReturnType<typeof createChatFileStore> =>
+    createChatFileStore({ client, projectIds, queueLock: mutex.run.bind(mutex) });
   const store = reopen();
   return {
     store,
@@ -889,6 +892,18 @@ describe('chat file store — composer record deletion (D11)', () => {
     await expect(files.exists(attachmentPath(projectId, sibling.id))).resolves.toBe(true);
     await expect(files.exists(recordPath(siblingProjectId, otherProjectChat.id))).resolves.toBe(true);
     await expect(files.exists(attachmentPath(siblingProjectId, otherProjectChat.id))).resolves.toBe(true);
+  });
+
+  it('should remove an inactive chat queue while preserving sibling queues', async () => {
+    const files = createStoreWithFiles();
+    const chat = await files.store.createChat(projectId, { name: 'Deleted', messages: [] });
+    const sibling = await files.store.createChat(projectId, { name: 'Kept', messages: [] });
+    const queuePath = (id: string): string => `/.tau/composers/chats/${projectId}/${id}/queue.json`;
+    await files.write(queuePath(chat.id), '{"version":1,"items":[]}');
+    await files.write(queuePath(sibling.id), '{"version":1,"items":[]}');
+    await files.store.deleteChat(chat.id);
+    await expect(files.exists(queuePath(chat.id))).resolves.toBe(false);
+    await expect(files.exists(queuePath(sibling.id))).resolves.toBe(true);
   });
 
   it('removes the record on the hard delete path too', async () => {

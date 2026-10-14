@@ -12,6 +12,9 @@ export type MorphTimingConfig = Readonly<{
   morphDuration: number;
 }>;
 
+/** Inline spinners run at twice the showcase pace. Shared with accompanying motion. */
+export const metalMorphSpinnerSpeed = 2;
+
 export const defaultMorphTiming: MorphTimingConfig = { restDuration: 1300, morphDuration: 1500 };
 
 export type MorphPhase = 'rest' | 'morph';

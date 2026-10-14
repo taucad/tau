@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -7,11 +7,12 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 export function ProjectFilesRouteIntent(): undefined {
   const location = useLocation();
   const navigate = useNavigate();
-  const { openPanel } = useProjectWorkspace();
+  const { openPanel, layoutController } = useProjectWorkspace();
+  const layoutReady = useSyncExternalStore(layoutController.subscribe, layoutController.ready, layoutController.ready);
 
   useEffect(() => {
     const parameters = new URLSearchParams(location.search);
-    if (parameters.get(searchParameterName.workbench) !== 'files') {
+    if (!layoutReady || parameters.get(searchParameterName.workbench) !== 'files') {
       return;
     }
     openPanel('files', () => {
@@ -19,7 +20,7 @@ export function ProjectFilesRouteIntent(): undefined {
       const search = parameters.toString();
       void navigate(`${location.pathname}${search ? `?${search}` : ''}${location.hash}`, { replace: true });
     });
-  }, [location.hash, location.pathname, location.search, navigate, openPanel]);
+  }, [layoutReady, location.hash, location.pathname, location.search, navigate, openPanel]);
 
   return undefined;
 }

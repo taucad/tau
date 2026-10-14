@@ -177,6 +177,7 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
   const layoutController = useMemo<WorkbenchLayoutController>(
     () => ({
       snapshot: () => layoutControllerRef.current?.snapshot(),
+      ready: () => layoutControllerRef.current?.ready() ?? false,
       subscribe: (listener) => {
         layoutListenersRef.current.add(listener);
         return () => {

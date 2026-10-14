@@ -361,6 +361,7 @@ describe('ProjectWorkspaceProvider', () => {
     };
     let workbench: WorkbenchLaneNode = layout.workbench;
     const controller: WorkbenchLayoutController = {
+      ready: () => true,
       snapshot: () => ({ layout: { ...layout, workbench }, layoutDigest: 'missing', refused: [] }),
       subscribe: () => () => undefined,
       restorePreviousArrangement: async () => true,

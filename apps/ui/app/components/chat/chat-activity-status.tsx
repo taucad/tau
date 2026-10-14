@@ -34,7 +34,7 @@ const ElapsedTime = ({ startedAt }: { readonly startedAt: number }): React.JSX.E
       role='timer'
       aria-live='off'
       aria-label='Time since message sent'
-      className='shrink-0 text-muted-foreground/70 tabular-nums'
+      className='shrink-0 whitespace-nowrap text-muted-foreground/70 tabular-nums'
     >
       {formatElapsed(now - startedAt)}
     </span>
@@ -45,13 +45,13 @@ const ElapsedTime = ({ startedAt }: { readonly startedAt: number }): React.JSX.E
 export const ChatActivityStatus = ({ cue, startedAt, className }: ChatActivityStatusProperties): React.JSX.Element => (
   <div
     className={cn(
-      'flex min-h-6 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-sans text-sm font-normal text-muted-foreground',
+      'flex min-h-6 min-w-0 items-center gap-2 font-sans text-sm font-normal text-muted-foreground',
       className,
     )}
   >
     <div className='flex max-w-full min-w-0 items-center gap-3'>
       {cue.kind === 'waiting' ? <CirclePause aria-hidden className='size-3 shrink-0' /> : <ChatActivitySpinner />}
-      <span role='status' aria-label='Current activity' className='min-w-0 break-words'>
+      <span role='status' aria-label='Current activity' className='min-w-0 truncate'>
         {cue.sentence}
       </span>
     </div>

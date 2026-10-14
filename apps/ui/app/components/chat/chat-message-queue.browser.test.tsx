@@ -127,7 +127,7 @@ describe('message queue pointer reordering', () => {
           return { top, height };
         });
       const initial = geometry();
-      const duringDrag: ReturnType<typeof geometry>[] = [];
+      const duringDrag: Array<ReturnType<typeof geometry>> = [];
       const observer = new MutationObserver(() => duringDrag.push(geometry()));
       observer.observe(screen.getByRole('region', { name: 'Queued messages' }), {
         subtree: true,

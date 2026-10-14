@@ -76,11 +76,7 @@ export const connectBrowserWorkbench = ({
         if (panel.api.title !== tab.title) {
           panel.api.setTitle(tab.title);
         }
-        if (
-          snapshot.activeTabId === tab.id &&
-          previousActiveId !== tab.id &&
-          (!isCreating || api.activePanel?.api.component === 'browser')
-        ) {
+        if (snapshot.activeTabId === tab.id && previousActiveId !== tab.id) {
           panel.api.setActive();
         }
       }
@@ -110,9 +106,6 @@ export const connectBrowserWorkbench = ({
     }
   };
   const unsubscribe = bridge.subscribe((value) => {
-    if (!snapshot) {
-      previousActiveId = value.activeTabId;
-    }
     snapshot = value;
     for (const id of closing) {
       if (!value.tabs.some((tab) => tab.id === id)) {
@@ -147,10 +140,7 @@ export const connectBrowserWorkbench = ({
   const readInitial = async (): Promise<void> => {
     try {
       const value = await bridge.command({ kind: 'snapshot' });
-      if (!snapshot) {
-        previousActiveId = value.activeTabId;
-        snapshot = value;
-      }
+      snapshot ??= value;
       reconcile();
     } catch (error) {
       report(error);

@@ -24,8 +24,6 @@ export type WorkbenchLayoutSnapshot = Readonly<{
 /** Project-scoped page commands. Restore writes the saved projection as an authoritative record edit. */
 export type WorkbenchLayoutController = Readonly<{
   snapshot: () => WorkbenchLayoutSnapshot | undefined;
-  /** Whether the initial saved arrangement has been read, including an absent record. */
-  ready: () => boolean;
   subscribe: (listener: () => void) => () => void;
   restorePreviousArrangement: (
     expected: Readonly<{ layoutDigest: string; target: string; eligible: () => boolean }>,

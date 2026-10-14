@@ -23,7 +23,6 @@ vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => bridge })
 vi.mock('#lib/agent-host-placement.js', () => ({ desktopWorkspaceRoot: async (id: string) => mockWorkspaceRoot(id) }));
 let pathname = '/';
 let search = '';
-let hash = '';
 let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
 
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => mockUseProjects() as ReturnType<typeof useProjects> }));
@@ -58,7 +57,7 @@ vi.mock('react-router', () => ({
       {children}
     </a>
   ),
-  useLocation: () => ({ pathname, search, hash }),
+  useLocation: () => ({ pathname, search }),
   useNavigate: () => mockNavigate,
   useNavigation: () => ({ location: pendingLocation, state: pendingLocation ? 'loading' : 'idle' }),
 }));
@@ -226,7 +225,6 @@ describe('ProjectNavigation', () => {
     vi.clearAllMocks();
     pathname = '/';
     search = '';
-    hash = '';
     pendingLocation = undefined;
     mockUseProjects.mockReturnValue(projectsResult);
     mockCloudIntent.mockReturnValue(undefined);
@@ -364,16 +362,10 @@ describe('ProjectNavigation', () => {
     });
   });
 
-  it('should preserve active project location when opening files without carrying it to another project', () => {
-    pathname = '/w/home/one';
-    search = '?chat=chat_1&keep=1';
-    hash = '#selected-file';
+  it('should omit folder access when the host has no native directory capability', () => {
     render(<ProjectNavigation />);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Open files' })[0]!);
-    expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?workbench=files');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Open files' })[1]!);
-    expect(mockNavigate).toHaveBeenCalledWith('/w/home/one?chat=chat_1&keep=1&workbench=files#selected-file');
     expect(screen.queryByRole('button', { name: /Open in/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open files' })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -385,6 +377,7 @@ describe('ProjectNavigation', () => {
     async ({ openLabel, openIcon, selector }) => {
       bridge = mock<DesktopBridge>({ directories: { openLabel, openIcon, open: mockOpenDirectory } });
       render(<ProjectNavigation />);
+      expect(screen.queryByRole('button', { name: 'Open files' })).not.toBeInTheDocument();
       const action = screen.getAllByRole('button', { name: openLabel })[0]!;
       expect(action.querySelector(selector)).toBeInTheDocument();
       expect(action.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');

@@ -85,11 +85,9 @@ describe('ProjectWorkspaceProvider', () => {
       </ProjectWorkspaceProvider>,
     );
 
-    const onOpened = vi.fn();
     act(() => {
-      workspace.openPanel('files', onOpened);
+      workspace.openPanel('files');
     });
-    expect(onOpened).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledExactlyOnceWith({
       type: 'setPanelState',
       panelState: {
@@ -105,7 +103,6 @@ describe('ProjectWorkspaceProvider', () => {
       workspace.connectWorkbench(opener);
     });
     expect(opener).toHaveBeenCalledExactlyOnceWith('files');
-    expect(onOpened).toHaveBeenCalledExactlyOnceWith();
     const replacement = vi.fn();
     act(() => {
       workspace.connectWorkbench(replacement);
@@ -361,7 +358,6 @@ describe('ProjectWorkspaceProvider', () => {
     };
     let workbench: WorkbenchLaneNode = layout.workbench;
     const controller: WorkbenchLayoutController = {
-      ready: () => true,
       snapshot: () => ({ layout: { ...layout, workbench }, layoutDigest: 'missing', refused: [] }),
       subscribe: () => () => undefined,
       restorePreviousArrangement: async () => true,

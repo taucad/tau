@@ -194,16 +194,6 @@ export function ProjectNavigation(): React.JSX.Element {
                     }
                   }}
                   onDuplicate={async () => handleDuplicate(project)}
-                  onOpenFiles={() => {
-                    if (!project.slugs) {
-                      return;
-                    }
-                    const parameters = new URLSearchParams(isActive ? location.search : '');
-                    parameters.set(searchParameterName.workbench, 'files');
-                    void navigate(
-                      `${projectUrl(project.slugs)}?${parameters.toString()}${isActive ? location.hash : ''}`,
-                    );
-                  }}
                   onShare={() => {
                     if (!project.slugs) {
                       return;
@@ -263,7 +253,6 @@ function ProjectNavigationItem({
   onEditingChange,
   onDuplicate,
   onShare,
-  onOpenFiles,
   onDelete,
 }: {
   readonly project: ProjectListItem;
@@ -279,7 +268,6 @@ function ProjectNavigationItem({
   readonly onEditingChange: (isEditing: boolean) => void;
   readonly onDuplicate: () => Promise<void>;
   readonly onShare: () => void;
-  readonly onOpenFiles: () => void;
   readonly onDelete: () => Promise<void>;
 }): React.JSX.Element {
   const { isMobile } = useSidebar();
@@ -361,10 +349,6 @@ function ProjectNavigationItem({
       >
         <SquarePen aria-hidden />
         New chat
-      </Item>
-      <Item disabled={!project.slugs} onSelect={onOpenFiles}>
-        <FolderOpen aria-hidden />
-        Open files
       </Item>
       {directories ? (
         <Item

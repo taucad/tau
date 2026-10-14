@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { CornerDownRight, ListEnd, MoreHorizontal, Paperclip, Pencil, Trash2 } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { CornerDownRight, ListEnd, MoreVertical, Paperclip, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
@@ -18,7 +18,7 @@ export type ChatMessageQueueProps = {
   readonly error?: string;
   readonly onEdit: (id: string, text: string | undefined) => Promise<void>;
   readonly onSteer: (id: string) => Promise<void>;
-  readonly onMoveFirst: (id: string) => Promise<void>;
+  readonly onMove: (id: string, beforeId: string | undefined) => Promise<void>;
   readonly onRetry: () => void;
 };
 
@@ -29,9 +29,12 @@ export function ChatMessageQueueView({
   error,
   onEdit,
   onSteer,
-  onMoveFirst,
+  onMove,
   onRetry,
 }: ChatMessageQueueProps): React.JSX.Element | undefined {
+  const rows = useRef(new Map<string, HTMLLIElement>());
+  const pointer = useRef<{ id: string; startY: number; beforeId?: string; moved: boolean } | undefined>(undefined);
+  const [drag, setDrag] = useState<{ id: string; beforeId?: string }>();
   const [editing, setEditing] = useState<string>();
   const [text, setText] = useState('');
   const [pending, setPending] = useState<{ id: string; label: string }>();
@@ -41,6 +44,10 @@ export function ChatMessageQueueView({
     label: string;
     operation: () => Promise<void>;
   }>();
+  const reorderLocked =
+    editing !== undefined ||
+    sendingId !== undefined ||
+    items.some((item) => item.command !== undefined || item.steer !== undefined);
   const visibleError = items.some((item) => item.id === actionError?.id) ? actionError : undefined;
   if (items.length === 0 && error === undefined && visibleError === undefined) {
     return undefined;
@@ -65,7 +72,7 @@ export function ChatMessageQueueView({
       aria-label='Queued messages'
       className='@container/message-queue max-h-64 min-w-0 overflow-y-auto overscroll-contain'
     >
-      <ul className='m-0 list-none p-0'>
+      <ul className='m-0 list-none divide-y divide-border/50 p-0'>
         {items.map((item, index) => {
           const content = item.message.parts
             .filter((part) => part.type === 'text')
@@ -80,14 +87,105 @@ export function ChatMessageQueueView({
             item.steer !== undefined && error !== undefined ? 'Steer failed' : busy ? busyLabel : undefined;
           const locked = busy || pending !== undefined || item.command !== undefined || item.steer !== undefined;
           return (
-            <li key={item.id} aria-busy={busy} className='min-w-0 px-2 py-1'>
+            <li
+              key={item.id}
+              aria-busy={busy}
+              ref={(element) => {
+                if (element === null) {
+                  rows.current.delete(item.id);
+                } else {
+                  rows.current.set(item.id, element);
+                }
+              }}
+              className={cn(
+                'min-w-0 px-2 py-1',
+                drag?.id === item.id && 'opacity-50',
+                drag !== undefined && drag.beforeId === item.id && 'border-t-2 border-t-muted-foreground',
+                drag !== undefined &&
+                  drag.beforeId === undefined &&
+                  index === items.length - 1 &&
+                  'border-b-2 border-b-muted-foreground',
+              )}
+            >
               <div className='flex min-w-0 items-center gap-2 @max-[14rem]/message-queue:flex-wrap'>
-                {busy ? (
-                  <Loader className='size-4 shrink-0 text-muted-foreground motion-reduce:animate-none' />
-                ) : (
-                  <ListEnd aria-hidden='true' className='size-4 shrink-0 text-muted-foreground' />
-                )}
-                <span className='min-w-0 flex-1 truncate text-sm' title={content}>
+                <Button
+                  variant='ghost'
+                  size='icon-xs'
+                  className='cursor-grab touch-none text-muted-foreground active:cursor-grabbing'
+                  aria-label={`Reorder queued message ${String(index + 1)}`}
+                  title='Drag to reorder, or use the up and down arrow keys'
+                  disabled={locked || reorderLocked || items.length < 2}
+                  onPointerDown={(event) => {
+                    if (event.button !== 0) {
+                      return;
+                    }
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    pointer.current = { id: item.id, startY: event.clientY, moved: false };
+                  }}
+                  onPointerMove={(event) => {
+                    const current = pointer.current;
+                    if (current?.id !== item.id || (Math.abs(event.clientY - current.startY) < 4 && !current.moved)) {
+                      return;
+                    }
+                    const beforeId = items.find((entry) => {
+                      const bounds = rows.current.get(entry.id)?.getBoundingClientRect();
+                      return (
+                        entry.id !== item.id && bounds !== undefined && event.clientY < (bounds.top + bounds.bottom) / 2
+                      );
+                    })?.id;
+                    pointer.current = { ...current, moved: true, beforeId };
+                    setDrag({ id: item.id, beforeId });
+                    const scroller = event.currentTarget.closest('section');
+                    const bounds = scroller?.getBoundingClientRect();
+                    if (scroller !== null && bounds !== undefined) {
+                      if (event.clientY < bounds.top + 24) {
+                        scroller.scrollBy(0, -16);
+                      } else if (event.clientY > bounds.bottom - 24) {
+                        scroller.scrollBy(0, 16);
+                      }
+                    }
+                  }}
+                  onPointerUp={(event) => {
+                    const current = pointer.current;
+                    pointer.current = undefined;
+                    setDrag(undefined);
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                    const bounds = event.currentTarget.closest('section')?.getBoundingClientRect();
+                    const inside =
+                      bounds !== undefined &&
+                      event.clientX >= bounds.left &&
+                      event.clientX <= bounds.right &&
+                      event.clientY >= bounds.top &&
+                      event.clientY <= bounds.bottom;
+                    if (current?.moved && inside && !locked && !reorderLocked) {
+                      act(item.id, 'Moving…', async () => onMove(item.id, current.beforeId));
+                    }
+                  }}
+                  onLostPointerCapture={() => {
+                    pointer.current = undefined;
+                    setDrag(undefined);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      pointer.current = undefined;
+                      setDrag(undefined);
+                    }
+                    if (event.key === 'ArrowUp' && index > 0) {
+                      event.preventDefault();
+                      act(item.id, 'Moving…', async () => onMove(item.id, items[index - 1]?.id));
+                    } else if (event.key === 'ArrowDown' && index < items.length - 1) {
+                      event.preventDefault();
+                      act(item.id, 'Moving…', async () => onMove(item.id, items[index + 2]?.id));
+                    }
+                  }}
+                >
+                  {busy ? (
+                    <Loader className='size-3.5 motion-reduce:animate-none' />
+                  ) : (
+                    <ListEnd aria-hidden='true' className='size-3.5' />
+                  )}
+                </Button>
+                <span className='min-w-0 flex-1 truncate text-xs' title={content}>
                   {content || 'Attached files'}
                 </span>
                 {attachments > 0 ? (
@@ -95,7 +193,7 @@ export function ChatMessageQueueView({
                     aria-label={`${String(attachments)} attachments`}
                     className='flex shrink-0 items-center gap-1 text-xs text-muted-foreground'
                   >
-                    <Paperclip aria-hidden='true' className='size-3' />
+                    <Paperclip aria-hidden='true' className='size-3.5' />
                     {attachments}
                   </span>
                 ) : null}
@@ -103,7 +201,7 @@ export function ChatMessageQueueView({
                   <Button
                     variant='ghost'
                     size='xs'
-                    className={cn('rounded-full font-normal', statusLabel !== undefined && 'disabled:opacity-100')}
+                    className={cn('font-normal', statusLabel !== undefined && 'disabled:opacity-100')}
                     aria-label='Steer'
                     disabled={locked}
                     title='Interrupt the current turn and send this message'
@@ -113,7 +211,7 @@ export function ChatMessageQueueView({
                   >
                     {statusLabel === undefined ? (
                       <>
-                        <CornerDownRight aria-hidden='true' className='size-4' />
+                        <CornerDownRight aria-hidden='true' className='size-3.5' />
                         Steer
                       </>
                     ) : (
@@ -123,25 +221,23 @@ export function ChatMessageQueueView({
                   <Button
                     variant='ghost'
                     size='icon-sm'
-                    className='rounded-full'
                     aria-label={`Delete queued message ${String(index + 1)}`}
                     disabled={locked}
                     onClick={() => {
                       act(item.id, 'Removing…', async () => onEdit(item.id, undefined));
                     }}
                   >
-                    <Trash2 className='size-4' />
+                    <Trash2 className='size-3.5' />
                   </Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
                         variant='ghost'
                         size='icon-sm'
-                        className='rounded-full'
                         aria-label={`Options for queued message ${String(index + 1)}`}
                         disabled={locked}
                       >
-                        <MoreHorizontal className='size-4' />
+                        <MoreVertical className='size-3.5' />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align='end'>
@@ -151,16 +247,27 @@ export function ChatMessageQueueView({
                           setEditing(item.id);
                         }}
                       >
-                        <Pencil className='size-4' />
+                        <Pencil className='size-3.5' />
                         Edit message
                       </DropdownMenuItem>
                       {index > 0 ? (
                         <DropdownMenuItem
+                          disabled={reorderLocked}
                           onSelect={() => {
-                            act(item.id, 'Moving…', async () => onMoveFirst(item.id));
+                            act(item.id, 'Moving…', async () => onMove(item.id, items[index - 1]?.id));
                           }}
                         >
-                          Move to front
+                          Move up
+                        </DropdownMenuItem>
+                      ) : null}
+                      {index < items.length - 1 ? (
+                        <DropdownMenuItem
+                          disabled={reorderLocked}
+                          onSelect={() => {
+                            act(item.id, 'Moving…', async () => onMove(item.id, items[index + 2]?.id));
+                          }}
+                        >
+                          Move down
                         </DropdownMenuItem>
                       ) : null}
                     </DropdownMenuContent>

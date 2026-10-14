@@ -21,7 +21,7 @@ function ConnectedQueue({
       {...(context.error === undefined ? {} : { error: context.error })}
       onEdit={async (id, text) => store.editQueuedMessage(chatId, id, text)}
       onSteer={async (id) => store.steerQueuedMessage(chatId, id)}
-      onMoveFirst={async (id) => store.moveQueuedMessageFirst(chatId, id)}
+      onMove={async (id, beforeId) => store.moveQueuedMessage(chatId, id, beforeId)}
       onRetry={() => {
         store.retryMessageQueue(chatId);
       }}

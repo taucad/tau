@@ -1559,24 +1559,13 @@ export class ChatSessionStore {
     session.messageQueueRef.send({ type: 'retry' });
   }
 
-  /** Move one unsent entry ahead of other pending messages. */
-  public async moveQueuedMessageFirst(chatId: string, id: string): Promise<void> {
+  /** Move one unsent entry before another, or to the end, preserving its identity. */
+  public async moveQueuedMessage(chatId: string, id: string, beforeId: string | undefined): Promise<void> {
     const session = this.#sessions.get(chatId);
     if (session === undefined) {
       return;
     }
-    await session.messageQueueStore.exclusive(async () =>
-      session.messageQueueStore.update((record) => {
-        const item = record.items.find((entry) => entry.id === id);
-        if (
-          item === undefined ||
-          record.items.some((entry) => entry.command !== undefined || entry.steer !== undefined)
-        ) {
-          throw new Error('Wait for the current message to finish sending.');
-        }
-        return { ...record, items: [item, ...record.items.filter((entry) => entry.id !== id)] };
-      }),
-    );
+    await session.messageQueueStore.move(id, beforeId);
     session.messageQueueRef.send({ type: 'refresh' });
   }
 

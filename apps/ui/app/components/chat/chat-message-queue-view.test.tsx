@@ -14,11 +14,28 @@ const fixture = (overrides: Partial<ChatMessageQueueProps> = {}): ChatMessageQue
   ],
   onEdit: vi.fn(async () => undefined),
   onSteer: vi.fn(async () => undefined),
-  onMoveFirst: vi.fn(async () => undefined),
+  onMove: vi.fn(async () => undefined),
   onRetry: vi.fn(),
   ...overrides,
 });
 describe('queued message adornment', () => {
+  it('should reorder from the handle with the keyboard and remove Move to front', async () => {
+    const user = userEvent.setup();
+    const props = fixture();
+    const second: ChatMessageQueueProps['items'][number] = {
+      id: 'two',
+      requestId: 'req_two',
+      message: { id: 'two', role: 'user', parts: [{ type: 'text', text: 'Second' }] },
+    };
+    render(<ChatMessageQueueView {...props} items={[...props.items, second]} />);
+    const handle = screen.getByRole('button', { name: 'Reorder queued message 2' });
+    handle.focus();
+    await user.keyboard('{ArrowUp}');
+    expect(props.onMove).toHaveBeenCalledWith('two', 'one');
+    await user.click(screen.getByRole('button', { name: 'Options for queued message 2' }));
+    expect(screen.queryByRole('menuitem', { name: 'Move to front' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Move up' })).toBeVisible();
+  });
   it('should discard an action retry when another tab removes its item', async () => {
     const user = userEvent.setup();
     const props = fixture({

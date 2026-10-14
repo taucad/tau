@@ -1,7 +1,8 @@
 import '#styles/global.css';
+import { Button } from '@taucad/ui/components/button';
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
-import { page } from 'vitest/browser';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { page, userEvent } from 'vitest/browser';
 import { ChatMessageQueueView } from '#components/chat/chat-message-queue-view.js';
 
 afterEach(() => {
@@ -29,7 +30,7 @@ describe('message queue pane reflow', () => {
           ]}
           onEdit={async () => undefined}
           onSteer={async () => undefined}
-          onMoveFirst={async () => undefined}
+          onMove={async () => undefined}
           onRetry={() => undefined}
         />
       </div>,
@@ -72,7 +73,7 @@ describe('message queue busy and enlarged text', () => {
           sendingId={sending ? 'one' : undefined}
           onEdit={async () => undefined}
           onSteer={async () => undefined}
-          onMoveFirst={async () => undefined}
+          onMove={async () => undefined}
           onRetry={() => undefined}
         />
       </div>,
@@ -89,5 +90,42 @@ describe('message queue busy and enlarged text', () => {
       expect(screen.getByRole('status').textContent).toBe('Sending…');
     }
     expect(getComputedStyle(screen.getByRole('button', { name: 'Steer' })).opacity).toBe('1');
+  });
+});
+
+describe('message queue pointer reordering', () => {
+  it('should drag only from the handle and keep the row compact with standard buttons', async () => {
+    await page.viewport(1000, 720);
+    const onMove = vi.fn(async () => undefined);
+    render(
+      <div style={{ width: 400 }}>
+        <Button variant='ghost' size='icon-sm'>
+          Standard button
+        </Button>
+        <ChatMessageQueueView
+          items={['one', 'two', 'three'].map((id) => ({
+            id,
+            requestId: `req_${id}`,
+            message: { id, role: 'user', parts: [{ type: 'text', text: id }] },
+          }))}
+          onEdit={async () => undefined}
+          onSteer={async () => undefined}
+          onMove={onMove}
+          onRetry={() => undefined}
+        />
+      </div>,
+    );
+    await userEvent.dragAndDrop(
+      screen.getByRole('button', { name: 'Reorder queued message 3' }),
+      screen.getAllByRole('listitem')[0]!,
+      { targetPosition: { x: 12, y: 2 } },
+    );
+    expect(onMove).toHaveBeenCalledExactlyOnceWith('three', 'one');
+    expect(getComputedStyle(screen.getByText('one')).fontSize).toBe('12px');
+    const button = screen.getByRole('button', { name: 'Options for queued message 1' });
+    expect(getComputedStyle(button).borderRadius).toBe(
+      getComputedStyle(screen.getByRole('button', { name: 'Standard button' })).borderRadius,
+    );
+    expect(getComputedStyle(screen.getAllByRole('listitem')[0]!).borderBottomWidth).toBe('1px');
   });
 });

@@ -1,6 +1,6 @@
 -------------------------- MODULE MessageQueue --------------------------
-\* Presentation review: compact responsive rows and muted/loading styles do not
-\* change admission, cancellation, persisted command identity or queue transitions.
+\* Presentation changes preserve admission, cancellation and command identity.
+\* Explicit reorder changes only the saved queue sequence under delivery exclusion.
 \* Enlarged-text reflow and readable busy labels retain the same disabled guards.
 \* Pending view actions remain serialized until settlement.
 \* Failed steering retains its durable cancel identity; a removed item's view-only
@@ -55,6 +55,16 @@ Persist == LET m == s.pending IN
                      !.afterTerminal[m] = IF CaptureTerminalAtSubmit THEN s.capturedTerminal[m]
                        ELSE IF Stopped(s.observed[s.pendingTab].phase)
                               THEN s.observed[s.pendingTab].run ELSE None]
+\* Explicit reorder changes only the durable sequence, never admission identity.
+MoveBefore(q, m, n) == LET rest == Remove(q, m)
+                           at == IF n = None THEN Len(rest) + 1
+                                 ELSE CHOOSE i \in 1..Len(rest) : rest[i] = n
+                       IN SubSeq(rest, 1, at - 1) \o <<m>> \o SubSeq(rest, at, Len(rest))
+Reorder(t, m, n) == /\ t \in s.alive /\ m \in Members(s.queue)
+                    /\ n \in (Members(s.queue) \ {m}) \cup {None}
+                    /\ s.owner = None /\ s.prepared = None /\ s.steerItem = None
+                    /\ s' = [s EXCEPT !.queue = MoveBefore(@, m, n),
+                              !.saved = IF Durable THEN MoveBefore(@, m, n) ELSE @]
 Observe(t) == /\ t \in s.alive
               /\ s.observed[t] # [run |-> s.active, phase |-> s.phase[s.active], known |-> s.known]
               /\ s' = [s EXCEPT !.observed[t] = [run |-> s.active, phase |-> s.phase[s.active], known |-> s.known]]
@@ -128,7 +138,8 @@ Reopen(t) == /\ t \notin s.alive /\ s' = [s EXCEPT !.alive = @ \cup {t}]
 Next == Persist \/ Complete \/ Pause \/ Resume \/ Stop \/ Fail
         \/ (\E t \in Tabs : Observe(t) \/ Prepare(t) \/ Recover(t) \/ Deliver(t)
              \/ Acknowledge(t) \/ LoseAck(t) \/ Crash(t) \/ Reopen(t) \/ Cancel(t)
-             \/ (\E m \in Messages : Submit(t, m) \/ Steer(t, m)))
+             \/ (\E m \in Messages : Submit(t, m) \/ Steer(t, m)
+                 \/ (\E n \in Messages \cup {None} : Reorder(t, m, n))))
         \/ (\E r \in Runs : FinishCancel(r))
 Spec == Init /\ [][Next]_vars
 TypeOK == /\ s.queue \in Seq(Messages) /\ s.saved \in Seq(Messages)

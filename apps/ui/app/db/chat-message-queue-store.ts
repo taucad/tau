@@ -105,6 +105,7 @@ export type ChatMessageQueueStore = {
     id: string,
     change: (item: QueuedChatMessage) => QueuedChatMessage | undefined,
   ): Promise<ChatMessageQueueRecord>;
+  move(id: string, beforeId: string | undefined): Promise<ChatMessageQueueRecord>;
   acknowledge(id: string, commandId: string): Promise<ChatMessageQueueRecord>;
   remove(): Promise<void>;
 };
@@ -162,6 +163,25 @@ export const createChatMessageQueueStore = (
           return next === undefined ? [] : [next];
         }),
       })),
+    move: async (id: string, beforeId: string | undefined): Promise<ChatMessageQueueRecord> =>
+      lock(`${path}:delivery`, async () =>
+        update((record) => {
+          if (record.items.some((entry) => entry.command !== undefined || entry.steer !== undefined)) {
+            throw new Error('Wait for the current message to finish sending.');
+          }
+          const item = record.items.find((entry) => entry.id === id);
+          if (item === undefined || (beforeId !== undefined && !record.items.some((entry) => entry.id === beforeId))) {
+            throw new Error('The queue changed. Choose the message position again.');
+          }
+          if (beforeId === id) {
+            return record;
+          }
+          const items = record.items.filter((entry) => entry.id !== id);
+          const index = beforeId === undefined ? items.length : items.findIndex((entry) => entry.id === beforeId);
+          items.splice(index, 0, item);
+          return { ...record, items };
+        }),
+      ),
     acknowledge: async (id: string, commandId: string): Promise<ChatMessageQueueRecord> =>
       update((record) => {
         const item = record.items.find((entry) => entry.id === id);

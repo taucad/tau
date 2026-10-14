@@ -31,6 +31,39 @@ const fixture = () => {
   return { files, client, path, open: () => createChatMessageQueueStore(client, path, lock) };
 };
 describe('durable chat message queue', () => {
+  it('should persist arbitrary moves without replacing identities or concurrent submissions', async () => {
+    const f = fixture();
+    const a = f.open();
+    await a.enqueue(item('one'));
+    await a.enqueue(item('two'));
+    await f.open().enqueue(item('three'));
+    await a.move('one', undefined);
+    expect((await f.open().read()).items).toEqual([item('two'), item('three'), item('one')]);
+    f.client.writeFile.mockRejectedValueOnce(new Error('disk full'));
+    await expect(a.move('one', 'three')).rejects.toThrow('disk full');
+    expect((await f.open().read()).items).toEqual([item('two'), item('three'), item('one')]);
+    await a.move('one', 'three');
+    await a.move('one', 'three');
+    expect((await f.open().read()).items).toEqual([item('two'), item('one'), item('three')]);
+    await expect(a.move('one', 'missing')).rejects.toThrow('changed');
+    expect((await f.open().read()).items).toEqual([item('two'), item('one'), item('three')]);
+  });
+  it('should reject a stale reorder after another client prepares steering', async () => {
+    const f = fixture();
+    const a = f.open();
+    await a.enqueue(item('one'));
+    await f.open().enqueue({
+      ...item('two'),
+      steer: {
+        type: 'cancel',
+        commandId: 'cancel_two',
+        payload: { chatId: 'chat', runId: 'active' },
+      },
+    });
+    const before = await a.read();
+    await expect(a.move('one', undefined)).rejects.toThrow('sending');
+    expect(await f.open().read()).toEqual(before);
+  });
   it('should preserve simultaneous submissions from independent clients across reopen', async () => {
     const f = fixture();
     const a = f.open();
@@ -85,6 +118,7 @@ describe('durable chat message queue', () => {
     } as const;
     await q.enqueue({ ...one, command });
     await expect(q.change('one', () => undefined)).rejects.toThrow('being sent');
+    await expect(q.move('one', undefined)).rejects.toThrow('sending');
     await q.acknowledge('one', 'wrong-key');
     const saved3 = await q.read();
     expect(saved3.items).toHaveLength(1);

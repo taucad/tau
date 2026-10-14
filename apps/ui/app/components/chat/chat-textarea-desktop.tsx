@@ -1,4 +1,4 @@
-import { chatInputPaddingClassName } from '#components/chat/chat-input-styles.js';
+import { chatComposerPaddingClassName } from '#components/chat/chat-input-styles.js';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
 import type { Editor } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
@@ -505,11 +505,11 @@ export const ChatTextareaDesktop = memo(function ({
         ref={containerReference}
         className={cn(
           'group/chat-textarea @container',
-          'relative flex w-full flex-col border bg-background',
-          chatInputPaddingClassName,
+          'relative flex w-full flex-col border border-border/60 bg-background',
+          chatComposerPaddingClassName,
           radius,
           'cursor-text overflow-hidden',
-          'shadow-md',
+          'shadow-sm',
           'has-[.tiptap:focus-visible]:focus-outline',
           className,
         )}

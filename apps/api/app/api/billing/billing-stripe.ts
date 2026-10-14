@@ -380,6 +380,9 @@ export function createBillingStripeClient(input: {
     }
   });
   const config: Stripe.StripeConfig = {
+    // Stripe supports older wire versions, but its generated config type names only the latest.
+    // Keep Tau's verified event/request contract while taking SDK transport and signature hardening.
+    // @ts-expect-error -- Pinned billing API version intentionally predates the SDK's generated types.
     apiVersion: stripeApiVersion,
     httpClient: {
       getClientName: () => transport.getClientName(),

@@ -8,6 +8,7 @@ import {
   Lock,
   Printer,
   Settings2,
+  Globe,
   User,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -289,6 +290,20 @@ const settingsCatalog = [
     ],
   },
   {
+    id: 'browser',
+    label: 'Browser',
+    icon: Globe,
+    group: 'Workspace',
+    entries: [
+      {
+        id: 'web-browser',
+        label: 'Web browser',
+        description: 'Search engine, page zoom, browsing history, cookies and site permissions',
+        keywords: ['chromium', 'downloads', 'privacy'],
+      },
+    ],
+  },
+  {
     id: 'experimental',
     label: 'Experimental',
     icon: FlaskConical,
@@ -324,7 +339,7 @@ const platformSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
         ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'browser-storage') }
         : section,
     )
-  : cloudSections.filter((section) => section.id !== 'machines');
+  : cloudSections.filter((section) => section.id !== 'machines' && section.id !== 'browser');
 
 export const settingsSections: readonly SettingsSectionDefinition[] = platformSections.map((section) => ({
   ...section,

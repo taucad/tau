@@ -35,7 +35,7 @@ const declared = new Set([
 type Target = { expr?: unknown; datasource?: { type?: string } };
 type Panel = { targets?: Target[]; datasource?: { type?: string }; panels?: Panel[] };
 type Dashboard = { panels?: Panel[]; templating?: { list?: Array<{ query?: unknown }> } };
-type RuleGroup = { rules?: Array<{ data?: Array<{ model?: { expr?: unknown } }> }> };
+type RuleGroup = { rules?: Array<{ data?: Array<{ datasourceUid?: string; model?: { expr?: unknown } }> }> };
 
 const strings = (values: readonly unknown[]): string[] =>
   values.filter((value): value is string => typeof value === 'string');
@@ -69,7 +69,14 @@ const promqlSources = (): Array<[query: string, file: string]> => {
   }
   for (const file of jsonFiles('alerts')) {
     const rules = read<RuleGroup>(file).rules ?? [];
-    add(file, strings(rules.flatMap((rule) => (rule.data ?? []).map((query) => query.model?.expr))));
+    add(
+      file,
+      strings(
+        rules.flatMap((rule) =>
+          (rule.data ?? []).filter((query) => query.datasourceUid !== 'loki').map((query) => query.model?.expr),
+        ),
+      ),
+    );
   }
   // The local provisioning copy: each `expr:` is a folded or plain YAML scalar, indented under its key.
   const yamlFile = path.join(grafanaRoot, 'provisioning/alerting/alerts.yaml');
@@ -152,5 +159,26 @@ describe('Grafana dashboards and alert rules', () => {
 
   it('should see the rule expressions in the local provisioning copy', () => {
     expect([...queried()].some(([, files]) => files.includes('provisioning/alerting/alerts.yaml'))).toBe(true);
+  });
+});
+
+describe('Grafana environment binding', () => {
+  it('should give every dashboard a local app binding without hosted app names', () => {
+    for (const file of jsonFiles('dashboards')) {
+      const dashboard = read<{ templating: { list: Array<{ name: string; query: string }> } }>(file);
+      expect(dashboard.templating.list.find((variable) => variable.name === 'app')?.query, file).toBe('.*');
+      expect(readFileSync(file, 'utf8'), file).not.toContain('tau-api-staging');
+    }
+  });
+
+  it('should scope application metric selectors before hosted provisioning binds them', () => {
+    const unscoped = promqlSources()
+      .filter(([, file]) => !file.endsWith('.yaml'))
+      .flatMap(([query, file]) =>
+        [...query.matchAll(/\{([^{}]*)\}/gu)]
+          .filter(([, selector]) => selector?.includes('service_name') && !selector.includes('app=~'))
+          .map(() => `${file}: ${query}`),
+      );
+    expect(unscoped).toEqual([]);
   });
 });

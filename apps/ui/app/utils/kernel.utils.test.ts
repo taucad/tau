@@ -1,9 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { replicadKernel } from '@taucad/replicad';
+import { jscadKernel } from '@taucad/jscad';
+import { manifoldKernel } from '@taucad/manifold';
+import { picovoxelKernel } from '@taucad/picovoxel';
+import { tscircuitKernel } from '@taucad/tscircuit';
 import { kernelLibraries } from '#utils/kernel-libraries.js';
 import { getKernelDependencies, kernelsWithLibraries } from '#utils/kernel.utils.js';
 
 describe('getKernelDependencies', () => {
+  it('should match every kernel without loading executable plugins into the renderer', () => {
+    expect(kernelLibraries).toEqual({
+      replicad: replicadKernel().builtinDependencies,
+      jscad: jscadKernel().builtinDependencies,
+      manifold: manifoldKernel().builtinDependencies,
+      picovoxel: picovoxelKernel().builtinDependencies,
+      tscircuit: tscircuitKernel().builtinDependencies,
+    });
+  });
+
   it('should declare the package the replicad plugin runs, under its import name', async () => {
     const dependencies = await getKernelDependencies('replicad');
 

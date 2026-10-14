@@ -54,8 +54,7 @@ import { nodeWorkerClientOptionsSchema } from '#transport/node-worker-transport.
 import { nodeWorkerId } from '#transport/_internal/node-worker-id.js';
 import { nodeWorkerClient } from '#transport/node-worker-client.js';
 
-export type { NodeWorkerLike, NodeWorkerClientOptions } from '#transport/node-worker-client.js';
-export type { NodeWorkerHostOptions } from '#transport/node-worker-host.js';
+export type { NodeWorkerLike } from '#transport/node-worker-client.js';
 
 /**
  * Node-worker client transport plugin (`nodeWorkerTransport`).

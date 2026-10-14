@@ -270,8 +270,12 @@ describe('useChatEditor', () => {
     expect(result.current.slashCommandState).toBeUndefined();
   });
 
-  it('should turn a typed known token into its chip when followed by a space', async () => {
-    const skill = { id: '$imagegen', label: '$imagegen', description: 'Images', group: 'Commands' } as const;
+  it.each([
+    { prefix: 'Render with ', token: '$imagegen' },
+    { prefix: '', token: '$imagegen' },
+    { prefix: 'Run ', token: '/imagegen' },
+  ])('should turn a typed $token after "$prefix" into its chip when followed by a space', async ({ prefix, token }) => {
+    const skill = { id: token, label: token, description: 'Images', group: 'Commands' } as const;
     const { result } = renderHook(() => useChatEditor(createDefaultOptions({ slashCommandItems: [skill] })));
 
     await waitFor(() => {
@@ -290,15 +294,15 @@ describe('useChatEditor', () => {
 
     act(() => {
       editor.commands.focus();
-      typeText('Render with $imagegen');
+      typeText(`${prefix}${token}`);
       typeText(' ');
       typeText('now and $5');
       typeText(' ');
     });
 
     expect(extractContent(editor)).toEqual({
-      text: 'Render with $imagegen now and $5 ',
-      contextChips: [expect.objectContaining({ label: '$imagegen', chipType: 'skill' })],
+      text: `${prefix}${token} now and $5 `,
+      contextChips: [expect.objectContaining({ label: token, chipType: 'skill' })],
     });
   });
 

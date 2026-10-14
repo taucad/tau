@@ -65,14 +65,14 @@ describe('selectChatActivityCue', () => {
       })?.sentence,
     ).toBe('Planning next moves…');
   });
-  it('should show the latest thought and distinguish writing from a resting checkpoint', () => {
+  it('should use a generic thought label and distinguish writing from a resting checkpoint', () => {
     expect(
       selectChatActivityCue({
         runState: 'working',
         chatStatus: 'streaming',
         parts: [{ type: 'reasoning', text: 'Earlier\n**Checking the wall thickness**', state: 'streaming' }],
       })?.sentence,
-    ).toBe('Checking the wall thickness');
+    ).toBe('Thinking…');
     expect(
       selectChatActivityCue({
         runState: 'working',
@@ -95,4 +95,83 @@ describe('selectChatActivityCue', () => {
       })?.sentence,
     ).toBe('Planning next moves…');
   });
+});
+
+it('should use explicit commentary verbatim through checkpoints and subsequent reasoning', () => {
+  const text = '**Literal progress**, not a parsed heading.\nSecond line.';
+  const parts = [
+    {
+      type: 'text',
+      text,
+      state: 'done',
+      providerMetadata: { common: { messagePhase: 'commentary', streamState: 'checkpoint' } },
+    },
+    { type: 'reasoning', text: '**Unrelated title**\nReasoning paragraph', state: 'streaming' },
+  ] as const;
+  expect(selectChatActivityCue({ runState: 'working', chatStatus: 'streaming', parts })?.sentence).toBe(text);
+  expect(selectChatActivityCue({ runState: 'working', chatStatus: 'submitted', parts })?.sentence).toBe(
+    'Planning next moves…',
+  );
+  for (const runState of ['done', 'failed', 'stopped'] as const) {
+    expect(selectChatActivityCue({ runState, chatStatus: 'streaming', parts })).toBeUndefined();
+  }
+  expect(selectChatActivityCue({ runState: 'approval', chatStatus: 'streaming', parts })?.sentence).toBe(
+    'Waiting for approval',
+  );
+  expect(selectChatActivityCue({ runState: 'reconnecting', chatStatus: 'streaming', parts })?.sentence).toBe(
+    'Reconnecting…',
+  );
+});
+
+it.each(['final_answer', 'partial_answer', 'future_phase', undefined])(
+  'should not infer progress from %s or reuse earlier commentary',
+  (phase) => {
+    expect(
+      selectChatActivityCue({
+        runState: 'working',
+        chatStatus: 'streaming',
+        parts: [
+          {
+            type: 'text',
+            text: 'Old progress',
+            state: 'done',
+            providerMetadata: { common: { messagePhase: 'commentary' } },
+          },
+          {
+            type: 'text',
+            text: '**Checking geometry**',
+            state: 'streaming',
+            providerMetadata: { common: phase === undefined ? {} : { messagePhase: phase } },
+          },
+        ],
+      })?.sentence,
+    ).toBe('Writing response…');
+  },
+);
+
+it('should let tool activity supersede commentary and not resurrect it when the tool settles', () => {
+  for (const state of ['input-available', 'output-available'] as const) {
+    expect(
+      selectChatActivityCue({
+        runState: 'working',
+        chatStatus: 'streaming',
+        parts: [
+          {
+            type: 'text',
+            text: 'Old progress',
+            state: 'done',
+            providerMetadata: { common: { messagePhase: 'commentary' } },
+          },
+          {
+            type: 'dynamic-tool',
+            toolName: 'exec',
+            toolCallId: 'cmd',
+            ...(state === 'output-available' ? { state, output: 'done' } : { state }),
+            input: {},
+            toolMetadata: { tau: { kind: 'execute' } },
+          },
+        ],
+      })?.sentence,
+    ).toBe(state === 'input-available' ? 'Running commands' : 'Planning next moves…');
+  }
 });

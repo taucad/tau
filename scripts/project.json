@@ -194,6 +194,11 @@
         "command": "node scripts/src/plan-geospec-ci.ts"
       }
     },
+    "grafana-bundle": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": { "command": "node scripts/src/validate-grafana.ts --write-bundle" }
+    },
     "validate-grafana": {
       "executor": "nx:run-commands",
       "inputs": ["{projectRoot}/src/validate-grafana.ts", "{workspaceRoot}/infra/grafana/**/*"],

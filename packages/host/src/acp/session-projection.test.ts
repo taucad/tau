@@ -1417,3 +1417,63 @@ describe('ACP permission choices', () => {
     expect(chooseOption([options[1]], { outcome: 'denied' })).toBeUndefined();
   });
 });
+
+it('should preserve Codex phase through every live frame and durable replay without merging messages', async () => {
+  const updates: SessionUpdate[] = [
+    {
+      sessionUpdate: 'agent_message_chunk',
+      messageId: 'progress',
+      content: { type: 'text', text: 'Checking ' },
+      _meta: { codex: { phase: 'commentary' } },
+    },
+    {
+      sessionUpdate: 'agent_message_chunk',
+      messageId: 'progress',
+      content: { type: 'text', text: 'the mounting holes.' },
+    },
+    {
+      sessionUpdate: 'agent_message_chunk',
+      messageId: 'answer',
+      content: { type: 'text', text: 'Done.' },
+      _meta: { codex: { phase: 'final_answer' } },
+    },
+  ];
+  const { live } = await projectEvents(updates);
+  expect(live.filter((event) => event['messageId'] === 'id-1').map((event) => event['phase'])).toEqual([
+    'commentary',
+    'commentary',
+    'commentary',
+    'commentary',
+  ]);
+  expect(live.filter((event) => event['messageId'] === 'id-2').map((event) => event['phase'])).toEqual([
+    'final_answer',
+    'final_answer',
+    'final_answer',
+  ]);
+  const messages = await project(updates);
+  expect(messages.map((message) => [message.content, message.metadata?.phase])).toEqual([
+    [[{ type: 'text', text: 'Checking the mounting holes.' }], 'commentary'],
+    [[{ type: 'text', text: 'Done.' }], 'final_answer'],
+  ]);
+});
+
+it.each([
+  ['codex', { codex: { phase: 'future_phase' } }, 'future_phase'],
+  ['codex', { codex: { phase: 123 } }, undefined],
+  ['codex', {}, undefined],
+  ['claude', { codex: { phase: 'commentary' } }, undefined],
+] as const)(
+  'should preserve only explicit string phase metadata from its owning adapter (%s)',
+  async (agentId, meta, expected) => {
+    const updates: SessionUpdate[] = [
+      {
+        sessionUpdate: 'agent_message_chunk',
+        messageId: 'm',
+        content: { type: 'text', text: '**Checking geometry**' },
+        _meta: meta,
+      },
+    ];
+    const messages = await project(updates, agentId);
+    expect(messages[0]?.metadata?.phase).toBe(expected);
+  },
+);

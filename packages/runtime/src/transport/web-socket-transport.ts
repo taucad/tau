@@ -53,8 +53,6 @@ import { webSocketClient } from '#transport/web-socket-client.js';
 import { webSocketClientOptionsSchema } from '#transport/web-socket-transport.schemas.js';
 import { webSocketId } from '#transport/_internal/web-socket-wire.js';
 
-export type { WebSocketTransportOptions } from '#transport/web-socket-transport.schemas.js';
-
 /**
  * Bundled WebSocket client transport plugin (`webSocketTransport`).
  *

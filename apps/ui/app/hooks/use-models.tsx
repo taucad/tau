@@ -143,7 +143,7 @@ export const useModels = () => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const data = await Promise.race([
-        queryClient.ensureQueryData(modelsQuery),
+        queryClient.query({ ...modelsQuery, staleTime: 'static' }),
         new Promise<never>((_resolve, reject) => {
           timer = setTimeout(() => {
             reject(new Error('The model catalog did not answer in time.'));

@@ -1,3 +1,5 @@
+import type { remarkLLMs } from 'fumadocs-core/mdx-plugins/remark-llms';
+import { replaceSource } from 'fumadocs-core/mdx-plugins/stringifier';
 import type { DocEntry, GeneratedDoc, RawTag } from 'fumadocs-typescript';
 
 type MdxJsxAttributeValueExpression = {
@@ -290,4 +292,46 @@ export const llmStringifyMdx = (...stringifyArguments: readonly unknown[]): stri
       return undefined;
     }
   }
+};
+
+/** Preserve Tau's plain-text component output using Fumadocs source replacements. */
+export const remarkLlmStringifyMdx = (): ReturnType<typeof remarkLLMs> => (tree, file) => {
+  const visit = (node: Parameters<typeof replaceSource>[1]): void => {
+    // Fumadocs now emits authored source rather than serializing the mutated AST.
+    // Reflect resolved site-root destinations in Markdown as well as HTML.
+    if ((node.type === 'link' || node.type === 'definition') && node.url.startsWith('/')) {
+      const destination = node.url.replaceAll(/[\n\r<>\\]/g, (character) => encodeURIComponent(character));
+      const title = node.title
+        ? ` "${node.title.replaceAll('\\', String.raw`\\`).replaceAll('"', String.raw`\"`)}"`
+        : '';
+      if (node.type === 'link') {
+        replaceSource(file, node, (stringifier) => `[${stringifier.inner(node)}](<${destination}>${title})`);
+      } else {
+        const label = (node.label ?? node.identifier).replaceAll(/[[\\\]]/g, (character) => `\\${character}`);
+        replaceSource(file, node, `[${label}]: <${destination}>${title}`);
+      }
+    }
+
+    const replacement = llmStringifyMdx(node);
+    if (replacement !== undefined) {
+      replaceSource(file, node, replacement);
+      return;
+    }
+
+    if ('children' in node) {
+      // AutoTypeTable retains the authored range on a root containing generated
+      // TypeTable children. Replace that range; generated children have no positions.
+      if (node !== tree && node.type === 'root' && node.children.length > 0) {
+        const rendered = node.children.map((child) => llmStringifyMdx(child));
+        if (rendered.every((value) => value !== undefined)) {
+          replaceSource(file, node, rendered.join('\n\n'));
+          return;
+        }
+      }
+      for (const child of node.children) {
+        visit(child);
+      }
+    }
+  };
+  visit(tree);
 };

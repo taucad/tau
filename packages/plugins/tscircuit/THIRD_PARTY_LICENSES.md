@@ -2,7 +2,7 @@
 
 Generated from the LICENSE text shipped with each package included in the engine, or, where a package ships none, the text in its upstream repository. CLEARED entries carry text identified as an OSS licence. DEFERRED entries have no text yet; they do not block publication and are tracked as follow-up work. HELD and REVIEW PENDING entries block publication.
 
-## @babel/runtime@7.29.7 — CLEARED (MIT)
+## @babel/runtime@7.29.10 — CLEARED (MIT)
 
 MIT License
 
@@ -1986,7 +1986,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## nanoid@5.1.14 — CLEARED (MIT)
+## nanoid@5.1.16 — CLEARED (MIT)
 
 The MIT License (MIT)
 
@@ -2047,7 +2047,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## papaparse@5.5.4 — CLEARED (MIT)
+## papaparse@5.7.0 — CLEARED (MIT)
 
 The MIT License (MIT)
 

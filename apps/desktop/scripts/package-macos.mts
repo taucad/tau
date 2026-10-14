@@ -298,6 +298,8 @@ try {
   const packagePaths = await packager({
     dir: stageRoot,
     out: outputRoot,
+    // Isolate Packager cleanup; ASAR's absolute-path unpack glob cannot cross hidden worktree directories.
+    tmpdir: resolve(tmpdir(), `tau-packager-${createHash('sha256').update(outputRoot).digest('hex').slice(0, 16)}`),
     overwrite: true,
     platform: 'darwin',
     arch: 'arm64',

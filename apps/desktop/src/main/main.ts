@@ -1,3 +1,4 @@
+import { installBrowserHost } from '#main/browser-host.js';
 /**
  * Electron main process (work item E2).
  *
@@ -441,6 +442,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   /* Deny by default; see `grantedPermissions` for the explicit grants and why. */
   const origins = rendererOrigins({ appOrigin, devServerUrl: environment.ELECTRON_RENDERER_URL });
+  installBrowserHost({ origins, userDataPath: app.getPath('userData') });
   // The macOS consent prompt appears once; later answers come from System Settings without a prompt.
   session.defaultSession.setPermissionRequestHandler(async (...[contents, permission, callback, details]) => {
     const microphone = isMicrophonePermissionGranted({

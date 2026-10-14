@@ -68,8 +68,7 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
     // Drop events processed after a withdrawal in this or another tab, before React reacts,
     // and strip invitation tokens from whatever is left (charter W5, D27).
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
-    before_send: (event) =>
-      readConsentStatus() === 'accepted' && event !== null ? redactEventProperties(event) : null,
+    before_send: (event) => (readConsentStatus() === 'accepted' ? redactEventProperties(event) : null),
     // Defer extension initialization (session recording, autocapture, dead-click detection, etc.)
     // to off-main-thread tasks with 30ms time-sliced budgets, reducing startup blocking.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options

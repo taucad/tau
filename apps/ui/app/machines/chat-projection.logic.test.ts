@@ -2003,3 +2003,213 @@ describe('completed long-run public SDK reconstruction controls', () => {
     ).rejects.toThrow();
   });
 });
+
+describe('late tool input envelope corrections', () => {
+  const cases = [false, true].flatMap((isError) =>
+    (['active', 'completed', 'sealed'] as const).flatMap((scope) =>
+      ([false, true, 'replaced'] as const).flatMap((refined) =>
+        [false, true].map((clear) => ({ isError, scope, refined, clear })),
+      ),
+    ),
+  );
+  it.each(cases.flatMap((entry) => [false, true].map((single) => ({ ...entry, single }))))(
+    'retains corrected facts and terminal output: %j',
+    async ({ isError, scope, refined, clear, single }) => {
+      const content = clear ? [] : [{ type: 'text', text: 'Corrected content' }];
+      const metadata = { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } };
+      const input = {
+        id: 'corrected-input',
+        role: 'tool-input',
+        toolCallId: 'corrected-call',
+        toolName: 'shell',
+        content: { command: 'old' },
+        metadata,
+        call: { toolCallId: 'vendor-call', title: 'Old title', content: [{ type: 'text', text: 'Old content' }] },
+      };
+      const refinement = refined
+        ? { title: 'Output refinement', content: [{ type: 'text', text: 'Output content' }] }
+        : {};
+      const rows = [
+        lifecycleRow(0, 'admitted'),
+        lifecycleRow(1, 'running'),
+        logRow(2, { type: 'message.appended', message: { id: 'user', role: 'user', content: 'Start' } }),
+        logRow(3, { type: 'message.appended', message: input }),
+        logRow(4, {
+          type: 'message.appended',
+          message: {
+            id: 'settled-output',
+            role: 'tool-output',
+            toolCallId: 'corrected-call',
+            toolName: 'shell',
+            content: 'Terminal result',
+            isError,
+            metadata,
+            call: { toolCallId: 'vendor-call', status: isError ? 'failed' : 'completed', ...refinement },
+          },
+        }),
+        ...(scope === 'completed'
+          ? [lifecycleRow(5, 'completed')]
+          : scope === 'sealed'
+            ? [
+                logRow(5, {
+                  type: 'message.appended',
+                  message: { id: 'steer:next', role: 'user', content: 'Next' },
+                }),
+              ]
+            : []),
+      ];
+      if (refined === 'replaced') {
+        refinement.title = 'Replaced output refinement';
+        refinement.content = [];
+        rows.push(
+          logRow(rows.length, {
+            type: 'message.envelope-replaced',
+            messageId: 'settled-output',
+            replacement: {
+              id: 'settled-output',
+              role: 'tool-output',
+              toolCallId: 'corrected-call',
+              toolName: 'shell',
+              content: 'Terminal result',
+              isError,
+              metadata,
+              call: { toolCallId: 'vendor-call', status: isError ? 'failed' : 'completed', ...refinement },
+            },
+          }),
+        );
+      }
+      rows.push(
+        logRow(rows.length, {
+          type: 'message.envelope-replaced',
+          messageId: input.id,
+          replacement: {
+            ...input,
+            content: { command: 'corrected' },
+            call: { ...input.call, title: 'Corrected title', content },
+          },
+        }),
+      );
+      const state = project(rows, single ? 1 : rows.length);
+      const messages = await materializeTranscript(state);
+      const parts = messages.flatMap((message) => message.parts).filter((part) => part.type === 'dynamic-tool');
+      expect(parts).toHaveLength(1);
+      expect(parts[0]).toMatchObject({
+        type: 'dynamic-tool',
+        toolCallId: 'corrected-call',
+        input: { command: 'corrected' },
+        state: isError ? 'output-error' : 'output-available',
+        ...(isError ? { errorText: 'Terminal result' } : { output: 'Terminal result' }),
+        toolMetadata: {
+          tau: {
+            toolCallId: 'vendor-call',
+            title: 'Corrected title',
+            content,
+            ...refinement,
+            status: isError ? 'failed' : 'completed',
+            origin: 'external',
+            agentId: 'codex',
+          },
+        },
+      });
+      if (scope === 'active') {
+        expect(state.blocks['run_1']?.[JSON.stringify(['run_1', 'tool', 'corrected-call'])]).toMatchObject({
+          closed: true,
+          toolMetadata: parts[0]?.toolMetadata,
+        });
+        const continued = reduceChatProjection(state, {
+          type: 'batch',
+          answer: batch(
+            [
+              logRow(rows.length, {
+                type: 'message.appended',
+                message: {
+                  id: 'later-output',
+                  role: 'tool-output',
+                  toolCallId: 'corrected-call',
+                  toolName: 'shell',
+                  content: 'Terminal result',
+                  isError,
+                  metadata,
+                },
+              }),
+            ],
+            rows.length,
+            rows.length + 1,
+          ),
+        }).state;
+        const continuedMessages = await materializeTranscript(continued);
+        const continuedParts = continuedMessages
+          .flatMap((message) => message.parts)
+          .filter((part) => part.type === 'dynamic-tool');
+        expect(continuedParts).toEqual(parts);
+      }
+      // Serialization is the projection persistence boundary, not merely a deep copy.
+      const serialized = JSON.stringify(state);
+      expect(await materializeTranscript(JSON.parse(serialized) as ChatProjection)).toEqual(messages);
+    },
+  );
+});
+
+it('isolates late corrected tool metadata by call and run', async () => {
+  const rows: Array<Record<string, unknown>> = [];
+  for (const runId of ['run_1', 'run_2']) {
+    rows.push(lifecycleRow(rows.length, 'admitted', runId));
+    for (const toolCallId of ['call_1', 'call_2']) {
+      rows.push(
+        logRow(rows.length, {
+          runId,
+          type: 'message.appended',
+          message: {
+            id: `${runId}-${toolCallId}`,
+            role: 'tool-input',
+            toolCallId,
+            toolName: 'shell',
+            metadata: { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } },
+            content: {},
+            call: { toolCallId, title: `${runId}-${toolCallId}` },
+          },
+        }),
+      );
+      rows.push(
+        logRow(rows.length, {
+          runId,
+          type: 'message.appended',
+          message: {
+            id: `${runId}-${toolCallId}-out`,
+            role: 'tool-output',
+            toolCallId,
+            toolName: 'shell',
+            metadata: { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } },
+            content: 'done',
+            isError: false,
+          },
+        }),
+      );
+    }
+    rows.push(lifecycleRow(rows.length, 'completed', runId));
+  }
+  rows.push(
+    logRow(rows.length, {
+      type: 'message.envelope-replaced',
+      messageId: 'run_1-call_1',
+      replacement: {
+        id: 'run_1-call_1',
+        role: 'tool-input',
+        toolCallId: 'call_1',
+        toolName: 'shell',
+        metadata: { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } },
+        content: {},
+        call: { toolCallId: 'call_1', title: 'Corrected' },
+      },
+    }),
+  );
+  const state = project(rows, 1);
+  const messages = await materializeTranscript(state);
+  expect(messages.flatMap((message) => message.parts).filter((part) => part.type === 'dynamic-tool')).toMatchObject([
+    { state: 'output-available', output: 'done', toolMetadata: { tau: { title: 'Corrected' } } },
+    { state: 'output-available', output: 'done', toolMetadata: { tau: { title: 'run_1-call_2' } } },
+    { state: 'output-available', output: 'done', toolMetadata: { tau: { title: 'run_2-call_1' } } },
+    { state: 'output-available', output: 'done', toolMetadata: { tau: { title: 'run_2-call_2' } } },
+  ]);
+  expect(state.blocks).toEqual({});
+});

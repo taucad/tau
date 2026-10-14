@@ -8,11 +8,25 @@ import type { MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import { resolveKernel } from '@taucad/types/constants';
 import { createActor } from 'xstate';
+import { mock } from 'vitest-mock-extended';
+import { KeyedMutex } from '#db/keyed-mutex.js';
+import type * as ChatMessageQueueModule from '#db/chat-message-queue-store.js';
+import type { AgentHostClient } from '#services/agent-host-client.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
-import { lifecycleRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
+import { lifecycleRow, publishLogRows, runningRows, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import { publishChatTurnAdmission, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
+
+const queueMutex = new KeyedMutex<string>();
+vi.mock('#db/chat-message-queue-store.js', async (importOriginal) => {
+  const original = await importOriginal<typeof ChatMessageQueueModule>();
+  return {
+    ...original,
+    createChatMessageQueueStore: (...[client, path]: Parameters<typeof original.createChatMessageQueueStore>) =>
+      original.createChatMessageQueueStore(client, path, queueMutex.run.bind(queueMutex)),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Hoisted test harness
@@ -163,6 +177,9 @@ const fileManager = vi.hoisted(() => {
   const under = (path: string): string[] =>
     [...files.keys()].filter((entry) => entry.startsWith(`${path}/`)).map((entry) => entry.slice(path.length + 1));
   return {
+    clear: () => {
+      files.clear();
+    },
     client: {
       async readFile(path: string) {
         const bytes = files.get(path);
@@ -194,9 +211,13 @@ const fileManager = vi.hoisted(() => {
   };
 });
 
+beforeEach(() => {
+  fileManager.clear();
+});
+
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => fileManager,
-  useOptionalFileManager: () => fileManager,
+  useFileManager: () => ({ ...fileManager, recordFiles: fileManager.client }),
+  useOptionalFileManager: () => ({ ...fileManager, recordFiles: fileManager.client }),
 }));
 
 vi.mock('#hooks/use-project-manager.js', () => ({
@@ -302,11 +323,25 @@ const testProjectId = 'proj_test';
 
 /** The admission the route publishes for the provider's gesture tests. */
 const testAdmission = async (gesture: ChatTurnGesture): Promise<ChatTurn> => ({
-  runId: `run_${gesture.kind}`,
+  runId: gesture.kind === 'send' ? gesture.requestId : `run_${gesture.kind}`,
   leaseTurnId: undefined,
   request:
     gesture.kind === 'send'
-      ? { kind: 'send', message: gesture.message }
+      ? {
+          kind: 'send',
+          message: gesture.message,
+          queueId: gesture.queueId,
+          command: {
+            type: 'start',
+            commandId: gesture.requestId!,
+            payload: {
+              chatId: defaultTestChatId,
+              runId: gesture.requestId!,
+              trigger: 'submit',
+              message: { id: gesture.message.id, role: 'user', content: 'activity' },
+            },
+          },
+        }
       : gesture.kind === 'edit'
         ? { kind: 'edit', messageId: gesture.messageId, content: gesture.text }
         : gesture.kind === 'continue'
@@ -326,10 +361,25 @@ function startTurnOwner(store: ChatSessionStore, chatId: string, admit = testAdm
   const session = createActor(projectSessionMachine, { input: { projectId: testProjectId } });
   session.start();
   const unpublish = publishChatTurnAdmission(chatId, admit);
+  const disconnect = store.publishProjectHostConnector(testProjectId, async () =>
+    mock<AgentHostClient>({
+      catchUp: writerOwnedCatchUp,
+      hostCommand: async (command) => ({
+        commandId: command.commandId,
+        generation: 1,
+        status: 'applied',
+        effect: 'durable',
+        cursor: 1,
+      }),
+      close: async () => undefined,
+    }),
+  );
+  publishLogRows(store, chatId, []);
   store.setFocusedProject(testProjectId);
   store.setProjectSession(testProjectId, session);
   return () => {
     unpublish();
+    disconnect();
     store.setProjectSession(testProjectId, undefined);
     session.stop();
   };
@@ -357,6 +407,21 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
 
   // Host-command routing is exercised by chat-session-store and turn-host tests.
 
+  it.each([{}, { afterTerminalRunId: 'run-stopped' }])(
+    'preserves captured queue intent %j through send actions',
+    async (queueIntent) => {
+      const { result } = renderHook(() => ({ actions: useChatActions(), store: useChatSessionStore() }), {
+        wrapper: createWrapper(defaultTestChatId),
+      });
+      const request = vi.spyOn(result.current.store, 'requestTurn').mockResolvedValue(undefined);
+      const message = makeUserMessage('queued-with-intent', 'Preserve my original intent');
+      await act(async () => {
+        await result.current.actions.sendMessage(message, { queueIntent });
+      });
+      expect(request).toHaveBeenCalledExactlyOnceWith(defaultTestChatId, { kind: 'send', message, queueIntent });
+    },
+  );
+
   it('records an accepted send once and ignores invalid targets and stop', async () => {
     const { result } = renderHook(() => ({ actions: useChatActions(), store: useChatSessionStore() }), {
       wrapper: createWrapper(defaultTestChatId),
@@ -371,6 +436,9 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
 
     await act(async () => {
       await result.current.actions.sendMessage(user);
+    });
+    await waitFor(() => {
+      expect(harness.touchChatRecency).toHaveBeenCalledOnce();
     });
     act(() => {
       result.current.actions.stop('stop-button');
@@ -387,14 +455,18 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     const { result } = renderHook(() => ({ actions: useChatActions(), store: useChatSessionStore() }), {
       wrapper: createWrapper(defaultTestChatId),
     });
+    const refuse = vi.fn(async () => {
+      throw new Error('No credit left for this turn.');
+    });
     act(() => {
-      stopTurnOwner = startTurnOwner(result.current.store, defaultTestChatId, async () => {
-        throw new Error('No credit left for this turn.');
-      });
+      stopTurnOwner = startTurnOwner(result.current.store, defaultTestChatId, refuse);
     });
 
     await act(async () => {
       await result.current.actions.sendMessage(makeUserMessage('msg_refused', 'refused'));
+    });
+    await waitFor(() => {
+      expect(refuse).toHaveBeenCalledOnce();
     });
 
     expect(getFake(defaultTestChatId).sendMessage).not.toHaveBeenCalled();

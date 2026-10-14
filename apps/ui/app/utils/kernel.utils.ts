@@ -27,7 +27,7 @@ export function getEmptyCode(kernelId: KernelProvider): string {
 }
 
 /**
- * Kernels whose plugins declare npm libraries (`kernel-libraries.ts`), so creating any other project loads no plugin.
+ * Kernels whose project manifests declare npm libraries (`kernel-libraries.ts`).
  * ponytail: hand-kept beside `kernelLibraries`; `kernel.utils.test.ts` fails when the two differ.
  */
 export const kernelsWithLibraries: ReadonlySet<KernelProvider> = new Set([
@@ -40,8 +40,8 @@ export const kernelsWithLibraries: ReadonlySet<KernelProvider> = new Set([
 
 /**
  * The npm `dependencies` a new project of this kernel declares, as the kernel plugin publishes them
- * (`{ replicad: 'npm:@taulabs/replicad@…' }`); empty for a kernel without npm libraries. The plugins load in their
- * own chunk, on demand; no wasm loads.
+ * (`{ replicad: 'npm:@taulabs/replicad@…' }`); empty for a kernel without npm libraries. Only dependency
+ * metadata loads; executable plugins and WASM stay out of the renderer.
  */
 export async function getKernelDependencies(kernelId: KernelProvider): Promise<Record<string, string>> {
   if (!kernelsWithLibraries.has(kernelId)) {

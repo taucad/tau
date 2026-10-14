@@ -14,7 +14,8 @@
   "exports": {
     ".": "./src/types/index.ts",
     "./constants": "./src/constants/index.ts",
-    "./constants/id": "./src/constants/id.constants.ts"
+    "./constants/id": "./src/constants/id.constants.ts",
+    "./browser": "./src/browser.ts"
   },
   "imports": {
     "#*.js": "./src/*.ts",

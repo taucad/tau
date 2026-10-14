@@ -630,7 +630,7 @@ impl AuthenticatedOverlapCache {
                 .bytes
                 .saturating_add(content_bytes)
                 .saturating_add(action_bytes);
-            projected <= self.limits.bytes && inventory.entries + 1 <= self.limits.actions
+            projected <= self.limits.bytes && inventory.entries < self.limits.actions
         };
         if fits(&inventory) {
             return Ok(());
@@ -971,7 +971,7 @@ fn domain_id(domain: &[u8], secret: &[u8]) -> String {
 }
 
 fn fill_random(bytes: &mut [u8]) -> io::Result<()> {
-    getrandom::getrandom(bytes)
+    getrandom::fill(bytes)
         .map_err(|error| io::Error::other(format!("operating-system randomness failed: {error}")))
 }
 
@@ -993,6 +993,12 @@ mod tests {
         process::Command,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
+
+    // A spawned child briefly inherits other test threads' open flock descriptors
+    // before exec closes CLOEXEC files. A nonblocking load/clear can then safely
+    // miss for reasons unrelated to its private cache. Keep ordinary tests parallel,
+    // but exclude subprocess creation while another test owns cache descriptors.
+    static PROCESS_SPAWN_GATE: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
     fn roots(name: &str) -> (PathBuf, PathBuf) {
         let nonce = SystemTime::now()
@@ -1038,6 +1044,7 @@ mod tests {
 
     #[test]
     fn authentication_digest_and_seal_fail_closed() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("integrity");
         let cache = AuthenticatedOverlapCache::open(&root, &project).unwrap();
         let address = address();
@@ -1081,6 +1088,7 @@ mod tests {
 
     #[test]
     fn sealed_store_does_not_publish() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("sealed");
         let cache = AuthenticatedOverlapCache::open(&root, &project).unwrap();
         let address = address();
@@ -1095,6 +1103,7 @@ mod tests {
 
     #[test]
     fn unknown_family_cannot_poison_managed_inventory() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("unknown-family");
         let cache = AuthenticatedOverlapCache::open(&root, &project).unwrap();
         let mut unknown = address();
@@ -1116,6 +1125,7 @@ mod tests {
 
     #[test]
     fn clearing_overlap_preserves_exact_fact_and_poison() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("family-clear");
         let cache = AuthenticatedOverlapCache::open(&root, &project).unwrap();
         let overlap = address();
@@ -1149,6 +1159,7 @@ mod tests {
 
     #[test]
     fn clear_refuses_ambiguous_action_before_removing_any_family() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("ambiguous-clear");
         let cache = AuthenticatedOverlapCache::open(&root, &project).unwrap();
         let overlap = address();
@@ -1172,6 +1183,7 @@ mod tests {
 
     #[test]
     fn interrupted_clear_epoch_fences_old_publisher_without_acknowledging_clear() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("interrupted-clear");
         let old = AuthenticatedOverlapCache::open(&root, &project).unwrap();
         let overlap = address();
@@ -1196,6 +1208,7 @@ mod tests {
 
     #[test]
     fn completed_family_reopens_in_fresh_process() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.write().unwrap();
         let (root, project) = roots("fresh-process");
         let mut address = address();
         address.family = "native-exact-step-clusters-v1";
@@ -1217,6 +1230,7 @@ mod tests {
 
     #[test]
     fn cache_reopen_child() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let Ok(root) = std::env::var("GEOSPEC_CACHE_REOPEN_ROOT") else {
             return;
         };
@@ -1233,6 +1247,7 @@ mod tests {
 
     #[test]
     fn rejects_unsafe_digests_and_poisoned_divergent_action() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("conflict");
         let cache = AuthenticatedOverlapCache::open(&root, &project).unwrap();
         let address = address();
@@ -1265,6 +1280,7 @@ mod tests {
 
     #[test]
     fn concurrent_divergent_writers_poison_action() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("concurrent-conflict");
         let first = AuthenticatedOverlapCache::open(&root, &project).unwrap();
         let second = AuthenticatedOverlapCache::open(&root, &project).unwrap();
@@ -1304,6 +1320,7 @@ mod tests {
 
     #[test]
     fn legacy_records_are_untouched_and_managed_clear_is_family_scoped() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("legacy");
         fs::create_dir_all(root.join("actions")).unwrap();
         fs::create_dir_all(root.join("content")).unwrap();
@@ -1330,6 +1347,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn managed_symlinks_refuse_before_following_them() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         use std::os::unix::fs::symlink;
         let (root, project) = roots("symlink");
         let (outside, _) = roots("outside");
@@ -1355,6 +1373,7 @@ mod tests {
 
     #[test]
     fn cap_pressure_preserves_shared_content_and_divergence_poison() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("pressure");
         let cache =
             AuthenticatedOverlapCache::open_with_limits(&root, &project, small_limits()).unwrap();
@@ -1388,6 +1407,7 @@ mod tests {
 
     #[test]
     fn byte_pressure_reclaims_only_unreferenced_managed_content() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("byte-pressure");
         let cache =
             AuthenticatedOverlapCache::open_with_limits(&root, &project, small_limits()).unwrap();
@@ -1415,6 +1435,7 @@ mod tests {
     #[test]
     #[ignore = "manual loaded-host inventory cost diagnostic"]
     fn near_cap_cold_publish_and_hit_cost_diagnostic() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("cost");
         let cache = AuthenticatedOverlapCache::open(&root, &project).unwrap();
         for index in 1..MAX_ACTIONS {
@@ -1435,6 +1456,7 @@ mod tests {
 
     #[test]
     fn unknown_inventory_refuses_publication_and_clear_without_deletion() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("unknown");
         let cache = AuthenticatedOverlapCache::open(&root, &project).unwrap();
         cache.publish(&address(), b"known");
@@ -1450,6 +1472,7 @@ mod tests {
 
     #[test]
     fn clear_generation_fences_old_miss_publisher_but_not_exact_family() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, project) = roots("generation");
         let old = AuthenticatedOverlapCache::open(&root, &project).unwrap();
         let clearer = AuthenticatedOverlapCache::open(&root, &project).unwrap();
@@ -1479,6 +1502,7 @@ mod tests {
 
     #[test]
     fn cache_process_child() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let Ok(mode) = std::env::var("GEOSPEC_CACHE_CHILD_MODE") else {
             return;
         };
@@ -1536,6 +1560,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn two_processes_poison_admitted_divergence_and_busy_lock_refuses() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.write().unwrap();
         let (root, project) = roots("process-race");
         AuthenticatedOverlapCache::open(&root, &project).unwrap();
         let gate = root.join("start");
@@ -1604,6 +1629,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn killed_blob_before_action_is_reclaimed_without_a_false_hit() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.write().unwrap();
         let (root, project) = roots("orphan-kill");
         AuthenticatedOverlapCache::open(&root, &project).unwrap();
         let gate = root.join("orphan-ready");
@@ -1636,6 +1662,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn second_process_clear_fences_first_process_miss_then_publish() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.write().unwrap();
         let (root, project) = roots("process-clear");
         AuthenticatedOverlapCache::open(&root, &project).unwrap();
         let gate = root.join("miss-ready");
@@ -1667,6 +1694,7 @@ mod tests {
 
     #[test]
     fn temporary_file_is_removed_after_write_or_sync_failure() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, _) = roots("temporary-cleanup");
         fs::create_dir_all(&root).unwrap();
         let target = root.join("action.json");
@@ -1690,6 +1718,7 @@ mod tests {
 
     #[test]
     fn temporary_collision_does_not_remove_other_writers_file() {
+        let _spawn_guard = PROCESS_SPAWN_GATE.read().unwrap();
         let (root, _) = roots("temporary-collision");
         fs::create_dir_all(&root).unwrap();
         let target = root.join("action.json");

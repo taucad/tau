@@ -14,4 +14,4 @@ geospec-engine-native-core = { path = "../../../rust" }
 manifold-rust = { path = "../source", default-features = false }
 
 [dev-dependencies]
-serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }
+serde_json = { version = "=1.0.152", features = ["float_roundtrip"] }

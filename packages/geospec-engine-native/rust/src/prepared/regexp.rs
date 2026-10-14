@@ -58,7 +58,7 @@ impl SelectorRegex {
             match message.as_str() {
                 "Incomplete escape" | "Unterminated escape" | "Unbalanced parenthesis" | "Unbalanced bracket" =>
                     EcmaRegexError::InvalidSyntax(format!("Invalid ECMAScript selector pattern: {message}.")),
-                _ => EcmaRegexError::Unsupported(format!("ECMAScript selector pattern could not be supported by regress 0.11.1: {message}.")),
+                _ => EcmaRegexError::Unsupported(format!("ECMAScript selector pattern could not be supported by regress 0.12.0: {message}.")),
             }
         })?;
         let compiled = Rc::new(CompiledPattern {

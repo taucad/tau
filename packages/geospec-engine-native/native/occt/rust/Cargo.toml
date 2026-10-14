@@ -12,10 +12,10 @@ path = "src/lib.rs"
 
 [dependencies]
 geospec-engine-native-core = { path = "../../../rust" }
-serde = { version = "=1.0.219", features = ["derive"] }
+serde = { version = "=1.0.229", features = ["derive"] }
 
 [build-dependencies]
-cc = "=1.4.4"
+cc = "=1.7.0"
 
 [features]
 # Compiles the bridge through native/occt/tests/qualification.cpp, the
@@ -23,7 +23,7 @@ cc = "=1.4.4"
 qualification = []
 
 [dev-dependencies]
-serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }
+serde_json = { version = "=1.0.152", features = ["float_roundtrip"] }
 
 [[test]]
 name = "trimmed_cylinder"

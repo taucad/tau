@@ -9,7 +9,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { bambuSimulatorMachine } from '@taucad/bambu';
+const { bambuSimulatorMachine } = await import('@taucad/bambu');
 
 import { openLocalMachines } from '#local-machines.js';
 import type { LocalMachines } from '#local-machines.js';

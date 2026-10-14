@@ -1657,10 +1657,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
   let settleShutdown: ((settled: boolean) => void) | undefined;
   const prepareToQuit = async (purpose: 'quit' | 'restart'): Promise<boolean> => {
     if (shutdownComplete) {
-      return Promise.resolve(true);
+      return true;
     }
     if (shutdownPending) {
-      return shutdown.getSnapshot().context.purpose === purpose ? shutdownPending : Promise.resolve(false);
+      return shutdown.getSnapshot().context.purpose === purpose ? shutdownPending : false;
     }
     quitting = true;
     shutdownPending = new Promise<boolean>((resolve) => {

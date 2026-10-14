@@ -51,7 +51,7 @@ export const machineObservation = (
         >(({ input, sendBack }) => {
           const abort = new AbortController();
           const { signal } = abort;
-          const publish = (event: { type: string; [key: string]: unknown }): void => {
+          const publish = (event: { [key: string]: unknown; type: string }): void => {
             if (!signal.aborted) {
               sendBack({ ...event, generation: input.generation });
             }

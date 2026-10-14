@@ -822,8 +822,9 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
       const { defaultMachineProviders } = await import('@taucad/host');
       const vault = process.env['TAU_SECRET_VAULT'];
       process.env['TAU_SECRET_VAULT'] = 'memory';
+      const providers = await defaultMachineProviders();
       const store = await openSharedMachineHost({
-        providers: (await defaultMachineProviders()).filter((provider) => provider.id === 'bambu-simulator'),
+        providers: providers.filter((provider) => provider.id === 'bambu-simulator'),
         readArtifact: async () => {
           throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
         },

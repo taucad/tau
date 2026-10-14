@@ -118,9 +118,9 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     await page.getByRole('button', { name: /^Advanced settings/u }).click();
     await screen.findByRole('group', { name: 'Bambu Studio overrides' });
     await page.getByRole('button', { name: 'Group: Quality' }).click();
-    await page.getByRole('spinbutton', { name: 'Input for Layer Height' }).fill('0.16');
-    fireEvent.blur(screen.getByRole('spinbutton', { name: 'Input for Layer Height' }));
-    await screen.findByRole('button', { name: 'Reset Layer Height' });
+    await page.getByRole('spinbutton', { name: 'Input for Layer height' }).fill('0.16');
+    fireEvent.blur(screen.getByRole('spinbutton', { name: 'Input for Layer height' }));
+    await screen.findByRole('button', { name: 'Reset Layer height' });
     // Headless Chromium draws few frames between actions, so the stages' open animations would still
     // be running when measured; finish them (time-based only: scroll shadows follow the scroller).
     for (const animation of document.getAnimations()) {

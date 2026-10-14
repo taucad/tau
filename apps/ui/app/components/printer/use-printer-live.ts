@@ -179,7 +179,7 @@ export const useProviderManifests = (
   const { snapshot, providers } = useMachineDirectory(client);
   const isLoaded = snapshot !== undefined;
   return useMemo(
-    () => (!isLoaded ? undefined : new Map(providers.map((provider) => [provider.id, provider.manifest]))),
+    () => (isLoaded ? new Map(providers.map((provider) => [provider.id, provider.manifest])) : undefined),
     [isLoaded, providers],
   );
 };

@@ -98,7 +98,10 @@ export const machineObservationMachine = setup({
     events: eventSchemas<MachineObservationMachineEvent>(),
   },
   actors: machineObservationActors,
-  delays: { retryDelay: ({ context }) => Math.min(500 * 2 ** Math.min(context.attempt - 1, 6), 30_000) },
+  delays: {
+    retryDelay: ({ context }) =>
+      Math.min(500 * 2 ** Math.min(context.attempt - 1, 6), machineObservationTimeouts[0].maximum),
+  },
 }).createMachine({
   id: 'machine-observation',
   version: '1',

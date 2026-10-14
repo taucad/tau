@@ -82,7 +82,6 @@
     "reason": "Machine plugin; no CAD authoring surface"
   },
   "dependencies": {
-    "@standard-schema/spec": "catalog:",
     "@taucad/units": "workspace:*",
     "basic-ftp": "catalog:",
     "fflate": "catalog:",

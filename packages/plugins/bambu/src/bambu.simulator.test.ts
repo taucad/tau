@@ -1483,11 +1483,8 @@ describe('simulated storage diagnosis', () => {
   it('reports the real storage recovery message without a write', async () => {
     const simulator = await createBambuSimulator({ faults: ['storage-damaged'] });
     const report = await simulator.session.getSnapshot({ signal });
-    expect(report.alerts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: '0500-402F', message: expect.stringContaining('Back up readable files') }),
-      ]),
-    );
+    const alert = report.alerts.find((entry) => entry.code === '0500-402F');
+    expect(alert?.message).toContain('Back up readable files');
     expect(simulator.writes()).toEqual([]);
     await simulator.session.close();
   });

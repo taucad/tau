@@ -8,7 +8,7 @@ import { generatedImageIpcChannel, isQuickLookEnabled } from '#shared/quick-look
 
 const state = vi.hoisted(() => ({
   exposed: new Map<string, unknown>(),
-  listeners: new Map<string, Array<() => void>>(),
+  listeners: new Map<string, Array<(...args: unknown[]) => void>>(),
 }));
 
 vi.mock('electron', () => ({
@@ -20,10 +20,10 @@ vi.mock('electron', () => ({
   ipcRenderer: {
     invoke: vi.fn(),
     send: vi.fn(),
-    on: vi.fn((channel: string, listener: () => void) => {
+    on: vi.fn((channel: string, listener: (...args: unknown[]) => void) => {
       state.listeners.set(channel, [...(state.listeners.get(channel) ?? []), listener]);
     }),
-    off: vi.fn((channel: string, listener: () => void) => {
+    off: vi.fn((channel: string, listener: (...args: unknown[]) => void) => {
       state.listeners.set(
         channel,
         (state.listeners.get(channel) ?? []).filter((candidate) => candidate !== listener),
@@ -39,8 +39,9 @@ vi.mock('@taucad/runtime/electron/preload', () => ({
 
 type QuitApi = Readonly<{
   isReady(): boolean;
-  onAsk(handler: () => void): () => void;
-  reportQuiesced(forced: boolean): void;
+  onNavigate(handler: (route: string) => void): () => void;
+  onAsk(handler: (attemptId: string) => void): () => void;
+  reportQuiesced(attemptId: string, forced: boolean): void;
 }>;
 
 const quitApi = (): QuitApi => {
@@ -50,7 +51,7 @@ const quitApi = (): QuitApi => {
 
 const askBeforeRendererMounts = (): void => {
   for (const listener of state.listeners.get(quitChannels.ask) ?? []) {
-    listener();
+    listener({}, 'attempt-1');
   }
 };
 
@@ -78,7 +79,25 @@ describe('desktop preload quit bridge', () => {
     askBeforeRendererMounts();
     quitApi().onAsk(handler);
 
-    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledExactlyOnceWith('attempt-1');
+  });
+});
+
+describe('desktop machine navigation bridge', () => {
+  it('buffers a machine route until the app subscribes and ignores unrelated routes', () => {
+    for (const listener of state.listeners.get(quitChannels.navigate) ?? []) {
+      listener({}, '/machines/host/machine');
+      listener({}, 'https://example.com');
+    }
+    const handler = vi.fn();
+    const unsubscribe = quitApi().onNavigate(handler);
+    expect(handler).toHaveBeenCalledExactlyOnceWith('/machines/host/machine');
+    unsubscribe();
+  });
+  it('returns the exact attempt and forced decision to main', () => {
+    vi.mocked(ipcRenderer.send).mockClear();
+    quitApi().reportQuiesced('attempt-2', true);
+    expect(ipcRenderer.send).toHaveBeenCalledExactlyOnceWith(quitChannels.quiesced, 'attempt-2', true);
   });
 });
 

@@ -25,6 +25,9 @@ export default defineConfig({
     fileParallelism: false,
     browser: {
       enabled: true,
+      screenshotDirectory: fileURLToPath(
+        new URL('../../../../../out/research/global-machines/implementation/browser/failures', import.meta.url),
+      ),
       headless: true,
       provider: playwright({ launchOptions: { channel: 'chromium' } }),
       instances: [{ browser: 'chromium' }],

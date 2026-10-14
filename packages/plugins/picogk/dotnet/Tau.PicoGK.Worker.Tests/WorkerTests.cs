@@ -870,6 +870,41 @@ Library.Go(1f, () => {
         while (true) yield return 1;
     }
 
+    [Theory]
+    [InlineData(270_000, 0)]
+    [InlineData(0, 100_001)]
+    public void MechanismProjectionPreservesLargeSerializablePayloads(int textLength, int sampleCount)
+    {
+        using var backend = new CaptureViewerBackend(Path.Combine(root, "large-mechanism"));
+        backend.SetMechanism(new { text = new string('x', textLength), samples = Enumerable.Range(0, sampleCount).ToArray() });
+        var scene = backend.Extract();
+        Assert.Equal(textLength, scene.Mechanism?.GetProperty("text").GetString()?.Length);
+        Assert.Equal(sampleCount, scene.Mechanism?.GetProperty("samples").GetArrayLength());
+        Assert.Empty(scene.Warnings);
+    }
+
+    [Fact]
+    public async Task MechanismProjectionCanBeCancelledDuringEnumeration()
+    {
+        using var backend = new CaptureViewerBackend(Path.Combine(root, "cancel-mechanism"));
+        using var started = new ManualResetEventSlim();
+        using var resume = new ManualResetEventSlim();
+        IEnumerable<int> Sequence()
+        {
+            started.Set();
+            resume.Wait();
+            yield return 1;
+        }
+        var projection = Task.Run(() => backend.SetMechanism(Sequence()));
+        try
+        {
+            Assert.True(started.Wait(TimeSpan.FromSeconds(10)));
+            backend.Cancel();
+        }
+        finally { resume.Set(); }
+        await Assert.ThrowsAsync<OperationCanceledException>(() => projection);
+    }
+
     [Fact]
     public void MechanismProjectionRejectsMalformedJsonAndKeepsSerializableValues()
     {
@@ -900,17 +935,15 @@ Library.Go(1f, () => {
             object nested = 1;
             for (var index = 0; index < 66; index++) nested = new[] { nested };
             backend.SetMechanism(nested);
-            backend.SetMechanism(InfiniteMechanism());
-            backend.SetMechanism(new { text = new string('x', 270_000) });
             var invalid = backend.Extract();
-            Assert.True(invalid.Warnings.Count == 5, string.Join(" | ", invalid.Warnings.Select(issue => issue.Message)));
+            Assert.True(invalid.Warnings.Count == 3, string.Join(" | ", invalid.Warnings.Select(issue => issue.Message)));
             Assert.Null(invalid.Mechanism);
             Assert.Equal("Still/Here", Assert.Single(invalid.Components).Name);
 
             var execution = new ModelExecutionResult(invalid.Components, 0, false, new ModelTimings(0, 0, 0, 0, 0, 0), invalid.Mechanism, invalid.Warnings);
             var written = MeshArtifactWriter.Write(Path.Combine(root, "mechanism-validation"), execution,
                 new WorkerDiagnostics(new WorkerTimings(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new WorkerMetrics(0, 0, 0)));
-            Assert.Equal(5, written.Warnings?.Count);
+            Assert.Equal(3, written.Warnings?.Count);
             backend.Cancel();
             Assert.Throws<OperationCanceledException>(() => backend.SetMechanism(InfiniteMechanism()));
         }

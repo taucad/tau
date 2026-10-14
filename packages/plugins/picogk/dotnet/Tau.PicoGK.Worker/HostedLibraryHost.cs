@@ -8,7 +8,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -229,8 +228,6 @@ internal sealed class CaptureViewerBackend : IViewerBackend
 
     // ponytail: a fixed bound replaces the removed per-render capture knob; it is producer backpressure only.
     private const int MaximumPendingCommands = 256;
-    private const int MaximumMechanismValues = 100_000;
-    private const int MaximumMechanismBytes = 256 * 1024;
 
     internal CaptureViewerBackend(string artifactRoot)
     {
@@ -303,13 +300,10 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             // Serialize before enqueueing: no user object can hold a collectible assembly alive.
             // Project into BCL-only values before using STJ. Its reflection metadata cache would
             // otherwise root source types from the model's collectible assembly across builds.
-            var values = 0;
-            var snapshot = JsonSerializer.SerializeToElement(ProjectMechanism(source, new HashSet<object>(ReferenceEqualityComparer.Instance), 0, ref values, MechanismNode.Root));
+            var snapshot = JsonSerializer.SerializeToElement(ProjectMechanism(source, new HashSet<object>(ReferenceEqualityComparer.Instance), 0, MechanismNode.Root));
             if (snapshot.ValueKind == JsonValueKind.Object && snapshot.TryGetProperty("schemaVersion", out var version) &&
                 (version.ValueKind != JsonValueKind.Number || !version.TryGetDouble(out var number) || number != 1))
                 throw new JsonException("Mechanism schemaVersion must be 1.");
-            if (Encoding.UTF8.GetByteCount(snapshot.GetRawText()) > MaximumMechanismBytes)
-                throw new JsonException("Mechanism exceeds 256 KiB of JSON.");
             Enqueue(new ViewerCommand(() => mechanism = snapshot));
         }
         catch (Exception error) when (error is not OutOfMemoryException and not OperationCanceledException)
@@ -402,11 +396,10 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         }
     }
 
-    private object? ProjectMechanism(object? value, HashSet<object> path, int depth, ref int values, MechanismNode node)
+    private object? ProjectMechanism(object? value, HashSet<object> path, int depth, MechanismNode node)
     {
         if (cancelled) throw new OperationCanceledException("The PicoGK build was cancelled.");
         if (depth > 64) throw new JsonException("Mechanism exceeds the maximum JSON depth of 64.");
-        if (++values > MaximumMechanismValues) throw new JsonException("Mechanism exceeds 100,000 JSON values.");
         if (value is null || value is string or bool or char or byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal or JsonElement)
             return value;
         if (value is JsonNode jsonNode) return JsonSerializer.SerializeToElement(jsonNode);
@@ -420,7 +413,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 foreach (DictionaryEntry entry in dictionary)
                 {
                     if (entry.Key is not string key) throw new JsonException("Mechanism object keys must be strings.");
-                    result.Add(key, ProjectMechanism(entry.Value, path, depth + 1, ref values, MechanismChild(node, key)));
+                    result.Add(key, ProjectMechanism(entry.Value, path, depth + 1, MechanismChild(node, key)));
                 }
                 return result;
             }
@@ -428,13 +421,13 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             {
                 var result = new Dictionary<string, object?>();
                 foreach (var entry in genericDictionary)
-                    result.Add(entry.Key, ProjectMechanism(entry.Value, path, depth + 1, ref values, MechanismChild(node, entry.Key)));
+                    result.Add(entry.Key, ProjectMechanism(entry.Value, path, depth + 1, MechanismChild(node, entry.Key)));
                 return result;
             }
             if (value is IEnumerable sequence)
             {
                 var result = new List<object?>();
-                foreach (var item in sequence) result.Add(ProjectMechanism(item, path, depth + 1, ref values, MechanismItem(node)));
+                foreach (var item in sequence) result.Add(ProjectMechanism(item, path, depth + 1, MechanismItem(node)));
                 return result;
             }
             var descriptors = new List<(System.Reflection.PropertyInfo Property, string Name, JsonIgnoreCondition Ignore)>();
@@ -458,7 +451,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 var item = MechanismProperty(descriptor.Property, value);
                 if (descriptor.Ignore == JsonIgnoreCondition.WhenWritingNull && item is null) continue;
                 if (descriptor.Ignore == JsonIgnoreCondition.WhenWritingDefault && MechanismDefault(descriptor.Property, item)) continue;
-                properties.Add(descriptor.Name, ProjectMechanism(item, path, depth + 1, ref values, MechanismChild(node, descriptor.Name)));
+                properties.Add(descriptor.Name, ProjectMechanism(item, path, depth + 1, MechanismChild(node, descriptor.Name)));
             }
             if (node == MechanismNode.Root && !properties.ContainsKey("schemaVersion")) properties.Add("schemaVersion", 1);
             return properties;

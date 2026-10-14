@@ -420,3 +420,7 @@ describe('createTauCorsOriginValidator development origins', () => {
     expect(allow('https://localhost:3001', 'development')).toBe(false);
   });
 });
+
+it('allows atomic preview backfill preconditions from browser clients', () => {
+  expect(corsBaseConfiguration.allowedHeaders).toContain('if-none-match');
+});

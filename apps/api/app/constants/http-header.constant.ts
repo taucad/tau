@@ -16,6 +16,8 @@ export const httpHeader = {
   authorization: 'authorization',
   userAgent: 'user-agent',
   contentType: 'content-type',
+  /** Atomic create-only saved-preview backfill from browser clients. */
+  ifNoneMatch: 'if-none-match',
   // Gateway pass-through headers for the Anthropic-compatible LLM surface
   // (allowlisted and validated in apps/api/app/api/llm/llm-gateway.headers.ts).
   anthropicVersion: 'anthropic-version',

@@ -1,5 +1,5 @@
 /**
- * Serves the static marketing site (`apps/www`) on the app's own hostname.
+ * Serves the server-rendered marketing site (`apps/www`) on the app's own hostname.
  *
  * A full page load of `/` without an app preference and of marketing pages is proxied to the
  * marketing deploy named by the `MARKETING_ORIGIN` site variable. Every app
@@ -36,11 +36,31 @@ export function resolveMarketingUrl(requestUrl: URL, method: string, origin: str
         return undefined;
       }
     }
-  } else if (!marketingPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+  } else if (pathname === '/_root.data' || pathname === '/vision.data') {
+    const routes = searchParams.get('_routes')?.split(',');
+    if (!routes?.length || !routes.every((route) => route === 'www-home' || route === 'www-vision')) {
+      return undefined;
+    }
+  } else if (
+    !['/vision/', '/sitemap-marketing.xml'].includes(pathname) &&
+    !marketingPrefixes.some(
+      (prefix) => pathname === prefix || pathname === `${prefix}.data` || pathname.startsWith(`${prefix}/`),
+    )
+  ) {
     return undefined;
   }
 
-  return new URL(pathname, origin);
+  const target = new URL(pathname === '/sitemap-marketing.xml' ? '/sitemap.xml' : pathname, origin);
+  // Only router protocol parameters reach SSR; campaign/auth data stays on the visitor's URL.
+  if (pathname.endsWith('.data')) {
+    for (const name of ['_routes']) {
+      const value = searchParams.get(name);
+      if (value !== null) {
+        target.searchParams.set(name, value);
+      }
+    }
+  }
+  return target;
 }
 
 /**
@@ -63,6 +83,22 @@ function readSiteVariable(name: string): string | undefined {
 
 export default async function marketing(request: Request, context: EdgeContext): Promise<Response> {
   const requestUrl = new URL(request.url);
+  const origin = readSiteVariable('MARKETING_ORIGIN');
+  // Keep app crawl exclusions authoritative; advertise marketing only when routing is enabled.
+  if (requestUrl.pathname === '/robots.txt') {
+    const response = await context.next();
+    if (!origin || request.method !== 'GET' || requestUrl.hostname !== 'tau.new' || response.status !== 200) {
+      return response;
+    }
+    const body = await response.text();
+    if (!body.includes('Sitemap: https://tau.new/sitemap.xml')) {
+      return new Response(body, response);
+    }
+    const headers = new Headers(response.headers);
+    headers.delete('content-length');
+    headers.delete('etag');
+    return new Response(`${body.trimEnd()}\nSitemap: https://tau.new/sitemap-marketing.xml\n`, { headers });
+  }
   // Presentation only: the API still authorizes every protected operation.
   // Ambiguous duplicate cookies do not select the app.
   const entries = (request.headers.get('cookie') ?? '')
@@ -73,7 +109,7 @@ export default async function marketing(request: Request, context: EdgeContext):
   const upstream =
     requestUrl.pathname === '/' && prefersApp && !requestUrl.searchParams.has('website')
       ? undefined
-      : resolveMarketingUrl(requestUrl, request.method, readSiteVariable('MARKETING_ORIGIN'));
+      : resolveMarketingUrl(requestUrl, request.method, origin);
   if (!upstream) {
     const response = await context.next();
     return requestUrl.pathname === '/' ? privateDocument(response) : response;
@@ -86,13 +122,45 @@ export default async function marketing(request: Request, context: EdgeContext):
   });
   const location = response.headers.get('location');
   if (!location) {
-    return requestUrl.pathname === '/' ? privateDocument(response) : response;
+    const document = await stagingDownloadLinks(response, requestUrl);
+    return requestUrl.pathname === '/' ? privateDocument(document) : document;
   }
 
   const headers = new Headers(response.headers);
   headers.set('location', rewriteLocation(location, upstream, requestUrl));
-  const rewritten = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  const rewritten = new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
   return requestUrl.pathname === '/' ? privateDocument(rewritten) : rewritten;
+}
+
+/** Select staging downloads in the shared static HTML before client scripts run. */
+async function stagingDownloadLinks(response: Response, requestUrl: URL): Promise<Response> {
+  if (
+    requestUrl.hostname !== 'taucad.dev' ||
+    response.body === null ||
+    !response.headers.get('content-type')?.toLowerCase().startsWith('text/html')
+  ) {
+    return response;
+  }
+
+  const html = await response.clone().text();
+  // Match our emitted anchors; keep complete script blocks byte-identical for CSP hashes.
+  const rewritten = html.replaceAll(
+    /<script\b[^>]*>[\s\S]*?<\/script\s*>|(<a\b[^>]*\shref=")https:\/\/downloads\.tau\.new(\/latest\/[^"]*")/giu,
+    (match: string, anchor: string | undefined, path: string | undefined) =>
+      anchor === undefined ? match : `${anchor}https://downloads.taucad.dev${path}`,
+  );
+  if (rewritten === html) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  for (const name of ['content-length', 'content-encoding', 'etag', 'last-modified']) {
+    headers.delete(name);
+  }
+  return new Response(rewritten, { status: response.status, statusText: response.statusText, headers });
 }
 
 /** Keep both root variants out of shared and browser document caches. */
@@ -102,9 +170,21 @@ function privateDocument(response: Response): Response {
   headers.set('cdn-cache-control', 'no-store');
   headers.set('netlify-cdn-cache-control', 'no-store');
   headers.delete('netlify-vary');
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 export const config = {
-  path: ['/', ...marketingPrefixes.flatMap((prefix) => [prefix, `${prefix}/*`])],
+  path: [
+    '/',
+    '/_root.data',
+    '/vision/',
+    '/vision.data',
+    '/sitemap-marketing.xml',
+    '/robots.txt',
+    ...marketingPrefixes.flatMap((prefix) => [prefix, `${prefix}.data`, `${prefix}/*`]),
+  ],
 };

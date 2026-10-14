@@ -151,3 +151,13 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+Font Awesome Free 6.7.2 — Apple, Windows and Linux brand icons
+Copyright Fonticons, Inc.
+Source: https://github.com/FortAwesome/Font-Awesome/tree/6.7.2/svgs/brands
+License: Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+SVG path geometry is unchanged. Presentation attributes are adapted to inherit
+the button color and hide decorative icons from assistive technology.
+Brand icons are trademarks of their respective owners; no endorsement is implied.

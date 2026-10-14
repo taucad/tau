@@ -1143,6 +1143,7 @@ function Sheet({
   const {
     model: { setActiveModel },
     execution: { execution, setActiveExecution },
+    canSelectExecution,
   } = useChatComposer();
   const { lastTauExecution } = useModels();
   const [view, setView] = useState<SheetView>('settings');
@@ -1157,7 +1158,7 @@ function Sheet({
   const surfaceRef = useRef<HTMLDivElement>(null);
   const agentRowRef = useRef<HTMLButtonElement>(null);
   const modelRowRef = useRef<HTMLButtonElement>(null);
-  const hasChoice = agents.length > 1;
+  const hasChoice = canSelectExecution && agents.some((agent) => agent.key !== current.key);
   const browsed = agents.find((agent) => agent.key === browseKey) ?? current;
   useEffect(() => {
     if (!hasNavigated || view !== 'settings') {

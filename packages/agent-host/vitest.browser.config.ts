@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   server: { host: '127.0.0.1' },
   test: {
-    include: ['src/**/*.browser.test.ts'],
+    include: ['src/**/*.browser.test.ts', 'src/harness/session.output-limit.test.ts'],
     fileParallelism: false,
     browser: {
       enabled: true,

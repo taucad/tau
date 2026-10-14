@@ -499,6 +499,26 @@ describe('ChatError', () => {
   });
 
   it.each([
+    [
+      'MODEL_OUTPUT_LIMIT',
+      'The model repeatedly reached its response limit. Your progress is saved. Resume to continue, or choose another model.',
+    ],
+    [
+      'TOOL_RESULT_PERSISTENCE_FAILED',
+      'Tau could not save a tool result. Resume to check the current project before continuing.',
+    ],
+  ])('explains %s and resumes the saved run from its projected log', async (code, message) => {
+    const user = userEvent.setup();
+    resumableFailureOverrides.add(code);
+    projected({ category: errorCategory.generic, title: 'Error', message, code });
+    render(<ChatErrorBanner />);
+    expect(screen.getByText(message)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  it.each([
     {
       code: 'SESSION_LOG_INTEGRITY',
       title: 'Tau paused this turn',

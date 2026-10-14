@@ -12,6 +12,7 @@ import { createTurnContextSnapshot } from '#harness/cad-middleware.js';
 import type { ClientContext } from '#harness/cad-middleware.js';
 import { codedFailureDetail } from '#harness/coded-failure.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
+import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery.js';
 import { createAgentSession, fundingPrincipal, settledRowOf } from '#harness/session.js';
 import type {
   AgentRunOutcome,
@@ -1397,12 +1398,27 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (answered) {
         recovery.push({ type: 'message.appended', message: answered });
       }
+      const tail = history.at(-1);
+      const outputLimited = tail?.role === 'assistant' && tail.metadata?.stopReason === 'length';
+      if (outputLimited) {
+        recovery.push({
+          type: 'message.appended',
+          message: createOutputLimitRecoveryMessage({
+            id: `tau:output-limit-resume:${runId}:${entry?.attempt ?? 0}`,
+            noProgress: 0,
+          }),
+        });
+      }
       return {
         kind: 'tau',
         turnId: entry?.turnId ?? latestTurnId(history, runId),
         /* The tail already answers the turn: the attempt ends with no call. */
         mode:
-          entry?.failure?.code !== 'USER_STOPPED' && !reminder && !answered && history.at(-1)?.role === 'assistant'
+          entry?.failure?.code !== 'USER_STOPPED' &&
+          !outputLimited &&
+          !reminder &&
+          !answered &&
+          tail?.role === 'assistant'
             ? 'complete'
             : 'continue',
         /* `running` first, so the command's cursor is the reopening row (ChatRunSlot.tla resume; W7.r1). */

@@ -98,16 +98,6 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   }),
 }));
 
-vi.mock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({
-  ChatMessagePlanning({ messageId, className }: { readonly messageId: string; readonly className?: string }) {
-    return (
-      <div data-testid='chat-message-planning' data-message-id={messageId} className={className}>
-        Planning next moves...
-      </div>
-    );
-  },
-}));
-
 vi.mock('#routes/w.$workspace.$project/chat-message-reasoning.js', () => ({
   ChatMessageReasoning({ parts }: { readonly parts: ReadonlyArray<{ readonly text: string }> }) {
     return <div data-testid='chat-message-reasoning'>{parts.map((part) => part.text).join('|')}</div>;
@@ -368,40 +358,16 @@ describe('ChatMessage column wrapper layout', () => {
     expect(wrapper.className).toContain('mx-4');
   });
 
-  it('attaches the footer to the user bubble and puts the indicator below both', () => {
+  it('attaches the revision footer to the user bubble without a message activity row', () => {
     setMessages([userMessage('msg-1', 'go')]);
-
     render(<ChatMessage messageId='msg-1' footer={<div data-testid='revision-footer'>marker</div>} />);
-
-    const wrapper = getColumnWrapper();
-    const planning = screen.getByTestId('chat-message-planning');
     const footer = screen.getByTestId('revision-footer');
     const bubble = screen.getByRole('button', { name: 'go' });
-    /* Bubble and card share one gapless surface; the indicator is the column's last row (R2, R11). */
     expect(footer.parentElement).toBe(bubble.parentElement);
-    expect(bubble.className).toContain('z-10');
-    expect(bubble.className).toContain('rounded-lg');
-    expect(planning.parentElement).toBe(wrapper);
-    expect(wrapper.lastElementChild).toBe(planning);
-    expect(planning.dataset['messageId']).toBe('msg-1');
+    expect(screen.queryByRole('status', { name: 'Current activity' })).toBeNull();
   });
 
-  it('renders the assistant indicator flush after its parts and before the action row', () => {
-    setMessages([assistantMessage('msg-1', 'Hello there')]);
-
-    render(<ChatMessage messageId='msg-1' />);
-
-    const planning = screen.getByTestId('chat-message-planning');
-    const text = screen.getByText('Hello there');
-    const copyButton = screen.getByTestId('copy-button');
-
-    expect(text.compareDocumentPosition(planning)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(planning.compareDocumentPosition(copyButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(planning.parentElement?.className).toContain('gap-0');
-    expect(planning.className).toBe('');
-  });
-
-  it('should cap collapsed long user bubbles at max-h-60.5 for parity with focused ChatTextarea, without nested Virtuoso scroll', () => {
+  it('should cap collapsed long user bubbles at max-h-61.5 for parity with focused ChatTextarea, without nested Virtuoso scroll', () => {
     const longText = Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n');
     setMessages([userMessage('msg-1', longText)]);
 
@@ -413,7 +379,7 @@ describe('ChatMessage column wrapper layout', () => {
       throw new Error('inner bubble not found');
     }
 
-    expect(innerBubble.className).toContain('max-h-60.5');
+    expect(innerBubble.className).toContain('max-h-61.5');
     expect(innerBubble.className).toContain('overflow-hidden');
     expect(innerBubble.querySelector('[data-testid="virtuoso-scroller"]')).toBeNull();
 

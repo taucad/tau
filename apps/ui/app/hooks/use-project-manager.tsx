@@ -45,6 +45,7 @@ import {
   getAllProjectFileSystemConfigs,
   listWorkspaces,
   pinHomeStorageBackend,
+  requestHomeStoragePersistence,
   setProjectCreationLocation,
   subscribeProjectRootConfigurationChanges,
   applyProjectFileSystemConfigChanges,
@@ -1410,6 +1411,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         await worker.completePendingProjectOperation(operation.operationId);
       } catch (error) {
         throw new PendingProjectRecoveryError('local-state-error', { cause: error });
+      }
+      if (operation.backend === 'indexeddb' || operation.backend === 'opfs') {
+        void requestHomeStoragePersistence();
       }
     },
     [

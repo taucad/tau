@@ -11,6 +11,10 @@
  * link through the app's own `redirectTo` and comes back here afterwards.
  */
 
+import type { MetaFunction } from 'react-router';
+import type { Handle } from '#types/matches.types.js';
+import { PageContent } from '#components/layout/page-content.js';
+import { PageHeader } from '#components/layout/page-header.js';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -24,6 +28,9 @@ import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { authClient } from '#lib/auth-client.js';
 import { cloudProjectsQueryKeyFor, fetchCloudProjects } from '#hooks/use-cloud-projects.js';
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
+
+export const meta: MetaFunction = () => [{ title: 'Project invitation · Tau' }];
+export const handle: Handle = { enableOverflowY: true };
 
 /** What the route can end in, once the token has been offered. */
 type AcceptOutcome =
@@ -97,10 +104,13 @@ function InvitationNotice({
  * @returns The page.
  */
 const withDesktopOffer = (body: React.ReactNode): React.JSX.Element => (
-  <div className='flex flex-col items-center gap-6'>
-    {body}
-    <OpenInDesktop continueLabel='Accept in the browser' />
-  </div>
+  <PageContent className='space-y-6'>
+    <PageHeader title='Project invitation' />
+    <div className='flex flex-col items-center gap-6'>
+      {body}
+      <OpenInDesktop continueLabel='Accept in the browser' />
+    </div>
+  </PageContent>
 );
 
 /**

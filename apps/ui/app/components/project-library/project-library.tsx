@@ -165,7 +165,7 @@ function ManifestIssueLines({ issue }: { readonly issue: ProjectManifestParseIss
  *
  * @returns The library.
  */
-export function ProjectLibrary(): React.JSX.Element {
+export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1 | 2 }): React.JSX.Element {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
   /*
    * D1: the Trash is a place, not a menu tick. `/projects?trash=1` is what the
@@ -442,6 +442,7 @@ export function ProjectLibrary(): React.JSX.Element {
     <PageContent>
       <PageHeader
         title='Projects'
+        headingLevel={headingLevel}
         className='mb-6'
         action={
           <Button asChild>

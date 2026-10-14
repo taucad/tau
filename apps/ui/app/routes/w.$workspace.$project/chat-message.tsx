@@ -74,7 +74,6 @@ import {
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 import { useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
-import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatStreamingStopButton } from '#components/chat/chat-textarea-submit-button.js';
 import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
 import { formatKeyCombination } from '@taucad/ui/utils/keys';
@@ -927,14 +926,14 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
             />
           </When>
           <When shouldRender={!isEditing}>
-            {/* Matches focused-edit ChatTextarea natural max (max-h-48 editor + toolbar + padding + border = 15.125rem). Keep in sync so click-to-edit does not jump. */}
+            {/* Matches focused-edit ChatTextarea natural max (max-h-48 editor + toolbar + padding + border = 15.375rem). Keep in sync so click-to-edit does not jump. */}
             <div
               className={cn(
                 'flex flex-col gap-0 min-w-0',
                 isUser &&
                   'relative z-10 cursor-action rounded-lg border bg-background px-3 outline-none hover:border-foreground/20 focus-visible:focus-outline',
                 isUser && chatInputPaddingClassName,
-                shouldRenderCollapsedUserRows && 'max-h-60.5 overflow-hidden',
+                shouldRenderCollapsedUserRows && 'max-h-61.5 overflow-hidden',
                 fileParts.length > 0 && 'pt-3',
               )}
               role={isUser ? 'button' : undefined}
@@ -957,7 +956,6 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
                 <AssistantParts parts={inlineParts} messageId={displayMessage.id} />
               )}
               {/* Flush under the activity rows, so the indicator keeps their pitch. */}
-              {isUser ? null : <ChatMessagePlanning messageId={messageId} />}
               {showUserBubbleStopShortcut ? (
                 <div
                   className={cn(
@@ -1010,7 +1008,6 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
           <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />
         </div>
         {/* A trailing request's indicator sits below its revision card, aligned with the activity rows. */}
-        {isUser ? <ChatMessagePlanning messageId={messageId} className='-mt-1 ml-0' /> : null}
       </div>
     </article>
   );

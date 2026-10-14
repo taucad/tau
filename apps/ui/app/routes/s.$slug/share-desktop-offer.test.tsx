@@ -66,17 +66,18 @@ describe('web /s/:slug desktop offer', () => {
     expect(await screen.findByRole('button', { name: 'Open in Tau Desktop' })).toBeInTheDocument();
   });
 
-  /* The workbench's bottom-right corner holds the end of the parameter list, and
-     the viewer's centred bar owns its bottom edge: the card sits over the
-     viewer's bottom-left, above the bar, from lg, where the viewer is wide
-     enough for it. */
-  it('should keep the offer off the workbench and the viewer bar', async () => {
+  it('should keep the offer at the bottom-right with the browser continuation action', async () => {
     mountAt('tau~pub_123', { publication: {}, viewerRole: 'public' });
 
     const openInDesktop = await screen.findByRole('button', { name: 'Open in Tau Desktop' });
     const offer = openInDesktop.closest('.fixed');
-    expect(offer).toHaveClass('hidden', 'lg:flex', 'justify-start', 'bottom-16');
-    expect(offer).not.toHaveClass('md:flex', 'justify-end');
+    expect(offer).toHaveClass(
+      'hidden',
+      'lg:block',
+      'bottom-[calc(var(--spacing)*4+1px)]',
+      'right-[calc(var(--spacing)*4+1px)]',
+    );
+    expect(screen.getByRole('button', { name: 'Continue in the browser' })).toBeInTheDocument();
   });
 
   /* The desktop route announces the same wait (`desktop-route.tsx`). */

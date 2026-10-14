@@ -360,6 +360,21 @@ main > .band:first-child::before {
   min-height: 2.25rem;
   padding: 0 0.875rem;
 }
+.button svg,
+.text-link svg {
+  width: 1em;
+  height: 1em;
+  fill: currentColor;
+  flex: none;
+}
+.download-options {
+  display: grid;
+  gap: calc(var(--spacing) * 4);
+}
+.download-actions .fine,
+.download-options .fine {
+  margin-top: 0;
+}
 .out {
   font-size: 0.85em;
 }

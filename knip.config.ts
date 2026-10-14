@@ -269,7 +269,7 @@ const config: KnipConfig = {
       ignoreUnresolved: [/^\.\/\+types\//u],
     },
     'apps/www': {
-      // The static builder bundles browser entries by path; these CLIs run directly from Node.
+      // The static builder loads browser scripts and stylesheets by path; these CLIs run directly from Node.
       entry: [
         'src/client.mjs',
         'src/site.css',

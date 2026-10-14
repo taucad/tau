@@ -1765,6 +1765,7 @@ describe('Workbench file reconciliation', () => {
       'model',
       'print',
       'kinematics',
+      'browser',
       'revisions',
       'agents',
       'jobs',
@@ -1969,6 +1970,17 @@ describe('Workbench file reconciliation', () => {
     openWorkbenchUtility(dockview.api, 'parameters');
     expect(existing.api.setActive).toHaveBeenCalledOnce();
     expect(dockview.addPanel).not.toHaveBeenCalled();
+  });
+
+  it('opens browser pages as separate workbench tabs', () => {
+    const dockview = createTestDockview();
+    openWorkbenchUtility(dockview.api, 'browser');
+    openWorkbenchUtility(dockview.api, 'browser');
+
+    expect(dockview.addPanel).toHaveBeenCalledTimes(2);
+    expect(dockview.panels).toHaveLength(2);
+    expect(dockview.panels[0]!.id).not.toBe(dockview.panels[1]!.id);
+    expect(dockview.addPanel).toHaveBeenCalledWith(expect.objectContaining({ component: 'browser', title: 'Browser' }));
   });
 
   it('opens Share as a fixed-ID singleton', () => {

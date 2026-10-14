@@ -1,4 +1,7 @@
 import { BrowserPane } from '#components/browser/browser-pane.js';
+import { getBrowserBridge } from '#components/browser/browser-bridge.js';
+import { connectBrowserWorkbench } from '#components/browser/browser-workbench.js';
+import type { BrowserPanelParameters } from '#components/browser/browser-workbench.js';
 import {
   createContext,
   Fragment,
@@ -266,6 +269,10 @@ function EditorPanel(properties: IDockviewPanelProps<EditorPanelParameters>): Re
       containerApi={properties.containerApi}
     />
   );
+}
+
+function BrowserWorkbenchPanel({ params }: IDockviewPanelProps<BrowserPanelParameters>): React.JSX.Element {
+  return <BrowserPane tabId={params.browserTabId} />;
 }
 
 function ParametersWorkbenchPanel(): React.JSX.Element {
@@ -539,7 +546,7 @@ export function replaceWorkbenchPlaceholderWithUtility({
   readonly panelId: WorkbenchUtilityPanelId;
 }): void {
   const definition = workbenchPanels[panelId];
-  const existing = api.panels.find((panel) => panel.id === definition.id);
+  const existing = panelId === 'browser' ? undefined : api.panels.find((panel) => panel.id === definition.id);
   if (existing) {
     existing.api.setActive();
     placeholder.api.close();
@@ -550,6 +557,7 @@ export function replaceWorkbenchPlaceholderWithUtility({
   const index = group.panels.findIndex((panel) => panel.id === placeholder.id);
   api.addPanel({
     ...definition,
+    ...(panelId === 'browser' ? { id: `browser:${generatePrefixedId(idPrefix.pane)}` } : {}),
     position: { direction: 'within', referenceGroup: group, ...(index === -1 ? {} : { index }) },
   });
   placeholder.api.close();
@@ -799,7 +807,7 @@ export function WorkbenchLeftActions(properties: IDockviewHeaderActionsProps): R
 }
 
 const components = {
-  browser: BrowserPane,
+  browser: BrowserWorkbenchPanel,
   editor: EditorPanel,
   newTab: WorkbenchPlaceholderPanel,
   parameters: ParametersWorkbenchPanel,
@@ -843,7 +851,9 @@ export const workbenchPanels = {
  */
 export const getWorkbenchTabIcon: DockviewTabIconRenderer = (properties) => {
   const mode = getPlaceholderParameters(properties)?.mode;
-  const surface = workbenchSurfaces.find((candidate) => candidate.panel?.id === properties.api.id);
+  const surface = workbenchSurfaces.find((candidate) =>
+    properties.api.component === 'browser' ? candidate.id === 'browser' : candidate.panel?.id === properties.api.id,
+  );
   const filePath = getFileParameters(properties)?.filePath;
   const Icon =
     mode === 'open-file'
@@ -871,7 +881,7 @@ export function openWorkbenchUtility(
   group?: DockviewGroupPanel,
 ): void {
   const definition = workbenchPanels[panelId];
-  const existing = api.panels.find((panel) => panel.id === definition.id);
+  const existing = panelId === 'browser' ? undefined : api.panels.find((panel) => panel.id === definition.id);
   if (existing) {
     existing.api.setActive();
     return;
@@ -880,6 +890,7 @@ export function openWorkbenchUtility(
   const referenceGroup = group ?? api.activeGroup ?? api.groups[0];
   api.addPanel({
     ...definition,
+    ...(panelId === 'browser' ? { id: `browser:${generatePrefixedId(idPrefix.pane)}` } : {}),
     ...(referenceGroup ? { position: { direction: 'within', referenceGroup } } : {}),
   });
 }
@@ -1697,6 +1708,21 @@ export const WorkbenchDockview = memo(function ({
   const monaco = useConfiguredMonaco();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
+
+  useEffect(() => {
+    const bridge = getBrowserBridge();
+    if (!api || !bridge || profile === 'shared') {
+      return;
+    }
+    return connectBrowserWorkbench({
+      api,
+      bridge,
+      isRestoring: () => isRestoringLayout.current,
+      onError: (message) => {
+        toast.error(message);
+      },
+    });
+  }, [api, profile]);
 
   useEffect(() => {
     onApiChange?.(api);

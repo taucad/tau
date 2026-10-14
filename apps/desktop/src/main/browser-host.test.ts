@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import type { BrowserWindow, IpcMainInvokeEvent, Session, WebContents, WebContentsView } from 'electron';
-import { BrowserWindow as Window, WebContentsView as View, ipcMain, session } from 'electron';
+import { BrowserWindow as Window, WebContentsView as View, ipcMain, session, webContents } from 'electron';
 import type { BrowserCommand, BrowserSnapshot } from '@taucad/types/browser';
 import { installBrowserHost } from '#main/browser-host.js';
 
@@ -14,6 +14,7 @@ vi.mock('electron', () => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Electron export name.
   WebContentsView: vi.fn(),
   session: { fromPartition: vi.fn() },
+  webContents: { fromId: vi.fn() },
   ipcMain: { handle: vi.fn() },
   dialog: { showSaveDialog: vi.fn() },
   shell: { openExternal: vi.fn() },
@@ -48,6 +49,7 @@ beforeEach(() => {
     return view;
   });
   vi.mocked(session.fromPartition).mockReturnValue(browserSession);
+  vi.mocked(webContents.fromId).mockReturnValue(undefined);
   installBrowserHost({ origins: ['app://tau'], userDataPath: directory });
   const handler = vi.mocked(ipcMain.handle).mock.calls[0]![1];
   invoke = async (command) => handler(event, command) as Promise<BrowserSnapshot>;
@@ -57,6 +59,84 @@ afterEach(() => {
 });
 
 describe('browser host authority', () => {
+  it('should return a bounded owner-only preview without broadcasting or retaining page pixels', async () => {
+    const opened = await invoke({ kind: 'new-tab', input: 'example.com' });
+    const tabId = opened.activeTabId!;
+    const image = mockDeep<Electron.NativeImage>();
+    image.isEmpty.mockReturnValue(false);
+    image.getSize.mockReturnValue({ width: 4000, height: 2000 });
+    image.resize.mockReturnValue(image);
+    image.toJPEG.mockReturnValue(Buffer.from('preview'));
+    guest.capturePage.mockResolvedValue(image);
+    window.webContents.send.mockClear();
+    const captured = await invoke({ kind: 'capture-preview', tabId });
+    expect(image.resize).toHaveBeenCalledWith({ width: 1600, height: 800 });
+    expect(captured.preview).toEqual({
+      tabId,
+      url: 'https://example.com/',
+      dataUrl: 'data:image/jpeg;base64,cHJldmlldw==',
+    });
+    expect(window.webContents.send).not.toHaveBeenCalled();
+    const normal = await invoke({ kind: 'snapshot' });
+    expect(normal.preview).toBeUndefined();
+    await expect(invoke({ kind: 'capture-preview', tabId: 'another-window-tab' })).rejects.toThrow('closed');
+    const pending = Promise.withResolvers<Electron.NativeImage>();
+    guest.capturePage.mockReturnValue(pending.promise);
+    const stale = invoke({ kind: 'capture-preview', tabId });
+    await invoke({ kind: 'navigate', tabId, input: 'https://example.org/' });
+    pending.resolve(image);
+    const staleResult = await stale;
+    expect(staleResult.preview).toBeUndefined();
+  });
+
+  it('should allow the trusted inspector frontend without allowing internal schemes in guest pages', async () => {
+    await invoke({ kind: 'new-tab', input: 'example.com' });
+    const inspector = mockDeep<WebContents>();
+    inspector.getType.mockReturnValue('remote');
+    guest.getType.mockReturnValue('window');
+    vi.mocked(webContents.fromId).mockImplementation((id) => {
+      if (id === 3) {
+        return inspector;
+      }
+      if (id === 2) {
+        return guest;
+      }
+      return undefined;
+    });
+    const listener = browserSession.webRequest.onBeforeRequest.mock.calls[0]![0];
+    if (typeof listener !== 'function') {
+      throw new TypeError('Expected a request listener');
+    }
+    const callback = vi.fn();
+    const inspectorUrl = 'devtools://devtools/bundled/devtools_app.html';
+    for (const [webContentsId, url, cancel] of [
+      [2, inspectorUrl, true],
+      [4, inspectorUrl, true],
+      [3, inspectorUrl, false],
+      [3, 'file:///etc/passwd', true],
+      [2, 'https://example.com/', false],
+    ] as const) {
+      listener(
+        mock<Electron.OnBeforeRequestListenerDetails>({ webContentsId, url, resourceType: 'mainFrame' }),
+        callback,
+      );
+      expect(callback).toHaveBeenLastCalledWith({ cancel });
+    }
+  });
+
+  it('should not turn a stopped navigation rejection into a page failure', async () => {
+    const { activeTabId: tabId } = await invoke({ kind: 'new-tab', input: 'example.com' });
+    const pending = Promise.withResolvers<void>();
+    guest.loadURL.mockReturnValueOnce(pending.promise);
+    const navigation = invoke({ kind: 'navigate', tabId: tabId!, input: 'https://example.com/slow' });
+    await invoke({ kind: 'action', tabId: tabId!, action: 'stop' });
+    pending.reject(new Error('ERR_FAILED (-2) loading the stopped page'));
+    await navigation;
+    expect(guest.stop).toHaveBeenCalledOnce();
+    const stopped = await invoke({ kind: 'snapshot' });
+    expect(stopped.tabs[0]).toMatchObject({ isLoading: false, error: undefined });
+  });
+
   it('should create an isolated guest with no preload or default app session', async () => {
     const result = await invoke({ kind: 'new-tab', input: 'example.com' });
     expect(session.fromPartition).toHaveBeenCalledWith('persist:tau-browser-v1');
@@ -124,6 +204,40 @@ describe('browser host authority', () => {
     expect(view.setVisible).toHaveBeenLastCalledWith(true);
     await invoke({ kind: 'detach', leaseId: 'active' });
     expect(view.setVisible).toHaveBeenLastCalledWith(false);
+  });
+  it('should keep split browser pages visible and detach only the matching page lease', async () => {
+    const otherGuest = mockDeep<WebContents>();
+    const otherView = mock<WebContentsView>({ webContents: otherGuest });
+    const first = await invoke({ kind: 'new-tab', input: 'example.com' });
+    vi.mocked(View).mockImplementationOnce(function () {
+      return otherView;
+    });
+    const second = await invoke({ kind: 'new-tab', input: 'example.org' });
+    await invoke({
+      kind: 'viewport',
+      leaseId: 'left',
+      tabId: first.activeTabId!,
+      visible: true,
+      x: 0,
+      y: 80,
+      width: 500,
+      height: 720,
+    });
+    await invoke({
+      kind: 'viewport',
+      leaseId: 'right',
+      tabId: second.activeTabId!,
+      visible: true,
+      x: 500,
+      y: 80,
+      width: 500,
+      height: 720,
+    });
+    expect(view.setVisible).toHaveBeenLastCalledWith(true);
+    expect(otherView.setVisible).toHaveBeenLastCalledWith(true);
+    await invoke({ kind: 'detach', leaseId: 'right' });
+    expect(view.setVisible).toHaveBeenLastCalledWith(true);
+    expect(otherView.setVisible).toHaveBeenLastCalledWith(false);
   });
   it('should place the native view in device-independent coordinates when Tau is zoomed', async () => {
     const result = await invoke({ kind: 'new-tab', input: 'example.com' });

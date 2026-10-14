@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserBridge, BrowserSnapshot } from '@taucad/types/browser';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
@@ -24,6 +24,7 @@ const snapshot: BrowserSnapshot = {
   history: [],
   downloads: [],
 };
+const preview = { tabId: 'one', url: 'https://example.com/', dataUrl: 'data:image/jpeg;base64,dGVzdA==' };
 const command = vi.fn<BrowserBridge['command']>();
 const unsubscribe = vi.fn();
 const frames = new Map<number, FrameRequestCallback>();
@@ -38,7 +39,9 @@ const tick = async (): Promise<void> => {
   });
 };
 beforeEach(() => {
-  command.mockReset().mockResolvedValue(snapshot);
+  command
+    .mockReset()
+    .mockImplementation(async (request) => (request.kind === 'capture-preview' ? { ...snapshot, preview } : snapshot));
   unsubscribe.mockClear();
   frames.clear();
   vi.stubGlobal('tauBrowser', { command, subscribe: () => unsubscribe } satisfies BrowserBridge);
@@ -64,7 +67,19 @@ afterEach(() => {
 });
 
 describe('native browser viewport lifetime', () => {
-  it('should hide the guest for overlays and fullscreen, resume it, and release only its own lease', async () => {
+  it('should focus the address field when a selected blank page is opened', async () => {
+    command.mockResolvedValue({ ...snapshot, tabs: snapshot.tabs.map((tab) => ({ ...tab, url: '' })) });
+    render(
+      <KeyboardProvider>
+        <TooltipProvider>
+          <BrowserPane />
+        </TooltipProvider>
+      </KeyboardProvider>,
+    );
+    expect(await screen.findByRole('textbox', { name: 'Search or enter a URL' })).toHaveFocus();
+  });
+
+  it('should paint a page preview before lowering an overlapping native guest and restore it on dismissal', async () => {
     const { unmount } = render(
       <KeyboardProvider>
         <TooltipProvider>
@@ -72,7 +87,8 @@ describe('native browser viewport lifetime', () => {
         </TooltipProvider>
       </KeyboardProvider>,
     );
-    await screen.findByRole('navigation', { name: 'Browser tabs' });
+    await screen.findByRole('textbox', { name: 'Search or enter a URL' });
+    expect(screen.queryByRole('navigation', { name: 'Browser tabs' })).not.toBeInTheDocument();
     await tick();
     expect(command).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'viewport', visible: true }));
     const request = command.mock.calls.at(-1)![0];
@@ -82,6 +98,10 @@ describe('native browser viewport lifetime', () => {
     const menu = document.createElement('div');
     menu.setAttribute('role', 'menu');
     document.body.append(menu);
+    await tick();
+    expect(command).toHaveBeenLastCalledWith({ kind: 'capture-preview', tabId: 'one' });
+    expect(command).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'viewport', visible: false }));
+    fireEvent.load(screen.getByRole('presentation', { hidden: true }));
     await tick();
     expect(command).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
     menu.remove();
@@ -97,6 +117,37 @@ describe('native browser viewport lifetime', () => {
     expect(command).toHaveBeenLastCalledWith({ kind: 'detach', leaseId: request.leaseId });
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(frames.size).toBe(0);
+  });
+  it('should keep the native page live for unrelated tooltips and discard a late overlapping capture', async () => {
+    const pending = Promise.withResolvers<BrowserSnapshot>();
+    command.mockImplementation(async (request) => (request.kind === 'capture-preview' ? pending.promise : snapshot));
+    render(
+      <KeyboardProvider>
+        <TooltipProvider>
+          <BrowserPane />
+        </TooltipProvider>
+      </KeyboardProvider>,
+    );
+    await screen.findByRole('textbox', { name: 'Search or enter a URL' });
+    await tick();
+    const tooltip = document.createElement('div');
+    tooltip.setAttribute('role', 'tooltip');
+    document.body.append(tooltip);
+    const bounds = vi.fn(() => new DOMRect(700, 0, 80, 30));
+    Object.defineProperty(tooltip, 'getBoundingClientRect', { value: bounds });
+    await tick();
+    expect(command).not.toHaveBeenCalledWith({ kind: 'capture-preview', tabId: 'one' });
+    bounds.mockReturnValue(new DOMRect(20, 90, 100, 40));
+    await tick();
+    expect(command).toHaveBeenLastCalledWith({ kind: 'capture-preview', tabId: 'one' });
+    tooltip.remove();
+    await tick();
+    await act(async () => {
+      pending.resolve({ ...snapshot, preview });
+    });
+    await tick();
+    expect(screen.queryByRole('presentation', { hidden: true })).not.toBeInTheDocument();
+    expect(command).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'viewport', visible: false }));
   });
   it('should explain the desktop requirement when the native bridge is absent', () => {
     vi.stubGlobal('tauBrowser', undefined);

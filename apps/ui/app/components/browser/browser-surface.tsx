@@ -8,9 +8,7 @@ import {
   ArrowUp,
   ExternalLink,
   Globe,
-  LoaderCircle,
-  MoreHorizontal,
-  Plus,
+  EllipsisVertical,
   RotateCw,
   Search,
   ShieldAlert,
@@ -27,13 +25,14 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { BrowserSettingsSurface } from '#components/browser/browser-settings.js';
-import { cn } from '@taucad/ui/utils/cn';
+import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 
 type BrowserPanel = 'page' | 'history' | 'downloads' | 'settings' | 'site';
 
 /** Trusted browser chrome, independent of native guest rendering and reusable in Canvas. */
 export function BrowserSurface({
   snapshot,
+  tabId = snapshot.activeTabId,
   command,
   error,
   viewportRef,
@@ -42,6 +41,7 @@ export function BrowserSurface({
   initialPanel = 'page',
 }: {
   readonly snapshot: BrowserSnapshot;
+  readonly tabId?: string;
   readonly command: (command: BrowserCommand) => Promise<void>;
   readonly error?: string;
   readonly viewportRef?: Ref<HTMLDivElement>;
@@ -49,7 +49,7 @@ export function BrowserSurface({
   readonly onSettings?: () => void;
   readonly initialPanel?: BrowserPanel;
 }): React.JSX.Element {
-  const tab = snapshot.tabs.find((candidate) => candidate.id === snapshot.activeTabId);
+  const tab = snapshot.tabs.find((candidate) => candidate.id === tabId);
   const [panel, setPanel] = useState<BrowserPanel>(initialPanel);
   const [addressDraft, setAddressDraft] = useState<string>();
   const [isFinding, setIsFinding] = useState(false);
@@ -81,14 +81,30 @@ export function BrowserSurface({
     },
     { enabled: isActive },
   );
+  useKeybinding(
+    { key: 'Escape' },
+    () => {
+      setIsFinding(false);
+      if (tab) {
+        void command({ kind: 'find', tabId: tab.id, text: '' });
+      }
+      focusAddress();
+    },
+    { enabled: () => isFinding && isActive() },
+  );
   useEffect(() => {
     if (isFinding) {
       findRef.current?.focus();
     }
   }, [isFinding]);
   useEffect(() => {
+    if (tab?.url === '' && tab.id === snapshot.activeTabId) {
+      focusAddress();
+    }
+  }, [tab?.id, tab?.url, snapshot.activeTabId]);
+  useEffect(() => {
     const handleShortcut = (event: Event): void => {
-      if (!(event instanceof CustomEvent) || !rootRef.current?.checkVisibility()) {
+      if (!(event instanceof CustomEvent) || !rootRef.current?.checkVisibility() || tab?.id !== snapshot.activeTabId) {
         return;
       }
       if (event.detail === 'l') {
@@ -102,7 +118,7 @@ export function BrowserSurface({
     return () => {
       globalThis.removeEventListener('tau-browser-shortcut', handleShortcut);
     };
-  }, []);
+  }, [tab?.id, snapshot.activeTabId]);
   const navigate = (input: string): void => {
     setPanel('page');
     setAddressDraft(undefined);
@@ -121,57 +137,6 @@ export function BrowserSurface({
       className='flex h-full min-h-0 min-w-0 flex-col bg-background text-foreground'
       data-review-id='browser-pane'
     >
-      <nav aria-label='Browser tabs' className='flex min-h-9 shrink-0 items-center gap-1 border-b px-1'>
-        <div className='flex min-w-0 flex-1 gap-1 overflow-x-auto'>
-          {snapshot.tabs.map((entry) => (
-            <div
-              key={entry.id}
-              className={cn('flex max-w-48 min-w-24 items-center rounded-md', entry.id === tab?.id && 'bg-accent')}
-            >
-              <Button
-                variant='ghost'
-                size='sm'
-                aria-pressed={entry.id === tab?.id}
-                className='min-w-0 flex-1 justify-start font-normal'
-                onClick={() => {
-                  setAddressDraft(undefined);
-                  setPanel('page');
-                  void command({ kind: 'select-tab', tabId: entry.id });
-                }}
-              >
-                {entry.isLoading ? (
-                  <LoaderCircle className='size-3 shrink-0 animate-spin motion-reduce:animate-none' />
-                ) : (
-                  <Globe className='size-3 shrink-0' />
-                )}
-                <span className='truncate'>{entry.title}</span>
-              </Button>
-              <Button
-                variant='ghost'
-                size='icon-xs'
-                aria-label={`Close ${entry.title}`}
-                onClick={() => {
-                  void command({ kind: 'close-tab', tabId: entry.id });
-                }}
-              >
-                <X className='size-3' />
-              </Button>
-            </div>
-          ))}
-        </div>
-        <Button
-          variant='ghost'
-          size='icon-sm'
-          aria-label='New browser tab'
-          onClick={() => {
-            setPanel('page');
-            setAddressDraft(undefined);
-            void command({ kind: 'new-tab' });
-          }}
-        >
-          <Plus />
-        </Button>
-      </nav>
       <div className='flex shrink-0 items-center gap-1 border-b p-1' data-review-id='browser-toolbar'>
         <Button
           variant='ghost'
@@ -243,10 +208,19 @@ export function BrowserSurface({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant='ghost' size='icon-sm' aria-label='Browser menu'>
-              <MoreHorizontal />
+              <EllipsisVertical />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align='end' className='w-64'>
+          <DropdownMenuContent
+            align='end'
+            className='w-64'
+            onCloseAutoFocus={(event) => {
+              if (isFinding) {
+                event.preventDefault();
+                findRef.current?.focus();
+              }
+            }}
+          >
             <DropdownMenuItem
               disabled={!tab?.url}
               onSelect={() => {
@@ -264,48 +238,49 @@ export function BrowserSurface({
               Print…
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <div className='flex items-center justify-between gap-2 px-2 py-1'>
-              <span className='text-sm'>Zoom</span>
+            <div
+              role='group'
+              aria-label='Page zoom'
+              className={menuItemVariants({ className: 'justify-between hover:bg-transparent' })}
+            >
+              <span>Zoom</span>
               <div className='flex items-center'>
-                <Button
-                  variant='ghost'
-                  size='icon-xs'
+                <DropdownMenuItem
                   aria-label='Zoom out'
                   disabled={!tab || tab.zoom <= 0.25}
-                  onClick={() => {
+                  onSelect={(event) => {
+                    event.preventDefault();
                     if (tab) {
                       void command({ kind: 'zoom', tabId: tab.id, factor: Math.max(0.25, tab.zoom - 0.25) });
                     }
                   }}
                 >
                   −
-                </Button>
-                <Button
-                  variant='ghost'
-                  size='sm'
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   aria-label='Reset zoom'
                   disabled={!tab}
-                  onClick={() => {
+                  onSelect={(event) => {
+                    event.preventDefault();
                     if (tab) {
                       void command({ kind: 'zoom', tabId: tab.id, factor: 1 });
                     }
                   }}
                 >
                   {Math.round((tab?.zoom ?? 1) * 100)}%
-                </Button>
-                <Button
-                  variant='ghost'
-                  size='icon-xs'
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   aria-label='Zoom in'
                   disabled={!tab || tab.zoom >= 3}
-                  onClick={() => {
+                  onSelect={(event) => {
+                    event.preventDefault();
                     if (tab) {
                       void command({ kind: 'zoom', tabId: tab.id, factor: Math.min(3, tab.zoom + 0.25) });
                     }
                   }}
                 >
                   +
-                </Button>
+                </DropdownMenuItem>
               </div>
             </div>
             <DropdownMenuItem

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { BrowserWindow, WebContentsView, dialog, ipcMain, session, shell } from 'electron';
+import { BrowserWindow, WebContentsView, dialog, ipcMain, session, shell, webContents } from 'electron';
 import type { DownloadItem, IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import { browserChannels, browserCommandSchema, browserSettingsSchema } from '@taucad/types/browser';
@@ -25,8 +25,8 @@ type BrowserRequest = z.output<typeof browserCommandSchema>;
 type TabRequest = Extract<BrowserRequest, { tabId: string }>;
 type PageAction = Extract<BrowserRequest, { kind: 'action' }>;
 type ViewportRequest = Extract<BrowserRequest, { kind: 'viewport' }>;
-type Page = { view: WebContentsView; state: BrowserTab };
-type WindowBrowser = { window: BrowserWindow; pages: Map<string, Page>; activeTabId?: string; viewportLease?: string };
+type Page = { view: WebContentsView; state: BrowserTab; viewportLease?: string; navigationId: number };
+type WindowBrowser = { window: BrowserWindow; pages: Map<string, Page>; activeTabId?: string };
 
 /** Main-process authority for guest pages. The session never receives app protocols or auth headers. */
 export const installBrowserHost = ({
@@ -73,11 +73,6 @@ export const installBrowserHost = ({
       publish(owner);
     }
   };
-  const hide = (owner: WindowBrowser): void => {
-    for (const { view } of owner.pages.values()) {
-      view.setVisible(false);
-    }
-  };
   const closePage = (owner: WindowBrowser, id: string): void => {
     const page = owner.pages.get(id);
     if (!page) {
@@ -112,13 +107,23 @@ export const installBrowserHost = ({
   // This also guards redirects and child-frame navigation; subresources keep normal web semantics.
   browserSession.webRequest.onBeforeRequest((details, callback) => {
     const isNavigation = details.resourceType === 'mainFrame' || details.resourceType === 'subFrame';
-    callback({ cancel: isClearing || (isNavigation && details.url !== 'about:blank' && !isBrowserUrl(details.url)) });
+    // The inspector shares this session and loads before devToolsWebContents is assigned.
+    // Only Electron-created remote contents may load its internal frontend; guest contents cannot.
+    const isInspector =
+      details.url.startsWith('devtools://devtools/') &&
+      details.webContentsId !== undefined &&
+      webContents.fromId(details.webContentsId)?.getType() === 'remote';
+    callback({
+      cancel:
+        isClearing || (isNavigation && details.url !== 'about:blank' && !isBrowserUrl(details.url) && !isInspector),
+    });
   });
 
   const navigate = async (owner: WindowBrowser, page: Page, url: string): Promise<void> => {
     if (!isBrowserUrl(url)) {
       throw new Error('Only http and https web addresses are supported.');
     }
+    const navigationId = ++page.navigationId;
     page.state.error = undefined;
     page.state.url = url;
     page.state.isLoading = true;
@@ -126,7 +131,11 @@ export const installBrowserHost = ({
     try {
       await page.view.webContents.loadURL(url);
     } catch (error) {
-      if (!owner.pages.has(page.state.id) || page.view.webContents.isDestroyed()) {
+      if (
+        page.navigationId !== navigationId ||
+        !owner.pages.has(page.state.id) ||
+        page.view.webContents.isDestroyed()
+      ) {
         return;
       }
       // Cancellation from a newer navigation is not a page failure.
@@ -153,8 +162,7 @@ export const installBrowserHost = ({
       canGoForward: false,
       zoom: profile.settings.defaultZoom,
     };
-    const page = { view, state };
-    hide(owner);
+    const page = { view, state, navigationId: 0 };
     view.setVisible(false);
     owner.window.contentView.addChildView(view);
     owner.pages.set(state.id, page);
@@ -175,6 +183,12 @@ export const installBrowserHost = ({
       state.zoom = contents.getZoomFactor();
       publish(owner);
     };
+    contents.on('focus', () => {
+      if (owner.activeTabId !== state.id) {
+        owner.activeTabId = state.id;
+        publish(owner);
+      }
+    });
     contents.on('did-start-loading', update);
     contents.on('did-stop-loading', update);
     contents.on('did-navigate-in-page', update);
@@ -383,10 +397,9 @@ export const installBrowserHost = ({
     }
   };
   const applyViewport = (owner: WindowBrowser, page: Page, command: ViewportRequest): void => {
-    if (!command.visible && owner.viewportLease !== command.leaseId) {
+    if (!command.visible && page.viewportLease !== command.leaseId) {
       return;
     }
-    hide(owner);
     const [width = 0, height = 0] = owner.window.getContentSize();
     const hostZoom = owner.window.webContents.getZoomFactor();
     const x = Math.round(command.x * hostZoom);
@@ -395,7 +408,6 @@ export const installBrowserHost = ({
     const pageHeight = Math.floor(command.height * hostZoom);
     const visible =
       command.visible &&
-      owner.activeTabId === command.tabId &&
       !page.state.error &&
       page.state.url !== '' &&
       command.width > 0 &&
@@ -403,7 +415,7 @@ export const installBrowserHost = ({
       x + pageWidth <= width + 1 &&
       y + pageHeight <= height + 1;
     if (visible) {
-      owner.viewportLease = command.leaseId;
+      page.viewportLease = command.leaseId;
       page.view.setBounds({ x, y, width: pageWidth, height: pageHeight });
     }
     page.view.setVisible(visible);
@@ -429,6 +441,10 @@ export const installBrowserHost = ({
         break;
       }
       case 'stop': {
+        // Electron can reject a stopped loadURL with ERR_FAILED without a did-fail-load event.
+        // Invalidate that request before stopping so its rejection cannot become a page error.
+        page.navigationId += 1;
+        page.state.isLoading = false;
         contents.stop();
         break;
       }
@@ -476,11 +492,39 @@ export const installBrowserHost = ({
     }
     const contents = page.view.webContents;
     switch (command.kind) {
+      case 'capture-preview': {
+        const { navigationId } = page;
+        const url = contents.getURL();
+        const capture = await contents.capturePage();
+        if (
+          isClearing ||
+          owner.pages.get(command.tabId) !== page ||
+          contents.isDestroyed() ||
+          page.navigationId !== navigationId ||
+          contents.getURL() !== url ||
+          capture.isEmpty()
+        ) {
+          return snapshot(owner);
+        }
+        const { width, height } = capture.getSize();
+        const scale = Math.min(1, 1600 / Math.max(width, height));
+        const bounded = capture.resize({
+          width: Math.max(1, Math.round(width * scale)),
+          height: Math.max(1, Math.round(height * scale)),
+        });
+        return {
+          ...snapshot(owner),
+          preview: {
+            tabId: command.tabId,
+            url,
+            dataUrl: `data:image/jpeg;base64,${bounded.toJPEG(85).toString('base64')}`,
+          },
+        };
+      }
       case 'select-tab': {
         if (owner.activeTabId === command.tabId) {
           break;
         }
-        hide(owner);
         owner.activeTabId = command.tabId;
         break;
       }
@@ -541,9 +585,11 @@ export const installBrowserHost = ({
         break;
       }
       case 'detach': {
-        if (owner.viewportLease === command.leaseId) {
-          hide(owner);
-          owner.viewportLease = undefined;
+        for (const page of owner.pages.values()) {
+          if (page.viewportLease === command.leaseId) {
+            page.view.setVisible(false);
+            page.viewportLease = undefined;
+          }
         }
         break;
       }

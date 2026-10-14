@@ -98,7 +98,7 @@ export function ChatMessageQueueView({
                 }
               }}
               className={cn(
-                'min-w-0 px-2 py-1',
+                'min-w-0 px-2 py-0.5',
                 drag?.id === item.id && 'opacity-50',
                 drag !== undefined && drag.beforeId === item.id && 'border-t-2 border-t-muted-foreground',
                 drag !== undefined &&
@@ -197,11 +197,14 @@ export function ChatMessageQueueView({
                     {attachments}
                   </span>
                 ) : null}
-                <div className='flex shrink-0 items-center gap-1 text-muted-foreground @max-[14rem]/message-queue:basis-full @max-[14rem]/message-queue:flex-wrap @max-[14rem]/message-queue:justify-end'>
+                <div className='flex shrink-0 items-center gap-0 text-muted-foreground @max-[14rem]/message-queue:basis-full @max-[14rem]/message-queue:flex-wrap @max-[14rem]/message-queue:justify-end'>
                   <Button
                     variant='ghost'
                     size='xs'
-                    className={cn('font-normal', statusLabel !== undefined && 'disabled:opacity-100')}
+                    className={cn(
+                      'gap-1 px-1 font-normal has-[>svg]:px-1',
+                      statusLabel !== undefined && 'disabled:opacity-100',
+                    )}
                     aria-label='Steer'
                     disabled={locked}
                     title='Interrupt the current turn and send this message'
@@ -220,7 +223,7 @@ export function ChatMessageQueueView({
                   </Button>
                   <Button
                     variant='ghost'
-                    size='icon-sm'
+                    size='icon-xs'
                     aria-label={`Delete queued message ${String(index + 1)}`}
                     disabled={locked}
                     onClick={() => {
@@ -233,7 +236,7 @@ export function ChatMessageQueueView({
                     <DropdownMenuTrigger asChild>
                       <Button
                         variant='ghost'
-                        size='icon-sm'
+                        size='icon-xs'
                         aria-label={`Options for queued message ${String(index + 1)}`}
                         disabled={locked}
                       >

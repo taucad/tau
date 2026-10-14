@@ -384,7 +384,7 @@ type StagingOwner = { readonly pid: number; readonly hostname: string; readonly 
  * Create `tmp/<attemptId>/` and record which process owns it.
  * @internal
  * @param layout - The store.
- * @param attemptId - The attempt.
+ * @param attemptId - The preparation attempt that will own the directory.
  * @returns The staging directory.
  */
 export const createStaging = async (layout: StoreLayout, attemptId: string): Promise<string> => {
@@ -515,7 +515,7 @@ const liveClosures = async (
  * kernel keeps the inodes of a closure deleted under it.
  * @internal
  * @param layout - The store.
- * @param input - Dry run, current time and signal.
+ * @param input - Whether to only report, the clock for the 24-hour orphan window, and cancellation.
  * @returns What was removed, or would be.
  */
 export const collectStoreGarbage = async (

@@ -2,7 +2,8 @@
 // The digest is the only key; every source's bytes are verified before anything is written.
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { mkdir, readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { access, mkdir, readFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -209,6 +210,15 @@ const candidatesOf = async (payload: DependencyPayload, context: AcquisitionCont
   return candidates;
 };
 
+const readable = async (path: string): Promise<boolean> => {
+  try {
+    await access(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Whether a payload can be acquired without a network request: from the store, the seed, a `file://` mirror or its
  * own npm package. Existence only; the bytes are still verified when they are read.
@@ -229,13 +239,7 @@ export const locallyAvailable = async (payload: DependencyPayload, context: Acqu
             ? undefined
             : candidate.path;
     // oxlint-disable-next-line no-await-in-loop -- the first local hit answers
-    if (
-      path !== undefined &&
-      (await readFile(path).then(
-        () => true,
-        () => false,
-      ))
-    ) {
+    if (path !== undefined && (await readable(path))) {
       return true;
     }
   }

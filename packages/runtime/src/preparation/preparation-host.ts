@@ -533,14 +533,11 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     attempt: Pick<AcquisitionContext, 'signal' | 'indexes'>,
   ): Promise<string[]> => {
     const missing: string[] = [];
+    const context = acquisitionContext(plugin, { staging: layout.staging, offline: true, ...attempt });
     for (const { payload } of payloads) {
       // oxlint-disable-next-line no-await-in-loop -- the first local hit answers each payload
-      if (
-        !(await locallyAvailable(
-          payload,
-          acquisitionContext(plugin, { staging: layout.staging, offline: true, ...attempt }),
-        ))
-      ) {
+      const available = await locallyAvailable(payload, context);
+      if (!available) {
         missing.push(payload.name);
       }
     }
@@ -863,16 +860,15 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           continue;
         }
         // oxlint-disable-next-line no-await-in-loop -- ditto
-        results.push(
-          await verifyReceipt({
-            plugin,
-            receipt: state.receipt,
-            key: state.key,
-            repair: input.repair === true,
-            offline: input.offline === true,
-            signal: input.signal,
-          }),
-        );
+        const verified = await verifyReceipt({
+          plugin,
+          receipt: state.receipt,
+          key: state.key,
+          repair: input.repair === true,
+          offline: input.offline === true,
+          signal: input.signal,
+        });
+        results.push(verified);
       }
       return results;
     },

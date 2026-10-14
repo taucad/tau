@@ -94,38 +94,78 @@ describe('message queue busy and enlarged text', () => {
 });
 
 describe('message queue pointer reordering', () => {
-  it('should drag only from the handle and keep the row compact with standard buttons', async () => {
-    await page.viewport(1000, 720);
-    const onMove = vi.fn(async () => undefined);
-    render(
-      <div style={{ width: 400 }}>
-        <Button variant='ghost' size='icon-sm'>
-          Standard button
-        </Button>
-        <ChatMessageQueueView
-          items={['one', 'two', 'three'].map((id) => ({
-            id,
-            requestId: `req_${id}`,
-            message: { id, role: 'user', parts: [{ type: 'text', text: id }] },
-          }))}
-          onEdit={async () => undefined}
-          onSteer={async () => undefined}
-          onMove={onMove}
-          onRetry={() => undefined}
-        />
-      </div>,
-    );
-    await userEvent.dragAndDrop(
-      screen.getByRole('button', { name: 'Reorder queued message 3' }),
-      screen.getAllByRole('listitem')[0]!,
-      { targetPosition: { x: 12, y: 2 } },
-    );
-    expect(onMove).toHaveBeenCalledExactlyOnceWith('three', 'one');
-    expect(getComputedStyle(screen.getByText('one')).fontSize).toBe('12px');
-    const button = screen.getByRole('button', { name: 'Options for queued message 1' });
-    expect(getComputedStyle(button).borderRadius).toBe(
-      getComputedStyle(screen.getByRole('button', { name: 'Standard button' })).borderRadius,
-    );
-    expect(getComputedStyle(screen.getAllByRole('listitem')[0]!).borderBottomWidth).toBe('1px');
-  });
+  it.each([
+    { source: 3, target: 0, y: 2, id: 'three', beforeId: 'one' },
+    { source: 1, target: 2, y: 26, id: 'one', beforeId: undefined },
+  ])(
+    'should keep row geometry stable when dragging message $source to row $target',
+    async ({ source, target, y, id, beforeId }) => {
+      await page.viewport(1000, 720);
+      const onMove = vi.fn(async () => undefined);
+      render(
+        <div style={{ width: 400 }}>
+          <Button variant='ghost' size='icon-sm'>
+            Standard button
+          </Button>
+          <ChatMessageQueueView
+            items={['one', 'two', 'three'].map((id) => ({
+              id,
+              requestId: `req_${id}`,
+              message: { id, role: 'user', parts: [{ type: 'text', text: id }] },
+            }))}
+            onEdit={async () => undefined}
+            onSteer={async () => undefined}
+            onMove={onMove}
+            onRetry={() => undefined}
+          />
+        </div>,
+      );
+      const rows = screen.getAllByRole('listitem');
+      const geometry = () =>
+        rows.map((row) => {
+          const { top, height } = row.getBoundingClientRect();
+          return { top, height };
+        });
+      const initial = geometry();
+      const duringDrag: ReturnType<typeof geometry>[] = [];
+      const observer = new MutationObserver(() => duringDrag.push(geometry()));
+      observer.observe(screen.getByRole('region', { name: 'Queued messages' }), {
+        subtree: true,
+        attributes: true,
+        childList: true,
+      });
+      try {
+        await userEvent.dragAndDrop(
+          screen.getByRole('button', { name: `Reorder queued message ${String(source)}` }),
+          rows[target]!,
+          {
+            targetPosition: { x: 12, y },
+          },
+        );
+      } finally {
+        observer.disconnect();
+      }
+      expect(duringDrag.length).toBeGreaterThan(0);
+      for (const frame of duringDrag) {
+        expect(frame).toEqual(initial);
+      }
+      expect(onMove).toHaveBeenCalledExactlyOnceWith(id, beforeId);
+      onMove.mockClear();
+      await userEvent.dragAndDrop(screen.getByRole('button', { name: 'Reorder queued message 2' }), rows[1]!, {
+        targetPosition: { x: 12, y: 24 },
+      });
+      expect(onMove).not.toHaveBeenCalled();
+      await userEvent.dragAndDrop(
+        screen.getByRole('button', { name: 'Reorder queued message 2' }),
+        screen.getByRole('button', { name: 'Standard button' }),
+      );
+      expect(onMove).not.toHaveBeenCalled();
+      expect(getComputedStyle(screen.getByText('one')).fontSize).toBe('12px');
+      const button = screen.getByRole('button', { name: 'Options for queued message 1' });
+      expect(getComputedStyle(button).borderRadius).toBe(
+        getComputedStyle(screen.getByRole('button', { name: 'Standard button' })).borderRadius,
+      );
+      expect(getComputedStyle(screen.getAllByRole('listitem')[0]!).borderBottomWidth).toBe('1px');
+    },
+  );
 });

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { CornerDownRight, ListEnd, MoreVertical, Paperclip, Pencil, Trash2 } from 'lucide-react';
+import { CornerDownRight, GripVertical, ListEnd, MoreVertical, Paperclip, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
@@ -97,21 +97,26 @@ export function ChatMessageQueueView({
                   rows.current.set(item.id, element);
                 }
               }}
-              className={cn(
-                'min-w-0 px-2 py-0.5',
-                drag?.id === item.id && 'opacity-50',
-                drag !== undefined && drag.beforeId === item.id && 'border-t-2 border-t-muted-foreground',
-                drag !== undefined &&
-                  drag.beforeId === undefined &&
-                  index === items.length - 1 &&
-                  'border-b-2 border-b-muted-foreground',
-              )}
+              className={cn('relative min-w-0 px-2 py-0.5', drag?.id === item.id && 'bg-accent/30')}
             >
+              {drag !== undefined &&
+              (drag.beforeId === item.id || (drag.beforeId === undefined && index === items.length - 1)) ? (
+                <span
+                  aria-hidden='true'
+                  className={cn(
+                    'pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full bg-muted-foreground',
+                    drag.beforeId === item.id ? 'top-0' : 'bottom-0',
+                  )}
+                />
+              ) : null}
               <div className='flex min-w-0 items-center gap-2 @max-[14rem]/message-queue:flex-wrap'>
                 <Button
                   variant='ghost'
                   size='icon-xs'
-                  className='cursor-grab touch-none text-muted-foreground/90 active:cursor-grabbing'
+                  className={cn(
+                    'group/handle cursor-grab touch-none text-muted-foreground/90 active:cursor-grabbing',
+                    drag?.id === item.id && 'cursor-grabbing bg-accent/50 text-accent-foreground',
+                  )}
                   aria-label={`Reorder queued message ${String(index + 1)}`}
                   title='Drag to reorder, or use the up and down arrow keys'
                   disabled={locked || reorderLocked || items.length < 2}
@@ -134,10 +139,21 @@ export function ChatMessageQueueView({
                       );
                     })?.id;
                     pointer.current = { ...current, moved: true, beforeId };
-                    setDrag({ id: item.id, beforeId });
                     const scroller = event.currentTarget.closest('section');
                     const bounds = scroller?.getBoundingClientRect();
-                    if (scroller !== null && bounds !== undefined) {
+                    const inside =
+                      bounds !== undefined &&
+                      event.clientX >= bounds.left &&
+                      event.clientX <= bounds.right &&
+                      event.clientY >= bounds.top &&
+                      event.clientY <= bounds.bottom;
+                    setDrag(inside && beforeId !== items[index + 1]?.id ? { id: item.id, beforeId } : undefined);
+                    if (
+                      scroller !== null &&
+                      bounds !== undefined &&
+                      event.clientX >= bounds.left &&
+                      event.clientX <= bounds.right
+                    ) {
                       if (event.clientY < bounds.top + 24) {
                         scroller.scrollBy(0, -16);
                       } else if (event.clientY > bounds.bottom - 24) {
@@ -157,9 +173,19 @@ export function ChatMessageQueueView({
                       event.clientX <= bounds.right &&
                       event.clientY >= bounds.top &&
                       event.clientY <= bounds.bottom;
-                    if (current?.moved && inside && !locked && !reorderLocked) {
+                    if (
+                      current?.moved &&
+                      inside &&
+                      !locked &&
+                      !reorderLocked &&
+                      current.beforeId !== items[index + 1]?.id
+                    ) {
                       act(item.id, 'Moving…', async () => onMove(item.id, current.beforeId));
                     }
+                  }}
+                  onPointerCancel={() => {
+                    pointer.current = undefined;
+                    setDrag(undefined);
                   }}
                   onLostPointerCapture={() => {
                     pointer.current = undefined;
@@ -182,7 +208,22 @@ export function ChatMessageQueueView({
                   {busy ? (
                     <Loader className='size-3.5 motion-reduce:animate-none' />
                   ) : (
-                    <ListEnd aria-hidden='true' className='size-3.5' />
+                    <>
+                      <ListEnd
+                        aria-hidden='true'
+                        className={cn(
+                          'size-3.5 group-hover/handle:hidden group-focus-visible/handle:hidden',
+                          drag?.id === item.id && 'hidden',
+                        )}
+                      />
+                      <GripVertical
+                        aria-hidden='true'
+                        className={cn(
+                          'size-3.5 group-hover/handle:block group-focus-visible/handle:block',
+                          drag?.id === item.id ? 'block' : 'hidden',
+                        )}
+                      />
+                    </>
                   )}
                 </Button>
                 <span className='min-w-0 flex-1 truncate text-xs' title={content}>

@@ -232,7 +232,7 @@ void test('product key follows the native closure and the locked napi CLI, not w
     `${packagePath}/scripts/test_native_proof.py`,
     'tools/tsdown.plugin.ts',
     'nx.json',
-    'tsconfig.base.json',
+    'tools/typescript/base.json',
     'package.json',
   ];
   for (const path of [...product, ...nonProduct, `${packagePath}/scripts/ci-artifacts.mjs`]) {

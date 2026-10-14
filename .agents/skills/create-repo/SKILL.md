@@ -105,7 +105,7 @@ without docs does not keep the `docs-site` workspace glob.
 
 1. Read the target repository's `AGENTS.md`, package manifests, lockfiles,
    build configs, workflows, release files, docs, and git state.
-2. Read Tau's `repos.yaml` entry. An org-owned `taucad/<name>` origin is
+2. Read Tau's `tools/repositories/catalog.yaml` entry. An org-owned `taucad/<name>` origin is
    writable without a `fork:` field; third-party upstream-only repos are not.
 3. Read `.agents/skills/create-package/SKILL.md` for package-internal exports,
    tsdown, TypeScript, and Vitest conventions. This skill owns the repository
@@ -297,7 +297,7 @@ link to `https://tau.new`. Never add postinstall messages or telemetry.
 
 ## 9. Registration and Governance
 
-1. Add or verify the `repos.yaml` entry and explicit non-default `branch:`.
+1. Add or verify the `tools/repositories/catalog.yaml` entry and explicit non-default `branch:`.
 2. Route relevant workflows to `.agents/skills/` from `AGENTS.md`; let the native catalog discover skills instead of duplicating a complete registry. Keep model selection/composition enabled by default.
 3. Verify npm Trusted Publishing binds every package in the fixed release group
    to `taucad/@@CREATE_REPO_slug@@` and `ci.yml`; register only when the operator

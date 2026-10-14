@@ -51,7 +51,7 @@
     "canvas:typecheck": "node scripts/src/canvas-typecheck.ts",
     "size:build": "node tools/size-build.mjs",
     "size:check": "cd node_modules/.cache/size-limit && size-limit",
-    "prepare": "husky"
+    "prepare": "husky tools/git-hooks"
   },
   "dependencies": {
     "@ai-sdk/langchain": "2.0.181",
@@ -333,7 +333,6 @@
   },
   "packageManager": "pnpm@11.7.0",
   "version": "1.0.0",
-  "main": "index.js",
   "directories": {
     "doc": "docs",
     "example": "examples"
@@ -342,7 +341,6 @@
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git"
   },
-  "keywords": [],
   "bugs": {
     "url": "https://github.com/taucad/tau/issues"
   }

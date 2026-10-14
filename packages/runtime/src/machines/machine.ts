@@ -577,14 +577,15 @@ type MachineQueryDefinitions<Queries extends QueryMap> = Readonly<{
   [Name in keyof Queries]: MachineQueryDefinitionFor<Queries[Name]>;
 }>;
 
+/* oxlint-disable typescript/consistent-type-definitions, typescript/no-empty-object-type -- A named interface preserves this readonly public contract in consumer declarations instead of expanding internal dependency types. */
 /** Trusted machine definition retained behind the shared runtime ABI loader. @public */
-export type MachineProviderDefinition<
+export interface MachineProviderDefinition<
   Id extends string,
   BindingSchema extends StandardSchemaV1,
   SubmissionSchema extends StandardSchemaV1,
   Queries extends QueryMap = Readonly<Record<never, never>>,
   Settings extends SettingsSchema = SettingsSchema,
-> = Readonly<{
+> extends Readonly<{
   id: Id;
   name: string;
   version: string;
@@ -605,7 +606,8 @@ export type MachineProviderDefinition<
     input: MachineConnectInput<StandardSchemaV1.InferOutput<BindingSchema>>,
     runtime: MachineConnectionRuntime,
   ): Promise<MachineSession<StandardSchemaV1.InferOutput<SubmissionSchema>>>;
-}>;
+}> {}
+/* oxlint-enable typescript/consistent-type-definitions, typescript/no-empty-object-type */
 
 /** Callable machine capability factory using the shared toolkit ABI. @public */
 export type MachineProviderFactory<Id extends string, QueryName extends string, Definition> = () => MachineProvider<

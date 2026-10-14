@@ -1,6 +1,6 @@
 ---
 name: submit-pr
-description: Submits draft upstream pull requests from external dependency repos managed by repos.yaml. Use when asked to open a PR, submit changes upstream, push to a fork, or prepare maintainer-quality PR descriptions with testing evidence and AI disclosure. PRs are always opened as drafts for human review before marking ready.
+description: Submits draft upstream pull requests from external dependency repos managed by the Tau repository catalogs. Use when asked to open a PR, submit changes upstream, push to a fork, or prepare maintainer-quality PR descriptions with testing evidence and AI disclosure. PRs are always opened as drafts for human review before marking ready.
 ---
 
 # Submit PR
@@ -11,7 +11,7 @@ Use this workflow to prepare and submit a maintainer-quality **draft** PR with o
 
 Read the matching maintenance owner in [Repos](../repos/SKILL.md#source-investigation-workflow) and the checkout's current instructions before validating an upstream change.
 
-1. Read `repos.yaml` and verify the target repo entry exists.
+1. Read the public `tools/repositories/catalog.yaml` or optional private `repos/tau-brain/repos.yaml` catalog and verify the target repo entry exists.
 2. Ensure the repo has a writable fork:
    - `pnpm repos fork <repo-name>`
 3. Confirm remotes in `repos/<repo-name>`:

@@ -1,7 +1,7 @@
 # =============================================================================
-# .dockerignore — used by apps/api/Dockerfile (the only Dockerfile in the repo).
+# .dockerignore — shared production build context rules.
 #
-# Build context is the repo root. The API Docker build uses COPY . . to ingest
+# Build context is the repo root. Production Docker builds use COPY . . to ingest
 # the full Nx monorepo, so only exclude items that the build doesn't need.
 # =============================================================================
 
@@ -36,7 +36,7 @@ docs
 .oxlintcache
 .prettierrc*
 .lintstagedrc*
-.husky
+tools/git-hooks
 
 # -- Nx caches and workspace data --------------------------------------------
 **/.nx/cache
@@ -80,3 +80,6 @@ LICENSE
 CODEOWNERS
 docker-compose.yml
 infra
+
+# Package builds copy this generated inventory into published distributions.
+!docs/licensing/third-party-licenses.md

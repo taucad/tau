@@ -65,7 +65,7 @@ All files are created in a single command with zero cleanup needed:
 | --------------------- | ------------------------------------------------------------------------------------------- |
 | `package.json`        | Tau conventions: `#*` imports, source exports, and publish metadata only for built projects |
 | `tsdown.config.ts`    | Built placements only: ESM build with declarations                                          |
-| `tsconfig.json`       | Extends `tsconfig.base.json`, references lib + spec configs                                 |
+| `tsconfig.json`       | Extends `tools/typescript/base.json`, references lib + spec configs                         |
 | `tsconfig.lib.json`   | `module: ESNext`, `moduleResolution: Bundler`; `#` via `imports`, never `paths`             |
 | `tsconfig.spec.json`  | Vitest types, test globs, config file includes                                              |
 | `tsconfig.build.json` | Built placements only: extends the library config                                           |

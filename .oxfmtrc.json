@@ -11,6 +11,12 @@
   },
   "sortPackageJson": false,
   "ignorePatterns": [
+    // Byte-locked file snapshots are test specifications; formatters must preserve their bytes.
+    "**/__email-snapshots__/**",
+    "**/__evidence-snapshots__/**",
+    "**/__shader-snapshots__/**",
+    // Generated license inventory preserves the dependency-license source text.
+    "/docs/licensing/third-party-licenses.md",
     "**/dist/**",
     "/out",
     "**/out/**",

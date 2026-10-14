@@ -270,7 +270,7 @@ const sourceIdentity = (root) => {
     'pnpm-lock.yaml',
     'pnpm-workspace.yaml',
     'nx.json',
-    'tsconfig.base.json',
+    'tools/typescript/base.json',
     'tsconfig.json',
     'rust-toolchain.toml',
     'Cargo.toml',

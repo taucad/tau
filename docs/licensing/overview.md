@@ -13,7 +13,7 @@ Third-party code and dependencies retain their own licences and notices.
 | ----------------------- | ------------ | -------------------------- |
 | All Tau-authored source | `Apache-2.0` | Open source (OSI approved) |
 
-The root [`license`](license) file is the canonical Apache-2.0 text. Every workspace package carries a byte-identical
+The root [`license`](../../license) file is the canonical Apache-2.0 text. Every workspace package carries a byte-identical
 copy named `LICENSE`; the repository root retains its historical lowercase filename.
 `scripts/src/validate-license-partitions.ts` enforces the SPDX field, file presence, and canonical text across every
 workspace package.
@@ -32,7 +32,7 @@ Both `geospec` and `@taucad/geospec-engine` are Apache-2.0. An adopter may autho
 fork, and redistribute the complete first-party GeoSpec workflow without a separate Tau software licence.
 
 Engine releases publish a provenance record described by
-[`packages/geospec-engine/provenance.schema.json`](packages/geospec-engine/provenance.schema.json). It records the
+[`packages/geospec-engine/provenance.schema.json`](../../packages/geospec-engine/provenance.schema.json). It records the
 release date and artifact digests for reproducibility; there is no future-licence conversion clock.
 
 Running Tau or GeoSpec puts no licence obligation on a user's specs, models, generated UI, or verdicts. Users choose
@@ -46,7 +46,7 @@ use Apache-2.0 for all Tau-authored source.
 
 ## Third-party code, contributions, and trademarks
 
-Third-party dependencies are inventoried in [`license-deps`](license-deps). Bundled code, copied material, and assets
+Third-party dependencies are inventoried in [`third-party-licenses.md`](third-party-licenses.md). Bundled code, copied material, and assets
 retain their original notices and obligations; the repository-wide Apache licence does not overwrite them.
 
 The current-tree provenance audit found no surviving non-Tau human-authored application files that require consent for

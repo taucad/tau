@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const docsApiDirectory = path.resolve(__dirname, '../../../content/docs/runtime/api');
 
 const generator = createGenerator({
-  tsconfigPath: path.resolve(__dirname, '../../../../../tsconfig.docs.json'),
+  tsconfigPath: path.resolve(__dirname, '../../../tsconfig.api-docs.json'),
   /*
    * Bypass on-disk cache: the cache key is keyed on the props-file path/name/content
    * (not the underlying type source), so a fresh runtime-source edit would otherwise

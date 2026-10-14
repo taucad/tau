@@ -6,5 +6,6 @@
     "target": "ESNext",
     "skipLibCheck": true
   },
-  "exclude": ["repos", "node_modules", "**/*.test.ts", "**/*.spec.ts"]
+  "exclude": ["../../repos", "../../node_modules", "../../**/*.test.ts", "../../**/*.spec.ts"],
+  "include": ["../../**/*"]
 }

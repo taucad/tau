@@ -165,7 +165,11 @@
     "enabled": false
   },
   "namedInputs": {
-    "sharedGlobals": ["{workspaceRoot}/.github/workflows/ci.yml", "{workspaceRoot}/.github/workflows/publish.yml"],
+    "sharedGlobals": [
+      "{workspaceRoot}/.github/workflows/ci.yml",
+      "{workspaceRoot}/.github/workflows/publish.yml",
+      "{workspaceRoot}/tools/typescript/base.json"
+    ],
     "default": ["{projectRoot}/**/*", "sharedGlobals"],
     "production": [
       "default",
@@ -190,7 +194,7 @@
     },
     "changelog": {
       "workspaceChangelog": {
-        "file": "CHANGELOG.md",
+        "file": "docs/releases/CHANGELOG.md",
         "renderOptions": {
           "authors": true,
           "commitReferences": true,

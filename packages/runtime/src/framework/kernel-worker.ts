@@ -91,6 +91,8 @@ import { createRuntimeFileSystem } from '#filesystem/create-runtime-filesystem.j
 import { createComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import type { ComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import { toJSONSchema, z } from 'zod';
+import { runtimeIssueSchema } from '#types/runtime-wire-common.schemas.js';
+import { toKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { createKernelError } from '#kernels/kernel-helpers.js';
 import { fileChangeDebounce } from '#framework/runtime-framework.constants.js';
 import { canonicalJson, sha256Bytes, sha256String } from '@taucad/utils/hash';
@@ -251,23 +253,34 @@ const sourceRevisionForArtifact = (artifact: MaterializedRender, fallback?: Sour
 };
 
 const neverAbortedSignal = new AbortController().signal;
+const carriedKernelIssueSchema = runtimeIssueSchema.extend({
+  code: z.unknown().optional().transform(toKernelIssueCode),
+});
+// A row that is not a kernel issue parses to `undefined`, so it never fails its siblings.
+const carriedKernelIssuesSchema = z.array(z.union([carriedKernelIssueSchema, z.unknown().transform(() => undefined)]));
+
 /**
- * The minimum a row must satisfy to survive the runtime protocol's own
- * `kernelIssueSchema`. `code` is deliberately absent: the transport repairs an
- * unknown code, but nothing downstream can invent a `severity`, and a row
- * without one is dropped by the receiving channel rather than reported.
- * `looseObject` keeps `location`, `stack` and `details` intact. `min(1)`
- * because an empty `issues` array explains nothing: the error's own message is
- * strictly more informative than no issue at all.
+ * Read the kernel issues a thrown value carries on `.issues` (a `KernelError`, a `KERNEL_REALM_CONFLICT` refusal).
+ *
+ * Each row is validated to the runtime wire's issue envelope (a `message` and a `severity`) rather than
+ * duck-typed: other errors carry an `issues` array too (`ZodError`, `WireValidationError`), and a row the wire
+ * would refuse is dropped by the receiving channel rather than reported. Rows are kept one by one, so a foreign
+ * row never discards a valid one; an unknown or missing `code` becomes `'UNKNOWN'`, and a row without a
+ * `message` or `severity` is dropped. Optional fields the envelope does not list (`type`, `location`, `stack`)
+ * pass through unchecked, as on the wire. Structural, so duplicate runtime copies in one realm agree.
+ *
+ * @param error - The thrown value.
+ * @returns The carried issues, or `undefined` when no row is a kernel issue.
+ * @internal
  */
-const kernelIssuesSchema = z
-  .array(
-    z.looseObject({
-      message: z.string(),
-      severity: z.enum(['error', 'warning', 'info']),
-    }),
-  )
-  .min(1);
+export const carriedKernelIssues = (error: unknown): [KernelIssue, ...KernelIssue[]] | undefined => {
+  if (error === null || typeof error !== 'object' || !('issues' in error)) {
+    return undefined;
+  }
+  const parsed = carriedKernelIssuesSchema.safeParse(error.issues);
+  const [first, ...rest] = parsed.success ? parsed.data.filter((issue) => issue !== undefined) : [];
+  return first ? [first, ...rest] : undefined;
+};
 
 /** Joined issue messages for a terminal state's `detail`, or nothing to say. */
 const issueDetail = (issues: readonly KernelIssue[]): string | undefined =>
@@ -2170,10 +2183,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @returns Issues that satisfy the runtime protocol.
    */
   private errorToRuntimeIssues(error: unknown): KernelIssue[] {
-    const carried = error !== null && typeof error === 'object' && 'issues' in error ? error.issues : undefined;
-    const parsed = kernelIssuesSchema.safeParse(carried);
-    if (parsed.success) {
-      return parsed.data as KernelIssue[];
+    const carried = carriedKernelIssues(error);
+    if (carried) {
+      return carried;
     }
     return [
       {
@@ -6116,12 +6128,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const registrations: CapabilitiesManifest['registrations'] = [
-      ...this.manifestKernelPlugins.map<RuntimeCapabilityRegistration>(({ id, extensions, permissions }) => ({
-        kind: 'kernel',
-        id,
-        extensions,
-        ...(permissions === undefined ? {} : { permissions }),
-      })),
+      ...this.manifestKernelPlugins.map<RuntimeCapabilityRegistration>(
+        ({ id, extensions, permissions, builtinDependencies }) => ({
+          kind: 'kernel',
+          id,
+          extensions,
+          ...(permissions === undefined ? {} : { permissions }),
+          ...(builtinDependencies === undefined ? {} : { builtinDependencies }),
+        }),
+      ),
       ...this.middlewarePlugins.map<RuntimeCapabilityRegistration>(({ id, permissions }) => ({
         kind: 'middleware',
         id,

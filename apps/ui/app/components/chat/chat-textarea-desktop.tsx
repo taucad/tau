@@ -1,9 +1,10 @@
+import { chatComposerPaddingClassName } from '#components/chat/chat-input-styles.js';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
 import type { Editor } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { AtSign, Paperclip, Plus } from 'lucide-react';
-import { useDictation } from '#components/chat/use-dictation.js';
-import { ChatDictationButton, ChatDictationRecording } from '#components/chat/chat-dictation-controls.js';
+import { useDictation } from '#components/dictation/use-dictation.js';
+import { DictationButton, DictationRecording, DictationFeedback } from '#components/dictation/dictation-controls.js';
 import type { AcpSessionData } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { FileEntry } from '@taucad/types';
@@ -32,7 +33,13 @@ import type { DraftAttachment } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
 import { ChatEditor } from '#components/chat/tiptap/chat-editor.js';
-import { buildEditorContentJson, extractContent, useChatEditor } from '#components/chat/tiptap/use-chat-editor.js';
+import type { CadReference } from '@taucad/chat/references';
+import {
+  buildEditorContentJson,
+  cadReferencesOfChips,
+  extractContent,
+  useChatEditor,
+} from '#components/chat/tiptap/use-chat-editor.js';
 import type { ContextSuggestionItem, SlashCommandItem } from '#components/chat/tiptap/suggestion-types.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import { createScreenshotContextHandler } from '#components/chat/screenshot-actions.utils.js';
@@ -90,7 +97,7 @@ type ChatTextareaDesktopProperties = {
   readonly addContextReferencesRef: React.RefObject<((references: ChatContextReference[]) => void) | undefined>;
 
   // Handlers (all must be stable references to prevent tooltip re-render loops)
-  readonly handleSubmit: (finalizedText?: string) => Promise<void>;
+  readonly handleSubmit: (finalizedText?: string, references?: readonly CadReference[]) => Promise<void>;
   readonly handleCancelClick: () => void;
   readonly handleDragOver: (event: React.DragEvent) => void;
   readonly handleDragLeave: () => void;
@@ -262,6 +269,12 @@ export const ChatTextareaDesktop = memo(function ({
     latestDraftOwner.current = draftActorRef;
   }, [draftActorRef]);
   const dictation = useDictation(insertTranscript, draftActorRef);
+  /* The chips' structured references travel beside the text only when the draft has some. */
+  const submitWithReferences = useCallback(
+    async (text: string | undefined, references: readonly CadReference[]): Promise<void> =>
+      references.length === 0 ? handleSubmit(text) : handleSubmit(text, references),
+    [handleSubmit],
+  );
   const submitWithDictation = useCallback(async (): Promise<void> => {
     if (dictation.phase !== 'idle') {
       if (dictation.phase !== 'recording' || !(await dictation.stop())) {
@@ -269,12 +282,19 @@ export const ChatTextareaDesktop = memo(function ({
       }
       const currentEditor = editorRef.current;
       if (currentEditor && !currentEditor.isDestroyed && latestDraftOwner.current === draftActorRef) {
-        await handleSubmit(extractContent(currentEditor).text);
+        const content = extractContent(currentEditor);
+        await submitWithReferences(content.text, cadReferencesOfChips(content.contextChips));
       }
       return;
     }
-    await handleSubmit();
-  }, [dictation.phase, dictation.stop, draftActorRef, handleSubmit]);
+    const currentEditor = editorRef.current;
+    await submitWithReferences(
+      undefined,
+      currentEditor && !currentEditor.isDestroyed
+        ? cadReferencesOfChips(extractContent(currentEditor).contextChips)
+        : [],
+    );
+  }, [dictation.phase, dictation.stop, draftActorRef, submitWithReferences]);
   const escapeWithDictation = useCallback((): void => {
     if (dictation.phase === 'idle') {
       onEscapePressed?.();
@@ -396,10 +416,20 @@ export const ChatTextareaDesktop = memo(function ({
   }, [addContextChipsRef, addContextReferencesRef, insertContextReferences]);
 
   useEffect(() => {
-    if (enableAutoFocus && editor) {
-      editor.commands.focus('end');
+    if (!enableAutoFocus || !editor) {
+      return undefined;
     }
-  }, [enableAutoFocus, editor]);
+    // Rehydration installs the draft in a microtask. Focus after it so opening
+    // a history message keeps its first line visible instead of scrolling to the end.
+    const frame = requestAnimationFrame(() => {
+      if (!editor.isDestroyed) {
+        editor.commands.focus(mode === 'edit' ? 'start' : 'end');
+      }
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [enableAutoFocus, editor, mode]);
 
   // Lock Tiptap while `await onSubmit(...)` is in-flight inside the textarea
   // hook (homepage create-project + `await navigate`, vs fire-and-forget
@@ -448,19 +478,14 @@ export const ChatTextareaDesktop = memo(function ({
   const dictationButton = useMemo(
     () =>
       dictation.available === true ? (
-        <ChatDictationButton
-          phase={dictation.phase}
-          disabled={isSubmitting || status === 'streaming' || status === 'submitted'}
-          onStart={dictation.start}
-          onStop={dictation.stop}
-        />
+        <DictationButton phase={dictation.phase} onStart={dictation.start} onStop={dictation.stop} />
       ) : undefined,
-    [dictation.available, dictation.phase, dictation.start, dictation.stop, isSubmitting, status],
+    [dictation.available, dictation.phase, dictation.start, dictation.stop],
   );
   const dictationRecording = useMemo(
     () =>
       dictationActive ? (
-        <ChatDictationRecording phase={dictation.phase} levels={dictation.levels} onCancel={dictation.cancel} />
+        <DictationRecording phase={dictation.phase} levels={dictation.levels} onCancel={dictation.cancel} />
       ) : undefined,
     [dictation.cancel, dictation.levels, dictation.phase, dictationActive],
   );
@@ -480,10 +505,11 @@ export const ChatTextareaDesktop = memo(function ({
         ref={containerReference}
         className={cn(
           'group/chat-textarea @container',
-          'relative flex w-full flex-col border bg-background pt-3 pb-2',
+          'relative flex w-full flex-col border border-border/60 bg-background',
+          chatComposerPaddingClassName,
           radius,
           'cursor-text overflow-hidden',
-          'shadow-md',
+          'shadow-sm',
           'has-[.tiptap:focus-visible]:focus-outline',
           className,
         )}
@@ -537,16 +563,7 @@ export const ChatTextareaDesktop = memo(function ({
           </div>
         ) : null}
 
-        {dictation.transcript === '' ? null : (
-          <p data-slot='dictation-transcript' className='px-3 py-1 text-sm text-muted-foreground'>
-            {dictation.transcript}
-          </p>
-        )}
-        {dictation.error === undefined ? null : (
-          <p role='alert' aria-label='Dictation error' className='px-3 py-1 text-xs text-muted-foreground'>
-            {dictation.error}
-          </p>
-        )}
+        <DictationFeedback transcript={dictation.transcript} error={dictation.error} />
         <ChatTextareaBar
           dictationButton={dictationButton}
           dictationRecording={dictationRecording}

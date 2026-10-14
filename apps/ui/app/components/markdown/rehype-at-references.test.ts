@@ -106,6 +106,19 @@ describe('rehypeAtReferences', () => {
     expect((p.children[0] as TextNode).value).toBe('hello @username');
   });
 
+  it('should mark a @cad component reference', () => {
+    const root = tree(element('p', text('the gear @cad[gears/main.ts#component:sun_gear] turns')));
+
+    runPlugin(root);
+
+    const p = root.children[0] as ElementNode;
+    expect(p.children).toHaveLength(3);
+    const mark = p.children[1] as ElementNode;
+    expect(mark.tagName).toBe('mark');
+    expect(mark.properties['data-cad-reference']).toBe('@cad[gears/main.ts#component:sun_gear]');
+    expect((p.children[2] as TextNode).value).toBe(' turns');
+  });
+
   it('should handle reference at start of text', () => {
     const root = tree(element('p', text('@main.scad is the file')));
 

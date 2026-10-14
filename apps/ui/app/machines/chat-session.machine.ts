@@ -1,7 +1,9 @@
 import { setup, types } from 'xstate';
 import type { ActorRefFrom, EnqueueObject, SystemRegistry } from 'xstate';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
+import type { CadReference } from '@taucad/chat/references';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import type { ChatMessageQueueIntent } from '#db/chat-message-queue-store.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import type { HostCommand } from '@taucad/agent-host/wire';
 
@@ -41,7 +43,7 @@ export type ChatRunPhase = 'admitted' | 'running' | 'paused' | 'completed' | 'fa
 /** The sync facet of the project's revision status, as this chat sees it. @public */
 export type ChatSyncState = 'synced' | 'pending' | 'conflicted';
 
-export type ChatRequest = Readonly<{ command?: HostCommand }> &
+export type ChatRequest = Readonly<{ command?: HostCommand; queueId?: string }> &
   (
     | { kind: 'send'; message: MyUIMessage }
     | { kind: 'regenerate' }
@@ -51,6 +53,8 @@ export type ChatRequest = Readonly<{ command?: HostCommand }> &
         content: string;
         /** The edit's attachments, already promoted into the chat's directory. */
         attachments?: readonly StoredAttachmentRef[];
+        /** The edit composer's structured geometry references (blueprint D6). */
+        references?: readonly CadReference[];
       }
     | { kind: 'continue' }
   );
@@ -65,8 +69,23 @@ export type ChatRequest = Readonly<{ command?: HostCommand }> &
  * @public
  */
 export type ChatTurnGesture =
-  | Readonly<{ kind: 'send'; message: MyUIMessage; attachments?: readonly StoredAttachmentRef[] }>
-  | Readonly<{ kind: 'edit'; messageId: string; text: string; attachments?: readonly StoredAttachmentRef[] }>
+  | Readonly<{
+      kind: 'send';
+      message: MyUIMessage;
+      attachments?: readonly StoredAttachmentRef[];
+      requestId?: string;
+      execution?: CadAgentExecution;
+      command?: Extract<HostCommand, { type: 'start' }>;
+      queueId?: string;
+      queueIntent?: ChatMessageQueueIntent;
+    }>
+  | Readonly<{
+      kind: 'edit';
+      messageId: string;
+      text: string;
+      attachments?: readonly StoredAttachmentRef[];
+      references?: readonly CadReference[];
+    }>
   | Readonly<{ kind: 'regenerate'; execution?: CadAgentExecution; requestId?: string }>
   /**
    * Resume the saved run only. Admission refuses if the host cannot continue
@@ -222,6 +241,10 @@ const runningRow = (context: ChatSessionMachineContext): 'approval' | 'tool' | '
 };
 
 const runLifecycle = ({ context, event }: ChatSessionArgs<EventOf<'runLifecycle'>>, enq: ChatSessionEnqueue) => {
+  // A late answer from a retired run cannot terminate the turn now owned here.
+  if (context.turn?.runId !== undefined && event.runId !== undefined && context.turn.runId !== event.runId) {
+    return {};
+  }
   const identity = captureRunIdentity(context, event);
   announce(context, enq);
   if (event.phase === 'admitted') {
@@ -304,7 +327,7 @@ export const chatSessionMachine = setup({
   actors: chatSessionActors,
 }).createMachine({
   id: 'chat-session',
-  version: '1',
+  version: '3',
   /* A fault no transition modelled is recorded and the chat keeps answering, so a render never throws (MC-R12). */
   onError: ({ event }) => ({ context: { fault: failureMessage(event.error, 'chat-session fault') } }),
   context: ({ input }) => ({

@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- snake_case is expected for webmanifest */
-import type { WebAppManifest } from '@remix-pwa/dev';
+import type { WebAppManifest } from 'web-app-manifest';
 import type { LoaderFunction } from 'react-router';
 import { metaConfig } from '#constants/meta.constants.js';
 
@@ -13,7 +13,6 @@ export const loader: LoaderFunction = () => {
       start_url: '/',
       display: 'standalone',
       // @see https://developer.mozilla.org/en-US/docs/Web/Manifest/Reference/display_override
-      // @ts-expect-error - fullscreen and minimal-ui are available in types, but are legitimate values
       display_override: ['fullscreen', 'minimal-ui'],
       background_color: '#ffffff',
       theme_color: '#ffffff',

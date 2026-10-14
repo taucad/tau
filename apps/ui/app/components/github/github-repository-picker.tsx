@@ -20,8 +20,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
+import { isReservedBranchName } from '@taucad/revisions';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import {
   configureGithubAccess,
   GithubRequestError,
@@ -37,6 +38,9 @@ import type {
   GithubRepository,
   GithubTreeFile,
 } from '#lib/github-connections.js';
+
+/* A conflict line travels as a branch but holds a decision, not a line to link (D14). */
+const isLinkable = ({ name }: { readonly name: string }): boolean => !isReservedBranchName(name);
 
 export type GithubRepositorySelection = Readonly<{
   connection: GithubConnection;
@@ -81,6 +85,14 @@ export const useGithubConnectionAvailable = (): boolean | undefined => {
   return data === undefined ? undefined : true;
 };
 
+/** What *Refresh* keeps selected while it reloads the catalog beneath it (R6). */
+type CatalogSelection = Readonly<{
+  connectionId: string;
+  installationId: string;
+  repository: GithubRepository | undefined;
+  branchName: string;
+}>;
+
 const byAccount = (left: GithubInstallation, right: GithubInstallation): number => {
   const leftOrganization = left.owner.type.toLowerCase() === 'organization';
   const rightOrganization = right.owner.type.toLowerCase() === 'organization';
@@ -112,6 +124,15 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
   const [busy, setBusy] = useState(true);
   const [oauthPending, setOauthPending] = useState(false);
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+  /*
+   * *Refresh* reloads each level explicitly, whether or not GitHub's answer changed. Each level's
+   * request carries the selection to keep; it applies only while it is still the current refresh.
+   */
+  const [installationsReload, setInstallationsReload] = useState<CatalogSelection>();
+  const [repositoriesReload, setRepositoriesReload] = useState<CatalogSelection>();
+  const [branchesReload, setBranchesReload] = useState<CatalogSelection>();
+  const refreshing = useRef<CatalogSelection | undefined>(undefined);
   const oauthAbort = useRef<AbortController | undefined>(undefined);
   const oauthAttempt = useRef<string | undefined>(undefined);
   const connectTrigger = useRef<HTMLButtonElement>(null);
@@ -122,7 +143,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
   const repository = repositories.find((item) => String(item.id) === repositoryId);
   const branch = branches.find((item) => item.name === branchName);
 
-  const loadConnections = useCallback(async (): Promise<void> => {
+  const loadConnections = useCallback(async (): Promise<readonly GithubConnection[] | undefined> => {
     setBusy(true);
     setError(undefined);
     try {
@@ -130,8 +151,10 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
       catalogGeneration.current += 1;
       setConnections(found);
       setConnectionId((current) => (found.some((item) => item.id === current) ? current : (found[0]?.id ?? '')));
+      return found;
     } catch (error) {
       setError(githubErrorMessage(error));
+      return undefined;
     } finally {
       setBusy(false);
     }
@@ -150,6 +173,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
 
   useEffect(() => {
     if (connectionId === '') {
+      refreshing.current = undefined;
       setInstallations([]);
       setInstallationId('');
       setRepositories([]);
@@ -159,13 +183,21 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     }
     let active = true;
     setBusy(true);
-    setInstallationId('');
-    setRepositories([]);
-    setRepositoryId('');
-    setRepositoryHasMore(false);
-    setBranches([]);
-    setBranchName('');
-    setBranchHasMore(false);
+    const kept =
+      installationsReload === refreshing.current && installationsReload?.connectionId === connectionId
+        ? installationsReload
+        : undefined;
+    refreshing.current = kept;
+    /* A refresh keeps the current lists in place until the new ones arrive. */
+    if (kept === undefined) {
+      setInstallationId('');
+      setRepositories([]);
+      setRepositoryId('');
+      setRepositoryHasMore(false);
+      setBranches([]);
+      setBranchName('');
+      setBranchHasMore(false);
+    }
     const loadInstallations = async (): Promise<void> => {
       try {
         const first = await githubConnections.installations(connectionId);
@@ -183,11 +215,18 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         }
         const found = all.toSorted(byAccount);
         catalogGeneration.current += 1;
+        const keepsInstallation = kept !== undefined && found.some((item) => String(item.id) === kept.installationId);
+        if (keepsInstallation) {
+          setRepositoriesReload(kept);
+        } else {
+          refreshing.current = undefined;
+        }
         setInstallations(found);
-        setInstallationId(found[0] === undefined ? '' : String(found[0].id));
+        setInstallationId(keepsInstallation ? kept.installationId : found[0] === undefined ? '' : String(found[0].id));
         setBusy(false);
       } catch (error) {
         if (active) {
+          refreshing.current = undefined;
           setError(githubErrorMessage(error));
           setBusy(false);
         }
@@ -198,7 +237,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     return () => {
       active = false;
     };
-  }, [connectionId]);
+  }, [connectionId, installationsReload]);
 
   useEffect(() => {
     if (connectionId === '' || installationId === '') {
@@ -208,20 +247,52 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     }
     let active = true;
     setBusy(true);
+    const kept =
+      repositoriesReload === refreshing.current && repositoriesReload?.installationId === installationId
+        ? repositoriesReload
+        : undefined;
     const loadRepositories = async (): Promise<void> => {
       try {
         const result = await githubConnections.repositories(connectionId, Number(installationId));
+        const contentsWritable = installation?.permissions['contents'] === 'write';
+        const accessOf = (repository_: GithubRepository): GithubRepository =>
+          repository_.access === 'write' && !contentsWritable ? { ...repository_, access: 'read' } : repository_;
+        let found = result.repositories.map(accessOf);
+        const keptRepository = kept?.repository;
+        /* The kept repository may lie beyond the first page; only GitHub's answer says it is gone. */
+        if (
+          keptRepository !== undefined &&
+          !found.some((item) => item.id === keptRepository.id) &&
+          result.repositories.length < result.totalCount
+        ) {
+          const resolved = await githubConnections
+            .repository(connectionId, keptRepository.id)
+            .catch((error: unknown) => {
+              if (error instanceof GithubRequestError && error.status === 404) {
+                return undefined;
+              }
+              throw error;
+            });
+          if (resolved !== undefined && resolved.owner.id === installation?.owner.id) {
+            found = [accessOf(resolved), ...found];
+          }
+        }
         if (!active) {
           return;
         }
-        const contentsWritable = installation?.permissions['contents'] === 'write';
-        setRepositories(
-          result.repositories.map((repository_) =>
-            repository_.access === 'write' && !contentsWritable ? { ...repository_, access: 'read' } : repository_,
-          ),
-        );
+        const keepsRepository = keptRepository !== undefined && found.some((item) => item.id === keptRepository.id);
+        setRepositories(found);
         setRepositoryHasMore(result.repositories.length > 0 && result.repositories.length < result.totalCount);
         setRepositoryPage(1);
+        if (keepsRepository) {
+          setBranchesReload(kept);
+          setBusy(false);
+          return;
+        }
+        refreshing.current = undefined;
+        if (keptRepository !== undefined) {
+          setNotice(`Tau can no longer reach ${keptRepository.fullName} on GitHub. Choose another repository.`);
+        }
         setRepositoryId('');
         setBranches([]);
         setBranchName('');
@@ -229,6 +300,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         setBusy(false);
       } catch (error) {
         if (active) {
+          refreshing.current = undefined;
           setError(githubErrorMessage(error));
           setBusy(false);
         }
@@ -239,7 +311,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     return () => {
       active = false;
     };
-  }, [connectionId, installation, installationId]);
+  }, [connectionId, installation, installationId, repositoriesReload]);
 
   useEffect(() => {
     if (connectionId === '' || repository === undefined) {
@@ -249,11 +321,15 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     }
     let active = true;
     setBusy(true);
+    const kept =
+      branchesReload === refreshing.current && branchesReload?.repository?.id === repository.id
+        ? branchesReload
+        : undefined;
     const loadBranches = async (): Promise<void> => {
       try {
         const result = await githubConnections.branches(connectionId, repository.id);
         let found: readonly GithubBranch[] =
-          result.branches.length === 0 ? [{ name: repository.defaultBranch }] : result.branches;
+          result.branches.length === 0 ? [{ name: repository.defaultBranch }] : result.branches.filter(isLinkable);
         /* D14: pages are alphabetical, so the default branch may lie beyond the first one. */
         if (!found.some((item) => item.name === repository.defaultBranch)) {
           const resolved = await githubConnections
@@ -269,17 +345,21 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         if (!active) {
           return;
         }
+        refreshing.current = undefined;
         setBranches(found);
         setBranchPage(1);
         setBranchHasMore(result.branches.length === 100);
         setBranchName(
-          found.some((item) => item.name === repository.defaultBranch)
-            ? repository.defaultBranch
-            : (found[0]?.name ?? ''),
+          kept !== undefined && found.some((item) => item.name === kept.branchName)
+            ? kept.branchName
+            : found.some((item) => item.name === repository.defaultBranch)
+              ? repository.defaultBranch
+              : (found[0]?.name ?? ''),
         );
         setBusy(false);
       } catch (error) {
         if (active) {
+          refreshing.current = undefined;
           setError(githubErrorMessage(error));
           setBusy(false);
         }
@@ -290,7 +370,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     return () => {
       active = false;
     };
-  }, [connectionId, repository]);
+  }, [branchesReload, connectionId, repository]);
 
   const connect = useCallback(async (): Promise<void> => {
     setBusy(true);
@@ -368,11 +448,20 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     }
   }, []);
 
+  /* R6: reload accounts, installations, repositories and branches, keeping each selection that still exists. */
   const refreshCatalog = useCallback(async (): Promise<void> => {
     catalogGeneration.current += 1;
-    setConnectionId('');
-    await loadConnections();
-  }, [loadConnections]);
+    const selection = { connectionId, installationId, repository, branchName };
+    refreshing.current = selection;
+    setNotice(undefined);
+    const found = await loadConnections();
+    if (found === undefined) {
+      refreshing.current = undefined;
+    } else if (found.some((item) => item.id === connectionId)) {
+      /* The same account: its id did not change, so reload its installations explicitly. */
+      setInstallationsReload(selection);
+    }
+  }, [branchName, connectionId, installationId, loadConnections, repository]);
 
   const configure = useCallback(async (): Promise<void> => {
     setBusy(true);
@@ -454,7 +543,9 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
       }
       setBranches((current) => [
         ...current,
-        ...result.branches.filter((candidate) => !current.some((item) => item.name === candidate.name)),
+        ...result.branches.filter(
+          (candidate) => isLinkable(candidate) && !current.some((item) => item.name === candidate.name),
+        ),
       ]);
       setBranchPage(nextPage);
       setBranchHasMore(result.branches.length === 100);
@@ -579,6 +670,8 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
             render={(item) => item.login}
             onSelect={(value) => {
               catalogGeneration.current += 1;
+              refreshing.current = undefined;
+              setNotice(undefined);
               setConnectionId(value);
             }}
           />
@@ -646,6 +739,8 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         }
         onSelect={(value) => {
           catalogGeneration.current += 1;
+          refreshing.current = undefined;
+          setNotice(undefined);
           setInstallationId(value);
         }}
       />
@@ -666,6 +761,8 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         onLoadMore={repositoryHasMore ? loadMoreRepositories : undefined}
         onSelect={(value) => {
           catalogGeneration.current += 1;
+          refreshing.current = undefined;
+          setNotice(undefined);
           setRepositoryId(value);
         }}
       />
@@ -684,6 +781,11 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         <p className='flex items-center gap-1.5 text-xs text-muted-foreground'>
           {repository.visibility === 'public' ? undefined : <Lock aria-hidden className='size-3.5' />}
           {repository.access === 'write' ? 'Read and write access' : 'Read-only import'}
+        </p>
+      )}
+      {notice === undefined ? undefined : (
+        <p role='status' className='text-sm text-muted-foreground'>
+          {notice}
         </p>
       )}
       {error === undefined ? undefined : (

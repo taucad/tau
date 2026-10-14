@@ -170,6 +170,28 @@
         }
       }
     },
+    "test:e2e:desktop:grok": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallelism": false,
+      "metadata": {
+        "description": "Opt-in Grok composer, continuity, skill, approval and Build123d MCP evaluation checks. Uses the operator's grok login and quota. Set TAU_E2E_GROK_PACKAGED=true to test the prepared macOS app."
+      },
+      "dependsOn": [
+        { "projects": ["desktop"], "target": "build" },
+        { "projects": ["desktop"], "target": "prepare-build123d-python" },
+        { "projects": ["api"], "target": "build" }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-grok.spec.ts"
+        ],
+        "env": { "TAU_E2E_API_URL": "http://localhost:4014", "TAU_E2E_GROK": "true" }
+      }
+    },
     "test:e2e:desktop:acp": {
       "executor": "nx:run-commands",
       "cache": false,

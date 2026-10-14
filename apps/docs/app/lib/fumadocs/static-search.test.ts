@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { oramaStaticClient } from 'fumadocs-core/search/client/orama-static';
+import { staticClient } from 'fumadocs-core/search/client/orama-static';
 import { getStaticSearchIndexUrl } from '#lib/fumadocs/static-search.server.js';
 
 const indexUrl = '/build/docs-search-index.json';
@@ -32,7 +32,7 @@ describe('static docs search', () => {
       return nativeFetch(input, init);
     });
     const generatedIndexUrl = await getStaticSearchIndexUrl();
-    const results = await oramaStaticClient({ from: generatedIndexUrl }).search('Replicad');
+    const results = await staticClient({ from: generatedIndexUrl }).search('Replicad');
 
     expect(generatedIndexUrl).toBe(indexUrl);
     expect(results.some(({ url }) => url === '/runtime/reference/replicad')).toBe(true);

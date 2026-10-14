@@ -1,4 +1,6 @@
 /* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- The CAD canvas needs focus for scoped viewer shortcuts; a button role would misrepresent a drawing surface. */
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { interactiveViewContent } from '#lib/interactive-view-content.js';
 import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
 import { memo, useEffect, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -8,22 +10,21 @@ import type { Evaluation, Rendering, RuntimeDocument, ViewSubscription } from '@
 import { canonicalJson } from '@taucad/utils/hash';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { FileX, FolderOpen, PlayCircle } from 'lucide-react';
-import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
-import { RuntimeErrorOverlay } from '#components/model-viewer.js';
+import { CadViewer } from '@taucad/viewer/cad/cad-viewer';
+import { RuntimeErrorOverlay } from '@taucad/viewer/model-viewer';
 import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
 import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-model-component-action-menu.js';
 import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
 import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';
-import type { PartThumbnailRequest, PartThumbnailState } from '#services/part-thumbnail.service.js';
-import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
+import type { PartThumbnailRequest } from '#services/part-thumbnail.service.js';
+import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
+import type { ModelComponentSecondaryPointerTarget } from '@taucad/viewer/graphics/three/react/gltf-mesh';
 import { FileSelector } from '#components/files/file-selector.js';
 import { Button } from '@taucad/ui/components/button';
 import { popoverSurfaceVariants } from '@taucad/ui/components/popover.variants';
 import { useProject } from '#hooks/use-project.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
-import { useRevisionStatus } from '#hooks/use-revision-status.js';
-import { Loader } from '#components/ui/loader.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { useLiveViewOptions } from '#workbench-records/live-view-options.js';
 import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-records/local-instance.js';
@@ -35,18 +36,21 @@ import {
   useGraphicsSelector,
   useKinematicsSelector,
   useModelInteractionSelector,
-} from '#hooks/use-graphics.js';
-import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
+} from '@taucad/viewer/hooks/use-graphics';
+import type { ViewCameraSeed } from '@taucad/viewer/services/graphics-camera-registry';
 import { ViewerIssues } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
 import { ViewerKernelSettings } from '#routes/w.$workspace.$project/chat-viewer-kernel-settings.js';
 import { ViewerProjectionPicker } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { isEmptyGlb } from '#utils/inspect-glb.utils.js';
+import { isEmptyGlb } from '@taucad/viewer/utils/inspect-glb';
 import { ArButton } from '#components/cad/ar-button.js';
-import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
-import { describeKinematicsHover, getKinematicsUnitState } from '#machines/kinematics.machine.js';
+import {
+  deriveModelInteractionUnitId,
+  getModelInteractionUnitState,
+} from '@taucad/viewer/machines/model-interaction.machine';
+import { describeKinematicsHover, getKinematicsUnitState } from '@taucad/viewer/machines/kinematics.machine';
 import {
   selectCadEvaluation,
   selectCadCapabilities,
@@ -69,6 +73,9 @@ import type {
   ViewerSecondaryGesturePoint,
   ViewerSecondaryGestureState,
 } from '#routes/w.$workspace.$project/chat-viewer-secondary-gesture.js';
+import { ExactMeasurementProvider } from '@taucad/viewer/graphics/three/react/exact-measurement';
+import type { ExactOccurrenceDistanceRequest } from '@taucad/viewer/graphics/three/react/exact-measurement';
+import { measureExactOccurrenceDistance } from '#workers/measurement-exact.client.js';
 
 const emptyViewerPreviewSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map();
 
@@ -302,16 +309,11 @@ function MissingViewerFile({
   readonly entryPath: string;
   readonly onSelect: (path: string) => void;
 }): React.JSX.Element {
-  const checkingRemote = useRevisionStatus()?.sync.state === 'checking';
   return (
     <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
-      {checkingRemote ? (
-        <Loader className='size-12 motion-reduce:animate-none' />
-      ) : (
-        <FileX className='size-12 stroke-1' />
-      )}
-      <div className='flex flex-col items-center gap-1' role={checkingRemote ? 'status' : undefined}>
-        <p className='text-sm font-medium'>{checkingRemote ? 'Checking synced files…' : 'File not found'}</p>
+      <FileX className='size-12 stroke-1' />
+      <div className='flex flex-col items-center gap-1'>
+        <p className='text-sm font-medium'>File not found</p>
         <p className='max-w-60 truncate text-xs'>{entryPath}</p>
       </div>
       <FileSelector
@@ -328,7 +330,7 @@ function MissingViewerFile({
   );
 }
 
-export const ChatViewer = memo(function ({
+const ChatViewerContent = memo(function ({
   viewId,
   entryPath,
   panelApi,
@@ -342,6 +344,14 @@ export const ChatViewer = memo(function ({
 
   // Get the geometry unit for this view's entry path
   const cadActor = entryPath ? geometryUnits.get(entryPath) : undefined;
+  const measureExact = useMemo(
+    () =>
+      cadActor
+        ? async (request: ExactOccurrenceDistanceRequest) =>
+            measureExactOccurrenceDistance({ ...request, cadRef: cadActor })
+        : undefined,
+    [cadActor],
+  );
 
   // Detect if the entry path is a directory: a listed directory entry, or a
   // prefix of a listed path when its directory has not been listed itself.
@@ -526,22 +536,24 @@ export const ChatViewer = memo(function ({
 
   return (
     <CadProvider cadRef={cadActor}>
-      <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
-        <ViewerContent viewId={viewId} entryPath={entryPath} profile={profile} />
-      </GraphicsProvider>
+      <ExactMeasurementProvider measure={measureExact}>
+        <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
+          <ViewerContent viewId={viewId} entryPath={entryPath} profile={profile} />
+        </GraphicsProvider>
+      </ExactMeasurementProvider>
     </CadProvider>
   );
 });
 
-/** Stands in for geometry that has not arrived; subscribes to loading so the viewer does not. */
-function GeometryPlaceholder({ isEmpty = false }: { readonly isEmpty?: boolean }): React.JSX.Element {
+/** Announces absent geometry without hiding the interactive empty scene. */
+function GeometryStatus({ isEmpty = false }: { readonly isEmpty?: boolean }): React.JSX.Element {
   const isCadLoading = useCadSelector(selectIsCadLoading, false);
   return (
     <div
       role='status'
       aria-label={isEmpty ? 'Empty model' : isCadLoading ? 'Loading geometry' : 'Waiting for geometry'}
       aria-busy={isCadLoading || undefined}
-      className='size-full bg-background'
+      className='sr-only'
     />
   );
 }
@@ -1020,7 +1032,7 @@ const ViewerContent = memo(function ({
       }}
     >
       {/* Status overlays: the running build phase in the bar's skin, outside the bar so the bar never moves for it.
-          With nothing rendered yet the pill is the viewer's only content, so it sits where the model will appear;
+          Before geometry arrives the pill sits where the model will appear;
           over a model it sits in the upper sixth, below the 96 px gizmo band and the pane's tab strip and above the
           model's middle. In the editor the view menus, the failure and a view notice live in the bottom bar. */}
       <div
@@ -1059,7 +1071,7 @@ const ViewerContent = memo(function ({
         onPointerMove={updateViewerPointerPosition}
         onPointerLeave={clearViewerPointerPosition}
       >
-        {artifact && presentedArtifact ? (
+        {isGeometryUnitClosed ? null : (
           <CadViewer
             enableZoom
             enablePan
@@ -1071,7 +1083,7 @@ const ViewerContent = memo(function ({
             enableLines={enableLines}
             enableMatcap={enableMatcap}
             upDirection={upDirection}
-            artifact={presentedArtifact}
+            artifact={artifact ? presentedArtifact : undefined}
             artifactHash={presentedArtifactKey}
             sourceFile={presentedSourceFile}
             // Keep R3F on default offsetX/Y compute; eventPrefix='client'
@@ -1080,15 +1092,9 @@ const ViewerContent = memo(function ({
             gizmoContainer={`#viewport-gizmo-container-${viewId}`}
             onModelComponentSecondaryPointerCandidate={handleModelComponentSecondaryPointerCandidate}
           />
-        ) : overlayFailureMessage ? (
-          <RuntimeErrorOverlay
-            message={overlayFailureMessage}
-            className='size-full flex-col justify-center gap-3 bg-background text-center [&>svg]:size-10'
-          />
-        ) : (
-          <GeometryPlaceholder isEmpty={emptyModel} />
         )}
-        {artifact && overlayFailureMessage ? (
+        {!artifact && !overlayFailureMessage ? <GeometryStatus isEmpty={emptyModel} /> : null}
+        {overlayFailureMessage ? (
           <RuntimeErrorOverlay
             message={overlayFailureMessage}
             className='absolute top-4 right-4 left-4 z-10 mx-auto w-fit max-w-[calc(100%-2rem)] rounded-md border border-feature/40 bg-background/90 p-2 shadow-sm backdrop-blur-sm'
@@ -1193,3 +1199,13 @@ function ModelComponentNameBadge({
     </div>
   );
 }
+
+/** Keep file absence and rendering errors hidden until the authored checkout is acknowledged. */
+export const ChatViewer = memo(function (props: ChatViewerProps): React.JSX.Element {
+  const availability = useProjectAvailability();
+  return props.profile !== 'shared' && availability !== 'ready' ? (
+    <ProjectSyncPlaceholder state={availability} />
+  ) : (
+    <ChatViewerContent {...props} />
+  );
+});

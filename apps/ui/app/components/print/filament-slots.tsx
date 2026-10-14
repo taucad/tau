@@ -1,5 +1,5 @@
 /** Map each model filament to a loaded AMS tray before slicing or sending. */
-import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
+import { ParameterSelect } from '@taucad/viewer/parameters/parameter-select';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import type { BambuTray } from '#components/print/bambu-studio-presets.js';
 

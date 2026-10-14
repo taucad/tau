@@ -1,3 +1,4 @@
+import { useSelector } from '@xstate/react';
 import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import { ChevronRight, ChevronUp, CircleX, Info, Sparkles, TriangleAlert } from 'lucide-react';
 import type { KernelProvider, KernelIssue, KernelStackFrame, IssueSeverity } from '@taucad/runtime';
@@ -9,13 +10,13 @@ import { Separator } from '@taucad/ui/components/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { FileLink } from '#components/files/file-link.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { useProject } from '#hooks/use-project.js';
 import { useCadSelector } from '#hooks/use-cad.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
-import { useModifiers } from '#hooks/use-keyboard.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
+import { useModifiers } from '@taucad/ui/components/keyboard';
+import { formatKeyCombination } from '@taucad/ui/utils/keys';
 import { cn } from '@taucad/ui/utils/cn';
 import { buildUserMessage } from '#utils/chat.utils.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
@@ -390,43 +391,11 @@ type ViewerIssuesProps = Readonly<{
  * and notes it left (the running phase is the top pill, `ChatViewerStatus`); opening it unfolds the list above the controls, errors first, each with Fix with
  * AI, and Fix all when there are several. New issues never reopen a closed list; a view notice does.
  */
-export function ViewerIssues({ entryPath, notice, children }: ViewerIssuesProps): React.ReactNode {
-  const { getMainFilename, projectId, projectRef, setFocusedChatId } = useProject();
+function ChatViewerIssues(props: ViewerIssuesProps): React.ReactNode {
+  const { getMainFilename, projectId, setFocusedChatId } = useProject();
   const { setChatOpen } = useProjectWorkspace();
   const fileManager = useFileManager();
   const { createChat } = useChats(projectId, { enabled: false });
-  // Closed by default; a notice present from the start opens it.
-  const [isOpen, setIsOpen] = useState(notice !== undefined);
-  const listId = useId();
-  const segmentRef = useRef<HTMLButtonElement>(null);
-
-  // CadProvider may retain the previous project's actor during a transition.
-  const selectIsCadActorStale = useCallback(
-    (snapshot: Parameters<typeof selectCadFailureIssues>[0]) => snapshot.context.parentRef !== projectRef,
-    [projectRef],
-  );
-  const isCadActorStale = useCadSelector(selectIsCadActorStale, true);
-
-  const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
-  const selectEntryIssues = useMemo(() => selectCadEntryIssues(entryPath), [entryPath]);
-  const entryIssues = useCadSelector(selectEntryIssues, undefined);
-  const errors = isCadActorStale ? undefined : (failureIssues ?? entryIssues);
-  const isFailed = !isCadActorStale && failureIssues !== undefined && failureIssues.length > 0;
-  const sorted = useMemo(
-    () => [...(errors ?? [])].sort((a, b) => severityRank[a.severity] - severityRank[b.severity]),
-    [errors],
-  );
-
-  // A notice is a decision the view waits on: it opens the list each time a new one arrives.
-  const noticeMessage = notice?.message;
-  const [seenNotice, setSeenNotice] = useState(noticeMessage);
-  if (noticeMessage !== seenNotice) {
-    setSeenNotice(noticeMessage);
-    if (noticeMessage) {
-      setIsOpen(true);
-    }
-  }
-
   // The chat-client composes the per-request `agent` payload (model, kernel,
   // mode, toolChoice, testingEnabled, snapshot, contextPayload) from the
   // current chat's active values. Fix-with-AI no longer stamps any of those
@@ -480,6 +449,51 @@ export function ViewerIssues({ entryPath, notice, children }: ViewerIssuesProps)
     },
     [getMainFilename, fileManager, agent.kernel, agent.execution, createChat, setFocusedChatId, cadChat, setChatOpen],
   );
+  return <ViewerIssuesContent {...props} onFixWithAi={handleFixWithAi} />;
+}
+
+function ViewerIssuesContent({
+  entryPath,
+  notice,
+  children,
+  onFixWithAi,
+}: ViewerIssuesProps &
+  Readonly<{
+    onFixWithAi?: (issues: readonly KernelIssue[], createNewChat: boolean) => Promise<void>;
+  }>): React.ReactNode {
+  const { projectRef } = useProject();
+  // Closed by default; a notice present from the start opens it.
+  const [isOpen, setIsOpen] = useState(notice !== undefined);
+  const listId = useId();
+  const segmentRef = useRef<HTMLButtonElement>(null);
+
+  // CadProvider may retain the previous project's actor during a transition.
+  const selectIsCadActorStale = useCallback(
+    (snapshot: Parameters<typeof selectCadFailureIssues>[0]) => snapshot.context.parentRef !== projectRef,
+    [projectRef],
+  );
+  const isCadActorStale = useCadSelector(selectIsCadActorStale, true);
+
+  const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
+  const selectEntryIssues = useMemo(() => selectCadEntryIssues(entryPath), [entryPath]);
+  const entryIssues = useCadSelector(selectEntryIssues, undefined);
+  const errors = isCadActorStale ? undefined : (failureIssues ?? entryIssues);
+  const isFailed = !isCadActorStale && failureIssues !== undefined && failureIssues.length > 0;
+  const sorted = useMemo(
+    () => [...(errors ?? [])].sort((a, b) => severityRank[a.severity] - severityRank[b.severity]),
+    [errors],
+  );
+
+  // A notice is a decision the view waits on: it opens the list each time a new one arrives.
+  const noticeMessage = notice?.message;
+  const [seenNotice, setSeenNotice] = useState(noticeMessage);
+  if (noticeMessage !== seenNotice) {
+    setSeenNotice(noticeMessage);
+    if (noticeMessage) {
+      setIsOpen(true);
+    }
+  }
+
   const { shift: isShiftHeld } = useModifiers();
 
   const total = sorted.length + (notice ? 1 : 0);
@@ -544,18 +558,18 @@ export function ViewerIssues({ entryPath, notice, children }: ViewerIssuesProps)
             // Create a unique key from issue properties
             key={`${issue.message}-${issue.location?.startLineNumber ?? 'unknown'}-${issue.location?.startColumn ?? 'unknown'}`}
             issue={issue}
-            onFixWithAi={async (createNewChat) => handleFixWithAi([issue], createNewChat)}
+            onFixWithAi={onFixWithAi ? async (createNewChat) => onFixWithAi([issue], createNewChat) : undefined}
           />
         ))}
       </ul>
-      {sorted.length > 1 ? (
+      {sorted.length > 1 && onFixWithAi ? (
         <div className='flex justify-end border-t px-1 pt-1'>
           <Button
             size='xs'
             variant='ghost'
             className='text-muted-foreground hover:text-foreground'
             onClick={() => {
-              void handleFixWithAi(sorted, isShiftHeld);
+              void onFixWithAi(sorted, isShiftHeld);
             }}
           >
             <Sparkles />
@@ -567,4 +581,11 @@ export function ViewerIssues({ entryPath, notice, children }: ViewerIssuesProps)
   ) : null;
 
   return children({ segment, list });
+}
+
+/** Diagnostics retain their normal controls while optional chat data arrives. */
+export function ViewerIssues(props: ViewerIssuesProps): React.ReactNode {
+  const { editorRef } = useProject();
+  const chatId = useSelector(editorRef, (snapshot) => snapshot.context.focusedChatId);
+  return chatId === undefined ? <ViewerIssuesContent {...props} /> : <ChatViewerIssues {...props} />;
 }

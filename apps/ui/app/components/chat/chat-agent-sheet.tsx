@@ -30,6 +30,7 @@ import {
   Zap,
 } from 'lucide-react';
 import type { AcpAgentExecution, TauAgentHostId } from '@taucad/chat';
+import { reasoningLevels } from '@taucad/chat/constants';
 import type { ReasoningLevel } from '@taucad/chat/constants';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { Button } from '@taucad/ui/components/button';
@@ -54,14 +55,14 @@ import { SvgIcon } from '#components/icons/svg-icon.js';
 import type { IconId } from '#components/icons/svg-icon.js';
 import { Tau } from '#components/icons/tau.js';
 import { ThoughtBubble } from '#components/icons/thought-bubble.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { configOptionOf, configValues } from '#components/chat/use-agent-config.js';
 import type { AgentConfig, AgentConfigOption } from '#components/chat/use-agent-config.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useBrowserAgentHostProjectAvailability } from '#hooks/use-cad-agent-config.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useModels } from '#hooks/use-models.js';
 import type { Model } from '#hooks/use-models.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
@@ -69,8 +70,8 @@ import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { externalAgentFixCommand, externalAgentRefusalReasons } from '#lib/external-agent.js';
-import { ariaKeyShortcuts, formatKeyCombination } from '#utils/keys.utils.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
+import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
+import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { groupModelsByTier } from '#utils/model-tier.js';
 import { tauModelReadiness, tauModelRefusal } from '#utils/new-chat-execution.js';
 import { modelReasoning, offeredReasoningLevels } from '#utils/model-reasoning.js';
@@ -91,6 +92,9 @@ export const openModelSelectorKeyCombination = { key: '/', modKey: true } satisf
 export const ghostPillClass = 'h-7 rounded-full px-2.5 font-normal text-muted-foreground hover:text-foreground';
 
 type Option = { readonly id: string; readonly name: string; readonly isDisabled?: boolean };
+
+/** ACP adds levels beyond Tau's catalog; unranked choices such as Default stay first. */
+const acpReasoningOrder: readonly string[] = ['none', 'minimal', ...reasoningLevels, 'ultra'];
 
 // ---------------------------------------------------------------------------
 // The segmented control
@@ -515,7 +519,11 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
   const selected = execution.kind === 'acp' ? execution.model : undefined;
   const modelId = selected ?? current.defaultModel;
   const thought = configOptionOf(agentConfig, 'thought_level');
-  const levels = thought ? configValues(thought).map((value) => ({ id: value.value, name: value.name })) : [];
+  const levels = thought
+    ? configValues(thought)
+        .map((value) => ({ id: value.value, name: value.name }))
+        .toSorted((left, right) => acpReasoningOrder.indexOf(left.id) - acpReasoningOrder.indexOf(right.id))
+    : [];
   const thoughtValue = thought ? agentConfig.valueOf(thought) : undefined;
   const level = levels.find((entry) => entry.id === thoughtValue);
   const settings = settingsOf(agentConfig);
@@ -1143,6 +1151,7 @@ function Sheet({
   const {
     model: { setActiveModel },
     execution: { execution, setActiveExecution },
+    canSelectExecution,
   } = useChatComposer();
   const { lastTauExecution } = useModels();
   const [view, setView] = useState<SheetView>('settings');
@@ -1157,7 +1166,7 @@ function Sheet({
   const surfaceRef = useRef<HTMLDivElement>(null);
   const agentRowRef = useRef<HTMLButtonElement>(null);
   const modelRowRef = useRef<HTMLButtonElement>(null);
-  const hasChoice = agents.length > 1;
+  const hasChoice = canSelectExecution && agents.some((agent) => agent.key !== current.key);
   const browsed = agents.find((agent) => agent.key === browseKey) ?? current;
   useEffect(() => {
     if (!hasNavigated || view !== 'settings') {

@@ -24,12 +24,7 @@ export {
   projectToManifest,
   serializeProjectManifest,
 } from '@taucad/project-core';
-export type {
-  AdoptableProjectManifest,
-  AdoptableProjectManifestParseResult,
-  ProjectManifest,
-  ProjectManifestParseResult,
-} from '@taucad/project-core';
+export type { AdoptableProjectManifest, ProjectManifest, ProjectManifestParseResult } from '@taucad/project-core';
 /* oxlint-enable no-barrel-files/no-barrel-files */
 
 /** Strict parser issues plus discovery's missing-manifest issue. @public */

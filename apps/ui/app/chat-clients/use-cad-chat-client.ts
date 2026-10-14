@@ -1,3 +1,4 @@
+import type { CadReference } from '@taucad/chat/references';
 import { useCallback, useEffect, useRef } from 'react';
 import type { ChatStatus } from 'ai';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
@@ -24,6 +25,8 @@ export type CadChatSubmitInput = {
   readonly text: string;
   /** The draft's attachments, stored beside its record; the client promotes them before sending (D18). */
   readonly attachments?: readonly StoredAttachmentRef[];
+  /** The composer chips' structured geometry references (blueprint D6). */
+  readonly references?: readonly CadReference[];
 };
 
 /**
@@ -158,30 +161,40 @@ export const useCadChatClient = (): CadChatClient => {
           return;
         }
       }
-      await send();
+      try {
+        await send();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Your message could not be saved. Please try again.', {
+          id: promotionToastId,
+        });
+      }
     },
     [activeChatId, agent.execution, store, surfaceDispatchFailure],
   );
 
   const submit = useCallback(
     async (input: CadChatSubmitInput): Promise<void> => {
+      const queueIntent = store.captureMessageQueueIntent(activeChatId);
       const userMessage = buildUserMessage(input);
       await withAttachments(input.attachments ?? [], async () =>
-        actions.sendMessage(userMessage, input.attachments === undefined ? {} : { attachments: input.attachments }),
+        actions.sendMessage(userMessage, {
+          execution: agent.execution,
+          queueIntent,
+          ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
+        }),
       );
     },
-    [actions, withAttachments],
+    [actions, activeChatId, agent.execution, store, withAttachments],
   );
 
   const edit = useCallback(
     (messageId: string, input: CadChatSubmitInput) => {
       // async-iife: bootstrap — the edit composer closes at once; failures surface on the banner or a toast.
       void withAttachments(input.attachments ?? [], () => {
-        actions.editMessage(
-          messageId,
-          input.text,
-          input.attachments === undefined ? {} : { attachments: input.attachments },
-        );
+        actions.editMessage(messageId, input.text, {
+          ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
+          ...(input.references === undefined ? {} : { references: input.references }),
+        });
       });
     },
     [actions, withAttachments],

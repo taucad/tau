@@ -7,6 +7,7 @@ import { createElement, useEffect, useState } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { Chat, MyUIMessage } from '@taucad/chat';
 import type {
+  FileTreeNode,
   ProjectDiscoveryEntry,
   ProjectDiscoveryResult,
   ProjectLocator,
@@ -209,6 +210,8 @@ const recordWatch: ReturnType<typeof useFileManager>['watchRecordFile'] = (absol
   });
 };
 const mockWatchRecordFile = vi.fn(recordWatch);
+/* The authority's physical-scope listing, one level per call (R14 orphan check). */
+const mockReadScopedShallowDirectory = vi.fn<(path: string) => Promise<FileTreeNode[]>>();
 const mockFileManager = {
   workerChangeChannel: mockWorkerChangeChannel,
   watchRecordFile: mockWatchRecordFile,
@@ -231,6 +234,7 @@ const mockFileManager = {
     commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
   },
   workspace: { syncProjectRoots: mockSyncProjectRoots },
+  scopedStorage: { readShallowDirectory: mockReadScopedShallowDirectory },
 };
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => mockFileManager }));
 
@@ -294,7 +298,9 @@ const mockRepairWorkspaceBindings = vi.fn(async () => ({
   skipped: [],
 }));
 
+const mockRequestHomeStoragePersistence = vi.fn(async () => undefined);
 vi.mock('#filesystem/handle-store.js', () => ({
+  requestHomeStoragePersistence: mockRequestHomeStoragePersistence,
   createWorkspace: mockCreateWorkspaceConnection,
   createNodeWorkspace: mockCreateNodeWorkspace,
   getWorkspaceMetadata: mockGetWorkspaceMetadata,
@@ -654,6 +660,8 @@ describe('useProjectManager.createProject', () => {
       mock.mockReset();
     }
     mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+    mockReadScopedShallowDirectory.mockReset();
+    mockReadScopedShallowDirectory.mockRejectedValue(new Error('ENOENT: unreadable'));
     mockReadFile.mockImplementation(async (path: string) => {
       if (path.endsWith('/.tau/library.json')) {
         if (libraryFileContent === undefined) {
@@ -2494,6 +2502,7 @@ describe('useProjectManager.createProject', () => {
       });
     });
     expect(mockCompletePending).not.toHaveBeenCalled();
+    expect(mockRequestHomeStoragePersistence).not.toHaveBeenCalled();
   });
 
   /*
@@ -2563,6 +2572,13 @@ describe('useProjectManager.createProject', () => {
   });
 
   it('uses the filesystem authority commit before restoring local resources and clearing the journal', async () => {
+    // An open browser prompt must not delay project creation.
+    mockRequestHomeStoragePersistence.mockImplementationOnce(
+      async () =>
+        new Promise<undefined>(() => {
+          // Intentionally leave the browser permission request open.
+        }),
+    );
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
     await act(async () =>
       result.current.createProject({
@@ -2595,6 +2611,10 @@ describe('useProjectManager.createProject', () => {
       providerBasePath: pendingCreate.providerBasePath,
     });
     expect(phaseOrder).toEqual(['pending', 'commit', 'locator', 'roots', 'resources', 'complete', 'preference']);
+    expect(mockRequestHomeStoragePersistence).toHaveBeenCalledOnce();
+    expect(mockRequestHomeStoragePersistence.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockCompletePending.mock.invocationCallOrder[0]!,
+    );
     expect(mockGetProjectCreationLocation).not.toHaveBeenCalled();
     expect(mockSetProjectCreationLocation).toHaveBeenCalledWith({ kind: 'home' });
   });
@@ -3177,6 +3197,98 @@ describe('useProjectManager.createProject', () => {
       }),
     ).rejects.toThrow(/already on this device/iu);
     expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+  });
+
+  /* R14: a browser that clears its storage drops every file of a Home project
+     but keeps the rows keyed by its id. The library reads `tau.json`, so the
+     project is gone from it, while the surviving route config refused the
+     re-import as "already on this device" with nothing to open. */
+  describe('an id whose Home folder lost every file', () => {
+    const orphanedId = 'proj_ccccccccccccccccccccc';
+    const directory = (id: string): FileTreeNode => ({
+      id,
+      name: id.split('/').pop()!,
+      size: 0,
+      mtimeMs: 0,
+      children: [],
+    });
+    const listings = (tree: Record<string, FileTreeNode[]>) => async (path: string) => {
+      const nodes = tree[path];
+      if (nodes === undefined) {
+        throw new Error(`ENOENT: ${path}`);
+      }
+      return nodes;
+    };
+    const reimport = async (result: { readonly current: ReturnType<typeof useProjectManager> }) =>
+      result.current.createProject({
+        id: orphanedId,
+        project: fakeProject,
+        files: {},
+        chat: false,
+        location: { kind: 'home' },
+      });
+
+    beforeEach(() => {
+      /* The route config survives until something deletes it. */
+      mockGetProjectFileSystemConfig.mockImplementation(async (projectId: string) =>
+        projectId === orphanedId && !mockDeleteProjectFileSystemConfig.mock.calls.some(([id]) => id === orphanedId)
+          ? { projectId, backend: 'opfs', providerBasePath: 'audit-sandbox' }
+          : undefined,
+      );
+    });
+
+    it('should release its rows and import it again (R14)', async () => {
+      mockReadScopedShallowDirectory.mockImplementation(
+        listings({
+          '/': [directory('/audit-sandbox')],
+          '/audit-sandbox': [directory('/audit-sandbox/.git'), directory('/audit-sandbox/.tau')],
+          '/audit-sandbox/.git': [],
+          '/audit-sandbox/.tau': [],
+        }),
+      );
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => reimport(result));
+
+      expect(mockDeleteProjectResources).toHaveBeenCalledWith(orphanedId);
+      expect(mockDeleteProjectFileSystemConfig).toHaveBeenCalledWith(orphanedId);
+      expect(mockDeleteProjectResources).toHaveBeenCalledTimes(1);
+      expect(mockPrepareProjectCreation.mock.calls.map(([input]) => input.manifest.id)).toEqual([orphanedId]);
+    });
+
+    it('should keep refusing while any file of the project is left', async () => {
+      mockReadScopedShallowDirectory.mockImplementation(
+        listings({
+          '/': [directory('/audit-sandbox')],
+          '/audit-sandbox': [directory('/audit-sandbox/.git')],
+          '/audit-sandbox/.git': [
+            { id: '/audit-sandbox/.git/HEAD', name: 'HEAD', size: 23, mtimeMs: 0, contentKind: 'text' },
+          ],
+        }),
+      );
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(reimport(result)).rejects.toThrow(`That project is already on this device: ${orphanedId}`);
+      });
+      expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+      expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+      expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+    });
+
+    it('should keep refusing when the project is discovered somewhere else', async () => {
+      mockReadScopedShallowDirectory.mockImplementation(listings({ '/': [] }));
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: liveWorkspaceRoot }],
+        entries: [{ status: 'valid', manifest: { ...fakeProject, id: orphanedId }, locator: liveWorkspaceLocator }],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(reimport(result)).rejects.toThrow(`That project is already on this device: ${orphanedId}`);
+      });
+      expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+    });
   });
 
   /* RV-W11 3: an *Open* racing materialize on sign-in (or a second tab) checks

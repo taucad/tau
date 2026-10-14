@@ -1,11 +1,11 @@
 import { memo } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
 import { useSelector } from '@xstate/react';
-import { ModelViewer, RuntimeStatusOverlay } from '#components/model-viewer.js';
-import type { ModelViewerGraphicsOptions, ModelViewerState } from '#components/model-viewer.js';
+import { ModelViewer, RuntimeStatusOverlay } from '@taucad/viewer/model-viewer';
+import type { ModelViewerGraphicsOptions, ModelViewerState } from '@taucad/viewer/model-viewer';
 import { useCadPreview } from '#hooks/use-cad-preview.js';
 import type { CadPreviewStatus } from '#hooks/use-cad-preview.js';
-import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
+import type { StageOptions } from '@taucad/viewer/graphics/three/stage-options';
 
 /**
  * Visual rendering settings for the CAD preview viewer.

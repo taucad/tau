@@ -2,17 +2,18 @@ import type { BeadData } from '#components/printer/printer-bead-data.js';
 import type { FilamentMode } from '#components/printer/printer-filament-material.js';
 /* oxlint-disable react/immutability -- This uncompiled R3F boundary mutates the Three.js scene it exclusively owns. */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { RefCallback } from 'react';
 import { Canvas, addAfterEffect, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type CameraControlsImpl from 'camera-controls';
 import type { ToolpathProgram } from '@taucad/slicer/toolpath';
-import { createTauR3fGlProp } from '#components/geometry/graphics/three/canvas-three-gl.js';
-import { readGraphicsBackendQueryOverride } from '#components/geometry/graphics/graphics-backend.js';
+import { createTauR3fGlProp } from '@taucad/viewer/graphics/three/canvas-three-gl';
+import { readGraphicsBackendQueryOverride } from '#utils/graphics-backend-override.js';
 import {
   resolveCameraControlProps,
   TauCameraControls,
-} from '#components/geometry/graphics/three/controls/tau-camera-controls.js';
+} from '@taucad/viewer/graphics/three/controls/tau-camera-controls';
 import { applyPlateGrain, plateStandInOutline } from '#components/printer/printer-plate-surface.js';
 import { createPrinterHardware, toolheadOpacity } from '#components/printer/printer-hardware.js';
 import { printerBackground, printerBody } from '#components/printer/printer-colors.constants.js';
@@ -800,7 +801,13 @@ export function PrinterScene(props: PrinterSceneProps): React.JSX.Element {
   const { geometry, program, frameRequest, isReducedMotion, onContextLost, isWholePrinter } = props;
   // Public viewers stay on WebGL; the existing internal override is used for parity checks.
   const backend = readGraphicsBackendQueryOverride() ?? 'webgl';
-  const gl = useMemo(() => createTauR3fGlProp(backend, [], onContextLost), [backend, onContextLost]);
+  const gl = useMemo(() => createTauR3fGlProp(backend, [], { onCreateError: onContextLost }), [backend, onContextLost]);
+  const bindCanvas = useCallback<RefCallback<HTMLCanvasElement>>(
+    (canvas): void => {
+      gl.bindCanvas(canvas ?? undefined);
+    },
+    [gl],
+  );
   // The whole printer frames the plate and its travel; the plate alone frames the finished part. Neither
   // depends on playback or the G-code filter, so the camera holds still while the part prints.
   const part = useMemo(() => props.preparedBounds ?? partBounds(program), [program, props.preparedBounds]);
@@ -825,6 +832,7 @@ export function PrinterScene(props: PrinterSceneProps): React.JSX.Element {
   return (
     <Canvas
       key={backend}
+      ref={bindCanvas}
       gl={gl}
       data-graphics-backend={backend}
       frameloop='demand'

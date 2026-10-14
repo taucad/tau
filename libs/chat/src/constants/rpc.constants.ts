@@ -31,6 +31,7 @@ export const rpcName = {
   readRevisions: 'read_revisions',
   writeTodos: 'write_todos',
   askQuestions: 'ask_questions',
+  installPackages: 'install_packages',
 } as const satisfies Record<string, string>;
 
 /**
@@ -65,6 +66,7 @@ export const mutatingRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.applyParameterOperation,
   rpcName.writeTodos,
   rpcName.askQuestions,
+  rpcName.installPackages,
 ]);
 
 /**

@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectListItem } from '#types/project-library.types.js';
+import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 
 /**
@@ -34,11 +35,13 @@ const trashed: ProjectListItem = {
   deletedAt: 5,
 };
 
-const { mockCreateProject, mockToastInfo, useProjectsOptions } = vi.hoisted(() => ({
+const { mockCreateProject, mockToastInfo, useProjectsOptions, mockGetConfig } = vi.hoisted(() => ({
   mockCreateProject: vi.fn(),
+  mockGetConfig: vi.fn(),
   mockToastInfo: vi.fn<(message: string, options: { action: { label: string; onClick: () => void } }) => void>(),
   useProjectsOptions: [] as unknown[],
 }));
+vi.mock('#filesystem/handle-store.js', () => ({ getProjectFileSystemConfig: mockGetConfig }));
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: (options: unknown) => {
     useProjectsOptions.push(options);
@@ -46,7 +49,9 @@ vi.mock('#hooks/use-projects.js', () => ({
   },
 }));
 vi.mock('#components/ui/sonner.js', () => ({ toast: { info: mockToastInfo } }));
-vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ createProject: mockCreateProject }) }));
+vi.mock('#hooks/use-project-manager.js', () => ({
+  useProjectManager: () => ({ createProject: mockCreateProject, getProjects: async () => [] }),
+}));
 
 const { cloudProjectStub, useOpenCloudProject } = await import('#hooks/use-open-cloud-project.js');
 
@@ -59,6 +64,7 @@ const renderOpen = () => renderHook(() => ({ open: useOpenCloudProject(), locati
 describe('useOpenCloudProject', () => {
   beforeEach(() => {
     mockCreateProject.mockReset();
+    mockGetConfig.mockReset();
     mockToastInfo.mockReset();
     mockCreateProject.mockResolvedValue({
       id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
@@ -74,8 +80,26 @@ describe('useOpenCloudProject', () => {
 
     expect(mockCreateProject).toHaveBeenCalledWith(cloudProjectStub(entry));
     expect(result.current.location.pathname).toBe('/w/home/bracket-beta');
-    expect(result.current.location.search).toBe('?cloudOpen=tau');
-    expect(result.current.location.state).toEqual({ openFromTauCloud: true });
+    expect(result.current.location.search).toBe('');
+    expect(tauCloudIntent.get(entry.id)).toBe('open');
+    expect(result.current.location.state).toBeNull();
+  });
+
+  it.each(['present', 'unreadable'])('keeps a %s partial stub pending after creation fails', async (state) => {
+    const entry: CloudProject = { id: 'partial-project', name: 'Partial', role: 'owner' };
+    if (state === 'present') {
+      mockGetConfig.mockResolvedValue({ backend: 'indexeddb' });
+    } else {
+      mockGetConfig.mockRejectedValue(new Error('storage unavailable'));
+    }
+    mockCreateProject.mockRejectedValue(new Error('quota'));
+    const { result } = renderOpen();
+    await act(async () => {
+      await expect(result.current.open(entry)).rejects.toThrow('quota');
+    });
+    expect(tauCloudIntent.get(entry.id)).toBe('open');
+    expect(result.current.location.pathname).toBe('/projects');
+    tauCloudIntent.set(entry.id, undefined);
   });
 
   it('should navigate to a project this device already holds instead of creating it again', async () => {

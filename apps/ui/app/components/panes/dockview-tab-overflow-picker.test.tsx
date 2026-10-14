@@ -16,7 +16,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 const mobileState = vi.hoisted(() => ({ current: false }));
 const comboBoxSpy = vi.hoisted(() => vi.fn());
 
-vi.mock('#components/ui/combobox-responsive.js', async () => {
+vi.mock('@taucad/ui/components/combobox-responsive', async () => {
   const { createElement } = await import('react');
   return {
     ComboBoxResponsive: (properties: { readonly children: ReactNode; readonly isNested?: boolean }) => {

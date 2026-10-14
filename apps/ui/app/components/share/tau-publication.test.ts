@@ -46,7 +46,7 @@ vi.mock('#environment.config.js', async (importOriginal) => {
 const useViewPingMock = vi.hoisted(() => vi.fn());
 vi.mock('#components/share/use-view-ping.js', () => ({ useViewPing: useViewPingMock }));
 // eslint-disable-next-line @typescript-eslint/naming-convention -- mock mirrors the module's exported component.
-vi.mock('#components/ui/utils/client-only.js', () => ({ ClientOnly: () => null }));
+vi.mock('@taucad/ui/components/client-only', () => ({ ClientOnly: () => null }));
 
 const mockedGetEnvironment = vi.mocked(getEnvironment);
 const originalClientEnvironment = globalThis.window.ENV;

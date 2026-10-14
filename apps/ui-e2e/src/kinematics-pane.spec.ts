@@ -255,6 +255,8 @@ async function openKinematicsPane(): Promise<void> {
 }
 
 const dofField = (dofId: string) => selectors.getByTestId(`kinematics-dof-${dofId}`).getByRole('spinbutton');
+/** A follower's one-line row: name, relation badge, then its value and unit last. */
+const followerRow = (dofId: string) => selectors.getByTestId(`kinematics-dof-${dofId}`);
 
 async function setDriver(dofId: string, value: number): Promise<void> {
   await target.fill(dofField(dofId), String(value));
@@ -284,9 +286,9 @@ test.describe('Kinematics pane', () => {
     expect(distance(transformPoint(planet, toGlbPoint(planetary.planetPin)), toGlbPoint(orbit))).toBeLessThan(1e-6);
     expectIdentity(await readMatrix(planetary.ring), 'grounded ring');
     // The sun's followers wait in a closed group under it.
-    await target.click(selectors.getByRole('button', { name: 'Followers of sun' }));
-    await target.expectValue(dofField('carrier'), '22.5');
-    await target.expectValue(dofField('planet-1'), '-67.5');
+    await target.click(selectors.getByRole('button', { name: 'Followers of Sun' }));
+    await target.expectText(followerRow('carrier'), /×22\.5°$/u);
+    await target.expectText(followerRow('planet-1'), /×-67\.5°$/u);
     await target.expectAttribute(dofField('sun'), 'aria-valuetext', '90 °');
 
     await target.focus(dofField('sun'));
@@ -294,7 +296,7 @@ test.describe('Kinematics pane', () => {
     await expect.poll(async () => readStateField('coordinates'), { timeout: 10_000 }).toEqual({ sun: 91 });
     expectRotation(await readMatrix(planetary.sun), { about: modelZ, degrees: 91 }, 'sun after ArrowUp');
     expectRotation(await readMatrix(planetary.carrier), { about: modelZ, degrees: 22.75 }, 'carrier after ArrowUp');
-    await target.expectValue(dofField('carrier'), '22.75');
+    await target.expectText(followerRow('carrier'), /×22\.75°$/u);
     await target.screenshot(selectors.getByCss('body'), 'kinematics-planetary-sun-91.png');
   });
 
@@ -489,7 +491,7 @@ test.describe('Kinematics pane', () => {
       { about: modelY, degrees: -360 / wormGear.wheelTeeth },
       'wheel after one worm turn',
     );
-    await target.expectValue(dofField('wheel'), '-12');
+    await target.expectText(followerRow('wheel'), /×-12°$/u);
     await target.screenshot(selectors.getByCss('body'), 'kinematics-worm-one-turn.png');
   });
 

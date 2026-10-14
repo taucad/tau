@@ -8,7 +8,7 @@ import { createTestRuntimeClient } from '@taucad/runtime-testing';
 import {
   buildGltfComponentManifest,
   buildGltfMeasurementFeatures,
-} from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+} from '@taucad/viewer/graphics/metadata/gltf-component-manifest';
 import { evaluateExactOccurrenceDistance } from './measurement-exact.worker.js';
 import type { ExactRequest } from './measurement-exact.worker.js';
 

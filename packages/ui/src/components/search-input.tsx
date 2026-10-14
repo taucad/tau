@@ -1,0 +1,101 @@
+import { Search, X } from 'lucide-react';
+import React from 'react';
+import { Input } from '#components/input.js';
+import { Button } from '#components/button.js';
+import { KeyShortcut } from '#components/key-shortcut.js';
+import { cn } from '#utils/cn.js';
+
+/**
+ * Properties of {@link SearchInput}.
+ *
+ * @public
+ */
+export type SearchInputProperties = {
+  /**
+   * The current search value
+   */
+  readonly value?: string;
+  /**
+   * Additional className for the container
+   */
+  readonly containerClassName?: string;
+  /**
+   * Callback function called when the clear button is clicked
+   */
+  readonly onClear: () => void;
+  /**
+   * Optional keyboard shortcut to display when input is not focused
+   */
+  readonly keyboardShortcut?: string;
+  /** Visual treatment for the input surface. */
+  readonly variant?: 'default' | 'transparent';
+} & Omit<React.ComponentProps<typeof Input>, 'type'>;
+
+/**
+ * A search field with a leading glyph and a clear control that returns focus to the field.
+ *
+ * @param props - Input properties, the value and the clear handler.
+ * @returns The search field.
+ *
+ * @public
+ */
+export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProperties>(function (
+  {
+    value = '',
+    containerClassName,
+    className,
+    placeholder = 'Search…',
+    onClear,
+    keyboardShortcut,
+    variant = 'default',
+    ...properties
+  },
+  reference,
+) {
+  const inputReference = React.useRef<HTMLInputElement>(null);
+  React.useImperativeHandle(reference, () => inputReference.current!);
+
+  const handlePointerDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+  };
+
+  return (
+    <div className={cn('relative w-full', containerClassName)}>
+      <Input
+        ref={inputReference}
+        autoComplete='off'
+        type='search'
+        placeholder={placeholder}
+        value={value}
+        className={cn(
+          'peer/search-input pr-2 pl-8 not-placeholder-shown:pr-8 placeholder:text-sm placeholder-shown:truncate focus:placeholder:opacity-0 [&::-webkit-search-cancel-button]:appearance-none',
+          keyboardShortcut && 'placeholder-shown:pr-14',
+          variant === 'transparent' && 'bg-transparent dark:bg-transparent',
+          className,
+        )}
+        {...properties}
+      />
+      <Search className='pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground' />
+      {keyboardShortcut ? (
+        <KeyShortcut className='pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 peer-not-placeholder-shown/search-input:invisible peer-focus-within/search-input:invisible'>
+          {keyboardShortcut}
+        </KeyShortcut>
+      ) : null}
+      <Button
+        variant='secondary'
+        size='icon-xs'
+        className='absolute top-1/2 right-1 -translate-y-1/2 bg-neutral/10 text-muted-foreground peer-placeholder-shown/search-input:invisible hover:bg-neutral/20 hover:text-foreground'
+        type='button'
+        aria-label='Clear search'
+        onClick={() => {
+          onClear();
+          // Clearing hides this button, so focus would otherwise fall to the document body.
+          inputReference.current?.focus();
+        }}
+        onPointerDown={handlePointerDown}
+      >
+        <X className='size-3.5' />
+      </Button>
+    </div>
+  );
+});

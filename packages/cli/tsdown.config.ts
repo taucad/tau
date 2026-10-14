@@ -43,6 +43,7 @@ const cliConfig: UserConfig = {
     tau: 'src/bin.ts',
     'host-runtime-child': 'src/host-runtime-child.ts',
     'compute-store-worker': 'src/compute-store.worker.ts',
+    'runtime-worker': 'src/runtime.worker.ts',
   },
   format: 'esm',
   outDir: 'dist/bin',

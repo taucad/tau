@@ -34,10 +34,13 @@ vi.mock('#components/geometry/loader/metal-morph-controller.js', () => ({
   }),
 }));
 
-vi.mock('#components/geometry/graphics/graphics-backend.js', () => ({
+vi.mock('@taucad/viewer/graphics/graphics-backend', () => ({
   probeWebGpuSupport: vi.fn(async (): Promise<boolean> => hoisted.probeResult),
-  readGraphicsBackendQueryOverride: vi.fn((): undefined => undefined),
   resolveGraphicsBackendPreference: vi.fn((): string => 'webgl'),
+}));
+
+vi.mock('#utils/graphics-backend-override.js', () => ({
+  readGraphicsBackendQueryOverride: vi.fn((): undefined => undefined),
 }));
 
 const { createMetalMorphSpinnerService } = await import('#components/geometry/loader/metal-morph-spinner-service.js');

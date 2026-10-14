@@ -17,9 +17,8 @@ import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
 import type { DynamicToolUIPart } from 'ai';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
-import type { CombinedChatState } from '#hooks/use-chat.js';
 import { serializeMessage } from '#utils/chat.utils.js';
-import { inlineSegmentText, parseInlineReferences } from '#utils/at-reference.utils.js';
+import { parseInlineReferences } from '#utils/at-reference.utils.js';
 import type { ActivityFamily, ActivityGroup, AggregatedGroup } from '#utils/assistant-message-activity.js';
 import {
   groupAssistantParts,
@@ -29,20 +28,23 @@ import {
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
 import { useAtReferenceContext } from '#components/chat/at-reference-context.js';
 import { ContextChip } from '#components/chat/context-chip.js';
+import { ChatPermissionRequest } from '#components/chat/chat-permission-request.js';
+import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { ChatActivityGroup } from '#components/chat/chat-activity-group.js';
-import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
+import { agentApprovalToolName, parseAgentHostApproval } from '#services/agent-host-event-projection.js';
 import { ChatMessageReasoning } from '#routes/w.$workspace.$project/chat-message-reasoning.js';
 import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat-message-context-compaction.js';
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
 import { ChatMessageText } from '#routes/w.$workspace.$project/chat-message-text.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
-import { CopyButton } from '#components/copy-button.js';
+import { CopyButton } from '@taucad/ui/components/copy-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { When } from '#components/ui/utils/when.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { chatUserMessagePaddingClassName, chatInputTextClassName } from '#components/chat/chat-input-styles.js';
 import { ChatMessageToolWebSearch } from '#routes/w.$workspace.$project/chat-message-tool-web-search.js';
 import { ChatMessageToolWebBrowser } from '#routes/w.$workspace.$project/chat-message-tool-web-browser.js';
 import { ChatMessageToolFileEdit } from '#routes/w.$workspace.$project/chat-message-tool-edit-file.js';
@@ -58,6 +60,7 @@ import { ChatMessageToolScreenshot } from '#routes/w.$workspace.$project/chat-me
 import { ChatMessageToolRevisions } from '#routes/w.$workspace.$project/chat-message-tool-revisions.js';
 import { ChatMessageToolExportGeometry } from '#routes/w.$workspace.$project/chat-message-tool-export-geometry.js';
 import { ChatMessageToolUpdateTodos } from '#routes/w.$workspace.$project/chat-message-tool-update-todos.js';
+import { ChatMessageToolInstallPackages } from '#routes/w.$workspace.$project/chat-message-tool-install-packages.js';
 import {
   ChatMessageToolAskQuestions,
   ChatMessageToolExternalOrQuestion,
@@ -72,57 +75,10 @@ import {
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 import { useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
-import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
-import { ChatStreamingStopButton } from '#components/chat/chat-textarea-submit-button.js';
-import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
 import { FileLink } from '#components/files/file-link.js';
 import { isSafeRelativePath } from '@taucad/utils/path';
 import { isRecord } from '@taucad/utils/schema';
-
-/**
- * Split a line into chunks of `maxLen` characters without breaking `@path` or `/command` references.
- * When a split point falls inside a reference, the chunk extends to include the full reference.
- */
-function splitLinePreservingReferences(line: string, maxLength: number, out: string[]): void {
-  const segments = parseInlineReferences(line);
-  let currentChunk = '';
-
-  for (const segment of segments) {
-    const isAtomic = segment.type !== 'text';
-    const text = inlineSegmentText(segment);
-
-    if (currentChunk.length + text.length <= maxLength) {
-      currentChunk += text;
-    } else if (isAtomic) {
-      if (currentChunk.length > 0) {
-        out.push(currentChunk);
-        currentChunk = '';
-      }
-      currentChunk = text;
-    } else {
-      let remaining = text;
-      while (remaining.length > 0) {
-        const space = maxLength - currentChunk.length;
-        if (space <= 0) {
-          out.push(currentChunk);
-          currentChunk = '';
-          continue;
-        }
-        currentChunk += remaining.slice(0, space);
-        remaining = remaining.slice(space);
-        if (currentChunk.length >= maxLength) {
-          out.push(currentChunk);
-          currentChunk = '';
-        }
-      }
-    }
-  }
-
-  if (currentChunk.length > 0) {
-    out.push(currentChunk);
-  }
-}
+import { CadReferenceChip } from '#components/chat/cad-reference-chip.js';
 
 function segmentKey(segment: ReturnType<typeof parseInlineReferences>[number], index: number): string {
   if (segment.type === 'atReference') {
@@ -130,6 +86,9 @@ function segmentKey(segment: ReturnType<typeof parseInlineReferences>[number], i
   }
   if (segment.type === 'invocation') {
     return `invocation-${segment.token}`;
+  }
+  if (segment.type === 'cadReference') {
+    return `cad-${segment.token}`;
   }
   return `text-${index}`;
 }
@@ -152,6 +111,9 @@ function TextWithAtReferences({ text }: { readonly text: string }): React.JSX.El
         }
         if (segment.type === 'atReference') {
           return <AtReferenceChip key={key} data-at-reference={segment.path} />;
+        }
+        if (segment.type === 'cadReference') {
+          return <CadReferenceChip key={key} target={segment.target} />;
         }
         if (knownTokens.has(segment.token)) {
           return <ContextChip key={key} label={segment.token} chipType='skill' />;
@@ -308,11 +270,26 @@ function renderAssistantPart(
     }
 
     case 'dynamic-tool': {
-      // A host's durable interrupt is presented by `ChatApprovalBanner` above
-      // the composer; rendering its projected part here would show the same
-      // request twice.
+      // Pending decisions belong above the composer; their settled record stays inspectable here.
       if (part.toolName === agentApprovalToolName) {
-        return undefined;
+        const approval = parseAgentHostApproval(part.input);
+        const outcome = isRecord(part.output) ? part.output['outcome'] : undefined;
+        if (
+          approval === undefined ||
+          approval.login !== undefined ||
+          part.state !== 'output-available' ||
+          typeof outcome !== 'string'
+        ) {
+          return undefined;
+        }
+        return (
+          <ChatPermissionRequest
+            key={part.toolCallId}
+            approval={approval}
+            name={approval.agentId ? externalAgentDisplayName(approval.agentId) : 'Agent'}
+            outcome={outcome}
+          />
+        );
       }
       const tau = isRecord(part.toolMetadata?.['tau']) ? part.toolMetadata['tau'] : undefined;
       const nativeName = typeof tau?.['nativeName'] === 'string' ? tau['nativeName'] : undefined;
@@ -514,6 +491,10 @@ function renderAssistantPart(
 
     case 'tool-arrange_workbench': {
       return <ChatMessageToolArrangeWorkbench key={part.toolCallId} part={part} />;
+    }
+
+    case 'tool-install_packages': {
+      return <ChatMessageToolInstallPackages key={part.toolCallId} part={part} />;
     }
 
     case 'tool-request_print': {
@@ -733,7 +714,7 @@ function ChatMessageTimestamp({
           dateTime={date.toISOString()}
           // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- keyboard users reach the absolute-time tooltip through focus
           tabIndex={0}
-          className='mx-1 flex h-7 items-center rounded-md px-1 text-xs outline-none focus-visible:focus-outline'
+          className='mx-1 flex h-6 items-center rounded-md px-1 text-xs outline-none focus-visible:focus-outline'
         >
           {formatRelativeTime(date)}
         </time>
@@ -741,17 +722,6 @@ function ChatMessageTimestamp({
       <TooltipContent side='bottom'>{formatAbsoluteTime(date)}</TooltipContent>
     </Tooltip>
   );
-}
-
-function selectLastUserMessageId(state: CombinedChatState): string | undefined {
-  for (let index = state.messages.length - 1; index >= 0; index--) {
-    const entry = state.messages[index];
-    if (entry?.role === messageRole.user) {
-      return entry.id;
-    }
-  }
-
-  return undefined;
 }
 
 // oxlint-disable-next-line complexity -- split render paths for user collapse/edit vs assistant tools would churn without UX benefit
@@ -782,30 +752,23 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
 
     return usageDataParts;
   });
-  const { startEditingMessage, exitEditMode, stop } = useChatActions();
+  const { startEditingMessage, exitEditMode } = useChatActions();
   const cadChat = useCadChatClient();
-  const chatStatus = useChatSelector((state) => state.status);
-  const lastUserMessageId = useChatSelector(selectLastUserMessageId);
-  const formattedCancelKeyCombination = formatKeyCombination(cancelChatStreamKeyCombination);
   const [isEditing, setIsEditing] = useState(false);
 
   const isUser = message?.role === messageRole.user;
-  const showUserBubbleStopShortcut =
-    isUser &&
-    !isEditing &&
-    lastUserMessageId === messageId &&
-    (chatStatus === 'streaming' || chatStatus === 'submitted');
   const isCollapsedUserMessage = isUser && !isEditing;
 
   const collapsedUserRows = useMemo(() => {
-    if (!isCollapsedUserMessage || !displayMessage || fileParts.length > 0) {
+    if (!isCollapsedUserMessage || !displayMessage) {
       return [];
     }
 
     const rows: string[] = [];
-    let remaining = userMessagePreviewCharacterLimit;
+    const rowLimit = fileParts.length > 0 ? Number.POSITIVE_INFINITY : userMessageCollapseRowThreshold;
+    let remaining = fileParts.length > 0 ? Number.POSITIVE_INFINITY : userMessagePreviewCharacterLimit;
     for (const part of displayMessage.parts) {
-      if (part.type !== 'text' || remaining === 0 || rows.length > userMessageCollapseRowThreshold) {
+      if (part.type !== 'text' || remaining === 0 || rows.length > rowLimit) {
         continue;
       }
 
@@ -813,23 +776,18 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
       remaining -= preview.length;
       const normalizedText = preview.replaceAll('\r\n', '\n');
       for (const line of normalizedText.split('\n')) {
-        if (rows.length > userMessageCollapseRowThreshold) {
+        if (rows.length > rowLimit) {
           break;
         }
-        if (line.length === 0) {
-          rows.push('');
-          continue;
-        }
-
-        splitLinePreservingReferences(line, 220, rows);
+        rows.push(line);
       }
     }
 
-    return rows.length > 0 ? rows.slice(0, userMessageCollapseRowThreshold + 1) : [''];
+    return rows.length > 0 ? rows.slice(0, rowLimit + 1) : [''];
   }, [displayMessage, fileParts.length, isCollapsedUserMessage]);
 
   const collapsedUserCharacterCount = useMemo(() => {
-    if (!isCollapsedUserMessage || !displayMessage || fileParts.length > 0) {
+    if (!isCollapsedUserMessage || !displayMessage) {
       return 0;
     }
 
@@ -841,7 +799,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
     }
 
     return characterCount;
-  }, [displayMessage, fileParts.length, isCollapsedUserMessage]);
+  }, [displayMessage, isCollapsedUserMessage]);
 
   const shouldCollapseUserMessage =
     isCollapsedUserMessage &&
@@ -849,11 +807,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
       collapsedUserCharacterCount > userMessageCollapseCharacterThreshold);
   const shouldRenderCollapsedUserRows = shouldCollapseUserMessage && fileParts.length === 0;
 
-  /* A user's files are the strip above their words; an agent's read in place. */
-  const inlineParts = useMemo(
-    () => (isUser ? displayMessage?.parts.filter((part) => part.type !== 'file') : displayMessage?.parts) ?? [],
-    [isUser, displayMessage?.parts],
-  );
+  const inlineParts = displayMessage?.parts ?? [];
 
   const collapsedUserRowsWithStableKeys = useMemo(() => {
     if (!displayMessage) {
@@ -923,14 +877,17 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
     >
       <div
         className={cn(
-          'flex flex-col space-y-2 min-w-0',
+          'flex flex-col min-w-0',
           'w-full',
           // Vary left margin for user and assistant messages to achieve visual
           // differentiation. Right side is intentionally flush — the parent
           // ChatScroller reserves a fixed scrollbar gutter, so dropping the
           // right margin here lets bubbles use that space when the scrollbar
           // is hidden, and the gutter doubles as the right margin when shown.
-          isUser ? 'mx-2' : 'mx-4',
+          // A request's hover-only row sits 4px under its bubble, so the turn
+          // reads as one exchange rather than two islands; an answer keeps 8px,
+          // which its row's `-mt-2` cancels.
+          isUser ? 'mx-2 space-y-1' : 'mx-4 space-y-2',
         )}
       >
         {/* The bubble and its attached footer (the turn's revision card) read as one surface. */}
@@ -944,7 +901,11 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
                 // the wire body's `agent` block is composed from the live
                 // `useCadAgentConfig` snapshot — no model/metadata stamping
                 // on the persisted user row.
-                cadChat.edit(messageId, { text: event.content, attachments: event.attachments });
+                cadChat.edit(messageId, {
+                  text: event.content,
+                  attachments: event.attachments,
+                  ...(event.references === undefined ? {} : { references: event.references }),
+                });
                 exitEditMode();
                 setIsEditing(false);
               }}
@@ -964,7 +925,8 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               className={cn(
                 'flex flex-col gap-0 min-w-0',
                 isUser &&
-                  'relative z-10 cursor-action rounded-lg border bg-background px-3 py-1 outline-none hover:border-foreground/20 focus-visible:focus-outline',
+                  'relative z-10 cursor-action rounded-lg border bg-background px-3 outline-none hover:border-foreground/20 focus-visible:focus-outline',
+                isUser && chatUserMessagePaddingClassName,
                 shouldRenderCollapsedUserRows && 'max-h-60.5 overflow-hidden',
                 fileParts.length > 0 && 'pt-3',
               )}
@@ -976,13 +938,10 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               {fileParts.length > 0 ? (
                 <ChatMessageFileAttachments parts={fileParts} directory={attachmentDirectories?.transcript} />
               ) : null}
-              {shouldRenderCollapsedUserRows ? (
-                <div className='flex flex-col gap-1 pr-1'>
+              {isUser ? (
+                <div className={chatInputTextClassName}>
                   {collapsedUserRowsWithStableKeys.map(({ keyPrefix, row }) => (
-                    <p
-                      key={`${keyPrefix}:${row.slice(0, 120)}`}
-                      className='text-sm leading-relaxed wrap-break-word whitespace-pre-wrap text-foreground/90'
-                    >
+                    <p key={`${keyPrefix}:${row.slice(0, 120)}`} className='min-h-5'>
                       <TextWithAtReferences text={row} />
                     </p>
                   ))}
@@ -990,26 +949,6 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               ) : (
                 <AssistantParts parts={inlineParts} messageId={displayMessage.id} />
               )}
-              {/* Flush under the activity rows, so the indicator keeps their pitch. */}
-              {isUser ? null : <ChatMessagePlanning messageId={messageId} />}
-              {showUserBubbleStopShortcut ? (
-                <div
-                  className={cn(
-                    'absolute right-1 bottom-1 z-10 transition-opacity duration-150',
-                    'pointer-events-none opacity-0',
-                    'group-hover/chat-message:pointer-events-auto group-hover/chat-message:opacity-100',
-                    'group-focus-within/chat-message:pointer-events-auto group-focus-within/chat-message:opacity-100',
-                  )}
-                >
-                  <ChatStreamingStopButton
-                    variant='compact'
-                    formattedCancelKeyCombination={formattedCancelKeyCombination}
-                    onCancel={() => {
-                      stop('message-stop');
-                    }}
-                  />
-                </div>
-              ) : null}
             </div>
           </When>
           {footer}
@@ -1036,16 +975,14 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
         >
           <CopyButton
             tooltipContentProperties={{ side: 'bottom' }}
-            size='icon'
+            size='icon-xs'
             getText={() => serializeMessage(displayMessage)}
             tooltip='Copy message'
-            className='size-7'
           />
           {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
           <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />
         </div>
         {/* A trailing request's indicator sits below its revision card, aligned with the activity rows. */}
-        {isUser ? <ChatMessagePlanning messageId={messageId} className='-mt-1 ml-0' /> : null}
       </div>
     </article>
   );

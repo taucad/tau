@@ -195,6 +195,11 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release"
+      },
+      "configurations": {
+        "staging": {
+          "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release --skip-notarization"
+        }
       }
     },
     "package-macos-unsigned": {
@@ -264,6 +269,11 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-macos-package.mts --release"
+      },
+      "configurations": {
+        "staging": {
+          "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-macos-package.mts --release --skip-notarization"
+        }
       }
     },
     "verify-macos-unsigned": {
@@ -291,6 +301,18 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/check-renderer-payload.mts"
+      }
+    },
+    "publish": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/publish-desktop.mts"
+      }
+    },
+    "verify-ota": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-ota.mts"
       }
     }
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseLogEvent } from '@taucad/agent-host';
+import { parseLogEvent, userProviderMessageSchema } from '@taucad/agent-host';
 import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 import { getReasoningEndedAtMs } from '@taucad/chat';
@@ -17,7 +17,11 @@ import {
   parseAgentHostApproval,
   projectTurnSettlement,
 } from '#services/agent-host-event-projection.js';
+import type { AgentHostLiveBlocks } from '#services/agent-host-event-projection.js';
+import { selectChatActivityCue } from '#utils/chat-activity-cue.js';
 import { chatTooLongMessage, parseErrorForPersistence } from '#utils/error.utils.js';
+import { buildUserMessage } from '#utils/chat.utils.js';
+import { userProviderMessageOf } from '#chat-clients/turn-intent.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
 import hexagonalNutFourRunLog from '#services/__fixtures__/daemon-reattach-hexnut-4runs.jsonl?raw';
 
@@ -387,6 +391,7 @@ describe('projectAgentHostEvent', () => {
     expect(part).toEqual({
       type: 'reasoning',
       text: 'Inspecting.',
+      id: 'assistant-live:thinking:0',
       state: 'done',
       providerMetadata: { common: { reasoningStartedAtMs: 100, reasoningEndedAtMs: 2100 } },
     });
@@ -731,6 +736,7 @@ describe('projectAgentHostEvent', () => {
           interruptId: 'approval-1',
           kind: 'approval',
           prompt: 'write hello.txt',
+          request: { title: 'write hello.txt', input: undefined },
           options: [
             { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
             { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
@@ -739,6 +745,30 @@ describe('projectAgentHostEvent', () => {
       },
       { type: 'tool-approval-request', approvalId: 'approval-1', toolCallId: 'approval-1' },
     ]);
+  });
+
+  it('retains full input and readable elicitation content instead of only an opaque ID', () => {
+    const input = { serverName: 'cua_repl', schema: { type: 'object', properties: {} } };
+    const [part] = projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'app-permission',
+      phase: 'requested',
+      reason: 'Allow elicitation:opaque?',
+      payload: {
+        prompt: 'Allow elicitation:opaque?',
+        context: {
+          toolCall: {
+            rawInput: input,
+            content: [{ type: 'content', content: { type: 'text', text: 'Allow Computer Use to use Tau?' } }],
+          },
+        },
+      },
+    });
+    expect(part).toMatchObject({
+      type: 'tool-input-available',
+      input: { request: { title: 'Allow Computer Use to use Tau?', input } },
+    });
   });
 
   it('carries the ledger correlation a print request attaches, and nothing else from its context', () => {
@@ -1344,8 +1374,8 @@ describe('projectTurnFinalized', () => {
 
 describe('external tool-call chunks', () => {
   const externalMetadata = { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } } as const;
-  const chunksOf = (message: unknown): readonly UIMessageChunk[] =>
-    projectAgentHostEvent({ ...base, type: 'message.appended', message } as AgentLogEvent);
+  const chunksOf = (message: unknown, blocks?: AgentHostLiveBlocks): readonly UIMessageChunk[] =>
+    projectAgentHostEvent({ ...base, type: 'message.appended', message } as AgentLogEvent, blocks);
 
   it("marks every external call dynamic, and carries the emitter's own facts", () => {
     const [chunk] = chunksOf({
@@ -1419,39 +1449,103 @@ describe('external tool-call chunks', () => {
     expect(chunk).toMatchObject({ toolMetadata: { tau: { kind: 'read', nativeName: 'list_directory' } } });
   });
 
-  it('keeps a normalized external Tau MCP call on one dynamic SDK identity', async () => {
+  it.each([false, true])(
+    'merges sparse results (isError=%s) without leaking facts or retaining replaced content',
+    (isError) => {
+      const blocks: AgentHostLiveBlocks = new Map();
+      const input = {
+        id: 'input',
+        role: 'tool-input',
+        toolCallId: 'shared-id',
+        toolName: 'shell',
+        call: { toolCallId: 'vendor-id', title: 'Run script', content: [{ type: 'text', text: 'Old content' }] },
+        content: { command: 'script' },
+        metadata: externalMetadata,
+      } as const;
+      const output = {
+        id: 'output',
+        role: 'tool-output',
+        toolCallId: 'shared-id',
+        toolName: 'shell',
+        call: { toolCallId: 'vendor-id', status: isError ? 'failed' : 'completed', content: [] },
+        content: 'Captured output',
+        isError,
+        metadata: externalMetadata,
+      } as const;
+      projectAgentHostEvent({ ...base, type: 'message.appended', message: input }, blocks);
+      const [sameRun] = projectAgentHostEvent({ ...base, type: 'message.appended', message: output }, blocks);
+      expect(sameRun).toMatchObject({
+        type: isError ? 'tool-output-error' : 'tool-output-available',
+        ...(isError ? { errorText: 'Captured output' } : { output: 'Captured output' }),
+        toolMetadata: {
+          tau: { toolCallId: 'vendor-id', title: 'Run script', status: isError ? 'failed' : 'completed', content: [] },
+        },
+      });
+      const { call: _call, ...outputWithoutCall } = output;
+      const [otherRun] = projectAgentHostEvent(
+        { ...base, runId: 'another-run', type: 'message.appended', message: outputWithoutCall },
+        blocks,
+      );
+      expect(otherRun).toMatchObject({
+        toolMetadata: {
+          tau: { origin: 'external', agentId: 'codex' },
+        },
+      });
+      expect(otherRun).not.toHaveProperty('toolMetadata.tau.title');
+      expect(otherRun).not.toHaveProperty('toolMetadata.tau.toolCallId');
+      const [otherCall] = projectAgentHostEvent(
+        { ...base, type: 'message.appended', message: { ...outputWithoutCall, toolCallId: 'another-call' } },
+        blocks,
+      );
+      expect(otherCall).not.toHaveProperty('toolMetadata.tau.title');
+      expect(otherCall).not.toHaveProperty('toolMetadata.tau.toolCallId');
+    },
+  );
+
+  it.each(['codex', 'grok'])('keeps a normalized %s Tau MCP call on one dynamic SDK identity', async (agentId) => {
+    const blocks: AgentHostLiveBlocks = new Map();
     const metadata = {
-      tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex', presentation: 'tau-mcp' },
+      tauInternal: { kind: 'external-tool', origin: 'external', agentId, presentation: 'tau-mcp' },
     } as const;
-    const [input] = chunksOf({
-      id: 'tau-mcp-input',
-      role: 'tool-input',
-      toolCallId: 'call-mcp',
-      toolName: 'screenshot',
-      call: {
-        toolCallId: 'vendor-call',
-        kind: 'execute',
-        nativeName: 'screenshot',
-        content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+    const [input] = chunksOf(
+      {
+        id: 'tau-mcp-input',
+        role: 'tool-input',
+        toolCallId: 'call-mcp',
+        toolName: 'screenshot',
+        call: {
+          toolCallId: 'vendor-call',
+          kind: 'execute',
+          ...(agentId === 'codex' ? { nativeName: 'screenshot' } : {}),
+          content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+        },
+        content: { targetFile: 'main.ts', mode: 'single' },
+        metadata,
       },
-      content: { targetFile: 'main.ts', mode: 'single' },
-      metadata,
-    });
-    const [output] = chunksOf({
-      id: 'tau-mcp-output',
-      role: 'tool-output',
-      toolCallId: 'call-mcp',
-      toolName: 'screenshot',
-      content: { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
-      isError: false,
-      call: { toolCallId: 'vendor-call', kind: 'execute', nativeName: 'screenshot' },
-      metadata,
-    });
+      blocks,
+    );
+    const [output] = chunksOf(
+      {
+        id: 'tau-mcp-output',
+        role: 'tool-output',
+        toolCallId: 'call-mcp',
+        toolName: 'screenshot',
+        content: { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
+        isError: false,
+        call: {
+          toolCallId: 'vendor-call',
+          kind: 'execute',
+          ...(agentId === 'codex' ? { nativeName: 'screenshot' } : {}),
+        },
+        metadata,
+      },
+      blocks,
+    );
 
     expect(input).toMatchObject({ type: 'tool-input-available', toolName: 'screenshot' });
     expect(input).toHaveProperty('dynamic', true);
     expect(input).toMatchObject({
-      toolMetadata: { tau: { origin: 'external', agentId: 'codex', presentation: 'tau-mcp' } },
+      toolMetadata: { tau: { origin: 'external', agentId, presentation: 'tau-mcp' } },
     });
     expect(output).toMatchObject({ type: 'tool-output-available', output: { images: [{ view: 'isometric' }] } });
     expect(output).toHaveProperty('dynamic', true);
@@ -1466,11 +1560,17 @@ describe('external tool-call chunks', () => {
     for await (const message of readUIMessageStream<MyUIMessage>({ stream })) {
       parts = message.parts;
     }
+    expect(parts.filter((part) => part.type === 'dynamic-tool')).toHaveLength(1);
     expect(parts.find((part) => part.type === 'dynamic-tool')).toMatchObject({
       type: 'dynamic-tool',
       state: 'output-available',
       toolMetadata: {
         tau: {
+          toolCallId: 'vendor-call',
+          origin: 'external',
+          agentId,
+          presentation: 'tau-mcp',
+          ...(agentId === 'codex' ? { nativeName: 'screenshot' } : {}),
           content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
         },
       },
@@ -1645,6 +1745,20 @@ describe('external attribution', () => {
    inlines them (the legacy `image` arm, D14). */
 describe('projectAgentHostUserMessage attachments', () => {
   const attachmentHash = 'd'.repeat(64);
+
+  it("should round-trip a composed message's geometry references through the host log", () => {
+    const reference = {
+      resource: { kind: 'workspace-file', path: 'gears/main.ts' },
+      target: { kind: 'component', componentId: 'component:sun_gear', label: 'Sun gear', componentKind: 'part' },
+    } as const;
+    const recorded = userProviderMessageOf([
+      buildUserMessage({ text: 'Widen @cad[gears/main.ts#component:sun_gear]', references: [reference] }),
+    ]);
+    expect(recorded.metadata).toEqual({ references: [reference] });
+    expect(projectAgentHostUserMessage(userProviderMessageSchema.parse(recorded)).metadata?.references).toEqual([
+      reference,
+    ]);
+  });
 
   it('should round-trip a file-ref image block to its attachment file part', () => {
     const message = projectAgentHostUserMessage({
@@ -2055,4 +2169,161 @@ describe('chat activity indicator resting block: text rest on the part', () => {
       ),
     ).toEqual([]);
   });
+});
+
+it.each(['commentary', 'final_answer', 'partial_answer', 'future_phase', undefined])(
+  'should preserve phase %s through live/checkpoint reconciliation and reload into the activity cue',
+  async (phase) => {
+    const identity = { chatId: 'chat', runId: base.runId, messageId: 'phase-message', contentIndex: 0 };
+    const live: AgentLiveEvent[] = [
+      { ...identity, type: 'text-start', phase },
+      { ...identity, type: 'text-delta', delta: 'Checking ', offset: 0, phase },
+      { ...identity, type: 'text-delta', delta: 'geometry.', offset: 9, phase },
+      { ...identity, type: 'text-end', content: 'Checking geometry.', phase },
+    ];
+    const durable = (text: string, checkpoint: boolean): AgentLogEvent =>
+      parseLogEvent({
+        ...base,
+        type: 'message.appended',
+        message: {
+          id: identity.messageId,
+          role: 'assistant',
+          content: [{ type: 'text', text }],
+          metadata: {
+            ...(phase === undefined ? {} : { phase }),
+            tauInternal: { kind: 'external', origin: 'external', streamState: checkpoint ? 'checkpoint' : 'final' },
+          },
+        },
+      });
+    await Promise.all(
+      [
+        [live[0], live[1], durable('Checking ', true), live[2], live[3], durable('Checking geometry.', false)],
+        [durable('Checking ', true), ...live, durable('Checking geometry.', false)],
+        [durable('Checking geometry.', false), ...live],
+        [durable('Checking geometry.', false)],
+        live,
+      ].map(async (events) => {
+        const blocks = new Map();
+        const chunks = events.flatMap((event) => {
+          if (!event) {
+            throw new Error('Missing phase fixture');
+          }
+          return 'leaderEpoch' in event
+            ? projectAgentHostEvent(event, blocks)
+            : projectAgentHostLiveEvent(event, blocks);
+        });
+        const stream = new ReadableStream<UIMessageChunk>({
+          start(controller) {
+            for (const chunk of chunks) {
+              controller.enqueue(chunk);
+            }
+            controller.close();
+          },
+        });
+        let parts: MyUIMessage['parts'] = [];
+        for await (const message of readUIMessageStream<MyUIMessage>({
+          stream,
+          onError(error) {
+            throw error;
+          },
+        })) {
+          parts = message.parts;
+          const text = parts.find((part) => part.type === 'text');
+          if (text?.type === 'text' && text.text !== '') {
+            expect(text.providerMetadata?.['common']?.['messagePhase']).toBe(phase);
+          }
+        }
+        expect(parts.filter((part) => part.type === 'text').map((part) => part.text)).toEqual(['Checking geometry.']);
+        expect(selectChatActivityCue({ runState: 'working', chatStatus: 'streaming', parts })?.sentence).toBe(
+          phase === 'commentary' ? 'Checking geometry.' : 'Planning next moves…',
+        );
+      }),
+    );
+  },
+);
+
+it('should keep the latest structured summary through live, checkpoint, duplicate and durable-only replay', async () => {
+  const identity = { chatId: 'chat', runId: base.runId, messageId: 'summary', contentIndex: 0 };
+  const first = '**Preparing supplemental CAD details**';
+  const last = '**Checking plot quality**';
+  const full = `${first}\n\n${last}`;
+  const live: AgentLiveEvent[] = [
+    { ...identity, type: 'thinking-start', timestamp: 100, reasoningSummary: first },
+    { ...identity, type: 'thinking-delta', delta: first, offset: 0, reasoningSummary: first },
+    { ...identity, type: 'thinking-delta', delta: `\n\n${last}`, offset: first.length, reasoningSummary: last },
+    { ...identity, type: 'thinking-end', content: full, timestamp: 200, reasoningSummary: last },
+  ];
+  const durable = (text: string, summary: string, checkpoint: boolean): AgentLogEvent =>
+    parseLogEvent({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: identity.messageId,
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: text }],
+        metadata: {
+          reasoningSummary: summary,
+          reasoningTimings: [{ contentIndex: 0, startedAtMs: 100, endedAtMs: 200 }],
+          tauInternal: { kind: 'external', origin: 'external', streamState: checkpoint ? 'checkpoint' : 'final' },
+        },
+      },
+    });
+  await Promise.all(
+    [
+      live,
+      [
+        live[0],
+        live[1],
+        durable(first, first, true),
+        live[2],
+        live[1],
+        durable(first, first, true),
+        live[3],
+        durable(full, last, false),
+      ],
+      [durable(first, first, true), ...live, durable(full, last, false)],
+      [durable(full, last, false), ...live],
+      [durable(full, last, false)],
+    ].map(async (events) => {
+      const blocks: AgentHostLiveBlocks = new Map();
+      const chunks = events.flatMap((event) => {
+        if (!event) {
+          throw new Error('Missing reasoning fixture');
+        }
+        return 'leaderEpoch' in event ? projectAgentHostEvent(event, blocks) : projectAgentHostLiveEvent(event, blocks);
+      });
+      const stream = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          for (const chunk of chunks) {
+            controller.enqueue(chunk);
+          }
+          controller.close();
+        },
+      });
+      let parts: MyUIMessage['parts'] = [];
+      let sawLatest = false;
+      for await (const message of readUIMessageStream<MyUIMessage>({
+        stream,
+        onError(error) {
+          throw error;
+        },
+      })) {
+        parts = message.parts;
+        const part = parts.find((candidate) => candidate.type === 'reasoning');
+        if (part?.type === 'reasoning' && part.text === full) {
+          expect(part.providerMetadata?.['common']?.['reasoningSummary']).toBe(last);
+          sawLatest = true;
+        }
+        if (sawLatest) {
+          expect(selectChatActivityCue({ runState: 'working', chatStatus: 'streaming', parts })?.sentence).toBe(
+            'Checking plot quality',
+          );
+        }
+      }
+      expect(parts.filter((part) => part.type === 'reasoning').map((part) => part.text)).toEqual([full]);
+      expect(selectChatActivityCue({ runState: 'working', chatStatus: 'streaming', parts })?.sentence).toBe(
+        'Checking plot quality',
+      );
+    }),
+  );
 });

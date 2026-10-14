@@ -54,6 +54,7 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { lstat, realpath } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
+import { z } from 'zod';
 
 import { CreateElicitationRequest as CreateElicitationRequestGuards } from '@agentclientprotocol/sdk';
 import type {
@@ -65,6 +66,7 @@ import type {
   Implementation,
   McpServer,
   PermissionOption,
+  PromptResponse,
   SessionConfigOption,
   SessionUpdate,
   StopReason,
@@ -219,7 +221,9 @@ export const isPresent = <Value>(value: Value): value is NonNullable<Value> => v
  */
 const confine = async (cwd: string, path: string, intent: 'read' | 'write'): Promise<string> => {
   const resolved = resolve(cwd, path);
-  if (resolved !== cwd && !resolved.startsWith(cwd + sep)) {
+  const backingRoot = await realpath(cwd);
+  // Agents may canonicalize the session root (macOS /var is /private/var).
+  if (![resolve(cwd), backingRoot].some((root) => resolved === root || resolved.startsWith(root + sep))) {
     throw maskedPath(`This agent may only read and write inside ${cwd}.`);
   }
 
@@ -240,7 +244,7 @@ const confine = async (cwd: string, path: string, intent: 'read' | 'write'): Pro
       existing = parent;
     }
   }
-  const [backingRoot, backingExisting] = await Promise.all([realpath(cwd), realpath(existing)]);
+  const backingExisting = await realpath(existing);
   const backing = resolve(backingExisting, relative(existing, resolved));
   const backingRelative = relative(backingRoot, backing);
   if (isAbsolute(backingRelative) || backingRelative === '..' || backingRelative.startsWith(`..${sep}`)) {
@@ -265,14 +269,26 @@ const confine = async (cwd: string, path: string, intent: 'read' | 'write'): Pro
  *
  * @param cwd - Absolute session working directory.
  * @param params - The path, and the optional line window.
+ * @param skillDirectories - Published skill roots available for reading only.
  * @returns The file's text, or the requested slice of its lines.
  */
 export const readSessionTextFile = async (
   cwd: string,
   params: { readonly path: string; readonly line?: unknown; readonly limit?: unknown },
+  skillDirectories: readonly string[] = [],
 ): Promise<string> => {
+  let path: string;
+  try {
+    path = await confine(cwd, params.path, 'read');
+  } catch (error) {
+    const [skillRoot, ...remaining] = skillDirectories;
+    if (skillRoot === undefined || !(error instanceof Error) || !('code' in error) || error.code !== maskedPathCode) {
+      throw error;
+    }
+    return readSessionTextFile(skillRoot, { ...params, path: resolve(cwd, params.path) }, remaining);
+  }
   const provider = new NodeFsProvider(cwd);
-  const content = new TextDecoder().decode(await provider.readFile(await confine(cwd, params.path, 'read')));
+  const content = new TextDecoder().decode(await provider.readFile(path));
   /* `unknown`, because ACP spells "no window" as an omitted field *and* as an
    * explicit JSON `null`, and a reader that trusted the declared type would
    * turn the second one into line zero and drop the file's first line. */
@@ -602,27 +618,41 @@ type NormalizedTauMcpCall = {
   readonly toolName: keyof typeof tauMcpSchemas;
   readonly arguments: JsonValue;
   readonly outputSchema: JsonSchema;
+  readonly grokServerName?: string;
 };
 
 const normalizedTauMcpCall = (
   update: AcpToolUpdate,
   serverName: string | undefined,
+  agentId: string,
 ): NormalizedTauMcpCall | undefined => {
   const input = asRecord(update.rawInput);
-  const name = input?.['tool'];
+  const grokTool = asRecord(asRecord(update._meta)?.['x.ai/tool']);
+  const grok = agentId === 'grok' && grokTool?.['name'] === 'use_tool' && grokTool['namespace'] === 'grok_build';
+  const qualifiedName = input?.['tool_name'];
+  const grokPrefix = `${serverName}__`;
+  const name = grok
+    ? typeof qualifiedName === 'string' && qualifiedName.startsWith(grokPrefix)
+      ? qualifiedName.slice(grokPrefix.length)
+      : undefined
+    : input?.['tool'];
   if (
     serverName === undefined ||
-    input?.['server'] !== serverName ||
-    asRecord(update._meta)?.['is_mcp_tool_call'] !== true ||
+    (!grok && (input?.['server'] !== serverName || asRecord(update._meta)?.['is_mcp_tool_call'] !== true)) ||
     typeof name !== 'string' ||
     !Object.hasOwn(tauMcpSchemas, name)
   ) {
     return undefined;
   }
   const schema = tauMcpSchemas[name as keyof typeof tauMcpSchemas];
-  const parsed = schema.input.safeParse(input['arguments']);
+  const parsed = schema.input.safeParse(input?.[grok ? 'tool_input' : 'arguments']);
   return parsed.success
-    ? { toolName: name as keyof typeof tauMcpSchemas, arguments: asJson(parsed.data), outputSchema: schema.output }
+    ? {
+        toolName: name as keyof typeof tauMcpSchemas,
+        arguments: asJson(parsed.data),
+        outputSchema: schema.output,
+        ...(grok ? { grokServerName: serverName } : {}),
+      }
     : undefined;
 };
 
@@ -637,7 +667,38 @@ const mcpResult = (
   tool: NormalizedTauMcpCall,
   failed: boolean,
 ): { readonly content: JsonValue; readonly isError: boolean } => {
-  const envelope = asRecord(rawOutput);
+  let envelope = asRecord(rawOutput);
+  if (tool.grokServerName !== undefined) {
+    const output = asRecord(envelope?.['output']);
+    const text = output?.['OkayOutput'];
+    const qualified =
+      envelope?.['type'] === 'MCP' &&
+      envelope['server_name'] === tool.grokServerName &&
+      envelope['tool_name'] === tool.toolName;
+    let structuredContent: unknown;
+    if (qualified && typeof text === 'string') {
+      try {
+        // Grok joins Tau's summary text and the final structured JSON block into one string.
+        const json =
+          (tool.toolName === toolName.screenshot && /^Captured \d+ CAD views?\./u.test(text)) ||
+          (tool.toolName === toolName.testModel && /^GeoSpec passed \d+ of \d+ requirements\./u.test(text))
+            ? text.slice(text.lastIndexOf('\n') + 1)
+            : text;
+        structuredContent = JSON.parse(json);
+      } catch {
+        /* Invalid JSON is refused by the output schema below. */
+      }
+    }
+    envelope = qualified
+      ? {
+          result: {
+            structuredContent,
+            content: typeof text === 'string' ? [{ type: 'text', text }] : [],
+            isError: failed,
+          },
+        }
+      : undefined;
+  }
   if (!envelope) {
     return {
       content: { errorCode: 'MCP_TRANSPORT_ERROR', message: 'Tau MCP returned no result envelope.' },
@@ -1062,6 +1123,46 @@ const vendorUsageOf = (usage: AcpUsage): JsonObject => {
   return totals;
 };
 
+const grokUsageSchema = z.object({
+  inputTokens: z.number().nonnegative(),
+  outputTokens: z.number().nonnegative(),
+  totalTokens: z.number().nonnegative(),
+  cachedReadTokens: z.number().nonnegative().optional(),
+  cacheCreationTokens: z.number().nonnegative().optional(),
+  reasoningTokens: z.number().nonnegative().optional(),
+});
+
+/**
+ * Normalize Grok's per-prompt counters to the cumulative ACP usage contract.
+ * @internal
+ * @param response - Completed prompt response.
+ * @param agentId - The selected adapter.
+ * @param prior - Last durably recorded session totals.
+ * @returns Standard usage, or validated Grok totals including this turn.
+ */
+export const promptUsageOf = (
+  response: PromptResponse,
+  agentId: string,
+  prior: AcpUsage | undefined,
+): AcpUsage | undefined => {
+  if (isPresent(response.usage) || agentId !== 'grok') {
+    return response.usage ?? undefined;
+  }
+  const parsed = grokUsageSchema.safeParse(response._meta?.['usage']);
+  if (!parsed.success) {
+    return undefined;
+  }
+  const usage = parsed.data;
+  return {
+    inputTokens: (prior?.inputTokens ?? 0) + usage.inputTokens,
+    outputTokens: (prior?.outputTokens ?? 0) + usage.outputTokens,
+    totalTokens: (prior?.totalTokens ?? 0) + usage.totalTokens,
+    cachedReadTokens: (prior?.cachedReadTokens ?? 0) + (usage.cachedReadTokens ?? 0),
+    cachedWriteTokens: (prior?.cachedWriteTokens ?? 0) + (usage.cacheCreationTokens ?? 0),
+    thoughtTokens: (prior?.thoughtTokens ?? 0) + (usage.reasoningTokens ?? 0),
+  };
+};
+
 /**
  * Project one turn's updates into the chat's durable log.
  *
@@ -1108,6 +1209,9 @@ export const createTurnProjection = (options: {
   type AssistantBlock = {
     readonly sourceId: string;
     readonly kind: 'text' | 'thinking';
+    phase?: string;
+    reasoningSummary?: string;
+    summaryIndex?: number;
     readonly durableId: string;
     readonly startedAtMs: number;
     text: string;
@@ -1203,6 +1307,8 @@ export const createTurnProjection = (options: {
   ): ProviderMessageMetadata => {
     const { usage, model, cost, context } = reported;
     return {
+      ...(block?.phase === undefined ? {} : { phase: block.phase }),
+      ...(block?.reasoningSummary === undefined ? {} : { reasoningSummary: block.reasoningSummary }),
       /* `model` *and* `responseModel`: the first is what ran, the second is what
        * every existing usage reader already looks for, and for an external turn
        * they are the same fact — Tau never substitutes a model here. */
@@ -1247,6 +1353,8 @@ export const createTurnProjection = (options: {
         contentIndex: 0,
         content: block.text,
         ...(block.kind === 'thinking' ? { timestamp: block.endedAt } : {}),
+        ...(block.phase === undefined ? {} : { phase: block.phase }),
+        ...(block.reasoningSummary === undefined ? {} : { reasoningSummary: block.reasoningSummary }),
       });
     }
     const message: ProviderMessage = {
@@ -1390,7 +1498,7 @@ export const createTurnProjection = (options: {
       ];
     }
     const rawOutput = update.rawOutput === undefined ? open.rawOutput : update.rawOutput;
-    const updatedTauMcp = normalizedTauMcpCall(update, options.tauMcpServerName);
+    const updatedTauMcp = normalizedTauMcpCall(update, options.tauMcpServerName, options.agentId);
     const tauMcp = open.tauMcp ?? updatedTauMcp;
     const facts = withoutDuplicateMcpContent(mergedFacts, tauMcp, rawOutput);
     const input =
@@ -1475,7 +1583,7 @@ export const createTurnProjection = (options: {
     const callId = options.createId();
     const inputMessageId = options.createId();
     const facts = callFacts(update);
-    const tauMcp = normalizedTauMcpCall(update, options.tauMcpServerName);
+    const tauMcp = normalizedTauMcpCall(update, options.tauMcpServerName, options.agentId);
     const callToolName = tauMcp?.toolName ?? facts.nativeName ?? update.title;
     const input = tauMcp?.arguments ?? asJson(update.rawInput ?? { title: update.title });
     const inputMessage: ToolInputProviderMessage = {
@@ -1518,7 +1626,7 @@ export const createTurnProjection = (options: {
           await flushBoundary();
         }
         const priorBlock = update.messageId === undefined ? pending : assistantBlocks.get(key);
-        const block = (priorBlock?.endedAt === undefined ? priorBlock : undefined) ?? {
+        const block: AssistantBlock = (priorBlock?.endedAt === undefined ? priorBlock : undefined) ?? {
           sourceId,
           kind,
           durableId: options.createId(),
@@ -1526,6 +1634,33 @@ export const createTurnProjection = (options: {
           text: '',
           committed: false,
         };
+        // Only Codex's pinned adapter owns this extension. Unknown phase values
+        // survive transport but never become inferred progress in the UI.
+        const phase =
+          options.agentId === 'codex' && kind === 'text'
+            ? asRecord(asRecord(update._meta)?.['codex'])?.['phase']
+            : undefined;
+        if (typeof phase === 'string') {
+          block.phase = phase;
+        }
+        const summary =
+          options.agentId === 'codex' && kind === 'thinking'
+            ? asRecord(asRecord(asRecord(update._meta)?.['codex'])?.['reasoningSummary'])
+            : undefined;
+        const summaryIndex = summary?.['index'];
+        const summaryText = summary?.['text'];
+        if (
+          typeof summaryIndex === 'number' &&
+          Number.isSafeInteger(summaryIndex) &&
+          summaryIndex >= 0 &&
+          typeof summaryText === 'string' &&
+          summaryText !== '' &&
+          summaryIndex >= (block.summaryIndex ?? 0)
+        ) {
+          block.reasoningSummary =
+            summaryIndex === block.summaryIndex ? (block.reasoningSummary ?? '') + summaryText : summaryText;
+          block.summaryIndex = summaryIndex;
+        }
         if (update.messageId !== undefined) {
           assistantBlocks.set(key, block);
         }
@@ -1537,6 +1672,8 @@ export const createTurnProjection = (options: {
             messageId: block.durableId,
             contentIndex: 0,
             ...(kind === 'thinking' ? { timestamp: block.startedAtMs } : {}),
+            ...(block.phase === undefined ? {} : { phase: block.phase }),
+            ...(block.reasoningSummary === undefined ? {} : { reasoningSummary: block.reasoningSummary }),
           });
         }
         block.text += delta;
@@ -1548,6 +1685,8 @@ export const createTurnProjection = (options: {
           contentIndex: 0,
           delta,
           offset: block.text.length - delta.length,
+          ...(block.phase === undefined ? {} : { phase: block.phase }),
+          ...(block.reasoningSummary === undefined ? {} : { reasoningSummary: block.reasoningSummary }),
         });
         if (idleFlush) {
           clearTimeout(idleFlush);

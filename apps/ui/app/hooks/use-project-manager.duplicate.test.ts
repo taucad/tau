@@ -76,7 +76,9 @@ const mockSetProjectFileSystemConfig = vi.fn(async () => {
 const mockPinHomeStorageBackend = vi.fn(async (backend: 'indexeddb' | 'opfs') => backend);
 const mockGetProjectCreationLocation = vi.fn();
 const mockSetProjectCreationLocation = vi.fn();
+const mockRequestHomeStoragePersistence = vi.fn(async () => undefined);
 vi.mock('#filesystem/handle-store.js', () => ({
+  requestHomeStoragePersistence: mockRequestHomeStoragePersistence,
   pinHomeStorageBackend: mockPinHomeStorageBackend,
   getHomeStorageBackend: vi.fn(async () => 'opfs'),
   getProjectCreationLocation: mockGetProjectCreationLocation,
@@ -314,6 +316,7 @@ describe('useProjectManager.duplicateProject', () => {
       workspaceId: 'wsp_alpha',
     });
     expect(mockPinHomeStorageBackend).not.toHaveBeenCalled();
+    expect(mockRequestHomeStoragePersistence).not.toHaveBeenCalled();
     expect(mockGetProjectCreationLocation).not.toHaveBeenCalled();
     expect(mockSetProjectCreationLocation).not.toHaveBeenCalled();
   });

@@ -1610,6 +1610,7 @@ export const chatRunMachine = setup({
               const failure = {
                 code: event.effect === 'unknown' ? 'RUN_ABANDONED' : event.code,
                 message: event.message,
+                ...(event.details === undefined ? {} : { details: event.details }),
               };
               const slot: Slot = {
                 ...context.slot,

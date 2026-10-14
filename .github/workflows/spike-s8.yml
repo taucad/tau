@@ -1,0 +1,53 @@
+# Spike S8 (native-dependency-resolution charter, wave 0): readWheel prototype against real and synthesized wheels (EQ8)
+# Spike code under scripts/spikes/native-deps/linux/s8; the run's evidence is the uploaded artifact
+# and the job summary. Downloaded bytes are inspected as data and never executed.
+name: Spike S8 (readWheel)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/spike-s8.yml'
+      - 'scripts/spikes/native-deps/linux/s8/**'
+      - 'packages/plugins/build123d/python/requirements.lock'
+      - 'scripts/spikes/native-deps/linux/annotate.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-s8-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s8:
+    name: S8 readWheel and closure wheel survey
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+      - name: Download two pinned wheels and run the reader
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence" "$RUNNER_TEMP/s8"
+          set +e
+          node scripts/spikes/native-deps/linux/s8/run.ts "$RUNNER_TEMP/s8" > "$RUNNER_TEMP/evidence/s8.json"
+          status=$?
+          set -e
+          node -e 'const r=require(process.argv[1]);console.log(JSON.stringify(r.summary,null,2));for(const c of r.cases)console.log(c.pass?"PASS":"FAIL",c.id,JSON.stringify(c.result).slice(0,300))' "$RUNNER_TEMP/evidence/s8.json" | tee "$RUNNER_TEMP/evidence/s8-summary.txt"
+          { echo '```'; cat "$RUNNER_TEMP/evidence/s8-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S8' "$RUNNER_TEMP/evidence/s8-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s8-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

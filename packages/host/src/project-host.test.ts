@@ -22,7 +22,8 @@ import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 
 import * as agentTools from '#agent-tools.js';
-import { closeParameterActor, createProjectHost, createProjectHostActor, openProjectHost } from '#project-host.js';
+import { closeParameterActor } from '#parameter-actors.js';
+import { createProjectHost, createProjectHostActor, openProjectHost } from '#project-host.js';
 import type { ProjectFileSystem, ProjectHost, ProjectHostOptions, ProjectHostRuntimeClient } from '#project-host.js';
 import type { TurnCheckout } from '#revisions.js';
 

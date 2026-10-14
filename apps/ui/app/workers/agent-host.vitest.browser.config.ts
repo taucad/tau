@@ -70,6 +70,7 @@ export default defineConfig({
     include: [
       'app/workers/agent-host.browser.test.ts',
       'app/workers/agent-host-resident.browser.test.ts',
+      'app/workers/agent-host-recovery.browser.test.ts',
       'app/workers/agent-host-executor-view.browser.test.ts',
       'app/workers/seam.browser.test.ts',
       'app/workers/gltf-codec.browser.test.ts',
@@ -79,7 +80,6 @@ export default defineConfig({
       'app/machines/web-locks.browser.test.ts',
       'app/machines/revisions-opfs.browser.test.ts',
       'app/components/geometry/loader/metal-morph-spinner.browser.test.tsx',
-      'app/components/geometry/graphics/three/materials/section-clip.browser.test.ts',
       'app/components/markdown/chat-markdown-hyperlink.browser.test.tsx',
     ],
     fileParallelism: false,

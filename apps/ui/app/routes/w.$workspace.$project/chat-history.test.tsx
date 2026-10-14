@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { StrictMode, useImperativeHandle } from 'react';
+import { useImperativeHandle } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import type { MyUIMessage } from '@taucad/chat';
@@ -129,6 +129,16 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
   },
 }));
 
+// Queue behavior is covered by its view and session-store suites; this leaf fixture owns history composition.
+vi.mock('#components/chat/chat-message-queue.js', () => ({ ChatMessageQueue: () => null }));
+vi.mock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({
+  ChatMessagePlanning: () => (
+    <div role='status' aria-label='Current activity'>
+      Reading files
+    </div>
+  ),
+}));
+
 vi.mock('#routes/w.$workspace.$project/chat-message.js', () => ({
   ChatMessage: ({ messageId, footer }: { readonly messageId: string; readonly footer?: React.ReactNode }) => (
     <div data-testid='chat-message' data-message-id={messageId}>
@@ -189,11 +199,11 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanelErrorContent: () => null,
 }));
 
-vi.mock('#components/ui/key-shortcut.js', () => ({
+vi.mock('@taucad/ui/components/key-shortcut', () => ({
   KeyShortcut: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Ctrl+C' }),
 }));
 
@@ -225,15 +235,18 @@ const capturedVirtuoso: {
   totalCount?: number;
   itemContent?: (index: number) => React.ReactNode;
   followOutput?: (atBottom: boolean) => 'auto' | false;
+  initialTopMostItemIndex?: { index: string; align: string };
 } = {};
 const scrollToIndexMock = vi.fn();
 vi.mock('react-virtuoso', () => ({
   Virtuoso: (properties: {
     readonly data: readonly unknown[];
+    readonly initialTopMostItemIndex: { index: string; align: string };
     readonly itemContent: (index: number, item: unknown) => React.ReactNode;
     readonly followOutput: (atBottom: boolean) => 'auto' | false;
     readonly ref?: React.Ref<{ scrollToIndex: typeof scrollToIndexMock }>;
   }) => {
+    capturedVirtuoso.initialTopMostItemIndex = properties.initialTopMostItemIndex;
     capturedVirtuoso.totalCount = properties.data.length;
     capturedVirtuoso.itemContent = async (index) => properties.itemContent(index, properties.data[index]);
     capturedVirtuoso.followOutput = properties.followOutput;
@@ -365,6 +378,7 @@ describe('ChatHistory — turn group rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capturedTextarea.onSubmit = undefined;
+    capturedVirtuoso.initialTopMostItemIndex = undefined;
     capturedVirtuoso.totalCount = undefined;
     capturedVirtuoso.itemContent = undefined;
     capturedVirtuoso.followOutput = undefined;
@@ -372,7 +386,7 @@ describe('ChatHistory — turn group rendering', () => {
     setMockMessages([]);
   });
 
-  it('should render one TurnGroup per user message and apply min-h only to the last', () => {
+  it('should render natural-height turn groups without a trailing viewport spacer', () => {
     setMockMessages([
       message('u1', 'user'),
       message('a1', 'assistant'),
@@ -394,8 +408,8 @@ describe('ChatHistory — turn group rendering', () => {
     const firstGroupMessages = firstGroup.querySelectorAll<HTMLElement>('[data-testid="chat-message"]');
     expect([...firstGroupMessages].map((node) => node.dataset['messageId'])).toEqual(['u1', 'a1']);
 
-    // Last group bundles u2 + a2 + a3, gets min-h to pin user message at top.
-    expect(lastGroup.className).toContain('min-h-(--chat-live-turn-min-h)');
+    // The last group also takes only its content height.
+    expect(lastGroup.className).not.toContain('min-h-');
     const lastGroupMessages = lastGroup.querySelectorAll<HTMLElement>('[data-testid="chat-message"]');
     expect([...lastGroupMessages].map((node) => node.dataset['messageId'])).toEqual(['u2', 'a2', 'a3']);
   });
@@ -442,10 +456,9 @@ describe('ChatHistory — turn group rendering', () => {
     const items = screen.getAllByTestId('virtuoso-item');
     expect(items).toHaveLength(1);
 
-    // Lone assistant greeting still receives min-h because it is the last
-    // (and only) group — keeps the empty-canvas effect consistent.
+    // A leading assistant greeting also takes only its content height.
     const onlyGroup = items[0]!.firstElementChild as HTMLElement;
-    expect(onlyGroup.className).toContain('min-h-(--chat-live-turn-min-h)');
+    expect(onlyGroup.className).not.toContain('min-h-');
     const messages = onlyGroup.querySelectorAll<HTMLElement>('[data-testid="chat-message"]');
     expect([...messages].map((node) => node.dataset['messageId'])).toEqual(['a0']);
   });
@@ -499,97 +512,23 @@ describe('ChatHistory — turn group rendering', () => {
     expect(typeof capturedVirtuoso.itemContent).toBe('function');
   });
 
-  it('opens hydrated history after StrictMode cancels the first pending scroll frame', () => {
-    const frames = new Map<number, FrameRequestCallback>();
-    let frameId = 0;
-    const requestSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
-      frameId += 1;
-      frames.set(frameId, callback);
-      return frameId;
-    });
-    const cancelSpy = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation((id) => {
-      frames.delete(id);
-    });
-    try {
-      setMockMessages([message('u1', 'user'), message('a1', 'assistant')]);
-      render(
-        <StrictMode>
-          <ChatHistory />
-        </StrictMode>,
-      );
-      act(() => {
-        for (const [id, callback] of frames) {
-          frames.delete(id);
-          callback(0);
-        }
-      });
-      expect(cancelSpy).toHaveBeenCalled();
-      expect(scrollToIndexMock).toHaveBeenCalledExactlyOnceWith({ index: 'LAST', align: 'start', behavior: 'instant' });
-    } finally {
-      requestSpy.mockRestore();
-      cancelSpy.mockRestore();
-    }
+  it('opens at the bottom and leaves scroll-away intact when a new turn arrives', () => {
+    setMockMessages([message('u1', 'user'), message('a1', 'assistant')]);
+    const view = render(<ChatHistory />);
+    expect(capturedVirtuoso.initialTopMostItemIndex).toEqual({ index: 'LAST', align: 'end' });
+    expect(capturedVirtuoso.followOutput?.(true)).toBe('auto');
+    expect(capturedVirtuoso.followOutput?.(false)).toBe(false);
+    setMockMessages([message('u1', 'user'), message('a1', 'assistant'), message('u2', 'user')]);
+    view.rerender(<ChatHistory className='updated' />);
+    expect(scrollToIndexMock).not.toHaveBeenCalled();
   });
 
-  it('opens an already hydrated transcript at its latest turn without repinning same-turn output', () => {
-    const callbacks: FrameRequestCallback[] = [];
-    const requestAnimationFrameSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
-      callbacks.push(callback);
-      return callbacks.length;
-    });
-    try {
-      setMockMessages([
-        message('u1', 'user'),
-        message('a1', 'assistant'),
-        message('u2', 'user'),
-        message('a2', 'assistant'),
-      ]);
-      const view = render(<ChatHistory />);
-      act(() => {
-        callbacks.at(-1)?.(0);
-      });
-      expect(scrollToIndexMock).toHaveBeenCalledExactlyOnceWith({ index: 'LAST', align: 'start', behavior: 'instant' });
-      expect(capturedVirtuoso.followOutput?.(false)).toBe(false);
-      setMockMessages([
-        message('u1', 'user'),
-        message('a1', 'assistant'),
-        message('u2', 'user'),
-        message('a2', 'assistant'),
-      ]);
-      view.rerender(<ChatHistory className='same-turn-updated' />);
-      expect(scrollToIndexMock).toHaveBeenCalledTimes(1);
-      expect(callbacks).toHaveLength(1);
-    } finally {
-      requestAnimationFrameSpy.mockRestore();
-    }
-  });
-
-  it('uses instant live following and pins a batched user plus assistant turn', () => {
-    const callbacks: FrameRequestCallback[] = [];
-    const requestAnimationFrameSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
-      callbacks.push(callback);
-      return callbacks.length;
-    });
-
-    try {
-      setMockMessages([message('u1', 'user'), message('a1', 'assistant')]);
-      const view = render(<ChatHistory />);
-      expect(capturedVirtuoso.followOutput?.(true)).toBe('auto');
-      expect(capturedVirtuoso.followOutput?.(false)).toBe(false);
-
-      setMockMessages([
-        message('u1', 'user'),
-        message('a1', 'assistant'),
-        message('u2', 'user'),
-        message('a2', 'assistant'),
-      ]);
-      view.rerender(<ChatHistory className='updated' />);
-      act(() => callbacks.at(-1)?.(0));
-
-      expect(scrollToIndexMock).toHaveBeenCalledWith({ index: 'LAST', align: 'start', behavior: 'instant' });
-    } finally {
-      requestAnimationFrameSpy.mockRestore();
-    }
+  it('keeps exactly one activity row in the composer region outside the transcript', () => {
+    setMockMessages([message('u1', 'user'), message('a1', 'assistant')]);
+    render(<ChatHistory />);
+    const activity = screen.getByRole('status', { name: 'Current activity' });
+    expect(screen.getByRole('region', { name: 'Chat composer' })).toContainElement(activity);
+    expect(screen.getByTestId('virtuoso')).not.toContainElement(activity);
   });
 });
 

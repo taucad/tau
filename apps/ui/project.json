@@ -3,9 +3,10 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/ui",
   "projectType": "application",
-  "tags": ["scope:ui", "type:app", "layer:feature", "release:app"],
+  "tags": ["scope:ui", "type:app", "layer:feature", "release:app", "deploy:staging"],
   "targets": {
     "formal:lean": {},
+    "formal": {},
     "render-calibration": {
       "executor": "nx:run-commands",
       "continuous": true,
@@ -300,11 +301,10 @@
         "cwd": "{projectRoot}",
         "commands": [
           "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts'",
-          "../../node_modules/.bin/vitest run --config app/components/geometry/graphics/svg/svg-viewer.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config app/components/geometry/graphics/three/utils/gltf-batches.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config app/components/geometry/graphics/three/viewer-resize.vitest.browser.config.ts"
+          "../../node_modules/.bin/vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts"
         ],
         "parallel": false
       }

@@ -27,6 +27,8 @@ import {
 } from '@taucad/runtime/kernel';
 import type { KernelServices } from '@taucad/runtime/kernel';
 
+import modelingPackage from '@jscad/modeling/package.json' with { type: 'json' };
+
 import { jscadExportSchemas } from '#jscad.schemas.js';
 
 import { jscadToGltf } from '#jscad-to-gltf.js';
@@ -204,7 +206,7 @@ function registerJscadModules(runtime: KernelServices, modeling: JscadModeling):
   registerKernelModule(runtime, {
     name: '@jscad/modeling',
     exports: modeling,
-    version: '2.12.6',
+    package: modelingPackage,
     globalName: 'jscadModeling',
   });
 
@@ -214,7 +216,7 @@ function registerJscadModules(runtime: KernelServices, modeling: JscadModeling):
         name: `@jscad/modeling/${subpath}`,
         exports: modeling,
         exportPath: subpath,
-        version: '2.12.6',
+        package: modelingPackage,
       });
     }
   }
@@ -268,6 +270,7 @@ export const jscadKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: jscadDetectPattern,
   builtinModuleNames: ['@jscad/modeling'],
+  builtinPackages: { '@jscad/modeling': modelingPackage },
   name: 'JscadKernel',
   version: '1.0.0',
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: ['includeEdges'] } },

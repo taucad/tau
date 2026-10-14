@@ -1,6 +1,11 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { useChatEditor, extractContent, buildEditorContentJson } from '#components/chat/tiptap/use-chat-editor.js';
+import {
+  useChatEditor,
+  extractContent,
+  buildEditorContentJson,
+  cadReferencesOfChips,
+} from '#components/chat/tiptap/use-chat-editor.js';
 import type { UseChatEditorOptions } from '#components/chat/tiptap/use-chat-editor.js';
 import { defaultCommands } from '#components/chat/tiptap/slash-command-suggestion.js';
 import type { PastedContentSegment } from '#utils/at-reference.utils.js';
@@ -265,8 +270,12 @@ describe('useChatEditor', () => {
     expect(result.current.slashCommandState).toBeUndefined();
   });
 
-  it('should turn a typed known token into its chip when followed by a space', async () => {
-    const skill = { id: '$imagegen', label: '$imagegen', description: 'Images', group: 'Commands' } as const;
+  it.each([
+    { prefix: 'Render with ', token: '$imagegen' },
+    { prefix: '', token: '$imagegen' },
+    { prefix: 'Run ', token: '/imagegen' },
+  ])('should turn a typed $token after "$prefix" into its chip when followed by a space', async ({ prefix, token }) => {
+    const skill = { id: token, label: token, description: 'Images', group: 'Commands' } as const;
     const { result } = renderHook(() => useChatEditor(createDefaultOptions({ slashCommandItems: [skill] })));
 
     await waitFor(() => {
@@ -285,15 +294,15 @@ describe('useChatEditor', () => {
 
     act(() => {
       editor.commands.focus();
-      typeText('Render with $imagegen');
+      typeText(`${prefix}${token}`);
       typeText(' ');
       typeText('now and $5');
       typeText(' ');
     });
 
     expect(extractContent(editor)).toEqual({
-      text: 'Render with $imagegen now and $5 ',
-      contextChips: [expect.objectContaining({ label: '$imagegen', chipType: 'skill' })],
+      text: `${prefix}${token} now and $5 `,
+      contextChips: [expect.objectContaining({ label: token, chipType: 'skill' })],
     });
   });
 
@@ -745,6 +754,24 @@ describe('buildEditorContentJson', () => {
       referenceToken: '@cad[main.ts#component:sun_gear]',
       geometryReference,
     });
+    expect(cadReferencesOfChips([...content.contextChips, ...content.contextChips])).toEqual([
+      {
+        resource: { kind: 'workspace-file', path: 'main.ts' },
+        target: {
+          kind: 'component',
+          componentId: 'component:sun_gear',
+          selector: '/nodes/0',
+          label: 'Sun Gear',
+          componentKind: 'part',
+        },
+      },
+    ]);
+    expect(
+      cadReferencesOfChips([
+        { id: 'a', label: 'a', chipType: 'geometry', geometryReference: '{not json' },
+        { id: 'b', label: 'b', chipType: 'geometry', geometryReference: '{"scheme":"other"}' },
+      ]),
+    ).toEqual([]);
   });
 
   it('should handle multiple adjacent chips', () => {

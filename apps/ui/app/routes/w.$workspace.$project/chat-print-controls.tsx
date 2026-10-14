@@ -4,8 +4,8 @@ import type { MachineClient, MachineDirectoryEntry, MachineManifest } from '@tau
 import { Button } from '@taucad/ui/components/button';
 import { randomUuid } from '@taucad/utils/id';
 import { isRecord } from '@taucad/utils/schema';
-import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
-import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
+import { ParameterSelect } from '@taucad/viewer/parameters/parameter-select';
+import { ParametersBoolean } from '@taucad/viewer/parameters/parameters-boolean';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import { PrintNotice, PrintRow, PrintStage, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
 import { formatAge } from '#routes/w.$workspace.$project/chat-print-summary.js';

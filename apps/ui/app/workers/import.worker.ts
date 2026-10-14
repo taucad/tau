@@ -48,6 +48,26 @@ class ArchiveTooLargeError extends Error {
 const isTooLarge = (error: unknown): boolean =>
   error instanceof ArchiveTooLargeError || (isShareError(error) && error.code === 'SHARE_ARTIFACT_LIMIT');
 
+/**
+ * The sentence a refused archive download carries, so the import says why (E14).
+ * The archive gateway answers in plain text; API refusals answer `{ error, code }`.
+ * @param response - The refused archive response.
+ * @returns The server's sentence, or the status when it gave none.
+ */
+export async function downloadRefusal(response: Response): Promise<string> {
+  const text = await response.text();
+  const body = text.trim();
+  try {
+    const { error } = JSON.parse(body) as { error?: unknown };
+    if (typeof error === 'string' && error !== '') {
+      return error;
+    }
+  } catch {
+    /* A plain-text sentence from the archive gateway. */
+  }
+  return body === '' ? `Download failed: ${response.status} ${response.statusText}` : body;
+}
+
 let extractedFiles: Map<string, Uint8Array<ArrayBuffer>> | undefined;
 let abortController: AbortController | undefined;
 
@@ -71,7 +91,7 @@ async function handleDownloadAndExtract(
       throw new ArchiveTooLargeError();
     }
     if (!response.ok) {
-      throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+      throw new Error(await downloadRefusal(response));
     }
 
     const contentLength = Number(response.headers.get('content-length') ?? 0);

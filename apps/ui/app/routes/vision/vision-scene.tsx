@@ -2,8 +2,8 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { createTauR3fGlProp } from '#components/geometry/graphics/three/canvas-three-gl.js';
-import { readGraphicsBackendQueryOverride } from '#components/geometry/graphics/graphics-backend.js';
+import { createTauR3fGlProp } from '@taucad/viewer/graphics/three/canvas-three-gl';
+import { readGraphicsBackendQueryOverride } from '#utils/graphics-backend-override.js';
 import { explodeLift, partPose, printedPart } from '@taucad/planetary-gearbox';
 import { createPrintVolume } from '#components/geometry/gearbox/gearbox.js';
 import type { GearboxPart } from '#components/geometry/gearbox/gearbox.js';
@@ -118,7 +118,7 @@ const Gearbox = ({
 export const VisionScene = memo(function VisionScene(properties: VisionSceneProperties): React.JSX.Element {
   const [error, setError] = useState<Error>();
   const backend = readGraphicsBackendQueryOverride() ?? 'webgl';
-  const renderer = useMemo(() => createTauR3fGlProp(backend, [], setError), [backend]);
+  const renderer = useMemo(() => createTauR3fGlProp(backend, [], { onCreateError: setError }), [backend]);
   const parts = useGearboxParts(properties.onReady, setError);
   if (error) {
     throw error;

@@ -45,6 +45,6 @@
     "picovoxel": "catalog:",
     "replicad": "catalog:",
     "replicad-opencascadejs": "catalog:",
-    "sharp": "^0.34.5"
+    "sharp": "catalog:"
   }
 }

@@ -6,12 +6,9 @@ import userEvent from '@testing-library/user-event';
 import { mock } from 'vitest-mock-extended';
 import type { ActorRefFrom } from 'xstate';
 import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
-import {
-  buildModelComponentGeometryReference,
-  ModelComponentActionDropdown,
-} from '#components/geometry/cad/model-component-action-menu.js';
+import { ModelComponentActionDropdown } from '#components/geometry/cad/model-component-action-menu.js';
 import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-model-component-action-menu.js';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 
 const mocks = vi.hoisted(() => ({
   openPartGallery: undefined as undefined | ReturnType<typeof vi.fn>,
@@ -347,22 +344,6 @@ describe('model component action menu', () => {
     await user.click(summary.getByRole('menuitem', { name: 'Rendering' }));
     expect(summary.getByText('Mixed: #ffffff (glTF default), Unavailable')).toBeVisible();
     expect(summary.getAllByText('Mixed: 1 (glTF default), Unavailable, Not used (unlit)')).toHaveLength(2);
-  });
-
-  it('should build a geometry reference from manifest metadata when the node has no explicit reference', () => {
-    const node = createNode();
-    const manifest = createManifest(node, 'src/main.ts');
-
-    expect(buildModelComponentGeometryReference(manifest, node)).toEqual({
-      scheme: 'tau-cad',
-      filePath: 'src/main.ts',
-      componentId,
-      selector: 'node/0',
-      geometryHash: undefined,
-      label: 'Planetary housing',
-      kind: 'part',
-    });
-    expect(buildModelComponentGeometryReference(createManifest(node), node)).toBeUndefined();
   });
 
   it('should dispatch actions with the supplied source and add geometry references to chat', async () => {

@@ -26,6 +26,7 @@ import {
   createKernelParameterDeclaration,
   nonemptyExportFiles,
   registerKernelModule,
+  createRealmGroup,
 } from '@taucad/runtime/kernel';
 import type { RealmHold, RuntimeLogger } from '@taucad/runtime/kernel';
 import {
@@ -50,6 +51,9 @@ import type { ShapeEntry } from '#opencascade.types.js';
 import { opencascadeDetectPattern } from '#opencascade.constants.js';
 
 import type { OpenCascadeInstance, TopoDS_Shape } from 'libcascade/init';
+
+/** One libcascade instance per realm, shared by every kernel in it (memory parity with replicad, Q6). */
+const libcascadeOcct = createRealmGroup<OpenCascadeInstance>('libcascade-occt');
 
 const fullWasmUrl = new URL(import.meta.resolve('libcascade/wasm')).href;
 const multiWasmUrl = new URL(import.meta.resolve('libcascade/multi/wasm')).href;
@@ -611,9 +615,8 @@ export const opencascadeKernel = defineKernel({
     const span = tracer.startSpan('opencascade.wasm-init');
     const resolved = await resolveWasm(options.wasm, logger);
     const compiledModule = resolved.wasmUrl ? runtime.getCompiledWasmModule(resolved.wasmUrl) : undefined;
-    // One libcascade instance per realm, shared by every kernel in it (memory parity with replicad, Q6).
     const occt = await runtime.realm.hold({
-      group: 'libcascade-occt',
+      group: libcascadeOcct,
       key: `${resolved.variant}:${resolved.wasmUrl ?? ''}`,
       async create() {
         // ponytail: OCCT print/printErr reach the creating kernel's logger only; exact with one realm per client.

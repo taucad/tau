@@ -80,11 +80,66 @@ fn external_resource_identity_and_real_step_share_the_composed_engine() {
 }
 
 #[test]
-fn unsupported_grant_is_refused_before_engine_construction() {
-    let mut config = EngineConfig::entry();
-    config.execution_permits = 3;
-    assert_eq!(
-        create_engine(config).err(),
-        Some("Only execution permits 1 and 2 are supported by this OCCT host.")
-    );
+fn ordinary_kernel_fillets_chamfers_and_bolt_patterns_are_decided() {
+    // The exact claims refused in the 2026-10-08 kernel-skill acceptance
+    // runs, each with a mismatch control so "passed" is a decision, not a
+    // leak. The perforated top face of the block stays unknown, so chamfer
+    // absence there remains an honest refusal.
+    let pattern = |count: u32| json!({"kind":"circularHolePattern","expected":{"count":count,"holeDiameter":5,"boltCircleDiameter":45}});
+    let fillet = |radius: u32| json!({"kind":"filletFeature","expected":{"radius":radius}});
+    let chamfer = |distance: u32| json!({"kind":"chamferFeature","expected":{"distance":distance}});
+    let mut engine = create_engine(EngineConfig::entry()).unwrap();
+    let mut cases = Vec::new();
+    for file in ["replicad-coupling.step", "build123d-coupling.step"] {
+        cases.push((
+            file,
+            "toHaveCircularHolePattern",
+            pattern(6),
+            "passed",
+            Some(1),
+        ));
+        cases.push((
+            file,
+            "toHaveCircularHolePattern",
+            pattern(5),
+            "failed",
+            Some(0),
+        ));
+        cases.push((file, "toHaveFilletFeature", fillet(1), "passed", Some(2)));
+        cases.push((file, "toHaveFilletFeature", fillet(2), "failed", Some(0)));
+    }
+    cases.push((
+        "build123d-chamfer-block.step",
+        "toHaveChamferFeature",
+        chamfer(1),
+        "passed",
+        Some(4),
+    ));
+    cases.push((
+        "build123d-chamfer-block.step",
+        "toHaveChamferFeature",
+        chamfer(2),
+        "refused",
+        None,
+    ));
+    for (file, capability, payload, status, matches) in cases {
+        let step = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../occt/rust/tests/fixtures/kernel-skill-acceptance")
+                .join(file),
+        )
+        .unwrap();
+        let admitted = ingest(&mut engine, step, vec![], "step", "auto");
+        let hash = admitted["result"]["subject"]["subjectHash"]
+            .as_str()
+            .unwrap();
+        let result = evaluate(&engine, hash, capability, payload);
+        let row = &result["results"][0];
+        assert_eq!(row["status"], status, "{file} {capability}: {result}");
+        assert_eq!(
+            row["evidence"]["measured"]["matchCount"].as_u64(),
+            matches,
+            "{file} {capability}: {result}"
+        );
+    }
 }

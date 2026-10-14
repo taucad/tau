@@ -3,7 +3,7 @@ import process from "node:process";
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 
 //#region ../node_modules/.pnpm/js-yaml@4.3.0/node_modules/js-yaml/dist/js-yaml.mjs
 function getDefaultExportFromCjs(x) {
@@ -2501,7 +2501,8 @@ const repoKeys = /* @__PURE__ */ new Set([
 	"commit",
 	"path",
 	"description",
-	"shallow"
+	"shallow",
+	"sparse"
 ]);
 const groupKeys = /* @__PURE__ */ new Set(["description", "repos"]);
 const isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -2522,6 +2523,8 @@ const parseRepo = (value, label) => {
 	const raw = requireRecord(value, label);
 	rejectUnknownKeys(raw, repoKeys, label);
 	if (raw["shallow"] !== void 0 && typeof raw["shallow"] !== "boolean") throw new Error(`${label}.shallow must be a boolean.`);
+	const { sparse } = raw;
+	if (sparse !== void 0 && (!Array.isArray(sparse) || sparse.length === 0 || sparse.some((pattern) => typeof pattern !== "string" || pattern.length === 0))) throw new Error(`${label}.sparse must be a non-empty array of non-empty strings.`);
 	const fork = optionalString(raw["fork"], `${label}.fork`);
 	const branch = optionalString(raw["branch"], `${label}.branch`);
 	const commit = optionalString(raw["commit"], `${label}.commit`);
@@ -2534,7 +2537,8 @@ const parseRepo = (value, label) => {
 		...commit && { commit },
 		...path && { path },
 		...description && { description },
-		...raw["shallow"] === true && { shallow: true }
+		...raw["shallow"] === true && { shallow: true },
+		...sparse !== void 0 && { sparse: [...sparse] }
 	};
 };
 const parseRepos = (value, label) => {
@@ -2592,7 +2596,7 @@ const privateCatalogPath = (root) => join(root, "repos", "tau-brain", "repos.yam
 const readCatalog = (root, catalog) => {
 	const filePath = catalog === "public" ? publicCatalogPath(root) : privateCatalogPath(root);
 	if (!existsSync(filePath)) {
-		if (catalog === "private") throw new Error(`Private repos catalog not found at ${filePath}. Authorized setup: GIT_LFS_SKIP_SMUDGE=1 gh repo clone taucad/tau-brain repos/tau-brain`);
+		if (catalog === "private") throw new Error(`Private repos catalog not found at ${filePath}. Authorized setup mounts Tau Brain: pnpm agent-env brain`);
 		throw new Error(`Public repos catalog not found at ${filePath}.`);
 	}
 	return parseCatalog(readFileSync(filePath, "utf8"), catalog, filePath);
@@ -2866,9 +2870,11 @@ const removeRepo = (state, name) => {
 		for (const group of Object.values(catalog.groups)) group.repos = group.repos.filter((repoName) => repoName !== name);
 	});
 };
+/** Full-history clones are blobless (contents download on demand); sparse clones check out after the patterns are set. */
 const buildCloneArgs = (options) => {
 	const args = ["git", "clone"];
-	if (options.shallow) args.push("--depth", "1");
+	args.push(...options.shallow ? ["--depth", "1"] : ["--filter=blob:none"]);
+	if (options.sparse) args.push("--no-checkout");
 	if (options.branch) args.push("--branch", options.branch);
 	args.push(options.cloneUrl, options.directory);
 	return args;
@@ -2889,9 +2895,27 @@ const cloneRepo = (context) => {
 		cloneUrl,
 		directory,
 		branch: repo.branch,
-		shallow: repo.shallow && !repo.commit
+		shallow: repo.shallow && !repo.commit,
+		sparse: Boolean(repo.sparse)
 	});
 	execSync(args.join(" "), { stdio: "inherit" });
+	if (repo.sparse) {
+		execFileSync("git", [
+			"-C",
+			directory,
+			"sparse-checkout",
+			"set",
+			"--no-cone",
+			...repo.sparse
+		], { stdio: "inherit" });
+		execFileSync("git", [
+			"-C",
+			directory,
+			"reset",
+			"-q",
+			"--hard"
+		], { stdio: "inherit" });
+	}
 	if (repo.fork) execSync(`git -C ${directory} remote add upstream ${repoUrl(repo.upstream)}`, { stdio: "inherit" });
 	if (repo.commit) execSync(`git -C ${directory} checkout ${repo.commit}`, { stdio: "inherit" });
 	return {

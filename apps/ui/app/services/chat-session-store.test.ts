@@ -3,6 +3,8 @@
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import { KeyedMutex } from '#db/keyed-mutex.js';
+import { chatMessageQueuePath } from '#db/chat-message-queue-store.js';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -213,8 +215,10 @@ type ChatSessionDeps = Parameters<StoreType['setDependencies']>[0];
  * that doesn't structurally match the typed closure fields.
  */
 type StubDeps = {
-  [K in Exclude<keyof ChatSessionDeps, 'client' | 'watchRecordFile'>]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
-} & { client: MemoryClient };
+  [K in Exclude<keyof ChatSessionDeps, 'client' | 'watchRecordFile' | 'queueLock'>]: ReturnType<
+    typeof vi.fn<ChatSessionDeps[K]>
+  >;
+} & { client: MemoryClient; queueLock: NonNullable<ChatSessionDeps['queueLock']> };
 
 const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
 
@@ -275,6 +279,7 @@ function createMemoryClient() {
 type MemoryClient = ReturnType<typeof createMemoryClient>;
 
 function createStubDeps(client: MemoryClient = createMemoryClient()): StubDeps {
+  const mutex = new KeyedMutex<string>();
   return {
     getChat: vi.fn<ChatSessionDeps['getChat']>().mockResolvedValue(undefined),
     patchChat: vi.fn<ChatSessionDeps['patchChat']>().mockResolvedValue(undefined),
@@ -282,6 +287,7 @@ function createStubDeps(client: MemoryClient = createMemoryClient()): StubDeps {
     consumeChatStartupRequest: vi.fn<ChatSessionDeps['consumeChatStartupRequest']>().mockResolvedValue(undefined),
     commitCancelledDraftRestore: vi.fn<ChatSessionDeps['commitCancelledDraftRestore']>().mockResolvedValue(undefined),
     client,
+    queueLock: mutex.run.bind(mutex),
   };
 }
 
@@ -383,6 +389,32 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       lifecycleRow(1, 'running', runId),
     ];
   };
+  it('should reopen the transcript watch when an external approval resumes the same attempt', async () => {
+    const store = createStore();
+    const chatId = 'chat_external_approval';
+    const runId = 'run_external_approval';
+    const session = store.acquire(chatId, 'project_external_approval');
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    const message = { id: 'user_approval', role: 'user', content: 'Build a cube' };
+    publishLogRows(store, chatId, [
+      { ...lifecycleRow(0, 'admitted', runId), admission: { kind: 'external', turnId: message.id, message } },
+      lifecycleRow(1, 'running', runId),
+    ]);
+    const chat = harness.created.find((entry) => entry.id === chatId)!;
+    await vi.waitFor(() => {
+      expect(chat.resumeStream).toHaveBeenCalledTimes(1);
+    });
+    publishLogRows(store, chatId, [lifecycleRow(2, 'paused', runId)], 2);
+    publishLogRows(store, chatId, [lifecycleRow(3, 'running', runId)], 3);
+    await vi.waitFor(() => {
+      expect(chat.resumeStream).toHaveBeenCalledTimes(2);
+    });
+    publishLogRows(store, chatId, [lifecycleRow(4, 'completed', runId)], 4);
+    store.release(chatId);
+  });
+
   it('reopens a projected run watch after live delivery drops without another durable row or command', async () => {
     const store = createStore();
     const chatId = 'chat_live_drop';
@@ -574,7 +606,9 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       });
       const callbacks: Array<(event: WatchEvent) => void> = [];
       const watch: NonNullable<ChatSessionDeps['watchRecordFile']> = (_path, listener) => {
-        callbacks.push(listener);
+        if (_path === directory) {
+          callbacks.push(listener);
+        }
         return {
           ready: Promise.resolve(),
           closed: new Promise<void>(() => {
@@ -1238,6 +1272,53 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     store.release(chatId);
   });
 
+  it('reads a refresh that arrived mid-run once the run settles', async () => {
+    const chatId = 'chat_projected_mid_run';
+    const projectId = 'project_projected_mid_run';
+    const client = createMemoryClient();
+    const rows = readFileSync(
+      new URL(
+        '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+        pathToFileURL(import.meta.filename),
+      ),
+      'utf8',
+    );
+    const segmentPath = `/projects/${projectId}/.tau/chats/${chatId}/events/other-device.jsonl`;
+    await client.writeFile(segmentPath, new TextEncoder().encode(rows));
+    const deps = createStubDeps(client);
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(deps);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(deps.getChat).toHaveBeenCalledOnce();
+    });
+    await settle();
+    await store.refreshRemoteSegments(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+    });
+    const fake = harness.created.find((entry) => entry.id === chatId)!;
+    fake.status = 'streaming';
+    fake.emitStatusChange();
+    await client.writeFile(
+      segmentPath,
+      new TextEncoder().encode(
+        rows.replace('Browser host completed the workspace change.', 'Browser host verified the workspace change.'),
+      ),
+    );
+
+    await store.refreshFromStorage(chatId);
+    expect(JSON.stringify(session.chat.messages)).not.toContain('Browser host verified the workspace change.');
+
+    fake.status = 'ready';
+    fake.emitStatusChange();
+    await vi.waitFor(() => {
+      expect(JSON.stringify(session.chat.messages)).toContain('Browser host verified the workspace change.');
+    });
+    store.release(chatId);
+  });
+
   it('should not replay a refused seed while a durable manual Start waits for intent clearing and log catch-up', async () => {
     const chatId = 'chat_seed_superseded';
     const projectId = 'project_seed_superseded';
@@ -1315,7 +1396,9 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       return {
         runId: requestId,
         leaseTurnId: seeded ? seed.id : manual.id,
-        request: seeded ? { kind: 'regenerate', command } : { kind: 'send', message: manual, command },
+        request: seeded
+          ? { kind: 'regenerate', command }
+          : { kind: 'send', message: manual, command, queueId: gesture.kind === 'send' ? gesture.queueId : undefined },
       };
     });
     const unpublishConnector = store.publishProjectHostConnector(projectId, async () =>
@@ -1346,7 +1429,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     expect(stored.startupRequest?.id).toBe('req_seed_superseded');
     expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
 
-    await store.requestTurn(chatId, { kind: 'send', message: manual });
+    await store.requestTurn(chatId, { kind: 'send', message: manual, requestId: 'req_manual_after_seed' });
     await vi.waitFor(() => {
       expect(hostCommand).toHaveBeenCalledTimes(2);
     });
@@ -1472,6 +1555,143 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     expect(close).toHaveBeenCalledTimes(1);
     unpublish();
   });
+
+  it.each([
+    { outcome: 'acknowledgement', successor: 'pending' },
+    { outcome: 'failure', successor: 'pending' },
+    { outcome: 'acknowledgement', successor: 'watching' },
+    { outcome: 'failure', successor: 'watching' },
+  ] as const)(
+    'should preserve the $successor successor when a replaced dispatch returns a late $outcome',
+    async ({ outcome, successor }) => {
+      const store = createStore();
+      const chatId = `chat_dispatch_${outcome}_${successor}`;
+      const projectId = `project_dispatch_${outcome}_${successor}`;
+      const firstReply = Promise.withResolvers<CommandAnswer>();
+      const secondReply = Promise.withResolvers<CommandAnswer>();
+      const command = (id: string): Extract<HostCommand, { type: 'start' }> => ({
+        type: 'start',
+        commandId: id,
+        payload: {
+          chatId,
+          runId: id,
+          trigger: 'submit',
+          message: { id: `user_${id}`, role: 'user', content: id },
+        },
+      });
+      const firstCommand = command('dispatch-first');
+      const secondCommand = command('dispatch-second');
+      const hostCommand = vi.fn<AgentHostClient['hostCommand']>(async (request) => {
+        if (request.type === 'cancel') {
+          return { commandId: request.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 3 };
+        }
+        return request.commandId === firstCommand.commandId ? firstReply.promise : secondReply.promise;
+      });
+      const close = vi.fn(async () => undefined);
+      const unpublish = store.publishProjectHostConnector(projectId, async () =>
+        mock<AgentHostClient>({ catchUp: writerOwnedCatchUp, hostCommand, close }),
+      );
+      startTurnOwner(store, projectId);
+      const session = store.acquire(chatId, projectId);
+      const unadmit = publishChatTurnAdmission(chatId, async (gesture) => {
+        const admitted =
+          gesture.kind === 'regenerate' && gesture.requestId === firstCommand.commandId ? firstCommand : secondCommand;
+        return {
+          runId: admitted.payload.runId,
+          leaseTurnId: undefined,
+          request: { kind: 'regenerate', command: admitted },
+        };
+      });
+      const unsubscribeWatches: Array<ReturnType<typeof vi.fn>> = [];
+      const subscribe = store.subscribeProjection.bind(store);
+      const subscriptions = vi.spyOn(store, 'subscribeProjection').mockImplementation((id, listener) => {
+        const unsubscribe = vi.fn(subscribe(id, listener));
+        unsubscribeWatches.push(unsubscribe);
+        return unsubscribe;
+      });
+      const acknowledgeSecond = (): void => {
+        secondReply.resolve({
+          commandId: secondCommand.commandId,
+          generation: 1,
+          status: 'applied',
+          effect: 'durable',
+          cursor: 2,
+        });
+      };
+      try {
+        await store.requestTurn(chatId, { kind: 'regenerate', requestId: firstCommand.commandId });
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledExactlyOnceWith(firstCommand);
+        });
+        await store.requestTurn(chatId, { kind: 'regenerate', requestId: secondCommand.commandId });
+        // The host's terminal lifecycle frees the held regenerate before its command reply arrives.
+        session.stateActorRef.send({ type: 'runLifecycle', runId: firstCommand.payload.runId, phase: 'cancelled' });
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledTimes(2);
+          expect(hostCommand).toHaveBeenLastCalledWith(secondCommand);
+        });
+        const chat = harness.created.find((entry) => entry.id === chatId)!;
+        if (successor === 'watching') {
+          acknowledgeSecond();
+          await vi.waitFor(() => {
+            expect(chat.regenerate).toHaveBeenCalledOnce();
+          });
+          expect(unsubscribeWatches).toHaveLength(1);
+        }
+        if (outcome === 'acknowledgement') {
+          firstReply.resolve({
+            commandId: firstCommand.commandId,
+            generation: 1,
+            status: 'applied',
+            effect: 'durable',
+            cursor: 1,
+          });
+        } else {
+          firstReply.reject(new Error('First command failed after its successor started'));
+        }
+        await vi.waitFor(() => {
+          expect(close).toHaveBeenCalledTimes(successor === 'pending' ? 1 : 2);
+        });
+        await settle();
+        expect(session.stateActorRef.getSnapshot().context.activeRunId).toBe(secondCommand.payload.runId);
+        expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+        if (successor === 'pending') {
+          // Stop must wait for B's own ACK. Clearing commandInFlight from A would cancel B prematurely.
+          publishLogRows(store, chatId, runningUserRows(secondCommand.payload.runId));
+          store.stopRun(chatId, 'stop-button');
+          await settle();
+          expect(chat.regenerate).not.toHaveBeenCalled();
+          expect(chat.resumeStream).not.toHaveBeenCalled();
+          expect(hostCommand).toHaveBeenCalledTimes(2);
+          acknowledgeSecond();
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledTimes(3);
+          });
+          expect(hostCommand).toHaveBeenLastCalledWith(
+            expect.objectContaining({ type: 'cancel', payload: { chatId, runId: secondCommand.payload.runId } }),
+          );
+          expect(unsubscribeWatches).toEqual([]);
+        } else {
+          expect(unsubscribeWatches).toHaveLength(1);
+          expect(unsubscribeWatches[0]).not.toHaveBeenCalled();
+          expect(hostCommand).toHaveBeenCalledTimes(2);
+        }
+      } finally {
+        firstReply.resolve({
+          commandId: firstCommand.commandId,
+          generation: 1,
+          status: 'applied',
+          effect: 'durable',
+          cursor: 1,
+        });
+        acknowledgeSecond();
+        subscriptions.mockRestore();
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    },
+  );
 
   for (const runningBeforeAck of [false, true]) {
     it(`should watch a resumed attempt only after its running row ${runningBeforeAck ? 'already folded' : 'arrives later'}`, async () => {
@@ -3453,15 +3673,19 @@ describe('ChatSessionStore', () => {
       expect(client.readFile).toHaveBeenCalledOnce();
     });
     client.files.set(path, bytes('Current input'));
-    for (let index = 0; index < 100; index++) {
+    // Deliver separate microtasks while the first read remains held.
+    const deliverChangeAfter = async (previous: Promise<void>): Promise<void> => {
+      await previous;
       listener?.({
         type: 'change',
         path: '.tau/chats/chat_foreign/events/peer.jsonl',
       });
-      // Deliver separate event-loop ticks while the first read remains held.
-      // eslint-disable-next-line no-await-in-loop -- Each fact must arrive in its own tick during the held read.
-      await Promise.resolve();
+    };
+    let burst = Promise.resolve();
+    for (let index = 0; index < 100; index++) {
+      burst = deliverChangeAfter(burst);
     }
+    await burst;
     held.resolve(bytes('Old input'));
     await vi.waitFor(() => {
       expect(published).toEqual(['Current input']);
@@ -4102,6 +4326,640 @@ describe('ChatSessionStore', () => {
       return { store, deps, session, hostCommand, unpublish };
     };
 
+    const queueAdmission = (chatId: string) =>
+      publishChatTurnAdmission(chatId, async (gesture) => {
+        if (gesture.kind !== 'send' || gesture.requestId === undefined) {
+          throw new Error('Expected queued send');
+        }
+        const command = gesture.command ?? {
+          type: 'start',
+          commandId: gesture.requestId,
+          payload: {
+            chatId,
+            runId: gesture.requestId,
+            trigger: 'submit',
+            message: {
+              id: gesture.message.id,
+              role: 'user',
+              content: gesture.message.parts
+                .filter((part) => part.type === 'text')
+                .map((part) => part.text)
+                .join('\n'),
+            },
+          },
+        };
+        return {
+          runId: gesture.requestId,
+          leaseTurnId: gesture.message.id,
+          request: { kind: 'send', message: gesture.message, command, queueId: gesture.queueId },
+        };
+      });
+    const queuedGesture = (id: string): Extract<ChatTurnGesture, { kind: 'send' }> => ({
+      kind: 'send',
+      requestId: `req_${id}`,
+      message: { id, role: 'user', parts: [{ type: 'text', text: id }] },
+    });
+
+    it('should wake a persisted queue once when draft attachment cleanup fails', async () => {
+      const chatId = 'queue_cleanup_failure';
+      const projectId = 'queue_project';
+      const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+      const unadmit = queueAdmission(chatId);
+      const failure = new Error('Draft cleanup failed');
+      const release = vi.spyOn(store, 'releaseDraftAttachments').mockImplementation(async () => {
+        expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+          items: [{ id: 'cleanup', requestId: 'req_cleanup' }],
+        });
+        throw failure;
+      });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        publishLogRows(store, chatId, []);
+        await vi.waitFor(() => {
+          expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+        });
+        await expect(store.requestTurn(chatId, queuedGesture('cleanup'))).resolves.toBeUndefined();
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledTimes(1);
+          expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+        });
+        expect(hostCommand.mock.calls[0]?.[0]).toMatchObject({
+          type: 'start',
+          commandId: 'req_cleanup',
+          payload: { runId: 'req_cleanup', message: { id: 'cleanup' } },
+        });
+        expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+        expect(warn).toHaveBeenCalledWith('[ChatSessionStore] draft attachments could not be released', failure);
+        await settle();
+        expect(hostCommand).toHaveBeenCalledTimes(1);
+      } finally {
+        release.mockRestore();
+        warn.mockRestore();
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it.each(['cancelled', 'failed'] as const)('should send a new message after observing %s', async (phase) => {
+      const chatId = `queue_after_${phase}`;
+      const { store, hostCommand, unpublish } = await open(chatId, 'queue_project');
+      const unadmit = queueAdmission(chatId);
+      try {
+        publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, phase, 'old')]);
+        await store.requestTurn(chatId, queuedGesture('new'));
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledTimes(1);
+        });
+        expect(hostCommand.mock.calls[0]?.[0]).toMatchObject({
+          type: 'start',
+          commandId: 'req_new',
+          payload: { runId: 'req_new', message: { id: 'new' } },
+        });
+      } finally {
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it.each(['cancelled', 'failed'] as const)(
+      'should keep pre-terminal messages ahead of new messages after %s and reopen',
+      async (phase) => {
+        const chatId = `queue_hold_${phase}`;
+        const projectId = 'queue_project';
+        const first = await open(chatId, projectId);
+        const terminal = [...runningRows('old'), lifecycleRow(2, phase, 'old')];
+        publishLogRows(first.store, chatId, runningRows('old'));
+        await first.store.requestTurn(chatId, queuedGesture('before'));
+        publishLogRows(first.store, chatId, terminal);
+        await first.store.requestTurn(chatId, queuedGesture('after'));
+        first.unpublish();
+        first.store.release(chatId);
+        const reopened = new ChatSessionStore({ chatSession });
+        reopened.setDependencies(first.deps);
+        const session = reopened.acquire(chatId, projectId);
+        const unadmit = queueAdmission(chatId);
+        const disconnect = reopened.publishProjectHostConnector(projectId, async () =>
+          mock<AgentHostClient>({
+            hostCommand: first.hostCommand,
+            catchUp: writerOwnedCatchUp,
+            close: async () => undefined,
+          }),
+        );
+        try {
+          publishLogRows(reopened, chatId, terminal);
+          reopened.refreshMessageQueue(chatId);
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+            expect(session.messageQueueRef.getSnapshot().context.items.map((item) => item.id)).toEqual([
+              'before',
+              'after',
+            ]);
+          });
+          expect(first.hostCommand).not.toHaveBeenCalled();
+          await reopened.editQueuedMessage(chatId, 'before', undefined);
+          await vi.waitFor(() => {
+            expect(first.hostCommand).toHaveBeenCalledTimes(1);
+          });
+          expect(first.hostCommand.mock.calls[0]?.[0]).toMatchObject({
+            commandId: 'req_after',
+            payload: { runId: 'req_after' },
+          });
+        } finally {
+          disconnect();
+          unadmit();
+          reopened.release(chatId);
+        }
+      },
+    );
+
+    it.each(['running', 'cancelled', 'failed'] as const)(
+      'should not authorize delivery through a different %s run',
+      async (phase) => {
+        const chatId = `queue_changed_${phase}`;
+        const projectId = 'queue_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const terminal = [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')];
+        publishLogRows(store, chatId, terminal);
+        await store.requestTurn(chatId, queuedGesture('new'));
+        expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+          items: [{ id: 'new', requestId: 'req_new', afterTerminalRunId: 'old' }],
+        });
+        publishLogRows(store, chatId, [
+          ...terminal,
+          lifecycleRow(3, 'admitted', 'different'),
+          lifecycleRow(4, phase, 'different'),
+        ]);
+        const unadmit = queueAdmission(chatId);
+        try {
+          store.refreshMessageQueue(chatId);
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+            expect(session.messageQueueRef.getSnapshot().context.items.map((item) => item.id)).toEqual(['new']);
+          });
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      },
+    );
+
+    it('should not authorize a pre-stop submission when terminal arrives during execution lookup', async () => {
+      const chatId = 'queue_lookup_terminal';
+      const projectId = 'queue_project';
+      const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+      const gate = Promise.withResolvers<ChatEntity | undefined>();
+      const unadmit = queueAdmission(chatId);
+      try {
+        publishLogRows(store, chatId, runningRows('old'));
+        deps.getChat.mockReturnValueOnce(gate.promise);
+        const pending = store.requestTurn(chatId, queuedGesture('before'));
+        publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')]);
+        gate.resolve(chatRow(chatId, projectId));
+        await pending;
+        await vi.waitFor(() => {
+          expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+          expect(session.messageQueueRef.getSnapshot().context.items.map((item) => item.id)).toEqual(['before']);
+        });
+        expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+          items: [{ id: 'before', requestId: 'req_before' }],
+        });
+        expect(session.messageQueueRef.getSnapshot().context.items[0]).not.toHaveProperty('afterTerminalRunId');
+        expect(hostCommand).not.toHaveBeenCalled();
+      } finally {
+        gate.resolve(chatRow(chatId, projectId));
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it('should retain the empty intent captured before asynchronous attachment preparation', async () => {
+      const chatId = 'queue_captured_before_stop';
+      const { store, session, hostCommand, unpublish } = await open(chatId, 'queue_project');
+      const unadmit = queueAdmission(chatId);
+      try {
+        publishLogRows(store, chatId, runningRows('old'));
+        const queueIntent = store.captureMessageQueueIntent(chatId);
+        expect(queueIntent).toEqual({});
+        publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')]);
+        expect(store.captureMessageQueueIntent(chatId)).toEqual({ afterTerminalRunId: 'old' });
+        await store.requestTurn(chatId, { ...queuedGesture('before'), queueIntent });
+        await vi.waitFor(() => {
+          expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+          expect(session.messageQueueRef.getSnapshot().context.items.map((item) => item.id)).toEqual(['before']);
+        });
+        expect(session.messageQueueRef.getSnapshot().context.items[0]).not.toHaveProperty('afterTerminalRunId');
+        expect(hostCommand).not.toHaveBeenCalled();
+      } finally {
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it.each(['running', 'paused'] as const)(
+      'should not bypass a resumed %s run with matching terminal authorization',
+      async (phase) => {
+        const chatId = 'queue_resumed_terminal';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'queue_project');
+        const terminal = [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')];
+        publishLogRows(store, chatId, terminal);
+        await store.requestTurn(chatId, queuedGesture('after'));
+        publishLogRows(store, chatId, [...terminal, { ...lifecycleRow(3, phase, 'old'), attempt: 2 }]);
+        const unadmit = queueAdmission(chatId);
+        try {
+          store.refreshMessageQueue(chatId);
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+            expect(session.messageQueueRef.getSnapshot().context.items).toMatchObject([
+              { id: 'after', afterTerminalRunId: 'old' },
+            ]);
+          });
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      },
+    );
+
+    it.each(['incomplete', 'faulted'] as const)(
+      'should not authorize a message from a %s terminal projection',
+      async (state) => {
+        const chatId = `queue_unhealthy_${state}`;
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'queue_project');
+        const terminal = [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')];
+        const unadmit = queueAdmission(chatId);
+        try {
+          if (state === 'incomplete') {
+            publishLogPage(store, chatId, terminal, { cursor: 0, endCursor: 4 });
+          } else {
+            publishLogRows(store, chatId, terminal);
+            store.receiveHostReadAnswer(chatId, { status: 'refused', reason: 'unreadable' });
+          }
+          await store.requestTurn(chatId, queuedGesture('unknown'));
+          publishLogRows(store, chatId, terminal);
+          store.refreshMessageQueue(chatId);
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().matches('waiting')).toBe(true);
+            expect(session.messageQueueRef.getSnapshot().context.items.map((item) => item.id)).toEqual(['unknown']);
+          });
+          expect(session.messageQueueRef.getSnapshot().context.items[0]).not.toHaveProperty('afterTerminalRunId');
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      },
+    );
+
+    it('should wait for full completion and preserve FIFO through a fast acknowledgement and delayed projection', async () => {
+      const chatId = 'queue_fifo';
+      const projectId = 'queue_project';
+      const { store, session, hostCommand, unpublish } = await open(chatId, projectId);
+      const unadmit = queueAdmission(chatId);
+      try {
+        publishLogRows(store, chatId, runningRows('old'));
+        await store.requestTurn(chatId, queuedGesture('one'));
+        await store.requestTurn(chatId, queuedGesture('two'));
+        await settle();
+        expect(hostCommand).not.toHaveBeenCalled();
+        publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'paused', 'old')]);
+        await settle();
+        expect(hostCommand).not.toHaveBeenCalled();
+        publishLogRows(store, chatId, [
+          ...runningRows('old'),
+          lifecycleRow(2, 'paused', 'old'),
+          lifecycleRow(3, 'completed', 'old'),
+        ]);
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledTimes(1);
+        });
+        await settle();
+        expect(hostCommand.mock.calls.map(([command]) => command.type)).toEqual(['start']);
+        expect(session.messageQueueRef.getSnapshot().context.items.map((item) => item.id)).toEqual(['two']);
+        publishLogRows(store, chatId, [
+          ...runningRows('old'),
+          lifecycleRow(2, 'paused', 'old'),
+          lifecycleRow(3, 'completed', 'old'),
+          lifecycleRow(4, 'admitted', 'req_one'),
+          lifecycleRow(5, 'running', 'req_one'),
+        ]);
+        await settle();
+        expect(hostCommand).toHaveBeenCalledTimes(1);
+        publishLogRows(store, chatId, [
+          ...runningRows('old'),
+          lifecycleRow(2, 'paused', 'old'),
+          lifecycleRow(3, 'completed', 'old'),
+          lifecycleRow(4, 'admitted', 'req_one'),
+          lifecycleRow(5, 'running', 'req_one'),
+          lifecycleRow(6, 'completed', 'req_one'),
+        ]);
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledTimes(2);
+        });
+        expect(hostCommand.mock.calls.map(([command]) => command.commandId)).toEqual(['req_one', 'req_two']);
+      } finally {
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it('should replay identical prepared bytes after close/reopen without another logical charge', async () => {
+      const chatId = 'queue_lost_ack';
+      const projectId = 'queue_lost_project';
+      const { store, deps, session, hostCommand, unpublish } = await open(chatId, projectId);
+      const unadmit = queueAdmission(chatId);
+      const charged = new Set<string>();
+      hostCommand.mockImplementation(async (command) => {
+        charged.add(command.commandId);
+        throw new Error('Acknowledgement lost after acceptance');
+      });
+      publishLogRows(store, chatId, []);
+      await store.requestTurn(chatId, queuedGesture('lost'));
+      await vi.waitFor(() => {
+        expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+      });
+      const original = hostCommand.mock.calls[0]![0];
+      expect(session.messageQueueRef.getSnapshot().context.items[0]?.command).toEqual(original);
+      unpublish();
+      store.release(chatId);
+      const reopened = new ChatSessionStore({ chatSession });
+      reopened.setDependencies(deps);
+      const restored = reopened.acquire(chatId, projectId);
+      const unadmitReopened = queueAdmission(chatId);
+      const replay = vi.fn<AgentHostClient['hostCommand']>(async (command) => {
+        charged.add(command.commandId);
+        return { commandId: command.commandId, generation: 2, status: 'replayed', effect: 'durable', cursor: 1 };
+      });
+      const disconnect = reopened.publishProjectHostConnector(
+        projectId,
+        async () => ({ hostCommand: replay, close: async () => undefined }) as unknown as AgentHostClient,
+      );
+      try {
+        publishLogRows(reopened, chatId, []);
+        reopened.refreshMessageQueue(chatId);
+        await vi.waitFor(() => {
+          expect(replay).toHaveBeenCalledExactlyOnceWith(original);
+        });
+        await vi.waitFor(() => {
+          expect(restored.messageQueueRef.getSnapshot().context.items).toEqual([]);
+        });
+        expect(charged.size).toBe(1);
+      } finally {
+        disconnect();
+        unadmitReopened();
+        unadmit();
+        reopened.release(chatId);
+      }
+    });
+
+    it('should never cancel an unrelated live run when retrying a prepared command', async () => {
+      const chatId = 'queue_refused';
+      const projectId = 'queue_refused_project';
+      const { store, session, hostCommand, unpublish } = await open(chatId, projectId);
+      const unadmit = queueAdmission(chatId);
+      hostCommand.mockResolvedValue({
+        commandId: 'req_wait',
+        generation: 1,
+        status: 'refused',
+        effect: 'not-applied',
+        code: 'CHAT_RUN_LIVE',
+        message: 'Another run is live.',
+      });
+      try {
+        publishLogRows(store, chatId, []);
+        await store.requestTurn(chatId, queuedGesture('wait'));
+        await vi.waitFor(() => {
+          expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+        });
+        publishLogRows(store, chatId, runningRows('other'));
+        store.retryMessageQueue(chatId);
+        await settle();
+        expect(hostCommand).toHaveBeenCalledTimes(1);
+        expect(session.messageQueueRef.getSnapshot().context.items[0]?.command?.commandId).toBe('req_wait');
+      } finally {
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it('should retain a prepared message when retry has no durable host decision', async () => {
+      const chatId = 'queue_no_decision';
+      const { store, session, hostCommand, unpublish } = await open(chatId, 'queue_project');
+      const unadmit = queueAdmission(chatId);
+      hostCommand.mockRejectedValueOnce(new Error('Lost acknowledgement'));
+      try {
+        publishLogRows(store, chatId, []);
+        await store.requestTurn(chatId, queuedGesture('undecided'));
+        await vi.waitFor(() => {
+          expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+        });
+        const original = hostCommand.mock.calls[0]![0];
+        hostCommand.mockResolvedValue({
+          commandId: original.commandId,
+          generation: 1,
+          status: 'applied',
+          effect: 'not-applied',
+          details: {},
+        });
+        store.retryMessageQueue(chatId);
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledTimes(2);
+        });
+        await settle();
+        expect(session.messageQueueRef.getSnapshot().context.items[0]?.command).toEqual(original);
+        expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+      } finally {
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it.each(['chat', 'project'] as const)(
+      'should not send a prepared message after %s deletion during connection',
+      async (deleted) => {
+        const chatId = 'queue_delete_connect';
+        const projectId = 'queue_project';
+        const { store, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const unadmit = queueAdmission(chatId);
+        const gate = Promise.withResolvers<void>();
+        const disconnect = store.publishProjectHostConnector(projectId, async () => {
+          await gate.promise;
+          return { hostCommand, close: async () => undefined } as unknown as AgentHostClient;
+        });
+        try {
+          publishLogRows(store, chatId, []);
+          await store.requestTurn(chatId, queuedGesture('delete'));
+          await vi.waitFor(() => {
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ command: { commandId: 'req_delete' } }],
+            });
+          });
+          await (deleted === 'chat' ? store.removeChat(chatId) : store.removeProject(projectId));
+          gate.resolve();
+          await settle();
+          expect(hostCommand).not.toHaveBeenCalled();
+          expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toBeUndefined();
+        } finally {
+          gate.resolve();
+          disconnect();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      },
+    );
+
+    it('should not recreate a deleted queue after pending execution lookup', async () => {
+      const chatId = 'queue_delete_lookup';
+      const projectId = 'queue_project';
+      const { store, deps, unpublish } = await open(chatId, projectId);
+      const gate = Promise.withResolvers<ChatEntity | undefined>();
+      deps.getChat.mockReturnValueOnce(gate.promise);
+      const pending = store.requestTurn(chatId, queuedGesture('delete'));
+      await store.removeChat(chatId);
+      gate.resolve(chatRow(chatId, projectId));
+      await expect(pending).rejects.toThrow('no longer open');
+      expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toBeUndefined();
+      unpublish();
+      store.release(chatId);
+    });
+
+    it('should target Steer at the observed run and wait for its durable cancellation', async () => {
+      const chatId = 'queue_steer';
+      const projectId = 'queue_steer_project';
+      const { store, hostCommand, unpublish } = await open(chatId, projectId);
+      const unadmit = queueAdmission(chatId);
+      try {
+        publishLogRows(store, chatId, runningRows('old'));
+        await store.requestTurn(chatId, queuedGesture('later'));
+        await store.requestTurn(chatId, queuedGesture('urgent'));
+        await store.steerQueuedMessage(chatId, 'urgent');
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledTimes(1);
+        });
+        expect(hostCommand.mock.calls[0]![0]).toMatchObject({ type: 'cancel', payload: { runId: 'old' } });
+        await settle();
+        expect(hostCommand).toHaveBeenCalledTimes(1);
+        publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')]);
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledTimes(2);
+        });
+        expect(hostCommand.mock.calls[1]![0]).toMatchObject({ type: 'start', commandId: 'req_urgent' });
+      } finally {
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it('should serialize delivery across two tabs with stale follower history', async () => {
+      const chatId = 'queue_tabs';
+      const projectId = 'queue_tabs_project';
+      const first = await open(chatId, projectId);
+      const second = new ChatSessionStore({ chatSession });
+      second.setDependencies(first.deps);
+      second.acquire(chatId, projectId);
+      const unadmit = queueAdmission(chatId);
+      const disconnect = second.publishProjectHostConnector(projectId, async () =>
+        mock<AgentHostClient>({
+          hostCommand: first.hostCommand,
+          catchUp: writerOwnedCatchUp,
+          subscribe: () => () => undefined,
+          close: async () => undefined,
+        }),
+      );
+      const old = [...runningRows('old'), lifecycleRow(2, 'completed', 'old')];
+      try {
+        publishLogRows(first.store, chatId, runningRows('old'));
+        publishLogRows(second, chatId, runningRows('old'));
+        await first.store.requestTurn(chatId, queuedGesture('one'));
+        await second.requestTurn(chatId, queuedGesture('two'));
+        publishLogRows(first.store, chatId, old);
+        await vi.waitFor(() => {
+          expect(first.hostCommand).toHaveBeenCalledTimes(1);
+        });
+        publishLogRows(second, chatId, old);
+        second.refreshMessageQueue(chatId);
+        await settle();
+        expect(first.hostCommand).toHaveBeenCalledTimes(1);
+        const finished = [...old, lifecycleRow(3, 'admitted', 'req_one'), lifecycleRow(4, 'completed', 'req_one')];
+        publishLogRows(first.store, chatId, finished);
+        publishLogRows(second, chatId, finished);
+        await vi.waitFor(() => {
+          expect(first.hostCommand).toHaveBeenCalledTimes(2);
+        });
+        await settle();
+        expect(first.hostCommand.mock.calls.map(([command]) => [command.type, command.commandId])).toEqual([
+          ['start', 'req_one'],
+          ['start', 'req_two'],
+        ]);
+      } finally {
+        unadmit();
+        disconnect();
+        first.unpublish();
+        first.store.release(chatId);
+        second.release(chatId);
+      }
+    });
+
+    it('should reconcile a lost acknowledgement from durable history without resending', async () => {
+      const chatId = 'queue_receipt';
+      const projectId = 'queue_receipt_project';
+      const { store, session, hostCommand, unpublish } = await open(chatId, projectId);
+      const unadmit = queueAdmission(chatId);
+      hostCommand.mockRejectedValue(new Error('Lost receipt'));
+      try {
+        publishLogRows(store, chatId, []);
+        await store.requestTurn(chatId, queuedGesture('receipt'));
+        await vi.waitFor(() => {
+          expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+        });
+        publishLogRows(store, chatId, [
+          { ...lifecycleRow(0, 'admitted', 'req_receipt'), commandId: 'req_receipt' },
+          lifecycleRow(1, 'completed', 'req_receipt'),
+        ]);
+        await vi.waitFor(() => {
+          expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+        });
+        expect(hostCommand).toHaveBeenCalledTimes(1);
+      } finally {
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    it('should retain a streaming follow-up without cancelling the active run', async () => {
+      const { store, session, hostCommand, unpublish } = await open('chat_queue', 'project_queue');
+      try {
+        publishLogRows(store, 'chat_queue', runningRows('run_streaming'));
+        session.stateActorRef.send({ type: 'runLifecycle', phase: 'running', runId: 'run_streaming' });
+        await store.requestTurn('chat_queue', {
+          kind: 'send',
+          message: {
+            id: 'msg_followup',
+            role: 'user',
+            parts: [{ type: 'text', text: 'There is no scope too large here' }],
+          },
+        });
+        expect(hostCommand.mock.calls.filter(([command]) => command.type === 'cancel')).toEqual([]);
+      } finally {
+        unpublish();
+        store.release('chat_queue');
+      }
+    });
+
     it('restores a cancelled user-only turn and its attachment only after the host confirms cancellation', async () => {
       const chatId = 'chat_projected_empty_cancel';
       const projectId = 'project_projected_empty_cancel';
@@ -4221,7 +5079,7 @@ describe('ChatSessionStore', () => {
       expect(deps.getChat).toHaveBeenCalledWith('chat_a', 'resource_1');
     });
 
-    it('returns a displaced send to the composer whichever requestTurn call observes it', async () => {
+    it('persists both concurrent submissions without displacing either into the composer', async () => {
       const store = createStore();
       const session = store.acquire('chat_two_sends', 'resource_two_sends');
       startTurnOwner(store, 'resource_two_sends');
@@ -4249,7 +5107,10 @@ describe('ChatSessionStore', () => {
       await Promise.all([first, displacing]);
 
       await vi.waitFor(() => {
-        expect(session.draftActorRef.getSnapshot().context.draftText).toBe('first message');
+        expect(session.messageQueueRef.getSnapshot().context.items.map((item) => item.message.parts)).toEqual([
+          [{ type: 'text', text: 'first message' }],
+          second.parts,
+        ]);
       });
 
       store.release('chat_two_sends');
@@ -4258,7 +5119,7 @@ describe('ChatSessionStore', () => {
     /* The same ordering with an `edit` doing the displacing: the edit rewinds to
      * a message the transcript still holds, so the only text at risk is the
      * send's — and its own `requestTurn` resolves last, holding the clear. */
-    it('returns a send displaced by an edit to the composer', async () => {
+    it('keeps a queued send intact when a transcript edit is submitted', async () => {
       const store = createStore();
       const session = store.acquire('chat_send_then_edit', 'resource_send_then_edit');
       startTurnOwner(store, 'resource_send_then_edit');
@@ -4289,7 +5150,9 @@ describe('ChatSessionStore', () => {
       await Promise.all([sent, edited]);
 
       await vi.waitFor(() => {
-        expect(session.draftActorRef.getSnapshot().context.draftText).toBe('unsent message');
+        expect(session.messageQueueRef.getSnapshot().context.items[0]?.message.parts).toEqual([
+          { type: 'text', text: 'unsent message' },
+        ]);
       });
 
       store.release('chat_send_then_edit');
@@ -4484,76 +5347,26 @@ describe('ChatSessionStore — composer records (W7)', () => {
     second.store.release(chatId);
   });
 
-  /*
-   * I5 for attachments, ruling E2. A displaced send's text came back to the
-   * composer but its files did not: the bytes were promoted into the chat's own
-   * directory when the gesture was taken and the draft-stage copies released
-   * with the draft, so the restored chips pointed at blobs the composer could
-   * no longer read or re-send. The decision that hands a message back is the
-   * decision that must not release — and must re-retain what it hands back.
-   */
-  it('should hand a displaced send back to the composer with its attachment still usable', async () => {
+  it('should keep multiple queued messages and their promoted attachments across reopen', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
     const session = store.acquire(chatId, projectId);
-    startTurnOwner(store, projectId);
-    const runId = 'req_attachment_displacement';
-    const command: HostCommand = {
-      type: 'start',
-      commandId: runId,
-      payload: {
-        chatId,
-        runId,
-        message: { id: 'msg_attachment_displacement', role: 'user', content: 'first message' },
-        trigger: 'submit',
-      },
-    };
-    const hostCommand = vi.fn(
-      async (): Promise<CommandAnswer> => ({
-        commandId: runId,
-        generation: 1,
-        status: 'applied',
-        effect: 'durable',
-        cursor: 1,
-      }),
-    );
-    const unpublish = store.publishProjectHostConnector(
-      projectId,
-      async () => ({ hostCommand, close: vi.fn(async () => undefined) }) as unknown as AgentHostClient,
-    );
-    publishAdmission(chatId, (gesture) => ({
-      kind: 'send',
-      message: gesture.kind === 'send' ? gesture.message : buildUserMessage({ text: 'first message' }),
-      command,
-    }));
     await attachBoth(session);
     const { draftAttachments } = session.draftActorRef.getSnapshot().context;
     await store.promoteDraftAttachments(chatId, draftAttachments);
-    const second = buildUserMessage({ text: 'second message', attachments: draftAttachments });
-
-    await store.requestTurn(chatId, { kind: 'send', message: buildUserMessage({ text: 'first message' }) });
-    await vi.waitFor(() => {
-      expect(hostCommand).toHaveBeenCalledExactlyOnceWith(command);
-    });
-    publishLogRows(store, chatId, runningRows(runId));
-    const displaced = store.requestTurn(chatId, { kind: 'send', message: second, attachments: draftAttachments });
-    const third = store.requestTurn(chatId, { kind: 'send', message: buildUserMessage({ text: 'third message' }) });
-    await Promise.all([displaced, third]);
-
-    await vi.waitFor(() => {
-      expect(session.draftActorRef.getSnapshot().context).toMatchObject({
-        draftText: 'second message',
-        draftAttachments: [
-          { hash: pngHash, mediaType: 'image/png' },
-          { hash: pdfHash, mediaType: 'application/pdf', filename: 'bracket-spec.pdf' },
-        ],
-      });
-    });
-    expect(client.namesUnder(draftAttachmentsDirectory(projectId, chatId))).toEqual(
-      [`${pngHash}.png`, `${pdfHash}.pdf`].sort(),
-    );
+    const first = buildUserMessage({ text: 'second message', attachments: draftAttachments });
+    const second = buildUserMessage({ text: 'third message' });
+    await store.requestTurn(chatId, { kind: 'send', message: first, attachments: draftAttachments });
+    await store.requestTurn(chatId, { kind: 'send', message: second });
     store.release(chatId);
-    unpublish();
+    const reopened = openStore(client).store;
+    const restored = reopened.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(restored.messageQueueRef.getSnapshot().context.items.map((item) => item.message)).toEqual([first, second]);
+    });
+    expect(client.files.get(`${chatAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`)).toEqual(pngBytes);
+    expect(client.files.get(`${chatAttachmentsDirectory(projectId, chatId)}/${pdfHash}.pdf`)).toEqual(pdfBytes);
+    reopened.release(chatId);
   });
 
   it('promotes both blobs into the chat directory and clears the draft-stage copies', async () => {

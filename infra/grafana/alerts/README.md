@@ -1,10 +1,9 @@
 # Tau Grafana Alerts
 
-JSON files in this directory are alert **rule groups** synced to any Grafana
-instance via `apps/api/scripts/sync-grafana-dashboards.sh`. Each file defines
+JSON files in this directory are alert **rule groups** consumed by the versioned Terraform bundle for hosted provisioning and by
+`apps/api/scripts/sync-grafana-dashboards.sh` for local development. Each file defines
 one rule group; each rule inside a group has a stable `uid` so re-runs are
-idempotent (the sync script deletes by UID before re-uploading to clear
-provenance conflicts).
+idempotent (the local sync updates groups in place without deleting rules).
 
 ## Datasource UID assumptions
 
@@ -31,9 +30,10 @@ failure rate on the Tau endpoint) — part of the launch-checklist click-ops.
 ## Adding a new alert
 
 1. Append a new object to the `rules` array of the appropriate file.
-2. Pick a stable, kebab-case `uid`; the sync script uses it for delete/replace.
+2. Pick a stable, kebab-case `uid`; provisioning retains it for in-place updates.
 3. Use `severity: critical` for P0, `severity: warning` for P1.
-4. Re-run `apps/api/scripts/sync-grafana-dashboards.sh` (locally or via CI).
+4. Update the local YAML copy and run `pnpm nx run scripts:validate-grafana`.
+5. Sync locally; promote the pinned definition commit in Tau Cloud for hosted changes.
 
 ## Adding a new Loki LogQL alert
 

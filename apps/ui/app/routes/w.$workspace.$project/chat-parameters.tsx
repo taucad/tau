@@ -1,3 +1,5 @@
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import {
   XIcon,
   ChevronDown,
@@ -17,7 +19,7 @@ import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { Paneview } from '#components/panes/paneview.js';
 import { hasJsonSchemaObjectProperties } from '@taucad/utils/schema';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { toast } from '#components/ui/sonner.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import {
@@ -50,10 +52,10 @@ import {
   FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
-import { SearchInput } from '#components/search-input.js';
+import { SearchInput } from '@taucad/ui/components/search-input';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import {
   PaneviewHeader,
@@ -66,16 +68,17 @@ import {
   paneviewHeaderSize,
 } from '#components/panes/paneview-header.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
+import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useProject, useMainGraphics, useParameterSetActor } from '#hooks/use-project.js';
-import { Parameters } from '#components/geometry/parameters/parameters.js';
-import type { ParameterCommit, ParameterEdit } from '#components/geometry/parameters/rjsf-context.js';
+import { Parameters } from '@taucad/viewer/parameters/parameters';
+import type { ParameterCommit, ParameterEdit } from '@taucad/viewer/parameters/rjsf-context';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { ParameterManifest } from '@taucad/parameters';
 import { getActiveGroupValues } from '@taucad/types';
 import type { FileParameterEntry, JSONValue } from '@taucad/types';
-import type { ParameterDraft, ParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterDraft } from '@taucad/viewer/parameters/parameter-edit';
 import { withPointerValue } from '#services/parameter-set-service.js';
 import { createDefaultEntry } from '#utils/parameter-config.utils.js';
 import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
@@ -1104,7 +1107,7 @@ function ParametersContent({ filterTerm }: { readonly filterTerm: string }): Rea
   return <ParametersPaneview entries={entries} mainEntryPath={mainEntryPath} filterTerm={filterTerm} />;
 }
 
-export function ParametersPanelBody(): React.JSX.Element {
+function ParametersPanelBodyContent(): React.JSX.Element {
   const [filterTerm, setFilterTerm] = useState('');
 
   return (
@@ -1175,3 +1178,8 @@ export const ChatParameters = memo(function (props: {
     </FloatingPanel>
   );
 });
+
+export function ParametersPanelBody(): React.JSX.Element {
+  const availability = useProjectAvailability();
+  return availability === 'ready' ? <ParametersPanelBodyContent /> : <ProjectSyncPlaceholder state={availability} />;
+}

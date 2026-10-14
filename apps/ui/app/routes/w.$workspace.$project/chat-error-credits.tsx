@@ -61,8 +61,8 @@ export const ChatErrorCredits = memo(function ({
   const shortfall = shortfallCredits(details);
   const routeId = typeof details?.['routeId'] === 'string' ? details['routeId'] : undefined;
   const fallbackDescription = resumable
-    ? 'Your credit balance is too low. Add credits, then resume this chat.'
-    : 'Your credit balance is too low.';
+    ? 'Your available monthly and purchased credits do not cover this turn. Add credits, then resume this chat.'
+    : 'Your available monthly and purchased credits do not cover this turn.';
   const resolvedDescription =
     shortfall === undefined || routeId === undefined
       ? (description ?? fallbackDescription)

@@ -5,7 +5,7 @@ import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { formatSharePath } from '@taucad/share/locator';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import type { BuiltinProjectCardModel, ProjectFiles } from '#constants/project-examples.js';

@@ -29,7 +29,7 @@ vi.mock('#components/ui/collapsible-code-block.js', () => ({
 }));
 
 // Mock the InlineCode component
-vi.mock('#components/code/code-block.js', () => ({
+vi.mock('@taucad/ui/components/inline-code', () => ({
   InlineCode: ({
     children,
     className,

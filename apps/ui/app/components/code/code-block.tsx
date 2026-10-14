@@ -157,18 +157,3 @@ export function Pre({ children, language, className, ...rest }: PreProps): React
     </pre>
   );
 }
-
-export function InlineCode({ children, className, ...rest }: ComponentProps<'code'>): React.JSX.Element {
-  return (
-    <code
-      {...rest}
-      data-slot='inline-code'
-      className={cn(
-        className,
-        'rounded-xs border bg-neutral/10 px-1 py-0 font-normal text-foreground/80 before:content-none after:content-none',
-      )}
-    >
-      {children}
-    </code>
-  );
-}

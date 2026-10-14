@@ -12,10 +12,14 @@
  * it via a transport-internal acquirer hook.
  */
 
-import { MessageChannel } from 'node:worker_threads';
+import { MessageChannel, Worker as NodeWorker } from 'node:worker_threads';
+import type { WorkerOptions } from 'node:worker_threads';
 import { describe, it, expect, vi } from 'vitest';
+import { createRuntimeClient } from '#client/runtime-document-client-core.js';
+import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { nodeWorkerHost } from '#transport/node-worker-host.js';
+import { nodeWorkerTransport } from '#transport/node-worker-transport.js';
 import * as nodeParentPortModule from '#transport/_internal/node-parent-port.js';
 
 const createMockKernelWorker = (): KernelWorker => {
@@ -122,4 +126,42 @@ describe('nodeWorkerHost — real port acquisition (R3)', () => {
       acquireSpy.mockRestore();
     }
   });
+});
+
+/** Runs the `.ts` fixture entry under tsx; the transport's own `workerCtor` seam. */
+class TsxWorker extends NodeWorker {
+  public constructor(url: string | URL, options?: WorkerOptions) {
+    super(url, { ...options, execArgv: ['--import', 'tsx'] });
+  }
+}
+
+describe('nodeWorkerTransport — workerData', () => {
+  it('should hand the consumer workerData to the worker entry', async () => {
+    const client = createRuntimeClient({
+      transport: nodeWorkerTransport({
+        url: new URL('node-worker-transport.fixture.ts', import.meta.url),
+        workerCtor: TsxWorker,
+        workerData: { projectRoot: '/projects/a', nested: { depth: 2 } },
+        fileSystem: fromMemoryFs({ 'main.fixture': 'workerData' }),
+      }),
+    });
+    const document = client.open({ source: { path: 'main.fixture' }, watch: false });
+    const view = document.view('model');
+    try {
+      const outcome = await view.rendering();
+      if (outcome.superseded || !outcome.rendering.success) {
+        throw new Error(`Expected one successful rendering: ${JSON.stringify(outcome)}`);
+      }
+      const report = JSON.parse(
+        new TextDecoder().decode(outcome.rendering.artifact.content as Uint8Array<ArrayBuffer>),
+      ) as {
+        workerData: unknown;
+      };
+      expect(report.workerData).toEqual({ projectRoot: '/projects/a', nested: { depth: 2 } });
+    } finally {
+      view.close();
+      document.close();
+      await client.shutdown();
+    }
+  }, 30_000);
 });

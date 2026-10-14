@@ -1,0 +1,124 @@
+# Spike S18 (native-dependency-resolution charter, wave 1): is x86_64_v3 CPython >= 10 % faster than the baseline
+# build on a build123d workload (D15)? Both interpreters get the same hash-locked wheel closure; the shipped
+# benchmark-native script runs five times per interpreter, interleaved. Pass (geomean speedup >= 10 %) would add a
+# microarchitecture tier and contradict D15; a fail keeps "no microarchitecture tiers".
+name: Spike S18 (x86_64_v3 CPython)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/spike-w1-linux-s18.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-w1-s18-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s18:
+    name: S18 benchmark-native, baseline vs x86_64_v3
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+      V3_ARCHIVE: cpython-3.13.15+20260901-x86_64_v3-unknown-linux-gnu-install_only.tar.gz
+      # From the release's SHA256SUMS (the baseline install_only row equals apps/desktop/resources/python/manifest.json).
+      V3_SHA256: d80ff86776b472d8590717984dba05b40ef0965ab4ddd2db096b8f0eba0814ad
+      RUNS: '5'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+      - name: Record the host
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          {
+            echo "cpu=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs) nproc=$(nproc)"
+            echo "x86-64-v3 flags present: $(for f in avx avx2 bmi1 bmi2 f16c fma lzcnt movbe xsave; do grep -qw "$f" /proc/cpuinfo && printf '%s ' "$f" || printf '!%s ' "$f"; done)"
+            echo "ld.so supported: $(/lib64/ld-linux-x86-64.so.2 --help | grep -E 'x86-64-v[234]' | xargs)"
+          } | tee "$RUNNER_TEMP/evidence/host.txt"
+      - name: Prepare the baseline closure
+        run: |
+          set -o pipefail
+          pnpm nx run desktop:prepare-build123d-python --outputStyle=stream 2>&1 | tail -3
+          mv apps/desktop/resources/python/linux-x64 "$RUNNER_TEMP/baseline"
+      - name: Prepare the x86_64_v3 closure with the same wheel lock
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$V3_ARCHIVE" "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/${V3_ARCHIVE//+/%2B}"
+          echo "$V3_SHA256  $RUNNER_TEMP/$V3_ARCHIVE" | sha256sum --check --quiet
+          v3="$RUNNER_TEMP/v3"
+          mkdir -p "$v3"
+          tar -xzf "$RUNNER_TEMP/$V3_ARCHIVE" -C "$v3" --strip-components=1
+          uv pip install --python "$v3/bin/python3" --require-hashes --no-deps -r packages/plugins/build123d/python/requirements.lock 2>&1 | tail -2
+          cp -R "$RUNNER_TEMP/baseline/tau-worker" "$v3/tau-worker"
+          sha=$(sha256sum "$v3/bin/python3" | cut -d' ' -f1)
+          jq --arg sha "$sha" --arg archive "$V3_ARCHIVE" --arg archiveSha "$V3_SHA256" \
+            '.pythonSha256 = $sha | .sourceArchive = $archive | .sourceArchiveSha256 = $archiveSha' \
+            "$RUNNER_TEMP/baseline/tau-runtime-manifest.json" > "$v3/tau-runtime-manifest.json"
+          {
+            for variant in baseline v3; do
+              root="$RUNNER_TEMP/$variant"
+              echo "$variant: python $("$root/bin/python3" -I -c 'import sys;print(sys.version.split()[0])') sha256 $(sha256sum "$root/bin/python3" | cut -c1-12) march $("$root/bin/python3" -I -c 'import sysconfig;import re;print((re.findall(r"-march=\S+", sysconfig.get_config_var("CFLAGS") or "") or ["(none)"])[0])')"
+              echo "$variant: site-packages tree $(cd "$root/lib/python3.13/site-packages" && find . -type f ! -name '*.pyc' ! -name RECORD ! -name INSTALLER ! -name REQUESTED ! -name direct_url.json -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
+            done
+          } | tee "$RUNNER_TEMP/evidence/interpreters.txt"
+      - name: Run benchmark-native five times per interpreter, interleaved
+        run: |
+          target=apps/desktop/resources/python/linux-x64
+          for run in $(seq 1 "$RUNS"); do
+            if [ $((run % 2)) -eq 1 ]; then order="baseline v3"; else order="v3 baseline"; fi
+            for variant in $order; do
+              mv "$RUNNER_TEMP/$variant" "$target"
+              node --import @oxc-node/core/register packages/plugins/build123d/scripts/benchmark-native.mts --iterations 200 > "$RUNNER_TEMP/evidence/$variant-$run.json"
+              mv "$target" "$RUNNER_TEMP/$variant"
+              echo "$variant run $run: v8Build $(jq -r '.v8BuildMilliseconds | floor' "$RUNNER_TEMP/evidence/$variant-$run.json") ms, longSession $(jq -r '.longSessionMilliseconds | floor' "$RUNNER_TEMP/evidence/$variant-$run.json") ms"
+            done
+          done
+      - name: Compute the geomean speedup
+        run: |
+          node - "$RUNNER_TEMP/evidence" "$RUNS" <<'JS' | tee "$RUNNER_TEMP/evidence/geomean.txt"
+          const { readFileSync } = require('node:fs');
+          const [dir, runs] = process.argv.slice(2);
+          const load = (variant) => Array.from({ length: Number(runs) }, (_, i) => JSON.parse(readFileSync(`${dir}/${variant}-${i + 1}.json`, 'utf8')));
+          const base = load('baseline');
+          const v3 = load('v3');
+          const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
+          // CPU workload metrics (timings of Python and OCP work). IPC, artifact reads and cancellation are I/O-bound and reported separately.
+          const workload = ['coldAnalysisMilliseconds', 'warmAnalysisMedianMilliseconds', 'boxBuildMilliseconds', 'boxMeshMilliseconds', 'boxExportMilliseconds', 'v8BuildMilliseconds', 'v8MeshMilliseconds', 'v8ExportMilliseconds', 'longSessionMilliseconds'];
+          const other = ['ipcMedianMilliseconds', 'boxArtifactReadMilliseconds', 'boxExportReadMilliseconds', 'v8ArtifactReadMilliseconds', 'v8ExportReadMilliseconds', 'cancellationMilliseconds'];
+          const row = (m) => { const b = median(base.map((r) => r[m])); const v = median(v3.map((r) => r[m])); return { m, b, v, ratio: b / v }; };
+          const geo = (rows) => Math.exp(rows.reduce((s, r) => s + Math.log(r.ratio), 0) / rows.length);
+          const fmt = (r) => `${r.m.replace('Milliseconds', '').padEnd(24)} baseline ${r.b.toFixed(1).padStart(9)} ms  v3 ${r.v.toFixed(1).padStart(9)} ms  speedup ${((r.ratio - 1) * 100).toFixed(1).padStart(6)} %`;
+          const w = workload.map(row);
+          const o = other.map(row);
+          console.log(`medians of ${runs} runs each (speedup = baseline / v3 - 1)`);
+          for (const r of w) console.log(fmt(r));
+          console.log('-- not in the geomean (I/O-bound):');
+          for (const r of o) console.log(fmt(r));
+          const g = geo(w);
+          console.log(`longSession per-run baseline: ${base.map((r) => r.longSessionMilliseconds.toFixed(0)).join(', ')}`);
+          console.log(`longSession per-run v3:       ${v3.map((r) => r.longSessionMilliseconds.toFixed(0)).join(', ')}`);
+          console.log(`GEOMEAN workload speedup: ${((g - 1) * 100).toFixed(2)} % -> ${g >= 1.1 ? 'PASS (>= 10 %): adds a tier' : 'FAIL (< 10 %): keeps no microarchitecture tiers'}`);
+          JS
+      - name: Collect the summary
+        if: always()
+        run: |
+          { cat "$RUNNER_TEMP/evidence/host.txt" "$RUNNER_TEMP/evidence/interpreters.txt" "$RUNNER_TEMP/evidence/geomean.txt"; } > "$RUNNER_TEMP/evidence/s18-summary.txt" 2>/dev/null || true
+          { echo '```'; cat "$RUNNER_TEMP/evidence/s18-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S18' "$RUNNER_TEMP/evidence/s18-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s18-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

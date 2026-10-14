@@ -3,7 +3,7 @@ import { ChevronDown, RotateCw } from 'lucide-react';
 import { messageRole } from '@taucad/chat/constants';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
-import { ActionButton, ActionsRow, disclosureMotion } from '#components/revisions/revision-actions.js';
+import { ActionButton, ActionsRow, disclosureMotion } from '@taucad/ui/components/actions';
 import { RevisionDetails, RevisionMenu } from '#routes/w.$workspace.$project/revision-marker.js';
 import { turnRevisionGlyph } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import {

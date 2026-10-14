@@ -30,8 +30,8 @@ import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { cn } from '@taucad/ui/utils/cn';
-import { gitRemoteUrlProblem, isCeilingRefusal } from '@taucad/revisions';
-import type { RemoteFacet, SyncFacet, SyncFailureReason } from '@taucad/revisions';
+import { gitRemoteUrlProblem, isCeilingRefusal, isGithubRemoteUrl } from '@taucad/revisions';
+import type { RemoteFacet, RemoteRefusedReplacement, SyncFacet, SyncFailureReason } from '@taucad/revisions';
 /* The machine's own subpath: `SyncFailureReason` is not on the package barrel,
    and a second copy of the union here would be exactly the dual vocabulary the
    contract forbids (§3). */
@@ -50,15 +50,17 @@ import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
 import { SwitchRow } from '@taucad/ui/components/switch';
 import { RevisionCollaborators } from '#routes/w.$workspace.$project/revision-collaborators.js';
-import { ActionButton, DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
+import { ActionButton, DetailsToggle, disclosureMotion } from '@taucad/ui/components/actions';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
 import { timelineRow } from '#components/revisions/revision-timeline.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import {
   accessRemovedSentence,
+  asksTauSignIn,
   backupCopy,
   isGithubRemote,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import type { RevisionWhere } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
@@ -141,6 +143,11 @@ export type RevisionSyncRegionProps = {
    */
   readonly role?: ProjectAccessRole;
   /**
+   * The viewer is signed out of Tau, so this device withholds its GitHub
+   * credential and a refusal asks for *Sign in*, not GitHub (D100).
+   */
+  readonly isSignedOut?: boolean;
+  /**
    * The project id: the owner's collaborator surface needs it, and so does a
    * moved GitHub repository, whose binding it keys (D11).
    */
@@ -151,6 +158,8 @@ export type RevisionSyncRegionProps = {
    * only fail after the gesture.
    */
   readonly isLineKnown?: boolean;
+  /** The branch the pane is on, which *Open on GitHub* opens; the repository root when absent (D92). */
+  readonly branch?: string;
   readonly className?: string;
 };
 
@@ -171,7 +180,8 @@ const reconnectCopy = (remote: RemoteFacet): string => {
   if (isGithubRemote(remote)) {
     return 'GitHub needs a connected account to reach this repository. Reconnect GitHub, then pick it from your repositories.';
   }
-  return remote.error ?? 'The remote rejected the saved credentials.';
+  /* D94: every other Git remote is anonymous, so it had no saved credentials to reject. */
+  return remote.error ?? 'This remote asked for a sign-in Tau does not have, or has no repository at this address.';
 };
 
 /**
@@ -183,18 +193,23 @@ const reconnectCopy = (remote: RemoteFacet): string => {
  *
  * @param reason - The failure class the sync machine recorded.
  * @param remote - The connection, so a credential problem names its provider.
- * @param role - The viewer's relationship to the project, which decides whether a plan action is theirs.
+ * @param viewer - The viewer's relationship to the project, which decides whether a plan action is
+ *   theirs, and whether they are signed out of Tau, which makes a GitHub refusal a sign-in (D100).
  * @returns Which action to render, or `undefined` when there is nothing to do.
  */
 const syncFailureAction = (
   { reason, error }: Readonly<{ reason?: SyncFailureReason | undefined; error?: string | undefined }>,
   remote: RemoteFacet,
-  role?: ProjectAccessRole,
+  { role, isSignedOut }: Pick<RevisionWhere, 'role' | 'isSignedOut'> = {},
 ): 'signIn' | 'upgrade' | 'reconnectGithub' | 'moved' | 'syncNow' | 'retry' | undefined => {
   switch (reason) {
     case 'unauthorized': {
-      /* Only Tau Cloud is reached with this device's own session (D18). */
-      return remote.kind === 'tau' ? 'signIn' : isGithubRemote(remote) ? 'reconnectGithub' : 'retry';
+      /* Only Tau Cloud is reached with this device's own session, and GitHub only once signed in (D18, D100). */
+      return asksTauSignIn({ reason }, remote, isSignedOut)
+        ? 'signIn'
+        : isGithubRemote(remote)
+          ? 'reconnectGithub'
+          : 'retry';
     }
     /* D17: a plan is the owner's to change. A collaborator's refusal is the
        owner-directed sentence alone; an owner with no larger plan gets none
@@ -229,6 +244,25 @@ const syncFailureAction = (
   }
 };
 
+/**
+ * The one action a refused replacement implies (R2, rule 19).
+ *
+ * The refusal is the new remote's, so the kept remote's own fixes (*Reconnect
+ * GitHub*, *Sync now*) do not apply: a plan refusal is the plan's action, and
+ * anything else is picking a backup again.
+ *
+ * @param refusal - What the new remote answered.
+ * @param remote - The connection that stayed.
+ * @param viewer - The viewer's relationship to the project, which decides whether a plan action is theirs.
+ * @returns Which action to render, or `undefined` when there is nothing to do.
+ */
+const refusedReplacementAction = (
+  refusal: RemoteRefusedReplacement,
+  remote: RemoteFacet,
+  viewer: Pick<RevisionWhere, 'role' | 'isSignedOut'>,
+): ReturnType<typeof syncFailureAction> =>
+  refusal.reason === 'notEntitled' || refusal.reason === 'quota' ? syncFailureAction(refusal, remote, viewer) : 'retry';
+
 const connectingCopy = (remote: RemoteFacet): string =>
   remote.phase === 'disconnecting'
     ? 'Disconnecting…'
@@ -236,6 +270,17 @@ const connectingCopy = (remote: RemoteFacet): string =>
       ? 'Connecting to Tau Cloud…'
       : 'Connecting…';
 
+/**
+ * The most specific true name for a Git remote (R3).
+ *
+ * A GitHub repository is its `owner/name`; any other host is named with its
+ * path too (`gitlab.example.com/o/r`), because two repositories on one host
+ * would otherwise read as the same backup in a *Replace* confirmation.
+ *
+ * @param url - The remote's address.
+ * @param github - Whether the address is a GitHub repository.
+ * @returns The name to show.
+ */
 const gitRemoteLabel = (url: string | undefined, github = false): string => {
   if (url === undefined) {
     return github ? 'GitHub repository' : 'Git remote';
@@ -243,7 +288,7 @@ const gitRemoteLabel = (url: string | undefined, github = false): string => {
   try {
     const parsed = new URL(url);
     const path = parsed.pathname.replaceAll(/^\/+|\/+$/gu, '').replace(/\.git$/u, '');
-    return github && path !== '' ? path : parsed.host;
+    return path === '' ? parsed.host : github ? path : `${parsed.host}/${path}`;
   } catch {
     return github ? 'GitHub repository' : 'Git remote';
   }
@@ -363,9 +408,14 @@ function GitRemoteForm({
  * id on the connection it was picked from. A new address is offered, and the
  * remote is re-pointed only once the person confirms it (policy rule 11).
  *
- * @param props - The project, the remote's own sentence, the re-point verb and
- *   the fallback action for when there is no new address to offer.
- * @returns The row.
+ * D99: GitHub serves a renamed repository's old address to an authorized git
+ * client without redirecting, so a rename never fails a sync. A healthy GitHub
+ * row asks too, with no sentence, and says nothing until the address differs.
+ *
+ * @param props - The project, the remote's own sentence (none on a healthy
+ *   row), the re-point verb and the fallback action for when there is no new
+ *   address to offer.
+ * @returns The row, or nothing on a healthy row whose address still holds.
  */
 function MovedRepository({
   projectId,
@@ -374,10 +424,10 @@ function MovedRepository({
   fallback,
 }: {
   readonly projectId: string | undefined;
-  readonly sentence: string;
+  readonly sentence: string | undefined;
   readonly onUpdate: (connectionId: string, repository: GithubRepository) => void;
   readonly fallback: ReactNode;
-}): React.JSX.Element {
+}): React.JSX.Element | undefined {
   const binding = projectId === undefined ? undefined : githubProjectBinding.get(projectId);
   const lookup = useQuery({
     queryKey: ['github', 'repository', binding?.connectionId, binding?.repositoryId],
@@ -391,6 +441,9 @@ function MovedRepository({
   const [kept, setKept] = useState(false);
   const moved = lookup.data !== undefined && lookup.data.cloneUrl !== binding?.repositoryUrl ? lookup.data : undefined;
   if (binding === undefined || moved === undefined) {
+    if (sentence === undefined) {
+      return undefined;
+    }
     return (
       <span className='flex flex-wrap items-center gap-2 text-xs'>
         <span className='min-w-0 flex-1'>{lookup.isError ? githubErrorMessage(lookup.error) : sentence}</span>
@@ -479,8 +532,10 @@ export function RevisionSyncRegion({
   storageLimitBytes,
   signInHref,
   role,
+  isSignedOut,
   projectId,
   isLineKnown = true,
+  branch,
   className,
 }: RevisionSyncRegionProps): React.JSX.Element {
   const busy = remote.phase === 'connecting' || remote.phase === 'disconnecting';
@@ -501,12 +556,15 @@ export function RevisionSyncRegion({
   const [pendingConnection, setPendingConnection] = useState<PendingConnection>();
   const [changingBackup, setChangingBackup] = useState(remote.phase !== 'connected');
   const [reconnecting, setReconnecting] = useState(false);
+  /* A connect in flight from this region: *Replace backup* waits for it. */
+  const [committing, setCommitting] = useState(false);
   const [shouldConnect, setShouldConnect] = useState(false);
   const handleConnectRequest = (): void => {
     setShouldConnect(false);
   };
-  const syncState = backupCopy(sync, role, remote);
-  const failureAction = syncFailureAction(sync, remote, role);
+  const viewer = { role, isSignedOut };
+  const syncState = backupCopy(sync, viewer, remote);
+  const failureAction = syncFailureAction(sync, remote, viewer);
   /* W2a: a damaged cloud copy is terminal; the client has nothing to offer but the truth (I12). */
   const failureSentence =
     sync.reason === 'damaged' ? describeRevisionFailure('backup', 'REMOTE_DAMAGED').description : sync.error;
@@ -584,18 +642,44 @@ export function RevisionSyncRegion({
     }
   }, [remote.phase]);
 
-  const connectedLabel = remote.kind === 'tau' ? 'Tau Cloud' : gitRemoteLabel(remote.url, remote.provider === 'github');
-  const pendingLabel =
-    pendingConnection?.kind === 'tau'
+  /* D92: *Open on GitHub* opens the branch, each segment encoded and its separators kept. */
+  const branchPath =
+    branch === undefined
+      ? ''
+      : `/tree/${branch
+          .split('/')
+          .map((segment) => encodeURIComponent(segment))
+          .join('/')}`;
+  const connectedLabel = remote.kind === 'tau' ? 'Tau Cloud' : gitRemoteLabel(remote.url, isGithubRemote(remote));
+  const labelOf = (pending: PendingConnection): string =>
+    pending.kind === 'tau'
       ? 'Tau Cloud'
-      : pendingConnection?.kind === 'github'
-        ? pendingConnection.repository.fullName
-        : pendingConnection?.kind === 'git'
-          ? gitRemoteLabel(pendingConnection.url)
-          : undefined;
+      : pending.kind === 'github'
+        ? pending.repository.fullName
+        : gitRemoteLabel(pending.url, isGithubRemoteUrl(pending.url));
+  const pendingLabel = pendingConnection === undefined ? undefined : labelOf(pendingConnection);
 
+  /* D11: a moved repository keeps its id, so the address decides sameness too. */
+  const isSameDestination = (pending: PendingConnection): boolean =>
+    pending.kind === 'tau'
+      ? remote.kind === 'tau'
+      : pending.kind === 'github'
+        ? remote.kind === 'git' &&
+          remote.provider === 'github' &&
+          remote.repositoryId === String(pending.repository.id) &&
+          remote.url === pending.repository.cloneUrl
+        : remote.kind === 'git' && remote.provider === undefined && remote.url === pending.url;
+
+  /*
+   * R2: the platform asks a replacing remote for its advertisement before it
+   * records it, and a refusal leaves the old remote recorded and backing the
+   * project up (`remote.refusedReplacement`). The hook's `connectRemote` owns
+   * the binding and credential across that answer, so it survives this region
+   * unmounting mid-probe; the region only sends the pick.
+   */
   const commitConnection = async (pending: PendingConnection): Promise<void> => {
     setConnectionError(undefined);
+    setCommitting(true);
     try {
       if (pending.kind === 'tau') {
         await onConnect('tau');
@@ -620,6 +704,8 @@ export function RevisionSyncRegion({
       setChoice(undefined);
     } catch (error) {
       setConnectionError(error instanceof Error ? error.message : 'The backup could not be connected.');
+    } finally {
+      setCommitting(false);
     }
   };
 
@@ -631,16 +717,7 @@ export function RevisionSyncRegion({
       onUpgrade?.();
       return;
     }
-    /* D11: a moved repository keeps its id, so the address decides sameness too. */
-    const same =
-      pending.kind === 'tau'
-        ? remote.kind === 'tau'
-        : pending.kind === 'github'
-          ? remote.kind === 'git' &&
-            remote.provider === 'github' &&
-            remote.repositoryId === String(pending.repository.id) &&
-            remote.url === pending.repository.cloneUrl
-          : remote.kind === 'git' && remote.provider === undefined && remote.url === pending.url;
+    const same = isSameDestination(pending);
     /* R-U6: the same repository with changed access is re-sent with it. */
     const accessChanged = pending.kind === 'github' && remote.fetchOnly !== (pending.repository.access !== 'write');
     /* D3: the same remote picked while its credential is refused is the
@@ -810,7 +887,18 @@ export function RevisionSyncRegion({
         </span>
         {role === 'revoked' ? (
           <span className='text-muted-foreground'>{accessRemovedSentence}</span>
-        ) : failureSentence === undefined ? undefined : failureAction === 'moved' ? (
+        ) : failureSentence === undefined ? (
+          remote.provider === 'github' ? (
+            <MovedRepository
+              projectId={projectId}
+              sentence={undefined}
+              fallback={undefined}
+              onUpdate={(connectionId, repository) => {
+                void commitConnection({ kind: 'github', connectionId, repository });
+              }}
+            />
+          ) : undefined
+        ) : failureAction === 'moved' ? (
           <MovedRepository
             projectId={projectId}
             sentence={failureSentence}
@@ -878,7 +966,11 @@ export function RevisionSyncRegion({
                         <DropdownMenuLabel>{connectedLabel}</DropdownMenuLabel>
                         {remote.provider === 'github' && remote.url !== undefined ? (
                           <DropdownMenuItem asChild>
-                            <a href={remote.url.replace(/\.git$/u, '')} target='_blank' rel='noreferrer'>
+                            <a
+                              href={`${remote.url.replace(/\.git$/u, '')}${branchPath}`}
+                              target='_blank'
+                              rel='noreferrer'
+                            >
                               <ExternalLink aria-hidden />
                               Open on GitHub
                             </a>
@@ -1148,6 +1240,7 @@ export function RevisionSyncRegion({
             <Button
               autoFocus
               size='sm'
+              disabled={committing}
               onClick={() => {
                 void commitConnection(pendingConnection);
               }}
@@ -1177,7 +1270,8 @@ export function RevisionSyncRegion({
         <div className='flex flex-col gap-2'>
           <p
             role='alert'
-            aria-label={isGithubRemote(remote) ? 'GitHub connection' : 'Remote credentials'}
+            /* R11: named by what it asks for. An anonymous remote holds no credentials (D94). */
+            aria-label={isGithubRemote(remote) ? 'GitHub connection' : 'Remote sign-in'}
             className='flex items-center gap-2 text-sm'
           >
             <CloudAlert aria-hidden className='size-4 shrink-0 text-warning' />
@@ -1210,6 +1304,25 @@ export function RevisionSyncRegion({
           )}
         </div>
       ) : undefined}
+
+      {/*
+        R2: the new remote refused, so nothing was replaced. Its own sentence,
+        the backup that stays, and one action: *Upgrade* for a plan refusal,
+        otherwise reopening the choice.
+      */}
+      {remote.refusedReplacement === undefined || busy || changingBackup ? undefined : (
+        <div role='alert' aria-label='Backup change refused' className='flex flex-wrap items-center gap-2 text-sm'>
+          <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
+          <span className='min-w-0 flex-1'>
+            {`${remote.refusedReplacement.error} ${connectedLabel} is still this project’s backup.`}
+          </span>
+          {renderFailureAction(refusedReplacementAction(remote.refusedReplacement, remote, viewer), () => {
+            setPendingConnection(undefined);
+            setChoice(remote.kind);
+            setChangingBackup(true);
+          })}
+        </div>
+      )}
 
       {connectionError === undefined ? undefined : (
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
@@ -1281,7 +1394,7 @@ export function RevisionSyncRegion({
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
           <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
           <span className='min-w-0 flex-1'>{remote.error}</span>
-          {renderFailureAction(syncFailureAction(remote, remote, role) ?? 'retry', () => {
+          {renderFailureAction(syncFailureAction(remote, remote, viewer) ?? 'retry', () => {
             setChangingBackup(true);
           })}
         </div>

@@ -28,6 +28,10 @@ export type ProviderMessageMetadata = {
   readonly model?: string | undefined;
   readonly responseModel?: string | undefined;
   readonly responseId?: string | undefined;
+  /** Provider-declared message phase. Missing or unrecognized values are not progress. */
+  readonly phase?: string | undefined;
+  /** Latest provider-declared reasoning summary, preserved separately from the full thought. */
+  readonly reasoningSummary?: string | undefined;
   readonly diagnostics?: readonly JsonValue[] | undefined;
   readonly usage?: Usage | undefined;
   readonly stopReason?: StopReason | undefined;

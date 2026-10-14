@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-09-29'
+updated: '2026-10-14'
 related:
   - docs/research/revisions-always-on-sync-charter.md
   - docs/research/git-storage-substrate-charter.md
@@ -117,7 +117,9 @@ Choose one backend per project per host from control-plane configuration. No lay
 
 Keep commit identity, regular-file mode, refs, log, diff, merge, tags, checkouts, remote operations, and LFS clean/smudge behind the port. Never put clean/smudge in the composed view. Preserve `100644` and `100755` modes in the immutable tree, hashing, capture, merge, restore, and every port; refuse symlinks, gitlinks, and unknown modes before applying them. Require browser and native conformance to produce identical tree and revision identities for identical inputs and to expose the same L2–L4 behavior; the CLI exposes the same verbs headlessly.
 
-Keep each worktree's Git index naming its branch's head tree, for stock Git only. Tau never reads the index and decides dirtiness by capture, so the port refreshes it after every branch move, every `HEAD` switch, and at open when no index exists, and never fails the move because of it. Leave an existing index alone at open: an adopted repository may hold the person's staged work. A person's staging is folded into the next revision.
+Keep each worktree's Git index naming its branch's head tree, for stock Git only. Tau never reads the index and decides dirtiness by capture, so the port refreshes it after every branch move, every `HEAD` switch, and at open when no index exists, and never fails the move because of it. Leave an existing index alone at open: an adopted repository may hold the person's staged work. A person's staging is folded into the next revision. Adopt only a repository whose `.git` is a directory at the project root; refuse a project path whose `.git` is a file (a linked worktree or submodule) before writing anything, because its index, LFS objects and worktree listing belong to another repository.
+
+Treat a repository already at the project path whose ignore and attributes files carry no Tau generated block as adopted, on disk hosts only. Leave its ignore, attributes and Git config files as the person wrote them and put Tau's generated ignore block in `.git/info/exclude`. Record its entries verbatim, so an unchanged entry keeps its representation (rule 13), and exclude from capture every untracked path its own Git ignores. List only the checkouts Tau created as its linked checkouts; a worktree the person made is never watched, cut or committed to. Refuse adoption before writing anything when its `HEAD` tree holds a path the registry cannot version, a mode other than `100644` or `100755`, or LFS attributes: those are entries the first revision would drop or convert.
 
 Keep remote transport to `listRemoteRefs`, `fetch`, and `push`; do not add bundle or import-bundle wires.
 
@@ -239,7 +241,9 @@ Use the project's remote as the only chat sync plane. Include chats when a remot
 
 ### 13. Use Git LFS for large authored objects
 
-Generate `.gitattributes` from the registry for new Tau-authored content. Track new binary formats and files at or above 1 MiB with LFS. Preserve an unchanged imported Git entry's existing blob or LFS pointer representation; do not convert an external repository merely by opening or saving it. A later changed entry follows its reviewed effective attributes, and every generated attribute or representation change appears in the revision delta. Always sync large authored inputs; classify large generated outputs and `thumbnail.webp` as records/evidence and keep them local unless **Sync large exports** is enabled.
+Generate `.gitattributes` from the registry for new Tau-authored content. Track new binary formats and files at or above 1 MiB with LFS. Preserve an unchanged imported Git entry's existing blob or LFS pointer representation; do not convert an external repository merely by opening or saving it. A later changed entry follows its reviewed effective attributes, and every generated attribute or representation change appears in the revision delta. Always sync large authored inputs; classify large generated outputs and `thumbnail.webp` as records/evidence and keep them local unless **Sync large exports** is enabled, except for the bounded catalog preview below.
+
+For a connected Tau Cloud project, permit one representative **saved preview** independently of **Sync large exports**. Derive it from the existing successful thumbnail capture, cap the non-animated WebP at 768 × 576 pixels and 256 KiB, and store it privately beneath the authorized owner’s repository prefix. Require authenticated project read access for every image fetch and write access for replacement. Never make it a public CDN asset, use it as evidence that project files are local/current, or start a kernel/full model download while browsing the library. A project with no capture has no preview. Keep original `thumbnail.webp` and other generated exports under the existing evidence preference. Replace the one preview object rather than accumulating generated versions; return a content hash for its identity and discard account-scoped UI leases on access failure or account change.
 
 Hide LFS terminology from users. Show storage usage against the plan in Sync, surface Git-host LFS limits before first push, and reject an over-quota push atomically with the affected file list. Let `remote.machine` alone own and present that list.
 

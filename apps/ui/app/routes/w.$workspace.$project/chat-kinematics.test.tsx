@@ -6,15 +6,17 @@ import { mock } from 'vitest-mock-extended';
 import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
 import type * as KinematicsModule from '@taucad/kinematics';
-import type * as NumberFieldModule from '#components/geometry/parameters/parameters-number-field.js';
+import type * as NumberFieldModule from '@taucad/viewer/parameters/parameters-number-field';
 import type { Mechanism } from '@taucad/kinematics';
 import type { KernelIssue } from '@taucad/runtime';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { getKinematicsUnitState, kinematicsMachine } from '#machines/kinematics.machine.js';
+import { getKinematicsUnitState, kinematicsMachine } from '@taucad/viewer/machines/kinematics.machine';
 import { KinematicsPanelBody } from '#routes/w.$workspace.$project/chat-kinematics.js';
 import { WorkspaceLanesContext } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 const solvePose = vi.hoisted(() => vi.fn());
+vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+
 vi.mock('@taucad/kinematics', async (importOriginal) => ({
   ...(await importOriginal<typeof KinematicsModule>()),
   solvePose,
@@ -23,7 +25,7 @@ vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: (): boolean => fals
 
 // Counts each field's renders by name, so a test can show which rows a pose change re-renders.
 const fieldRenders = vi.hoisted(() => new Map<string, number>());
-vi.mock('#components/geometry/parameters/parameters-number-field.js', async (importOriginal) => {
+vi.mock('@taucad/viewer/parameters/parameters-number-field', async (importOriginal) => {
   const actual = await importOriginal<typeof NumberFieldModule>();
   return {
     ...actual,
@@ -262,11 +264,15 @@ const workbenchShown = { chat: true, workbench: true };
 const workbenchHidden = { chat: true, workbench: false };
 
 const field = (name: string) => screen.getByRole('spinbutton', { name });
-const trigger = (name: string) => screen.getByRole('button', { name });
+const trigger = (name: string | RegExp) => screen.getByRole('button', { name });
+/** A follower's one-line row, found by its degree of freedom id. */
+const follower = (id: string) => screen.getByTestId(`kinematics-dof-${id}`);
+/** A follower's relation badge, which opens the relation card on hover and on focus. */
+const relation = (id: string) => within(follower(id)).getByLabelText(/^Follows /u);
 
 /** The sun's followers start in a closed group; most follower checks open it first. */
 async function openSunFollowers(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await user.click(trigger('Followers of sun'));
+  await user.click(trigger('Followers of Sun'));
 }
 const statusRegion = () => screen.getByRole('status', { name: 'Kinematics status' });
 const alertRegion = () => screen.getByRole('alert', { name: 'Kinematics error' });
@@ -277,38 +283,66 @@ describe('KinematicsPanelBody', () => {
     project.projectRef.send.mockClear();
   });
 
-  it('should render driver sliders in degrees and millimetres and describe read-only followers by joint, relation and range', async () => {
+  it('should render driver sliders in degrees and millimetres and followers as one-line readouts with their relation', async () => {
     const user = userEvent.setup();
     renderPane();
     await openSunFollowers(user);
 
-    expect(field('sun')).toHaveValue('0');
-    expect(field('arm')).not.toHaveAttribute('readonly');
-    expect(field('slide')).toBeInTheDocument();
-    expect(field('carrier')).toHaveAttribute('readonly');
-    expect(field('carrier')).toHaveAccessibleDescription(
-      'Revolute joint · follower · carrier. = 0.25 × sun. Unlimited range. Moves 1 part: component:carrier',
+    expect(field('Sun')).toHaveValue('0');
+    expect(field('Arm')).not.toHaveAttribute('readonly');
+    expect(field('Slide')).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Carrier' })).not.toBeInTheDocument();
+    expect(follower('carrier')).toHaveTextContent('Carrier0.25×0°');
+    expect(relation('carrier')).toHaveAccessibleName('Follows Sun: = 0.25 × Sun');
+    expect(field('Arm')).toHaveAccessibleDescription(
+      'Revolute joint · driver · arm. Range -45° to 90°. On Base (ground). Moves 1 part: component:arm',
     );
-    expect(field('arm')).toHaveAccessibleDescription(
-      'Revolute joint · driver · arm. Range -45° to 90°. Moves 1 part: component:arm',
+    expect(field('Slide')).toHaveAccessibleDescription(
+      'Prismatic joint · driver · slide. Range 0 mm to 50 mm. On Base (ground). Moves 1 part: component:slide',
     );
-    expect(field('slide')).toHaveAccessibleDescription(
-      'Prismatic joint · driver · slide. Range 0 mm to 50 mm. Moves 1 part: component:slide',
-    );
-    expect(screen.getByText('Root base · 5 links · 4 joints · m, rad')).toBeInTheDocument();
+    expect(trigger(/^Structure/u)).toHaveTextContent('Structure5 links · 4 joints');
     expect(screen.queryByText(/Drag parts in the viewer/)).not.toBeInTheDocument();
     expect(statusRegion()).toHaveTextContent('Ready');
+  });
+
+  it('should open the relation card on focus with how the follower follows, its range, its carrier and its parts', async () => {
+    const user = userEvent.setup();
+    renderPane({ partNames: { 'component:carrier': 'Carrier plate' } });
+    await openSunFollowers(user);
+
+    act(() => {
+      relation('carrier').focus();
+    });
+
+    const card = await screen.findByText(/^Revolute follower/u);
+    const content = card.closest('[data-slot=hover-card-content]')!;
+    expect(content).toHaveTextContent('Follows0.25 × SunTurns with Sun');
+    expect(content).toHaveTextContent('RangeUnlimited');
+    expect(content).toHaveTextContent('OnBase (ground)');
+    expect(content).toHaveTextContent('Moves1 partCarrier plate');
+  });
+
+  it('should list each link under the joint that carries it in the Structure disclosure', async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(trigger(/^Structure/u));
+
+    expect(screen.getByText('Ground')).toBeInTheDocument();
+    for (const link of ['Sun', 'Carrier', 'Arm', 'Slide']) {
+      expect(screen.getAllByText(link).length).toBeGreaterThan(0);
+    }
   });
 
   it('should hold a driver and a closed Followers group in an open group card and keep other drivers as rows', async () => {
     const user = userEvent.setup();
     renderPane();
 
-    expect(trigger('Group: sun')).toHaveAttribute('aria-expanded', 'true');
-    expect(trigger('Followers of sun')).toHaveAttribute('aria-expanded', 'false');
-    expect(trigger('Followers of sun')).toHaveTextContent('(1)');
-    expect(screen.queryByRole('button', { name: 'Group: arm' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('spinbutton', { name: 'carrier' })).not.toBeInTheDocument();
+    expect(trigger('Group: Sun')).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger('Followers of Sun')).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger('Followers of Sun')).toHaveTextContent('Followers1');
+    expect(screen.queryByRole('button', { name: 'Group: Arm' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('kinematics-dof-carrier')).not.toBeInTheDocument();
     // Inside its group the driver's control is labelled by what it sets.
     expect(screen.getByText('Angle')).toBeInTheDocument();
     const driverRows = within(screen.getByRole('list', { name: 'Joints and drivers' })).getAllByRole('listitem');
@@ -318,12 +352,11 @@ describe('KinematicsPanelBody', () => {
     }
 
     await openSunFollowers(user);
-    expect(field('carrier')).toBeInTheDocument();
-    expect(screen.getByText('Ratio 0.25')).toBeInTheDocument();
+    expect(relation('carrier')).toHaveTextContent('0.25×');
 
-    await user.click(trigger('Group: sun'));
-    expect(screen.queryByRole('spinbutton', { name: 'sun' })).not.toBeInTheDocument();
-    expect(trigger('Group: sun')).toHaveTextContent('0°');
+    await user.click(trigger('Group: Sun'));
+    expect(screen.queryByRole('spinbutton', { name: 'Sun' })).not.toBeInTheDocument();
+    expect(trigger('Group: Sun')).toHaveTextContent('0°');
   });
 
   it('should read joint names from the mechanism and keep the id in the details', () => {
@@ -332,7 +365,7 @@ describe('KinematicsPanelBody', () => {
     });
 
     expect(field('Shoulder')).toHaveAccessibleDescription(expect.stringContaining('Revolute joint · driver · arm'));
-    expect(screen.queryByRole('spinbutton', { name: 'arm' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Arm' })).not.toBeInTheDocument();
   });
 
   it('should show twelve followers and the rest on request', async () => {
@@ -358,31 +391,28 @@ describe('KinematicsPanelBody', () => {
       },
     });
 
-    await user.click(trigger('Followers of arm'));
-    expect(screen.getByRole('spinbutton', { name: 'vane-12' })).toBeInTheDocument();
-    expect(screen.queryByRole('spinbutton', { name: 'vane-13' })).not.toBeInTheDocument();
+    await user.click(trigger('Followers of Arm'));
+    expect(follower('vane-12')).toHaveTextContent('Vane 12');
+    expect(screen.queryByTestId('kinematics-dof-vane-13')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Show 2 more' }));
-    expect(screen.getByRole('spinbutton', { name: 'vane-14' })).toBeInTheDocument();
+    expect(follower('vane-14')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Show \d+ more$/u })).not.toBeInTheDocument();
   });
 
-  it('should announce each joint value with its unit and only the limits the joint declares', async () => {
-    const user = userEvent.setup();
+  it('should announce each driver value with its unit and only the limits the joint declares', () => {
     renderPane();
-    await openSunFollowers(user);
 
-    expect(field('arm')).toHaveAttribute('aria-valuenow', '0');
-    expect(field('arm')).toHaveAttribute('aria-valuetext', '0 °');
-    expect(Number(field('arm').getAttribute('aria-valuemin'))).toBeCloseTo(-45);
-    expect(Number(field('arm').getAttribute('aria-valuemax'))).toBeCloseTo(90);
-    expect(field('slide')).toHaveAttribute('aria-valuetext', '0 mm');
-    expect(Number(field('slide').getAttribute('aria-valuemax'))).toBeCloseTo(50);
+    expect(field('Arm')).toHaveAttribute('aria-valuenow', '0');
+    expect(field('Arm')).toHaveAttribute('aria-valuetext', '0 °');
+    expect(Number(field('Arm').getAttribute('aria-valuemin'))).toBeCloseTo(-45);
+    expect(Number(field('Arm').getAttribute('aria-valuemax'))).toBeCloseTo(90);
+    expect(field('Slide')).toHaveAttribute('aria-valuetext', '0 mm');
+    expect(Number(field('Slide').getAttribute('aria-valuemax'))).toBeCloseTo(50);
     // An unlimited joint scrubs a window around its value, which is no range to announce.
-    expect(field('sun')).toHaveAttribute('aria-valuetext', '0 °');
-    expect(field('sun')).not.toHaveAttribute('aria-valuemin');
-    expect(field('sun')).not.toHaveAttribute('aria-valuemax');
-    expect(field('carrier')).not.toHaveAttribute('aria-valuemax');
+    expect(field('Sun')).toHaveAttribute('aria-valuetext', '0 °');
+    expect(field('Sun')).not.toHaveAttribute('aria-valuemin');
+    expect(field('Sun')).not.toHaveAttribute('aria-valuemax');
   });
 
   it('should show a small coupling ratio to four significant digits', async () => {
@@ -398,8 +428,8 @@ describe('KinematicsPanelBody', () => {
       });
     });
 
-    expect(field('carrier')).toHaveAccessibleDescription(expect.stringContaining('= -0.03333 × sun'));
-    expect(screen.getByText('Ratio -0.03333')).toBeInTheDocument();
+    expect(relation('carrier')).toHaveAccessibleName('Follows Sun: = -0.03333 × Sun');
+    expect(relation('carrier')).toHaveTextContent('-0.03333×');
   });
 
   it('should describe a curve follower by its driver', async () => {
@@ -418,8 +448,7 @@ describe('KinematicsPanelBody', () => {
       });
     });
 
-    expect(field('carrier')).toHaveAccessibleDescription(expect.stringContaining('= curve of sun'));
-    expect(screen.getByText('Curve')).toBeInTheDocument();
+    expect(relation('carrier')).toHaveAccessibleName('Follows Sun: = curve of Sun');
   });
 
   it('should convert a typed driver value into mechanism units and derive its followers', async () => {
@@ -427,23 +456,23 @@ describe('KinematicsPanelBody', () => {
     renderPane();
     await openSunFollowers(user);
 
-    await user.click(field('sun'));
-    await user.clear(field('sun'));
-    await user.type(field('sun'), '90{Enter}');
-    await user.click(field('slide'));
-    await user.clear(field('slide'));
-    await user.type(field('slide'), '12.5{Enter}');
+    await user.click(field('Sun'));
+    await user.clear(field('Sun'));
+    await user.type(field('Sun'), '90{Enter}');
+    await user.click(field('Slide'));
+    await user.clear(field('Slide'));
+    await user.type(field('Slide'), '12.5{Enter}');
 
     expect(unit().coordinates['sun']).toBeCloseTo(90 * degrees);
     expect(unit().coordinates['slide']).toBeCloseTo(0.0125);
-    expect(field('carrier')).toHaveValue('22.5');
+    expect(follower('carrier')).toHaveTextContent('22.5°');
   });
 
   it('should step with arrow keys and jump to the limits with unmodified Home and End only', async () => {
     const user = userEvent.setup();
     renderPane();
 
-    await user.click(field('arm'));
+    await user.click(field('Arm'));
     await user.keyboard('{ArrowUp}');
     expect(unit().coordinates['arm']).toBeCloseTo(degrees);
 
@@ -468,13 +497,13 @@ describe('KinematicsPanelBody', () => {
       kinematics.send({ type: 'tick', unitId, elapsed: 2.5 });
       kinematics.send({ type: 'pause', unitId });
     });
-    expect(field('sun')).toHaveValue('900');
+    expect(field('Sun')).toHaveValue('900');
 
-    await user.click(field('sun'));
+    await user.click(field('Sun'));
     await user.keyboard('{ArrowUp}');
 
     expect(unit().coordinates['sun']).toBeCloseTo(901 * degrees);
-    expect(field('carrier')).toHaveValue('225.25');
+    expect(follower('carrier')).toHaveTextContent('225.25°');
 
     // A joint without limits has no range ends, so End leaves it where it is.
     await user.keyboard('{End}');
@@ -485,17 +514,17 @@ describe('KinematicsPanelBody', () => {
     const user = userEvent.setup();
     renderPane();
 
-    await user.click(field('arm'));
-    await user.clear(field('arm'));
-    await user.type(field('arm'), '120{Enter}');
+    await user.click(field('Arm'));
+    await user.clear(field('Arm'));
+    await user.type(field('Arm'), '120{Enter}');
 
-    expect(field('arm')).toHaveAccessibleDescription(
-      'At limit Revolute joint · driver · arm. Range -45° to 90°. Moves 1 part: component:arm',
+    expect(field('Arm')).toHaveAccessibleDescription(
+      'At limit Revolute joint · driver · arm. Range -45° to 90°. On Base (ground). Moves 1 part: component:arm',
     );
     expect(unit().coordinates['arm']).toBeCloseTo(90 * degrees);
   });
 
-  it('should toggle playback, show the clip time while it runs and reset to the as-built pose from the file mark', async () => {
+  it('should toggle playback, show the clip time on the strip and reset to the as-built pose from the file mark', async () => {
     const user = userEvent.setup();
     renderPane();
     expect(screen.queryByRole('button', { name: 'Reset pose to as built' })).not.toBeInTheDocument();
@@ -503,7 +532,7 @@ describe('KinematicsPanelBody', () => {
       kinematics.send({ type: 'setCoordinate', unitId, id: 'arm', value: 10 * degrees });
     });
     const playback = within(screen.getByRole('group', { name: 'Playback' }));
-    expect(screen.queryByRole('group', { name: 'Timeline' })).not.toBeInTheDocument();
+    expect(playback.getByText('0.0 / 4.0 s')).toBeInTheDocument();
 
     await user.click(playback.getByRole('button', { name: 'Play' }));
     expect(unit().playback).toMatchObject({ status: 'playing', animationId: 'four-sun-turns' });
@@ -512,7 +541,8 @@ describe('KinematicsPanelBody', () => {
     act(() => {
       kinematics.send({ type: 'tick', unitId, elapsed: 1 });
     });
-    expect(screen.getByRole('spinbutton', { name: 'Time' })).toHaveAttribute('aria-valuetext', '1.0 of 4.0 seconds');
+    expect(screen.getByRole('slider', { name: 'Time' })).toHaveAttribute('aria-valuenow', '1');
+    expect(playback.getByText('1.0 / 4.0 s')).toBeInTheDocument();
     await user.click(playback.getByRole('button', { name: 'Pause' }));
     expect(unit().playback).toMatchObject({ status: 'paused', time: 1 });
     expect(statusRegion()).toHaveTextContent('Paused at 1.0 s');
@@ -520,24 +550,20 @@ describe('KinematicsPanelBody', () => {
     await user.click(screen.getByRole('button', { name: 'Reset pose to as built' }));
     expect(unit().coordinates).toEqual({ sun: 0, arm: 0, slide: 0 });
     expect(unit().playback.status).toBe('stopped');
-    expect(screen.queryByRole('group', { name: 'Timeline' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reset pose to as built' })).not.toBeInTheDocument();
   });
 
-  it('should seek to a typed clip time', async () => {
+  it('should seek from the strip, pausing the clip there', async () => {
     const user = userEvent.setup();
     renderPane();
+
     act(() => {
-      kinematics.send({ type: 'play', unitId });
-      kinematics.send({ type: 'pause', unitId });
+      screen.getByRole('slider', { name: 'Time' }).focus();
     });
+    await user.keyboard('{End}');
 
-    await user.click(screen.getByRole('spinbutton', { name: 'Time' }));
-    await user.clear(screen.getByRole('spinbutton', { name: 'Time' }));
-    await user.type(screen.getByRole('spinbutton', { name: 'Time' }), '2{Enter}');
-
-    expect(unit().playback).toMatchObject({ status: 'paused', time: 2 });
-    expect(field('sun')).toHaveValue('720');
+    expect(unit().playback).toMatchObject({ status: 'paused', time: 4 });
+    expect(field('Sun')).toHaveValue('1440');
   });
 
   it('should mark a moved driver, reset it alone, and hide driver marks while a clip plays', async () => {
@@ -547,17 +573,17 @@ describe('KinematicsPanelBody', () => {
       kinematics.send({ type: 'setCoordinate', unitId, id: 'arm', value: 10 * degrees });
       kinematics.send({ type: 'setCoordinate', unitId, id: 'slide', value: 0.01 });
     });
-    expect(screen.queryByRole('button', { name: 'Reset sun' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset Sun' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Reset arm' }));
+    await user.click(screen.getByRole('button', { name: 'Reset Arm' }));
     expect(unit().coordinates).toEqual({ sun: 0, arm: 0, slide: 0.01 });
-    expect(screen.queryByRole('button', { name: 'Reset arm' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset Arm' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reset pose to as built' })).toBeInTheDocument();
 
     act(() => {
       kinematics.send({ type: 'play', unitId });
     });
-    expect(screen.queryByRole('button', { name: 'Reset slide' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset Slide' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reset pose to as built' })).toBeInTheDocument();
   });
 
@@ -566,10 +592,10 @@ describe('KinematicsPanelBody', () => {
     renderPane();
 
     await user.click(screen.getByRole('button', { name: 'Expand all' }));
-    expect(field('carrier')).toBeInTheDocument();
+    expect(follower('carrier')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Collapse all' }));
-    expect(trigger('Group: sun')).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger('Group: Sun')).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('button', { name: 'Expand all' })).toBeInTheDocument();
   });
 
@@ -577,7 +603,7 @@ describe('KinematicsPanelBody', () => {
     renderPane({ loaded: { ...mechanism, couplings: [] } });
 
     expect(screen.queryByRole('button', { name: 'Expand all' })).not.toBeInTheDocument();
-    expect(field('carrier')).toBeInTheDocument();
+    expect(field('Carrier')).toBeInTheDocument();
   });
 
   it('should point the viewer at the parts a hovered or focused row moves', async () => {
@@ -585,23 +611,23 @@ describe('KinematicsPanelBody', () => {
     renderPane();
     const row = (name: string) => field(name).closest('[data-slot=kinematics-joint]')!;
 
-    fireEvent.mouseEnter(row('sun'));
+    fireEvent.mouseEnter(row('Sun'));
     expect(unit().hoveredComponentIds).toEqual(['component:sun', 'component:carrier']);
-    fireEvent.mouseLeave(row('sun'));
+    fireEvent.mouseLeave(row('Sun'));
     expect(unit().hoveredComponentIds).toEqual([]);
 
-    await user.click(field('arm'));
+    await user.click(field('Arm'));
     expect(unit().hoveredComponentIds).toEqual(['component:arm']);
   });
 
-  it('should open the groups around a revealed follower and focus its field', async () => {
+  it('should open the groups around a revealed follower and focus its relation', async () => {
     renderPane();
 
     requestReveal('component:carrier');
 
-    expect(trigger('Followers of sun')).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger('Followers of Sun')).toHaveAttribute('aria-expanded', 'true');
     await vi.waitFor(() => {
-      expect(field('carrier')).toHaveFocus();
+      expect(relation('carrier')).toHaveFocus();
     });
   });
 
@@ -616,9 +642,9 @@ describe('KinematicsPanelBody', () => {
       kinematics.send({ type: 'tick', unitId, elapsed: 0.5 });
     });
 
-    expect(fieldRenders.get('sun')).toBeGreaterThan(before.get('sun') ?? 0);
-    expect(fieldRenders.get('arm')).toBe(before.get('arm'));
-    expect(fieldRenders.get('slide')).toBe(before.get('slide'));
+    expect(fieldRenders.get('Sun')).toBeGreaterThan(before.get('Sun') ?? 0);
+    expect(fieldRenders.get('Arm')).toBe(before.get('Arm'));
+    expect(fieldRenders.get('Slide')).toBe(before.get('Slide'));
   });
 
   it('should play the chosen animation from the picker, including the driver sweep, at the chosen speed', async () => {
@@ -723,9 +749,9 @@ describe('KinematicsPanelBody', () => {
 
     await user.type(screen.getByRole('searchbox', { name: 'Filter joints and parts' }), 'arm');
 
-    expect(field('arm')).toBeInTheDocument();
-    expect(screen.queryByRole('spinbutton', { name: 'sun' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('spinbutton', { name: 'carrier' })).not.toBeInTheDocument();
+    expect(field('Arm')).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Sun' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('kinematics-dof-carrier')).not.toBeInTheDocument();
   });
 
   it('should find a follower by the name of the part it moves and open its group', async () => {
@@ -734,19 +760,18 @@ describe('KinematicsPanelBody', () => {
 
     await user.type(screen.getByRole('searchbox', { name: 'Filter joints and parts' }), 'plate');
 
-    expect(field('carrier')).toBeInTheDocument();
-    expect(field('carrier')).toHaveAccessibleDescription(expect.stringContaining('Moves 1 part: Carrier plate'));
-    expect(screen.queryByRole('spinbutton', { name: 'arm' })).not.toBeInTheDocument();
+    expect(follower('carrier')).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Arm' })).not.toBeInTheDocument();
 
     await user.clear(screen.getByRole('searchbox', { name: 'Filter joints and parts' }));
-    expect(screen.queryByRole('spinbutton', { name: 'carrier' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('kinematics-dof-carrier')).not.toBeInTheDocument();
   });
 
   it('should keep its drivers when the entry path has a space', () => {
     renderPane({ entryPath: 'gear box.ts' });
 
     expect(screen.getByRole('region', { name: 'Drivers' })).toBeInTheDocument();
-    expect(field('arm')).toBeInTheDocument();
+    expect(field('Arm')).toBeInTheDocument();
   });
 
   it('should give a mechanism without degrees of freedom its own copy and nothing to play', () => {
@@ -900,7 +925,7 @@ describe('shared preview viewer binding', () => {
   it('should expose joint controls without editor view records', () => {
     renderPane({ shared: true });
     expect(screen.queryByText('Open renderer to pose this model')).not.toBeInTheDocument();
-    expect(field('sun')).toBeInTheDocument();
+    expect(field('Sun')).toBeInTheDocument();
   });
 });
 
@@ -954,23 +979,23 @@ describe('large generated kinematics collections', () => {
 
   it('should bound driver controls and reveal an offscreen driver', async () => {
     renderPane({ virtualViewport: true, loaded: largeMechanism(false) });
-    await screen.findByRole('spinbutton', { name: 'sun' });
+    await screen.findByRole('spinbutton', { name: 'Sun' });
     expect(screen.getAllByRole('spinbutton').length).toBeLessThan(30);
-    expect(screen.queryByRole('spinbutton', { name: 'vane-1709' })).toBeNull();
+    expect(screen.queryByRole('spinbutton', { name: 'Vane 1709' })).toBeNull();
     requestReveal('component:vane-1709');
     await waitFor(() => {
-      expect(screen.getByRole('spinbutton', { name: 'vane-1709' })).toHaveFocus();
+      expect(screen.getByRole('spinbutton', { name: 'Vane 1709' })).toHaveFocus();
     });
-    expect(field('vane-1709').closest('[data-pane-list-key]')).toHaveClass('pt-(--pane-group-gap)');
+    expect(field('Vane 1709').closest('[data-pane-list-key]')).toHaveClass('pt-(--pane-group-gap)');
   });
 
   it('should bound expanded followers and reveal an offscreen follower', async () => {
     renderPane({ virtualViewport: true, loaded: largeMechanism(true) });
     requestReveal('component:vane-1709');
     await waitFor(() => {
-      expect(screen.getByRole('spinbutton', { name: 'vane-1709' })).toHaveFocus();
+      expect(relation('vane-1709')).toHaveFocus();
     });
-    expect(screen.getAllByRole('spinbutton').length).toBeLessThan(30);
-    expect(trigger('Followers of arm')).toHaveAttribute('aria-expanded', 'true');
+    expect(document.querySelectorAll('[data-slot=kinematics-follower]').length).toBeLessThan(30);
+    expect(trigger('Followers of Arm')).toHaveAttribute('aria-expanded', 'true');
   });
 });

@@ -1,22 +1,15 @@
 // @vitest-environment jsdom
-/**
- * The open pull's first window, in the Files tree (D28, S41, W13 P34).
- *
- * A second device opens a project whose files are still on the remote. The
- * scheduler's facet is the one signal the tree reads: while it says `checking`
- * the pull is inside its own 3 s window and the tree says so; the moment the
- * fetch answers — or that window elapses without one — the tree shows what this
- * device actually has. The three exits stay in `sync.machine`; nothing here is
- * a second copy of them.
- */
+/** First-open intent keeps Files pending until authored checkout readiness is acknowledged. */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router';
 import { render, screen } from '@testing-library/react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
 import type { SyncFacet } from '@taucad/revisions';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 
+const pending = vi.hoisted(() => ({ current: false }));
 const tree = vi.hoisted(() => ({ current: new Map<string, FileEntry>() }));
 const sync = vi.hoisted(() => {
   const initial: SyncFacet = {
@@ -46,11 +39,12 @@ vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeSelector: <T,>(select: (snapshot: typeof tree.current) => T): T => select(tree.current),
   useFileTreeEntry: () => undefined,
 }));
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Enter' }),
 }));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
+    projectId: 'project-1',
     projectRef: actorStub,
     editorRef: { ...actorStub, send: vi.fn() },
     viewRecords: new Map(),
@@ -63,8 +57,14 @@ vi.mock('#workbench-records/view-actions.js', () => ({
     remove: async () => true,
   }),
 }));
+vi.mock('#hooks/use-cloud-projects.js', () => ({
+  useTauCloudIntent: () => (pending.current ? 'open' : undefined),
+  canOpenCloudProject: () => true,
+}));
 vi.mock('#hooks/use-revision-status.js', () => ({
-  useRevisionStatus: () => ({ sync: sync.current }),
+  useRevisionCommands: () => ({ connectRemote: vi.fn(), syncNow: vi.fn() }),
+  useRevisionClient: () => undefined,
+  useRevisionStatus: () => ({ sync: sync.current, remote: { phase: 'connected' } }),
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
@@ -113,24 +113,28 @@ const arrived: [string, FileEntry] = [
 
 const renderTree = (): void => {
   render(
-    <TooltipProvider>
-      <FileTreePanelBody />
-    </TooltipProvider>,
+    <MemoryRouter>
+      <TooltipProvider>
+        <FileTreePanelBody />
+      </TooltipProvider>
+    </MemoryRouter>,
   );
 };
 
 beforeEach(() => {
   tree.current = new Map<string, FileEntry>();
   sync.current = facet('backedUp');
+  pending.current = false;
 });
 
 describe('the Files tree while the open pull is running', () => {
-  it('says it is checking rather than claiming the project is empty', () => {
+  it('should keep connecting rather than claim the project is empty', () => {
+    pending.current = true;
     sync.current = facet('checking');
 
     renderTree();
 
-    expect(screen.getByText('Checking…')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Connecting to Tau Cloud' })).toBeInTheDocument();
     expect(screen.queryByText('No files available')).not.toBeInTheDocument();
   });
 
@@ -141,18 +145,17 @@ describe('the Files tree while the open pull is running', () => {
     renderTree();
 
     expect(screen.getByRole('treeitem', { name: /bracket\.scad/u })).toBeInTheDocument();
-    expect(screen.queryByText('Checking…')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Connecting to Tau Cloud' })).not.toBeInTheDocument();
   });
 
-  it('renders what this device has when the window elapses without an answer', () => {
-    /* The 3 s exit, seen from here: the facet stops saying `checking` while the
-     * fetch is still running, and the tree stops waiting with it (F16). */
-    sync.current = facet('pending');
+  it('should keep waiting after checking expires while the first download remains pending', () => {
+    pending.current = true;
+    sync.current = { ...facet('pending'), pullPhase: 'fetching' };
 
     renderTree();
 
-    expect(screen.getByText('No files available')).toBeInTheDocument();
-    expect(screen.queryByText('Checking…')).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Downloading project files' })).toBeInTheDocument();
+    expect(screen.queryByText('No files available')).not.toBeInTheDocument();
   });
 
   it('says nothing about a remote a project does not have', () => {

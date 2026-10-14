@@ -61,10 +61,13 @@ describe('RevisionConflictChat', () => {
     expect(seeded).toMatchObject({
       startupRequest: { kind: 'regenerate-tail', source: 'resolve-conflict-new-chat' },
     });
-    /* The prompt names the files and leaves the three terms in the graph: the
-       placement is what tells the agent where to read them (A22). */
+    /* The prompt names the files and the conflicted revision, and leaves the
+       sides in the graph: the turn's checkout holds only one of them, so the
+       agent reads both with the revisions tool's conflict action (A22). */
     const [message] = (seeded as { messages: ReadonlyArray<{ parts: ReadonlyArray<{ text?: string }> }> }).messages;
-    expect(message?.parts.map((part) => part.text ?? '').join('')).toContain('src/bracket.ts');
+    const prompt = message?.parts.map((part) => part.text ?? '').join('');
+    expect(prompt).toContain('src/bracket.ts');
+    expect(prompt).toContain("{ action: 'conflict', revision: 'rev-conflicted' }");
     expect((seeded as { startupRequest: { message: unknown } }).startupRequest.message).toEqual(message);
 
     await waitFor(() => {

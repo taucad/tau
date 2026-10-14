@@ -25,7 +25,7 @@ import { isTerminalJobState } from '#lib/jobs-projection.js';
 import { formatFileSize } from '#components/geometry/converter/converter-utils.js';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { Progress } from '@taucad/ui/components/progress';
 import { cn } from '@taucad/ui/utils/cn';
 

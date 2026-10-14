@@ -1,6 +1,9 @@
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useCallback, useEffect, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
+import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useProject } from '#hooks/use-project.js';
 import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
@@ -52,7 +55,8 @@ export function FocusedChatErrorPanel({ error }: { readonly error: Error }): Rea
  * - On cold start, the parent (`ChatInterfaceDesktop` / `Mobile`) already
  *   defers mounting via its own `isEditorReady` placeholder, so by the
  *   time this gate runs the editor machine is in `ready` and Layer 1
- *   guarantees `focusedChatId` is a `string`.
+ *   may have deferred optional chat discovery. The model and files can mount
+ *   without an active chat; session-required controls wait for a real ID.
  * - During runtime ensure (`ready.operation.ensuringFocusedChat`),
  *   `focusedChatId` may be transiently `undefined`. We keep the
  *   previous `chatId` mounted via `lastValidChatId` so the provider
@@ -84,13 +88,20 @@ export function ChatInterfaceSessionGate({
     }
   }, [focusedChatId, lastValidChatId]);
 
-  if (!lastValidChatId) {
+  const effectiveChatId = focusedChatId ?? lastValidChatId;
+  const isReady = useSelector(editorRef, (state) => state.matches('ready'));
+  if (!effectiveChatId && isReady) {
+    // oxlint-disable-next-line react/jsx-no-useless-fragment -- panes can load before optional chat discovery
+    return <>{children}</>;
+  }
+
+  if (!effectiveChatId) {
     // oxlint-disable-next-line react/jsx-no-useless-fragment -- forwarding raw fallback
     return <>{fallback}</>;
   }
 
   return (
-    <ActiveChatProvider chatId={lastValidChatId} projectId={projectId}>
+    <ActiveChatProvider chatId={effectiveChatId} projectId={projectId}>
       {/* The chat's one turn host: it owns the agent-host binding and the
           bodyless body factory, which every consumer of `useCadChatClient`
           used to write over each other. */}
@@ -114,6 +125,10 @@ export function ChatInterfaceSessionGate({
  */
 export function ChatHistoryGate({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const { editorRef } = useProject();
+  const availability = useProjectAvailability();
+  const chats = useRevisionStatus()?.sync.chats;
+  const { syncNow } = useRevisionCommands();
+  const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
 
   const focusedChatError = useSelector(editorRef, (state) => state.context.focusedChatError);
   const isEnsuring = useSelector(
@@ -126,6 +141,38 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
     state.matches({ ready: { operation: 'focusedChatUnresolved' } }),
   );
 
+  if (availability !== 'ready') {
+    return <ProjectSyncPlaceholder state={availability} />;
+  }
+  if (focusedChatId === undefined && !focusedChatError) {
+    return (
+      <div
+        className='flex size-full flex-col items-center justify-center gap-2 p-6 text-center'
+        role='status'
+        aria-busy={chats === 'loading' || chats === 'unknown'}
+      >
+        <p className='text-sm font-medium'>
+          {chats === 'disabled'
+            ? 'Chat sync is off'
+            : chats === 'failed'
+              ? 'Couldn’t load chat history'
+              : 'Loading chat history'}
+        </p>
+        <p className='max-w-64 text-xs text-muted-foreground'>
+          {chats === 'disabled'
+            ? 'Your project files are available. Create a new chat to work here.'
+            : chats === 'failed'
+              ? 'Your project files are available. Try loading your chats again.'
+              : 'Your project files can open while chats arrive.'}
+        </p>
+        {chats === 'failed' ? (
+          <Button size='sm' variant='outline' onClick={syncNow}>
+            Try again
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
   if (isUnresolved && focusedChatError) {
     return <FocusedChatErrorPanel error={focusedChatError} />;
   }

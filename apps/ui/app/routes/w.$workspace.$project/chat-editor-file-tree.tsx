@@ -1,4 +1,6 @@
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useCallback, useId, useState, useRef, useMemo, useEffect, memo } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import type { ItemInstance, TreeInstance } from '@headless-tree/core';
@@ -41,7 +43,7 @@ import type { FileEntry, FileProvenance } from '@taucad/types';
 import { cn } from '@taucad/ui/utils/cn';
 import { buttonVariants } from '@taucad/ui/components/button';
 import { Badge } from '@taucad/ui/components/badge';
-import { SearchInput } from '#components/search-input.js';
+import { SearchInput } from '@taucad/ui/components/search-input';
 import { toast } from '#components/ui/sonner.js';
 import {
   FloatingPanelContent,
@@ -75,8 +77,8 @@ import { mountFileOperationParticipants } from '#filesystem/file-operation-parti
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { ViewerNode } from '@taucad/workbench';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
-import { HighlightText } from '#components/highlight-text.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
+import { HighlightText } from '@taucad/ui/components/highlight-text';
 import {
   SidebarRowActions,
   SidebarRowContextMenu,
@@ -88,11 +90,10 @@ import { FileExtensionIcon, getIconIdForFilename } from '#components/icons/file-
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
+import type { KeyCombination } from '@taucad/ui/utils/keys';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { parentDirectory } from '@taucad/utils/path';
 
 import type { TreeItemData } from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
@@ -2140,14 +2141,11 @@ export const ChatEditorFileTree = memo(function ({
  * would otherwise all re-render on every revision the project mints.
  */
 function FileTreeEmptyState(): React.JSX.Element {
-  const checkingRemote = useRevisionStatus()?.sync.state === 'checking';
-  return (
-    <PanelEmptyState
-      icon={FolderOpen}
-      title={checkingRemote ? 'Checking…' : 'No files available'}
-      className='rounded-xl border bg-card'
-    />
-  );
+  const availability = useProjectAvailability();
+  if (availability !== 'ready') {
+    return <ProjectSyncPlaceholder state={availability} />;
+  }
+  return <PanelEmptyState icon={FolderOpen} title='No files available' className='rounded-xl border bg-card' />;
 }
 
 type TreeItemProps = {

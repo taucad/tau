@@ -11,9 +11,9 @@ import {
   Vector3,
 } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
-import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
-import { createRenderer } from '#components/geometry/graphics/three/renderer.js';
-import { getGeneratedShaderSource } from '#components/geometry/graphics/three/utils/three-shader-debug.test-utils.js';
+import type { ResolvedGraphicsBackend } from '@taucad/viewer/graphics/graphics-settings';
+import { createRenderer } from '@taucad/viewer/graphics/three/renderer';
+import { getGeneratedShaderSource } from '@taucad/viewer/graphics/three/utils/three-shader-debug';
 import { captureFrameThrough, resolveBackendInUse } from '#components/geometry/loader/showcase-capture.js';
 import type { ShowcaseBackendInUse, ShowcaseFrameCapture } from '#components/geometry/loader/showcase-capture.js';
 import { adaptiveLevels, createShowcaseFrameLoop } from '#components/geometry/loader/showcase-frame-loop.js';

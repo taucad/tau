@@ -48,8 +48,10 @@ export const inspectNativeWorkspace = async (filesystem: KernelFileSystem): Prom
 Pass the runtime-injected filesystem. A native kernel runs its child against `mirror.workspacePath`
 between `sync()` and `cleanup()`. Exclusions are exact workspace-relative paths, applied before
 metadata and content reads; excluding `thumbnail.webp` leaves `assets/thumbnail.webp` available.
-The mirror also enforces path, size, depth, and case-collision limits. The OS sandbox is applied
-by `NativeProcessSession` when it spawns the worker against that mirror.
+The mirror validates rooted paths and rejects case collisions and files that change during a read.
+It copies one file at a time without fixed file-size, workspace-size, file-count or directory-depth
+ceilings. Available memory, disk space and filesystem path limits still apply. The OS sandbox is
+applied by `NativeProcessSession` when it spawns the worker against that mirror.
 
 Inside a kernel call, pass `runtime.fileContentCache` and `runtime.operationId` as `sync()`'s second
 and third arguments. The mirror then reuses bytes the runtime already read and walks the workspace
@@ -64,9 +66,13 @@ once per runtime operation, however many of a render's calls ask for it.
 | `NativeRuntimeUnavailableError` | Thrown (code `NATIVE_RUNTIME_UNAVAILABLE`) when the operating-system sandbox cannot start; the worker never runs.    |
 | `launchInNativeSandbox`         | Wraps one host-owned executable and argument vector in the fixed Tau sandbox profile.                                |
 | `nativeSandboxPolicy`           | The fixed capability profile: bundled runtime and source snapshot readable, one private writable root, no network.   |
-| `createWorkspaceMirror`         | Bounded, disposable projection of the injected filesystem into a private native workspace.                           |
+| `createWorkspaceMirror`         | Disposable projection of the injected filesystem into a private native workspace.                                    |
 | `processEnvironment`            | Constructs the child environment from the supported platform values.                                                 |
 | `terminateProcessTree`          | Terminates the owned native process tree across supported host platforms.                                            |
+
+Native sessions accept `requestTimeout: 0` to wait for completion or cancellation. Startup still
+has a two-minute handshake deadline; a positive request timeout remains an explicit host policy.
+Artifact size limits supplied by the host remain enforced alongside length and digest validation.
 
 ## Sandbox
 

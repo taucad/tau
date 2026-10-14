@@ -1,0 +1,9 @@
+{
+  "name": "lock-fixture",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "d3-shape": "^3",
+    "is-number": "^7"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "tau-dev",
+  "description": "The Tau plugin from this folder: a workspace checkout or an unpacked @taucad/agent-plugin.",
+  "owner": {
+    "name": "taucad",
+    "url": "https://tau.new"
+  },
+  "plugins": [
+    {
+      "name": "tau",
+      "source": "./",
+      "description": "Evaluate, test, screenshot and export code-CAD models with Tau."
+    }
+  ]
+}

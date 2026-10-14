@@ -1,5 +1,5 @@
-# Panels api:grafana:check may find empty locally, one `Dashboard › Panel` per line. Fly's own metrics
-# have no local producer. The other two are event panels that stay empty while nothing goes wrong: a
+# Panels api:grafana:check may find empty locally, one `Dashboard › Panel` per line.
+# Fly panels live in Tau Cloud. These event panels stay empty while nothing goes wrong: a
 # funded call refused at admission, and an agent, ACP, LLM or gateway warning or error in the API's
 # logs. The harness's funded Haiku calls fill the gen_ai_* panels, given a supplier key in apps/api/.env
 # (without one those calls answer 503 and the check fails on them). Agent panels fill from its synthetic
@@ -8,14 +8,3 @@
 
 Agents & Codex Usage › Agent & LLM Warnings and Errors
 Billing & Credit Ledger › Funded LLM Admission Denials (1h)
-Infrastructure › CPU Usage (Fly.io)
-Infrastructure › Memory Usage (Fly.io)
-Infrastructure › Network I/O (Fly.io)
-Runtime & Machines (Fly-equivalent) › Fly CPU by Machine
-Runtime & Machines (Fly-equivalent) › Fly Memory Used by Machine
-Runtime & Machines (Fly-equivalent) › Fly Load (1m) by Machine
-Runtime & Machines (Fly-equivalent) › Fly Network I/O
-Runtime & Machines (Fly-equivalent) › Fly Edge Responses by Status
-Runtime & Machines (Fly-equivalent) › Fly Edge Response Time p95
-Runtime & Machines (Fly-equivalent) › Fly Concurrency by Machine
-Runtime & Machines (Fly-equivalent) › Fly Volume Used

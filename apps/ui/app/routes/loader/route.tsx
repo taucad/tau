@@ -1,3 +1,5 @@
+import { PageContent } from '#components/layout/page-content.js';
+import { PageHeader } from '#components/layout/page-header.js';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import type { MetaFunction } from 'react-router';
@@ -23,7 +25,7 @@ import { metalMorphShapeIds, metalMorphShapeLabels } from '#components/geometry/
 import type { MetalMorphShapeId } from '#components/geometry/loader/metal-morph-shapes.js';
 import { LazySection } from '#components/ui/lazy-section.js';
 import { ChatActivitySpinner } from '#components/chat/chat-activity-spinner.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { useFeature } from '#flags/use-feature.js';
 import type { Handle } from '#types/matches.types.js';
 
@@ -94,13 +96,6 @@ export const meta: MetaFunction = () => [
 ];
 
 export const handle: Handle = {
-  breadcrumb() {
-    return (
-      <Button asChild variant='ghost'>
-        <Link to='/loader'>Loader</Link>
-      </Button>
-    );
-  },
   enableOverflowY: true,
 };
 
@@ -219,12 +214,9 @@ export default function LoaderShowcase(): React.JSX.Element {
   }, [sequence]);
 
   return (
-    <div className='container mx-auto max-w-6xl space-y-12 px-4 py-10'>
+    <PageContent className='space-y-6'>
       <header className='space-y-3'>
-        <p className='font-mono text-xs font-medium tracking-[0.2em] text-muted-foreground uppercase'>
-          Brand · Loading indicator
-        </p>
-        <h1 className='text-4xl font-semibold tracking-tight text-balance md:text-5xl'>Liquid metal loader</h1>
+        <PageHeader title='Liquid metal loader' />
         <p className='max-w-[64ch] text-lg text-muted-foreground'>
           One chrome body, bent like a metalbender would: a wave of liquid metal rolls across the surface, ripples
           trailing in its wake, and the next geometric form settles out of the flow behind it. Five forms, a random walk
@@ -493,6 +485,6 @@ export default function LoaderShowcase(): React.JSX.Element {
 <MetalMorphLoader className='size-24' label='Loading your model' />`}
         </pre>
       </section>
-    </div>
+    </PageContent>
   );
 }

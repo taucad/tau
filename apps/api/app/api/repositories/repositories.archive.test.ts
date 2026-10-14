@@ -331,7 +331,7 @@ describe('repository archive gateway', () => {
         '203.0.113.7',
         new AbortController().signal,
       ),
-    ).rejects.toMatchObject({ status: 429 });
+    ).rejects.toMatchObject({ status: 429, response: { code: 'REPOSITORY_RATE_LIMITED' } });
     expect(evalRedis).toHaveBeenCalledWith(expect.any(String), 1, expect.stringContaining('203.0.113.7'), '3600');
     expect(upstream).not.toHaveBeenCalled();
   });

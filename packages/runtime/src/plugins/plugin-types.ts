@@ -89,6 +89,13 @@ export type KernelPlugin<
   detectImport?: RegExp | Readonly<{ source: string; flags: string }>;
   /** Bare-specifier module names this kernel provides for bundler-assisted detection */
   builtinModuleNames?: string[];
+  /**
+   * The npm `dependencies` entries for the packages this kernel runs as builtin modules, in
+   * `package.json` form: `{ "replicad": "npm:@taulabs/replicad@1.1.0-taulabs.0" }` for a package
+   * Tau runs under another name, `{ "manifold-3d": "3.4.1" }` otherwise. A project declares these
+   * so it runs outside Tau with the same libraries.
+   */
+  builtinDependencies?: Readonly<Record<string, string>>;
   /** Kernel-specific options passed to initialize() */
   options?: Record<string, unknown>;
   /**

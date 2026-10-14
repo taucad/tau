@@ -115,7 +115,7 @@ vi.mock('#hooks/use-cookie.js', () => ({
   },
 }));
 
-vi.mock('#components/ui/combobox-responsive.js', () => ({
+vi.mock('@taucad/ui/components/combobox-responsive', () => ({
   ComboBoxResponsive: ({
     children,
     groupedItems,

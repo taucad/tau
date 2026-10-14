@@ -44,7 +44,7 @@ import type { SessionsMachineEmitted } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds, projectSessionMachine } from '#machines/project-session.machine.js';
 import { useChatSidebarStatus, useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
+import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 
 const {
@@ -80,6 +80,7 @@ const {
   let revisionStatus = {
     dirty: false,
     line: { kind: 'branch', name: 'main' } as const,
+    remote: { kind: 'none', phase: 'none', fetchOnly: false } as const,
     sync: { state: 'noRemote' as 'backedUp' | 'checking' | 'noRemote', pendingCount: 0 },
   };
   const editorSnapshot = (): unknown => ({
@@ -177,6 +178,7 @@ const {
         revisionStatus = {
           dirty: false,
           line: { kind: 'branch', name: 'main' } as const,
+          remote: { kind: 'none', phase: 'none', fetchOnly: false } as const,
           sync: { state: 'noRemote', pendingCount: 0 },
         };
         revisionListeners.clear();
@@ -212,6 +214,8 @@ workerRef.current = mock<Worker>({
 /* The provider mirrors the app's shared worker into the store; in jsdom there
  * is no `SharedWorkerContext`, so the one hook it reads is the seam to stand
  * in for. Compute admission is then the real path, on a recording worker. */
+vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({ usePublishCloudProjectPreview: () => undefined }));
+
 vi.mock('#hooks/use-file-manager.js', () => ({
   useSharedFileManagerWorker: () => workerRef.current,
   SharedWorkerGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -422,7 +426,7 @@ vi.mock('#hooks/use-flush-on-close.js', () => ({
 vi.mock('#hooks/use-monaco-model-service.js', () => ({
   MonacoModelServiceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock('#hooks/use-webgl-context-tracker.js', () => ({
+vi.mock('@taucad/viewer/hooks/use-webgl-context-tracker', () => ({
   WebglContextTrackerProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({ RevisionSaveShortcut: () => null }));

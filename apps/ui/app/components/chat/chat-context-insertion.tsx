@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useRef } from 'react';
 import type { GeometryComponentReference } from '@taucad/types';
+import { formatCadReferenceToken } from '@taucad/chat/references';
 import type { ChipType } from '#components/chat/context-chip.js';
 
 export type ChatContextReference = {
@@ -19,7 +20,7 @@ type ChatContextInsertionContextValue = {
 const ChatContextInsertionContext = createContext<ChatContextInsertionContextValue | undefined>(undefined);
 
 export function geometryReferenceToToken(reference: GeometryComponentReference): string {
-  return `@cad[${reference.filePath}#${reference.componentId}]`;
+  return formatCadReferenceToken({ path: reference.filePath, componentId: reference.componentId });
 }
 
 export function ChatContextInsertionProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {

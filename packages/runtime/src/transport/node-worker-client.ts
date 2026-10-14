@@ -10,7 +10,7 @@
  */
 
 import { Worker as NodeWorker } from 'node:worker_threads';
-import type { Transferable as NodeTransferable } from 'node:worker_threads';
+import type { Transferable as NodeTransferable, WorkerOptions } from 'node:worker_threads';
 
 import { createChannelClient } from '@taucad/rpc';
 import type { Channel, Port } from '@taucad/rpc';
@@ -46,9 +46,43 @@ import { buildComputeStoreBridge } from '#transport/_internal/compute-store-brid
 export type NodeWorkerLike = {
   postMessage(value: unknown, transferList?: readonly NodeTransferable[]): void;
   on(event: 'message', listener: (data: unknown) => void): NodeWorkerLike;
+  /** The transport settles the client from `'error'` and `'exit'`; a worker that never emits them hangs until the operation timeout. */
+  on(event: 'error', listener: (error: Error) => void): NodeWorkerLike;
+  on(event: 'exit', listener: (exitCode: number) => void): NodeWorkerLike;
   off(event: 'message', listener: (data: unknown) => void): NodeWorkerLike;
+  off(event: 'error', listener: (error: Error) => void): NodeWorkerLike;
+  off(event: 'exit', listener: (exitCode: number) => void): NodeWorkerLike;
   terminate(): Promise<number>;
 };
+
+/**
+ * A value `node:worker_threads` can structured-clone into a worker's
+ * `workerData`: primitives, dates, regular expressions, binary data, and
+ * arrays, maps, sets and plain objects of these. Functions, class instances
+ * with behaviour and symbols cannot cross the thread boundary.
+ *
+ * Declare an object's shape with `type`, not `interface`: an interface has no
+ * implicit index signature, so it is not assignable here even when every
+ * member is cloneable.
+ *
+ * @public
+ */
+export type NodeWorkerData =
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is a value a worker can receive; this type describes data, not an API's absence.
+  | null
+  | undefined
+  | boolean
+  | number
+  | bigint
+  | string
+  | Date
+  | RegExp
+  | ArrayBuffer
+  | ArrayBufferView
+  | readonly NodeWorkerData[]
+  | ReadonlyMap<NodeWorkerData, NodeWorkerData>
+  | ReadonlySet<NodeWorkerData>
+  | { readonly [key: string]: NodeWorkerData };
 
 /**
  * Options accepted by {@link nodeWorkerClient}.
@@ -61,7 +95,19 @@ export type NodeWorkerClientOptions = {
    * configured runtime through `nodeWorkerHost` or an equivalent helper.
    */
   readonly url: string | URL;
-  readonly workerCtor?: unknown;
+  /**
+   * Override for `node:worker_threads.Worker`, called as
+   * `new workerCtor(url, { workerData })` — a tsx-run `.ts` entry, or a fake
+   * worker in a unit test. A custom constructor must forward `options` to
+   * `Worker`, or the entry never receives `workerData`.
+   */
+  readonly workerCtor?: new (url: string | URL, options?: WorkerOptions) => NodeWorkerLike;
+  /**
+   * Structured-cloned into the worker as `workerData` from
+   * `node:worker_threads`, so one application-owned entry can configure the
+   * runtime it hosts (a project root, a plugin list).
+   */
+  readonly workerData?: NodeWorkerData;
   readonly sharedMemory?: { readonly geometry?: { readonly bytes: number } };
   readonly fileSystem?: RuntimeFileSystem;
   /** Mirror runtime spans into the worker Performance Timeline for DevTools. */
@@ -147,8 +193,8 @@ export const nodeWorkerClientDescribe = (options: NodeWorkerClientOptions): Tran
 export const nodeWorkerClient = (
   options: NodeWorkerClientOptions,
 ): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<never, never>>, NodeWorkerId> => {
-  const ctor = (options.workerCtor ?? NodeWorker) as new (url: string | URL) => NodeWorkerLike;
-  if (typeof ctor !== 'function') {
+  const workerCtor = options.workerCtor ?? NodeWorker;
+  if (typeof workerCtor !== 'function') {
     throw new TypeError('nodeWorkerTransport: requires `node:worker_threads.Worker` (or `workerCtor` test seam)');
   }
   if (options.fileSystem !== undefined && !isRuntimeFileSystem(options.fileSystem)) {
@@ -224,13 +270,12 @@ export const nodeWorkerClient = (
         throw new Error('nodeWorkerTransport: client closed before open()');
       }
       void ensurePools();
-      worker = Reflect.construct(ctor, [options.url]);
-      const eventWorker = worker as NodeWorkerLike & {
-        on(event: 'error', listener: (error: Error) => void): NodeWorkerLike;
-        on(event: 'exit', listener: (exitCode: number) => void): NodeWorkerLike;
-        off(event: 'error', listener: (error: Error) => void): NodeWorkerLike;
-        off(event: 'exit', listener: (exitCode: number) => void): NodeWorkerLike;
-      };
+      // oxlint-disable-next-line new-cap -- the constructor is held in a camel-case variable by naming policy.
+      worker = new workerCtor(
+        options.url,
+        options.workerData === undefined ? undefined : { workerData: options.workerData },
+      );
+      const eventWorker = worker;
       const onWorkerError = (error: Error): void => {
         void finish({ cause: 'wire-failure', error });
       };

@@ -10,8 +10,9 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { chmod, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, relative, resolve } from 'node:path';
+import { basename, dirname, relative, resolve } from 'node:path';
 import { picogkRuntimeManifestSchema } from '@taucad/picogk';
 
 type Target = {
@@ -171,6 +172,45 @@ const ensurePatchedPicoGk = async (options: {
   await writeFile(resolve(temporary, markerName), `${expectedMarker}\n`);
   await rm(picoGkSourceRoot, { recursive: true, force: true });
   await rename(temporary, picoGkSourceRoot);
+};
+
+/**
+ * Copy the MIT licences and third-party notices of the Microsoft packages the publish output carries
+ * (the .NET runtime pack, Roslyn and SkiaSharp) from the exact packages restore and publish used.
+ * @param options - Where the SDK and NuGet packages live, the runtime identifier, the SkiaSharp
+ *   version the target's lock resolved and the publish output to copy into.
+ * @throws When a notice is missing, because the payload must not ship without it.
+ */
+const copyPackageNotices = async (options: {
+  readonly dotnetRoot: string;
+  readonly nugetRoot: string;
+  readonly rid: string;
+  readonly skiaSharpVersion: string;
+  readonly output: string;
+}): Promise<void> => {
+  const { dotnetRoot, nugetRoot, rid, skiaSharpVersion, output } = options;
+  /* A self-contained publish restores the runtime pack as a NuGet package; an SDK that bundles it keeps it in packs/. */
+  const runtimePackCandidates = [
+    resolve(nugetRoot, `microsoft.netcore.app.runtime.${rid}`, dotnetRuntimeVersion),
+    resolve(dotnetRoot, 'packs', `Microsoft.NETCore.App.Runtime.${rid}`, dotnetRuntimeVersion),
+  ];
+  const runtimePack = runtimePackCandidates.find((path) => existsSync(resolve(path, 'LICENSE.TXT')));
+  if (runtimePack === undefined) {
+    throw new Error(
+      `The .NET ${dotnetRuntimeVersion} runtime pack for ${rid} is in none of ${runtimePackCandidates.join(', ')}`,
+    );
+  }
+  const notices: ReadonlyArray<readonly [string, string]> = [
+    [resolve(runtimePack, 'LICENSE.TXT'), 'DotNet-LICENSE.txt'],
+    [resolve(runtimePack, 'THIRD-PARTY-NOTICES.TXT'), 'DotNet-THIRD-PARTY-NOTICES.txt'],
+    [resolve(nugetRoot, 'microsoft.codeanalysis.csharp', roslynVersion, 'ThirdPartyNotices.rtf'), 'Roslyn-NOTICES.rtf'],
+    [resolve(nugetRoot, 'skiasharp', skiaSharpVersion, 'LICENSE.txt'), 'SkiaSharp-LICENSE.txt'],
+    [
+      resolve(nugetRoot, 'skiasharp.nativeassets.macos', skiaSharpVersion, 'THIRD-PARTY-NOTICES.txt'),
+      'SkiaSharp-THIRD-PARTY-NOTICES.txt',
+    ],
+  ];
+  await Promise.all(notices.map(async ([from, name]) => cp(from, resolve(output, name))));
 };
 
 const filesUnder = async (root: string): Promise<string[]> => {
@@ -793,7 +833,8 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   buildEnvironment['DOTNET_MULTILEVEL_LOOKUP'] = '0';
   buildEnvironment['DOTNET_NOLOGO'] = '1';
   buildEnvironment['DOTNET_ROOT'] = dotnetRoot;
-  buildEnvironment['NUGET_PACKAGES'] = resolve(cacheRoot, 'nuget-packages');
+  const nugetRoot = resolve(cacheRoot, 'nuget-packages');
+  buildEnvironment['NUGET_PACKAGES'] = nugetRoot;
   const projectProperties = [`-p:PicoGKProject=${resolve(picoGkSourceRoot, 'PicoGK.csproj')}`];
   const lockProperties = ['-p:RestorePackagesWithLockFile=true', `-p:NuGetLockFilePath=${target.lockFile}`];
   execFileSync(
@@ -832,7 +873,21 @@ const prepareTarget = async (targetName: string): Promise<void> => {
       readbackFiles.map(async (name) => cp(resolve(readbackRoot, name), resolve(temporary, name), { recursive: true })),
     );
   }
+  const workerLock = JSON.parse(await readFile(resolve(dirname(workerProject), target.lockFile), 'utf8')) as {
+    readonly dependencies: Readonly<Record<string, Readonly<Record<string, { readonly resolved: string }>>>>;
+  };
+  const skiaSharpVersion = workerLock.dependencies['net10.0']?.['SkiaSharp']?.resolved;
+  if (skiaSharpVersion === undefined) {
+    throw new Error(`${target.lockFile} resolves no SkiaSharp for net10.0`);
+  }
   await Promise.all([
+    copyPackageNotices({
+      dotnetRoot,
+      nugetRoot,
+      rid: target.rid,
+      skiaSharpVersion,
+      output: temporary,
+    }),
     cp(resolve(picoGkSourceRoot, 'LICENSE'), resolve(temporary, 'PicoGK-LICENSE')),
     cp(resolve(workspaceRoot, 'packages/plugins/picogk/LICENSE'), resolve(temporary, 'Tau-PicoGK-LICENSE')),
     cp(topologySchema, resolve(temporary, basename(topologySchema))),
@@ -875,6 +930,7 @@ const prepareTarget = async (targetName: string): Promise<void> => {
               ]),
           { type: 'platform', name: '.NET Runtime', version: dotnetRuntimeVersion },
           { type: 'library', name: 'Microsoft.CodeAnalysis.CSharp', version: roslynVersion },
+          { type: 'library', name: 'SkiaSharp', version: skiaSharpVersion },
           {
             type: 'library',
             name: 'PicoGK',

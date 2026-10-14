@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
@@ -71,6 +71,7 @@ import type {
   RevisionRef,
   RevisionTag,
   RemoteRef,
+  RevisionRemoteAddress,
   UpdateRevisionRefInput,
   UpdateRevisionRefResult,
   WriteRevisionInput,
@@ -93,6 +94,8 @@ import {
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  hasGeneratedBlock,
+  tauRevisionPolicy,
 } from '#workspace-config.js';
 
 /** Where linked checkouts live, and which project they belong to. @public */
@@ -876,8 +879,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @returns The live checkout first, then every linked one.
    */
   const listWorktrees = async (): Promise<readonly Checkout[]> => {
-    const { projectId } = requireCheckouts();
+    const { projectId, directory } = requireCheckouts();
     const zero = await zeroObjectId();
+    const checkoutsRoot = await realpath(directory).catch(() => directory);
     const listing = await text(['worktree', 'list', '--porcelain']);
     const blocks = listing.split('\n\n');
     const collected: Checkout[] = [];
@@ -890,6 +894,14 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       const head = lines.find((line) => line.startsWith('HEAD '))?.slice('HEAD '.length);
       const branch = lines.find((line) => line.startsWith('branch '))?.slice('branch '.length);
       const linked = collected.length > 0;
+      /* An adopted repository can have worktrees the person made. They are not
+       * this project's checkouts: listing one watched it, cut it at close and
+       * committed onto its branch. Only a worktree this port created, directly
+       * under its checkouts directory, is a linked checkout. */
+      // oxlint-disable-next-line no-await-in-loop -- one realpath per worktree, in Git's order.
+      if (linked && dirname(await realpath(root).catch(() => root)) !== checkoutsRoot) {
+        continue;
+      }
       collected.push(
         Object.freeze({
           /* The id is the directory name this port created, not a slice of the
@@ -976,10 +988,18 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
   };
 
-  const listRemoteReferences = async (remote: string): Promise<readonly RemoteRef[]> => {
-    guardTransportValue(remote, 'remote');
+  const listRemoteReferences = async (remote: string | RevisionRemoteAddress): Promise<readonly RemoteRef[]> => {
+    const name = typeof remote === 'string' ? remote : remote.name;
+    guardTransportValue(name, 'remote');
+    /* R2: an address not recorded yet is read by URL, with the credential its
+     * address would get once recorded under `name`; git's config is not written. */
+    const target = typeof remote === 'string' ? remote : remote.url;
+    if (typeof remote !== 'string') {
+      guardTransportValue(remote.url, 'url');
+    }
+    const env = await remoteEnvironment(name, typeof remote === 'string' ? undefined : [remoteOf(name, remote.url)]);
     const listing = textDecoder
-      .decode(await output(['ls-remote', '--refs', '--', remote], { env: await remoteEnvironment(remote), remote }))
+      .decode(await output(['ls-remote', '--refs', '--', target], { env, remote: name }))
       .trim();
     return Object.freeze(
       listing
@@ -1051,6 +1071,20 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @returns Whether a repository exists here and its top level is this path.
    */
   const ownsStore = async (): Promise<boolean> => {
+    /* A linked worktree or a submodule has a one-line `.git` file naming an
+     * administrative directory inside another repository. Every path this port
+     * derives from `<project>/.git` — the index it heals, the LFS objects it
+     * writes, `worktree list`'s first entry as the live checkout — then names
+     * somebody else's, so a close revision committed the worktree's files onto
+     * the main checkout's branch and the open rewrote this worktree's index
+     * from that checkout's HEAD. */
+    const gitEntry = await stat(join(repositoryPath, gitDirectoryName)).catch(() => undefined);
+    if (gitEntry?.isFile() === true) {
+      throw new RevisionPortError(
+        'INVALID_REPOSITORY',
+        'The project path is a linked Git worktree or submodule; a revision store needs a repository of its own.',
+      );
+    }
     /* Discovery, not the pinned store: the question is what is *already* at
      * this path, so `GIT_DIR` must be absent here rather than pointed at the
      * answer. Every `GIT_*` the caller exported is still stripped. */
@@ -1079,6 +1113,88 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
   };
 
+  /**
+   * What was at the project path when this port first looked, asked once.
+   *
+   * `adopted` is a repository the person made: Tau writes its ignore block
+   * before `git init`, so a store it created always carries one. An adopted
+   * repository keeps its own ignore and attributes files, its entries keep the
+   * representation its own Git gave them, and its config is left alone
+   * (revisions policy rules 5 and 13).
+   */
+  let opened: Promise<Readonly<{ owned: boolean; adopted: boolean }>> | undefined;
+  const openState = async (): Promise<Readonly<{ owned: boolean; adopted: boolean }>> => {
+    opened ??= (async () => {
+      const owned = await ownsStore();
+      if (!owned) {
+        return { owned, adopted: false };
+      }
+      const [ignore, attributes] = await Promise.all(
+        [generatedIgnorePath, generatedGitattributesPath].map(async (path) =>
+          readFile(join(repositoryPath, path), 'utf8').catch(() => undefined),
+        ),
+      );
+      return { owned, adopted: !hasGeneratedBlock(ignore) && !hasGeneratedBlock(attributes) };
+    })();
+    return opened;
+  };
+  /* A path `init` refuses is never adopted; it never reaches a write either. */
+  const isAdopted = async (): Promise<boolean> => {
+    try {
+      const { adopted } = await openState();
+      return adopted;
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * Refuse a repository whose recorded tree Tau cannot carry unchanged.
+   *
+   * Every path in `HEAD` must be one the registry versions and a regular file,
+   * or the first revision would drop it (rule 4) or record a link as a file
+   * (rule 5). Large-file pointers are refused because an adopted entry is stored
+   * as captured, and a working copy holds their content, not the pointer: the
+   * first revision would convert every one of them (rule 13).
+   */
+  const assertAdoptable = async (): Promise<void> => {
+    const refuse = (reason: string): never => {
+      throw new RevisionPortError('INVALID_REPOSITORY', `Tau cannot record revisions in this repository: ${reason}`);
+    };
+    const usesPointers = (attributes: string): boolean => /\bfilter=lfs\b/u.test(attributes);
+    const rootAttributes = await readFile(join(repositoryPath, generatedGitattributesPath), 'utf8').catch(() => '');
+    if (usesPointers(rootAttributes)) {
+      refuse('it stores large files outside Git, and recording them would convert them.');
+    }
+    const head = await run(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
+    if (head.exitCode !== 0) {
+      return;
+    }
+    const attributeBlobs: string[] = [];
+    const listing = await text(['ls-tree', '-r', '-z', '--full-tree', 'HEAD']);
+    for (const record of listing.split('\0')) {
+      const tab = record.indexOf('\t');
+      if (tab === -1) {
+        continue;
+      }
+      const [mode = '', , oid = ''] = record.slice(0, tab).split(' ');
+      const path = record.slice(tab + 1);
+      if (mode !== '100644' && mode !== '100755') {
+        refuse(`${path} is a link or a nested repository, which a revision cannot hold.`);
+      }
+      if (!tauRevisionPolicy.policy.classify(path).versioned) {
+        refuse(`${path} is a path Tau reserves for its own records.`);
+      }
+      if (path === generatedGitattributesPath || path.endsWith(`/${generatedGitattributesPath}`)) {
+        attributeBlobs.push(oid);
+      }
+    }
+    const blobs = await readObjects(attributeBlobs, 'blob');
+    if ([...blobs.values()].some((bytes) => usesPointers(new TextDecoder().decode(bytes)))) {
+      refuse('it stores large files outside Git, and recording them would convert them.');
+    }
+  };
+
   const port: RevisionPort = Object.freeze({
     describe: async (): Promise<RevisionEngineDescriptor> => {
       const reported = await text(['--version']);
@@ -1091,7 +1207,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         transports: true,
         nWayMerge: false,
         checkouts: checkouts !== undefined,
-        largeObjects: true,
+        largeObjects: !(await isAdopted()),
       });
     },
 
@@ -1105,12 +1221,24 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * rewrite cannot repeat.
      */
     init: async (input: InitRevisionStoreInput): Promise<void> => {
-      /* Asked first, and it throws for a bare repository: a path this port
+      /* Asked first, and it throws for a bare repository or a `.git` file: a path this port
        * refuses is left exactly as it was, ignore file included (review 4 R40).
        * The ordering that matters is the ignore file before `git init`, not
        * before the question of what is already here. */
-      const owned = await ownsStore();
-      if (input.createSetupFiles !== false) {
+      const { owned, adopted } = await openState();
+      if (adopted) {
+        await assertAdoptable();
+        /* The person's ignore file stays theirs. Tau's block goes where stock
+         * Git reads it and no revision records it, so the records Tau keeps
+         * under `.tau/` stay out of their `git status`. */
+        const excludePath = join(repositoryPath, gitDirectoryName, 'info', 'exclude');
+        const existing = await readFile(excludePath, 'utf8').catch(() => undefined);
+        const exclude = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
+        if (exclude !== existing) {
+          await mkdir(dirname(excludePath), { recursive: true });
+          await writeFile(excludePath, exclude);
+        }
+      } else if (input.createSetupFiles !== false) {
         const ignorePath = join(repositoryPath, generatedIgnorePath);
         const existing = await readFile(ignorePath, 'utf8').catch(() => undefined);
         const ignore = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
@@ -1136,8 +1264,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
        * or somebody's own `git clone` — needs git-lfs's filters configured to
        * resolve them. Best effort: a machine without the binary still records
        * and reads revisions through this port, and `resolveGitLfs` is what tells
-       * an operator the transport half is missing. */
-      await run(['lfs', 'install', '--local']);
+       * an operator the transport half is missing. An adopted repository
+       * records no pointers, and its config is the person's. */
+      if (!adopted) {
+        await run(['lfs', 'install', '--local']);
+      }
       /* Every project an older build recorded has no index at all, so this open
        * heals it. An existing index is left alone: in a repository Tau adopted
        * it may hold the person's own staged work. */
@@ -1148,6 +1279,24 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if (!indexed) {
         await syncIndexes(undefined);
       }
+    },
+
+    ignoredPaths: async (root?: string): Promise<readonly string[] | undefined> => {
+      if (!(await isAdopted())) {
+        return undefined;
+      }
+      /* Git's own answer, so every ignore source the person's Git reads — nested
+       * ignore files, `info/exclude`, their global excludes — decides here too. */
+      const args = ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'];
+      const listed =
+        root === undefined
+          ? await output(args)
+          : // A linked worktree finds its own admin directory from its `.git` file.
+            await output(['-C', root, ...args], { env: clearedGitEnvironment() });
+      return textDecoder
+        .decode(listed)
+        .split('\0')
+        .filter((path) => path !== '');
     },
 
     readRevision: async (id: RevisionId): Promise<RevisionRecord | undefined> => {
@@ -1187,7 +1336,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     },
 
     writeRevision: async (input: WriteRevisionInput): Promise<RevisionReceipt> => {
-      const treeId = await writeTreeObject(input.tree, input.largeObjects !== false);
+      const treeId = await writeTreeObject(input.tree, input.largeObjects !== false && !(await isAdopted()));
       const trailer: RevisionTrailer = {
         parents: [...input.parents],
         provenance: input.provenance,

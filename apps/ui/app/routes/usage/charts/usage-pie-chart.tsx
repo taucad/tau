@@ -1,12 +1,13 @@
 import React, { useMemo } from 'react';
 import { Label, Pie, PieChart, Cell } from 'recharts';
 import type { PieLabelRenderProps } from 'recharts';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@taucad/ui/components/chart';
+import { ChartContainer, ChartTooltip } from '@taucad/ui/components/chart';
 import type { ChartConfig } from '@taucad/ui/components/chart';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireUsageActivityPage } from '@taucad/billing';
 import { getUsageColor } from '#routes/usage/provider-colors.js';
+import { CreditUsageTooltip } from '#routes/usage/charts/credit-usage-tooltip.js';
 import { displayCredits } from '#routes/usage/credits.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RADIAN is a constant
@@ -66,6 +67,7 @@ function UsagePieChartComponent({
         .map((item) => ({
           activity: item.activity,
           credits: displayCredits(item.netUsedCreditAtoms),
+          creditAtoms: item.netUsedCreditAtoms,
           fill: getUsageColor(item.activity),
         }))
         .sort((a, b) => b.credits - a.credits),
@@ -108,7 +110,7 @@ function UsagePieChartComponent({
         <ChartContainer config={chartConfig} className='h-75 w-full min-w-0'>
           <PieChart>
             {/* @ts-expect-error - ChartTooltipContent types don't match Recharts exactly */}
-            <ChartTooltip cursor={false} content={ChartTooltipContent} />
+            <ChartTooltip cursor={false} content={CreditUsageTooltip} />
             <Pie
               data={chartData}
               dataKey='credits'

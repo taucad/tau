@@ -21,6 +21,7 @@ const github = vi.hoisted(() => ({
   configuration: vi.fn(),
   remove: vi.fn(),
   branch: vi.fn(),
+  repository: vi.fn(),
 }));
 const desktop = vi.hoisted(() => ({ current: false }));
 const session = vi.hoisted((): { current: { user: { id: string } } | undefined } => ({
@@ -257,6 +258,114 @@ describe('GithubRepositoryPicker', () => {
     expect(await screen.findByRole('button', { name: 'Branch main' })).toBeInTheDocument();
   });
 
+  it('should search the repositories beyond the first page, then say when none match (D2)', async () => {
+    /* GitHub pages hold 100, so a catalog with more is a full first page. */
+    const firstPage = Array.from({ length: 100 }, (_, index) =>
+      repositoryOf({ id: 100 + index, name: `part-${String(index).padStart(3, '0')}` }),
+    );
+    github.repositories.mockImplementation(async (_connection: string, _installation: number, page?: number) =>
+      page === undefined || page === 1
+        ? { totalCount: 101, page: 1, repositories: firstPage }
+        : { totalCount: 101, page, repositories: page === 2 ? [repositoryOf({ id: 31, name: 'gearbox' })] : [] },
+    );
+
+    await act(async () => {
+      renderPicker(<GithubRepositoryPicker onSelect={vi.fn()} />);
+    });
+    await vi.waitFor(() => {
+      expect(github.repositories).toHaveBeenCalled();
+    });
+    await userEvent.click(screen.getByRole('button', { name: /^Repository /u }));
+    await userEvent.type(screen.getByRole('combobox'), 'gearbox');
+
+    await vi.waitFor(() => {
+      expect(github.repositories).toHaveBeenCalledWith('connection-1', 10, 2);
+    });
+    /* The virtualized list lays out no rows in jsdom; the search filter is what proves the match. */
+    expect(screen.queryByText('Searching remaining repositories…')).not.toBeInTheDocument();
+    expect(screen.queryByText('No repository found')).not.toBeInTheDocument();
+
+    await userEvent.clear(screen.getByRole('combobox'));
+    await userEvent.type(screen.getByRole('combobox'), 'nothing-like-it');
+    expect(await screen.findByText('No repository found')).toBeInTheDocument();
+  });
+
+  it('should not offer a conflict line as a branch to link', async () => {
+    github.repositories.mockResolvedValue({ totalCount: 1, page: 1, repositories: [repositoryOf()] });
+    github.branches.mockResolvedValue({
+      page: 1,
+      branches: [{ name: 'conflicts/main/0f1e2d3c' }, { name: 'feature' }, { name: 'main' }],
+    });
+
+    await act(async () => {
+      renderPicker(<GithubRepositoryPicker onSelect={vi.fn()} />);
+    });
+    await vi.waitFor(() => {
+      expect(github.repositories).toHaveBeenCalled();
+    });
+    await userEvent.click(screen.getByRole('button', { name: /^Repository /u }));
+    await userEvent.click(await screen.findByRole('option', { name: /octo\/part/u }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Branch main' }));
+
+    expect(await screen.findByRole('option', { name: 'feature' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /^conflicts\//u })).not.toBeInTheDocument();
+  });
+
+  it('should explain an installation that GitHub suspended and keep it from being chosen', async () => {
+    github.installations.mockResolvedValue({
+      totalCount: 2,
+      page: 1,
+      installations: [
+        {
+          id: 20,
+          owner: { id: 20, login: 'acme', avatarUrl: null, type: 'Organization' },
+          repositorySelection: 'selected',
+          suspended: true,
+          permissions: { contents: 'write' },
+        },
+        {
+          id: 10,
+          owner: { id: 10, login: 'octo', avatarUrl: null, type: 'User' },
+          repositorySelection: 'all',
+          suspended: false,
+          permissions: { contents: 'write' },
+        },
+      ],
+    });
+
+    await act(async () => {
+      renderPicker(<GithubRepositoryPicker onSelect={vi.fn()} />);
+    });
+    await vi.waitFor(() => {
+      expect(github.repositories).toHaveBeenCalledWith('connection-1', 10);
+    });
+    await userEvent.click(screen.getByRole('button', { name: /^Personal account or organization /u }));
+
+    const option = await screen.findByRole('option', { name: /acme/u });
+    expect(option).toHaveAttribute('aria-disabled', 'true');
+    expect(option).toHaveTextContent('Suspended on GitHub. An owner must unsuspend the Tau app for this account.');
+    expect(github.repositories).not.toHaveBeenCalledWith('connection-1', 20);
+  });
+
+  it('should offer to install Tau on GitHub when the account has no installation', async () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...globalThis.location, assign });
+    github.installations.mockResolvedValue({ totalCount: 0, page: 1, installations: [] });
+
+    await act(async () => {
+      renderPicker(<GithubRepositoryPicker onSelect={vi.fn()} />);
+    });
+
+    expect(
+      await screen.findByText('No personal or organization installation is available for this account.'),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Install Tau on GitHub' }));
+    await vi.waitFor(() => {
+      expect(assign).toHaveBeenCalledWith('https://github.com/apps/tau/installations/new');
+    });
+    expect(github.repositories).not.toHaveBeenCalled();
+  });
+
   it('should name each picker by its label and explain a repository that cannot be chosen', async () => {
     github.repositories.mockResolvedValue({
       totalCount: 1,
@@ -275,5 +384,94 @@ describe('GithubRepositoryPicker', () => {
     const option = await screen.findByRole('option', { name: /octo\/hidden/u });
     expect(option).toHaveAttribute('aria-disabled', 'true');
     expect(option).toHaveTextContent("Your GitHub account can't read this repository.");
+  });
+  /* Each answer is a fresh object, as the parsed API response is. */
+  const catalogPages = (...pages: Array<Array<ReturnType<typeof repositoryOf>>>): void => {
+    let call = 0;
+    github.repositories.mockImplementation(async () => {
+      const page = pages[Math.min(call, pages.length - 1)] ?? [];
+      call += 1;
+      return { totalCount: page.length, page: 1, repositories: page.map((item) => ({ ...item })) };
+    });
+  };
+  const chooseRepository = async (name: RegExp): Promise<void> => {
+    await act(async () => {
+      renderPicker(<GithubRepositoryPicker onSelect={vi.fn()} />);
+    });
+    await vi.waitFor(() => {
+      expect(github.repositories).toHaveBeenCalled();
+    });
+    await userEvent.click(screen.getByRole('button', { name: /^Repository /u }));
+    await userEvent.click(await screen.findByRole('option', { name }));
+  };
+
+  it('should keep the chosen repository and branch on Refresh and list what GitHub added (R6)', async () => {
+    catalogPages([repositoryOf()], [repositoryOf(), repositoryOf({ id: 31, name: 'gearbox' })]);
+    github.branches
+      .mockResolvedValueOnce({ page: 1, branches: [{ name: 'dev' }, { name: 'main' }] })
+      .mockResolvedValue({ page: 1, branches: [{ name: 'audit-new' }, { name: 'dev' }, { name: 'main' }] });
+    await chooseRepository(/octo\/part/u);
+    await userEvent.click(await screen.findByRole('button', { name: 'Branch main' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'dev' }));
+    expect(await screen.findByRole('button', { name: 'Branch dev' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await vi.waitFor(() => {
+      expect(github.branches).toHaveBeenCalledTimes(2);
+    });
+    await vi.waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
+    });
+    expect(github.list).toHaveBeenCalledTimes(2);
+    expect(github.repositories).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: 'Repository octo/part · Private' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Branch dev' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Branch dev' }));
+    expect(await screen.findByRole('option', { name: 'audit-new' })).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(screen.getByRole('button', { name: 'Repository octo/part · Private' }));
+    expect(await screen.findByRole('option', { name: /octo\/gearbox/u })).toBeInTheDocument();
+  });
+
+  it('should keep a chosen repository that Refresh finds beyond the first page (R6)', async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) =>
+      repositoryOf({ id: 100 + index, name: `part-${String(index).padStart(3, '0')}` }),
+    );
+    let call = 0;
+    github.repositories.mockImplementation(async () => {
+      call += 1;
+      return call === 1
+        ? { totalCount: 1, page: 1, repositories: [repositoryOf()] }
+        : { totalCount: 101, page: 1, repositories: firstPage };
+    });
+    github.repository.mockResolvedValue(repositoryOf());
+    await chooseRepository(/octo\/part/u);
+    expect(await screen.findByRole('button', { name: 'Branch main' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await vi.waitFor(() => {
+      expect(github.branches).toHaveBeenCalledTimes(2);
+    });
+    expect(github.repository).toHaveBeenCalledWith('connection-1', 30);
+    expect(screen.getByRole('button', { name: 'Repository octo/part · Private' })).toBeInTheDocument();
+    expect(screen.queryByText(/no longer reach/u)).not.toBeInTheDocument();
+  });
+
+  it('should clear a chosen repository that is gone after Refresh and say so (R6)', async () => {
+    catalogPages([repositoryOf()], []);
+    github.branches.mockResolvedValue({ page: 1, branches: [{ name: 'main' }] });
+    await chooseRepository(/octo\/part/u);
+    expect(await screen.findByRole('button', { name: 'Branch main' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect(
+      await screen.findByText('Tau can no longer reach octo/part on GitHub. Choose another repository.'),
+    ).toHaveAttribute('role', 'status');
+    expect(screen.getByRole('button', { name: 'Repository Select repository…' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Branch main' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use repository' })).toBeDisabled();
   });
 });

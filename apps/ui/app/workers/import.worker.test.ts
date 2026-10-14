@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { ShareError } from '@taucad/share/provider';
+import { downloadRefusal } from '#workers/import.worker.js';
 import type { ImportWorkerRequest, ImportWorkerResponse } from '#workers/import.worker.js';
 
 const extractRepositoryImportFiles = vi.hoisted(() => vi.fn());
@@ -116,10 +117,16 @@ describe('import worker download failures', () => {
     });
   });
 
-  it('should leave other download failures without a reason', async () => {
-    const { message } = await startDownload(new Response('Bad Gateway', { status: 502, statusText: 'Bad Gateway' }));
+  it("should leave other download failures without a reason, in the server's words", async () => {
+    const { message } = await startDownload(
+      new Response('The repository provider could not be reached.', { status: 502, statusText: 'Bad Gateway' }),
+    );
 
-    expect(message).toStrictEqual({ type: 'error', message: 'Download failed: 502 Bad Gateway', phase: 'download' });
+    expect(message).toStrictEqual({
+      type: 'error',
+      message: 'The repository provider could not be reached.',
+      phase: 'download',
+    });
   });
 });
 
@@ -164,5 +171,25 @@ describe('ImportWorkerResponse types', () => {
     };
     expect(response.type).toBe('error');
     expect(response.phase).toBe('download');
+  });
+});
+
+describe('downloadRefusal', () => {
+  it.each([
+    [
+      'an API refusal',
+      new Response(JSON.stringify({ error: 'Too many GitHub imports.', code: 'REPOSITORY_RATE_LIMITED' }), {
+        status: 429,
+      }),
+      'Too many GitHub imports.',
+    ],
+    [
+      "the archive gateway's sentence",
+      new Response('The repository archive could not be fetched.', { status: 404 }),
+      'The repository archive could not be fetched.',
+    ],
+    ['an empty body', new Response('', { status: 502, statusText: 'Bad Gateway' }), 'Download failed: 502 Bad Gateway'],
+  ])('should say why for %s', async (_case, response, sentence) => {
+    await expect(downloadRefusal(response)).resolves.toBe(sentence);
   });
 });

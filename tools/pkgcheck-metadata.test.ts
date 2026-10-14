@@ -29,6 +29,7 @@ import {
   strictConsumerCompilerOptions,
   vendoredAssetIssues,
   vendoredNodeModulesIssues,
+  workerUrlIssues,
   workspaceRangeIssues,
 } from './pkgcheck-metadata.js';
 
@@ -238,6 +239,34 @@ describe('pkgcheck metadata', () => {
         'dist/fonts/fonts/HelvetikerRegular.json',
       ]),
     ).toEqual(['dist/fonts/fonts', 'dist/kernels/kernels']);
+  });
+
+  it('reports worker URLs in emitted modules that name no emitted file', () => {
+    const emitted = new Set([
+      'graphics/utils/client.mjs',
+      'graphics/utils/measure.worker.mjs',
+      'graphics/workers/caps.worker.mjs',
+    ]);
+    expect(
+      workerUrlIssues(
+        [
+          {
+            path: 'graphics/utils/client.mjs',
+            source: [
+              'new Worker(new URL(`measure.worker.mjs`,import.meta.url),{type:`module`});',
+              "new Worker(new URL('../workers/caps.worker.mjs', import.meta.url));",
+              "new Worker(new URL('topology.worker.ts', import.meta.url));",
+              'new SharedWorker(new URL("#graphics/workers/caps.worker.js",import.meta.url));',
+              "new URL('thumbnail.webp', import.meta.url);",
+            ].join('\n'),
+          },
+        ],
+        emitted,
+      ),
+    ).toEqual([
+      "graphics/utils/client.mjs: worker URL '#graphics/workers/caps.worker.js' names no emitted file",
+      "graphics/utils/client.mjs: worker URL 'topology.worker.ts' names no emitted file",
+    ]);
   });
 
   it('detects bundled workspace projects from the mirror directories unbundled builds emit', () => {

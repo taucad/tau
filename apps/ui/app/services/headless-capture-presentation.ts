@@ -1,15 +1,12 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import type { Mechanism, Pose } from '@taucad/kinematics';
 import type { GeometryComponentPrimitiveRef } from '@taucad/types';
-import {
-  buildGltfComponentManifest,
-  parseGltfBytes,
-} from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import { buildGltfComponentManifest, parseGltfBytes } from '@taucad/viewer/graphics/metadata/gltf-component-manifest';
 import {
   createGltfComponentOwnership,
   getComponentAncestorIds,
   getGltfPrimitiveComponentId,
-} from '#components/geometry/graphics/metadata/gltf-component-visibility.js';
+} from '@taucad/viewer/graphics/metadata/gltf-component-visibility';
 
 export type CaptureModelPresentation = {
   readonly mechanism?: Mechanism;

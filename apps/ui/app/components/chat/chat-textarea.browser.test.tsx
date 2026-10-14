@@ -1,13 +1,30 @@
 import '#styles/global.css';
 import { createRef } from 'react';
 import type { ComponentProps } from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
+import type { Ask } from '@taucad/chat';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { storedRef } from '#utils/attachment.test-utils.js';
+
+let dictationAvailable = false;
+let transcription: ReturnType<typeof Promise.withResolvers<string>> | undefined;
+let recordLevel: ((level: number) => void) | undefined;
+let microphonePermission: ReturnType<typeof Promise.withResolvers<void>> | undefined;
+vi.doMock('#components/dictation/dictation-client.js', () => ({
+  fetchDictationStatus: async () => ({ available: dictationAvailable }),
+  transcribeDictation: async () => transcription?.promise ?? 'Make the corners round.',
+}));
+vi.doMock('#components/dictation/dictation-capture.js', () => ({
+  captureDictation: async ({ onLevel }: { onLevel: (level: number) => void }) => {
+    await microphonePermission?.promise;
+    recordLevel = onLevel;
+    return { finish: async () => new Blob([], { type: 'audio/wav' }), cancel: () => undefined };
+  },
+}));
 
 vi.doMock('#hooks/active-chat-provider.js', () => ({
   useActiveChatSession: () => undefined,
@@ -17,7 +34,7 @@ vi.doMock('#hooks/active-chat-provider.js', () => ({
     contextUsage: undefined,
   }),
 }));
-vi.doMock('#hooks/use-keyboard.js', () => ({
+vi.doMock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: '⌘.' }),
 }));
 vi.doMock('#hooks/use-skills-catalog.js', async (importOriginal) => ({
@@ -55,6 +72,7 @@ vi.doMock('#components/files/file-link.js', () => ({
 }));
 
 const { ChatTextareaDesktop } = await import('#components/chat/chat-textarea-desktop.js');
+const { QuestionCard } = await import('#components/chat/question-card.js');
 const { ChatTextareaSkeleton } = await import('#components/chat/chat-textarea-skeleton.js');
 type ComposerProps = ComponentProps<typeof ChatTextareaDesktop>;
 const noop = (): void => undefined;
@@ -144,7 +162,11 @@ const renderComposer = (props: Partial<ComposerProps>) => {
 
 afterEach(() => {
   cleanup();
-  globalThis.document.documentElement.classList.remove('dark');
+  dictationAvailable = false;
+  transcription = undefined;
+  recordLevel = undefined;
+  microphonePermission = undefined;
+  globalThis.document.documentElement.classList.remove('light', 'dark', 'black', 'high-contrast');
 });
 
 for (const width of [320, 600]) {
@@ -168,6 +190,7 @@ for (const width of [320, 600]) {
         expect(bottom).toBeCloseTo(8, 1);
         if (mode === 'main' && action.getAttribute('aria-label') !== 'Resume') {
           const right = bounds.right - action.getBoundingClientRect().right - Number.parseFloat(style.borderRightWidth);
+          expect(right).toBeCloseTo(8, 1);
           expect(bottom).toBeCloseTo(right, 1);
         }
         expect(container.scrollWidth).toBe(container.clientWidth);
@@ -304,4 +327,226 @@ describe('composer bar resize geometry', () => {
     await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(false);
     expect(model.scrollWidth).toBeLessThanOrEqual(model.clientWidth);
   });
+});
+
+describe('dictation recording and transcription', () => {
+  it.each([
+    { width: 800, theme: 'light', status: 'streaming' },
+    { width: 800, theme: 'dark', status: 'streaming' },
+    { width: 320, theme: 'light', status: 'streaming' },
+    { width: 800, theme: 'light', status: 'ready' },
+  ] as const)(
+    'should record and transcribe at $width in $theme mode while $status',
+    async ({ width, theme, status }) => {
+      await page.viewport(width, 480);
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+      dictationAvailable = true;
+      transcription = Promise.withResolvers<string>();
+      const cancelChat = vi.fn();
+      const submit = vi.fn().mockResolvedValue(undefined);
+      const { containerReference } = renderComposer({
+        status,
+        inputText: 'Keep working on the bracket.',
+        handleCancelClick: cancelChat,
+        handleSubmit: submit,
+      });
+      await page.getByRole('button', { name: 'Dictate', exact: true }).click();
+      await expect.element(page.getByRole('button', { name: 'Stop dictation', exact: true })).toBeVisible();
+      act(() => {
+        // Deterministic microphone samples; the real composer and dictation hook render them.
+        for (let index = 0; index < 100; index++) {
+          const peak = Math.max(0, Math.sin(index * 0.31) + Math.sin(index * 0.79) * 0.6 - 0.6);
+          recordLevel?.(index > 45 ? peak * 0.12 : 0);
+        }
+      });
+      const waveform = screen.getByRole('img', { name: 'Microphone waveform' });
+      const cancelRecording = screen.getByRole('button', { name: 'Cancel dictation' });
+      const stopRecording = screen.getByRole('button', { name: 'Stop dictation' });
+      expect(waveform.getBoundingClientRect().width).toBeGreaterThan(width / 2);
+      expect(waveform.getBoundingClientRect().left).toBeGreaterThan(cancelRecording.getBoundingClientRect().right);
+      expect(waveform.getBoundingClientRect().right).toBeLessThan(stopRecording.getBoundingClientRect().left);
+      expect(containerReference.current!.scrollWidth).toBe(containerReference.current!.clientWidth);
+      await page.getByRole('textbox').click();
+      await page.screenshot({
+        element: screen.getByRole('region', { name: 'Composer' }),
+        path: `../../../../../out/test-results/composer/dictation-${width}-${theme}-${status}.png`,
+      });
+      await page.getByRole('button', { name: 'Stop dictation', exact: true }).click();
+      await expect.element(page.getByRole('status', { name: 'Transcribing', exact: true })).toBeVisible();
+      expect(screen.queryByRole('img', { name: 'Microphone waveform' })).toBeNull();
+      await expect.element(page.getByRole('button', { name: 'Cancel dictation' })).toBeEnabled();
+      await expect
+        .element(page.getByRole('button', { name: 'Transcribing', exact: true }))
+        .toHaveAttribute('aria-busy', 'true');
+      await page.getByRole('textbox').click();
+      await page.screenshot({
+        element: screen.getByRole('region', { name: 'Composer' }),
+        path: `../../../../../out/test-results/composer/transcribing-${width}-${theme}-${status}.png`,
+      });
+      await act(async () => {
+        transcription?.resolve('Make the corners round.');
+      });
+      await expect
+        .element(page.getByRole('textbox'))
+        .toHaveTextContent('Keep working on the bracket. Make the corners round.');
+      expect(submit).not.toHaveBeenCalled();
+      expect(cancelChat).not.toHaveBeenCalled();
+      if (status === 'streaming') {
+        await page.getByRole('button', { name: 'Stop', exact: true }).click();
+        expect(cancelChat).toHaveBeenCalledOnce();
+      }
+    },
+  );
+});
+
+describe('question dictation', () => {
+  it.each(
+    ['light', 'dark', 'black', 'high-contrast'].flatMap((theme) =>
+      [320, 800].flatMap((width) =>
+        ['text', 'options', 'tray', 'multiline'].map((variant) => ({
+          theme,
+          width,
+          variant,
+          sendWhileRecording: variant !== 'options',
+        })),
+      ),
+    ),
+  )(
+    'should finish dictation at $width in $theme mode with $variant (send: $sendWhileRecording)',
+    async ({ width, theme, variant, sendWhileRecording }) => {
+      await page.viewport(width, 600);
+      document.documentElement.classList.remove('light', 'dark', 'black', 'high-contrast');
+      document.documentElement.classList.add(theme);
+      document.documentElement.classList.toggle('dark', theme !== 'light');
+      dictationAvailable = true;
+      transcription = Promise.withResolvers<string>();
+      microphonePermission = Promise.withResolvers<void>();
+      const onAnswer = vi.fn();
+      const onHold = vi.fn();
+      const ask: Ask = {
+        id: 'ask_material',
+        callId: 'call_material',
+        source: 'tau',
+        askedAt: '2026-10-13T20:00:00.000Z',
+        deadline: variant === 'options' ? '2026-10-13T20:02:00.000Z' : null,
+        questions: [
+          {
+            id: 'material',
+            question: 'What material and finish should the bracket use?',
+            allowsText: true,
+            options: variant === 'options' ? [{ label: 'Aluminium' }, { label: 'Stainless steel' }] : [],
+            ...(variant === 'options' ? { recommended: 0 } : {}),
+          },
+        ],
+      };
+      render(
+        <TooltipProvider>
+          <section aria-label='Question reply' className='p-4'>
+            <QuestionCard
+              isFlat={variant === 'tray'}
+              ask={ask}
+              answers={undefined}
+              now={Date.parse(ask.askedAt)}
+              onAnswer={onAnswer}
+              onHold={onHold}
+              onDecline={noop}
+            />
+          </section>
+        </TooltipProvider>,
+      );
+      if (variant === 'options') {
+        await page.getByRole('button', { name: 'C, Something else: answer in your own words' }).click();
+      }
+      const box = page.getByRole('textbox', { name: 'Your answer' });
+      const region = screen.getByRole('region', { name: 'Question reply' });
+      await expect.element(page.getByRole('button', { name: 'Dictate', exact: true })).toBeVisible();
+      const draft =
+        variant === 'multiline' ? 'Aluminium.\nRound the corners.\nLeave the mounting holes clear.' : 'Aluminium.';
+      await box.fill(draft);
+      const reply = screen.getByRole('group', { name: 'Answer input' });
+      const idleHeight = reply.getBoundingClientRect().height;
+      const expectAlignedActions = (label: string): void => {
+        const action = screen.getByRole('button', { name: label }).getBoundingClientRect();
+        const send = screen.getByRole('button', { name: 'Send answer' }).getBoundingClientRect();
+        expect(action.top).toBe(send.top);
+        expect(action.bottom).toBe(send.bottom);
+        expect(action.right).toBeLessThanOrEqual(send.left);
+      };
+      const idleSend = screen.getByRole('button', { name: 'Send answer' }).getBoundingClientRect();
+      expectAlignedActions('Dictate');
+      if (variant !== 'multiline') {
+        const bounds = reply.getBoundingClientRect();
+        expect(idleSend.top + idleSend.height / 2).toBe(bounds.top + bounds.height / 2);
+      }
+      await page.screenshot({
+        element: region,
+        path: `../../../../../out/test-results/composer/question-idle-${width}-${theme}-${variant}.png`,
+      });
+      await page.getByRole('button', { name: 'Dictate', exact: true }).click();
+      expect(onHold).toHaveBeenCalled();
+      await expect.element(page.getByRole('status', { name: 'Requesting microphone…' })).toBeVisible();
+      await expect.element(page.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'true');
+      expectAlignedActions('Requesting microphone…');
+      const requesting = screen.getByRole('status', { name: 'Requesting microphone…' });
+      expect(requesting.scrollHeight).toBeLessThanOrEqual(requesting.clientHeight);
+      expect(reply.getBoundingClientRect().height).toBe(idleHeight);
+      await page.screenshot({
+        element: region,
+        path: `../../../../../out/test-results/composer/question-requesting-${width}-${theme}-${variant}.png`,
+      });
+      await act(async () => {
+        microphonePermission?.resolve();
+      });
+      await expect.element(page.getByRole('button', { name: 'Stop dictation' })).toBeVisible();
+      act(() => {
+        for (let index = 0; index < 100; index++) {
+          recordLevel?.(Math.max(0, Math.sin(index * 0.31)) * 0.12);
+        }
+      });
+      await expect.element(page.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'false');
+      expect(reply.getBoundingClientRect().height).toBe(idleHeight);
+      const cancel = screen.getByRole('button', { name: 'Cancel dictation' }).getBoundingClientRect();
+      const stop = screen.getByRole('button', { name: 'Stop dictation' }).getBoundingClientRect();
+      const waveform = screen.getByRole('img', { name: 'Microphone waveform' }).getBoundingClientRect();
+      const send = screen.getByRole('button', { name: 'Send answer' }).getBoundingClientRect();
+      expect(cancel.top).toBe(stop.top);
+      expect(send.top).toBe(stop.top);
+      expect(send.left).toBeGreaterThanOrEqual(stop.right);
+      expect(waveform.left).toBeGreaterThanOrEqual(cancel.right);
+      expect(waveform.right).toBeLessThanOrEqual(stop.left);
+      await page.screenshot({
+        element: region,
+        path: `../../../../../out/test-results/composer/question-recording-${width}-${theme}-${variant}.png`,
+      });
+      await page.getByRole('button', { name: sendWhileRecording ? 'Send answer' : 'Stop dictation' }).click();
+      await expect.element(page.getByRole('status', { name: 'Transcribing', exact: true })).toBeVisible();
+      expect(reply.getBoundingClientRect().height).toBe(idleHeight);
+      await page.screenshot({
+        element: region,
+        path: `../../../../../out/test-results/composer/question-transcribing-${width}-${theme}-${variant}.png`,
+      });
+      expect(region.scrollWidth).toBe(region.clientWidth);
+      await expect.element(page.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'true');
+      expect(onAnswer).not.toHaveBeenCalled();
+      expectAlignedActions('Transcribing');
+      const progress = screen.getByRole('status', { name: 'Transcribing' });
+      const microphone = screen.getByRole('button', { name: 'Transcribing' });
+      expect(progress.getBoundingClientRect().right).toBeLessThanOrEqual(microphone.getBoundingClientRect().left);
+      await act(async () => {
+        transcription?.resolve('Use a brushed finish.');
+      });
+      if (sendWhileRecording) {
+        expect(onAnswer).toHaveBeenCalledExactlyOnceWith('material', { text: `${draft} Use a brushed finish.` });
+        return;
+      }
+      await expect.element(box).toHaveValue(`${draft} Use a brushed finish.`);
+      expect(onAnswer).not.toHaveBeenCalled();
+      expectAlignedActions('Dictate');
+      await box.fill('Aluminium. Use a brushed finish on both sides.');
+      await page.getByRole('button', { name: 'Send answer' }).click();
+      expect(onAnswer).toHaveBeenCalledExactlyOnceWith('material', {
+        text: 'Aluminium. Use a brushed finish on both sides.',
+      });
+    },
+  );
 });

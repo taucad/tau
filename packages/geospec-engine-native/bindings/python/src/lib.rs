@@ -239,7 +239,8 @@ fn canonicalize<'py>(py: Python<'py>, input: &[u8]) -> PyResult<Bound<'py, PyByt
     Ok(PyBytes::new(py, &result))
 }
 
-#[pymodule]
+// Preserve the pre-0.28 GIL requirement for the thread-affine native engine.
+#[pymodule(gil_used = true)]
 fn geospec_engine_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyEngine>()?;
     module.add("ProtocolError", module.py().get_type::<ProtocolError>())?;

@@ -1,3 +1,5 @@
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useEffect, useReducer } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -19,7 +21,7 @@ import { SvgIcon } from '#components/icons/svg-icon.js';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -106,7 +108,16 @@ export const ChatAgents = ({
 );
 
 /** Durable + live project-wide projection. It never acquires or owns a chat run. */
-export const AgentsPanelBody = ({
+export function AgentsPanelBody(props: AgentsPanelBodyProps): React.JSX.Element {
+  const availability = useProjectAvailability();
+  return availability === 'ready' ? (
+    <AgentsPanelBodyContent {...props} />
+  ) : (
+    <ProjectSyncPlaceholder state={availability} />
+  );
+}
+
+const AgentsPanelBodyContent = ({
   metadataByChatId,
   enableHistory = true,
 }: AgentsPanelBodyProps): React.JSX.Element => {

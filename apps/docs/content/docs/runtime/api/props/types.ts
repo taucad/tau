@@ -21,6 +21,8 @@ export type {
   KernelDefinition,
   KernelServices,
   RealmResources,
+  RealmGroup,
+  RealmHoldInput,
   RealmHold,
   ViewDeclaration,
   ExportDeclaration,

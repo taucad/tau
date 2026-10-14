@@ -1,5 +1,8 @@
 import { useState, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router';
+import type { MetaFunction } from 'react-router';
+import { PageContent } from '#components/layout/page-content.js';
+import { PageHeader } from '#components/layout/page-header.js';
+import { useNavigate } from 'react-router';
 import type { KernelProvider } from '@taucad/runtime';
 import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
 import { Button } from '@taucad/ui/components/button';
@@ -18,7 +21,7 @@ import { toast } from '#components/ui/sonner.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import type { Handle } from '#types/matches.types.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { useProjectCreationLocation } from '#hooks/use-project-creation-location.js';
@@ -30,14 +33,9 @@ import { isDesktopTarget } from '#lib/build-target.js';
 
 const homeLocationLabel = projectLocationFullLabel(projectLocationDescriptor({ kind: 'home' }));
 
+export const meta: MetaFunction = () => [{ title: 'New project · Tau' }];
+
 export const handle: Handle = {
-  breadcrumb() {
-    return (
-      <Button asChild variant='ghost'>
-        <Link to='/projects/new'>New</Link>
-      </Button>
-    );
-  },
   // Mobile: section scrolls as one page. Desktop: route uses h-full flex + inner list scroll (see layout).
   enableOverflowY: true,
 };
@@ -71,7 +69,7 @@ function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider 
           <ul className='space-y-1 text-sm text-muted-foreground'>
             {selectedOption.features.map((feature) => (
               <li key={feature} className='flex items-center gap-2'>
-                <div className='size-1.5 shrink-0 rounded-full bg-primary/60' />
+                <div className='size-1.5 shrink-0 rounded-full bg-muted-foreground' />
                 <span>{feature}</span>
               </li>
             ))}
@@ -190,11 +188,8 @@ export default function ProjectsNew(): React.JSX.Element {
   );
 
   return (
-    <div className='container mx-auto flex max-w-4xl flex-col px-4 pb-4 md:h-full md:min-h-0'>
-      <div className='mb-4 shrink-0 text-center'>
-        <h1 className='mb-2 text-3xl font-semibold tracking-tight'>Create New Project</h1>
-        <p className='text-muted-foreground'>Choose a CAD kernel and start building</p>
-      </div>
+    <PageContent layout='fill'>
+      <PageHeader title='New project' />
 
       <div className='md:flex md:min-h-0 md:flex-1 md:flex-col md:overflow-hidden'>
         <Card className='flex flex-col bg-sidebar/70 md:min-h-0 md:flex-1 md:overflow-hidden'>
@@ -270,11 +265,11 @@ export default function ProjectsNew(): React.JSX.Element {
                       value={option.id}
                       className={cn(
                         'border-b border-border last:border-b-0 transition-all',
-                        kernel === option.id && 'bg-primary/5',
+                        kernel === option.id && 'bg-accent',
                       )}
                     >
                       <div
-                        className='flex cursor-action items-start gap-3 p-4 transition-colors hover:bg-primary/5'
+                        className='flex cursor-action items-start gap-3 p-4 transition-colors hover:bg-accent'
                         onClick={() => {
                           setSelectedKernel(option.id);
                         }}
@@ -287,10 +282,10 @@ export default function ProjectsNew(): React.JSX.Element {
                               'bg-transparent hover:bg-transparent data-[state=open]:bg-transparent',
                             )}
                           >
-                            <div className='flex flex-1 items-start gap-3'>
+                            <div className='flex min-w-0 flex-1 items-start gap-3'>
                               <SvgIcon id={option.id} className='mt-0.5 size-6 shrink-0' />
                               <div className='flex w-full min-w-0 flex-col gap-1'>
-                                <div className='flex w-full items-start justify-between gap-2'>
+                                <div className='flex w-full flex-wrap items-start justify-between gap-2'>
                                   <span className='flex items-center gap-1.5 text-sm font-medium'>
                                     {option.name}
                                     <KernelCommercialBadge kernelId={option.id} />
@@ -332,8 +327,8 @@ export default function ProjectsNew(): React.JSX.Element {
                         key={option.id}
                         htmlFor={option.id}
                         className={cn(
-                          'flex h-auto cursor-action items-start justify-start gap-3 border-b border-border p-4 text-left transition-all last:border-b-0 hover:bg-primary/5',
-                          kernel === option.id && 'bg-primary/5 hover:bg-primary/10',
+                          'flex h-auto cursor-action items-start justify-start gap-3 border-b border-border p-4 text-left transition-all last:border-b-0 hover:bg-accent',
+                          kernel === option.id && 'bg-accent',
                         )}
                         onClick={() => {
                           setSelectedKernel(option.id);
@@ -365,7 +360,7 @@ export default function ProjectsNew(): React.JSX.Element {
         </Card>
       </div>
 
-      <div className='flex shrink-0 flex-col gap-3 pt-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:flex-row sm:justify-between sm:gap-4'>
+      <div className='flex shrink-0 flex-col gap-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:flex-row sm:justify-between sm:gap-4'>
         <Button variant='outline' disabled={isCreating} onClick={handleCancel}>
           Cancel
         </Button>
@@ -373,6 +368,6 @@ export default function ProjectsNew(): React.JSX.Element {
           {isCreating ? 'Creating…' : `Create Project ${formattedKeyCombination}`}
         </Button>
       </div>
-    </div>
+    </PageContent>
   );
 }

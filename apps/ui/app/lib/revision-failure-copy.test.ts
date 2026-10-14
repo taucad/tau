@@ -44,6 +44,16 @@ describe('describeRevisionFailure', () => {
     );
   });
 
+  /* D91: a rename the effect refuses before writing anything says why, never "already exists". */
+  it('should say why a rename of a linked or backed-up branch is refused', () => {
+    expect(describeRevisionFailure('branch', 'BRANCH_RENAME_LINKED').description).toBe(
+      'This branch has its own set of files open, so Tau can’t rename it. Make a new branch from it instead.',
+    );
+    expect(describeRevisionFailure('branch', 'BRANCH_RENAME_PUSHED').description).toBe(
+      'This branch is already backed up under its name, and Tau can’t remove a name there. Make a new branch from it instead.',
+    );
+  });
+
   it('names the branch a person already has, when the refusal came with one', () => {
     expect(describeRevisionFailure('branch', 'CHECKOUT_CONFLICT', { branch: 'bracket-fillet' }).description).toBe(
       'bracket-fillet already exists. Pick another name.',

@@ -376,6 +376,24 @@ export class GithubService {
     }
   }
 
+  /**
+   * Open a pending completion as the user asking for it.
+   * The seal binds the user who started the attempt, so another Tau account
+   * cannot open it under the current key: that is the wrong owner, not a
+   * connection to renew (D81). A record sealed under a retired key still asks
+   * for reconnect.
+   */
+  private openPending(raw: string, userId: string, attemptId: string): PendingRecord {
+    try {
+      return this.open<PendingRecord>(raw, userId, `pending:${attemptId}`);
+    } catch (error) {
+      if (error instanceof UnauthorizedException && raw.startsWith(`${String(this.keyVersion)}.`)) {
+        throw new UnauthorizedException({ code: 'GITHUB_COMPLETION_OWNER_MISMATCH' });
+      }
+      throw error;
+    }
+  }
+
   /** Starts an attempt; `returnTo` and `completionMode` arrive unvalidated from the request body. */
   public async start(
     userId: string,
@@ -536,7 +554,7 @@ export class GithubService {
     if (raw === null) {
       return this.unfinished(userId, sessionId, attemptId);
     }
-    const pending = this.open<PendingRecord>(raw, userId, `pending:${attemptId}`);
+    const pending = this.openPending(raw, userId, attemptId);
     if (pending.userId !== userId || pending.sessionId !== sessionId || pending.attemptId !== attemptId) {
       throw new UnauthorizedException({ code: 'GITHUB_COMPLETION_OWNER_MISMATCH' });
     }

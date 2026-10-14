@@ -21,4 +21,16 @@ describe('PageHeader', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/^Projects$/u);
     expect(container.querySelector('.tabular-nums')).toBeNull();
   });
+
+  it('should render an embedded section without adding a second page heading', () => {
+    render(
+      <>
+        <h1>Home</h1>
+        <PageHeader headingLevel={2} title='Projects' />
+      </>,
+    );
+
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 2, name: 'Projects' })).toBeInTheDocument();
+  });
 });

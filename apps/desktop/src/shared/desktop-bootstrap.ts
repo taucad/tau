@@ -20,6 +20,9 @@ export const agentHostSessionChannels = {
   release: 'tau:agent-host:release',
 } as const;
 
+/** Open a granted directory in the operating system's file manager. */
+export const openDirectoryChannel = 'tau:open-directory';
+
 /** Theme notification shared by main and preload for the native app icon. */
 export const appIconThemeChannel = 'tau:app-icon-theme';
 

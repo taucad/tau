@@ -1,3 +1,5 @@
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { XIcon, Box, Eye, EyeOff, Target } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
@@ -6,10 +8,10 @@ import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { Paneview } from '#components/panes/paneview.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
-import { SearchInput } from '#components/search-input.js';
-import { HighlightText } from '#components/highlight-text.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
+import { SearchInput } from '@taucad/ui/components/search-input';
+import { HighlightText } from '@taucad/ui/components/highlight-text';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -25,20 +27,24 @@ import {
   ModelComponentActionContextContent,
   ModelComponentActionDropdown,
 } from '#components/geometry/cad/model-component-action-menu.js';
-import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
-import { PartPropertiesPanel } from '#components/geometry/cad/part-properties-panel.js';
-import { PartPreviewFrame } from '#components/geometry/cad/part-preview-image.js';
+import { MaterialSwatch } from '@taucad/viewer/cad/material-swatch';
+import { PartPropertiesPanel } from '@taucad/viewer/cad/part-properties-panel';
+import { PartPreviewFrame } from '@taucad/viewer/cad/part-preview-image';
 import { isPreviewablePart, useOpenPartGallery } from '#components/geometry/cad/part-gallery.js';
 import { useOptionalHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
 import { PartThumbnailService } from '#services/part-thumbnail.service.js';
-import type { PartThumbnailRequest, PartThumbnailState } from '#services/part-thumbnail.service.js';
+import type { PartThumbnailRequest } from '#services/part-thumbnail.service.js';
+import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
 import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useProject } from '#hooks/use-project.js';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
-import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
-import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import {
+  deriveModelInteractionUnitId,
+  getModelInteractionUnitState,
+} from '@taucad/viewer/machines/model-interaction.machine';
+import type { modelInteractionMachine } from '@taucad/viewer/machines/model-interaction.machine';
 import { cn } from '@taucad/ui/utils/cn';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
@@ -54,7 +60,7 @@ import {
   getInitialPanelOptions,
   usePaneviewPersistence,
 } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
-import { PaneVirtualList } from '#components/panes/pane-virtual-list.js';
+import { PaneVirtualList } from '@taucad/ui/components/pane-virtual-list';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 const keyCombinationEditor = projectWorkspaceKeyCombinations.model;
@@ -138,7 +144,7 @@ function getIsolationAction({
   };
 }
 
-export function ModelPanelBody({ onRequestOpen }: { readonly onRequestOpen?: () => void }): React.JSX.Element {
+function ModelPanelBodyContent({ onRequestOpen }: { readonly onRequestOpen?: () => void }): React.JSX.Element {
   const project = useProject({ enableNoContext: true });
   const [query, setQuery] = useState('');
   const [revealTarget, setRevealTarget] = useState<ModelComponentRevealTarget>();
@@ -1446,4 +1452,13 @@ function ExplorerUnavailableState(): React.JSX.Element {
 
 function ExplorerNoMatchesState(): React.JSX.Element {
   return <PanelEmptyState icon={Box} title='No matching parts' className='min-h-16 break-all' />;
+}
+
+export function ModelPanelBody(props: Parameters<typeof ModelPanelBodyContent>[0]): React.JSX.Element {
+  const availability = useProjectAvailability();
+  return availability === 'ready' ? (
+    <ModelPanelBodyContent {...props} />
+  ) : (
+    <ProjectSyncPlaceholder state={availability} />
+  );
 }

@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ArrowUp, CircleCheck, CircleSlash, Clock, MessageCircleQuestionMark, Undo2 } from 'lucide-react';
+import { CircleCheck, CircleSlash, Clock, MessageCircleQuestionMark, Undo2 } from 'lucide-react';
 import { askStatus, resolveAnswers } from '@taucad/chat';
 import type { Ask, AskAnswers, AskedQuestion, AskStatus } from '@taucad/chat';
-import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
-import { Textarea } from '@taucad/ui/components/textarea';
 import { cn } from '@taucad/ui/utils/cn';
+import { QuestionTextAnswer } from '#components/chat/question-text-answer.js';
 
 /** What the person gives one question. @public */
 export type QuestionReply = { readonly choice: string } | { readonly text: string };
@@ -25,6 +24,8 @@ export type QuestionCardProperties = {
   readonly onDecline: () => void;
   /** A flat row on the composer tray's surface instead of a bordered card. */
   readonly isFlat?: boolean;
+  /** Disable submissions while the durable answer is being written. */
+  readonly isPending?: boolean;
   readonly className?: string;
 };
 
@@ -50,10 +51,7 @@ const answerOf = (question: AskedQuestion, answers: AskAnswers | undefined): str
 
 function LetterKey({ letter }: { readonly letter: string }): React.JSX.Element {
   return (
-    <span
-      aria-hidden='true'
-      className='mt-px inline-flex size-5 shrink-0 items-center justify-center rounded-sm border bg-background text-xs font-medium text-muted-foreground tabular-nums group-hover:text-foreground'
-    >
+    <span aria-hidden='true' className='shrink-0 text-xs font-normal tabular-nums'>
       {letter}
     </span>
   );
@@ -64,7 +62,6 @@ type QuestionBodyProperties = {
   readonly isOpen: boolean;
   readonly onAnswer: (reply: QuestionReply) => void;
   readonly onHold: () => void;
-  readonly isFlat: boolean;
   /** Take focus on arrival: the person just answered or reopened from inside the card. */
   readonly shouldTakeFocus: boolean;
   readonly onFocusTaken: () => void;
@@ -76,7 +73,6 @@ function QuestionOptions({
   isOpen,
   onAnswer,
   onHold,
-  isFlat,
   shouldTakeFocus,
   onFocusTaken,
 }: QuestionBodyProperties): React.JSX.Element {
@@ -89,23 +85,7 @@ function QuestionOptions({
   }, [shouldTakeFocus, onFocusTaken]);
   const [isWriting, setIsWriting] = useState(false);
   const [draft, setDraft] = useState('');
-  const textId = useId();
-  const textRef = useRef<HTMLTextAreaElement>(null);
-  /* Choosing "Something else" moves focus into the box it opens. */
-  useEffect(() => {
-    if (isWriting) {
-      textRef.current?.focus();
-    }
-  }, [isWriting]);
   const otherLetter = letters[question.options.length] ?? '…';
-  const send = (): void => {
-    const text = draft.trim();
-    if (text !== '') {
-      onAnswer({ text });
-      setDraft('');
-      setIsWriting(false);
-    }
-  };
 
   return (
     <ul ref={listRef} className='flex flex-col gap-1'>
@@ -114,91 +94,68 @@ function QuestionOptions({
         const letter = letters[index] ?? '…';
         return (
           <li key={option.label}>
-            <button
+            <Button
+              size='xs'
+              variant='ghost'
               type='button'
               disabled={!isOpen}
               data-letter={letter}
               aria-label={`${letter}, ${option.label}${isRecommended ? ', recommended' : ''}${option.description ? `. ${option.description}` : ''}`}
-              className={cn(
-                'group flex w-full cursor-action items-start gap-2.5 rounded-md px-2 text-left transition-colors duration-100 hover:bg-accent/60 focus-visible:focus-outline disabled:cursor-default disabled:hover:bg-transparent',
-                isFlat ? 'py-1.5' : 'py-2',
-              )}
+              className='group h-auto min-h-6 max-w-full items-start justify-start py-0 text-left whitespace-normal'
               onClick={() => {
                 onAnswer({ choice: option.label });
               }}
             >
               <LetterKey letter={letter} />
               <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
-                <span className='flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-foreground'>
+                <span className='flex flex-wrap items-center gap-x-2 gap-y-1 text-xs/5 font-normal text-foreground'>
                   <span className='wrap-break-word'>{option.label}</span>
-                  {isRecommended ? (
-                    <Badge variant='secondary' className='px-1.5 font-normal'>
-                      Recommended
-                    </Badge>
-                  ) : null}
+                  {isRecommended ? <span className='text-muted-foreground'>Recommended</span> : null}
                 </span>
                 {option.description === undefined ? null : (
                   <span className='text-xs wrap-break-word text-muted-foreground'>{option.description}</span>
                 )}
               </span>
-            </button>
+            </Button>
           </li>
         );
       })}
       {question.allowsText ? (
         <li>
           {isWriting || question.options.length === 0 ? (
-            <div className={cn('flex items-start gap-2.5 rounded-md px-2', isFlat ? 'py-1.5' : 'py-2')}>
-              {question.options.length === 0 ? null : <LetterKey letter={otherLetter} />}
-              <div className='flex min-w-0 flex-1 items-end gap-1.5'>
-                <label htmlFor={textId} className='sr-only'>
-                  Your answer
-                </label>
-                <Textarea
-                  ref={textRef}
-                  id={textId}
-                  rows={1}
-                  value={draft}
-                  disabled={!isOpen}
-                  placeholder={question.options.length === 0 ? 'Type your answer' : 'Type your own answer'}
-                  className='min-h-8 resize-none py-1.5'
-                  onFocus={onHold}
-                  onChange={(event) => {
-                    setDraft(event.target.value);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault();
-                      send();
-                    } else if (event.key === 'Escape' && question.options.length > 0) {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setIsWriting(false);
-                    }
-                  }}
-                />
-                <Button
-                  type='button'
-                  size='icon-sm'
-                  variant='outline'
-                  aria-label='Send answer'
-                  disabled={!isOpen || draft.trim() === ''}
-                  onClick={send}
-                >
-                  <ArrowUp aria-hidden='true' />
-                </Button>
-              </div>
+            <div className='flex items-start gap-2 rounded-md px-2 pt-1'>
+              {question.options.length === 0 ? null : (
+                <span className='pt-2'>
+                  <LetterKey letter={otherLetter} />
+                </span>
+              )}
+              <QuestionTextAnswer
+                draft={draft}
+                onDraftChange={setDraft}
+                isOpen={isOpen}
+                shouldTakeFocus={isWriting || shouldTakeFocus}
+                placeholder={question.options.length === 0 ? 'Type your answer' : 'Type your own answer'}
+                onHold={onHold}
+                onAnswer={(text) => {
+                  onAnswer({ text });
+                  // The next recorded question remounts this body; retain the draft if saving fails.
+                }}
+                onDismiss={() => {
+                  if (question.options.length > 0) {
+                    setIsWriting(false);
+                  }
+                }}
+              />
             </div>
           ) : (
-            <button
+            <Button
+              size='xs'
+              variant='ghost'
               type='button'
               disabled={!isOpen}
               data-letter={otherLetter}
               aria-label={`${otherLetter}, Something else: answer in your own words`}
-              className={cn(
-                'group flex w-full cursor-action items-start gap-2.5 rounded-md px-2 text-left transition-colors duration-100 hover:bg-accent/60 focus-visible:focus-outline disabled:cursor-default disabled:hover:bg-transparent',
-                isFlat ? 'py-1.5' : 'py-2',
-              )}
+              className='group h-auto min-h-6 max-w-full items-start justify-start py-0 text-left whitespace-normal'
               onClick={() => {
                 setIsWriting(true);
                 onHold();
@@ -206,10 +163,9 @@ function QuestionOptions({
             >
               <LetterKey letter={otherLetter} />
               <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
-                <span className='text-sm font-medium text-foreground'>Something else</span>
-                <span className='text-xs text-muted-foreground'>Answer in your own words.</span>
+                <span className='text-xs/5 font-normal text-foreground'>Something else</span>
               </span>
-            </button>
+            </Button>
           )}
         </li>
       ) : null}
@@ -270,7 +226,7 @@ function SettledRows({
   );
 }
 
-const cardClassName = (isFlat: boolean): string => (isFlat ? 'px-1 py-2.5' : 'rounded-lg border bg-background p-3');
+const cardClassName = (isFlat: boolean): string => (isFlat ? 'p-2' : 'rounded-lg border bg-background p-2');
 
 const settledTitle = (kind: AskStatus['kind'], agentName: string | undefined): string => {
   switch (kind) {
@@ -340,7 +296,7 @@ function SettledCard({
       tabIndex={-1}
       className={cn('flex flex-col gap-2 outline-none', cardClassName(isFlat), className)}
     >
-      <div className='flex min-w-0 items-center gap-1.5 px-2 text-xs text-muted-foreground'>
+      <div className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground'>
         <MessageCircleQuestionMark aria-hidden='true' className='size-3.5 shrink-0' />
         <span id={titleId} className='min-w-0 flex-1 wrap-break-word'>
           {settledTitle(kind, agentName)}
@@ -358,7 +314,7 @@ function SettledCard({
           </Button>
         ) : null}
       </div>
-      <p className='px-2 text-sm wrap-break-word text-foreground'>
+      <p className='text-sm/5 wrap-break-word text-foreground'>
         {ask.questions.length === 1 ? ask.questions[0]?.question : (ask.message ?? 'Questions')}
       </p>
       {kind === 'declined' ? null : (
@@ -393,7 +349,7 @@ function QuestionHeader({
   readonly timer: string | undefined;
 }): React.JSX.Element {
   return (
-    <div className='flex min-w-0 items-center gap-1.5 px-2 text-xs text-muted-foreground'>
+    <div className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground'>
       <MessageCircleQuestionMark aria-hidden='true' className='size-3.5 shrink-0' />
       <span className='min-w-0 truncate'>
         {agentName === undefined ? 'Question' : `${agentName} asks`}
@@ -416,11 +372,13 @@ function QuestionHeader({
 function QuestionFooter({
   isLate,
   hasDefault,
+  isPending,
   onCancel,
   onDecline,
 }: {
   readonly isLate: boolean;
   readonly hasDefault: boolean;
+  readonly isPending: boolean;
   readonly onCancel: () => void;
   readonly onDecline: () => void;
 }): React.JSX.Element | undefined {
@@ -436,7 +394,14 @@ function QuestionFooter({
   }
   return hasDefault ? undefined : (
     <div className='flex justify-end px-2'>
-      <Button type='button' variant='ghost' size='xs' className='text-muted-foreground' onClick={onDecline}>
+      <Button
+        type='button'
+        variant='ghost'
+        size='xs'
+        disabled={isPending}
+        className='text-muted-foreground'
+        onClick={onDecline}
+      >
         Decline
       </Button>
     </div>
@@ -465,6 +430,7 @@ export function QuestionCard({
   onHold,
   onDecline,
   isFlat = false,
+  isPending = false,
   className,
 }: QuestionCardProperties): React.JSX.Element {
   const status = askStatus(ask, answers, now);
@@ -530,20 +496,16 @@ export function QuestionCard({
       ) : null}
       {current === undefined ? null : (
         <>
-          <p
-            id={titleId}
-            className={cn('px-2 font-medium text-foreground wrap-break-word', isFlat ? 'text-sm' : 'text-sm/6')}
-          >
+          <p id={titleId} className='text-sm/5 font-medium wrap-break-word text-foreground'>
             {current.question}
           </p>
           {ask.message !== undefined && !isMulti ? (
-            <p className='px-2 text-xs wrap-break-word text-muted-foreground'>{ask.message}</p>
+            <p className='text-xs/5 wrap-break-word text-muted-foreground'>{ask.message}</p>
           ) : null}
           <QuestionOptions
-            key={current.id}
+            key={`${ask.id}:${current.id}`}
             question={current}
-            isOpen={isOpen}
-            isFlat={isFlat}
+            isOpen={!isPending}
             shouldTakeFocus={focusFrom !== undefined && focusFrom !== current.id && focusFrom !== 'reopened'}
             onFocusTaken={clearFocusFrom}
             onHold={onHold}
@@ -558,8 +520,13 @@ export function QuestionCard({
       )}
       <QuestionFooter
         isLate={isLate}
+        isPending={isPending}
         hasDefault={ask.questions.some((question) => question.recommended !== undefined)}
-        onDecline={onDecline}
+        onDecline={() => {
+          if (!isPending) {
+            onDecline();
+          }
+        }}
         onCancel={() => {
           reopen(false);
         }}

@@ -1,8 +1,10 @@
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { memo, useCallback } from 'react';
 import { XIcon } from 'lucide-react';
 import { FloatingPanel, FloatingPanelClose } from '#components/ui/floating-panel.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { ChatEditorFileTree } from '#routes/w.$workspace.$project/chat-editor-file-tree.js';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
@@ -33,6 +35,10 @@ export const FileTreePanelBody = memo(function ({
   readonly shouldHandleReveal?: () => boolean;
   readonly readOnly?: boolean;
 }): React.JSX.Element {
+  const availability = useProjectAvailability();
+  if (availability !== 'ready') {
+    return <ProjectSyncPlaceholder state={availability} />;
+  }
   return (
     <FloatingPanel isOpen={isOpen} side='right' className={className} onOpenChange={onOpenChange}>
       <ChatEditorFileTree

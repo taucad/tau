@@ -6,6 +6,8 @@ import type { FileParameterEntry } from '@taucad/types';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { ChatParameters } from '#routes/w.$workspace.$project/chat-parameters.js';
 
+vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) => {
     if (!actor) {
@@ -300,7 +302,7 @@ vi.mock('dockview-react', () => ({
   },
 }));
 
-vi.mock('#components/geometry/parameters/parameters.js', () => ({
+vi.mock('@taucad/viewer/parameters/parameters', () => ({
   Parameters: ({
     parameters,
     className,
@@ -370,7 +372,7 @@ vi.mock('#components/geometry/parameters/parameters.js', () => ({
   ),
 }));
 
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Ctrl+X' }),
 }));
 
@@ -400,7 +402,7 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanelButtonGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock('#components/ui/key-shortcut.js', () => ({
+vi.mock('@taucad/ui/components/key-shortcut', () => ({
   KeyShortcut: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
 
@@ -415,7 +417,7 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
   TooltipTrigger: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
 }));
 
-vi.mock('#components/ui/combobox-responsive.js', () => ({
+vi.mock('@taucad/ui/components/combobox-responsive', () => ({
   ComboBoxResponsive: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
 }));
 

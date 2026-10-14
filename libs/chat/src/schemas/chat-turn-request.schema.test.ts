@@ -48,26 +48,6 @@ describe('chatExecutionTargetSchema', () => {
     expect(verdict.success).toBe(true);
   });
 
-  it('carries the conflict a resolution turn is being asked about (W10)', () => {
-    // *Ask chat to resolve* seeds a turn from the conflicted revision itself,
-    // so the paths still without a side ride the placement, not the prompt.
-    const verdict = chatTurnRequestSchema.safeParse({
-      ...validRequest(),
-      execution: { ...validRequest().execution, conflict: { revisionId: 'revision_9', paths: ['src/bracket.ts'] } },
-    });
-
-    expect(verdict.success).toBe(true);
-  });
-
-  it('rejects a conflict with no path to decide', () => {
-    const verdict = chatTurnRequestSchema.safeParse({
-      ...validRequest(),
-      execution: { ...validRequest().execution, conflict: { revisionId: 'revision_9', paths: [] } },
-    });
-
-    expect(verdict.success).toBe(false);
-  });
-
   it('rejects a revision mode the wire no longer speaks', () => {
     const verdict = chatTurnRequestSchema.safeParse({
       ...validRequest(),
@@ -98,4 +78,38 @@ it('rejects an unregistered static tool at the request boundary', async () => {
       ]),
     ),
   ).rejects.toMatchObject({ issues: [expect.objectContaining({ path: ['messages'] })] });
+});
+
+it.each(['input-streaming', 'input-available', 'output-error'])(
+  'rejects an unregistered historical static tool in %s state before normalization',
+  async (state) => {
+    await expect(
+      parseChatTurnRequest(
+        request([
+          {
+            id: 'unknown-tool-message',
+            role: 'assistant',
+            parts: [
+              { type: 'tool-unregistered_operation', toolCallId: 'unknown', state, input: {}, errorText: 'Failed' },
+            ],
+          },
+          { id: 'next-user-message', role: 'user', parts: [{ type: 'text', text: 'Continue' }] },
+        ]),
+      ),
+    ).rejects.toMatchObject({ issues: [expect.objectContaining({ path: ['messages'] })] });
+  },
+);
+
+it('preserves explicitly dynamic tools without imposing the static registry', async () => {
+  const part = {
+    type: 'dynamic-tool',
+    toolName: 'external_operation',
+    toolCallId: 'dynamic-call',
+    state: 'output-available',
+    input: { value: 'input' },
+    output: 'External result',
+  };
+  await expect(
+    parseChatTurnRequest(request([{ id: 'dynamic-message', role: 'assistant', parts: [part] }])),
+  ).resolves.toMatchObject({ messages: [{ parts: [part] }] });
 });

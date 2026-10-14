@@ -1,8 +1,6 @@
-import {
-  probeWebGpuSupport,
-  readGraphicsBackendQueryOverride,
-  resolveGraphicsBackendPreference,
-} from '#components/geometry/graphics/graphics-backend.js';
+import { probeWebGpuSupport, resolveGraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-backend';
+import { readGraphicsBackendQueryOverride } from '#utils/graphics-backend-override.js';
+import { metalMorphSpinnerSpeed } from '#components/geometry/loader/metal-morph-sequence.js';
 import { createMetalMorphLoader } from '#components/geometry/loader/metal-morph-controller.js';
 import type {
   MetalMorphBackendInUse,
@@ -296,7 +294,7 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
         theme,
         quality: 'balanced',
         // Twice the showcase speed: at a 12 px slot the resting walk barely moves, reading as a still icon.
-        speed: 2,
+        speed: metalMorphSpinnerSpeed,
         onFrame: blit,
       });
       controller = created;

@@ -1,14 +1,24 @@
 name: 'Staging deploy superseded'
 description: >-
-  Reports whether a newer commit on `main` has already deployed this app to staging,
-  so an older `ci.yml` push run does not put its commit back over it. Run it inside
-  the deploy job, which holds the app's staging deploy queue, just before publishing.
+  Reports whether a newer commit on `main` has already deployed this app to staging, or
+  is on its way to, so an older `ci.yml` push run does not publish its commit. Run it
+  inside the deploy job, which holds the app's staging deploy queue, just before
+  publishing.
 
 # Each push to `main` runs on its own, so an older run can reach its deploy after a
 # newer one. A newer commit on `main` contains this one, so once its run's deploy job
 # for the same app has passed there is nothing left for this commit to ship. A newer
 # job that passed by skipping on this check counts too: something newer than it
 # deployed first.
+#
+# When this deploy comes from a `ci.yml` push run, a newer run that is still going
+# supersedes it as well, once that run's plan has passed and its deploy job for this
+# app has not ended without deploying. Its plan diffs the app against the last commit
+# staging recorded (`staging-deploy-history`), which this unpublished commit is not,
+# so it deploys this change too, or the app is unchanged since that record and there
+# is nothing to publish. If that run then fails before deploying, the record stays
+# behind this commit and the next push to `main` ships it. Waiting here instead would
+# hold the deploy queue the newer job needs.
 
 inputs:
   job-name:
@@ -20,7 +30,7 @@ inputs:
 
 outputs:
   superseded:
-    description: "'true' when a newer commit's run has already deployed this app to staging"
+    description: "'true' when a newer commit's run has deployed, or will deploy, this app to staging"
     value: ${{ steps.check.outputs.superseded }}
 
 runs:
@@ -32,24 +42,46 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         JOB_NAME: ${{ inputs.job-name }}
+        # The plan job of `ci.yml`.
+        PLAN_JOB: Plan affected lanes
       run: |
         set -euo pipefail
+        jobs_of() {
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$1/jobs?per_page=100" \
+            --jq '.jobs[] | {name, conclusion}' | jq -s .
+        }
         # In a called workflow the run is the caller's, so this is the ci.yml push run;
         # a manual dispatch looks at the runs started since it began.
         created=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+        # The caller job's name, e.g. `Deploy UI (Staging)`: a newer run that decides
+        # not to deploy shows only that job, as skipped.
+        caller=''
+        if [ "$GITHUB_EVENT_NAME" = push ]; then
+          caller=$(jobs_of "$GITHUB_RUN_ID" | jq -r --arg job "$JOB_NAME" \
+            'map(.name | select(endswith(" / " + $job)) | rtrimstr(" / " + $job)) | first // empty')
+        fi
         runs=$(gh api --paginate -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
           -f branch=main -f event=push -f created=">=$created" -f per_page=100 \
-          --jq ".workflow_runs[] | select(.id != $GITHUB_RUN_ID and .head_sha != \"$GITHUB_SHA\") | \"\(.id) \(.head_sha)\"")
-        while read -r run_id sha; do
+          --jq ".workflow_runs[] | select(.id != $GITHUB_RUN_ID and .head_sha != \"$GITHUB_SHA\") | \"\(.id) \(.head_sha) \(.status)\"")
+        while read -r run_id sha status; do
           [ -n "$run_id" ] || continue
           # `ahead`: that commit descends from this one, so it carries this change.
           [ "$(gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$sha" --jq .status)" = ahead ] || continue
-          deployed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" \
-            --jq "[.jobs[] | select(.conclusion == \"success\" and (.name == \"$JOB_NAME\" or (.name | endswith(\" / $JOB_NAME\"))))] | length")
-          if [ "$deployed" -gt 0 ]; then
-            echo "::notice::Run $run_id already deployed $sha, which contains $GITHUB_SHA; skipping this older deploy."
-            echo "superseded=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          verdict=$(jobs_of "$run_id" | jq -r --arg job "$JOB_NAME" --arg caller "$caller" \
+            --arg plan "$PLAN_JOB" --arg status "$status" '
+            def deploy: .name == $job or (.name | endswith(" / " + $job))
+              or ($caller != "" and (.name == $caller or (.name | startswith($caller + " / "))));
+            if any(.[]; deploy and .conclusion == "success") then "deployed"
+            elif $caller != "" and $status != "completed"
+              and any(.[]; .name == $plan and .conclusion == "success")
+              and (any(.[]; deploy and .conclusion != null) | not) then "coming"
+            else "none" end')
+          case "$verdict" in
+            deployed) echo "::notice::Run $run_id already deployed $sha, which contains $GITHUB_SHA; skipping this older deploy." ;;
+            coming) echo "::notice::Run $run_id for $sha, which contains $GITHUB_SHA, passed its plan and has not ended its deploy; skipping this older deploy." ;;
+            *) continue ;;
+          esac
+          echo "superseded=true" >> "$GITHUB_OUTPUT"
+          exit 0
         done <<< "$runs"
         echo "superseded=false" >> "$GITHUB_OUTPUT"

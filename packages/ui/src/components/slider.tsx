@@ -53,7 +53,8 @@ const sliderVariants = cva(
 
 /**
  * Render the APG slider pattern. Arrow keys adjust by one step, while Home and
- * End move to the minimum and maximum values supplied to Radix.
+ * End move to the minimum and maximum values supplied to Radix. `aria-label` and
+ * `aria-labelledby` name each thumb, which carries the slider role.
  *
  * @public
  * @param properties - Radix slider properties and the Tau layout variant.
@@ -74,6 +75,8 @@ function Slider({
   value,
   min = 0,
   max = 100,
+  'aria-label': ariaLabel,
+  'aria-labelledby': ariaLabelledBy,
   ...properties
 }: React.ComponentProps<typeof SliderPrimitive.Root> & VariantProps<typeof sliderVariants>): React.JSX.Element {
   const _values = React.useMemo(
@@ -106,6 +109,8 @@ function Slider({
         <SliderPrimitive.Thumb
           key={index}
           data-slot='slider-thumb'
+          aria-label={ariaLabel}
+          aria-labelledby={ariaLabelledBy}
           className='block size-4 shrink-0 rounded-full border border-primary bg-background shadow-sm ring-ring transition-[box-shadow] hover:ring-2 focus-visible:focus-outline disabled:pointer-events-none disabled:opacity-50'
         />
       ))}

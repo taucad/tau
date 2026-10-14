@@ -597,9 +597,9 @@
     },
     {
       "path": "packages/geospec-engine-native/native/manifold-rust/source/Cargo.lock",
-      "sha256": "b92bd5a7cdd59cad7206804581235ef178920bfe22bea36d4c2fcd0731205a0c",
+      "sha256": "4db7c4c84e237544ed0bb2e03c18a85caea721716bbbbfa2946799915fafbd1d",
       "class": "data",
-      "reason": "Non-executable configuration, documentation, license or fixture bytes."
+      "reason": "Non-executable dependency lock data. Local crossbeam-epoch 0.9.18 to 0.9.20 security adaptation; original upstream identity and exact before/after hashes are retained in quality/README.md."
     },
     {
       "path": "packages/geospec-engine-native/native/manifold-rust/source/Cargo.toml",
@@ -2565,7 +2565,7 @@
     },
     {
       "path": "packages/geospec-engine-native/quality/README.md",
-      "sha256": "ece40499704cf56a06154c60d0cb51591877f494dfe1429594a2315c99ed9696",
+      "sha256": "cd547cbe442470f99d6a2d190b71c4ebac5f646e8dd18076ddb80f97ad2568f9",
       "class": "data",
       "reason": "Non-executable configuration, documentation, license or fixture bytes."
     },

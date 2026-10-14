@@ -16,7 +16,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum(rate(ws_disconnections_total{service_name=\"tau-api\",ws_close_reason=\"error\"}[5m])) > 1",
+            "expr": "sum(rate(ws_disconnections_total{app=~\".*\",service_name=\"tau-api\",ws_close_reason=\"error\"}[5m])) > 1",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "ws_disconnect_spike"
@@ -50,7 +50,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum(rate(gen_ai_client_operation_duration_count{service_name=\"tau-api\",error_type!=\"\"}[10m])) / sum(rate(gen_ai_client_operation_duration_count{service_name=\"tau-api\"}[10m])) > 0.05",
+            "expr": "sum(rate(gen_ai_client_operation_duration_count{app=~\".*\",service_name=\"tau-api\",error_type!=\"\"}[10m])) / sum(rate(gen_ai_client_operation_duration_count{app=~\".*\",service_name=\"tau-api\"}[10m])) > 0.05",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "llm_errors"
@@ -84,7 +84,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "(sum(rate(http_server_request_duration_count{service_name=\"tau-api\",http_response_status_code=~\"5..\"}[5m])) or vector(0)) / sum(rate(http_server_request_duration_count{service_name=\"tau-api\"}[5m])) > 0.05",
+            "expr": "(sum(rate(http_server_request_duration_count{app=~\".*\",service_name=\"tau-api\",http_response_status_code=~\"5..\"}[5m])) or vector(0)) / sum(rate(http_server_request_duration_count{app=~\".*\",service_name=\"tau-api\"}[5m])) > 0.05",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "http_5xx_high"
@@ -118,7 +118,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "(\n  (\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n    or\n    0 * sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m]))\n  )\n  /\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=~\"input|cache_read|cache_write\"}[30m]))\n) < 0.4\nand\nsum by (gen_ai_request_model, gen_ai_provider_name) (increase(gen_ai_client_token_usage_sum{service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m])) >= 200000",
+            "expr": "(\n  (\n    sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{app=~\".*\",service_name=\"tau-api\", gen_ai_token_type=\"cache_read\"}[30m]))\n    or\n    0 * sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{app=~\".*\",service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m]))\n  )\n  /\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{app=~\".*\",service_name=\"tau-api\", gen_ai_token_type=~\"input|cache_read|cache_write\"}[30m]))\n) < 0.4\nand\nsum by (gen_ai_request_model, gen_ai_provider_name) (increase(gen_ai_client_token_usage_sum{app=~\".*\",service_name=\"tau-api\", gen_ai_token_type=\"input\"}[30m])) >= 200000",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "cache_hit_rate_low"
@@ -153,7 +153,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "max(tau_billing_funded_operation_current{service_name=\"tau-api\",tau_billing_pending_state=\"pending\"}) >= 56",
+            "expr": "max(tau_billing_funded_operation_current{app=~\".*\",service_name=\"tau-api\",tau_billing_pending_state=\"pending\"}) >= 56",
             "intervalMs": 15000,
             "maxDataPoints": 60,
             "refId": "billing_funded_operation_occupancy"
@@ -187,7 +187,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum(increase(tau_billing_funded_operation_denials_total{service_name=\"tau-api\",tau_billing_capacity_pool=\"primary\",tau_billing_denial_reason=\"genuine_saturation\"}[5m])) > 0",
+            "expr": "sum(increase(tau_billing_funded_operation_denials_total{app=~\".*\",service_name=\"tau-api\",tau_billing_capacity_pool=\"primary\",tau_billing_denial_reason=\"genuine_saturation\"}[5m])) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "billing_funded_operation_limit"
@@ -221,7 +221,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum(increase(tau_billing_funded_operation_recoveries_total{service_name=\"tau-api\",tau_billing_recovery_outcome=\"failed\"}[5m])) > 0",
+            "expr": "sum(increase(tau_billing_funded_operation_recoveries_total{app=~\".*\",service_name=\"tau-api\",tau_billing_recovery_outcome=\"failed\"}[5m])) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "billing_funded_operation_recovery_failed"
@@ -255,7 +255,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "max by (deployment_environment, tau_billing_capacity_pool) (tau_billing_funded_operation_oldest_due_age{service_name=\"tau-api\"}) > 30000",
+            "expr": "max by (deployment_environment, tau_billing_capacity_pool) (tau_billing_funded_operation_oldest_due_age{app=~\".*\",service_name=\"tau-api\"}) > 30000",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "billing_funded_operation_due_age"
@@ -289,7 +289,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "max(tau_billing_funded_operation_recovery_provider_executions{service_name=\"tau-api\"}) > 0",
+            "expr": "max(tau_billing_funded_operation_recovery_provider_executions{app=~\".*\",service_name=\"tau-api\"}) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "billing_funded_operation_recovery_provider_execution"
@@ -323,7 +323,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum by (app, instance, tau_process) (resets(process_uptime{service_name=\"tau-api\"}[30m])) > 2",
+            "expr": "sum by (app, instance, tau_process) (resets(process_uptime{app=~\".*\",service_name=\"tau-api\"}[30m])) > 2",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "process_restarting"
@@ -357,7 +357,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum by (app, gen_ai_request_model, gen_ai_provider_name) (increase(tau_billing_supplier_cost_picousd_total{service_name=\"tau-api\"}[24h])) / (sum by (app, gen_ai_request_model, gen_ai_provider_name) (increase(gen_ai_client_cost_total{service_name=\"tau-api\"}[24h])) * 1e12) > 0.85",
+            "expr": "sum by (app, gen_ai_request_model, gen_ai_provider_name) (increase(tau_billing_supplier_cost_picousd_total{app=~\".*\",service_name=\"tau-api\"}[24h])) / (sum by (app, gen_ai_request_model, gen_ai_provider_name) (increase(gen_ai_client_cost_total{app=~\".*\",service_name=\"tau-api\"}[24h])) * 1e12) > 0.85",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "supplier_margin"
@@ -391,7 +391,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "(sum by (deployment_environment) (increase(tau_billing_supplier_cost_picousd_total{service_name=\"tau-api\"}[24h])) / 1e12 > on (deployment_environment) clamp_min(3 * sum by (deployment_environment) (increase(tau_billing_supplier_cost_picousd_total{service_name=\"tau-api\"}[7d] offset 24h)) / 7 / 1e12, 50)) or (sum by (deployment_environment) (increase(tau_billing_supplier_cost_picousd_total{service_name=\"tau-api\"}[24h])) / 1e12 > 50 unless on (deployment_environment) sum by (deployment_environment) (increase(tau_billing_supplier_cost_picousd_total{service_name=\"tau-api\"}[7d] offset 24h)))",
+            "expr": "(sum by (deployment_environment) (increase(tau_billing_supplier_cost_picousd_total{app=~\".*\",service_name=\"tau-api\"}[24h])) / 1e12 > on (deployment_environment) clamp_min(3 * sum by (deployment_environment) (increase(tau_billing_supplier_cost_picousd_total{app=~\".*\",service_name=\"tau-api\"}[7d] offset 24h)) / 7 / 1e12, 50)) or (sum by (deployment_environment) (increase(tau_billing_supplier_cost_picousd_total{app=~\".*\",service_name=\"tau-api\"}[24h])) / 1e12 > 50 unless on (deployment_environment) sum by (deployment_environment) (increase(tau_billing_supplier_cost_picousd_total{app=~\".*\",service_name=\"tau-api\"}[7d] offset 24h)))",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "supplier_daily_spend"
@@ -425,7 +425,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "(max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=~\"missing_rate|dimension_mismatch\"}) > on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=~\"missing_rate|dimension_mismatch\"} offset 2h)) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=~\"missing_rate|dimension_mismatch\"}) > 0 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=~\"missing_rate|dimension_mismatch\"} offset 2h))",
+            "expr": "(max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{app=~\".*\",service_name=\"tau-api\",tau_billing_unpriced_reason=~\"missing_rate|dimension_mismatch\"}) > on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{app=~\".*\",service_name=\"tau-api\",tau_billing_unpriced_reason=~\"missing_rate|dimension_mismatch\"} offset 2h)) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{app=~\".*\",service_name=\"tau-api\",tau_billing_unpriced_reason=~\"missing_rate|dimension_mismatch\"}) > 0 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{app=~\".*\",service_name=\"tau-api\",tau_billing_unpriced_reason=~\"missing_rate|dimension_mismatch\"} offset 2h))",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "supplier_unpriced"
@@ -459,7 +459,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "(max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=\"absorbed\"}) - on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=\"absorbed\"} offset 1h) > 10) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=\"absorbed\"}) > 10 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{service_name=\"tau-api\",tau_billing_unpriced_reason=\"absorbed\"} offset 1h))",
+            "expr": "(max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{app=~\".*\",service_name=\"tau-api\",tau_billing_unpriced_reason=\"absorbed\"}) - on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{app=~\".*\",service_name=\"tau-api\",tau_billing_unpriced_reason=\"absorbed\"} offset 1h) > 10) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{app=~\".*\",service_name=\"tau-api\",tau_billing_unpriced_reason=\"absorbed\"}) > 10 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{app=~\".*\",service_name=\"tau-api\",tau_billing_unpriced_reason=\"absorbed\"} offset 1h))",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "supplier_absorbed"
@@ -493,7 +493,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "max by (app, kind) (tau_billing_open_financial_cases{service_name=\"tau-api\",kind=\"supplier_invoice_total_mismatch\"}) > 0",
+            "expr": "max by (app, kind) (tau_billing_open_financial_cases{app=~\".*\",service_name=\"tau-api\",kind=\"supplier_invoice_total_mismatch\"}) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "supplier_invoice"

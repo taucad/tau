@@ -648,3 +648,46 @@ describe('a checkout stopped inside an apply', () => {
     }
   }, 300_000);
 });
+
+describe('a path that changes kind', () => {
+  /** Apply `files` over the checkout, starting from what it holds now. */
+  const applyFiles = async (checkout: RevisionFileSystem, files: Readonly<Record<string, string>>) =>
+    materializer(checkout)(liveCheckout, new ImmutableRevisionTree(Object.entries(files)), {
+      before: await captureRevisionTree(checkout, {
+        exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned,
+      }),
+    });
+
+  it('should replace a directory the tree no longer holds with a file of the same name', async () => {
+    const context = await project({ 'foo/bar': 'nested\n' });
+
+    const result = await applyFiles(context.checkout, { foo: 'flat\n' });
+
+    expect(result.paths).toEqual(['foo', 'foo/bar']);
+    expect(await filesOf(context.tree)).toEqual(['foo']);
+    expect(await context.tree.readFile('foo', 'utf8')).toBe('flat\n');
+  });
+
+  it('should replace a file the tree no longer holds with a directory of the same name', async () => {
+    const context = await project({ foo: 'flat\n' });
+
+    await applyFiles(context.checkout, { 'foo/bar': 'nested\n' });
+
+    expect(await filesOf(context.tree)).toEqual(['foo/bar']);
+    expect(await context.tree.readFile('foo/bar', 'utf8')).toBe('nested\n');
+  });
+
+  it('should remove the directories its removals emptied and keep one that still holds an unversioned file', async () => {
+    const context = await project({
+      'gone/deep/a.ts': 'a\n',
+      'kept/b.ts': 'b\n',
+      'kept/node_modules/pkg.js': 'cache\n',
+      'main.ts': 'main\n',
+    });
+
+    await applyFiles(context.checkout, { 'main.ts': 'main\n' });
+
+    expect(await context.tree.exists('gone')).toBe(false);
+    expect(await filesOf(context.tree)).toEqual(['kept/node_modules/pkg.js', 'main.ts']);
+  });
+});

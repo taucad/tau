@@ -10,6 +10,7 @@ import type { RevisionConflictFacet } from '@taucad/revisions';
 import { ConflictDecision, RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
 vi.mock('#hooks/use-revision-status.js', async () => {
@@ -118,6 +119,49 @@ describe('a decision that travels (D14)', () => {
   });
 });
 
+describe('a decision whose file count is not a choice (R13)', () => {
+  it('should say Checking files while the conflict is being read, never a count', () => {
+    decision({ ...foreign, labels: undefined, paths: [], busy: true });
+
+    expect(screen.getByRole('status')).toHaveTextContent('Checking files…');
+    expect(screen.queryByText(/0 files/u)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Merge into main' })).toBeDisabled();
+  });
+
+  it('should say nothing still differs, with Merge as the one action, when a later merge reconciled every file', async () => {
+    const user = userEvent.setup();
+    const onFinishResolution = vi.fn();
+    render(
+      <ConflictDecision
+        conflict={{ ...foreign, paths: [], ready: true }}
+        currentBranch='main'
+        conflictTexts={{}}
+        onKeepSide={vi.fn()}
+        onOpenConflict={vi.fn()}
+        onAskChat={vi.fn()}
+        onFinishResolution={onFinishResolution}
+        onResolveInEditor={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Nothing still differs on main. Merge to finish this decision.')).toBeInTheDocument();
+    expect(screen.queryByText(/0 files/u)).not.toBeInTheDocument();
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Ask chat to resolve' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Merge into main' }));
+    expect(onFinishResolution).toHaveBeenCalledWith('rev-c');
+  });
+
+  it('should say the conflict could not be read when its read failed, never a count', () => {
+    decision({ ...foreign, labels: undefined, paths: [], busy: false });
+
+    expect(screen.getByText('This conflict could not be read. Reload the page to read it again.')).toBeInTheDocument();
+    expect(screen.queryByText(/0 files/u)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Merge into main' })).toBeDisabled();
+  });
+});
+
 describe('a conflict line in Branches (D14)', () => {
   it('names a line by its decision, and offers no Switch or branch verbs on this device’s own', () => {
     branches({ ...foreign, branch: 'conflicts/main/device-a', foreign: false });
@@ -172,5 +216,129 @@ describe('a conflict line in Branches (D14)', () => {
       'Only the project’s owner can remove another device’s decision.',
     );
     expect(revisionStatusHarness.commands.syncNow).not.toHaveBeenCalled();
+  });
+});
+
+describe('a branch with no checkout on this device (D93)', () => {
+  it('should say Remote only for a branch the remote has, and nothing for one only this device has', () => {
+    render(
+      <RevisionBranches
+        branches={[
+          { name: 'main', head: 'rev-1', checkoutId: 'live', checkoutRoot: '/p', leaseChatIds: [] },
+          {
+            name: 'upstream',
+            head: 'rev-2',
+            checkoutId: undefined,
+            checkoutRoot: undefined,
+            leaseChatIds: [],
+            onRemote: true,
+          },
+          {
+            name: 'renamed-here',
+            head: 'rev-3',
+            checkoutId: undefined,
+            checkoutRoot: undefined,
+            leaseChatIds: [],
+            onRemote: false,
+          },
+        ]}
+        currentBranch='main'
+        liveCheckoutId='live'
+        chatNames={{}}
+        chatCheckoutIds={{}}
+        branchFacts={new Map()}
+        conflicts={[]}
+        isBusy={false}
+        isWritable
+        onSwitch={vi.fn()}
+        onMerge={vi.fn()}
+        onDiscard={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    );
+
+    const rows = screen.getAllByRole('listitem');
+    expect(rows.map((row) => row.textContent.includes('Remote only'))).toEqual([false, true, false]);
+  });
+});
+
+/* D91, audit R1: *Rename* is refused for a branch something else knows by its
+ * name, so the menu says why instead of offering it; a branch only this device
+ * holds keeps it. The reason is the refusal's own sentence. */
+describe('Rename on a branch that keeps its name elsewhere (D91)', () => {
+  const renaming = (onRename = vi.fn()) =>
+    render(
+      <RevisionBranches
+        branches={[
+          { name: 'main', head: 'rev-1', checkoutId: 'live', checkoutRoot: '/p', leaseChatIds: [], onRemote: true },
+          {
+            name: 'agent/b',
+            head: 'rev-2',
+            checkoutId: 'checkout-b',
+            checkoutRoot: '/checkouts/checkout-b',
+            leaseChatIds: [],
+            onRemote: false,
+          },
+          {
+            name: 'upstream',
+            head: 'rev-3',
+            checkoutId: undefined,
+            checkoutRoot: undefined,
+            leaseChatIds: [],
+            onRemote: true,
+          },
+          { name: 'solo', head: 'rev-4', checkoutId: undefined, checkoutRoot: undefined, leaseChatIds: [] },
+        ]}
+        currentBranch='main'
+        liveCheckoutId='live'
+        chatNames={{}}
+        chatCheckoutIds={{}}
+        branchFacts={new Map()}
+        conflicts={[]}
+        isBusy={false}
+        isWritable
+        onSwitch={vi.fn()}
+        onMerge={vi.fn()}
+        onDiscard={vi.fn()}
+        onRename={onRename}
+      />,
+    );
+  const pushed = describeRevisionFailure('branch', 'BRANCH_RENAME_PUSHED').description;
+  const linked = describeRevisionFailure('branch', 'BRANCH_RENAME_LINKED').description;
+
+  it.each([
+    ['main', pushed],
+    ['agent/b', linked],
+    ['upstream', pushed],
+  ])('should show Rename %s as unavailable, with the refusal as its reason', async (name, reason) => {
+    const user = userEvent.setup();
+    const onRename = vi.fn();
+    renaming(onRename);
+
+    await user.click(screen.getByRole('button', { name: `Actions for ${name}` }));
+    const item = screen.getByRole('menuitem', { name: new RegExp(`^Rename ${name}…`, 'u') });
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(item).toHaveTextContent(reason);
+    await user.click(item);
+
+    expect(screen.queryByRole('textbox', { name: `New name for ${name}` })).not.toBeInTheDocument();
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it('should offer Rename for a branch only this device holds', async () => {
+    const user = userEvent.setup();
+    const onRename = vi.fn();
+    renaming(onRename);
+
+    await user.click(screen.getByRole('button', { name: 'Actions for solo' }));
+    const item = screen.getByRole('menuitem', { name: 'Rename solo…' });
+    expect(item).not.toHaveAttribute('aria-disabled');
+    await user.click(item);
+    const field = await screen.findByRole('textbox', { name: 'New name for solo' });
+    await user.clear(field);
+    await user.type(field, 'solo-2');
+    await user.click(screen.getByRole('button', { name: 'Rename branch' }));
+
+    expect(onRename).toHaveBeenCalledWith('solo', 'solo-2');
   });
 });

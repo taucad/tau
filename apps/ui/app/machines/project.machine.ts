@@ -14,13 +14,13 @@ import { assertRootedPath, normalizePath } from '@taucad/utils/path';
 import { classify } from '@taucad/filesystem/path-registry';
 import { isBrowser } from '#constants/browser.constants.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import type { GraphicsOwnedSettings, GraphicsViewSettings } from '#constants/editor.constants.js';
-import { defaultGraphicsSettings } from '#constants/editor.constants.js';
+import type { GraphicsOwnedSettings, GraphicsViewSettings } from '@taucad/viewer/graphics/graphics-settings';
+import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { actorIdOf, eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { cadMachine, closeCadRuntime, disposeCadRuntime } from '#machines/cad.machine.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
+import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { logMachine } from '#machines/logs.machine.js';
-import { modelInteractionMachine } from '#machines/model-interaction.machine.js';
+import { modelInteractionMachine } from '@taucad/viewer/machines/model-interaction.machine';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 
 /**

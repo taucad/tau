@@ -22,15 +22,19 @@ import {
   imageCarouselControlClassName,
   imageCarouselOverlayControlProps,
 } from '#components/ui/image-carousel-dialog.js';
-import { PartPropertiesPanel } from '#components/geometry/cad/part-properties-panel.js';
-import { disclosureMotion } from '#components/revisions/revision-actions.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
+import { PartPropertiesPanel } from '@taucad/viewer/cad/part-properties-panel';
+import { disclosureMotion } from '@taucad/ui/components/actions';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
-import type { PartThumbnailRequest, PartThumbnailState } from '#services/part-thumbnail.service.js';
+import type { PartThumbnailRequest } from '#services/part-thumbnail.service.js';
+import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
 import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
-import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
-import type { ModelInteractionSource, modelInteractionMachine } from '#machines/model-interaction.machine.js';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
+import type {
+  ModelInteractionSource,
+  modelInteractionMachine,
+} from '@taucad/viewer/machines/model-interaction.machine';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;

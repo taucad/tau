@@ -1,9 +1,9 @@
 import * as React from 'react';
 import { Color, Mesh, PerspectiveCamera, PlaneGeometry, Scene, WebGLRenderer } from 'three';
 import { WebGPURenderer } from 'three/webgpu';
-import { createInfiniteGridNodeMaterial } from '#components/geometry/graphics/three/materials/infinite-grid-material.node.js';
-import { createInfiniteGridGlMaterial } from '#components/geometry/graphics/three/materials/infinite-grid-material.js';
-import { getGeneratedShaderSource } from '#components/geometry/graphics/three/utils/three-shader-debug.test-utils.js';
+import { createInfiniteGridNodeMaterial } from '@taucad/viewer/graphics/three/materials/infinite-grid-material.node';
+import { createInfiniteGridGlMaterial } from '@taucad/viewer/graphics/three/materials/infinite-grid-material';
+import { getGeneratedShaderSource } from '@taucad/viewer/graphics/three/utils/three-shader-debug';
 import { getEnvironment } from '#environment.config.js';
 
 type ShaderFixtureBackend = 'common-webgl' | 'webgpu';

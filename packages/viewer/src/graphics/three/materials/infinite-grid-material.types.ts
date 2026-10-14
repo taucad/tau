@@ -1,0 +1,45 @@
+import type { Color, Material } from 'three';
+
+/** Visual-only props that callers may mutate on a long-lived infinite-grid material via {@link InfiniteGridMaterialHandle.applyVisualOverrides}. */
+export type InfiniteGridVisualOverrides = {
+  readonly smallSize?: number;
+  readonly largeSize?: number;
+  readonly color?: Color;
+  readonly lineOpacity?: number;
+  readonly gridDistance?: number;
+  readonly planeOffset?: number;
+  readonly smallPhase?: readonly [number, number];
+  readonly largePhase?: readonly [number, number];
+};
+
+/**
+ * Long-lived infinite grid material bundle (WebGL `ShaderMaterial` or WebGPU `MeshBasicNodeMaterial`).
+ *
+ * @public
+ */
+export type InfiniteGridMaterialHandle = Readonly<{
+  material: Material;
+  applyVisualOverrides: (overrides: InfiniteGridVisualOverrides) => void;
+}>;
+
+/**
+ * Shared configuration for infinite grid shaders (legacy GLSL + WebGPU TSL).
+ *
+ * @public
+ */
+export type InfiniteGridMaterialProperties = {
+  readonly smallSize?: number;
+  readonly smallThickness?: number;
+  readonly largeSize?: number;
+  readonly largeThickness?: number;
+  readonly color?: Color;
+  readonly axes?: 'xyz' | 'xzy' | 'zyx';
+  readonly lineOpacity?: number;
+  readonly gridDistance?: number;
+  readonly fadeStart?: number;
+  readonly fadeEnd?: number;
+  readonly planeOffset?: number;
+  readonly smallPhase?: readonly [number, number];
+  readonly largePhase?: readonly [number, number];
+  readonly alphaThreshold?: number;
+};

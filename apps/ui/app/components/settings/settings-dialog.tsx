@@ -1,3 +1,4 @@
+import { BrowserSettingsPanel } from '#components/browser/browser-settings.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefCallback } from 'react';
 import { ArrowLeft } from 'lucide-react';
@@ -16,10 +17,10 @@ import { SettingsAuthGate } from '#components/settings/settings-auth-gate.js';
 import { RemoteComputeSettings } from '#components/settings/remote-compute-settings.js';
 import { ComputeReuseSettings } from '#components/settings/compute-reuse-settings.js';
 import { MachinesSettings } from '#components/settings/machines-settings.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
 
 import { Button } from '@taucad/ui/components/button';
-import { SearchInput } from '#components/search-input.js';
+import { SearchInput } from '@taucad/ui/components/search-input';
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -36,6 +37,13 @@ import { SettingsItem } from '#components/settings/settings-item.js';
 /** Keep authenticated sections behind their existing gate and mount only the active section. */
 function SettingsContent({ section }: { readonly section: SettingsSection }): React.JSX.Element {
   switch (section) {
+    case 'browser': {
+      return (
+        <SettingsItem settingId='web-browser'>
+          <BrowserSettingsPanel />
+        </SettingsItem>
+      );
+    }
     case 'general': {
       return <GeneralSettings />;
     }
@@ -205,7 +213,7 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
 
   return (
     <DialogContent
-      className='h-[90dvh] max-w-[calc(100%-2rem)] grid-rows-[1fr] gap-0 overflow-hidden p-0 sm:max-w-6xl'
+      className='h-[90dvh] max-w-[calc(100%-2rem)] grid-rows-[1fr] gap-0 overflow-hidden p-0 sm:max-w-6xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input]]:bg-card [&_[data-slot=select-trigger]]:bg-card [&_[data-slot=slider-input]]:bg-card [&_[data-slot=textarea]]:bg-card'
       onOpenAutoFocus={(event) => {
         // A deep link owns focus: its reveal moves it to the content, not the dialog's first button.
         if (linkedDestination) {
@@ -243,7 +251,6 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
               aria-label='Search settings'
               placeholder='Search settings…'
               value={query}
-              variant='transparent'
               onClear={clearSearch}
               onChange={(event) => {
                 setQuery(event.target.value);
@@ -334,7 +341,7 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
           role='region'
           aria-label={`${active.label} settings`}
           tabIndex={-1}
-          className='min-h-0 min-w-0 flex-1 overflow-y-auto p-6 focus-visible:focus-outline md:p-10'
+          className='min-h-0 min-w-0 flex-1 overflow-y-auto bg-muted/40 p-6 focus-visible:focus-outline md:p-10'
         >
           <div className='mx-auto flex max-w-3xl flex-col gap-6 [&_[data-settings-section]]:gap-3 [&_[data-settings-section]]:border-0 [&_[data-settings-section]]:bg-transparent [&_[data-settings-section]]:py-0 [&_[data-settings-section]>[data-slot=card-content]]:rounded-xl [&_[data-settings-section]>[data-slot=card-content]]:border [&_[data-settings-section]>[data-slot=card-content]]:bg-card [&_[data-settings-section]>[data-slot=card-content]]:py-4 [&_[data-settings-section]>[data-slot=card-content]:has(>[data-slot=settings-item])]:gap-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:pt-4 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:absolute [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:inset-x-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:top-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:border-t [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:content-[""] [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:last-child)]:pb-4 [&_[data-settings-section]>[data-slot=card-header]]:px-0 [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-description]]:hidden [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-title]]:text-sm [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-title]]:font-medium [&_[data-slot=card]]:shadow-none [&_h2]:text-sm [&_h2]:font-medium'>
             <h1 className='text-lg font-medium'>{active.label}</h1>

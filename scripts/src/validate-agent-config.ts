@@ -12,6 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { load as loadYaml } from 'js-yaml';
 import remarkParse from 'remark-parse';
 import { unified } from 'unified';
+import { createBrainIndex } from '#brain-index.js';
 
 const excludedTrees = ['repos', 'worktrees', '.worktrees', '.claude/worktrees', '.codex/worktrees'];
 const templateDirectories = [
@@ -230,6 +231,7 @@ export const validateAgentConfig = (root: string): AgentConfigResult => {
     }
   }
 
+  const trackedInBrain = createBrainIndex(resolve(root, 'repos/tau-brain'));
   for (const path of [...boundaries, ...skills]) {
     for (const link of markdownLinks(readFileSync(path, 'utf8'))) {
       if (link.startsWith('#') || /^[a-z][a-z\d+.-]*:/iu.test(link)) {
@@ -240,7 +242,10 @@ export const validateAgentConfig = (root: string): AgentConfigResult => {
       const absentOptionalDocs = relocatableDocumentation.some(
         (prefix) => (local === prefix || local.startsWith(`${prefix}/`)) && !existsSync(resolve(root, prefix)),
       );
-      if (!existsSync(target) && !absentOptionalDocs && !local.startsWith('repos/')) {
+      const sparseBrainLink =
+        relocatableDocumentation.some((prefix) => local.startsWith(`${prefix}/`)) &&
+        trackedInBrain(local.slice('docs/'.length));
+      if (!existsSync(target) && !absentOptionalDocs && !sparseBrainLink && !local.startsWith('repos/')) {
         report(path, `broken local link: ${link}`);
       }
       if (skillPolicies.get(path) && skillPolicies.get(target) === false) {

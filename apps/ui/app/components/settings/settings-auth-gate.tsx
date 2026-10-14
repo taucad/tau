@@ -3,7 +3,7 @@ import { Lock } from 'lucide-react';
 import { NavLink } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { authClient } from '#lib/auth-client.js';
 
 /**
@@ -17,7 +17,7 @@ export function SettingsAuthGate({ children }: { readonly children: React.ReactN
 
   if (isPending) {
     return (
-      <div className='flex items-center justify-center py-16'>
+      <div className='flex items-center justify-center rounded-xl border bg-card py-16'>
         <Loader className='size-6 text-muted-foreground' />
       </div>
     );
@@ -25,7 +25,7 @@ export function SettingsAuthGate({ children }: { readonly children: React.ReactN
 
   if (!session) {
     return (
-      <div className='flex flex-col items-center justify-center gap-4 py-16 text-center'>
+      <div className='flex flex-col items-center justify-center gap-4 rounded-xl border bg-card px-4 py-16 text-center'>
         <div className='flex size-12 items-center justify-center rounded-full bg-muted'>
           <Lock className='size-6 text-muted-foreground' />
         </div>

@@ -1,0 +1,1173 @@
+import type { GLTF } from '@gltf-transform/core';
+import { tauCadTopologyExtension } from '@taucad/types/constants';
+import type {
+  GeometryComponentAppearance,
+  GeometryComponentBounds,
+  GeometryComponentCapabilities,
+  GeometryComponentKind,
+  GeometryComponentManifest,
+  GeometryComponentNode,
+  GeometryComponentPrimitiveRef,
+  JSONObject,
+} from '@taucad/types';
+import { admitMechanism } from '@taucad/kinematics';
+import type { TauCadTopologyComponent } from '@taucad/geometry-core';
+import { Box3, Matrix4, Quaternion, Vector3 } from 'three';
+
+type JsonObject = JSONObject;
+
+type GltfAccessor = {
+  bufferView?: number;
+  byteOffset?: number;
+  componentType: number;
+  count: number;
+  type: string;
+  min?: number[];
+  max?: number[];
+};
+
+type GltfBufferView = {
+  byteOffset?: number;
+  byteLength: number;
+  byteStride?: number;
+};
+
+/** One glTF mesh primitive as the manifest and the in-place update path read it. @public */
+export type GltfPrimitive = {
+  attributes?: Record<string, number>;
+  indices?: number;
+  material?: number;
+  /** GlTF primitive mode; 4 (TRIANGLES) when absent, 1 for LINES. */
+  mode?: number;
+  extras?: JsonObject;
+};
+
+type GltfMesh = {
+  primitives?: GltfPrimitive[];
+  name?: string;
+};
+
+type GltfNode = {
+  mesh?: number;
+  name?: string;
+  children?: number[];
+  matrix?: number[];
+  translation?: number[];
+  rotation?: number[];
+  scale?: number[];
+  extras?: JsonObject;
+};
+
+type GltfScene = {
+  nodes?: number[];
+};
+
+/** The glTF JSON chunk, narrowed to what the manifest and the in-place update path read. @public */
+export type GltfJson = Pick<GLTF.IGLTF, 'images' | 'textures' | 'samplers'> & {
+  scene?: number;
+  scenes?: GltfScene[];
+  nodes?: GltfNode[];
+  meshes?: GltfMesh[];
+  accessors?: GltfAccessor[];
+  bufferViews?: GltfBufferView[];
+  materials?: GltfMaterial[];
+  extensions?: Record<string, JsonObject>;
+};
+
+type GltfMaterial = {
+  name?: string;
+  pbrMetallicRoughness?: {
+    baseColorFactor?: number[];
+    metallicFactor?: number;
+    roughnessFactor?: number;
+    baseColorTexture?: unknown;
+    metallicRoughnessTexture?: unknown;
+  };
+  normalTexture?: unknown;
+  occlusionTexture?: unknown;
+  emissiveTexture?: unknown;
+  extensions?: Record<string, JsonObject>;
+};
+
+type SurfaceMaterial = NonNullable<GeometryComponentAppearance['materials']>[number];
+
+type TopologyComponent = Partial<TauCadTopologyComponent> & { readonly kind?: GeometryComponentKind };
+
+/** A GLB split into its JSON chunk and a view over its BIN chunk. @public */
+export type ParsedGltf = {
+  json: GltfJson;
+  bin: Uint8Array<ArrayBuffer>;
+};
+
+const rootId = 'root';
+const defaultMeshFormats = ['glb', 'stl'];
+const defaultBrepFormats = ['step', 'stp', 'brep', 'dxf'];
+
+function alignTo4(value: number): number {
+  const remainder = value % 4;
+  return remainder === 0 ? value : value + (4 - remainder);
+}
+
+/**
+ * Split GLB (or glTF JSON) bytes into the parsed JSON chunk and a view over the BIN chunk.
+ *
+ * The BIN chunk is a `subarray`, not a copy: callers read accessor windows out of it.
+ * @public
+ */
+export function parseGltfBytes(content: Uint8Array<ArrayBuffer>): ParsedGltf {
+  const firstNonWhitespace = content.find((byte) => byte > 0x20);
+  if (firstNonWhitespace === 0x7b) {
+    return {
+      json: JSON.parse(new TextDecoder().decode(content)) as GltfJson,
+      bin: new Uint8Array(),
+    };
+  }
+
+  const view = new DataView(content.buffer, content.byteOffset, content.byteLength);
+  const magic = view.getUint32(0, true);
+  if (magic !== 0x46_54_6c_67) {
+    throw new Error('Expected GLB magic bytes when building component manifest.');
+  }
+
+  const jsonChunkLength = view.getUint32(12, true);
+  const jsonStart = 20;
+  const jsonEnd = jsonStart + jsonChunkLength;
+  const binHeaderStart = jsonStart + alignTo4(jsonChunkLength);
+  const binChunkLength = binHeaderStart + 4 < content.byteLength ? view.getUint32(binHeaderStart, true) : 0;
+  const binStart = binHeaderStart + 8;
+
+  return {
+    json: JSON.parse(new TextDecoder().decode(content.subarray(jsonStart, jsonEnd)).trim()) as GltfJson,
+    bin: binChunkLength > 0 ? content.subarray(binStart, binStart + binChunkLength) : new Uint8Array(),
+  };
+}
+
+/**
+ * List every primitive instance reachable from the glTF's active scene.
+ *
+ * @public
+ */
+export function listReachableGltfPrimitiveReferences(
+  content: Uint8Array<ArrayBuffer>,
+): GeometryComponentPrimitiveRef[] {
+  const { json } = parseGltfBytes(content);
+  const referencedNodeIndices = new Set((json.nodes ?? []).flatMap((node) => node.children ?? []));
+  const scene = json.scenes?.[json.scene ?? 0];
+  const roots =
+    scene?.nodes ??
+    (json.nodes ?? []).flatMap((_, nodeIndex) => (referencedNodeIndices.has(nodeIndex) ? [] : [nodeIndex]));
+  const visited = new Set<number>();
+  const references: GeometryComponentPrimitiveRef[] = [];
+  const visit = (nodeIndex: number): void => {
+    if (visited.has(nodeIndex)) {
+      return;
+    }
+    visited.add(nodeIndex);
+    const node = json.nodes?.[nodeIndex];
+    if (!node) {
+      return;
+    }
+    const meshIndex = node.mesh;
+    if (meshIndex !== undefined) {
+      for (const primitiveIndex of (json.meshes?.[meshIndex]?.primitives ?? []).keys()) {
+        references.push({ nodeIndex, meshIndex, primitiveIndex });
+      }
+    }
+    for (const childIndex of node.children ?? []) {
+      visit(childIndex);
+    }
+  };
+  for (const root of roots) {
+    visit(root);
+  }
+  if (!scene) {
+    for (const nodeIndex of (json.nodes ?? []).keys()) {
+      visit(nodeIndex);
+    }
+  }
+  return references;
+}
+
+function createFallbackComponentId(nodeIndex: number): string {
+  return `component:node-${nodeIndex}`;
+}
+
+function dedupeComponentId(baseId: string, usedIds: Map<string, number>): string {
+  const occurrence = usedIds.get(baseId) ?? 0;
+  usedIds.set(baseId, occurrence + 1);
+  if (occurrence === 0) {
+    return baseId;
+  }
+  return `${baseId}#${occurrence + 1}`;
+}
+
+function createCapabilities(hasPreciseTopology: boolean): GeometryComponentCapabilities {
+  return {
+    canHide: true,
+    canIsolate: true,
+    canFocus: true,
+    canAdjustOpacity: true,
+    hasDrawings: false,
+    hasPreciseTopology,
+    exports: [
+      { fidelity: 'mesh', formats: defaultMeshFormats, available: true },
+      {
+        fidelity: 'brep',
+        formats: defaultBrepFormats,
+        available: hasPreciseTopology,
+        ...(hasPreciseTopology ? {} : { reason: 'Precise topology is not available for this component.' }),
+      },
+    ],
+  };
+}
+
+type TopologyPayload = { components?: TopologyComponent[]; mechanism?: unknown };
+
+/**
+ * Draw-element spans for one displayed primitive occurrence. IDs are valid only for this GLB.
+ *
+ * @public
+ */
+export type GltfMeasurementFeatures = {
+  readonly occurrenceId: string;
+  readonly componentId: string;
+  readonly kind: 'surface' | 'line';
+  readonly primitive: GeometryComponentPrimitiveRef;
+  readonly faces?: ReadonlyArray<{ readonly id: string; readonly start: number; readonly count: number }>;
+  readonly edges?: ReadonlyArray<{ readonly id: string; readonly start: number; readonly count: number }>;
+};
+
+/**
+ * The key used for a glTF primitive under a particular scene node, including shared-mesh instances.
+ *
+ * @public
+ */
+export function gltfPrimitiveOccurrenceKey(reference: GeometryComponentPrimitiveRef): string {
+  return `${reference.nodeIndex}/${reference.meshIndex}/${reference.primitiveIndex}`;
+}
+
+function validGroups(
+  groups: ReadonlyArray<{ start: number; count: number; id: number }> | undefined,
+  limit: number | undefined,
+  alignment: number,
+): boolean {
+  if (!groups?.length || limit === undefined) {
+    return false;
+  }
+  const ids = new Set<number>();
+  let end = 0;
+  for (const group of [...groups].sort((a, b) => a.start - b.start)) {
+    if (
+      !Number.isInteger(group.id) ||
+      ids.has(group.id) ||
+      !Number.isInteger(group.start) ||
+      !Number.isInteger(group.count) ||
+      group.start < end ||
+      group.start % alignment !== 0 ||
+      group.count <= 0 ||
+      group.count % alignment !== 0 ||
+      group.start + group.count > limit
+    ) {
+      return false;
+    }
+    ids.add(group.id);
+    end = group.start + group.count;
+  }
+  return true;
+}
+
+/**
+ * Preserve Replicad's current-build face and edge groups at the displayed primitive boundary.
+ * Surface spans count index entries. Its non-indexed LINES spans count flat XYZ scalars, so
+ * divide them by three before handing them to the Three.js draw/selection path.
+ * @public
+ */
+export function buildGltfMeasurementFeatures(
+  content: Uint8Array<ArrayBuffer>,
+  manifest: GeometryComponentManifest,
+): ReadonlyMap<string, GltfMeasurementFeatures> {
+  const { json, bin } = parseGltfBytes(content);
+  return buildMeasurementFeatures(json, readTopologyPayload(json, bin), manifest);
+}
+
+function buildMeasurementFeatures(
+  json: GltfJson,
+  topology: TopologyPayload,
+  manifest: GeometryComponentManifest,
+): ReadonlyMap<string, GltfMeasurementFeatures> {
+  const components = new Map(topology.components?.map((component) => [component.id, component]) ?? []);
+  const result = new Map<string, GltfMeasurementFeatures>();
+
+  for (const componentId of manifest.nodeOrder) {
+    const node = manifest.nodesById[componentId];
+    const source = components.get(componentId);
+    if (!node || !source) {
+      continue;
+    }
+    const references = node.primitiveRefs ?? [];
+    const surfaces = references.filter(
+      (reference) => (json.meshes?.[reference.meshIndex]?.primitives?.[reference.primitiveIndex]?.mode ?? 4) === 4,
+    );
+    const lines = references.filter(
+      (reference) => json.meshes?.[reference.meshIndex]?.primitives?.[reference.primitiveIndex]?.mode === 1,
+    );
+
+    for (const reference of references) {
+      const primitive = json.meshes?.[reference.meshIndex]?.primitives?.[reference.primitiveIndex];
+      if (!primitive) {
+        continue;
+      }
+      const faceGroups = Array.isArray(primitive.extras?.['faceGroups'])
+        ? (primitive.extras['faceGroups'] as typeof source.faceGroups)
+        : surfaces.length === 1
+          ? source.faceGroups
+          : undefined;
+      const edgeGroups = Array.isArray(primitive.extras?.['edgeGroups'])
+        ? (primitive.extras['edgeGroups'] as typeof source.edgeGroups)
+        : lines.length === 1
+          ? source.edgeGroups
+          : undefined;
+      const faceLimit = primitive.indices === undefined ? undefined : json.accessors?.[primitive.indices]?.count;
+      const edgeLimit = json.accessors?.[primitive.attributes?.['POSITION'] ?? -1]?.count;
+      const faceUnit = primitive.extras?.['tauFaceGroupUnit'] ?? source.sourceRefs?.['faceGroupUnit'];
+      const edgeUnit = primitive.extras?.['tauEdgeGroupUnit'] ?? source.sourceRefs?.['edgeGroupUnit'];
+      const faces =
+        primitive.mode !== 1 &&
+        faceUnit === 'indices-v1' &&
+        validGroups(
+          faceGroups?.map((group) => ({ ...group, id: group.faceId })),
+          faceLimit,
+          3,
+        )
+          ? faceGroups?.map((group) => ({ id: `face:${group.faceId}`, start: group.start, count: group.count }))
+          : undefined;
+      const edges =
+        primitive.mode === 1 &&
+        primitive.indices === undefined &&
+        edgeUnit === 'xyz-scalars-v1' &&
+        validGroups(
+          edgeGroups?.map((group) => ({ ...group, id: group.edgeId })),
+          edgeLimit === undefined ? undefined : edgeLimit * 3,
+          6,
+        )
+          ? edgeGroups?.map((group) => ({ id: `edge:${group.edgeId}`, start: group.start / 3, count: group.count / 3 }))
+          : undefined;
+      if (!faces?.length && !edges?.length) {
+        continue;
+      }
+      result.set(gltfPrimitiveOccurrenceKey(reference), {
+        occurrenceId: `${componentId}@node:${reference.nodeIndex}`,
+        componentId,
+        kind: primitive.mode === 1 ? 'line' : 'surface',
+        primitive: reference,
+        ...(faces?.length ? { faces } : {}),
+        ...(edges?.length ? { edges } : {}),
+      });
+    }
+  }
+  return result;
+}
+
+function readTopologyPayload(json: GltfJson, bin: Uint8Array<ArrayBuffer>): TopologyPayload {
+  const extension = json.extensions?.[tauCadTopologyExtension];
+  if (!extension) {
+    return {};
+  }
+
+  if (Array.isArray(extension['components'])) {
+    return extension as TopologyPayload;
+  }
+
+  const { topologyBufferView } = extension;
+  if (typeof topologyBufferView !== 'number') {
+    return {};
+  }
+
+  const bufferView = json.bufferViews?.[topologyBufferView];
+  if (!bufferView) {
+    return {};
+  }
+
+  const start = bufferView.byteOffset ?? 0;
+  const payloadBytes = bin.subarray(start, start + bufferView.byteLength);
+  return JSON.parse(new TextDecoder().decode(payloadBytes)) as TopologyPayload;
+}
+
+/**
+ * Re-admit the payload's mechanism: the GLB is untrusted input, so a mechanism the viewer cannot
+ * use, because admission rejects it or a link names a component the payload does not declare, is
+ * dropped with a warning rather than failing the manifest.
+ */
+function readMechanism(payload: TopologyPayload): GeometryComponentManifest['mechanism'] {
+  if (payload.mechanism === undefined) {
+    return undefined;
+  }
+
+  const outcome = admitMechanism(payload.mechanism);
+  if (outcome.status === 'invalid') {
+    const [issue] = outcome.issues;
+    console.warn(`Ignoring the TAU_cad_topology mechanism: ${issue?.path} ${issue?.message}`, outcome.issues);
+    return undefined;
+  }
+
+  const componentIds = new Set(payload.components?.map((component) => component.id));
+  const undeclared = Object.values(outcome.mechanism.links)
+    .flatMap((link) => link.components)
+    .filter((id) => !componentIds.has(id));
+  if (undeclared.length > 0) {
+    console.warn(
+      `Ignoring the TAU_cad_topology mechanism: its links name undeclared components ${undeclared.join(', ')}`,
+    );
+    return undefined;
+  }
+
+  return outcome.mechanism;
+}
+
+function combineBounds(bounds: GeometryComponentBounds[]): GeometryComponentBounds | undefined {
+  if (bounds.length === 0) {
+    return undefined;
+  }
+
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (const bound of bounds) {
+    for (let axis = 0; axis < 3; axis++) {
+      min[axis] = Math.min(min[axis]!, bound.min[axis]!);
+      max[axis] = Math.max(max[axis]!, bound.max[axis]!);
+    }
+  }
+
+  const center: [number, number, number] = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+  const radius = Math.hypot(max[0] - center[0], max[1] - center[1], max[2] - center[2]);
+  return { min, max, center, radius };
+}
+
+function getAccessorBounds(json: GltfJson, accessorIndex: number | undefined): GeometryComponentBounds | undefined {
+  if (accessorIndex === undefined) {
+    return undefined;
+  }
+
+  const accessor = json.accessors?.[accessorIndex];
+  if (!accessor?.min || !accessor.max || accessor.min.length < 3 || accessor.max.length < 3) {
+    return undefined;
+  }
+
+  const min: [number, number, number] = [accessor.min[0]!, accessor.min[1]!, accessor.min[2]!];
+  const max: [number, number, number] = [accessor.max[0]!, accessor.max[1]!, accessor.max[2]!];
+  const center: [number, number, number] = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+  const radius = Math.hypot(max[0] - center[0], max[1] - center[1], max[2] - center[2]);
+  return { min, max, center, radius };
+}
+
+type GltfBoundsContext = {
+  json: GltfJson;
+  worldMatrices: ReadonlyMap<number, Matrix4>;
+};
+
+function createNodeWorldMatrices(json: GltfJson): ReadonlyMap<number, Matrix4> {
+  const parents = new Map<number, number>();
+  for (const [nodeIndex, node] of (json.nodes ?? []).entries()) {
+    for (const childIndex of node.children ?? []) {
+      if (!parents.has(childIndex)) {
+        parents.set(childIndex, nodeIndex);
+      }
+    }
+  }
+
+  const matrices = new Map<number, Matrix4>();
+  const visiting = new Set<number>();
+  const worldMatrix = (nodeIndex: number): Matrix4 => {
+    const cached = matrices.get(nodeIndex);
+    if (cached) {
+      return cached;
+    }
+    const node = json.nodes?.[nodeIndex];
+    if (!node || visiting.has(nodeIndex)) {
+      return new Matrix4();
+    }
+
+    visiting.add(nodeIndex);
+    const matrix = node.matrix
+      ? new Matrix4().fromArray(node.matrix)
+      : new Matrix4().compose(
+          new Vector3().fromArray(node.translation ?? [0, 0, 0]),
+          new Quaternion().fromArray(node.rotation ?? [0, 0, 0, 1]),
+          new Vector3().fromArray(node.scale ?? [1, 1, 1]),
+        );
+    const parentIndex = parents.get(nodeIndex);
+    if (parentIndex !== undefined) {
+      matrix.premultiply(worldMatrix(parentIndex));
+    }
+    visiting.delete(nodeIndex);
+    matrices.set(nodeIndex, matrix);
+    return matrix;
+  };
+  for (const nodeIndex of (json.nodes ?? []).keys()) {
+    worldMatrix(nodeIndex);
+  }
+  return matrices;
+}
+
+function transformBounds(
+  bounds: GeometryComponentBounds | undefined,
+  matrix: Matrix4 | undefined,
+): GeometryComponentBounds | undefined {
+  if (!bounds || !matrix) {
+    return bounds;
+  }
+  // Box3 transforms all eight corners, including rotated, scaled and sheared AABBs.
+  const box = new Box3(new Vector3(...bounds.min), new Vector3(...bounds.max)).applyMatrix4(matrix);
+  const center = box.getCenter(new Vector3());
+  return {
+    min: [box.min.x, box.min.y, box.min.z],
+    max: [box.max.x, box.max.y, box.max.z],
+    center: [center.x, center.y, center.z],
+    radius: box.getSize(new Vector3()).length() / 2,
+  };
+}
+
+function getNodeBounds(context: GltfBoundsContext, nodeIndex: number): GeometryComponentBounds | undefined {
+  const { json, worldMatrices } = context;
+  const node = json.nodes?.[nodeIndex];
+  if (!node) {
+    return undefined;
+  }
+  const mesh = node.mesh === undefined ? undefined : json.meshes?.[node.mesh];
+  const primitiveBounds =
+    mesh?.primitives
+      ?.map((primitive) =>
+        transformBounds(getAccessorBounds(json, primitive.attributes?.['POSITION']), worldMatrices.get(nodeIndex)),
+      )
+      .filter((bound): bound is GeometryComponentBounds => bound !== undefined) ?? [];
+  return combineBounds(primitiveBounds);
+}
+
+function getPrimitiveBounds(
+  json: GltfJson,
+  meshIndex: number | undefined,
+  primitiveIndex: number | undefined,
+): GeometryComponentBounds | undefined {
+  if (meshIndex === undefined || primitiveIndex === undefined) {
+    return undefined;
+  }
+
+  const primitive = json.meshes?.[meshIndex]?.primitives?.[primitiveIndex];
+  return getAccessorBounds(json, primitive?.attributes?.['POSITION']);
+}
+
+function clampUnit(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function linearChannelToSrgbByte(channel: number): number {
+  const clamped = clampUnit(channel);
+  const srgb = clamped <= 0.0031308 ? clamped * 12.92 : 1.055 * clamped ** (1 / 2.4) - 0.055;
+  return Math.round(clampUnit(srgb) * 255);
+}
+
+function byteToHex(value: number): string {
+  return value.toString(16).padStart(2, '0');
+}
+
+function formatAlpha(value: number): string {
+  return Number(clampUnit(value).toFixed(3)).toString();
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function baseColorFactorToCssColor(baseColorFactor: readonly number[] | undefined): string | undefined {
+  const color = baseColorFactor ?? [1, 1, 1, 1];
+  const red = color[0];
+  const green = color[1];
+  const blue = color[2];
+  const alpha = color[3] ?? 1;
+  if (!isFiniteNumber(red) || !isFiniteNumber(green) || !isFiniteNumber(blue) || !isFiniteNumber(alpha)) {
+    return undefined;
+  }
+
+  const srgbRed = linearChannelToSrgbByte(red);
+  const srgbGreen = linearChannelToSrgbByte(green);
+  const srgbBlue = linearChannelToSrgbByte(blue);
+  if (alpha < 1) {
+    return `rgba(${srgbRed}, ${srgbGreen}, ${srgbBlue}, ${formatAlpha(alpha)})`;
+  }
+
+  return `#${byteToHex(srgbRed)}${byteToHex(srgbGreen)}${byteToHex(srgbBlue)}`;
+}
+
+function getComponentAppearance(
+  json: GltfJson,
+  materialIndices: readonly number[],
+): GeometryComponentAppearance | undefined {
+  const colors: string[] = [];
+  const materialNames: string[] = [];
+
+  for (const materialIndex of materialIndices) {
+    const material = json.materials?.[materialIndex];
+    if (!material) {
+      continue;
+    }
+
+    const color = baseColorFactorToCssColor(material.pbrMetallicRoughness?.baseColorFactor);
+    if (color && !colors.includes(color)) {
+      colors.push(color);
+    }
+    if (material.name && !materialNames.includes(material.name)) {
+      materialNames.push(material.name);
+    }
+  }
+
+  if (colors.length === 0 && materialNames.length === 0) {
+    return undefined;
+  }
+
+  return {
+    ...(colors[0] ? { color: colors[0] } : {}),
+    ...(colors.length > 0 ? { colors } : {}),
+    ...(materialNames.length > 0 ? { materialNames } : {}),
+  };
+}
+
+function readMaterialFactor(value: number | undefined): number | 'unavailable' | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return isFiniteNumber(value) && value >= 0 && value <= 1 ? value : 'unavailable';
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getSourceMaterialDescriptors(
+  material: GltfMaterial,
+): Pick<SurfaceMaterial, 'name' | 'textures' | 'extensions'> {
+  const factors = material.pbrMetallicRoughness;
+  const textures = {
+    ...(isJsonObject(factors?.baseColorTexture) ? { baseColor: factors.baseColorTexture } : {}),
+    ...(isJsonObject(factors?.metallicRoughnessTexture) ? { metallicRoughness: factors.metallicRoughnessTexture } : {}),
+    ...(isJsonObject(material.normalTexture) ? { normal: material.normalTexture } : {}),
+    ...(isJsonObject(material.occlusionTexture) ? { occlusion: material.occlusionTexture } : {}),
+    ...(isJsonObject(material.emissiveTexture) ? { emissive: material.emissiveTexture } : {}),
+  };
+  return {
+    ...(typeof material.name === 'string' && material.name.length > 0 ? { name: material.name } : {}),
+    ...(Object.keys(textures).length > 0 ? { textures } : {}),
+    ...(isJsonObject(material.extensions) ? { extensions: material.extensions } : {}),
+  };
+}
+
+function getSurfaceMaterial(json: GltfJson, materialIndex: number | undefined): SurfaceMaterial {
+  if (materialIndex === undefined) {
+    return {};
+  }
+  const material = json.materials?.[materialIndex];
+  if (!material) {
+    return { materialIndex, color: 'unavailable', metalness: 'unavailable', roughness: 'unavailable' };
+  }
+  const factors = material.pbrMetallicRoughness;
+  const baseColor = factors?.baseColorFactor;
+  const color =
+    baseColor === undefined
+      ? undefined
+      : baseColor.length === 4 && baseColor.every((value) => readMaterialFactor(value) !== 'unavailable')
+        ? baseColorFactorToCssColor(baseColor)
+        : 'unavailable';
+  return {
+    materialIndex,
+    ...getSourceMaterialDescriptors(material),
+    ...(color === undefined ? {} : { color }),
+    ...(factors?.metallicFactor === undefined ? {} : { metalness: readMaterialFactor(factors.metallicFactor) }),
+    ...(factors?.roughnessFactor === undefined ? {} : { roughness: readMaterialFactor(factors.roughnessFactor) }),
+    ...(material.extensions?.['KHR_materials_unlit'] ? { isUnlit: true } : {}),
+  };
+}
+
+/** Attach immutable-source factors once, independently of legacy color swatches and live renderer overrides. */
+function attachComponentSurfaceMaterials(
+  json: GltfJson,
+  manifest: GeometryComponentManifest,
+): GeometryComponentManifest {
+  const materials = new Map<number | undefined, SurfaceMaterial>();
+  const resolved = new Map<string, Set<number | undefined>>();
+  const visiting = new Set<string>();
+  const visit = (id: string): Set<number | undefined> => {
+    const previous = resolved.get(id);
+    if (previous) {
+      return previous;
+    }
+    const indices = new Set<number | undefined>();
+    const node = manifest.nodesById[id];
+    if (!node || visiting.has(id)) {
+      return indices;
+    }
+    visiting.add(id);
+    for (const reference of node.primitiveRefs ?? []) {
+      const primitive = json.meshes?.[reference.meshIndex]?.primitives?.[reference.primitiveIndex];
+      if (primitive && [4, 5, 6].includes(primitive.mode ?? 4)) {
+        indices.add(primitive.material);
+      }
+    }
+    for (const childId of node.childIds) {
+      for (const index of visit(childId)) {
+        indices.add(index);
+      }
+    }
+    if (indices.size > 0) {
+      node.appearance = {
+        ...node.appearance,
+        materials: [...indices].map((index) => {
+          let material = materials.get(index);
+          if (!material) {
+            material = getSurfaceMaterial(json, index);
+            materials.set(index, material);
+          }
+          return material;
+        }),
+      };
+    }
+    visiting.delete(id);
+    resolved.set(id, indices);
+    return indices;
+  };
+  visit(manifest.rootId);
+  return manifest;
+}
+
+function toGeometryKind(value: unknown): GeometryComponentKind {
+  const kind = typeof value === 'string' ? value : 'part';
+  const known = new Set<GeometryComponentKind>([
+    'model',
+    'assembly',
+    'part',
+    'body',
+    'face',
+    'edge',
+    'vertex',
+    'mesh',
+    'line',
+    'material',
+    'unknown',
+  ]);
+  return known.has(kind as GeometryComponentKind) ? (kind as GeometryComponentKind) : 'part';
+}
+
+type TopologyVisitInput = {
+  id: string;
+  depth: number;
+  parentId: string;
+  parentPath: readonly string[];
+};
+
+function getTopologyPrimitiveReferences(json: GltfJson, component: TopologyComponent): GeometryComponentPrimitiveRef[] {
+  if (Array.isArray(component.primitiveRefs)) {
+    return component.primitiveRefs.filter(
+      (reference) =>
+        Number.isInteger(reference.nodeIndex) &&
+        Number.isInteger(reference.meshIndex) &&
+        Number.isInteger(reference.primitiveIndex),
+    );
+  }
+
+  if (typeof component.nodeIndex !== 'number') {
+    return [];
+  }
+
+  const meshIndex =
+    typeof component.meshIndex === 'number' ? component.meshIndex : json.nodes?.[component.nodeIndex]?.mesh;
+  if (typeof meshIndex !== 'number') {
+    return [];
+  }
+
+  const primitiveIndices =
+    component.primitiveIndices ??
+    json.meshes?.[meshIndex]?.primitives?.map((_, primitiveIndex) => primitiveIndex) ??
+    [];
+  return primitiveIndices
+    .filter((primitiveIndex): primitiveIndex is number => Number.isInteger(primitiveIndex))
+    .map((primitiveIndex) => ({
+      nodeIndex: component.nodeIndex!,
+      meshIndex,
+      primitiveIndex,
+    }));
+}
+
+function getPrimitiveReferencesMaterialIndices(
+  json: GltfJson,
+  primitiveReferences: readonly GeometryComponentPrimitiveRef[],
+): number[] {
+  return [
+    ...new Set(
+      primitiveReferences
+        .map((reference) => json.meshes?.[reference.meshIndex]?.primitives?.[reference.primitiveIndex]?.material)
+        .filter((materialIndex): materialIndex is number => typeof materialIndex === 'number'),
+    ),
+  ];
+}
+
+function getPrimitiveReferencesBounds(
+  context: GltfBoundsContext,
+  primitiveReferences: readonly GeometryComponentPrimitiveRef[],
+): GeometryComponentBounds | undefined {
+  return combineBounds(
+    primitiveReferences
+      .map((reference) =>
+        transformBounds(
+          getPrimitiveBounds(context.json, reference.meshIndex, reference.primitiveIndex),
+          context.worldMatrices.get(reference.nodeIndex),
+        ),
+      )
+      .filter((bound): bound is GeometryComponentBounds => bound !== undefined),
+  );
+}
+
+function createTopologyComponentManifest(
+  context: GltfBoundsContext,
+  topologyComponents: readonly TopologyComponent[],
+  options: { sourceFile?: string; geometryHash?: string },
+): GeometryComponentManifest | undefined {
+  const { json } = context;
+  const candidates = topologyComponents.filter((component) => typeof component.id === 'string');
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  const componentById = new Map(candidates.map((component) => [component.id!, component]));
+  const childIdsByParent = new Map<string, string[]>();
+  const topLevelIds: string[] = [];
+  for (const component of candidates) {
+    const id = component.id!;
+    const parentId =
+      typeof component.parentId === 'string' && componentById.has(component.parentId) ? component.parentId : rootId;
+    const children = childIdsByParent.get(parentId) ?? [];
+    children.push(id);
+    childIdsByParent.set(parentId, children);
+    if (parentId === rootId) {
+      topLevelIds.push(id);
+    }
+  }
+
+  const nodesById: Record<string, GeometryComponentNode> = {};
+  const nodeOrder: string[] = [rootId];
+  let hasPreciseTopology = false;
+
+  const visit = ({ id, depth, parentId, parentPath }: TopologyVisitInput): void => {
+    const component = componentById.get(id);
+    if (!component || nodesById[id]) {
+      return;
+    }
+
+    const primitiveReferences = getTopologyPrimitiveReferences(json, component);
+    const materialIndices = getPrimitiveReferencesMaterialIndices(json, primitiveReferences);
+    const providedChildIds = Array.isArray(component.childIds)
+      ? component.childIds.filter((childId) => componentById.has(childId))
+      : [];
+    const derivedChildIds = childIdsByParent.get(id) ?? [];
+    const childIds = [...new Set([...providedChildIds, ...derivedChildIds])];
+    const componentHasPreciseTopology = component.capabilities?.hasPreciseTopology ?? true;
+    hasPreciseTopology ||= componentHasPreciseTopology;
+    const capabilities = component.capabilities
+      ? { ...createCapabilities(componentHasPreciseTopology), ...component.capabilities }
+      : createCapabilities(componentHasPreciseTopology);
+    const name = component.name ?? component.id!.replace(/^component:/, '');
+    const selector = component.selector ?? component.id!;
+    const kind = component.kind ?? 'unknown';
+    const path = [...parentPath, name];
+
+    nodeOrder.push(id);
+    nodesById[id] = {
+      id,
+      name,
+      kind,
+      selector,
+      parentId,
+      childIds,
+      depth,
+      path,
+      meshNodeIndices: [...new Set(primitiveReferences.map((reference) => reference.nodeIndex))],
+      primitiveIndices: primitiveReferences.map((reference) => reference.primitiveIndex),
+      primitiveRefs: primitiveReferences,
+      materialIndices,
+      appearance: getComponentAppearance(json, materialIndices),
+      bounds: getPrimitiveReferencesBounds(context, primitiveReferences),
+      capabilities,
+      reference:
+        options.sourceFile === undefined
+          ? undefined
+          : {
+              scheme: 'tau-cad',
+              filePath: options.sourceFile,
+              componentId: id,
+              selector,
+              geometryHash: options.geometryHash,
+              label: name,
+              kind,
+            },
+      extras: component.sourceRefs,
+    };
+
+    for (const childId of childIds) {
+      visit({ id: childId, depth: depth + 1, parentId: id, parentPath: path });
+    }
+  };
+
+  const orderedTopLevelIds = [
+    ...new Set([
+      ...topLevelIds,
+      ...candidates
+        .filter((component) => typeof component.parentId !== 'string' || !componentById.has(component.parentId))
+        .map((component) => component.id!),
+    ]),
+  ];
+  for (const id of orderedTopLevelIds) {
+    visit({ id, depth: 1, parentId: rootId, parentPath: ['Model'] });
+  }
+
+  const rootCapabilities = createCapabilities(hasPreciseTopology);
+  nodesById[rootId] = createRootNode(
+    orderedTopLevelIds.filter((id) => nodesById[id]),
+    rootCapabilities,
+  );
+
+  return {
+    schemaVersion: 1,
+    sourceFile: options.sourceFile,
+    geometryHash: options.geometryHash,
+    rootId,
+    nodeOrder,
+    nodesById,
+    capabilities: rootCapabilities,
+    extensionUsed: tauCadTopologyExtension,
+  };
+}
+
+function createRootNode(childIds: string[], capabilities: GeometryComponentCapabilities): GeometryComponentNode {
+  return {
+    id: rootId,
+    name: 'Model',
+    kind: 'model',
+    selector: 'root',
+    childIds,
+    depth: 0,
+    path: ['Model'],
+    meshNodeIndices: [],
+    primitiveIndices: [],
+    materialIndices: [],
+    capabilities,
+  };
+}
+
+/**
+ * Decode the candidate's metadata once for presentation and reuse admission.
+ *
+ * @public
+ */
+export function prepareGltfMetadata(
+  content: Uint8Array<ArrayBuffer>,
+  options: { sourceFile?: string; geometryHash?: string } = {},
+): {
+  parsed: ParsedGltf;
+  manifest: GeometryComponentManifest;
+  getMeasurementFeatures: () => ReadonlyMap<string, GltfMeasurementFeatures>;
+} {
+  const parsed = parseGltfBytes(content);
+  const payload = readTopologyPayload(parsed.json, parsed.bin);
+  const componentManifest = buildComponentManifest(parsed.json, payload.components ?? [], options);
+  const mechanism = readMechanism(payload);
+  const manifest = mechanism ? { ...componentManifest, mechanism } : componentManifest;
+  let measurementFeatures: ReadonlyMap<string, GltfMeasurementFeatures> | undefined;
+  return {
+    parsed,
+    manifest,
+    getMeasurementFeatures: () => {
+      measurementFeatures ??= buildMeasurementFeatures(parsed.json, payload, manifest);
+      return measurementFeatures;
+    },
+  };
+}
+
+/**
+ * Reads the component manifest of a binary glTF, with its mechanism when the asset carries one.
+ *
+ * @param content - The GLB bytes.
+ * @param options - The source file and geometry hash to record in the manifest.
+ * @returns The component manifest.
+ * @public
+ */
+export function buildGltfComponentManifest(
+  content: Uint8Array<ArrayBuffer>,
+  options: { sourceFile?: string; geometryHash?: string } = {},
+): GeometryComponentManifest {
+  const { json, bin } = parseGltfBytes(content);
+  const payload = readTopologyPayload(json, bin);
+  const manifest = buildComponentManifest(json, payload.components ?? [], options);
+  const mechanism = readMechanism(payload);
+  return mechanism ? { ...manifest, mechanism } : manifest;
+}
+
+function buildComponentManifest(
+  json: GltfJson,
+  topologyComponents: readonly TopologyComponent[],
+  options: { sourceFile?: string; geometryHash?: string },
+): GeometryComponentManifest {
+  const boundsContext = { json, worldMatrices: createNodeWorldMatrices(json) };
+  const topologyManifest = createTopologyComponentManifest(boundsContext, topologyComponents, options);
+  if (topologyManifest) {
+    return attachComponentSurfaceMaterials(json, topologyManifest);
+  }
+
+  const topologyByNodeIndex = new Map<number, TopologyComponent>();
+  for (const component of topologyComponents) {
+    if (typeof component.nodeIndex === 'number') {
+      topologyByNodeIndex.set(component.nodeIndex, component);
+    }
+  }
+
+  const nodesById: Record<string, GeometryComponentNode> = {};
+  const nodeOrder: string[] = [rootId];
+  const usedIds = new Map<string, number>([[rootId, 1]]);
+  const visitedNodeIndices = new Set<number>();
+  const visitingNodeIndices = new Set<number>();
+  let hasPreciseTopology = false;
+
+  const visit = ({
+    nodeIndex,
+    parentId,
+    depth,
+    parentPath,
+  }: {
+    nodeIndex: number;
+    parentId: string;
+    depth: number;
+    parentPath: readonly string[];
+  }): string | undefined => {
+    const gltfNode = json.nodes?.[nodeIndex];
+    if (!gltfNode || visitedNodeIndices.has(nodeIndex) || visitingNodeIndices.has(nodeIndex)) {
+      return undefined;
+    }
+
+    visitingNodeIndices.add(nodeIndex);
+    const topology = topologyByNodeIndex.get(nodeIndex);
+    const mesh = gltfNode.mesh === undefined ? undefined : json.meshes?.[gltfNode.mesh];
+    const primitiveIndices = mesh?.primitives?.map((_, primitiveIndex) => primitiveIndex) ?? [];
+    const primitiveReferences =
+      gltfNode.mesh === undefined
+        ? []
+        : primitiveIndices.map((primitiveIndex) => ({
+            nodeIndex,
+            meshIndex: gltfNode.mesh!,
+            primitiveIndex,
+          }));
+    const ownMaterialIndices = getPrimitiveReferencesMaterialIndices(json, primitiveReferences);
+    const name = topology?.name ?? gltfNode.name ?? mesh?.name ?? `Component ${nodeIndex + 1}`;
+    const kind = topology?.kind ?? toGeometryKind(gltfNode.extras?.['tauComponentKind']);
+    const selector =
+      topology?.selector ??
+      (typeof gltfNode.extras?.['tauComponentSelector'] === 'string'
+        ? gltfNode.extras['tauComponentSelector']
+        : `node/${nodeIndex}`);
+    const annotatedId =
+      topology?.id ??
+      (typeof gltfNode.extras?.['tauComponentId'] === 'string' ? gltfNode.extras['tauComponentId'] : undefined);
+    const baseId = annotatedId ?? createFallbackComponentId(nodeIndex);
+    const id = dedupeComponentId(baseId, usedIds);
+    const componentHasPreciseTopology = topology?.capabilities?.hasPreciseTopology ?? Boolean(topology);
+    hasPreciseTopology = hasPreciseTopology || componentHasPreciseTopology;
+    const capabilities = topology?.capabilities
+      ? { ...createCapabilities(componentHasPreciseTopology), ...topology.capabilities }
+      : createCapabilities(componentHasPreciseTopology);
+    const path = [...parentPath, name];
+    const ownBounds = getNodeBounds(boundsContext, nodeIndex);
+
+    nodeOrder.push(id);
+    nodesById[id] = {
+      id,
+      name,
+      kind,
+      selector,
+      parentId,
+      childIds: [],
+      depth,
+      path,
+      meshNodeIndices: gltfNode.mesh === undefined ? [] : [nodeIndex],
+      primitiveIndices,
+      primitiveRefs: primitiveReferences,
+      materialIndices: ownMaterialIndices,
+      appearance: getComponentAppearance(json, ownMaterialIndices),
+      bounds: ownBounds,
+      capabilities,
+      reference:
+        options.sourceFile === undefined
+          ? undefined
+          : {
+              scheme: 'tau-cad',
+              filePath: options.sourceFile,
+              componentId: id,
+              selector,
+              geometryHash: options.geometryHash,
+              label: name,
+              kind,
+            },
+      extras: gltfNode.extras,
+    };
+
+    const childIds = (gltfNode.children ?? [])
+      .map((childNodeIndex) => visit({ nodeIndex: childNodeIndex, parentId: id, depth: depth + 1, parentPath: path }))
+      .filter((childId): childId is string => childId !== undefined);
+    const childNodes = childIds.map((childId) => nodesById[childId]!).filter(Boolean);
+    const materialIndices = [
+      ...new Set([...ownMaterialIndices, ...childNodes.flatMap((child) => child.materialIndices)]),
+    ];
+    nodesById[id] = {
+      ...nodesById[id],
+      childIds,
+      materialIndices,
+      appearance: getComponentAppearance(json, materialIndices),
+      bounds: combineBounds(
+        [ownBounds, ...childNodes.map((child) => child.bounds)].filter(
+          (bounds): bounds is GeometryComponentBounds => bounds !== undefined,
+        ),
+      ),
+    };
+    visitingNodeIndices.delete(nodeIndex);
+    visitedNodeIndices.add(nodeIndex);
+    return id;
+  };
+
+  const referencedNodeIndices = new Set((json.nodes ?? []).flatMap((node) => node.children ?? []));
+  const scene = json.scenes?.[json.scene ?? 0];
+  const rootNodeIndices =
+    scene?.nodes ??
+    (json.nodes ?? []).flatMap((_, nodeIndex) => (referencedNodeIndices.has(nodeIndex) ? [] : [nodeIndex]));
+  const childIds = rootNodeIndices
+    .map((nodeIndex) => visit({ nodeIndex, parentId: rootId, depth: 1, parentPath: ['Model'] }))
+    .filter((childId): childId is string => childId !== undefined);
+
+  if (!scene) {
+    for (const nodeIndex of (json.nodes ?? []).keys()) {
+      if (!visitedNodeIndices.has(nodeIndex)) {
+        const childId = visit({ nodeIndex, parentId: rootId, depth: 1, parentPath: ['Model'] });
+        if (childId) {
+          childIds.push(childId);
+        }
+      }
+    }
+  }
+
+  const rootCapabilities = createCapabilities(hasPreciseTopology);
+  nodesById[rootId] = createRootNode(childIds, rootCapabilities);
+
+  return attachComponentSurfaceMaterials(json, {
+    schemaVersion: 1,
+    sourceFile: options.sourceFile,
+    geometryHash: options.geometryHash,
+    rootId,
+    nodeOrder,
+    nodesById,
+    capabilities: rootCapabilities,
+    extensionUsed: json.extensions?.[tauCadTopologyExtension] ? tauCadTopologyExtension : undefined,
+  });
+}

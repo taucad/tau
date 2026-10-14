@@ -42,6 +42,7 @@ import {
 import type {
   CheckoutFileSystems,
   ProjectRevisionsActor,
+  RevisionConflictRead,
   UseCheckoutFileSystem,
   TurnConflictedEvent as SettlementConflicted,
   TurnFailedEvent as SettlementFailed,
@@ -56,6 +57,7 @@ import {
   publishOverHttp,
   readRemoteStorageOverHttp,
   registerProjectOverHttp,
+  RevisionPortError,
   tauRemoteUrl,
   watchRevisionStream,
 } from '@taucad/revisions';
@@ -277,7 +279,7 @@ export type ProjectRevisions = {
   /**
    * This project's history, read-only (S28).
    *
-   * The same three functions `tau revisions` and the Revisions pane read, over
+   * The same functions `tau revisions` and the Revisions pane read, over
    * this project's own port — handed to `createHostToolRegistry` so the agent's
    * `revisions` tool cannot answer from a second reading of the graph. Nothing
    * here writes: an agent has no branch, merge, restore, discard or sync (I10).
@@ -286,6 +288,8 @@ export type ProjectRevisions = {
     log(request?: RevisionLogRequest): Promise<readonly RevisionRow[]>;
     diff(from: string | undefined, to: string): Promise<readonly RevisionDiffEntry[]>;
     describe(): Promise<RevisionPlace>;
+    /** Both sides of a conflicted revision as text; absent `revision` reads the one waiting on this branch. */
+    conflict(revision: string | undefined): Promise<RevisionConflictRead | undefined>;
   }>;
   /**
    * Open this project's turn-placement session over its revision tree (W8 TS-S4, D9). The host process is the session,
@@ -305,6 +309,14 @@ export type ProjectRevisions = {
   status(): RevisionStatusProjection;
   /** Record what is on disk, then stop the tree. The launcher closes first, so its attempts are settled. */
   release(): Promise<void>;
+  /**
+   * Settles once this project's store has opened, or rejects with the refusal that kept it closed.
+   *
+   * A store that refuses at open — a linked worktree, a repository Tau cannot adopt — never records
+   * anything. A host that exists only to serve this project awaits it before it serves, so it fails
+   * at start rather than at its close.
+   */
+  opened(): Promise<void>;
 };
 
 /**
@@ -752,7 +764,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       checkoutId: settlement.checkoutId,
     });
   });
+  /* The open's own refusal, with its code, for `opened()`. */
+  let openRefusal: RevisionPortError | undefined;
   actor.on('checkoutFailed', (failure) => {
+    if (failure.operation === 'open') {
+      openRefusal ??= new RevisionPortError(failure.code ?? 'ENGINE_FAILED', failure.reason);
+    }
     options.events?.({
       type: 'revision.failed',
       operation: failure.operation,
@@ -1269,7 +1286,13 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     if (status.headRevisionId !== undefined && basis === undefined) {
       throw new Error('The checkout head tree is unavailable.');
     }
-    return { filesystem, mode: (path: string): FileMode => basis?.mode(path) ?? '100644' };
+    const ignored = new Set(await port.ignoredPaths?.(checkout.kind === 'live' ? undefined : checkout.root));
+    return {
+      filesystem,
+      mode: (path: string): FileMode => basis?.mode(path) ?? '100644',
+      /* The capture's own rule: the registry, and in an adopted repository the person's ignore rules. */
+      excluded: (path: string): boolean => !classify(path).versioned || ignored.has(path) || ignored.has(`${path}/`),
+    };
   };
 
   // oxlint-disable-next-line complexity -- One validated dispatch table mirrors the established worker wire without another protocol layer.
@@ -1333,7 +1356,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           const checkout = await comparisonCheckout();
           // ponytail: one bounded capture per live list refresh; reuse the checkout capture memo if large projects make this hot.
           const modified = await captureRevisionTree(checkout.filesystem, {
-            exclude: (path) => !classify(path).versioned,
+            exclude: checkout.excluded,
             inheritedMode: checkout.mode,
           });
           return revisionJson(diffRevisionTrees({ original, modified }));
@@ -1685,6 +1708,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       log: async (request?: RevisionLogRequest) => readRevisionLog(port, request),
       diff: async (from: string | undefined, to: string) => readRevisionDiff(port, from, to),
       describe: async () => readRevisionPlace(port),
+      conflict: async (revision: string | undefined) => {
+        const { line, conflicts } = selectRevisionStatus(actor.getSnapshot());
+        const id =
+          revision ?? conflicts.find((conflict) => line.kind === 'branch' && conflict.into === line.name)?.revisionId;
+        return id === undefined ? undefined : tree.readConflict(id);
+      },
     }),
     changed: (checkoutId, paths) => {
       /* One increment per content-change event, whatever its path count: the
@@ -1696,6 +1725,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       emitChannel({ kind: 'event', value: revisionJson({ type: 'checkout.changed', checkoutId, paths }) });
     },
     release,
+    opened: async () => {
+      if ((await waitForLiveCheckout()) === undefined) {
+        throw openRefusal ?? new RevisionPortError('ENGINE_FAILED', 'This project has no live checkout.');
+      }
+    },
     status: () => selectRevisionStatus(actor.getSnapshot()),
     channel: {
       request: async (input) => ({

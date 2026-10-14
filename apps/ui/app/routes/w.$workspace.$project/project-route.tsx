@@ -1,3 +1,4 @@
+import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useLocation, useMatch, useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
@@ -8,7 +9,7 @@ import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 // route only needs to flush its own project + editor machine state below.
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import {
   deriveProjectRouteState,
   ProjectRouteRetryContext,
@@ -83,7 +84,6 @@ export function ProjectRouteGate({
   requestedProjectId,
   requestedChatId,
   createdChatId,
-  shouldOpenFromTauCloud,
   slugs,
   isResolvingSlugs = false,
 }: {
@@ -92,7 +92,6 @@ export function ProjectRouteGate({
   readonly requestedProjectId?: string;
   readonly requestedChatId?: string;
   readonly createdChatId?: string;
-  readonly shouldOpenFromTauCloud?: boolean;
   /** How the URL addressed this project, for a slug that resolves to nothing. */
   readonly slugs?: ProjectRouteSlugs;
   readonly isResolvingSlugs?: boolean;
@@ -318,7 +317,6 @@ export function ProjectRouteGate({
           requestedChatId: pending ? resolved.requestedChatId : requestedChatId,
           createdChatId: pending ? undefined : createdChatId,
           children: isShellHostedByFocusedSession ? children : undefined,
-          ...(shouldOpenFromTauCloud === true ? { shouldOpenFromTauCloud: true } : {}),
         }
       : undefined;
 
@@ -407,16 +405,13 @@ export function ProjectSessionsHost({ children }: { readonly children: React.Rea
    * triggers needs a revision client that does not exist yet at this render.
    */
   const [cloudOpen, setCloudOpen] = useSearchParameter(searchParameterName.cloudOpen, cloudOpenParameter);
-  const [hasTauCloudIntent, setHasTauCloudIntent] = useState(false);
   useEffect(() => {
-    if (cloudOpen !== 'tau') {
+    if (cloudOpen !== 'tau' || projectId === undefined) {
       return;
     }
-    // oxlint-disable-next-line react/set-state-in-effect -- The URL is the external source; the marker is consumed once and cleared.
-    setHasTauCloudIntent(true);
+    tauCloudIntent.set(projectId, 'open');
     setCloudOpen(cloudOpenParameter.fallback);
-  }, [cloudOpen, setCloudOpen]);
-  const shouldOpenFromTauCloud = location.state?.openFromTauCloud === true || hasTauCloudIntent;
+  }, [cloudOpen, projectId, setCloudOpen]);
   const currentUrl = `${location.pathname}${location.search}`;
   const handleFocusedChatResolved = useCallback(
     (chatId: string) => {
@@ -427,11 +422,10 @@ export function ProjectSessionsHost({ children }: { readonly children: React.Rea
       if (currentUrl !== target) {
         void navigate(target, {
           replace: true,
-          ...(shouldOpenFromTauCloud ? { state: { openFromTauCloud: true } } : {}),
         });
       }
     },
-    [canonicalSlugs, currentUrl, navigate, project, shouldOpenFromTauCloud, workspace],
+    [canonicalSlugs, currentUrl, navigate, project, workspace],
   );
   /*
    * W2: the shell is no longer swapped out here either. An unresolvable slug is
@@ -443,7 +437,6 @@ export function ProjectSessionsHost({ children }: { readonly children: React.Rea
         requestedProjectId={projectId}
         requestedChatId={requestedChatId}
         createdChatId={createdChatId}
-        shouldOpenFromTauCloud={shouldOpenFromTauCloud}
         onFocusedChatResolved={handleFocusedChatResolved}
         slugs={match === null ? undefined : { workspaceSlug: workspace, projectSlug: project }}
         isResolvingSlugs={resolution.status === 'resolving'}
@@ -464,14 +457,12 @@ export function ProjectRouteProviders({
   projectId,
   requestedChatId,
   createdChatId,
-  shouldOpenFromTauCloud,
 }: {
   readonly children?: React.ReactNode;
   readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly projectId?: string;
   readonly requestedChatId?: string;
   readonly createdChatId?: string;
-  readonly shouldOpenFromTauCloud?: boolean;
 }): React.ReactNode {
   const appHosted = useContext(ProjectSessionsHostContext);
   if (appHosted) {
@@ -482,7 +473,6 @@ export function ProjectRouteProviders({
       requestedProjectId={projectId}
       requestedChatId={requestedChatId}
       createdChatId={createdChatId}
-      shouldOpenFromTauCloud={shouldOpenFromTauCloud}
       onFocusedChatResolved={onFocusedChatResolved}
     >
       {children}

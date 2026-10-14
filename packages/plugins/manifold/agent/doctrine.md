@@ -37,3 +37,4 @@ Check missing imports, undefined returns, invalid boolean inputs, and non-positi
 - Wrong: `Manifold.cylinder(radius, height)`. Correct: height first: `Manifold.cylinder(height, radiusLow, radiusHigh, segments, center)`; pass `-1` for `radiusHigh` to match `radiusLow`.
 - Wrong: chaining `a.add(b).add(c)…` over many parts. Correct: `Manifold.union([a, b, c])` once.
 - Wrong: capturing a model while `show()` or `only()` is active. Correct: remove them first; debug views render in the viewer only, and screenshots and thumbnails of them fail with "TRIANGLES primitive missing NORMAL".
+- Wrong: `.asOriginal()` on a boolean result so GeoSpec reads it as one solid. Correct: return it as it is; GeoSpec already reads a Manifold mesh's runs as one solid.

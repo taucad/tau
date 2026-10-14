@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { awaitGeometryPresentation } from '#components/geometry/graphics/three/utils/geometry-presentation-admission.js';
+import { awaitGeometryPresentation } from '@taucad/viewer/graphics/three/utils/geometry-presentation-admission';
 import { useActorRef } from '@xstate/react';
 import { asKnownArtifact } from '@taucad/runtime';
 import { useProject } from '#hooks/use-project.js';
@@ -9,7 +9,7 @@ import type { ThumbnailResult } from '#machines/thumbnail.machine.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
-import { isEmptyGlb } from '#utils/inspect-glb.utils.js';
+import { isEmptyGlb } from '@taucad/viewer/utils/inspect-glb';
 
 /** Project-relative path for the generated thumbnail. */
 const thumbnailPath = 'thumbnail.webp';
@@ -65,7 +65,9 @@ const locatorIdentity = (config: ProjectFileSystemConfig | undefined): string =>
  * @returns `regenerate` — force a thumbnail render now (manual command),
  *   bypassing the geometry-hash dedupe.
  */
-export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailResult> } {
+export function useThumbnailGenerator(options?: { onStored?: (bytes: Uint8Array<ArrayBuffer>) => void }): {
+  regenerate: () => Promise<ThumbnailResult>;
+} {
   const { geometryUnits, mainEntryPath, projectId } = useProject();
   const { writeFile, deleteFile } = useFileManager();
   const imageService = useHeadlessImageService();
@@ -77,12 +79,14 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
   const cadActorRef = useRef(mainCadActor);
   const writeFileRef = useRef(writeFile);
   const deleteFileRef = useRef(deleteFile);
+  const onStoredRef = useRef(options?.onStored);
 
   useEffect(() => {
     cadActorRef.current = mainCadActor;
     writeFileRef.current = writeFile;
     deleteFileRef.current = deleteFile;
-  }, [mainCadActor, writeFile, deleteFile]);
+    onStoredRef.current = options?.onStored;
+  }, [mainCadActor, writeFile, deleteFile, options?.onStored]);
   const generationRef = useRef(0);
   const identityRef = useRef(`${projectId}:unsettled`);
   const manualResultResolversRef = useRef<Array<(result: ThumbnailResult) => void>>([]);
@@ -184,6 +188,10 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
             message: error instanceof Error ? error.message : String(error),
           });
           throw error;
+        }
+        // Only a fresh locally rendered capture may replace a cloud preview. Saved-image backfill is create-only.
+        if (artifact.generation === generationRef.current && artifact.identity === identityRef.current) {
+          onStoredRef.current?.(artifact.bytes);
         }
         return { status: 'stored' };
       },

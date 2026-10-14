@@ -3,7 +3,7 @@ import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import type { FileSystemBackend } from '@taucad/types';
 import { projectLocationDescriptor } from '#utils/project-creation-location.utils.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -18,7 +18,8 @@ import { Textarea } from '@taucad/ui/components/textarea';
 import { Tags, TagsTrigger } from '#components/ui/input-tags.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { ChatDetailsUsage } from '#routes/w.$workspace.$project/chat-details-usage.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
+import { PackagesPanel } from '#routes/w.$workspace.$project/packages-panel.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useProject } from '#hooks/use-project.js';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -158,6 +159,7 @@ export function DetailsPanelBody({
           </section>
 
           <FileSystemInfo backendType={backendType} activeWorkspaceName={activeWorkspaceName} />
+          {sharedReadOnly ? null : <PackagesPanel />}
           {sharedReadOnly ? null : <ChatDetailsUsage enabled={enableHistory} />}
         </div>
       </div>

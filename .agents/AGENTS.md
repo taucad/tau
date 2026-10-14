@@ -6,7 +6,7 @@
 
 Write precise natural task triggers and keep skill selection/composition enabled by default. A slash command is optional. Do not add `disable-model-invocation` or a false Codex implicit-invocation policy without a deliberate user requirement and the policy's recorded exception. Invocation metadata is not action authorization or a security boundary; preserve bounded input, provenance, rights, trusted-source and publication gates.
 
-One procedure owns each output and state cursor. Compose [Create Research](skills/create-research/SKILL.md) for investigations, [Create Charter](skills/create-charter/SKILL.md) for unresolved program architecture, [Superplan](skills/superplan/SKILL.md) for a requested plan and [Work Charter](skills/work-charter/SKILL.md) for authorized selected execution. Keep one coordinator queue and disjoint worker paths. The [PR worker brief](skills/pr-review-coordinator/pr-issue-fixer.md) is portable content supplied through the available native delegation tool.
+One procedure owns each output and state cursor. Compose [Create Research](skills/create-research/SKILL.md) for investigations, [Create Charter](skills/create-charter/SKILL.md) for unresolved program architecture, [Superplan](skills/superplan/SKILL.md) for a requested plan, [Work Charter](skills/work-charter/SKILL.md) for authorized selected execution and [Create Cloud Project](skills/create-cloud-project/SKILL.md) for transmitting an approved program to a cloud project. Keep one coordinator queue and disjoint worker paths. The [PR worker brief](skills/pr-review-coordinator/pr-issue-fixer.md) is portable content supplied through the available native delegation tool.
 
 ## Learning and persistence
 

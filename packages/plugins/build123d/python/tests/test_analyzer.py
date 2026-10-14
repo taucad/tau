@@ -97,12 +97,13 @@ class AnalyzerTest(unittest.TestCase):
         )
         self.assertEqual(result["jsonSchema"]["properties"]["length"]["default"], 25.4)
 
+    def test_large_source_and_wide_syntax_tree(self) -> None:
+        source = model() + "\n#" + "x" * (1024 * 1024) + "\n" + "value = 1\n" * 20_000
+        result = analyzer.analyze_source(source)
+        self.assertEqual(result["jsonSchema"]["properties"]["width"]["default"], 2.5)
+
     def test_parse_limits_and_syntax(self) -> None:
         self.assertEqual(self.assert_issue("(", "was never closed").code, "PYTHON_SYNTAX")
-        with patch.object(analyzer, "MAX_SOURCE_BYTES", 1):
-            self.assertEqual(self.assert_issue(model(), "exceeds").code, "PYTHON_SOURCE_LIMIT")
-        with patch.object(analyzer, "MAX_AST_NODES", 1):
-            self.assertEqual(self.assert_issue(model(), "syntax tree").code, "PYTHON_AST_LIMIT")
         with patch.object(analyzer, "MAX_AST_DEPTH", 1):
             self.assertEqual(self.assert_issue(model(), "syntax tree").code, "PYTHON_AST_LIMIT")
         with patch("analyzer.ast.parse", side_effect=MemoryError):

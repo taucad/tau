@@ -20,7 +20,7 @@ export type PortRevisionsClient = RpcRevisionsClient &
   }>;
 
 /**
- * Serve `log`, `diff` and `describe` over a revision port.
+ * Serve `log`, `diff`, `describe` and `conflict` over a revision port.
  *
  * @param port - A port the file-manager worker's revision registry serves for this project.
  * @returns The client and its close.
@@ -28,10 +28,18 @@ export type PortRevisionsClient = RpcRevisionsClient &
  */
 export const createPortRevisionsClient = (port: MessagePort): PortRevisionsClient => {
   let nextId = 0;
+  let closed = false;
+  const closedError = (): Error =>
+    Object.assign(new Error('The project host closed.'), { code: 'PROJECT_HOST_CLOSED' });
+  const assertOpen = (): void => {
+    if (closed) {
+      throw closedError();
+    }
+  };
   const pending = new Map<number, PromiseWithResolvers<WorkerRevisionResult>>();
   const status = Promise.withResolvers<void>();
   let latest: RevisionStatus | undefined;
-  port.addEventListener('message', ({ data }: MessageEvent<WorkerRevisionResponse>) => {
+  const onMessage = ({ data }: MessageEvent<WorkerRevisionResponse>): void => {
     if (data.type === 'status') {
       latest = data.status;
       status.resolve();
@@ -47,13 +55,15 @@ export const createPortRevisionsClient = (port: MessagePort): PortRevisionsClien
     } else {
       request?.reject(Object.assign(new Error(data.message), data.code === undefined ? {} : { code: data.code }));
     }
-  });
+  };
+  port.addEventListener('message', onMessage);
   port.start();
 
   const ask = async <Kind extends WorkerRevisionResult['kind']>(
     request: WorkerRevisionRequest,
     kind: Kind,
   ): Promise<Extract<WorkerRevisionResult, { kind: Kind }>> => {
+    assertOpen();
     nextId += 1;
     const id = nextId;
     const answer = Promise.withResolvers<WorkerRevisionResult>();
@@ -101,6 +111,7 @@ export const createPortRevisionsClient = (port: MessagePort): PortRevisionsClien
      * branch count ever makes this slow. */
     describe: async () => {
       await status.promise;
+      assertOpen();
       const { line, headRevisionId, branches } = latest!;
       const branch = line.kind === 'branch' ? line.name : undefined;
       const [revisionNumber, ...numbers] = await Promise.all([
@@ -124,13 +135,33 @@ export const createPortRevisionsClient = (port: MessagePort): PortRevisionsClien
               : `${branch} · Rev ${String(revisionNumber)}`,
       };
     },
+    conflict: async (revision) => {
+      await status.promise;
+      assertOpen();
+      /* The one waiting on this project's branch, from the projection the pane's card reads. */
+      const { line, conflicts } = latest!;
+      const id =
+        revision ?? conflicts.find((conflict) => line.kind === 'branch' && conflict.into === line.name)?.revisionId;
+      if (id === undefined) {
+        return undefined;
+      }
+      const result = await ask({ command: 'readConflict', revisionId: id }, 'conflict');
+      return result.conflict;
+    },
     close: () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      status.resolve();
       /* Uncorrelated: the last port's close releases the root; any other port's only leaves it. */
       port.postMessage({ command: 'close' } satisfies WorkerRevisionRequest);
       for (const request of pending.values()) {
-        request.reject(Object.assign(new Error('The project host closed.'), { code: 'PROJECT_HOST_CLOSED' }));
+        request.reject(closedError());
       }
       pending.clear();
+      port.removeEventListener('message', onMessage);
+      port.close();
     },
   };
 };

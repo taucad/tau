@@ -15,6 +15,10 @@ import { readFileInputSchema, readFileOutputSchema } from '#schemas/tools/read-f
 import { createFileInputSchema, createFileOutputSchema } from '#schemas/tools/create-file.tool.schema.js';
 import { updateTodosInputSchema, updateTodosOutputSchema } from '#schemas/tools/update-todos.tool.schema.js';
 import { askQuestionsInputSchema, askQuestionsOutputSchema } from '#schemas/tools/ask-questions.tool.schema.js';
+import {
+  installPackagesInputSchema,
+  installPackagesOutputSchema,
+} from '#schemas/tools/install-packages.tool.schema.js';
 import { deleteFileInputSchema, deleteFileOutputSchema } from '#schemas/tools/delete-file.tool.schema.js';
 import {
   directoryEntrySchema,
@@ -170,6 +174,9 @@ const createFileRpc = defineRpc({
 });
 
 const arrangeWorkbenchRpc = defineRpc({ input: arrangeWorkbenchInputSchema, success: arrangeWorkbenchOutputSchema });
+
+/* Refusals are issues in a success result; only an unexpected filesystem failure is a failure. */
+const installPackagesRpc = defineRpc({ input: installPackagesInputSchema, success: installPackagesOutputSchema });
 
 const writeTodosRpc = defineRpc({
   input: updateTodosInputSchema,
@@ -330,6 +337,7 @@ export type RpcSchemasRegistry = {
   [rpcName.writeTodos]: RpcSchemaEntry<WriteTodosRpcInput, WriteTodosRpcResult>;
   [rpcName.askQuestions]: typeof askQuestionsRpc;
   [rpcName.arrangeWorkbench]: typeof arrangeWorkbenchRpc;
+  [rpcName.installPackages]: typeof installPackagesRpc;
 };
 
 /**
@@ -408,6 +416,7 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
   },
   [rpcName.askQuestions]: askQuestionsRpc,
   [rpcName.arrangeWorkbench]: arrangeWorkbenchRpc,
+  [rpcName.installPackages]: installPackagesRpc,
 };
 
 // =============================================================================
@@ -502,6 +511,11 @@ export type WriteTodosRpcInput = z.infer<typeof writeTodosRpc.inputSchema>;
 export type WriteTodosRpcSuccess = z.infer<typeof writeTodosRpc.successSchema>;
 /** @public */
 export type WriteTodosRpcResult = z.infer<typeof writeTodosRpc.resultSchema>;
+
+/** @public */
+export type InstallPackagesRpcInput = z.infer<typeof installPackagesRpc.inputSchema>;
+/** @public */
+export type InstallPackagesRpcResult = z.infer<typeof installPackagesRpc.resultSchema>;
 
 /** @public */
 export type AskQuestionsRpcInput = z.infer<typeof askQuestionsRpc.inputSchema>;

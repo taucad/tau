@@ -1,0 +1,307 @@
+# Spike S19 (native-dependency-resolution charter, wave 1): Windows facts for W20/Q66/Q67 and musl detection.
+# Informational: each cell is recorded, no cell gates Stage A. Only the official CPython (python-build-standalone,
+# digest-pinned) and Microsoft .NET runtime binaries are spawned, as the charter row's method names; the .NET
+# runtime digest is taken from Microsoft's release metadata. Numbers are re-emitted as annotations.
+name: Spike S19 (Windows facts, musl)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/spike-w1-windows-s19.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-w1-s19-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PBS_ARCHIVE: cpython-3.13.15+20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz
+  PBS_SHA256: 63d263ab0162f34a241a56dc5b283c22d6e131f5516117e6a921350c69ba7d4f
+  DOTNET_RUNTIME_VERSION: '10.0.11'
+
+jobs:
+  windows-x64:
+    name: S19 windows-2025 long paths, Zone.Identifier, Authenticode, spawn
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+      - name: Write the spike-only probes
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\evidence", "$env:RUNNER_TEMP\probes" | Out-Null
+          Set-Content -Encoding utf8 "$env:RUNNER_TEMP\probes\longpath.mjs" @'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { spawnSync } from 'node:child_process';
+          const [base, label] = process.argv.slice(2);
+          const segment = 'tau-store-segment-'.padEnd(60, 'x');
+          const results = {};
+          let length = 0;
+          for (const [mode, wrap] of [['plain', (p) => p], ['namespaced', (p) => path.toNamespacedPath(p)]]) {
+            const top = path.join(base, label, mode);
+            let dir = top;
+            while (dir.length < 300) dir = path.join(dir, segment);
+            const file = path.join(dir, 'payload.txt');
+            const exe = path.join(dir, 'node-copy.exe');
+            length = file.length;
+            const attempt = (name, fn) => { try { fn(); results[`${mode}.${name}`] = 'ok'; } catch (error) { results[`${mode}.${name}`] = error.code ?? String(error.message).slice(0, 80); } };
+            attempt('mkdir', () => fs.mkdirSync(wrap(dir), { recursive: true }));
+            attempt('writeFile', () => fs.writeFileSync(wrap(file), 'x'));
+            attempt('readFile', () => fs.readFileSync(wrap(file)));
+            attempt('stat', () => fs.statSync(wrap(file)));
+            attempt('readdir', () => fs.readdirSync(wrap(dir)));
+            attempt('rename', () => { fs.renameSync(wrap(file), wrap(`${file}.2`)); fs.renameSync(wrap(`${file}.2`), wrap(file)); });
+            attempt('realpath', () => fs.realpathSync(wrap(file)));
+            attempt('copyFile', () => fs.copyFileSync(process.execPath, wrap(exe)));
+            attempt('spawn', () => { const r = spawnSync(wrap(exe), ['-p', '1+1'], { encoding: 'utf8' }); if (r.error) throw r.error; if (r.status !== 0) throw new Error(`exit ${r.status}`); });
+            attempt('rm', () => fs.rmSync(wrap(top), { recursive: true }));
+          }
+          console.log(`${label} pathLength=${length} ${Object.entries(results).map(([k, v]) => `${k}=${v}`).join(' ')}`);
+          '@
+          Set-Content -Encoding utf8 "$env:RUNNER_TEMP\probes\fetch.mjs" @'
+          import { createHash } from 'node:crypto';
+          import { writeFileSync } from 'node:fs';
+          const [url, out, algorithm, expected] = process.argv.slice(2);
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`HTTP ${response.status} ${url}`);
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          const actual = createHash(algorithm).update(bytes).digest('hex');
+          if (actual !== expected.toLowerCase()) throw new Error(`digest mismatch ${actual}`);
+          writeFileSync(out, bytes);
+          console.log(`fetched ${bytes.length} bytes, ${algorithm} verified -> ${out}`);
+          '@
+          Set-Content -Encoding utf8 "$env:RUNNER_TEMP\probes\spawn.mjs" @'
+          import { spawnSync } from 'node:child_process';
+          const [exe, ...args] = process.argv.slice(2);
+          const started = performance.now();
+          const r = spawnSync(exe, args, { encoding: 'utf8', timeout: 120000 });
+          const ms = (performance.now() - started).toFixed(0);
+          const out = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim().split(/\r?\n/).filter(Boolean);
+          console.log(`spawn ${exe.split(/[\\/]/).slice(-2).join('/')} ${args.join(' ').slice(0, 60)} -> status=${r.status} signal=${r.signal} error=${r.error?.code ?? 'none'} ${ms} ms | ${out.slice(-2).join(' / ').slice(0, 300)}`);
+          '@
+          Set-Content -Encoding utf8 "$env:RUNNER_TEMP\probes\copy.mjs" @'
+          import { cpSync } from 'node:fs';
+          const [from, to] = process.argv.slice(2);
+          cpSync(from, to, { recursive: true });
+          console.log(`node cpSync ${from} -> ${to}`);
+          '@
+      - name: Long paths under LongPathsEnabled 0 and 1, plain fs vs path.toNamespacedPath
+        continue-on-error: true
+        run: |
+          $key = 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'
+          $original = (Get-ItemProperty $key).LongPathsEnabled
+          $out = "$env:RUNNER_TEMP\evidence\longpath.txt"
+          "LongPathsEnabled on the image: $original" | Tee-Object -FilePath $out
+          foreach ($value in 0, 1) {
+            Set-ItemProperty -Path $key -Name LongPathsEnabled -Value $value -Type DWord
+            node "$env:RUNNER_TEMP\probes\longpath.mjs" "$env:RUNNER_TEMP\lp" "LongPathsEnabled=$value" | Tee-Object -FilePath $out -Append
+          }
+          Set-ItemProperty -Path $key -Name LongPathsEnabled -Value $original -Type DWord
+      - name: node.exe application manifest (mt.exe -inputresource)
+        continue-on-error: true
+        run: |
+          $mt = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter mt.exe | Where-Object FullName -Match '\\x64\\' | Select-Object -First 1
+          $node = (Get-Command node).Source
+          & $mt.FullName -nologo "-inputresource:$node;#1" "-out:$env:RUNNER_TEMP\evidence\node.manifest"
+          $manifest = Get-Content -Raw "$env:RUNNER_TEMP\evidence\node.manifest"
+          $aware = [regex]::Match($manifest, '<[^>]*longPathAware[^>]*>([^<]*)<').Groups[1].Value
+          "node.exe $(node -v) manifest longPathAware=$(if ($aware) { $aware } else { 'absent' }) (mt $($mt.Directory.Parent.Name))" | Tee-Object -FilePath "$env:RUNNER_TEMP\evidence\manifest.txt"
+      - name: Fetch PBS and the .NET runtime with Node, extract, copy with Node
+        run: |
+          $t = $env:RUNNER_TEMP
+          $url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/$($env:PBS_ARCHIVE -replace '\+','%2B')"
+          node "$t\probes\fetch.mjs" $url "$t\pbs.tar.gz" sha256 $env:PBS_SHA256
+          New-Item -ItemType Directory -Force "$t\pbs-tar" | Out-Null
+          tar.exe -xzf "$t\pbs.tar.gz" -C "$t\pbs-tar" --strip-components=1
+          node "$t\probes\copy.mjs" "$t\pbs-tar" "$t\pbs-node"
+          node "$t\probes\copy.mjs" "$t\pbs-tar" "$t\pbs-motw"
+          $release = Invoke-RestMethod 'https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json'
+          $file = $release.releases | Where-Object { $_.runtime.version -eq $env:DOTNET_RUNTIME_VERSION } | ForEach-Object { $_.runtime.files } | Where-Object { $_.rid -eq 'win-x64' -and $_.name -eq 'dotnet-runtime-win-x64.zip' } | Select-Object -First 1
+          "dotnet runtime file: $($file.name) $($file.url)" | Tee-Object -FilePath "$t\evidence\dotnet-source.txt"
+          node "$t\probes\fetch.mjs" $file.url "$t\dotnet.zip" sha512 $file.hash
+          Expand-Archive -Path "$t\dotnet.zip" -DestinationPath "$t\dotnet-zip"
+          node "$t\probes\copy.mjs" "$t\dotnet-zip" "$t\dotnet-node"
+          # Control: the same python.exe with a Mark-of-the-Web stream added by hand.
+          Set-Content -Path "$t\pbs-motw\python.exe" -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3"
+      - name: Alternate data streams and Authenticode
+        continue-on-error: true
+        run: |
+          $t = $env:RUNNER_TEMP
+          $out = "$t\evidence\streams-signatures.txt"
+          $files = @("$t\pbs.tar.gz", "$t\pbs-tar\python.exe", "$t\pbs-node\python.exe", "$t\pbs-motw\python.exe", "$t\dotnet.zip", "$t\dotnet-node\dotnet.exe")
+          foreach ($f in $files) {
+            if (-not (Test-Path -LiteralPath $f)) { "streams $($f.Replace($t, '')) = missing" | Tee-Object -FilePath $out -Append; continue }
+            $streams = (Get-Item -LiteralPath $f -Stream * | ForEach-Object Stream) -join ','
+            "streams $($f.Replace($t, '')) = $streams" | Tee-Object -FilePath $out -Append
+          }
+          $signed = @("$t\pbs-node\python.exe", "$t\pbs-node\python313.dll", "$t\pbs-node\vcruntime140.dll", "$t\dotnet-node\dotnet.exe", "$t\dotnet-node\host\fxr\$env:DOTNET_RUNTIME_VERSION\hostfxr.dll", "$t\dotnet-node\shared\Microsoft.NETCore.App\$env:DOTNET_RUNTIME_VERSION\coreclr.dll", (Get-Command node).Source)
+          foreach ($f in $signed) {
+            if (-not (Test-Path -LiteralPath $f)) { "authenticode $($f.Replace($t, '')) = missing" | Tee-Object -FilePath $out -Append; continue }
+            $s = Get-AuthenticodeSignature -LiteralPath $f
+            "authenticode $($f.Replace($t, '')) = $($s.Status) $($s.SignatureType) signer=$(if ($s.SignerCertificate) { ($s.SignerCertificate.Subject -split ',')[0] } else { 'none' })" | Tee-Object -FilePath $out -Append
+          }
+          "system VC++ redistributable present: msvcp140.dll=$(Test-Path "$env:windir\System32\msvcp140.dll") vcruntime140.dll=$(Test-Path "$env:windir\System32\vcruntime140.dll")" | Tee-Object -FilePath $out -Append
+      - name: Spawn both from Node (Node-written, and the MotW control)
+        continue-on-error: true
+        run: |
+          $t = $env:RUNNER_TEMP
+          $out = "$t\evidence\spawn.txt"
+          node "$t\probes\spawn.mjs" "$t\pbs-node\python.exe" -I -c "import sys, platform; print(sys.version.split()[0], platform.machine())" | Tee-Object -FilePath $out -Append
+          node "$t\probes\spawn.mjs" "$t\pbs-motw\python.exe" -I -c "import sys, platform; print(sys.version.split()[0], platform.machine())" | Tee-Object -FilePath $out -Append
+          node "$t\probes\spawn.mjs" "$t\dotnet-node\dotnet.exe" --list-runtimes | Tee-Object -FilePath $out -Append
+          "SmartScreen policy: $((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer' -ErrorAction SilentlyContinue).SmartScreenEnabled)" | Tee-Object -FilePath $out -Append
+      - name: Install the locked closure into the win-x64 interpreter and import OCP
+        continue-on-error: true
+        run: |
+          $t = $env:RUNNER_TEMP
+          $py = "$t\pbs-node\python.exe"
+          $out = "$t\evidence\imports.txt"
+          & $py -I -m pip --version 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 0) { & $py -I -m ensurepip 2>&1 | Select-Object -Last 1 }
+          & $py -I -m pip install --disable-pip-version-check --no-deps --require-hashes --only-binary=:all: -r packages/plugins/build123d/python/requirements.lock *> "$t\evidence\pip-install.log"
+          "pip install exit=$LASTEXITCODE $("$(Get-Content "$t\evidence\pip-install.log" | Select-String 'Successfully installed|ERROR' | Select-Object -Last 1)" -replace '^(.{0,160}).*$', '$1')" | Tee-Object -FilePath $out -Append
+          foreach ($m in 'numpy', 'scipy.linalg', 'sklearn', 'lib3mf', 'OCP', 'build123d') {
+            node "$t\probes\spawn.mjs" $py -I -c "import $m; print('$m ok')" | Tee-Object -FilePath $out -Append
+          }
+          node "$t\probes\spawn.mjs" $py -I -c "from build123d import Box; print('box volume', Box(1, 2, 3).volume)" | Tee-Object -FilePath $out -Append
+      - name: PE imports of the native modules, the S9 residual (unmangled MSVCP140.dll)
+        continue-on-error: true
+        run: |
+          $t = $env:RUNNER_TEMP
+          $dumpbin = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+          $sp = "$t\pbs-node\Lib\site-packages"
+          $out = "$t\evidence\pe-imports.txt"
+          foreach ($pkg in 'lib3mf', 'scipy', 'OCP', 'numpy', 'sklearn', 'cadquery_ocp_novtk.libs', 'numpy.libs') {
+            if (-not (Test-Path "$sp\$pkg")) { "${pkg}: absent" | Tee-Object -FilePath $out -Append; continue }
+            $mods = Get-ChildItem "$sp\$pkg" -Recurse -Include *.pyd, *.dll
+            $counts = @{}
+            foreach ($mod in $mods) {
+              $deps = & $dumpbin /nologo /dependents $mod.FullName | Where-Object { $_ -match '^\s+\S+\.dll\s*$' } | ForEach-Object { $_.Trim().ToLower() }
+              foreach ($d in $deps) { if ($d -match '^(msvcp140|vcruntime140|vcruntime140_1|vcomp140|concrt140)\.dll$') { $counts[$d] = 1 + [int]$counts[$d] } }
+            }
+            "${pkg}: $($mods.Count) native modules; unmangled CRT imports: $(($counts.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ' ')" | Tee-Object -FilePath $out -Append
+          }
+      - name: Collect the summary
+        if: always()
+        run: |
+          $t = $env:RUNNER_TEMP
+          Get-Content "$t\evidence\longpath.txt", "$t\evidence\manifest.txt", "$t\evidence\dotnet-source.txt", "$t\evidence\streams-signatures.txt", "$t\evidence\spawn.txt", "$t\evidence\imports.txt", "$t\evidence\pe-imports.txt" -ErrorAction SilentlyContinue | Set-Content "$t\evidence\s19-windows-x64-summary.txt"
+          "``````" | Add-Content $env:GITHUB_STEP_SUMMARY
+          Get-Content "$t\evidence\s19-windows-x64-summary.txt" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "``````" | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Publish the numbers as annotations
+        if: always()
+        shell: bash
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S19 windows-2025' "$(cygpath -u "$RUNNER_TEMP")/evidence/s19-windows-x64-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s19-windows-x64-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30
+
+  windows-arm:
+    name: S19 windows-11-arm, ${{ matrix.node-arch }} Node
+    runs-on: windows-11-arm
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        node-arch: [x64, arm64]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+          architecture: ${{ matrix.node-arch }}
+      - name: Architecture indicators seen by Node
+        continue-on-error: true
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\evidence" | Out-Null
+          node -e "const os = require('node:os'); const h = process.report.getReport().header; console.log(JSON.stringify({ nodeArch: process.arch, osMachine: os.machine(), reportArch: h.arch, reportMachine: h.osMachine, PROCESSOR_ARCHITECTURE: process.env.PROCESSOR_ARCHITECTURE, PROCESSOR_ARCHITEW6432: process.env.PROCESSOR_ARCHITEW6432 ?? null, PROCESSOR_IDENTIFIER: process.env.PROCESSOR_IDENTIFIER, cpu: os.cpus()[0]?.model }))" | Tee-Object -FilePath "$env:RUNNER_TEMP\evidence\indicators.txt"
+          node -e "const r = require('node:child_process').spawnSync('reg', ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', '/v', 'PROCESSOR_ARCHITECTURE'], { encoding: 'utf8' }); console.log('node ' + process.arch + ' reg query machine PROCESSOR_ARCHITECTURE: ' + (r.stdout.match(/REG_SZ\s+(\S+)/) || [])[1])" | Tee-Object -FilePath "$env:RUNNER_TEMP\evidence\indicators.txt" -Append
+          "pwsh (native) PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE PROCESSOR_ARCHITEW6432=$env:PROCESSOR_ARCHITEW6432" | Tee-Object -FilePath "$env:RUNNER_TEMP\evidence\indicators.txt" -Append
+      - name: Spawn the win-x64 interpreter with the OCP wheel from this Node
+        run: |
+          $t = $env:RUNNER_TEMP
+          $out = "$t\evidence\imports.txt"
+          @'
+          import { spawnSync } from 'node:child_process';
+          const [exe, ...args] = process.argv.slice(2);
+          const started = performance.now();
+          const r = spawnSync(exe, args, { encoding: 'utf8', timeout: 300000 });
+          const out = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim().split(/\r?\n/).filter(Boolean);
+          console.log(`node ${process.arch} spawn ${args.join(' ').slice(0, 70)} -> status=${r.status} error=${r.error?.code ?? 'none'} ${(performance.now() - started).toFixed(0)} ms | ${out.slice(-2).join(' / ').slice(0, 300)}`);
+          '@ | Set-Content -Encoding utf8 "$t\spawn.mjs"
+          $url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/$($env:PBS_ARCHIVE -replace '\+','%2B')"
+          Invoke-WebRequest -Uri $url -OutFile "$t\pbs.tar.gz"
+          if ((Get-FileHash -Algorithm SHA256 "$t\pbs.tar.gz").Hash.ToLower() -ne $env:PBS_SHA256) { throw 'PBS digest mismatch' }
+          New-Item -ItemType Directory -Force "$t\pbs" | Out-Null
+          tar.exe -xzf "$t\pbs.tar.gz" -C "$t\pbs" --strip-components=1
+          $py = "$t\pbs\python.exe"
+          & $py -I -m pip --version 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 0) { & $py -I -m ensurepip 2>&1 | Select-Object -Last 1 }
+          $start = Get-Date
+          & $py -I -m pip install --disable-pip-version-check --no-deps --require-hashes --only-binary=:all: -r packages/plugins/build123d/python/requirements.lock *> "$t\evidence\pip-install.log"
+          "pip install (x64 interpreter, emulated) exit=$LASTEXITCODE in $([int]((Get-Date) - $start).TotalSeconds) s" | Tee-Object -FilePath $out -Append
+          node "$t\spawn.mjs" $py -I -c "import platform, sys; print('python', sys.version.split()[0], 'machine', platform.machine())" | Tee-Object -FilePath $out -Append
+          foreach ($m in 'numpy', 'scipy.linalg', 'lib3mf', 'OCP') {
+            node "$t\spawn.mjs" $py -I -c "import $m; print('$m ok')" | Tee-Object -FilePath $out -Append
+          }
+          node "$t\spawn.mjs" $py -I -c "from build123d import Box; print('box volume', Box(1, 2, 3).volume)" | Tee-Object -FilePath $out -Append
+      - name: Collect the summary
+        if: always()
+        run: |
+          $t = $env:RUNNER_TEMP
+          Get-Content "$t\evidence\indicators.txt", "$t\evidence\imports.txt" -ErrorAction SilentlyContinue | Set-Content "$t\evidence\s19-arm-summary.txt"
+          "``````" | Add-Content $env:GITHUB_STEP_SUMMARY
+          Get-Content "$t\evidence\s19-arm-summary.txt" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "``````" | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Publish the numbers as annotations
+        if: always()
+        shell: bash
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S19 windows-11-arm ${{ matrix.node-arch }}' "$(cygpath -u "$RUNNER_TEMP")/evidence/s19-arm-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s19-windows-arm-${{ matrix.node-arch }}-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30
+
+  musl:
+    name: S19 musl detection via process.report (node:24-alpine)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Detect libc in node:24-alpine and a glibc control
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          probe='process.report.excludeNetwork = true; const r = process.report.getReport(); const glibc = r.header.glibcVersionRuntime; const muslObjects = r.sharedObjects.filter((p) => /ld-musl|libc\.musl/.test(p)); const libc = glibc ? "glibc" : muslObjects.length ? "musl" : "unknown"; console.log(JSON.stringify({ node: process.version, arch: process.arch, glibcVersionRuntime: glibc ?? null, muslObjects, libc, outcome: libc === "glibc" ? "linux-x64-glibc candidate" : { state: "blocked", reason: "unsupported-target", detail: { axis: "libc", host: libc, nearest: "linux-x64-glibc" } } }))'
+          for image in node:24-alpine node:24-bookworm-slim; do
+            docker pull -q "$image" > /dev/null
+            echo "$image ($(docker image inspect --format '{{index .RepoDigests 0}}' "$image" | cut -d@ -f2 | cut -c1-19)): $(docker run --rm --network none "$image" node -e "$probe")" | tee -a "$RUNNER_TEMP/evidence/s19-musl-summary.txt"
+          done
+          { echo '```'; cat "$RUNNER_TEMP/evidence/s19-musl-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S19 musl' "$RUNNER_TEMP/evidence/s19-musl-summary.txt"

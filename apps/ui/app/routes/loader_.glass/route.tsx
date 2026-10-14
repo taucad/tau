@@ -1,3 +1,5 @@
+import { PageContent } from '#components/layout/page-content.js';
+import { PageHeader } from '#components/layout/page-header.js';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import type { MetaFunction } from 'react-router';
@@ -19,7 +21,7 @@ import {
 import type { GlassPrismShapeId } from '#components/geometry/loader/glass-prism-shapes.js';
 import type { ShowcaseFrameCapture } from '#components/geometry/loader/showcase-capture.js';
 import { LazySection } from '#components/ui/lazy-section.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { useFeature } from '#flags/use-feature.js';
 import type { Handle } from '#types/matches.types.js';
 
@@ -52,13 +54,6 @@ export const meta: MetaFunction = () => [
 ];
 
 export const handle: Handle = {
-  breadcrumb() {
-    return (
-      <Button asChild variant='ghost'>
-        <Link to='/loader/glass'>Glass loader</Link>
-      </Button>
-    );
-  },
   enableOverflowY: true,
 };
 
@@ -146,12 +141,9 @@ export default function GlassLoaderShowcase(): React.JSX.Element {
   }, [sequence]);
 
   return (
-    <div className='container mx-auto max-w-6xl space-y-12 px-4 py-10'>
+    <PageContent className='space-y-6'>
       <header className='space-y-3'>
-        <p className='font-mono text-xs font-medium tracking-[0.2em] text-muted-foreground uppercase'>
-          Brand · Loading indicator · Glass
-        </p>
-        <h1 className='text-4xl font-semibold tracking-tight text-balance md:text-5xl'>Glass prism loader</h1>
+        <PageHeader title='Glass prism loader' />
         <p className='max-w-[64ch] text-lg text-muted-foreground'>
           A white beam meets a body of glass and leaves it as a spectrum. The body flows between five morphologies, each
           bending the light its own way, and the spectrum is traced through the glass anew every frame, so the pattern
@@ -339,6 +331,6 @@ export default function GlassLoaderShowcase(): React.JSX.Element {
 <GlassPrismLoader className='size-64' label='Loading your model' />`}
         </pre>
       </section>
-    </div>
+    </PageContent>
   );
 }

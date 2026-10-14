@@ -822,6 +822,7 @@ describe('Revisions pane closeout', () => {
       ...revisionStatusHarness.status,
       line: { kind: 'branch', name: 'main' },
       checkoutId: 'live',
+      liveCheckoutId: 'live',
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -841,6 +842,31 @@ describe('Revisions pane closeout', () => {
     expect(await screen.findByText('Linked')).toBeInTheDocument();
   });
 
+  it('marks the linked branch, not the live one, while the pane is on the linked checkout (D96)', async () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'bracket-fillet' },
+      checkoutId: 'co-2',
+      liveCheckoutId: 'live',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: undefined,
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+    };
+
+    renderPane();
+
+    const badges = await screen.findAllByText('Linked');
+    expect(badges).toHaveLength(1);
+    expect(badges[0]!.closest('li')).toHaveTextContent('bracket-fillet');
+  });
+
   it('places no chat on a remote-only branch, which has no checkout (D37)', async () => {
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
@@ -848,7 +874,14 @@ describe('Revisions pane closeout', () => {
       checkoutId: 'live',
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
-        { name: 'upstream-only', head: undefined, checkoutId: undefined, checkoutRoot: undefined, leaseChatIds: [] },
+        {
+          name: 'upstream-only',
+          head: undefined,
+          checkoutId: undefined,
+          checkoutRoot: undefined,
+          leaseChatIds: [],
+          onRemote: true,
+        },
       ],
     };
 

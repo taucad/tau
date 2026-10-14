@@ -5,21 +5,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { GraphicsProvider } from '#hooks/use-graphics.js';
-import { KeyboardProvider } from '#hooks/use-keyboard.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
+import { GraphicsProvider } from '@taucad/viewer/hooks/use-graphics';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
+import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { ConverterExportPanel, ConverterViewer } from '#routes/convert/route.js';
 
-vi.mock('#components/geometry/cad/cad-viewer.js', () => ({
+vi.mock('@taucad/viewer/cad/cad-viewer', () => ({
   CadViewer: () => <div role='img' aria-label='Model' />,
 }));
 vi.mock('#components/geometry/cad/capture-view-control.js', () => ({
   CaptureViewControl: () => <button type='button' aria-label='Capture view to chat' />,
 }));
-vi.mock('#components/geometry/cad/grid-control.js', () => ({
+vi.mock('@taucad/viewer/cad/grid-control', () => ({
   GridSizeIndicator: () => <button type='button' aria-label='Grid 10 mm, units and grid' />,
 }));
-vi.mock('#components/geometry/cad/viewer-settings.js', () => ({
+vi.mock('@taucad/viewer/cad/viewer-settings', () => ({
   ViewerSettings: () => <button type='button' aria-label='Viewer settings' />,
 }));
 

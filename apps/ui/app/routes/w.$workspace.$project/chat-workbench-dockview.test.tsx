@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { isValidElement, useEffect, useState, StrictMode, Fragment } from 'react';
 import { MemoryRouter } from 'react-router';
-import { KeyboardProvider } from '#hooks/use-keyboard.js';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { createPortal } from 'react-dom';
 import { Printer } from 'lucide-react';
 import type {
@@ -35,6 +35,8 @@ const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastErro
     mockPrintBody: vi.fn(),
     mockExportBody: vi.fn(),
   }));
+
+vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
 
 vi.mock('#routes/w.$workspace.$project/chat-print.js', () => ({
   PrintPanelBody: ({ isShown }: { readonly isShown?: boolean }) => {
@@ -1765,6 +1767,7 @@ describe('Workbench file reconciliation', () => {
       'model',
       'print',
       'kinematics',
+      'browser',
       'revisions',
       'agents',
       'jobs',
@@ -1969,6 +1972,17 @@ describe('Workbench file reconciliation', () => {
     openWorkbenchUtility(dockview.api, 'parameters');
     expect(existing.api.setActive).toHaveBeenCalledOnce();
     expect(dockview.addPanel).not.toHaveBeenCalled();
+  });
+
+  it('opens browser pages as separate workbench tabs', () => {
+    const dockview = createTestDockview();
+    openWorkbenchUtility(dockview.api, 'browser');
+    openWorkbenchUtility(dockview.api, 'browser');
+
+    expect(dockview.addPanel).toHaveBeenCalledTimes(2);
+    expect(dockview.panels).toHaveLength(2);
+    expect(dockview.panels[0]!.id).not.toBe(dockview.panels[1]!.id);
+    expect(dockview.addPanel).toHaveBeenCalledWith(expect.objectContaining({ component: 'browser', title: 'Browser' }));
   });
 
   it('opens Share as a fixed-ID singleton', () => {

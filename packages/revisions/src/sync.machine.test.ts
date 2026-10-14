@@ -76,6 +76,10 @@
  * | 69 | `syncNow` in every state, answered once by the push that carries it | **RM-R11**: while pulling, while pushing (the next push), and `failed` with no remote |
  * | 70 | `pushing --after pushDeadline--> recording → queued` | **A12**: a hung push ends, keeps what it owed and answers every carried requester |
  * | 71 | a mint on another branch is pushed but is not this branch's head | **RM-S3**: `revisionMinted` names its branch |
+ * | 72 | `opening.fetching(merged linked) → pushing` | **D87**: another checkout's diverged branch merged on the pull re-heads its actor and the merge revision is pushed |
+ * | 73 | `opening.fetching(linked conflict) → backedUp` + parent `mergeConflicted` | **D87**: another checkout's conflict is announced without entering `conflicted`; this branch stays in sync |
+ * | 74 | `queued(leaseLost on another branch) --syncBackoff--> opening → pushing` offering both sets | **D87**: a lost lease never narrows the retry away from this branch's own revisions |
+ * | 75 | `selectSyncFacet(queued(leaseLost on another branch), undecided)` | **D90**: a branch whose conflict waits on the person says so instead of "will catch up and try again" |
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
@@ -96,6 +100,7 @@ import type {
 import type { SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { RevisionPortError } from '#revision-port.js';
+import { revisionId } from '#algorithms/index.js';
 import {
   createFakeCallbackActors,
   createFakeParent,
@@ -164,6 +169,7 @@ const start = (
     readRemote: effects.actor('readRemote'),
     push: effects.actor('push'),
     fetch: effects.actor('fetch'),
+    projectRecords: effects.actor('projectRecords'),
     fastForward: effects.actor('fastForward'),
     merge: effects.actor('merge'),
     connectivity: holds.actor('connectivity'),
@@ -223,6 +229,126 @@ const openCleanly = async (harness: Harness): Promise<void> => {
 const pushResult = (...outcomes: readonly SyncRefOutcome[]): SyncPushActorOutput => ({ refs: outcomes });
 
 describe('syncMachine', () => {
+  it('keeps authored readiness pending past the checking window and acknowledges apply before records settle', async () => {
+    const harness = start();
+    try {
+      await vi.waitFor(() => {
+        expect(harness.effects.running('fetch')).toBe(1);
+      });
+      harness.clock.advance(3001);
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+        pullPhase: 'fetching',
+        hasAppliedRemote: false,
+        chats: 'loading',
+      });
+      harness.effects.settle('fetch', {
+        output: {
+          leases: {},
+          integration: 'fastForward',
+          recordProjection: {
+            remote: 'tau',
+            fetchRefs: [chatRef],
+            refs: [{ name: 'refs/remotes/tau/tau/chats/c1', head: revisionId('chat-head') }],
+            // A pre-apply preference cannot confirm chats are disabled after apply.
+            syncChats: false,
+            syncLargeExports: false,
+          },
+        } satisfies SyncFetchActorOutput,
+      });
+      await vi.waitFor(() => {
+        expect(harness.effects.running('fastForward')).toBe(1);
+      });
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+        pullPhase: 'applying',
+        hasAppliedRemote: false,
+      });
+      harness.effects.settle('fastForward', { output: { checkoutId: 'live', revisionId: 'r1', treeId: 'tree1' } });
+      await vi.waitFor(() => {
+        expect(harness.effects.running('projectRecords')).toBe(1);
+      });
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+        pullPhase: 'records',
+        hasAppliedRemote: true,
+        chats: 'loading',
+      });
+      harness.clock.advance(7000);
+      await vi.waitFor(() => {
+        expect(harness.effects.running('writePending')).toBe(1);
+      });
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({ hasAppliedRemote: true, chats: 'failed' });
+      expect(harness.effects.inputsFor('writePending').at(-1)).toMatchObject({
+        record: { entries: [expect.objectContaining({ ref: chatRef, operation: 'projection' })] },
+      });
+      harness.effects.settle('projectRecords', { output: { records: [], chats: 'disabled' } });
+      await Promise.resolve();
+      expect(selectSyncFacet(harness.actor.getSnapshot()).chats).toBe('failed');
+      harness.effects.settle('writePending', { output: undefined });
+      await vi.waitFor(() => {
+        expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+      });
+      harness.actor.send({ type: 'remoteDisconnected' });
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({ hasAppliedRemote: false, chats: 'unknown' });
+    } finally {
+      harness.stop();
+    }
+  });
+
+  it('acknowledges a valid empty remote and independently reports disabled chats', async () => {
+    const harness = start();
+    try {
+      await settleWhenRunning(harness.effects, 'fetch', {
+        output: {
+          leases: {},
+          integration: 'upToDate',
+          recordProjection: { remote: 'tau', fetchRefs: [], refs: [], syncChats: false, syncLargeExports: false },
+        } satisfies SyncFetchActorOutput,
+      });
+      await vi.waitFor(() => {
+        expect(harness.effects.running('projectRecords')).toBe(1);
+      });
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({ hasAppliedRemote: true, chats: 'loading' });
+      harness.effects.settle('projectRecords', { output: { records: [], chats: 'disabled' } });
+      await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+      await vi.waitFor(() => {
+        expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+      });
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+        hasAppliedRemote: true,
+        chats: 'disabled',
+        pullPhase: 'idle',
+      });
+      harness.actor.send({ type: 'remoteConnected', remote: 'another' });
+      expect(selectSyncFacet(harness.actor.getSnapshot()).hasAppliedRemote).toBe(false);
+    } finally {
+      harness.stop();
+    }
+  });
+
+  it('ignores the former remote’s late pull answer after switching remote generation', async () => {
+    const harness = start();
+    try {
+      await vi.waitFor(() => {
+        expect(harness.effects.running('fetch')).toBe(1);
+      });
+      harness.actor.send({ type: 'remoteConnected', remote: 'another' });
+      await vi.waitFor(() => {
+        expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
+      });
+      harness.effects.settle('fetch', { output: { leases: {}, integration: 'upToDate' } });
+      await Promise.resolve();
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+        hasAppliedRemote: false,
+        pullPhase: 'fetching',
+      });
+      harness.effects.settle('fetch', { output: { leases: {}, integration: 'upToDate' } });
+      await vi.waitFor(() => {
+        expect(selectSyncFacet(harness.actor.getSnapshot()).hasAppliedRemote).toBe(true);
+      });
+    } finally {
+      harness.stop();
+    }
+  });
+
   it('row 1: a project with no remote schedules nothing', async () => {
     const harness = start({ remote: undefined });
 
@@ -311,6 +437,26 @@ describe('syncMachine', () => {
     });
     expect(harness.actor.getSnapshot().context.leases).toEqual({ [chatRef]: 'remote-chat-2' });
 
+    harness.stop();
+  });
+
+  it('resets readiness for a new remote without abandoning an in-flight push or queue write', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.actor.send({ type: 'remoteConnected', remote: 'other' });
+    expect(harness.actor.getSnapshot().matches('pushing')).toBe(true);
+    expect(selectSyncFacet(harness.actor.getSnapshot()).hasAppliedRemote).toBe(false);
+    harness.effects.settle('push', { output: pushResult() });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+    expect(harness.effects.inputsFor('fetch').at(-1)).toMatchObject({ remote: 'other' });
+    expect(selectSyncFacet(harness.actor.getSnapshot()).hasAppliedRemote).toBe(false);
     harness.stop();
   });
 
@@ -915,6 +1061,70 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  it('D98: a revision minted after an access refusal is owed, and a refusal with nothing minted stays backed up (D68)', async () => {
+    const harness = start();
+    await settleWhenRunning(harness.effects, 'fetch', {
+      error: new RevisionPortError('REMOTE_UNAUTHORIZED', 'Write access to repository not granted.'),
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+      state: 'failed',
+      pendingCount: 0,
+      reason: 'unauthorized',
+    });
+
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r25',
+      branch: 'main',
+    });
+    /* Recorded, so a reopen that is refused again still knows Rev 25 never left. */
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    expect(harness.effects.inputsFor('writePending').at(-1)).toMatchObject({
+      record: { entries: [{ ref: mainRef, head: 'r25' }] },
+    });
+    expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+      state: 'failed',
+      pendingCount: 1,
+      reason: 'unauthorized',
+    });
+    /* Still terminal: the mint never retries a refused project by itself (rule 19). */
+    expect(harness.effects.running('push')).toBe(0);
+
+    harness.stop();
+  });
+
+  it('D98: a revision minted while the open pull runs is owed once that pull is refused', async () => {
+    const harness = start();
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r25',
+      branch: 'main',
+    });
+    harness.effects.settle('fetch', {
+      error: new RevisionPortError('REMOTE_FORBIDDEN', 'Write access to repository not granted.'),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({ pendingCount: 1, reason: 'forbidden' });
+
+    harness.stop();
+  });
+
   it('row 13: a queue that will not write is a failure nothing can retry its way out of', async () => {
     const harness = start();
     await openCleanly(harness);
@@ -1287,6 +1497,7 @@ describe('syncMachine', () => {
       }),
       push: effects.actor('push'),
       fetch: effects.actor('fetch'),
+      projectRecords: effects.actor('projectRecords'),
       fastForward: effects.actor('fastForward'),
       merge: effects.actor('merge'),
       connectivity: holds.actor('connectivity'),
@@ -1919,6 +2130,16 @@ describe('syncMachine', () => {
           type: `xstate.done.actor.${fetchInvoke}`,
           output: { leases: { [mainRef]: 'remote-head' }, integration } satisfies SyncFetchActorOutput,
         })),
+        {
+          type: `xstate.done.actor.${fetchInvoke}`,
+          output: {
+            leases: {},
+            integration: 'upToDate',
+            recordProjection: { remote: 'tau', fetchRefs: [], refs: [], syncChats: true, syncLargeExports: false },
+          } satisfies SyncFetchActorOutput,
+        },
+        { type: 'xstate.done.actor.0.sync.opening.projectingRecords', output: { records: [], chats: 'ready' } },
+        { type: 'xstate.error.actor.0.sync.opening.projectingRecords', error: new Error('record failed') },
         { type: `xstate.error.actor.${fetchInvoke}`, error: new Error('offline') },
         {
           type: `xstate.done.actor.${fastForwardInvoke}`,
@@ -2583,6 +2804,135 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     });
     expect(harness.effects.inputsFor('push').at(-1)).toMatchObject({ leases: { [mainRef]: 'remote-2' } });
     expect(harness.parent.events.filter((event) => event.type === 'checkoutChanged')).toHaveLength(1);
+
+    harness.stop();
+  });
+
+  it('row 72 (D87): a pull that merged another checkout’s diverged branch re-heads it and pushes the merge', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    await moveRemote(harness, 2);
+    const moved = { branch: 'feature', checkoutId: 'feature', revisionId: 'merged-f', treeId: 'tree-f' };
+    harness.effects.settle('fetch', {
+      output: {
+        leases: { [mainRef]: 'remote-head', 'refs/heads/feature': 'remote-f' },
+        integration: 'upToDate',
+        advanced: [moved],
+        merged: ['feature'],
+      } satisfies SyncFetchActorOutput,
+    });
+
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    expect(harness.effects.inputsFor('push').at(-1)).toMatchObject({
+      leases: { 'refs/heads/feature': 'remote-f' },
+    });
+    expect(harness.parent.events.filter((event) => event.type === 'checkoutChanged')).toEqual([
+      { type: 'checkoutChanged', ...moved },
+    ]);
+
+    harness.stop();
+  });
+
+  it('row 73 (D87): another checkout’s conflict is announced and this branch stays in sync', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    await moveRemote(harness, 2);
+    const conflict = { branch: 'conflicts/feature/device-a', into: 'feature', paths: ['sandbox.scad'] };
+    harness.effects.settle('fetch', {
+      output: {
+        leases: { [mainRef]: 'remote-head' },
+        integration: 'upToDate',
+        conflicts: [conflict],
+      } satisfies SyncFetchActorOutput,
+    });
+
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+    expect(harness.parent.events.filter((event) => event.type === 'mergeConflicted')).toEqual([
+      { type: 'mergeConflicted', ...conflict },
+    ]);
+    expect(selectSyncFacet(harness.actor.getSnapshot()).conflictRef).toBeUndefined();
+
+    harness.stop();
+  });
+
+  it('row 75 (D90): a lease lost on a branch whose conflict waits says it waits on the person, not that it catches up', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'close',
+      revisionId: 'r1',
+      branch: 'main',
+    });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult(
+        { name: mainRef, status: 'updated', head: 'r1' },
+        { name: 'refs/heads/feature', status: 'rejected', head: 'f1', reason: 'leaseLost' },
+      ),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+
+    /* Nothing catches `feature` up until the person decides its conflict. */
+    expect(selectSyncFacet(harness.actor.getSnapshot(), ['feature']).error).toBe(
+      'feature waits on your decision; its revisions back up once you choose.',
+    );
+    /* Another branch's waiting conflict says nothing about `feature`. */
+    expect(selectSyncFacet(harness.actor.getSnapshot(), ['other']).error).toBe(
+      'feature changed on the remote; this project will catch up and try again.',
+    );
+
+    harness.stop();
+  });
+
+  it('row 74 (D87): a lease lost on another branch never narrows the next offer away from this branch', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'close',
+      revisionId: 'r1',
+      branch: 'main',
+    });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult(
+        { name: mainRef, status: 'updated', head: 'r1' },
+        { name: 'refs/heads/feature', status: 'rejected', head: 'f1', reason: 'leaseLost' },
+      ),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+
+    /* This branch saves again while `feature` still waits on its divergence. */
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r2',
+      branch: 'main',
+    });
+    harness.clock.advance(5000);
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: {
+        leases: { [mainRef]: 'r1', 'refs/heads/feature': 'remote-f' },
+        integration: 'ahead',
+      } satisfies SyncFetchActorOutput,
+    });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    /* Both sets: the push keeps an unintegrated branch out of the atomic set itself (D54). */
+    expect(harness.effects.inputsFor('push').at(-1)).not.toHaveProperty('refs');
 
     harness.stop();
   });

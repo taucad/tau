@@ -43,6 +43,12 @@ Pass a directory to target a different host convention:
 npx taucad-skills .claude/skills
 ```
 
+Name owner packages after the directory to install only their bundles. An owner is a package from the table below, resolved from `@taucad/skills` itself:
+
+```bash
+npx taucad-skills .agents/skills @taucad/replicad geospec
+```
+
 Rerun after upgrading a dependency to refresh the bundles in place.
 
 To drive it from code — for example from your own setup script:

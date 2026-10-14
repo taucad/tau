@@ -58,7 +58,9 @@ export type RevisionEngineDescriptor = Readonly<{
    * A caller that computes a tree id without writing it has to hash what the
    * store will record, pointers included (I5) — so the cut asks rather than
    * assumes. True on both legs since W11b: the decision is host-neutral
-   * (`lfs.ts`) and only the transport behind it differs.
+   * (`lfs.ts`) and only the transport behind it differs. False for a
+   * repository a disk host adopted, whose entries keep the representation the
+   * person's own Git gave them (rule 13).
    */
   largeObjects: boolean;
 }>;
@@ -309,6 +311,14 @@ export type SetRevisionRemoteInput = Readonly<{
   fetchOnly?: boolean;
 }>;
 
+/**
+ * A remote that is not in git's config yet: the name it would be recorded
+ * under, which decides how a refusal is classified, and its address.
+ *
+ * @public
+ */
+export type RevisionRemoteAddress = Pick<SetRevisionRemoteInput, 'name' | 'url'>;
+
 /** One ref a push offers the remote. @public */
 export type RevisionPushRef = Readonly<{
   /** Fully-qualified local ref, e.g. `refs/heads/main` or `refs/tau/chats/c1`. */
@@ -544,8 +554,15 @@ export type RevisionPort = Readonly<{
    */
   divergence(input: RevisionDivergenceInput): Promise<RevisionDivergence>;
   diff(input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]>;
-  /** Every ref the remote advertises, without fetching an object. */
-  listRemoteRefs(remote: string): Promise<readonly RemoteRef[]>;
+  /**
+   * Every ref the remote advertises, without fetching an object.
+   *
+   * A name reads a remote in git's config. A {@link RevisionRemoteAddress}
+   * reads an address that is not recorded, credited and classified exactly as
+   * it would be once recorded under that name, and writes nothing: how
+   * *Change backup* checks a new remote before it replaces the old one (R2).
+   */
+  listRemoteRefs(remote: string | RevisionRemoteAddress): Promise<readonly RemoteRef[]>;
   /** Bring the remote's refs into `refs/remotes/<remote>/…`; never moves a branch. */
   fetch(input: RevisionFetchInput): Promise<RevisionFetchResult>;
   /** Offer refs to the remote and report each one's outcome. */
@@ -579,6 +596,20 @@ export type RevisionPort = Readonly<{
   conflicts(id: RevisionId): Promise<RevisionConflict | undefined>;
   /** Every place this project's files are, live checkout first. */
   listCheckouts?(): Promise<readonly Checkout[]>;
+  /**
+   * The untracked paths Git itself ignores in one checkout of an adopted repository.
+   *
+   * Capture versions what the path registry admits. In a repository the person
+   * made, their own ignore rules decide too, or a revision records their build
+   * output and secrets and commits them to their branch. A store Tau created
+   * answers `undefined`: its ignore file is derived from the registry, so the
+   * registry alone decides on every host.
+   *
+   * @param root - A linked checkout's root, or `undefined` for the live checkout.
+   * @returns Paths relative to that root, a directory with a trailing `/`, or
+   *   `undefined` when the registry alone decides.
+   */
+  ignoredPaths?(root?: string): Promise<readonly string[] | undefined>;
   /** Add one linked checkout on its own branch. */
   addCheckout?(input: AddCheckoutInput): Promise<Checkout>;
   /** Remove one linked checkout. Removing the live checkout is refused. */
@@ -609,6 +640,10 @@ export type RevisionPortErrorCode =
   | 'BRANCH_NEEDS_REVISION'
   /** A branch name conflict lines own: `conflicts` or a name under it (charter D14). */
   | 'BRANCH_NAME_RESERVED'
+  /** A rename of a branch a linked checkout holds: the checkout is named by its branch. */
+  | 'BRANCH_RENAME_LINKED'
+  /** A rename of a branch a remote holds: no push removes the old name there. */
+  | 'BRANCH_RENAME_PUSHED'
   /** The requested branch already has a checkout, or the id names no checkout. */
   | 'CHECKOUT_CONFLICT'
   | 'ENGINE_FAILED'

@@ -796,6 +796,37 @@ export const doubledPathSegments = (paths: readonly string[]): string[] => {
   return [...issues].sort();
 };
 
+/** `new Worker(new URL('<literal>', import.meta.url)` and its `SharedWorker` twin, in source or minified output. */
+const workerUrlPattern = /new\s+(?:Shared)?Worker\(\s*new\s+URL\(\s*(["'`])([^"'`]+)\1\s*,\s*import\.meta\.url\s*\)/g;
+
+/**
+ * Worker URLs in emitted modules that name no emitted file. A `new URL()` literal is not an import: outside a bundler
+ * it resolves against the emitting module, so a `.ts` source name, a `#` subpath or an unemitted worker loads nothing.
+ *
+ * @param modules - Emitted JavaScript modules as `dist`-relative POSIX paths with their source text.
+ * @param emitted - Every `dist`-relative POSIX path the build emitted.
+ * @returns One issue per worker URL whose target is not in `emitted`, sorted.
+ */
+export const workerUrlIssues = (
+  modules: ReadonlyArray<{ path: string; source: string }>,
+  emitted: ReadonlySet<string>,
+): string[] => {
+  const issues: string[] = [];
+  for (const module of modules) {
+    for (const match of module.source.matchAll(workerUrlPattern)) {
+      const literal = match[2]!;
+      const base = new URL(module.path, 'file:///dist/');
+      const target = new URL(literal, base);
+      const path = target.protocol === 'file:' ? target.pathname.replace(/^\/dist\//, '') : undefined;
+      if (path === undefined || target.hash !== '' || !emitted.has(path)) {
+        issues.push(`${module.path}: worker URL '${literal}' names no emitted file`);
+      }
+    }
+  }
+
+  return issues.sort();
+};
+
 /**
  * Workspace projects a package actually bundled, detected from the mirror
  * directories `unbundle: true` emits for sources outside the package root

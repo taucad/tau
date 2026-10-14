@@ -6,7 +6,7 @@ export function ChatEditorPlanViewer({ content }: ChatEditorViewerProps): React.
   return (
     <div className='flex h-full flex-col overflow-auto bg-background'>
       <div className='mx-auto w-full max-w-3xl px-6 pt-3 pb-8'>
-        <MarkdownViewer className='prose-sm dark:prose-invert prose prose-headings:font-semibold prose-p:text-muted-foreground prose-li:text-muted-foreground'>
+        <MarkdownViewer className='dark:prose-invert prose prose-sm prose-headings:font-semibold prose-p:text-muted-foreground prose-li:text-muted-foreground'>
           {content}
         </MarkdownViewer>
       </div>

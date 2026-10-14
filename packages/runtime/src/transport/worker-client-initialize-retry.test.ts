@@ -3,6 +3,7 @@ import type * as RpcModule from '@taucad/rpc';
 import { createFileSystemBridgePort, createTransferredFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { nodeWorkerClient } from '#transport/node-worker-client.js';
+import type { NodeWorkerLike } from '#transport/node-worker-client.js';
 import type { RuntimeInitializePayload } from '#transport/runtime-transport.types.js';
 import { webWorkerClient } from '#transport/web-worker-client.js';
 import { resolveRuntimeFileSystem, wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
@@ -83,12 +84,16 @@ const createNodeWorkerCtor = () => {
     const listeners = new Set<(data: unknown) => void>();
     const worker = {
       postMessage: vi.fn(),
-      on: vi.fn((_event: 'message', listener: (data: unknown) => void) => {
-        listeners.add(listener);
+      on: vi.fn((event: string, listener: (data: unknown) => void) => {
+        if (event === 'message') {
+          listeners.add(listener);
+        }
         return worker;
       }),
-      off: vi.fn((_event: 'message', listener: (data: unknown) => void) => {
-        listeners.delete(listener);
+      off: vi.fn((event: string, listener: (data: unknown) => void) => {
+        if (event === 'message') {
+          listeners.delete(listener);
+        }
         return worker;
       }),
       terminate: vi.fn(async () => {
@@ -98,7 +103,7 @@ const createNodeWorkerCtor = () => {
     };
     created.push(worker);
     return worker;
-  };
+  } as unknown as new (url: string | URL) => NodeWorkerLike;
   return { workerCtor, created };
 };
 

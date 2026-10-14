@@ -7,6 +7,15 @@
   "templating": {
     "list": [
       {
+        "name": "app",
+        "label": "Application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": { "text": ".*", "value": ".*" },
+        "hide": 2
+      },
+      {
         "name": "service",
         "label": "Service",
         "type": "custom",
@@ -20,7 +29,7 @@
         "name": "instance",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(process_uptime{service_name=~\"$service\"}, instance)",
+        "query": "label_values(process_uptime{app=~\"$app\",service_name=~\"$service\"}, instance)",
         "multi": true,
         "includeAll": true,
         "current": { "text": "All", "value": "$__all" }
@@ -39,18 +48,18 @@
           "format": "table",
           "refId": "A"
         }
-      ]
+      ],
+      "id": 1
     },
     {
       "title": "Transactions per Second",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "targets": [
-        {
-          "expr": "sum(rate(postgresql_commits_total[5m])) + sum(rate(postgresql_rollbacks_total[5m]))"
-        }
-      ],
-      "fieldConfig": { "defaults": { "unit": "ops" } }
+      "targets": [{ "expr": "sum(rate(postgresql_commits_total[5m])) + sum(rate(postgresql_rollbacks_total[5m]))" }],
+      "fieldConfig": {
+        "defaults": { "unit": "ops" }
+      },
+      "id": 2
     },
     {
       "title": "Transaction Rate",
@@ -63,7 +72,8 @@
           "format": "table",
           "refId": "A"
         }
-      ]
+      ],
+      "id": 3
     },
     {
       "title": "Row Operations by Kind",
@@ -75,7 +85,10 @@
           "legendFormat": "{{operation}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "ops" } }
+      "fieldConfig": {
+        "defaults": { "unit": "ops" }
+      },
+      "id": 4
     },
     {
       "title": "Deadlocks",
@@ -99,7 +112,8 @@
             ]
           }
         }
-      }
+      },
+      "id": 5
     },
     {
       "title": "Table Sizes",
@@ -115,9 +129,13 @@
       ],
       "fieldConfig": {
         "overrides": [
-          { "matcher": { "id": "byName", "options": "size" }, "properties": [{ "id": "unit", "value": "decbytes" }] }
+          {
+            "matcher": { "id": "byName", "options": "size" },
+            "properties": [{ "id": "unit", "value": "decbytes" }]
+          }
         ]
-      }
+      },
+      "id": 6
     },
     {
       "title": "Index Usage",
@@ -130,7 +148,8 @@
           "format": "table",
           "refId": "A"
         }
-      ]
+      ],
+      "id": 7
     },
     {
       "title": "PostgreSQL Connections Used",
@@ -148,14 +167,20 @@
             ]
           }
         }
-      }
+      },
+      "id": 8
     },
     {
       "title": "Error Logs",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
+      "targets": [
+        {
+          "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"",
+          "refId": "A"
+        }
+      ],
       "options": {
         "showTime": true,
         "showLabels": true,
@@ -164,14 +189,22 @@
         "prettifyLogMessage": false,
         "enableLogDetails": true,
         "sortOrder": "Descending"
-      }
+      },
+      "id": 9
     },
     {
       "title": "Recent Traces",
       "type": "traces",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
       "datasource": { "type": "tempo", "uid": "tempo" },
-      "targets": [{ "query": "{resource.service.name=~\"$service\"}", "refId": "A", "queryType": "traceqlSearch" }]
+      "targets": [
+        {
+          "query": "{resource.service.name=~\"$service\"}",
+          "refId": "A",
+          "queryType": "traceqlSearch"
+        }
+      ],
+      "id": 10
     }
   ],
   "schemaVersion": 39

@@ -1,3 +1,4 @@
+import { observeHomeProjectSaves } from '#filesystem/observe-home-project-saves.js';
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
 import { machineSettingsPath } from '@taucad/runtime/machine/settings';
@@ -7,7 +8,7 @@ import { createContext, useContext, useMemo, useCallback, useEffect, useLayoutEf
 import { useActorRef, useSelector } from '@xstate/react';
 import { OctagonAlert, RefreshCw } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { waitFor } from 'xstate';
 import type { SnapshotFrom } from 'xstate';
 import type { FileSystemBackend, FileStatEntry, FileStat } from '@taucad/types';
@@ -724,6 +725,13 @@ export function FileManagerProvider({
   const activeWorkspaceId = useSelector(fileManagerRef, (state) => state.context.activeWorkspaceId);
   const activeWorkspaceName = useSelector(fileManagerRef, (state) => state.context.activeWorkspaceName);
   const unavailableReason = useSelector(fileManagerRef, (state) => state.context.unavailableReason);
+
+  useEffect(() => {
+    if (!contentService || !workerChangeChannel) {
+      return;
+    }
+    return observeHomeProjectSaves({ projectId, backend: backendType, contentService, channel: workerChangeChannel });
+  }, [projectId, backendType, contentService, workerChangeChannel]);
 
   const bindProjectToWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {

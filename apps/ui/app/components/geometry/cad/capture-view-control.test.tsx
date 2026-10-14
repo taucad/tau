@@ -12,6 +12,7 @@ const selectedModel = {
   model: { support: { modalities: { input: ['text', 'image'], output: ['text'] } } },
 };
 let mockSelectedModel: { name: string; model?: typeof selectedModel.model } = selectedModel;
+let mockCanCapture = true;
 let mockExecution: CadAgentExecution = { kind: 'tau', model: 'vision' };
 const mockTrigger = vi.fn();
 const mockGraphicsRef = { send: vi.fn(), id: 'graphics-actor' };
@@ -29,14 +30,17 @@ vi.mock('#services/headless-capture.js', () => ({
   captureFilesToDataUrls: () => ['data:image/webp;base64,AQID'],
   omittedSectionCutsNotice: 'Section cutaways narrower than 180° are not shown in captures.',
 }));
-vi.mock('#hooks/use-graphics.js', () => ({ useGraphics: () => mockGraphicsRef }));
+vi.mock('@taucad/viewer/hooks/use-graphics', () => ({
+  useGraphics: () => mockGraphicsRef,
+  useGraphicsSelector: () => mockCanCapture,
+}));
 vi.mock('#hooks/use-cad.js', () => ({ useCad: () => mockCadRef }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectRef: { send: mockProjectSend } }) }));
 vi.mock('#hooks/use-chat.js', () => ({ useChatActions: () => ({ addDraftAttachment: mockAddDraftAttachment }) }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({ model: { model: mockSelectedModel }, execution: { execution: mockExecution } }),
 }));
-vi.mock('#hooks/use-tick-animation.js', () => ({
+vi.mock('@taucad/ui/hooks/use-tick-animation', () => ({
   useTickAnimation: () => ({ ticked: false, trigger: mockTrigger }),
 }));
 vi.mock('#providers/headless-image-provider.js', () => ({
@@ -60,6 +64,7 @@ const { CaptureViewControl } = await import('#components/geometry/cad/capture-vi
 describe('CaptureViewControl', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCanCapture = true;
     mockSelectedModel = selectedModel;
     mockExecution = { kind: 'tau', model: 'vision' };
     mockCaptureCadImages.mockResolvedValue({
@@ -118,5 +123,12 @@ describe('CaptureViewControl', () => {
         model: { name: 'codex', support: { modalities: { input: ['text', 'image', 'pdf'], output: ['text'] } } },
       });
     });
+  });
+  it('should explain why an empty model cannot be captured', async () => {
+    mockCanCapture = false;
+    render(<CaptureViewControl />);
+    await userEvent.click(screen.getByTestId('capture-button'));
+    expect(mockCaptureCadImages).not.toHaveBeenCalled();
+    expect(screen.getByText('Available when a model is displayed')).toBeInTheDocument();
   });
 });

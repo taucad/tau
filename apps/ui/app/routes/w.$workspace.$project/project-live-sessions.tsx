@@ -6,6 +6,8 @@
  * the chunk a page that only lists projects evaluates. `project-route.tsx` loads it lazily the moment
  * a project is live, and the project route imports its own entry point from here directly.
  */
+import { ProjectSyncAnnouncement } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { usePublishCloudProjectPreview } from '#hooks/use-publish-cloud-project-preview.js';
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
@@ -51,7 +53,7 @@ import { RevisionSaveShortcut } from '#routes/w.$workspace.$project/revision-sav
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project
 // route only needs to flush its own project + editor machine state below.
-import { WebglContextTrackerProvider } from '#hooks/use-webgl-context-tracker.js';
+import { WebglContextTrackerProvider } from '@taucad/viewer/hooks/use-webgl-context-tracker';
 import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
 import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
@@ -71,6 +73,7 @@ import {
   useRevisionClientLifecycle,
   useRevisionClientStatus,
   useRevisionCommands,
+  useProjectRole,
 } from '#hooks/use-revision-status.js';
 import type { RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
@@ -155,11 +158,9 @@ const noFlushRegistration = (): void => undefined;
 function ProjectSessionBinding({
   projectId,
   isFocused,
-  shouldOpenFromTauCloud,
 }: {
   readonly projectId: string;
   readonly isFocused: boolean;
-  readonly shouldOpenFromTauCloud?: boolean;
 }): React.JSX.Element {
   const { fileManagerRef, workerChangeChannel, workspace } = useFileManager();
   const { defaultExecution, resolveModel } = useModels();
@@ -171,10 +172,10 @@ function ProjectSessionBinding({
   useEffect(() => {
     choices.current = { defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel };
   }, [defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel]);
-  const { parameterService, projectRef, editorRef, flushWorkbenchRecordProducers } = useProject();
+  const { parameterService, projectRef, editorRef, flushWorkbenchRecordProducers, retryManifestObservation } =
+    useProject();
   const client = useRevisionClientLifecycle();
   const revisionCommands = useRevisionCommands();
-  const { connectRemote } = revisionCommands;
   const cloudIntent = useTauCloudIntent(projectId);
   const chatSessions = useChatSessionStore();
   const session = useProjectSession(projectId);
@@ -183,6 +184,30 @@ function ProjectSessionBinding({
   /* R4: why this project has no kernel, from the machine that owns its units. */
   const kernelRefusal = useSelector(projectRef, selectProjectKernelRefusal);
   const status = useRevisionClientStatus(client);
+  useEffect(() => {
+    if (cloudIntent === 'open' && status?.sync.hasAppliedRemote === true) {
+      retryManifestObservation();
+    }
+  }, [cloudIntent, retryManifestObservation, status?.sync.hasAppliedRemote]);
+  const role = useProjectRole();
+  const isChatDeferred = useSelector(editorRef, (snapshot) =>
+    snapshot.matches({ ready: { operation: 'focusedChatDeferred' } }),
+  );
+  usePublishCloudProjectPreview({
+    projectId,
+    enabled:
+      status?.remote.kind === 'tau' &&
+      status.remote.phase === 'connected' &&
+      !status.remote.fetchOnly &&
+      status.sync.hasAppliedRemote === true &&
+      status.sync.state === 'backedUp' &&
+      (role === 'owner' || role === 'write'),
+  });
+  useEffect(() => {
+    if (status?.sync.chats === 'ready' && isChatDeferred) {
+      editorRef.send({ type: 'retryEnsureFocusedChat' });
+    }
+  }, [editorRef, isChatDeferred, status?.sync.chats]);
   /* Every live project publishes one read connector, even without a focused chat. Each chat's persisted placement
    * decides which owner log to read; opening an observer never issues Start or acquires an SDK session. */
   useEffect(() => {
@@ -337,14 +362,6 @@ function ProjectSessionBinding({
     subscribeEditorConflictRecords,
     useCallback(() => isRecordingEditorConflict(projectId), [projectId]),
   );
-  /* W7 tier 3: the `cloudOpen` marker is read and cleared by the host, through
-   * the router, so React sees the change. This half only acts on it. */
-  useEffect(() => {
-    if (client === undefined || shouldOpenFromTauCloud !== true) {
-      return;
-    }
-    void connectRemote('tau');
-  }, [client, connectRemote, shouldOpenFromTauCloud]);
 
   useEffect(() => {
     if (viewsReady) {
@@ -499,6 +516,7 @@ function ProjectSessionBinding({
 
   return (
     <>
+      {isFocused ? <ProjectSyncAnnouncement /> : null}
       <UnsavedParameterDraftsDialog projectId={projectId} />
       {cloudIntent === undefined || cloudIntent === 'connected' || client === undefined ? null : (
         <TauCloudIntentConnector
@@ -549,7 +567,6 @@ function ProjectSession({
   createdChatId,
   onFocusedChatResolved,
   onFlushRegistration,
-  shouldOpenFromTauCloud,
 }: {
   readonly children?: React.ReactNode;
   readonly projectId: string;
@@ -559,7 +576,6 @@ function ProjectSession({
   readonly createdChatId?: string;
   readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
-  readonly shouldOpenFromTauCloud?: boolean;
 }): React.ReactNode {
   const kernelSelection = useProjectKernelOptions({
     projectId,
@@ -580,11 +596,7 @@ function ProjectSession({
           <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
           <ViewSettingsSyncHost />
           <EntriesSyncHost />
-          <ProjectSessionBinding
-            projectId={projectId}
-            isFocused={focused}
-            shouldOpenFromTauCloud={shouldOpenFromTauCloud}
-          />
+          <ProjectSessionBinding projectId={projectId} isFocused={focused} />
           {focused ? (
             <>
               <RevisionSaveShortcut isFocused={focused} />
@@ -618,7 +630,6 @@ type FocusedProjectSession = Readonly<{
   requestedChatId: string | undefined;
   createdChatId: string | undefined;
   children: React.ReactNode;
-  shouldOpenFromTauCloud?: boolean;
 }>;
 
 /** The app-level keyed host for every live project's resource subtree. */
@@ -649,7 +660,6 @@ export function LiveProjectSessions({
             createdChatId={isFocused ? focused.createdChatId : undefined}
             onFocusedChatResolved={isFocused ? onFocusedChatResolved : undefined}
             onFlushRegistration={isFocused ? onFlushRegistration : noFlushRegistration}
-            shouldOpenFromTauCloud={isFocused ? focused.shouldOpenFromTauCloud : undefined}
           >
             {isFocused ? focused.children : undefined}
           </ProjectSession>

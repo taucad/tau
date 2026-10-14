@@ -34,9 +34,9 @@ import {
   FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { Spinner } from '#components/ui/spinner.js';
-import { ActionButton, DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
+import { ActionButton, DetailsToggle, disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
 import {
@@ -71,7 +71,7 @@ import {
   useRevisionStatus,
 } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
-import { setAnonymousRevisions, useAnonymousRevisions } from '#lib/revision-actor.js';
+import { setAnonymousRevisions, useAnonymousRevisions, useRevisionSessionUser } from '#lib/revision-actor.js';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { useRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
@@ -1002,6 +1002,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const status = useRevisionStatus();
   const commands = useRevisionCommands();
   const projectRole = useProjectRole();
+  const isSignedOut = useRevisionSessionUser() === undefined;
   const { chats } = useChatRecords(projectId);
   /* A29: *Sync* appears when a remote exists, or when the person opens it. */
   const [isConnectOpen, setIsConnectOpen] = useState(false);
@@ -1063,7 +1064,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
             <RevisionBranches
               branches={branches}
               currentBranch={currentBranch}
-              liveCheckoutId={status?.checkoutId}
+              liveCheckoutId={status?.liveCheckoutId}
               chatNames={chatNames}
               chatCheckoutIds={chatCheckoutIds}
               {...(activeChatId === undefined ? {} : { activeChatId })}
@@ -1150,8 +1151,11 @@ export function RevisionsPanelBody(): React.JSX.Element {
             storageLimitBytes={storageLimitBytes}
             signInHref={signIn}
             role={projectRole}
+            isSignedOut={isSignedOut}
             projectId={projectId}
             isLineKnown={line.kind !== 'unknown'}
+            /* Sync pushes every branch; an unborn one is not on GitHub yet (D92). */
+            branch={line.kind === 'branch' ? line.name : undefined}
           />
         ) : null}
       </div>

@@ -32,7 +32,13 @@ import { syncFailureReason } from '#sync.machine.js';
 import type { SyncFailureReason } from '#sync.types.js';
 import type { RemoteKind, RemoteReauthorizationCode } from '#remotes.js';
 import type { RemoteStorageRefusal } from '#revision-port.js';
-import type { RemoteFacet, RemoteMachineEvent, RemoteStorage, RevisionChildToast } from '#remote.types.js';
+import type {
+  RemoteFacet,
+  RemoteMachineEvent,
+  RemoteRefusedReplacement,
+  RemoteStorage,
+  RevisionChildToast,
+} from '#remote.types.js';
 
 /** One remote as this machine records it. @public */
 export type RemoteRecord = Readonly<{
@@ -79,6 +85,26 @@ type RemoteMachineContextFields = Readonly<{
    * their own write, and nothing else's.
    */
   attemptWroteRemote: boolean;
+  /**
+   * The destination the person picked, carried from `connect` to `choosing`
+   * across the R2 probe, which is not a `connect` event.
+   */
+  candidate: RemoteCandidate | undefined;
+  /** Where a refused or cancelled probe returns: the remote that stays this project's backup (R2). */
+  probeReturn: 'connected' | 'reconnectRequired';
+  /** The last replacement the new remote refused; the old remote stayed (R2). */
+  refusedReplacement: RemoteRefusedReplacement | undefined;
+  /** How many replacements have been refused, so each refusal carries its own `attempt`. */
+  refusals: number;
+}>;
+
+/** The destination a `connect` names. @public */
+export type RemoteCandidate = Readonly<{
+  kind: RemoteKind;
+  url?: string;
+  provider?: 'github';
+  repositoryId?: string;
+  fetchOnly?: boolean;
 }>;
 
 /** Serializable state owned by remoteMachine. @public */
@@ -190,11 +216,61 @@ const forgetAttempt = {
   attemptWroteRemote: false,
 } satisfies Partial<RemoteMachineContext>;
 
+type ConnectEvent = Extract<RemoteMachineEvent, { type: 'connect' }>;
+
+/* What a `connect` names, without its `type`. */
+const candidateOf = (event: ConnectEvent, kind: RemoteKind): RemoteCandidate => ({
+  kind,
+  ...(event.url === undefined ? {} : { url: event.url }),
+  ...(event.provider === undefined ? {} : { provider: event.provider }),
+  ...(event.repositoryId === undefined ? {} : { repositoryId: event.repositoryId }),
+  ...(event.fetchOnly === true ? { fetchOnly: true } : {}),
+});
+
+/* An attempt starts: `choosing` records the picked destination. */
+const startAttempt = (event: ConnectEvent, kind: RemoteKind) => ({
+  target: 'choosing',
+  context: { kind, error: undefined, candidate: candidateOf(event, kind), refusedReplacement: undefined },
+});
+
 /* `connect` from a settled state: choosing *No remote* disconnects, anything else starts an attempt. */
-const reconnect = (event: Extract<RemoteMachineEvent, { type: 'connect' }>) =>
-  event.kind === 'none'
-    ? { target: 'disconnecting' }
-    : { target: 'choosing', context: { kind: event.kind, error: undefined } };
+const reconnect = (event: ConnectEvent) =>
+  event.kind === 'none' ? { target: 'disconnecting' } : startAttempt(event, event.kind);
+
+/* The same destination, picked again: a re-grant or an access change, never a replacement. */
+const isSameDestination = (remote: RemoteRecord, event: ConnectEvent): boolean =>
+  event.kind === remote.kind &&
+  (event.kind === 'tau' ||
+    (event.url === remote.url && event.provider === remote.provider && event.repositoryId === remote.repositoryId));
+
+/*
+ * R2: `connect` while a remote is recorded and backing this project up.
+ *
+ * `choosing` writes the new remote over the old one before anything has asked
+ * the new one a question, so a refused address used to cost the backup that
+ * worked. A different destination is probed first — `validate`'s question, on
+ * this host's own transport, with nothing recorded — and the old remote is
+ * replaced only once it answers. The same destination is a re-grant or an
+ * access change and goes straight to `choosing`, as it always has.
+ */
+const replaceOrReconnect = (
+  context: RemoteMachineContext,
+  event: ConnectEvent,
+  from: RemoteMachineContext['probeReturn'],
+) => {
+  if (event.kind === 'none' || context.remote === undefined || isSameDestination(context.remote, event)) {
+    return reconnect(event);
+  }
+  return {
+    target: 'probing',
+    context: {
+      kind: event.kind,
+      candidate: candidateOf(event, event.kind),
+      probeReturn: from,
+      refusedReplacement: undefined,
+    },
+  };
+};
 
 /* A refused push's file list and figures: the root's handler and `connected`'s share it. */
 const quotaRefusedContext = (
@@ -210,8 +286,7 @@ const quotaRefusedContext = (
 });
 
 /* A connect gesture before any remote is recorded: *No remote* is already the answer. */
-const firstConnect = (event: Extract<RemoteMachineEvent, { type: 'connect' }>) =>
-  event.kind === 'none' ? {} : { target: 'choosing', context: { kind: event.kind, error: undefined } };
+const firstConnect = (event: ConnectEvent) => (event.kind === 'none' ? {} : startAttempt(event, event.kind));
 
 /* A connection step that failed: a stale credential asks for reauthorization, an
  * attempt that already wrote its remote undoes that write, anything else fails. */
@@ -260,6 +335,48 @@ const announceConnected = (context: RemoteMachineContext, enq: RemoteEnqueue): v
   }
 };
 
+/* What `writeRemote` and the R2 probe are asked for: the destination the person picked. */
+const writeInputOf = (context: RemoteMachineContext): RemoteWriteActorInput => {
+  const { candidate } = context;
+  return {
+    projectId: context.projectId,
+    kind: candidate?.kind ?? (context.kind === 'none' ? 'tau' : context.kind),
+    url: candidate?.url,
+    ...(candidate?.provider === undefined ? {} : { provider: candidate.provider }),
+    ...(candidate?.repositoryId === undefined ? {} : { repositoryId: candidate.repositoryId }),
+    ...(candidate?.fetchOnly === true ? { fetchOnly: true } : {}),
+  };
+};
+
+/*
+ * A refused or cancelled R2 probe: the recorded remote is still the backup.
+ *
+ * The root retires `sync` on every `connect` (it cannot know the attempt will
+ * not replace anything), so a remote that was backing the project up is
+ * announced again and `sync` resumes its paused queue (policy rule 9). One
+ * waiting on `reconnectRequired` was never handed to `sync` and stays so.
+ */
+const keepCurrentRemote = (
+  context: RemoteMachineContext,
+  enq: RemoteEnqueue,
+  refusal: Omit<RemoteRefusedReplacement, 'attempt'> | undefined,
+) => {
+  const kept = { ...context, kind: context.remote?.kind ?? context.kind };
+  if (context.probeReturn === 'connected') {
+    announceConnected(kept, enq);
+  }
+  const refusals = refusal === undefined ? context.refusals : context.refusals + 1;
+  return {
+    target: context.probeReturn,
+    context: {
+      kind: kept.kind,
+      candidate: undefined,
+      refusals,
+      refusedReplacement: refusal === undefined ? undefined : { ...refusal, attempt: refusals },
+    },
+  };
+};
+
 const remoteMachineDefinition = setup({
   schemas: {
     context: types<RemoteMachineContext>(),
@@ -272,6 +389,8 @@ const remoteMachineDefinition = setup({
     readRemote: createAsyncLogic<RemoteReadActorOutput, Readonly<{ projectId: string }>>({ run: unsupported }),
     writeRemote: createAsyncLogic<RemoteWriteActorOutput, RemoteWriteActorInput>({ run: unsupported }),
     removeRemote: createAsyncLogic<void, Readonly<{ name: string }>>({ run: unsupported }),
+    /** R2: `validate`'s question of a destination not recorded yet; writes nothing. */
+    probe: createAsyncLogic<void, RemoteWriteActorInput>({ run: unsupported }),
     /** Resolves the *reference* the host will authenticate with, never a secret (I8). */
     authorize: createAsyncLogic<void, RemoteAuthorizeActorInput>({ run: unsupported }),
     validate: createAsyncLogic<RemoteValidateActorOutput, RemoteValidateActorInput>({ run: unsupported }),
@@ -293,6 +412,10 @@ const remoteMachineDefinition = setup({
     error: undefined,
     reason: undefined,
     attemptWroteRemote: false,
+    candidate: undefined,
+    probeReturn: 'connected',
+    refusedReplacement: undefined,
+    refusals: 0,
   }),
   /* A fact about the remote, not about where the connect sequence is (L2-F10):
    * `sync` forwards a refusal from whichever push it was making, and one that
@@ -341,19 +464,43 @@ const remoteMachineDefinition = setup({
       },
     },
 
+    /**
+     * R2: does the new remote answer before it replaces the recorded one?
+     *
+     * Nothing is written here, so failing, cancelling or a refusal leaves the
+     * recorded remote exactly as it was and returns to it.
+     */
+    probing: {
+      invoke: {
+        src: 'probe',
+        input: ({ context }) => writeInputOf(context),
+        onDone: { target: 'choosing', context: { error: undefined } },
+        onError: ({ context, event }, enq) =>
+          keepCurrentRemote(context, enq, {
+            kind: context.candidate?.kind ?? 'git',
+            ...(context.candidate?.url === undefined ? {} : { url: context.candidate.url }),
+            error: reason(event.error),
+            reason: syncFailureReason(event.error),
+          }),
+      },
+      on: {
+        cancel: ({ context }, enq) => keepCurrentRemote(context, enq, undefined),
+        /* A newer pick wins, and is probed in turn; *No remote* or the recorded remote itself need no probe. */
+        connect: ({ context, event }) => {
+          const next = replaceOrReconnect(context, event, context.probeReturn);
+          return next.target === 'probing' ? { ...next, reenter: true } : next;
+        },
+        /* Disconnecting is about the recorded remote, which nothing here touched. */
+        disconnect: { target: 'disconnecting' },
+      },
+    },
+
     /** The choice, recorded in git's remotes list before anything is asked of it. */
     choosing: {
       entry: () => ({ context: forgetQuota }),
       invoke: {
         src: 'writeRemote',
-        input: ({ context, event }) => ({
-          projectId: context.projectId,
-          kind: context.kind === 'none' ? 'tau' : context.kind,
-          url: event.type === 'connect' ? event.url : context.remote?.url,
-          ...(event.type === 'connect' && event.provider !== undefined ? { provider: event.provider } : {}),
-          ...(event.type === 'connect' && event.repositoryId !== undefined ? { repositoryId: event.repositoryId } : {}),
-          ...(event.type === 'connect' && event.fetchOnly === true ? { fetchOnly: true } : {}),
-        }),
+        input: ({ context }) => writeInputOf(context),
         onDone: {
           target: 'authorizing',
           context: ({ event }) => ({ remote: event.output.remote, attemptWroteRemote: true }),
@@ -493,7 +640,7 @@ const remoteMachineDefinition = setup({
       },
       on: {
         disconnect: { target: 'disconnecting' },
-        connect: ({ event }) => reconnect(event),
+        connect: ({ context, event }) => replaceOrReconnect(context, event, 'connected'),
         /* F9: a push changed what is stored; read it again, dropping any read in flight. */
         pushed: { target: '.reading', reenter: true },
         /* F9: a refusal's own figures are newer than a read still in flight, so
@@ -517,7 +664,13 @@ const remoteMachineDefinition = setup({
           }
           return {
             target: 'none',
-            context: { remote: undefined, kind: 'none', ...forgetQuota, error: undefined },
+            context: {
+              remote: undefined,
+              kind: 'none',
+              ...forgetQuota,
+              error: undefined,
+              refusedReplacement: undefined,
+            },
           };
         },
         onError: {
@@ -541,7 +694,7 @@ const remoteMachineDefinition = setup({
         /* The remote here is an established one, not this attempt's write, so a
          * later validate failure must not remove it (C10). */
         authorized: { target: 'validating', context: { error: undefined, attemptWroteRemote: false } },
-        connect: ({ event }) => reconnect(event),
+        connect: ({ context, event }) => replaceOrReconnect(context, event, 'reconnectRequired'),
         disconnect: { target: 'disconnecting' },
       },
     },
@@ -554,6 +707,19 @@ const remoteMachineDefinition = setup({
     },
   },
 });
+
+/**
+ * Public events a state drops on purpose, for the event-coverage checks (D13, MC-R17).
+ *
+ * - `authorized` and `validated` in `probing` (R2): each finishes a step of a
+ *   recorded remote's own connect, and a probe records nothing either could finish.
+ *
+ * @public
+ */
+export const remoteIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ['probing', 'authorized'],
+  ['probing', 'validated'],
+];
 
 type RemoteMachineDefinition = typeof remoteMachineDefinition;
 
@@ -637,4 +803,7 @@ export const selectRemoteFacet = (snapshot: SnapshotFrom<typeof remoteMachine>):
   fetchOnly: snapshot.context.remote?.fetchOnly === true,
   provider: snapshot.context.remote?.provider,
   repositoryId: snapshot.context.remote?.repositoryId,
+  ...(snapshot.context.refusedReplacement === undefined
+    ? {}
+    : { refusedReplacement: snapshot.context.refusedReplacement }),
 });

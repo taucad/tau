@@ -9,7 +9,7 @@ import {
   createLightRibbonMaterials,
   glassPrismRenderOrder,
 } from '#components/geometry/loader/glass-prism-material.node.js';
-import { serialiseStrippedTslGraph } from '#components/geometry/graphics/three/utils/tsl-node-graph-snapshot.js';
+import { serialiseStrippedTslGraph } from '@taucad/viewer/graphics/three/utils/tsl-node-graph-snapshot';
 
 const currentDirectory = fileURLToPath(new URL('.', import.meta.url));
 

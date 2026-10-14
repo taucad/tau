@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { wireUsageSnapshotSchema } from '@taucad/billing';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import UsagePage from '#routes/usage/route.js';
 
 const useUsageSnapshot = vi.hoisted(() => vi.fn());
@@ -16,6 +17,9 @@ const useChatName = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useCloudProjects }));
 vi.mock('#routes/usage/use-chat-name.js', () => ({ useChatName }));
 vi.mock('@taucad/billing/hooks/use-usage-snapshot', () => ({ useUsageSnapshot }));
+vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
+  useEntitlements: () => ({ tier: 'pro', isResolved: true }),
+}));
 vi.mock('@taucad/billing/hooks/use-credits', () => ({ useCredits }));
 vi.mock('@taucad/billing/hooks/use-open-holds', () => ({ useOpenHolds }));
 vi.mock('#db/billing-snapshot-store.js', () => ({
@@ -180,7 +184,9 @@ const detailRow = (label: string): HTMLElement => {
 const renderPage = (): void => {
   render(
     <MemoryRouter>
-      <UsagePage />
+      <TooltipProvider>
+        <UsagePage />
+      </TooltipProvider>
     </MemoryRouter>,
   );
 };
@@ -210,15 +216,14 @@ describe('UsagePage', () => {
 
     expect(screen.getByRole('heading', { name: 'Tau usage' })).toBeInTheDocument();
     expect(screen.getByText(/Usage through the Tau LLM provider/)).toBeInTheDocument();
-    expect(screen.getByTestId('credits-used')).toHaveTextContent('1.23 credits');
-    expect(screen.getByText(/Exactly 1\.2345 credits across 1 action/)).toBeInTheDocument();
-    expect(screen.getByTestId('available-balance')).toHaveTextContent('25 credits');
-    expect(screen.getByText('Paid plan: 20')).toBeInTheDocument();
-    expect(screen.getByText('Purchased: 5')).toBeInTheDocument();
-    expect(screen.getByText('Promotional: 0')).toBeInTheDocument();
-    expect(screen.getByText('Pending issuance: 1')).toBeInTheDocument();
-    expect(screen.getByText('Debt: 0')).toBeInTheDocument();
-    expect(screen.getByTestId('reserved-credits')).toHaveTextContent('4 credits');
+    expect(screen.getByTestId('credits-used')).toHaveTextContent('1 credit used');
+    expect(screen.getByText('Across 1 action in the selected range')).toBeInTheDocument();
+    expect(screen.getByTestId('purchased-balance')).toHaveTextContent('4 credits available');
+    expect(screen.getByText('<1% left')).toBeInTheDocument();
+    expect(screen.getByText('Pending issuance: 1 credit')).toBeInTheDocument();
+    expect(screen.getByTestId('reserved-credits')).toHaveTextContent('Monthly credits: 3 credits');
+    expect(screen.getByTestId('reserved-credits')).toHaveTextContent('Purchased credits: 1 credit');
+    expect(screen.queryByText('Available balance')).not.toBeInTheDocument();
     expect(screen.getByText(/Held for work in flight/)).toBeInTheDocument();
     expect(screen.getByText('2026-09-01 to 2026-09-12 (UTC)')).toBeInTheDocument();
     expect(screen.getByText('Luna')).toBeInTheDocument();
@@ -227,14 +232,25 @@ describe('UsagePage', () => {
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
   });
 
-  it('opens the per-action credit explanation with exact credits, tokens and rates', async () => {
+  it('shows positive sub-credit usage without decimals or a false zero', () => {
+    useUsageSnapshot.mockReturnValue({
+      status: 'ready',
+      snapshot: { ...snapshot, totals: { ...snapshot.totals, netUsedCreditAtoms: '4000' } },
+      retry: vi.fn(),
+    });
+    renderPage();
+    expect(screen.getByTestId('credits-used')).toHaveTextContent('<1 credit used');
+    expect(screen.getByTestId('purchased-balance')).toHaveTextContent('4 credits available');
+  });
+
+  it('opens the per-action credit explanation with whole credits, tokens and rates', async () => {
     renderPage();
 
     expect(screen.queryByTestId('usage-event-detail')).not.toBeInTheDocument();
     await userEvent.click(screen.getByText('agent'));
 
     const detail = screen.getByTestId('usage-event-detail');
-    expect(detail).toHaveTextContent('1.2345 credits');
+    expect(detail).toHaveTextContent('1 credit');
     expect(detail).toHaveTextContent('Authorized maximum');
     expect(detail).toHaveTextContent('Cache read');
     expect(detail).toHaveTextContent('Reasoning (of output)');
@@ -384,7 +400,7 @@ describe('UsagePage', () => {
     useUsageSnapshot.mockReturnValue({ status: 'unable-to-refresh', snapshot, retry });
     renderPage();
 
-    expect(screen.getByTestId('credits-used')).toHaveTextContent('1.23 credits');
+    expect(screen.getByTestId('credits-used')).toHaveTextContent('1 credit used');
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(retry).toHaveBeenCalled();
   });
@@ -419,7 +435,7 @@ describe('UsagePage', () => {
     expect(screen.getByTestId('usage-freshness')).toHaveTextContent(
       /Offline — saved usage for a@example.test, last updated .+\. Reconnect for the latest usage\./u,
     );
-    expect(screen.getByTestId('credits-used')).toHaveTextContent('1.23 credits');
+    expect(screen.getByTestId('credits-used')).toHaveTextContent('1 credit used');
     expect(screen.queryByRole('button', { name: /Models/u })).not.toBeInTheDocument();
   });
 
@@ -437,7 +453,7 @@ describe('UsagePage', () => {
     useCredits.mockReturnValue(undefined);
     renderPage();
 
-    expect(screen.queryByTestId('available-balance')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('purchased-balance')).not.toBeInTheDocument();
     expect(screen.queryByTestId('reserved-credits')).not.toBeInTheDocument();
     expect(screen.getAllByText('Balance unavailable')).toHaveLength(2);
   });
@@ -449,12 +465,12 @@ describe('UsagePage', () => {
     const rows = screen.getAllByRole('row').filter((row) => row.closest('[data-testid="reserved-table"]') !== null);
     expect(rows).toHaveLength(3);
     expect(rows[1]).toHaveTextContent('Astra');
-    expect(rows[1]).toHaveTextContent('308.43');
+    expect(rows[1]).toHaveTextContent('308');
     expect(rows[1]).toHaveTextContent('2 minutes ago');
     expect(rows[1]).toHaveTextContent('Running');
     /* Past `releaseAfter`, the reserve is coming back whatever the dispatch state says. */
     expect(rows[2]).toHaveTextContent('gpt-5.6-luna');
-    expect(rows[2]).toHaveTextContent('6.59');
+    expect(rows[2]).toHaveTextContent('7');
     expect(rows[2]).toHaveTextContent('Being released');
   });
 

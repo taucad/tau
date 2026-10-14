@@ -364,7 +364,7 @@ export const launchDesktopApp = async (options: {
       ([key, value]) =>
         key.startsWith('TAU_E2E_') && key.endsWith('_MANUAL') && value !== undefined && value !== 'false',
     );
-  const snapshots = manual || configuredSnapshots !== 'false';
+  const snapshots = configuredSnapshots !== 'false';
   const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
   const startupNetworkLogPath = options.captureStartupNetwork ? join(userData, 'startup-network.json') : undefined;
   /* A fixed, already-lowercase leaf inside the random parent: the workspace
@@ -546,7 +546,14 @@ export const launchDesktopApp = async (options: {
     recordStartupPhase('domcontentloaded.after', page.url());
     // Main bootstrap still awaits its initial loadURL after DOM readiness.
     recordStartupPhase('initial-app-load.before', page.url());
-    await page.waitForURL((url) => url.protocol === 'app:' && url.host === 'tau', { waitUntil: 'load' });
+    const devRenderer = packaged
+      ? undefined
+      : (options.env?.['ELECTRON_RENDERER_URL'] ?? process.env['ELECTRON_RENDERER_URL']);
+    await page.waitForURL(
+      (url) =>
+        devRenderer ? url.origin === new URL(devRenderer).origin : url.protocol === 'app:' && url.host === 'tau',
+      { waitUntil: 'load' },
+    );
     recordStartupPhase('initial-app-load.after', page.url());
     if (options.windowTitle !== undefined) {
       const ownedWindow = await application.browserWindow(page);

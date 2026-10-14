@@ -7,7 +7,7 @@ import type { MachineSettingsHandle } from '#components/print/use-machine-settin
 import type { BambuStudioMode } from '#components/print/use-bambu-studio.js';
 import { MachineProfiles } from '#components/print/machine-profiles.js';
 
-vi.mock('#components/geometry/parameters/parameter-select.js', () => ({
+vi.mock('@taucad/viewer/parameters/parameter-select', () => ({
   ParameterSelect: ({ value }: { value: string }) => <div>{value}</div>,
 }));
 

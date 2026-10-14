@@ -561,6 +561,16 @@ fn flatten(
             .unwrap_or_else(|| format!("Shape {}", node_ordinal + 1));
         let matrix = world[node.index()];
         let mut position_segments = std::collections::HashMap::new();
+        // EXT_mesh_manifold declares one manifold over its manifoldPrimitive's
+        // POSITION accessor; the mesh's primitives (one per Manifold run) over
+        // that accessor are slices of it, so they form one material partition.
+        let manifold_position = json
+            .pointer(&format!(
+                "/meshes/{}/extensions/EXT_mesh_manifold/manifoldPrimitive/attributes/POSITION",
+                mesh.index()
+            ))
+            .and_then(serde_json::Value::as_u64);
+        let mut manifold_partition = None;
         for (primitive_ordinal, primitive) in mesh.primitives().enumerate() {
             if primitive.mode() != Mode::Triangles {
                 continue;
@@ -568,10 +578,19 @@ fn flatten(
             let Some(attribute) = primitive.get(&Semantic::Positions) else {
                 continue;
             };
-            let (vertex_start, vertex_count) =
-                if let Some(&segment) = position_segments.get(&attribute.index()) {
-                    segment
-                } else {
+            let (vertex_start, vertex_count) = if let Some(&segment) =
+                position_segments.get(&attribute.index())
+            {
+                segment
+            } else {
+                let vertex_start = u32::try_from(positions.len()).map_err(|_| {
+                    MeshDecodeError::new(
+                        MeshDecodeErrorKind::LimitExceeded,
+                        "Mesh position count exceeds the retained u32 index profile.",
+                    )
+                })?;
+                // gltf 1.4.1 underflows reading a zero-count accessor.
+                if attribute.count() > 0 {
                     let reader = primitive
                         .reader(|buffer| buffers.get(buffer.index()).map(BufferBytes::as_slice));
                     let source = reader.read_positions().ok_or_else(|| {
@@ -580,40 +599,53 @@ fn flatten(
                             "A POSITION accessor could not be read from its supplied buffer.",
                         )
                     })?;
-                    let vertex_start = u32::try_from(positions.len()).map_err(|_| {
-                        MeshDecodeError::new(
-                            MeshDecodeErrorKind::LimitExceeded,
-                            "Mesh position count exceeds the retained u32 index profile.",
-                        )
-                    })?;
                     positions.extend(source.map(|point| transform(matrix, point, scale)));
-                    let vertex_count = u32::try_from(positions.len() - vertex_start as usize)
-                        .map_err(|_| {
-                            MeshDecodeError::new(
-                                MeshDecodeErrorKind::LimitExceeded,
-                                "A POSITION accessor exceeds the retained u32 count profile.",
-                            )
-                        })?;
-                    vertex_start.checked_add(vertex_count).ok_or_else(|| {
+                }
+                let vertex_count =
+                    u32::try_from(positions.len() - vertex_start as usize).map_err(|_| {
                         MeshDecodeError::new(
                             MeshDecodeErrorKind::LimitExceeded,
-                            "Mesh position count exceeds the retained u32 index profile.",
+                            "A POSITION accessor exceeds the retained u32 count profile.",
                         )
                     })?;
-                    position_segments.insert(attribute.index(), (vertex_start, vertex_count));
-                    (vertex_start, vertex_count)
-                };
-            let primitive_index = u32::try_from(primitives.len()).map_err(|_| {
-                MeshDecodeError::new(
-                    MeshDecodeErrorKind::LimitExceeded,
-                    "Primitive count exceeds the retained u32 index profile.",
-                )
-            })?;
-            primitives.push(Primitive {
-                name: format!("{name}#{primitive_ordinal}"),
-                vertex_start,
-                vertex_count,
-            });
+                vertex_start.checked_add(vertex_count).ok_or_else(|| {
+                    MeshDecodeError::new(
+                        MeshDecodeErrorKind::LimitExceeded,
+                        "Mesh position count exceeds the retained u32 index profile.",
+                    )
+                })?;
+                position_segments.insert(attribute.index(), (vertex_start, vertex_count));
+                (vertex_start, vertex_count)
+            };
+            let manifold = manifold_position == Some(attribute.index() as u64);
+            let primitive_index = match manifold_partition {
+                Some(index) if manifold => index,
+                _ => {
+                    let index = u32::try_from(primitives.len()).map_err(|_| {
+                        MeshDecodeError::new(
+                            MeshDecodeErrorKind::LimitExceeded,
+                            "Primitive count exceeds the retained u32 index profile.",
+                        )
+                    })?;
+                    primitives.push(Primitive {
+                        name: format!("{name}#{primitive_ordinal}"),
+                        vertex_start,
+                        vertex_count,
+                    });
+                    if manifold {
+                        manifold_partition = Some(index);
+                    }
+                    index
+                }
+            };
+            // An empty index run (Manifold can emit one) adds no triangles, and
+            // gltf 1.4.1 underflows reading it.
+            if primitive
+                .indices()
+                .is_some_and(|indices| indices.count() == 0)
+            {
+                continue;
+            }
             let reader =
                 primitive.reader(|buffer| buffers.get(buffer.index()).map(BufferBytes::as_slice));
             let segment = (vertex_start, vertex_count, primitive_index);
@@ -706,6 +738,7 @@ mod tests {
 
     use super::*;
     use crate::analysis::mesh::analyze;
+    use crate::budget::Budget;
 
     fn resource_fixture(uri: Option<&str>) -> (Vec<u8>, Vec<u8>) {
         let mut buffer = Vec::new();
@@ -792,6 +825,69 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["part#0", "part#1"]
         );
+    }
+
+    #[test]
+    fn ext_mesh_manifold_runs_form_one_primitive_partition() {
+        // A closed tetrahedron split into two open runs over one POSITION accessor.
+        let mut buffer = Vec::new();
+        for value in [
+            0.0_f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0,
+        ] {
+            buffer.extend_from_slice(&value.to_le_bytes());
+        }
+        for index in [0_u16, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3] {
+            buffer.extend_from_slice(&index.to_le_bytes());
+        }
+        // Accessor 4 is a second POSITION accessor over the same points;
+        // accessor 5 is an empty index run at the end of its buffer view.
+        let document = |extension: &str, extra: &str, nodes: &str, roots: &str| {
+            format!(
+                r#"{{"asset":{{"version":"2.0"}},"buffers":[{{"byteLength":72}}],"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":48}},{{"buffer":0,"byteOffset":48,"byteLength":24}}],"accessors":[{{"bufferView":0,"componentType":5126,"count":4,"type":"VEC3","min":[0,0,0],"max":[1,1,1]}},{{"bufferView":1,"componentType":5123,"count":12,"type":"SCALAR"}},{{"bufferView":1,"componentType":5123,"count":6,"type":"SCALAR"}},{{"bufferView":1,"byteOffset":12,"componentType":5123,"count":6,"type":"SCALAR"}},{{"bufferView":0,"componentType":5126,"count":4,"type":"VEC3","min":[0,0,0],"max":[1,1,1]}},{{"bufferView":1,"byteOffset":24,"componentType":5123,"count":0,"type":"SCALAR"}}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0}},"indices":2}},{{"attributes":{{"POSITION":0}},"indices":3}}{extra}]{extension}}}],"nodes":[{nodes}],"scenes":[{{"nodes":[{roots}]}}],"scene":0}}"#
+            )
+            .into_bytes()
+        };
+        let decode = |json: Vec<u8>| {
+            decode_glb(&glb(&json, &buffer), &ResourceBundle::default(), 1.0)
+                .unwrap()
+                .record
+        };
+        let names = |record: &MeshAnalysisRecord| -> Vec<String> {
+            record.primitives.iter().map(|p| p.name.clone()).collect()
+        };
+        let material = |record: &MeshAnalysisRecord| {
+            super::super::material::clusters(record, 0.0, &Budget::new(100_000), u64::MAX)
+        };
+        let declared = r#","extensions":{"EXT_mesh_manifold":{"manifoldPrimitive":{"attributes":{"POSITION":0},"indices":1,"mode":4}}}"#;
+        let part = r#"{"name":"part","mesh":0}"#;
+        let manifold = decode(document(declared, "", part, "0"));
+        assert_eq!(manifold.triangle_primitives, [0, 0, 0, 0]);
+        assert_eq!(names(&manifold), ["part#0"]);
+        assert_eq!(material(&manifold).unwrap(), [vec![0, 1, 2, 3]]);
+        // Without a declared manifold POSITION the runs stay distinct open operands.
+        for extension in ["", r#","extensions":{"EXT_mesh_manifold":{}}"#] {
+            let record = decode(document(extension, "", part, "0"));
+            assert_eq!(record.triangle_primitives, [0, 0, 1, 1]);
+            assert!(material(&record).is_err());
+        }
+        // A primitive over another POSITION accessor stays its own partition.
+        let extra = r#",{"attributes":{"POSITION":4},"indices":1}"#;
+        let record = decode(document(declared, extra, part, "0"));
+        assert_eq!(record.triangle_primitives, [0, 0, 0, 0, 1, 1, 1, 1]);
+        assert_eq!(names(&record), ["part#0", "part#2"]);
+        // An empty run adds no triangles; undeclared, it keeps its own row.
+        let empty = r#",{"attributes":{"POSITION":0},"indices":5}"#;
+        let record = decode(document(declared, empty, part, "0"));
+        assert_eq!(record.triangle_primitives, [0, 0, 0, 0]);
+        assert_eq!(names(&record), ["part#0"]);
+        let record = decode(document("", empty, part, "0"));
+        assert_eq!(record.triangle_primitives, [0, 0, 1, 1]);
+        assert_eq!(names(&record), ["part#0", "part#1", "part#2"]);
+        // Each node instancing the manifold mesh is its own partition.
+        let nodes = r#"{"name":"a","mesh":0},{"name":"b","mesh":0}"#;
+        let record = decode(document(declared, "", nodes, "0,1"));
+        assert_eq!(record.triangle_primitives, [0, 0, 0, 0, 1, 1, 1, 1]);
+        assert_eq!(names(&record), ["a#0", "b#0"]);
     }
 
     #[test]

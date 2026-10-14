@@ -46,6 +46,12 @@
  * | 36 | `connected --quotaRefused-->` after `readStorage` | **D18**: a refusal's figures keep the retained-packs figure it does not carry |
  * | 37 | `connected --pushed--> connected.reading` | **RV-W8 F9**: a push re-reads the stored figure |
  * | 38 | `connected.reading --quotaRefused(figures)--> connected.settled` | **RV-W8 F9**: a read that finishes after a refusal's figures cannot overwrite them |
+ * | 39 | `connected --connect(other)--> probing → connected` | **R2**: a new remote that refuses keeps the old one recorded, announced again, with the refusal and its attempt |
+ * | 40 | `connected --connect(other)--> probing → choosing → … → connected` | **R2**: the old remote is replaced only after the new one answered |
+ * | 41 | `connected --connect tau--> probing → connected` | **R2**: a refused Tau Cloud replacement keeps the Git remote, with its class |
+ * | 42 | `probing --cancel--> connected` | **R2**: cancelling the probe keeps the old remote and records no refusal |
+ * | 43 | `reconnectRequired --connect(other)--> probing → reconnectRequired` | **R2**: and a remote waiting on its credential stays waiting, unannounced |
+ * | 44 | `connected --connect(same)--> choosing` | **R2**: a re-grant or access change of the recorded remote is not probed |
  *
  * With rows 25–27 every transition in the machine has a row (W12 review R6).
  */
@@ -59,7 +65,7 @@ import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 import * as machineModule from '#remote.machine.js';
-import { remoteMachine, selectRemoteFacet } from '#remote.machine.js';
+import { remoteIgnoredEvents, remoteMachine, selectRemoteFacet } from '#remote.machine.js';
 import { reauthorizationRequired } from '#remotes.js';
 import { RevisionPortError } from '#revision-port.js';
 import { createFakeParent } from '@taucad/xstate-testing/fakes';
@@ -137,6 +143,9 @@ const knownDefects: IgnoredEvents = {
   ],
 };
 
+/** The known defects, plus the events the machine drops on purpose and says so. */
+const ignoredEvents: IgnoredEvents = { remote: [...(knownDefects['remote'] ?? []), ...remoteIgnoredEvents] };
+
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
 
@@ -193,6 +202,7 @@ const start = (
   const actors: RemoteActors = {
     readRemote: reads(undefined),
     writeRemote: createAsyncLogic({ run: async () => ({ remote: tauRemote }) }),
+    probe: createAsyncLogic({ run: async (): Promise<void> => undefined }),
     removeRemote: createAsyncLogic({ run: async (): Promise<void> => undefined }),
     authorize: createAsyncLogic({ run: async (): Promise<void> => undefined }),
     validate: createAsyncLogic({
@@ -204,7 +214,7 @@ const start = (
     readStorage: createAsyncLogic({ run: async (): Promise<RemoteStorage | undefined> => undefined }),
     ...overrides,
   };
-  const guard = guardActors({ ignore: knownDefects });
+  const guard = guardActors({ ignore: ignoredEvents });
   const actor = createActor(remoteMachine.provide({ actors }), {
     input: { projectId: 'p1', ...(parentRef === undefined ? {} : { parentRef }) },
     clock: new StepClock(),
@@ -228,7 +238,7 @@ const settle = async (): Promise<void> => {
 describe('remoteMachine', () => {
   it('tells its parent when the remote comes and goes, so a sibling scheduler starts on the fact (W18 review DEF-6b, P53)', async () => {
     const received: Array<{ type: string }> = [];
-    const guard = guardActors({ ignore: knownDefects });
+    const guard = guardActors({ ignore: ignoredEvents });
     const parent = createActor(
       setup({}).createMachine({
         on: {
@@ -909,6 +919,7 @@ describe('remoteMachine', () => {
       ]);
     const publicEvents: readonly RemoteMachineEvent[] = [
       { type: 'connect', kind: 'tau' },
+      { type: 'connect', kind: 'git', url: 'https://github.com/o/r.git' },
       { type: 'connect', kind: 'none' },
       { type: 'authorized' },
       { type: 'validated', storage: { used: 1, quota: 2 } },
@@ -923,7 +934,7 @@ describe('remoteMachine', () => {
       serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
     };
 
-    expect(unansweredEvents(remoteMachine, { ...options, ignore: knownDefects['remote'] })).toEqual([]);
+    expect(unansweredEvents(remoteMachine, { ...options, ignore: ignoredEvents['remote'] })).toEqual([]);
     expect(unreachedStates(remoteMachine, options)).toEqual([]);
   });
 
@@ -1079,5 +1090,253 @@ describe('remoteMachine', () => {
       storage: { used: 1024 ** 3 + 1, quota: 1024 ** 3 },
     });
     actor.stop();
+  });
+  /*
+   * R2: *Change backup* used to write the new remote over the old one before
+   * asking it anything, so a refused address cost the backup that worked.
+   */
+  describe('replacing a recorded remote (R2)', () => {
+    const githubRemote: RemoteRecord = {
+      name: 'github-12',
+      url: 'https://github.com/o/design.git',
+      kind: 'git',
+      provider: 'github',
+      repositoryId: '12',
+    };
+    const replacement = {
+      type: 'connect',
+      kind: 'git',
+      url: 'https://github.com/o/r.git',
+      provider: 'github',
+      repositoryId: '99',
+    } as const;
+
+    /* Every write and removal the machine asks for, so "nothing was replaced" is an observation. */
+    const recording = (): Readonly<{ writes: unknown[]; removals: unknown[]; overrides: Overrides }> => {
+      const writes: unknown[] = [];
+      const removals: unknown[] = [];
+      return {
+        writes,
+        removals,
+        overrides: {
+          writeRemote: createAsyncLogic({
+            run: async ({ input }): Promise<{ remote: RemoteRecord }> => {
+              writes.push(input);
+              return { remote: { name: 'github-99', url: replacement.url, kind: 'git', provider: 'github' } };
+            },
+          }),
+          removeRemote: createAsyncLogic({
+            run: async ({ input }): Promise<void> => {
+              removals.push(input);
+            },
+          }),
+        },
+      };
+    };
+
+    it('39: keeps the old remote recorded and announced, with the refusal, when the new one refuses', async () => {
+      const probes: unknown[] = [];
+      const { writes, removals, overrides } = recording();
+      const parent = createFakeParent();
+      const { actor } = start(
+        {
+          ...overrides,
+          readRemote: reads(githubRemote),
+          probe: createAsyncLogic({
+            run: async ({ input }): Promise<void> => {
+              probes.push(input);
+              await Promise.resolve();
+              throw new RevisionPortError(
+                'REMOTE_NOT_FOUND',
+                'This remote has no repository at this address for your account.',
+              );
+            },
+          }),
+        },
+        parent.ref,
+      );
+      await settle();
+
+      actor.send(replacement);
+      await settle();
+
+      expect(probes).toStrictEqual([
+        { projectId: 'p1', kind: 'git', url: replacement.url, provider: 'github', repositoryId: '99' },
+      ]);
+      expect(writes).toStrictEqual([]);
+      expect(removals).toStrictEqual([]);
+      expect(actor.getSnapshot().matches('connected')).toBe(true);
+      expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({
+        kind: 'git',
+        url: githubRemote.url,
+        phase: 'connected',
+        error: undefined,
+        refusedReplacement: {
+          kind: 'git',
+          url: replacement.url,
+          error: 'This remote has no repository at this address for your account.',
+          reason: 'notFound',
+        },
+      });
+      /* The root retired `sync` on `connect`; the remote that stays is handed back to it. */
+      expect(parent.events.filter((event) => event.type === 'remoteConnected')).toStrictEqual([
+        { type: 'remoteConnected', kind: 'git', url: githubRemote.url, name: githubRemote.name },
+      ]);
+      expect(selectRemoteFacet(actor.getSnapshot()).refusedReplacement?.attempt).toBe(1);
+
+      /* The same refusal again is a new one, so a host can tell it from the last. */
+      actor.send(replacement);
+      await settle();
+      expect(selectRemoteFacet(actor.getSnapshot()).refusedReplacement).toMatchObject({
+        url: replacement.url,
+        attempt: 2,
+      });
+      expect(writes).toStrictEqual([]);
+      actor.stop();
+      parent.stop();
+    });
+
+    it('40: replaces the old remote only after the new one answered', async () => {
+      const order: string[] = [];
+      const { writes, overrides } = recording();
+      const { actor } = start({
+        ...overrides,
+        readRemote: reads(githubRemote),
+        probe: createAsyncLogic({
+          run: async (): Promise<void> => {
+            order.push('probe');
+          },
+        }),
+        writeRemote: createAsyncLogic({
+          run: async ({ input }): Promise<{ remote: RemoteRecord }> => {
+            order.push('write');
+            writes.push(input);
+            return { remote: { name: 'github-99', url: replacement.url, kind: 'git', provider: 'github' } };
+          },
+        }),
+      });
+      await settle();
+
+      actor.send(replacement);
+      await settle();
+      await settle();
+
+      expect(order).toStrictEqual(['probe', 'write']);
+      expect(writes).toStrictEqual([
+        { projectId: 'p1', kind: 'git', url: replacement.url, provider: 'github', repositoryId: '99' },
+      ]);
+      expect(actor.getSnapshot().matches('connected')).toBe(true);
+      expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({ url: replacement.url });
+      expect(selectRemoteFacet(actor.getSnapshot()).refusedReplacement).toBeUndefined();
+      actor.stop();
+    });
+
+    it('41: keeps the Git remote when Tau Cloud refuses to replace it, with the refusal’s class', async () => {
+      const { writes, overrides } = recording();
+      const { actor } = start({
+        ...overrides,
+        readRemote: reads(githubRemote),
+        probe: createAsyncLogic({
+          run: async ({ input }): Promise<void> => {
+            expect(input.kind).toBe('tau');
+            await Promise.resolve();
+            throw new RevisionPortError('REMOTE_NOT_ENTITLED', 'Syncing files to Tau Cloud is a paid plan feature.');
+          },
+        }),
+      });
+      await settle();
+
+      actor.send({ type: 'connect', kind: 'tau' });
+      await settle();
+
+      expect(writes).toStrictEqual([]);
+      expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({
+        kind: 'git',
+        url: githubRemote.url,
+        phase: 'connected',
+        refusedReplacement: { kind: 'tau', reason: 'notEntitled' },
+      });
+      actor.stop();
+    });
+
+    it('42: cancelling the probe keeps the old remote and records no refusal', async () => {
+      const { writes, removals, overrides } = recording();
+      const { actor } = start({ ...overrides, readRemote: reads(githubRemote), probe: pending() });
+      await settle();
+
+      actor.send(replacement);
+      await settle();
+      expect(selectRemoteFacet(actor.getSnapshot()).phase).toBe('connecting');
+      actor.send({ type: 'cancel' });
+      await settle();
+
+      expect(writes).toStrictEqual([]);
+      expect(removals).toStrictEqual([]);
+      expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({
+        kind: 'git',
+        url: githubRemote.url,
+        phase: 'connected',
+      });
+      expect(selectRemoteFacet(actor.getSnapshot()).refusedReplacement).toBeUndefined();
+      actor.stop();
+    });
+
+    it('43: a remote waiting on its credential stays waiting, unannounced, when its replacement refuses', async () => {
+      const parent = createFakeParent();
+      const { actor } = start(
+        {
+          writeRemote: createAsyncLogic({ run: async () => ({ remote: githubRemote }) }),
+          validate: reauthorizing('Your GitHub connection needs to be renewed.'),
+          probe: failing('Repository not found.'),
+        },
+        parent.ref,
+      );
+      await settle();
+      actor.send({ type: 'connect', kind: 'git', url: githubRemote.url, provider: 'github', repositoryId: '12' });
+      await settle();
+      expect(actor.getSnapshot().matches('reconnectRequired')).toBe(true);
+
+      actor.send(replacement);
+      await settle();
+
+      expect(actor.getSnapshot().matches('reconnectRequired')).toBe(true);
+      expect(actor.getSnapshot().context.remote).toStrictEqual(githubRemote);
+      expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({
+        error: 'Your GitHub connection needs to be renewed.',
+        refusedReplacement: { url: replacement.url, error: 'Repository not found.' },
+      });
+      expect(parent.events.filter((event) => event.type === 'remoteConnected')).toStrictEqual([]);
+      actor.stop();
+      parent.stop();
+    });
+
+    it('44: does not probe a re-grant or an access change of the recorded remote', async () => {
+      const probes: unknown[] = [];
+      const { writes, overrides } = recording();
+      const { actor } = start({
+        ...overrides,
+        readRemote: reads(githubRemote),
+        probe: createAsyncLogic({
+          run: async ({ input }): Promise<void> => {
+            probes.push(input);
+          },
+        }),
+      });
+      await settle();
+
+      actor.send({
+        type: 'connect',
+        kind: 'git',
+        url: githubRemote.url,
+        provider: 'github',
+        repositoryId: '12',
+        fetchOnly: true,
+      });
+      await settle();
+
+      expect(probes).toStrictEqual([]);
+      expect(writes).toHaveLength(1);
+      actor.stop();
+    });
   });
 });

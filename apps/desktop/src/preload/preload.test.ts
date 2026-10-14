@@ -1,6 +1,9 @@
+import type { BrowserBridge, BrowserSnapshot } from '@taucad/types/browser';
+import { browserChannels } from '@taucad/types/browser';
+import { mock } from 'vitest-mock-extended';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
-import { quitChannels, slicersChannels } from '#shared/desktop-bootstrap.js';
+import { openDirectoryChannel, quitChannels, slicersChannels } from '#shared/desktop-bootstrap.js';
 import { generatedImageIpcChannel, isQuickLookEnabled } from '#shared/quick-look.js';
 
 const state = vi.hoisted(() => ({
@@ -128,5 +131,50 @@ describe('desktop preload Quick Look bridge', () => {
     const tau = state.exposed.get('tau') as Readonly<Record<string, unknown>>;
 
     expect('quickLook' in tau).toBe(isQuickLookEnabled());
+  });
+});
+
+describe('native directory access', () => {
+  it('should advertise the native file manager and forward the selected directory', async () => {
+    const tau = state.exposed.get('tau') as {
+      directories: { openLabel: string; openIcon: string; open(path: string): Promise<void> };
+    };
+    expect(tau.directories.openLabel).toBe(
+      process.platform === 'darwin'
+        ? 'Open in Finder'
+        : process.platform === 'win32'
+          ? 'Open in File Explorer'
+          : 'Open in file manager',
+    );
+    expect(tau.directories.openIcon).toBe(
+      process.platform === 'darwin' ? 'finder' : process.platform === 'win32' ? 'file-explorer' : 'folder',
+    );
+    await tau.directories.open('/picked/Project');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(openDirectoryChannel, '/picked/Project');
+  });
+});
+
+describe('desktop browser bridge', () => {
+  it('should expose a finite command API and strip Electron events from subscriptions', async () => {
+    const bridge = state.exposed.get('tauBrowser') as BrowserBridge;
+    expect(Object.keys(bridge).sort()).toEqual(['command', 'subscribe']);
+    const snapshot: BrowserSnapshot = {
+      tabs: [],
+      settings: { searchEngine: 'duckduckgo', rememberHistory: true, defaultZoom: 1 },
+      history: [],
+      downloads: [],
+    };
+    vi.mocked(ipcRenderer.invoke).mockReset().mockResolvedValue(snapshot);
+    await expect(bridge.command({ kind: 'snapshot' })).resolves.toEqual(snapshot);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(browserChannels.command, { kind: 'snapshot' });
+    const listener = vi.fn();
+    const unsubscribe = bridge.subscribe(listener);
+    const registration = vi
+      .mocked(ipcRenderer.on)
+      .mock.calls.findLast(([channel]) => channel === browserChannels.state)!;
+    registration[1](mock<Electron.IpcRendererEvent>(), snapshot);
+    expect(listener).toHaveBeenCalledExactlyOnceWith(snapshot);
+    unsubscribe();
+    expect(ipcRenderer.off).toHaveBeenCalledWith(browserChannels.state, registration[1]);
   });
 });

@@ -64,9 +64,6 @@ internal sealed record CompilationTimings(
 internal static class CompilationService
 {
     private const string CompilerContractVersion = "4";
-    private const int MaximumSourceFiles = 256;
-    private const int MaximumSourceBytes = 8 * 1024 * 1024;
-    private const int MaximumSingleSourceBytes = 1024 * 1024;
     private const int MaximumSyntaxDepth = 512;
     private const int MaximumDiagnostics = 256;
     private static readonly object CacheLock = new();
@@ -191,21 +188,9 @@ internal static class CompilationService
         {
             throw CompilationError("The PicoGK project contains no C# source files.");
         }
-        if (paths.Length > MaximumSourceFiles)
-        {
-            throw CompilationError($"The PicoGK project exceeds {MaximumSourceFiles} C# source files.");
-        }
-
-        var totalBytes = 0L;
         using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var files = paths.Select(path =>
         {
-            var fileBytes = new FileInfo(path).Length;
-            totalBytes = checked(totalBytes + fileBytes);
-            if (fileBytes > MaximumSingleSourceBytes || totalBytes > MaximumSourceBytes)
-            {
-                throw CompilationError("The PicoGK project exceeds its C# source byte limit.");
-            }
             var relativePath = Path.GetRelativePath(workspace, path).Replace('\\', '/');
             var content = File.ReadAllBytes(path);
             AppendDigest(digest, Encoding.UTF8.GetBytes(relativePath));

@@ -157,12 +157,9 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           matcherWallBackstop: runOptions.matcherWallBackstop,
           forensic: runOptions.forensic,
           bundleCache,
-          ...(options.modelLoader ? { modelLoader: options.modelLoader } : {}),
-          ...(options.nativeAssertions ? { nativeAssertions: options.nativeAssertions } : {}),
+          nativeAssertions: options.nativeAssertions,
           ...(options.nativeModelLoader ? { nativeModelLoader: options.nativeModelLoader } : {}),
-          ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
           ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
-          ...(options.internalProfile ? { internalProfile: options.internalProfile } : {}),
         }).catch(
           (error: unknown): GeoSpecRunResult => ({
             success: false,

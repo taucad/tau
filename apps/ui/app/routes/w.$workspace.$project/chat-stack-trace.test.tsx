@@ -16,6 +16,13 @@ const { mockCreateChat, mockSubmit, mockSetFocusedChatId, mockEditorSend, mockRe
   }),
 );
 
+const editorSnapshot = { context: { focusedChatId: 'chat-test' } };
+const editorRef = {
+  send: mockEditorSend,
+  getSnapshot: () => editorSnapshot,
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
+
 let mockKernelIssues = new Map<string, KernelIssue[]>();
 let mockLatestGeometryOutcome: 'success' | 'failure' | undefined;
 let mockCadTags = new Set<string>();
@@ -35,7 +42,7 @@ let mockAgent: CadAgentConfigInput = {
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     getMainFilename: async () => 'main.scad',
-    editorRef: { send: mockEditorSend },
+    editorRef,
     projectId: 'project_test',
     projectRef: mockProjectRef,
     setFocusedChatId: mockSetFocusedChatId,
@@ -96,7 +103,7 @@ vi.mock('#hooks/use-chat-snapshot.js', () => ({
   },
 }));
 
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useModifiers: () => ({ shift: true }),
 }));
 
@@ -116,7 +123,7 @@ vi.mock('#components/markdown/markdown-viewer.js', () => ({
   MarkdownViewer: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 
-vi.mock('#components/ui/key-shortcut.js', () => ({
+vi.mock('@taucad/ui/components/key-shortcut', () => ({
   KeyShortcut: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 
@@ -433,7 +440,9 @@ describe('ViewerIssues — in-place (shift not held) path', () => {
 
     // Override `useModifiers` for this describe block so the shift-not-held
     // path is exercised and the in-place chat-client submit fires.
-    const useModifiersMock = (await import('#hooks/use-keyboard.js')) as { useModifiers: () => { shift: boolean } };
+    const useModifiersMock = (await import('@taucad/ui/components/keyboard')) as {
+      useModifiers: () => { shift: boolean };
+    };
     useModifiersMock.useModifiers = () => ({ shift: false });
     shiftHeld = false;
   });

@@ -7,7 +7,7 @@
  * - The actions sit absolutely over the dissolved tail, so revealing them never
  *   moves the name; fine pointers see them on hover or focus, coarse pointers
  *   always (I3).
- * - The row's sentence is its link's tooltip and `aria-describedby` text.
+ * - The row's sentence is its link's `aria-describedby` text, with an optional tooltip.
  * - A row being renamed carries the focus outline; the field inside draws none.
  */
 
@@ -177,13 +177,13 @@ export function SidebarRowMenuButton({
 }
 
 /**
- * The row's name link, with its sentence one hover or focus away (D1).
+ * The row's name link, with an accessible sentence and optional tooltip.
  *
  * A pending route only sets `aria-busy` here; its spinner belongs to the row's
  * status slot (`StatusMark`), so loading never moves the name.
  *
  * @param props - The link's target and state, the name, and the sentence.
- * @returns The link, its tooltip and its description.
+ * @returns The link, its description and optional tooltip.
  * @public
  */
 export function SidebarRowLink({
@@ -193,6 +193,7 @@ export function SidebarRowLink({
   descriptionId,
   isActive,
   isPending,
+  hasTooltip = true,
   onClick,
   state,
 }: {
@@ -202,6 +203,7 @@ export function SidebarRowLink({
   readonly descriptionId: string;
   readonly isActive: boolean;
   readonly isPending: boolean;
+  readonly hasTooltip?: boolean;
   readonly onClick?: () => void;
   readonly state?: { readonly openChat: true };
 }): React.JSX.Element {
@@ -227,10 +229,14 @@ export function SidebarRowLink({
   }
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>{link}</TooltipTrigger>
-        <TooltipContent side='right'>{sentence}</TooltipContent>
-      </Tooltip>
+      {hasTooltip ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{link}</TooltipTrigger>
+          <TooltipContent side='right'>{sentence}</TooltipContent>
+        </Tooltip>
+      ) : (
+        link
+      )}
       <span id={descriptionId} className='sr-only'>
         {sentence}
       </span>

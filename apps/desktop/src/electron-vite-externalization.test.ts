@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 // oxlint-disable-next-line no-restricted-imports -- Exercise the package script's actual staging boundary.
-import { copyGeoSpecNative, copyGeoSpecNativeAssembly, copyGeoSpecSourceRelink } from '../scripts/runtime-closure.mjs';
+import { copyGeoSpecNativeAssembly, copyGeoSpecSourceRelink } from '../scripts/runtime-closure.mjs';
 
 const appRoot = join(import.meta.dirname, '..');
 
@@ -33,7 +33,7 @@ describe('macOS GeoSpec assembly selection', () => {
 
   it('should select and finish copying a verified snapshot for the default assembly', () => {
     const source = readFileSync(join(appRoot, 'scripts/package-macos.mts'), 'utf8');
-    const mode = source.indexOf('parseMacosPackageMode(process.argv.slice(2))');
+    const mode = source.indexOf('parseMacosPackageMode(');
     const unsafeOutput = source.indexOf('Refusing unsafe package output root:');
     const selection = source.indexOf(
       "const selectedGeoSpecAssembly = process.env['TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT'];",
@@ -105,13 +105,13 @@ const matchesExternal = async (rule: unknown, id: string): Promise<boolean> => {
   return false;
 };
 
-type MainExternals = {
+type ProcessExternals = {
   readonly isExternal: (id: string) => Promise<boolean>;
   /** `externalizeDeps.include` as the config declares it. */
   readonly include: readonly string[];
 };
 
-const resolveMainExternals = async (): Promise<MainExternals> => {
+const resolveProcessExternals = async (processType: 'main' | 'preload' = 'main'): Promise<ProcessExternals> => {
   const electronVite = (await import(
     pathToFileURL(join(appRoot, 'node_modules/electron-vite/dist/index.js')).href
   )) as ElectronViteApi;
@@ -126,22 +126,22 @@ const resolveMainExternals = async (): Promise<MainExternals> => {
       'build',
       'production',
     );
-    const mainConfig = resolved.config?.['main'];
-    if (!mainConfig) {
-      throw new TypeError('electron-vite did not resolve a main config');
+    const processConfig = resolved.config?.[processType];
+    if (!processConfig) {
+      throw new TypeError(`electron-vite did not resolve a ${processType} config`);
     }
     const viteConfig = await vite.resolveConfig(
-      { ...mainConfig, configFile: false, logLevel: 'silent' },
+      { ...processConfig, configFile: false, logLevel: 'silent' },
       'build',
       'production',
     );
     const external = viteConfig.build.rolldownOptions?.external ?? viteConfig.build.rollupOptions?.external;
-    const declared = (mainConfig['build'] as { externalizeDeps?: { include?: readonly string[] } } | undefined)
+    const declared = (processConfig['build'] as { externalizeDeps?: { include?: readonly string[] } } | undefined)
       ?.externalizeDeps?.include;
-    if (!declared) {
+    if (!declared && processType === 'main') {
       throw new TypeError('electron-vite main config declares no externalizeDeps.include');
     }
-    return { isExternal: async (id: string) => matchesExternal(external, id), include: declared };
+    return { isExternal: async (id: string) => matchesExternal(external, id), include: declared ?? [] };
   } finally {
     process.chdir(previousDirectory);
     if (previousNodeEnvironment === undefined) {
@@ -153,37 +153,12 @@ const resolveMainExternals = async (): Promise<MainExternals> => {
 };
 
 describe('electron-vite main externalization', () => {
-  it('resolves the GeoSpec native STEP backend from the desktop runtime boundary', () => {
-    const require = createRequire(join(appRoot, 'package.json'));
-    expect(require.resolve('@taucad/geospec-engine/native/opencascade/single')).toMatch(/init\.js$/u);
-  });
-
-  it('instantiates GeoSpec STEP evidence from the staged native payload without workspace resolution', async () => {
-    const require = createRequire(join(appRoot, 'package.json'));
-    const source = dirname(require.resolve('@taucad/geospec-engine/package.json'));
-    const stage = await mkdtemp(join(tmpdir(), 'tau-geospec-stage-'));
-    try {
-      await copyGeoSpecNative(source, join(stage, 'node_modules'));
-      const output = execFileSync(
-        process.execPath,
-        [
-          '--input-type=module',
-          '-e',
-          "const { default: init } = await import('@taucad/geospec-engine/native/opencascade/single'); const module = await init(); console.log(typeof module.GeoSpecXdeReader);",
-        ],
-        { cwd: stage, encoding: 'utf8', timeout: 60_000 },
-      );
-      expect(output.trim()).toBe('function');
-    } finally {
-      await rm(stage, { recursive: true, force: true });
-    }
-  }, 90_000);
-
   it('bundles workspace sources and keeps host/runtime imports external', async () => {
-    const { isExternal, include } = await resolveMainExternals();
+    const { isExternal, include } = await resolveProcessExternals();
     expect(include).toContain('@taucad/geospec-engine-native');
     for (const id of [
       '@taucad/events',
+      '@taucad/types/browser',
       '@taucad/openrscad',
       '@taucad/middleware',
       '@taucad/filesystem',
@@ -201,8 +176,15 @@ describe('electron-vite main externalization', () => {
     }
   }, 60_000);
 
+  it('should bundle the browser contract and validator into the preload', async () => {
+    const { isExternal } = await resolveProcessExternals('preload');
+    expect(await isExternal('@taucad/types/browser')).toBe(false);
+    expect(await isExternal('zod')).toBe(false);
+    expect(await isExternal('electron')).toBe(true);
+  });
+
   it('declares runtime-loaded packages as direct dependencies', async () => {
-    const { include } = await resolveMainExternals();
+    const { include } = await resolveProcessExternals();
     const manifest = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')) as {
       readonly dependencies?: Readonly<Record<string, string>>;
     };

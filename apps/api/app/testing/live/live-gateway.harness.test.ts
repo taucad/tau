@@ -34,7 +34,9 @@ describe('live completion ceiling', () => {
   it('should ask for what a production turn asks for on every enabled catalog row', () => {
     expect(enabledRows.length).toBeGreaterThan(0);
     for (const row of enabledRows) {
-      expect(liveCompletionCeiling(row.id), row.id).toBe(requestedMaxTokens(row.details.maxTokens, undefined));
+      expect(liveCompletionCeiling(row.id), row.id).toBe(
+        requestedMaxTokens(row.details.maxTokens, undefined, liveSessionModel(row.id).reasoning),
+      );
     }
   });
 

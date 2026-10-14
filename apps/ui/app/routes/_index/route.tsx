@@ -2,8 +2,6 @@ import type { MetaFunction } from 'react-router';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { HomepageChatHero } from '#routes/_index/homepage-chat-hero.js';
 import { LegacyLanding } from '#routes/_index/legacy-landing.js';
-import { MarketingLanding } from '#routes/_index/marketing-landing.js';
-import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useFeature } from '#flags/use-feature.js';
 import type { Handle } from '#types/matches.types.js';
 import { metaConfig } from '#constants/meta.constants.js';
@@ -49,31 +47,16 @@ export const meta: MetaFunction = () => [
 export const handle: Handle = {
   enableOverflowY: true,
   enablePageFooter: true,
-  // App shell: off only for confirmed anonymous visitors once the marketing
-  // landing is enabled. Unresolved auth defaults to the local-first workspace.
-  enablePageWrapper: ({ authState, flags }) => (flags.marketingLanding ? authState !== 'anonymous' : true),
+  // The edge selects the website; the app always preserves local workspace access.
+  enablePageWrapper: true,
 };
 
-/**
- * Home route. Session-aware and flag-gated:
- *
- * - `marketingLanding` off → the legacy homepage (unchanged), in the app shell.
- * - flag on + confirmed signed out → marketing (own chrome, no app shell).
- * - flag on + signed in or unresolved → local projects inside the app shell.
- *
- * SSR output stays session-neutral so `/` remains CDN-cacheable. An unresolved
- * session changes presentation only; protected operations still use real auth.
- */
+/** Session-neutral app home; marketing is served by the edge before this app. */
 export default function WebHome(): React.JSX.Element {
   const marketingLanding = useFeature('marketingLanding');
-  const resolvedAuth = useResolvedAuth();
 
   if (!marketingLanding) {
     return <LegacyLanding />;
-  }
-
-  if (resolvedAuth === 'anonymous') {
-    return <MarketingLanding />;
   }
 
   return (

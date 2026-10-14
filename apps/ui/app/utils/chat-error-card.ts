@@ -39,6 +39,8 @@ const codeCards = {
   NETWORK_ERROR: { category: 'pausedTurn' },
   PROVIDER_UNAVAILABLE: { category: 'pausedTurn', normalized: errorCategory.overloaded },
   MALFORMED_RESPONSE: { category: 'pausedTurn' },
+  MODEL_OUTPUT_LIMIT: { category: 'pausedTurn' },
+  TOOL_RESULT_PERSISTENCE_FAILED: { category: 'pausedTurn' },
   UPSTREAM_REJECTED: { category: 'pausedTurn', normalized: errorCategory.server },
   SESSION_LOG_INTEGRITY: { category: 'historyTidy' },
   SUMMARY_REQUIRED: { category: 'historyTidy' },

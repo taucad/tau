@@ -79,17 +79,16 @@ try {
         { timeout: 30_000 },
       );
       const slider = page.getByRole('slider', { name: 'Turn the input' });
+      await page.waitForFunction(() => document.querySelector<HTMLInputElement>('#turn-input')?.value === '90');
+      // Range values snap to step=5 before the demonstration animation has finished.
       await page.waitForFunction(
-        () => document.querySelector<HTMLInputElement>('[aria-label="Turn the input"]')?.value === '90',
-      );
-      await page.evaluate(
         async () =>
-          new Promise<void>((resolve) => {
-            requestAnimationFrame(() =>
-              requestAnimationFrame(() => {
-                resolve();
-              }),
-            );
+          new Promise<boolean>((resolve) => {
+            const stage = document.querySelector<HTMLElement>('[data-hero-stage]');
+            const before = stage?.dataset['frames'];
+            setTimeout(() => {
+              resolve(stage?.dataset['frames'] === before);
+            }, 200);
           }),
       );
       const settled = await frames(page, '[data-hero-stage]');

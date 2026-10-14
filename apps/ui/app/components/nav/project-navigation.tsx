@@ -2,6 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import {
   ChevronRight,
+  Cloud,
   Copy,
   FolderOpen,
   PanelsTopLeft,
@@ -401,6 +402,7 @@ function ProjectNavigationItem({
         Share project
       </Item>
       <Item disabled={!project.slugs} onSelect={openSyncDetails}>
+        <Cloud aria-hidden />
         View sync status
       </Item>
       <Separator />

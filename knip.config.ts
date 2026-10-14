@@ -269,17 +269,8 @@ const config: KnipConfig = {
       ignoreUnresolved: [/^\.\/\+types\//u],
     },
     'apps/www': {
-      // The static builder loads browser scripts and stylesheets by path; these CLIs run directly from Node.
-      entry: [
-        'src/client.mjs',
-        'src/site.css',
-        'src/principle-diagrams.css',
-        'scripts/{build,serve,browser-check,check-story,render-assets,optimize-assets,capture-metal-hero,export-story-assets}.mjs',
-        'scripts/metal-hero-entry.mjs',
-        'tests/*.test.mjs',
-      ],
-      project: ['src/**/*.{mjs,css}', 'scripts/**/*.{mjs,js}', 'tests/**/*.mjs'],
-      ignore: ['public/**'],
+      entry: ['app/routes/**/*.{ts,tsx}', 'scripts/*.ts'],
+      project: ['app/**/*.{ts,tsx}', 'src/**/*.{ts,tsx,css}', 'scripts/**/*.ts', 'tests/**/*.{ts,tsx}'],
     },
     'apps/docs': {
       entry: ['app/routes/**/*.{ts,tsx}', 'vite-environment.d.ts'],

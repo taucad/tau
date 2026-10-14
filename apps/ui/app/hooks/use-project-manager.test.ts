@@ -2575,7 +2575,7 @@ describe('useProjectManager.createProject', () => {
     // An open browser prompt must not delay project creation.
     mockRequestHomeStoragePersistence.mockImplementationOnce(
       async () =>
-        new Promise<void>(() => {
+        new Promise<undefined>(() => {
           // Intentionally leave the browser permission request open.
         }),
     );

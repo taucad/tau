@@ -50,7 +50,7 @@ describe('Home project save observation', () => {
     fixture.writes.emit({ type: 'read', path: 'main.scad', data });
     fixture.writes.emit({ type: 'written', path: '.tau/records/chat.json', data, source: 'machine' });
     fixture.writes.emit({ type: 'batchWritten', paths: ['node_modules/lib.js', 'thumbnail.webp'], source: 'machine' });
-    fixture.remote.emit({ type: 'fileWritten', path: '.tau/revisions/objects/hash', backend: 'opfs' });
+    fixture.remote.emit({ type: 'fileWritten', path: '.git/objects/hash', backend: 'opfs' });
     fixture.remote.emit({ type: 'fileWritten', path: 'main.scad', backend: 'webaccess' });
     expect(request).not.toHaveBeenCalled();
     fixture.dispose();

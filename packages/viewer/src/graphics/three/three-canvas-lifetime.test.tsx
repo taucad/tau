@@ -3,11 +3,14 @@ import { act, render, cleanup } from '@testing-library/react';
 import { Canvas, createRoot, _roots, flushSync as flushThreeSync } from '@react-three/fiber';
 import { OrthographicCamera, PerspectiveCamera, WebGLCoordinateSystem } from 'three';
 import { WebGPURenderer } from 'three/webgpu';
-import { StrictMode } from 'react';
+import { Activity, StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
+import { WebglErrorBoundary } from '#cad/webgl-error-boundary.jsx';
 
-const allocation = vi.hoisted(() => ({ createRenderer: vi.fn() }));
+const allocation = vi.hoisted(() => ({
+  createRenderer: vi.fn<(preset: string, backend: string, canvas: HTMLCanvasElement) => Promise<WebGPURenderer>>(),
+}));
 vi.mock('#graphics/three/renderer.js', () => ({
   createRenderer: allocation.createRenderer,
 }));
@@ -62,7 +65,6 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
   let frameId = 0;
   let release: (() => void) | undefined;
   let width = 475;
-  let cleanupCallbacks = 0;
 
   const drain = async (): Promise<void> => {
     await act(async () => {
@@ -80,19 +82,6 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    cleanupCallbacks = 0;
-    const allocateTimeout = globalThis.setTimeout;
-    vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, cleanupDelay, ...args) => {
-      if (cleanupDelay !== 500) {
-        return allocateTimeout(callback, cleanupDelay, ...args);
-      }
-      return allocateTimeout(() => {
-        cleanupCallbacks += 1;
-        if (typeof callback === 'function') {
-          callback(...args);
-        }
-      }, cleanupDelay);
-    });
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       frameId += 1;
       frameCallbacks.set(frameId, callback);
@@ -224,6 +213,27 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
     expect(disposeCalls[0]).not.toHaveBeenCalled();
   });
 
+  it('should release the failed renderer root when creation shows the fallback', async () => {
+    allocation.createRenderer.mockRejectedValueOnce(new Error('Renderer creation unavailable.'));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const view = render(
+      <WebglErrorBoundary fallback={({ error }) => <span>{error?.message}</span>}>
+        <ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />
+      </WebglErrorBoundary>,
+    );
+    const canvas = view.container.querySelector('canvas');
+    expect(canvas).not.toBeNull();
+    await measure();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(501);
+    });
+    expect(allocation.createRenderer).toHaveBeenCalledOnce();
+    expect(view.getByText('Renderer creation unavailable.')).toBeDefined();
+    expect(view.container.querySelector('canvas')).toBeNull();
+    expect(_roots.has(canvas!)).toBe(false);
+  });
+
   it('should retain the live renderer through StrictMode effect replay', async () => {
     const view = render(
       <StrictMode>
@@ -239,6 +249,120 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
     expect(_roots.get(renderers[0]!.domElement)!.store.getState().internal.active).toBe(true);
     view.unmount();
   });
+
+  it('should retain the renderer while Activity hides and reveals its canvas', async () => {
+    const view = render(
+      <Activity mode='visible'>
+        <ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />
+      </Activity>,
+    );
+    await measure();
+    const renderer = renderers[0]!;
+    view.rerender(
+      <Activity mode='hidden'>
+        <ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />
+      </Activity>,
+    );
+    await drain();
+    expect(disposeCalls[0]).not.toHaveBeenCalled();
+    view.rerender(
+      <Activity mode='visible'>
+        <ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />
+      </Activity>,
+    );
+    await measure();
+    expect(allocation.createRenderer).toHaveBeenCalledOnce();
+    expect(_roots.get(renderer.domElement)!.store.getState().internal.active).toBe(true);
+    view.unmount();
+    await drain();
+    expect(disposeCalls[0]).toHaveBeenCalledOnce();
+  });
+
+  it('should preserve a replacement created reentrantly while caller-owned renderer caches are released', async () => {
+    const canvas = document.createElement('canvas');
+    const renderer = new WebGPURenderer({ canvas });
+    const replacement = new WebGPURenderer({ canvas });
+    const loseContext = vi.fn();
+    let replacementReady: Promise<unknown> | undefined;
+    let replacementRoot: ReturnType<typeof createRoot> | undefined;
+    const releaseCaches = vi.fn(() => {
+      replacementRoot = createRoot(canvas);
+      replacementReady = replacementRoot.configure({
+        gl: replacement,
+        size: { width: 20, height: 30, top: 0, left: 0 },
+        frameloop: 'never',
+      });
+    });
+    Object.assign(renderer, { forceContextLoss: loseContext, renderLists: { dispose: releaseCaches } });
+    const dispose = vi.spyOn(renderer, 'dispose');
+    const old = createRoot(canvas);
+    await old.configure({ gl: renderer, size: { width: 10, height: 10, top: 0, left: 0 }, frameloop: 'never' });
+    old.render(<group />);
+    await drain();
+    flushThreeSync(() => {
+      old.unmount();
+    });
+    await drain();
+    await replacementReady;
+    expect(releaseCaches).toHaveBeenCalledOnce();
+    expect(dispose).not.toHaveBeenCalled();
+    expect(loseContext).not.toHaveBeenCalled();
+    expect(_roots.get(canvas)!.store.getState().gl).toBe(replacement);
+    replacementRoot!.unmount();
+  });
+
+  it.each(['resolve', 'reject'] as const)(
+    'should preserve a replacement installed during asynchronous disposal (%s)',
+    async (result) => {
+      const canvas = document.createElement('canvas');
+      const renderer: WebGPURenderer = await allocation.createRenderer('viewport', 'webgpu', canvas);
+      const loseContext = vi.fn();
+      Object.assign(renderer, { forceContextLoss: loseContext });
+      let finish: (() => void) | undefined;
+      const dispose = vi.spyOn(renderer, 'dispose').mockImplementationOnce(
+        async () =>
+          new Promise<void>((resolve, reject) => {
+            finish =
+              result === 'resolve'
+                ? resolve
+                : () => {
+                    reject(new Error('Controlled disposal rejection'));
+                  };
+          }),
+      );
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const old = createRoot(canvas);
+      await old.configure({
+        gl: async () => renderer,
+        size: { width: 10, height: 10, top: 0, left: 0 },
+        frameloop: 'never',
+      });
+      old.render(<group />);
+      await drain();
+      flushThreeSync(() => {
+        old.unmount();
+      });
+      await drain();
+      expect(dispose).toHaveBeenCalledOnce();
+      const survivor = createRoot(canvas);
+      const replacement = new WebGPURenderer({ canvas });
+      await survivor.configure({
+        gl: replacement,
+        size: { width: 20, height: 30, top: 0, left: 0 },
+        frameloop: 'never',
+      });
+      survivor.render(<group />);
+      finish!();
+      await drain();
+      expect(loseContext).not.toHaveBeenCalled();
+      expect(_roots.get(canvas)!.store.getState().gl).toBe(replacement);
+      expect(dispose).toHaveBeenCalledOnce();
+      if (result === 'reject') {
+        expect(warning).toHaveBeenCalledWith('[R3F] Error disposing renderer', expect.any(Error));
+      }
+      survivor.unmount();
+    },
+  );
 
   it('should retire only the removed keyed backend and retain an independent canvas', async () => {
     const view = render(
@@ -294,7 +418,7 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
 
   it('should not dispose a caller-owned external renderer on R3F Canvas removal', async () => {
     const canvas = document.createElement('canvas');
-    const renderer = (await allocation.createRenderer('viewport', 'webgpu', canvas)) as WebGPURenderer;
+    const renderer = await allocation.createRenderer('viewport', 'webgpu', canvas);
     const view = render(
       <Canvas gl={renderer} frameloop='never'>
         <group name='external-child' />
@@ -314,13 +438,17 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
     async (elapsed) => {
       const canvas = document.createElement('canvas');
       let resolveOld: ((renderer: WebGPURenderer) => void) | undefined;
-      const oldRenderer = new WebGPURenderer({ canvas });
+      const oldRenderer: WebGPURenderer = await allocation.createRenderer('viewport', 'webgpu', canvas);
+      const loseOldContext = vi.fn();
+      Object.assign(oldRenderer, { forceContextLoss: loseOldContext });
+      const sharedCamera = new PerspectiveCamera();
       const old = createRoot(canvas);
       const oldConfiguration = old.configure({
         gl: async () =>
           new Promise<WebGPURenderer>((resolve) => {
             resolveOld = resolve;
           }),
+        camera: sharedCamera,
         size: { width: 10, height: 10, top: 0, left: 0 },
         frameloop: 'never',
       });
@@ -336,12 +464,15 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
       const newRenderer = new WebGPURenderer({ canvas });
       await survivor.configure({
         gl: newRenderer,
+        camera: sharedCamera,
         size: { width: 20, height: 30, top: 0, left: 0 },
         dpr: 1.5,
         frameloop: 'never',
       });
       survivor.render(<group name='survivor-child' />);
       await drain();
+      const backingSize = [canvas.width, canvas.height];
+      const projection = sharedCamera.projectionMatrix.toArray();
       await act(async () => {
         resolveOld!(oldRenderer);
         await oldConfiguration;
@@ -357,6 +488,10 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
       expect(state.scene.getObjectByName('retired-child')).toBeUndefined();
       expect(state.size.width).toBe(20);
       expect(newRenderer.getPixelRatio()).toBe(1.5);
+      expect.soft([canvas.width, canvas.height]).toEqual(backingSize);
+      expect.soft(sharedCamera.projectionMatrix.toArray()).toEqual(projection);
+      expect.soft(disposeCalls[0]).toHaveBeenCalledTimes(1);
+      expect.soft(loseOldContext).not.toHaveBeenCalled();
       survivor.unmount();
     },
   );
@@ -365,6 +500,7 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
     const canvas = document.createElement('canvas');
     const renderer = new WebGPURenderer({ canvas });
     const root = createRoot(canvas);
+    const rootStore = _roots.get(canvas)!.store;
     let resolveRenderer: ((renderer: WebGPURenderer) => void) | undefined;
     const configuration = root.configure({
       gl: async () =>
@@ -383,7 +519,7 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
     });
     await configuration;
     await drain();
-    const state = _roots.get(canvas)!.store.getState();
+    const state = rootStore.getState();
     expect(state.internal.active).toBe(false);
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- R3F declares Scene but its pre-init store contains null.
     expect(state.scene?.getObjectByName('late-child')).toBeUndefined();
@@ -414,10 +550,6 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(elapsed);
       });
-      const cleanupCallbacksBeforeResolution = cleanupCallbacks;
-      if (elapsed > 500) {
-        expect(cleanupCallbacksBeforeResolution).toBeGreaterThan(0);
-      }
       perspectiveCamera.coordinateSystem = WebGLCoordinateSystem;
       orthographicCamera.coordinateSystem = WebGLCoordinateSystem;
       await act(async () => {
@@ -427,6 +559,10 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
       expect.soft(disposeCalls[0]).toHaveBeenCalledOnce();
       expect.soft(perspectiveCamera.coordinateSystem).toBe(WebGLCoordinateSystem);
       expect(root.store.getState().internal.active).toBe(false);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(501);
+      });
+      expect(_roots.has(renderer.domElement)).toBe(false);
     },
   );
 });

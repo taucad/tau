@@ -1,6 +1,6 @@
 import { createAuthPlugin } from '@better-auth-ui/core';
-import { magicLinkPlugin as coreMagicLinkPlugin } from '@better-auth-ui/core/plugins';
-import type { MagicLinkPluginOptions } from '@better-auth-ui/core/plugins';
+import { magicLinkPlugin as coreMagicLinkPlugin } from '@better-auth-ui/core/plugins/magic-link';
+import type { MagicLinkPluginOptions } from '@better-auth-ui/core/plugins/magic-link';
 
 import { MagicLink } from '#components/auth/magic-link.js';
 import { MagicLinkButton } from '#components/auth/magic-link-button.js';

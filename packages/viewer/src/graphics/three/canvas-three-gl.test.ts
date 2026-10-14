@@ -22,6 +22,7 @@ describe('createTauR3fGlProp', () => {
   beforeEach(() => {
     hoisted.createRenderer.mockReset();
     hoisted.createRenderer.mockImplementation(async () => ({
+      dispose: vi.fn(),
       setPixelRatio: vi.fn(),
       getPixelRatio: () => 1,
       init: vi.fn(async () => {
@@ -163,7 +164,7 @@ describe('createTauR3fGlProp', () => {
     const setPixelRatio = vi.fn((value: number) => {
       ratio = value;
     });
-    const renderer = { setPixelRatio, getPixelRatio: () => ratio };
+    const renderer = { dispose: vi.fn(), setPixelRatio, getPixelRatio: () => ratio };
     hoisted.createRenderer.mockResolvedValue(renderer);
     const factory = createTauR3fGlProp('webgl');
     if (typeof factory !== 'function') {
@@ -177,7 +178,7 @@ describe('createTauR3fGlProp', () => {
     expect(setPixelRatio.mock.calls).toEqual([[2], [1]]);
   });
 
-  it('should report renderer creation failure and never settle so R3F leaves no unhandled rejection', async () => {
+  it('should report renderer creation failure and reject so R3F can finish teardown', async () => {
     const { createTauR3fGlProp } = await import('#graphics/three/canvas-three-gl.js');
     const failure = new Error('Error creating WebGL context.');
     hoisted.createRenderer.mockRejectedValue(failure);
@@ -191,27 +192,12 @@ describe('createTauR3fGlProp', () => {
     const first = glFactory({ canvas });
     const second = glFactory({ canvas });
     const third = glFactory({ canvas });
-    const settlement = async (): Promise<'settled'> => {
-      try {
-        await Promise.all([first, second, third]);
-      } catch {
-        return 'settled';
-      }
-      return 'settled';
-    };
-    const stillPending = async (): Promise<'pending'> => {
-      await new Promise((resolve) => {
-        setTimeout(resolve, 20);
-      });
-      return 'pending';
-    };
-
-    expect(await Promise.race([settlement(), stillPending()])).toBe('pending');
+    await expect(Promise.all([first, second, third])).rejects.toBe(failure);
     expect(onCreateError).toHaveBeenCalledWith(failure);
     expect(onCreateError).toHaveBeenCalledOnce();
     expect(hoisted.createRenderer).toHaveBeenCalledOnce();
 
-    const replacement = { setPixelRatio: vi.fn(), getPixelRatio: () => 1 };
+    const replacement = { dispose: vi.fn(), setPixelRatio: vi.fn(), getPixelRatio: () => 1 };
     hoisted.createRenderer.mockResolvedValue(replacement);
     const retryFactory = createTauR3fGlProp('webgl', [], { onCreateError });
     if (typeof retryFactory !== 'function') {
@@ -236,12 +222,7 @@ describe('createTauR3fGlProp', () => {
     const canvas = document.createElement('canvas');
     document.body.append(canvas);
     factory.bindCanvas(canvas);
-    let settled = false;
-    const trackSettlement = async (): Promise<void> => {
-      await factory({ canvas });
-      settled = true;
-    };
-    const pendingSettlement = trackSettlement();
+    const pendingSettlement = expect(factory({ canvas })).rejects.toThrow('retired initialization failed');
     canvas.remove();
     factory.bindCanvas(undefined);
     rejectCreation!(new Error('retired initialization failed'));
@@ -249,11 +230,10 @@ describe('createTauR3fGlProp', () => {
     await Promise.resolve();
     expect(factory.isRetired()).toBe(true);
     expect(onCreateError).not.toHaveBeenCalled();
-    expect(settled).toBe(false);
-    expect(pendingSettlement).toBeInstanceOf(Promise);
-    void factory({ canvas });
+    await pendingSettlement;
+    await expect(factory({ canvas })).rejects.toThrow('retired initialization failed');
     expect(hoisted.createRenderer).toHaveBeenCalledOnce();
-    const replacement = { setPixelRatio: vi.fn(), getPixelRatio: () => 1 };
+    const replacement = { dispose: vi.fn(), setPixelRatio: vi.fn(), getPixelRatio: () => 1 };
     hoisted.createRenderer.mockResolvedValueOnce(replacement);
     const fresh = createTauR3fGlProp('webgl', [], { onCreateError });
     expect(await fresh({ canvas: document.createElement('canvas') })).toBe(replacement);
@@ -275,6 +255,7 @@ describe('createTauR3fGlProp', () => {
       expect(new Vector3(0, 0, -camera.far).applyMatrix4(camera.projectionMatrix).z).toBeCloseTo(0, 12);
     }
     hoisted.createRenderer.mockResolvedValue({
+      dispose: vi.fn(),
       setPixelRatio: vi.fn(),
       getPixelRatio: () => 1,
       coordinateSystem: WebGLCoordinateSystem,
@@ -299,6 +280,7 @@ describe('createTauR3fGlProp', () => {
     const cameras = [new PerspectiveCamera(35, 1.6, 0.1, 1000), new OrthographicCamera(-3, 7, 5, -2, 0.1, 1000)];
     const projectionUpdates = cameras.map((camera) => vi.spyOn(camera, 'updateProjectionMatrix'));
     hoisted.createRenderer.mockResolvedValue({
+      dispose: vi.fn(),
       setPixelRatio: vi.fn(),
       getPixelRatio: () => 1,
       coordinateSystem: WebGPUCoordinateSystem,

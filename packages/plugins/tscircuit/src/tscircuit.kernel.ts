@@ -50,7 +50,7 @@ import {
  */
 const corePackage = { name: '@tscircuit/core', version: '0.0.1844' } as const;
 const propsPackage = { name: '@tscircuit/props', version: '0.0.646' } as const;
-const reactPackage = { name: 'react', version: '19.2.7' } as const;
+const reactPackage = { name: 'react', version: '19.3.0' } as const;
 
 /** `circuit-json-to-gltf` writes Y-up millimetres; Tau's GLB space is Y-up metres. */
 const millimetersToMeters = 0.001;

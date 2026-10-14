@@ -1,0 +1,324 @@
+diff --git a/dist/events-21d8cd92.cjs.dev.js b/dist/events-21d8cd92.cjs.dev.js
+index 9b43bdf7d5f4e4fa58d53e0a53954d3595569459..8fc89f33a43a0b710acacb55dd11cc65c924da84 100644
+--- a/dist/events-21d8cd92.cjs.dev.js
++++ b/dist/events-21d8cd92.cjs.dev.js
+@@ -17132,7 +17132,8 @@ function transitionRoot(root, event) {
+ }
+ function createRoot(canvas) {
+   // Check against mistaken use of createRoot
+-  const prevRoot = _roots.get(canvas);
++  const existingRoot = _roots.get(canvas);
++  const prevRoot = existingRoot?.state.status === 'open' ? existingRoot : undefined;
+   const prevFiber = prevRoot == null ? void 0 : prevRoot.fiber;
+   const prevStore = prevRoot == null ? void 0 : prevRoot.store;
+   if (prevRoot) console.warn('R3F.createRoot should only be called once!');
+@@ -17187,7 +17188,7 @@ function createRoot(canvas) {
+       return root.ready;
+     },
+     configure(props = {}) {
+-      if (!transitionRoot(root, {
++      if (_roots.get(canvas) !== root || !transitionRoot(root, {
+         type: 'use'
+       })) {
+         return rejected(new Error('R3F: Cannot configure a root after disposal has started.'));
+@@ -17212,6 +17213,11 @@ function createRoot(canvas) {
+             gl: gl
+           });
+         }
++        // Keep the factory result owned for teardown, but never reconfigure a retired canvas.
++        if (_roots.get(canvas) !== root || root.state.status !== 'open') {
++          resolve(this);
++          return;
++        }
+         applyRootConfiguration(root, canvas, props);
+         resolve(this);
+       };
+@@ -17229,7 +17235,7 @@ function createRoot(canvas) {
+       return promise;
+     },
+     render(children) {
+-      if (!transitionRoot(root, {
++      if (_roots.get(canvas) !== root || !transitionRoot(root, {
+         type: 'use'
+       })) return store;
+ 
+@@ -17238,7 +17244,7 @@ function createRoot(canvas) {
+       if (root.ready.status === 'rejected') throw root.ready.reason;
+       const commit = () => {
+         var _root$configuration$p;
+-        if (root.state.status !== 'open' || root.ready.status === 'rejected') return;
++        if (_roots.get(canvas) !== root || root.state.status !== 'open' || root.ready.status === 'rejected') return;
+         // Wait for all queued configuration, including any queued while waiting
+         if (root.ready.status === 'pending') {
+           root.ready.then(commit, logRecoverableError);
+@@ -17303,7 +17309,7 @@ function Provider({
+  * context until garbage collection, and browsers cap live WebGL contexts, so the context is lost
+  * after it. A WebGPURenderer (from a factory) releases its device and context inside dispose().
+  */
+-function disposeRenderer(gl) {
++function disposeRenderer(gl, loseContext) {
+   // Avoid starting initialization through three's dispose(). A factory must await init()
+   // before returning its renderer so readiness includes initialization and teardown can wait.
+   if ((gl.hasInitialized == null ? void 0 : gl.hasInitialized()) === false) return;
+@@ -17313,9 +17319,9 @@ function disposeRenderer(gl) {
+   });
+   // WebGPURenderer.dispose() is async from three r186
+   if (isPromiseLike(disposed)) {
+-    return Promise.resolve(disposed).catch(error => console.warn('[R3F] Error disposing renderer', error)).then(() => attempt(() => gl.forceContextLoss == null ? void 0 : gl.forceContextLoss()));
++    return Promise.resolve(disposed).catch(error => console.warn('[R3F] Error disposing renderer', error)).then(() => attempt(loseContext));
+   }
+-  attempt(() => gl.forceContextLoss == null ? void 0 : gl.forceContextLoss());
++  attempt(loseContext);
+ }
+ function attempt(step) {
+   try {
+@@ -17344,25 +17350,29 @@ function unmountComponentAtNode(canvas, callback) {
+       token
+     })) return;
+     // Close the gates before invoking user cleanup code.
+-    _roots.delete(canvas);
++    if (_roots.get(canvas) === root) _roots.delete(canvas);
+     const state = root.store.getState();
+     state.internal.active = false;
+ 
+     // Release what uses the renderer before the renderer itself
+     attempt(() => state.events.disconnect == null ? void 0 : state.events.disconnect());
+-    if ((_state$gl = state.gl) != null && _state$gl.xr) attempt(() => state.xr.disconnect());
++    if ((_state$gl = state.gl) != null && _state$gl.xr) attempt(() => state.xr == null ? void 0 : state.xr.disconnect());
+     if (state.scene) attempt(() => dispose(state.scene));
+     const gl = state.gl;
++    // A replacement may arrive even while asynchronous disposal is pending.
++    const loseContext = () => {
++      if (!_roots.has(canvas)) return gl.forceContextLoss == null ? void 0 : gl.forceContextLoss();
++    };
+     let disposal = undefined;
+     if (gl && root.ownsRenderer) {
+-      disposal = attempt(() => disposeRenderer(gl));
++      disposal = attempt(() => disposeRenderer(gl, loseContext));
+     } else if (gl) {
+       // A renderer passed in keeps its 9.x teardown: its context is lost but it is not disposed
+       attempt(() => {
+         var _gl$renderLists2;
+         return (_gl$renderLists2 = gl.renderLists) == null ? void 0 : _gl$renderLists2.dispose == null ? void 0 : _gl$renderLists2.dispose();
+       });
+-      attempt(() => gl.forceContextLoss == null ? void 0 : gl.forceContextLoss());
++      attempt(loseContext);
+     }
+     if (isPromiseLike(disposal)) disposal.then(() => callback == null ? void 0 : callback(canvas));else callback == null ? void 0 : callback(canvas);
+   };
+diff --git a/dist/events-9ce18a08.esm.js b/dist/events-9ce18a08.esm.js
+index ea6b4c903fe1a45092eca8440397ebcef2de7341..95cd49e8a73bc980966d72444a5cb9f029f64ce6 100644
+--- a/dist/events-9ce18a08.esm.js
++++ b/dist/events-9ce18a08.esm.js
+@@ -17107,7 +17107,8 @@ function transitionRoot(root, event) {
+ }
+ function createRoot(canvas) {
+   // Check against mistaken use of createRoot
+-  const prevRoot = _roots.get(canvas);
++  const existingRoot = _roots.get(canvas);
++  const prevRoot = existingRoot?.state.status === 'open' ? existingRoot : undefined;
+   const prevFiber = prevRoot == null ? void 0 : prevRoot.fiber;
+   const prevStore = prevRoot == null ? void 0 : prevRoot.store;
+   if (prevRoot) console.warn('R3F.createRoot should only be called once!');
+@@ -17162,7 +17163,7 @@ function createRoot(canvas) {
+       return root.ready;
+     },
+     configure(props = {}) {
+-      if (!transitionRoot(root, {
++      if (_roots.get(canvas) !== root || !transitionRoot(root, {
+         type: 'use'
+       })) {
+         return rejected(new Error('R3F: Cannot configure a root after disposal has started.'));
+@@ -17187,6 +17188,11 @@ function createRoot(canvas) {
+             gl: gl
+           });
+         }
++        // Keep the factory result owned for teardown, but never reconfigure a retired canvas.
++        if (_roots.get(canvas) !== root || root.state.status !== 'open') {
++          resolve(this);
++          return;
++        }
+         applyRootConfiguration(root, canvas, props);
+         resolve(this);
+       };
+@@ -17204,7 +17210,7 @@ function createRoot(canvas) {
+       return promise;
+     },
+     render(children) {
+-      if (!transitionRoot(root, {
++      if (_roots.get(canvas) !== root || !transitionRoot(root, {
+         type: 'use'
+       })) return store;
+ 
+@@ -17213,7 +17219,7 @@ function createRoot(canvas) {
+       if (root.ready.status === 'rejected') throw root.ready.reason;
+       const commit = () => {
+         var _root$configuration$p;
+-        if (root.state.status !== 'open' || root.ready.status === 'rejected') return;
++        if (_roots.get(canvas) !== root || root.state.status !== 'open' || root.ready.status === 'rejected') return;
+         // Wait for all queued configuration, including any queued while waiting
+         if (root.ready.status === 'pending') {
+           root.ready.then(commit, logRecoverableError);
+@@ -17278,7 +17284,7 @@ function Provider({
+  * context until garbage collection, and browsers cap live WebGL contexts, so the context is lost
+  * after it. A WebGPURenderer (from a factory) releases its device and context inside dispose().
+  */
+-function disposeRenderer(gl) {
++function disposeRenderer(gl, loseContext) {
+   // Avoid starting initialization through three's dispose(). A factory must await init()
+   // before returning its renderer so readiness includes initialization and teardown can wait.
+   if ((gl.hasInitialized == null ? void 0 : gl.hasInitialized()) === false) return;
+@@ -17288,9 +17294,9 @@ function disposeRenderer(gl) {
+   });
+   // WebGPURenderer.dispose() is async from three r186
+   if (isPromiseLike(disposed)) {
+-    return Promise.resolve(disposed).catch(error => console.warn('[R3F] Error disposing renderer', error)).then(() => attempt(() => gl.forceContextLoss == null ? void 0 : gl.forceContextLoss()));
++    return Promise.resolve(disposed).catch(error => console.warn('[R3F] Error disposing renderer', error)).then(() => attempt(loseContext));
+   }
+-  attempt(() => gl.forceContextLoss == null ? void 0 : gl.forceContextLoss());
++  attempt(loseContext);
+ }
+ function attempt(step) {
+   try {
+@@ -17319,25 +17325,29 @@ function unmountComponentAtNode(canvas, callback) {
+       token
+     })) return;
+     // Close the gates before invoking user cleanup code.
+-    _roots.delete(canvas);
++    if (_roots.get(canvas) === root) _roots.delete(canvas);
+     const state = root.store.getState();
+     state.internal.active = false;
+ 
+     // Release what uses the renderer before the renderer itself
+     attempt(() => state.events.disconnect == null ? void 0 : state.events.disconnect());
+-    if ((_state$gl = state.gl) != null && _state$gl.xr) attempt(() => state.xr.disconnect());
++    if ((_state$gl = state.gl) != null && _state$gl.xr) attempt(() => state.xr == null ? void 0 : state.xr.disconnect());
+     if (state.scene) attempt(() => dispose(state.scene));
+     const gl = state.gl;
++    // A replacement may arrive even while asynchronous disposal is pending.
++    const loseContext = () => {
++      if (!_roots.has(canvas)) return gl.forceContextLoss == null ? void 0 : gl.forceContextLoss();
++    };
+     let disposal = undefined;
+     if (gl && root.ownsRenderer) {
+-      disposal = attempt(() => disposeRenderer(gl));
++      disposal = attempt(() => disposeRenderer(gl, loseContext));
+     } else if (gl) {
+       // A renderer passed in keeps its 9.x teardown: its context is lost but it is not disposed
+       attempt(() => {
+         var _gl$renderLists2;
+         return (_gl$renderLists2 = gl.renderLists) == null ? void 0 : _gl$renderLists2.dispose == null ? void 0 : _gl$renderLists2.dispose();
+       });
+-      attempt(() => gl.forceContextLoss == null ? void 0 : gl.forceContextLoss());
++      attempt(loseContext);
+     }
+     if (isPromiseLike(disposal)) disposal.then(() => callback == null ? void 0 : callback(canvas));else callback == null ? void 0 : callback(canvas);
+   };
+diff --git a/dist/events-a816cbab.cjs.prod.js b/dist/events-a816cbab.cjs.prod.js
+index c26a227f3264c978f78d2ab7a7231ce943fe911f..a7e00c8b7d18e6d2a3504cfd898ab53a2b41c208 100644
+--- a/dist/events-a816cbab.cjs.prod.js
++++ b/dist/events-a816cbab.cjs.prod.js
+@@ -8353,7 +8353,8 @@ function transitionRoot(root, event) {
+ }
+ function createRoot(canvas) {
+   // Check against mistaken use of createRoot
+-  const prevRoot = _roots.get(canvas);
++  const existingRoot = _roots.get(canvas);
++  const prevRoot = existingRoot?.state.status === 'open' ? existingRoot : undefined;
+   const prevFiber = prevRoot == null ? void 0 : prevRoot.fiber;
+   const prevStore = prevRoot == null ? void 0 : prevRoot.store;
+   if (prevRoot) console.warn('R3F.createRoot should only be called once!');
+@@ -8408,7 +8409,7 @@ function createRoot(canvas) {
+       return root.ready;
+     },
+     configure(props = {}) {
+-      if (!transitionRoot(root, {
++      if (_roots.get(canvas) !== root || !transitionRoot(root, {
+         type: 'use'
+       })) {
+         return rejected(new Error('R3F: Cannot configure a root after disposal has started.'));
+@@ -8433,6 +8434,11 @@ function createRoot(canvas) {
+             gl: gl
+           });
+         }
++        // Keep the factory result owned for teardown, but never reconfigure a retired canvas.
++        if (_roots.get(canvas) !== root || root.state.status !== 'open') {
++          resolve(this);
++          return;
++        }
+         applyRootConfiguration(root, canvas, props);
+         resolve(this);
+       };
+@@ -8450,7 +8456,7 @@ function createRoot(canvas) {
+       return promise;
+     },
+     render(children) {
+-      if (!transitionRoot(root, {
++      if (_roots.get(canvas) !== root || !transitionRoot(root, {
+         type: 'use'
+       })) return store;
+ 
+@@ -8459,7 +8465,7 @@ function createRoot(canvas) {
+       if (root.ready.status === 'rejected') throw root.ready.reason;
+       const commit = () => {
+         var _root$configuration$p;
+-        if (root.state.status !== 'open' || root.ready.status === 'rejected') return;
++        if (_roots.get(canvas) !== root || root.state.status !== 'open' || root.ready.status === 'rejected') return;
+         // Wait for all queued configuration, including any queued while waiting
+         if (root.ready.status === 'pending') {
+           root.ready.then(commit, logRecoverableError);
+@@ -8524,7 +8530,7 @@ function Provider({
+  * context until garbage collection, and browsers cap live WebGL contexts, so the context is lost
+  * after it. A WebGPURenderer (from a factory) releases its device and context inside dispose().
+  */
+-function disposeRenderer(gl) {
++function disposeRenderer(gl, loseContext) {
+   // Avoid starting initialization through three's dispose(). A factory must await init()
+   // before returning its renderer so readiness includes initialization and teardown can wait.
+   if ((gl.hasInitialized == null ? void 0 : gl.hasInitialized()) === false) return;
+@@ -8534,9 +8540,9 @@ function disposeRenderer(gl) {
+   });
+   // WebGPURenderer.dispose() is async from three r186
+   if (isPromiseLike(disposed)) {
+-    return Promise.resolve(disposed).catch(error => console.warn('[R3F] Error disposing renderer', error)).then(() => attempt(() => gl.forceContextLoss == null ? void 0 : gl.forceContextLoss()));
++    return Promise.resolve(disposed).catch(error => console.warn('[R3F] Error disposing renderer', error)).then(() => attempt(loseContext));
+   }
+-  attempt(() => gl.forceContextLoss == null ? void 0 : gl.forceContextLoss());
++  attempt(loseContext);
+ }
+ function attempt(step) {
+   try {
+@@ -8565,25 +8571,29 @@ function unmountComponentAtNode(canvas, callback) {
+       token
+     })) return;
+     // Close the gates before invoking user cleanup code.
+-    _roots.delete(canvas);
++    if (_roots.get(canvas) === root) _roots.delete(canvas);
+     const state = root.store.getState();
+     state.internal.active = false;
+ 
+     // Release what uses the renderer before the renderer itself
+     attempt(() => state.events.disconnect == null ? void 0 : state.events.disconnect());
+-    if ((_state$gl = state.gl) != null && _state$gl.xr) attempt(() => state.xr.disconnect());
++    if ((_state$gl = state.gl) != null && _state$gl.xr) attempt(() => state.xr == null ? void 0 : state.xr.disconnect());
+     if (state.scene) attempt(() => dispose(state.scene));
+     const gl = state.gl;
++    // A replacement may arrive even while asynchronous disposal is pending.
++    const loseContext = () => {
++      if (!_roots.has(canvas)) return gl.forceContextLoss == null ? void 0 : gl.forceContextLoss();
++    };
+     let disposal = undefined;
+     if (gl && root.ownsRenderer) {
+-      disposal = attempt(() => disposeRenderer(gl));
++      disposal = attempt(() => disposeRenderer(gl, loseContext));
+     } else if (gl) {
+       // A renderer passed in keeps its 9.x teardown: its context is lost but it is not disposed
+       attempt(() => {
+         var _gl$renderLists2;
+         return (_gl$renderLists2 = gl.renderLists) == null ? void 0 : _gl$renderLists2.dispose == null ? void 0 : _gl$renderLists2.dispose();
+       });
+-      attempt(() => gl.forceContextLoss == null ? void 0 : gl.forceContextLoss());
++      attempt(loseContext);
+     }
+     if (isPromiseLike(disposal)) disposal.then(() => callback == null ? void 0 : callback(canvas));else callback == null ? void 0 : callback(canvas);
+   };

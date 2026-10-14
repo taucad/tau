@@ -35,6 +35,8 @@ export default defineConfig({
     provide: { webGpuProfile },
     include: [
       'src/graphics/three/empty-viewer.browser.test.tsx',
+      'src/graphics/three/three-canvas-lifetime.browser.test.tsx',
+      'src/graphics/three/canvas-renderer-factory.browser.test.ts',
       'src/graphics/three/post-processing-antialias.browser.test.tsx',
       'src/graphics/three/controls/viewport-gizmo-cube.browser.test.ts',
       'src/graphics/three/viewer-resize-continuation.browser.test.tsx',

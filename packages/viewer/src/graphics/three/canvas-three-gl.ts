@@ -1,3 +1,5 @@
+import { invalidate } from '@react-three/fiber';
+import { claimCanvasRenderer } from '#graphics/three/canvas-renderer-ownership.js';
 import type { CanvasProps, Renderer as FiberCompatibleGl } from '@react-three/fiber';
 import type { ThreeCamera } from '@taucad/three/camera';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
@@ -25,16 +27,16 @@ export type TauR3fGlFactory = ((defaults: TauR3fGlDefaults) => Promise<FiberComp
  * Builds renderers via {@link createRenderer} with the **`viewport`** use case (MSAA,
  * WebGL log-depth / WebGPU reversed-Z — see `tau-renderer.ts`).
  *
- * R3F awaits this factory inside a `configure()` call that nothing awaits, so a renderer that cannot be created
- * (no WebGL context, or a context Safari hands back already lost) would surface as an unhandled rejection that no
- * error boundary sees, leaving a blank canvas. The factory instead reports the failure through `onCreateError` and
- * never settles; the owner unmounts the `<Canvas>` and shows its fallback.
+ * R3F owns disposal of factory-created renderers and waits for configuration to settle before teardown.
+ * Report creation failures to the viewer and reject so R3F can finish teardown through its error handler.
+ * A renderer that finishes after removal still reaches R3F for disposal, without changing retained cameras.
  *
  * @param graphicsBackend - Backend the viewport renderer is created for.
  * @param cameras - Retained cameras whose projection convention must follow the new renderer.
  * @param options - The owner's choices.
  * @param options.onCreateError - Receives the renderer creation failure so the owner can render its fallback.
  * @param options.preserveDrawingBuffer - Keep each WebGL frame readable after it is shown (a live capture).
+ * @returns A canvas-bound factory whose renderer is disposed by R3F.
  * @public
  */
 export function createTauR3fGlProp(
@@ -46,23 +48,12 @@ export function createTauR3fGlProp(
   }: Readonly<{ onCreateError?: (error: Error) => void; preserveDrawingBuffer?: boolean }> = {},
 ): TauR3fGlFactory {
   let initialization: Promise<FiberCompatibleGl> | undefined;
-  let ownedRenderer: RendererInstance | undefined;
   let mountedCanvas: HTMLCanvasElement | undefined = undefined;
   let hasCanvasBinding = false;
   let retired = false;
-  let disposed = false;
-  const pending = async (): Promise<never> =>
-    new Promise<never>(() => {
-      // Never settles while R3F waits for a retired or failed canvas.
-      void 0;
-    });
   const isRetired = (): boolean => retired || (hasCanvasBinding && mountedCanvas === undefined);
   const retire = (): void => {
     retired = true;
-    if (ownedRenderer && !disposed) {
-      disposed = true;
-      ownedRenderer.dispose();
-    }
   };
   const bindCanvas = (canvas: HTMLCanvasElement | undefined): void => {
     hasCanvasBinding = true;
@@ -78,6 +69,7 @@ export function createTauR3fGlProp(
     }
   };
   const initialize = async (canvas: HTMLCanvasElement): Promise<FiberCompatibleGl> => {
+    const attachOwnership = claimCanvasRenderer(canvas, invalidate);
     let renderer: RendererInstance;
     try {
       renderer = await createRenderer(
@@ -86,18 +78,17 @@ export function createTauR3fGlProp(
         preserveDrawingBuffer ? { canvas, preserveDrawingBuffer } : canvas,
       );
     } catch (error) {
-      if (isRetired()) {
-        return pending();
-      }
+      attachOwnership.cancel();
       const failure = error instanceof Error ? error : new Error(String(error));
-      console.warn('[createTauR3fGlProp] Renderer creation failed:', failure);
-      onCreateError?.(failure);
-      return pending();
+      if (!isRetired()) {
+        console.warn('[createTauR3fGlProp] Renderer creation failed:', failure);
+        onCreateError?.(failure);
+      }
+      throw failure;
     }
-    ownedRenderer = renderer;
+    attachOwnership(renderer);
     if (isRetired()) {
-      retire();
-      return pending();
+      return renderer as FiberCompatibleGl;
     }
     // R3F reapplies DPR on every resize. WebGLRenderer.setPixelRatio also calls
     // setSize, clearing/reallocating the old buffer before R3F sizes the new one.
@@ -121,16 +112,11 @@ export function createTauR3fGlProp(
   // R3F can reenter configure before this async factory settles. One canvas/backend
   // mount must share the complete setup; a new keyed factory owns a fresh retry.
   const factory = async (defaults: TauR3fGlDefaults): Promise<FiberCompatibleGl> => {
-    if (isRetired()) {
-      return pending();
+    if (isRetired() && initialization === undefined) {
+      throw new Error('Cannot initialize a retired canvas.');
     }
     initialization ??= initialize(defaults.canvas as HTMLCanvasElement);
-    const renderer = await initialization;
-    if (isRetired()) {
-      retire();
-      return pending();
-    }
-    return renderer;
+    return initialization;
   };
   return Object.assign(factory, { bindCanvas, isRetired });
 }

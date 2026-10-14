@@ -154,7 +154,8 @@ it.each([
     const view = render(fixture());
     await vi.waitFor(
       () => {
-        expect(frames).toBeGreaterThan(2);
+        // Demand rendering may idle after its first completed scene submission.
+        expect(frames).toBeGreaterThan(0);
       },
       { timeout: 45_000 },
     );
@@ -168,6 +169,7 @@ it.each([
     }
     const capture = async (): Promise<Uint8ClampedArray> => {
       let pixels: Uint8ClampedArray = new Uint8ClampedArray();
+      const framesBeforeCapture = frames;
       // Let scene changes settle, completing each final-frame readback before requesting the next.
       for (let sample = 0; sample < 3; sample++) {
         const completed = Promise.withResolvers<Uint8ClampedArray>();
@@ -182,6 +184,7 @@ it.each([
         // oxlint-disable-next-line eslint/no-await-in-loop -- Each frame must finish its GPU copy before another capture.
         pixels = await completed.promise;
       }
+      expect(frames - framesBeforeCapture, 'each requested capture frame is delivered').toBeGreaterThanOrEqual(3);
       return pixels;
     };
     const screenshot = async (pixels: Uint8ClampedArray, phase: string): Promise<void> => {

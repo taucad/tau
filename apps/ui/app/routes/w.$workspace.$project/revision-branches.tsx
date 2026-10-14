@@ -34,7 +34,7 @@ import {
 import { cn } from '@taucad/ui/utils/cn';
 import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisions';
 import { DiffViewer } from '#components/code/diff-viewer.js';
-import { ActionButton } from '#components/revisions/revision-actions.js';
+import { ActionButton } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
@@ -120,142 +120,165 @@ export function ConflictDecision({
         : `Merging ${theirs} into ${target} changed the same lines in ${files(count)}.`;
   const open = conflict.paths.filter((path) => path.side === undefined).length;
   const [modes, setModes] = useState<Readonly<Record<string, 'compare' | 'edit' | undefined>>>({});
+  /* The count is a fact only once the conflict has been read (`labels`): before
+     that it is unknown, never zero, and a read that failed says so. A read
+     conflict with no files left — a later merge already reconciled them — still
+     needs its merge, which is what hides the line (D14). */
+  const phase =
+    conflict.labels === undefined ? (conflict.busy ? 'checking' : 'unreadable') : count === 0 ? 'settled' : 'open';
 
   return (
     <div className='flex flex-col gap-2'>
-      <p className='text-xs text-muted-foreground'>{`${cause} ${target} is untouched until you choose.`}</p>
-      <ul aria-label={`Files to resolve in ${theirs}`} className='flex list-none flex-col gap-2'>
-        {conflict.paths.map(({ path, openable, side, keys }) => {
-          const materialized = conflictTexts[`${conflict.revisionId}\u0000${path}`];
-          const toggle = (mode: 'compare' | 'edit'): void => {
-            const isOpen = modes[path] === mode;
-            setModes((current) => ({ ...current, [path]: isOpen ? undefined : mode }));
-            if (!isOpen) {
-              onOpenConflict(conflict.revisionId, path);
-            }
-          };
-          return (
-            <li key={path} className='flex flex-col gap-1'>
-              <span className='flex min-w-0 items-start gap-2'>
-                <FileText aria-hidden className='mt-px size-3.5 shrink-0 text-muted-foreground' />
-                <span className='min-w-0 text-xs break-all'>{path}</span>
-              </span>
-              {/* A parameter record is choose-one: the keys both sides set say what the choice decides. */}
-              {keys === undefined || keys.length === 0 ? null : (
-                <span className='text-xs text-muted-foreground sm:pl-5'>{`Both changed ${keys.join(', ')}`}</span>
-              )}
-              {/* The Keeps and the tools are pairs that wrap as pairs, so a narrow
-                  card never shows Edit manually alone. */}
-              <span className='flex flex-wrap items-center gap-2 sm:pl-5'>
-                <span className='flex flex-wrap items-center gap-2'>
-                  {(['mine', 'theirs'] as const).map((choice) => (
-                    <ActionButton
-                      key={choice}
-                      verb={`Keep ${choice}`}
-                      icon={side === choice ? CircleCheck : Circle}
-                      variant={side === choice ? 'secondary' : 'outline'}
-                      aria-pressed={side === choice}
-                      aria-label={`Keep ${choice} in ${path}`}
-                      disabled={conflict.busy}
-                      onClick={() => {
-                        onKeepSide(conflict.revisionId, path, choice);
-                      }}
-                    />
-                  ))}
+      {phase === 'checking' ? (
+        <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>
+          Checking files…
+        </p>
+      ) : (
+        <p className='text-xs text-muted-foreground'>
+          {phase === 'open'
+            ? `${cause} ${target} is untouched until you choose.`
+            : phase === 'settled'
+              ? `Nothing still differs on ${target}. Merge to finish this decision.`
+              : 'This conflict could not be read. Reload the page to read it again.'}
+        </p>
+      )}
+      {phase === 'open' ? (
+        <ul aria-label={`Files to resolve in ${theirs}`} className='flex list-none flex-col gap-2'>
+          {conflict.paths.map(({ path, openable, side, keys }) => {
+            const materialized = conflictTexts[`${conflict.revisionId}\u0000${path}`];
+            const toggle = (mode: 'compare' | 'edit'): void => {
+              const isOpen = modes[path] === mode;
+              setModes((current) => ({ ...current, [path]: isOpen ? undefined : mode }));
+              if (!isOpen) {
+                onOpenConflict(conflict.revisionId, path);
+              }
+            };
+            return (
+              <li key={path} className='flex flex-col gap-1'>
+                <span className='flex min-w-0 items-start gap-2'>
+                  <FileText aria-hidden className='mt-px size-3.5 shrink-0 text-muted-foreground' />
+                  <span className='min-w-0 text-xs break-all'>{path}</span>
                 </span>
-                {/* Both tools read the same materialization, so both are offered
-                    only where there is text: a parametric or binary conflict is
-                    choose-one (A22). */}
-                {openable ? (
+                {/* A parameter record is choose-one: the keys both sides set say what the choice decides. */}
+                {keys === undefined || keys.length === 0 ? null : (
+                  <span className='text-xs text-muted-foreground sm:pl-5'>{`Both changed ${keys.join(', ')}`}</span>
+                )}
+                {/* The Keeps and the tools are pairs that wrap as pairs, so a narrow
+                    card never shows Edit manually alone. */}
+                <span className='flex flex-wrap items-center gap-2 sm:pl-5'>
                   <span className='flex flex-wrap items-center gap-2'>
-                    <ActionButton
-                      verb='Compare'
-                      icon={GitCompare}
-                      variant={modes[path] === 'compare' ? 'secondary' : 'outline'}
-                      aria-label={`Compare ${path}`}
-                      aria-pressed={modes[path] === 'compare'}
-                      onClick={() => {
-                        toggle('compare');
-                      }}
-                    />
-                    <ActionButton
-                      verb='Edit manually'
-                      icon={Pencil}
-                      variant={modes[path] === 'edit' ? 'secondary' : 'outline'}
-                      aria-label={`Edit ${path} manually`}
-                      aria-pressed={modes[path] === 'edit'}
-                      disabled={conflict.busy}
-                      onClick={() => {
-                        toggle('edit');
-                      }}
-                    />
+                    {(['mine', 'theirs'] as const).map((choice) => (
+                      <ActionButton
+                        key={choice}
+                        verb={`Keep ${choice}`}
+                        icon={side === choice ? CircleCheck : Circle}
+                        variant={side === choice ? 'secondary' : 'outline'}
+                        aria-pressed={side === choice}
+                        aria-label={`Keep ${choice} in ${path}`}
+                        disabled={conflict.busy}
+                        onClick={() => {
+                          onKeepSide(conflict.revisionId, path, choice);
+                        }}
+                      />
+                    ))}
                   </span>
-                ) : null}
-              </span>
-              {/* The editable mode: the markers in a buffer with no file behind
-                  them, because a conflicted revision's tree holds no marker byte (A22, P43). */}
-              {modes[path] === 'edit' && materialized?.text !== undefined ? (
-                <RevisionConflictEditor
-                  path={path}
-                  text={materialized.text}
-                  isBusy={conflict.busy}
-                  onResolved={(content) => {
-                    onResolveInEditor(conflict.revisionId, path, content);
-                  }}
-                />
-              ) : null}
-              {modes[path] !== undefined && materialized === undefined ? (
-                <p
-                  role='status'
-                  aria-label={`Conflict view for ${path}`}
-                  aria-busy='true'
-                  className='px-2 py-1 text-xs text-muted-foreground'
-                >
-                  Loading {modes[path] === 'compare' ? 'comparison' : 'editor'} for {path}…
-                </p>
-              ) : null}
-              {materialized?.failure === undefined ? null : (
-                <div
-                  role='alert'
-                  aria-label={`Conflict view for ${path}`}
-                  className='flex flex-wrap items-center gap-2 px-2 py-1 text-xs'
-                >
-                  <span className='min-w-0 flex-auto'>{`${materialized.failure} Your choices are unchanged.`}</span>
-                  <ActionButton
-                    verb='Retry'
-                    icon={RotateCw}
-                    onClick={() => {
-                      onOpenConflict(conflict.revisionId, path);
+                  {/* Both tools read the same materialization, so both are offered
+                      only where there is text: a parametric or binary conflict is
+                      choose-one (A22). */}
+                  {openable ? (
+                    <span className='flex flex-wrap items-center gap-2'>
+                      <ActionButton
+                        verb='Compare'
+                        icon={GitCompare}
+                        variant={modes[path] === 'compare' ? 'secondary' : 'outline'}
+                        aria-label={`Compare ${path}`}
+                        aria-pressed={modes[path] === 'compare'}
+                        onClick={() => {
+                          toggle('compare');
+                        }}
+                      />
+                      <ActionButton
+                        verb='Edit manually'
+                        icon={Pencil}
+                        variant={modes[path] === 'edit' ? 'secondary' : 'outline'}
+                        aria-label={`Edit ${path} manually`}
+                        aria-pressed={modes[path] === 'edit'}
+                        disabled={conflict.busy}
+                        onClick={() => {
+                          toggle('edit');
+                        }}
+                      />
+                    </span>
+                  ) : null}
+                </span>
+                {/* The editable mode: the markers in a buffer with no file behind
+                    them, because a conflicted revision's tree holds no marker byte (A22, P43). */}
+                {modes[path] === 'edit' && materialized?.text !== undefined ? (
+                  <RevisionConflictEditor
+                    path={path}
+                    text={materialized.text}
+                    isBusy={conflict.busy}
+                    onResolved={(content) => {
+                      onResolveInEditor(conflict.revisionId, path, content);
                     }}
                   />
-                </div>
-              )}
-              {modes[path] === 'compare' && materialized?.text !== undefined ? (
-                <DiffViewer
-                  originalContent={materialized.ours}
-                  modifiedContent={materialized.theirs}
-                  language={resolveHighlightLanguageForPath(path).shikiLanguage}
-                  className='rounded-md border'
-                />
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
+                ) : null}
+                {modes[path] !== undefined && materialized === undefined ? (
+                  <p
+                    role='status'
+                    aria-label={`Conflict view for ${path}`}
+                    aria-busy='true'
+                    className='px-2 py-1 text-xs text-muted-foreground'
+                  >
+                    Loading {modes[path] === 'compare' ? 'comparison' : 'editor'} for {path}…
+                  </p>
+                ) : null}
+                {materialized?.failure === undefined ? null : (
+                  <div
+                    role='alert'
+                    aria-label={`Conflict view for ${path}`}
+                    className='flex flex-wrap items-center gap-2 px-2 py-1 text-xs'
+                  >
+                    <span className='min-w-0 flex-auto'>{`${materialized.failure} Your choices are unchanged.`}</span>
+                    <ActionButton
+                      verb='Retry'
+                      icon={RotateCw}
+                      onClick={() => {
+                        onOpenConflict(conflict.revisionId, path);
+                      }}
+                    />
+                  </div>
+                )}
+                {modes[path] === 'compare' && materialized?.text !== undefined ? (
+                  <DiffViewer
+                    originalContent={materialized.ours}
+                    modifiedContent={materialized.theirs}
+                    language={resolveHighlightLanguageForPath(path).shikiLanguage}
+                    className='rounded-md border'
+                  />
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
       {conflict.ready || open === 0 ? null : (
         <p className='text-xs text-muted-foreground'>
           {`${files(open)} still need${open === 1 ? 's' : ''} a choice before the merge can finish.`}
         </p>
       )}
       <div className='flex flex-wrap items-center justify-between gap-2'>
-        <ActionButton
-          verb='Ask chat to resolve'
-          icon={MessageSquare}
-          disabled={conflict.busy}
-          onClick={() => {
-            onAskChat(conflict.revisionId);
-          }}
-        />
+        {/* With no file left there is nothing for chat to resolve: Merge is the one action. */}
+        {phase === 'open' || phase === 'checking' ? (
+          <ActionButton
+            verb='Ask chat to resolve'
+            icon={MessageSquare}
+            disabled={conflict.busy}
+            onClick={() => {
+              onAskChat(conflict.revisionId);
+            }}
+          />
+        ) : null}
         <ActionButton
           verb={`Merge into ${target}`}
           icon={GitMerge}
@@ -272,8 +295,27 @@ export function ConflictDecision({
 }
 
 /**
+ * Why *Rename* would be refused for a row, as the rename effect decides it (D91):
+ * a linked checkout's branch first, then a branch the remote holds under its
+ * name. The sentence is the refusal's own, so the menu and the toast never
+ * disagree. A row whose live checkout is not known yet is not called linked.
+ *
+ * @param branch - The row.
+ * @param liveCheckoutId - The live checkout's id, from the same projection.
+ * @returns The refusal's sentence, or `undefined` when the rename can go through.
+ */
+const renameRefusalOf = (branch: RevisionBranchFacet, liveCheckoutId: string | undefined): string | undefined => {
+  const isLinked =
+    branch.checkoutId !== undefined && liveCheckoutId !== undefined && branch.checkoutId !== liveCheckoutId;
+  const code = isLinked ? 'BRANCH_RENAME_LINKED' : branch.onRemote === true ? 'BRANCH_RENAME_PUSHED' : undefined;
+  return code === undefined ? undefined : describeRevisionFailure('branch', code).description;
+};
+
+/**
  * A branch row's More, each verb with its glyph. Rename names the branch in the
- * one naming form under this menu's button, as New branch does (round 16).
+ * one naming form under this menu's button, as New branch does (round 16); a
+ * rename that would be refused stays listed, unavailable, with the reason under
+ * it, as a print profile's verbs are.
  *
  * @param props - The branch, the line the checkout is on, and the verbs.
  * @returns The menu.
@@ -283,6 +325,7 @@ function BranchMenu({
   currentBranch,
   isCurrent,
   isBusy,
+  renameRefusal,
   onMerge,
   onRename,
   onPlace,
@@ -292,6 +335,8 @@ function BranchMenu({
   readonly currentBranch: string | undefined;
   readonly isCurrent: boolean;
   readonly isBusy: boolean;
+  /** Why *Rename* would be refused (D91); `undefined` offers it. */
+  readonly renameRefusal: string | undefined;
   readonly onMerge: () => void;
   readonly onRename: (name: string) => void;
   /** Present only when using this branch would move the chat in focus. */
@@ -343,14 +388,24 @@ function BranchMenu({
             {`Merge ${branch} into ${currentBranch}`}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem
-          onSelect={() => {
-            opensRename.current = true;
-          }}
-        >
-          <Pencil aria-hidden />
-          {`Rename ${branch}…`}
-        </DropdownMenuItem>
+        {renameRefusal === undefined ? (
+          <DropdownMenuItem
+            onSelect={() => {
+              opensRename.current = true;
+            }}
+          >
+            <Pencil aria-hidden />
+            {`Rename ${branch}…`}
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem disabled className='h-auto items-start'>
+            <Pencil aria-hidden className='mt-0.5' />
+            <span className='flex flex-col'>
+              {`Rename ${branch}…`}
+              <span className='max-w-64 text-xs text-muted-foreground'>{renameRefusal}</span>
+            </span>
+          </DropdownMenuItem>
+        )}
         {onPlace === undefined ? null : (
           <DropdownMenuItem onSelect={onPlace}>
             <MessageSquare aria-hidden />
@@ -634,6 +689,7 @@ export function RevisionBranches({
                     currentBranch={currentBranch}
                     isCurrent={isCurrent}
                     isBusy={isBusy}
+                    renameRefusal={renameRefusalOf(branch, liveCheckoutId)}
                     onPlace={
                       placement === undefined
                         ? undefined
@@ -659,9 +715,12 @@ export function RevisionBranches({
               {counts.length === 0 ? null : <span className='tabular-nums'>{counts.join(', ')}</span>}
               {/* Checkout identity, not a path prefix (I2, C40). */}
               {branch.checkoutId === undefined ? (
-                <Badge variant='outline' className='font-normal'>
-                  Remote only
-                </Badge>
+                /* A branch only this device has, with no checkout, is not *Remote only* (D93). */
+                branch.onRemote === true ? (
+                  <Badge variant='outline' className='font-normal'>
+                    Remote only
+                  </Badge>
+                ) : null
               ) : branch.checkoutId === liveCheckoutId ? null : (
                 <Badge variant='outline' className='font-normal'>
                   Linked

@@ -139,6 +139,48 @@ export const createApplyTreeEffects = (
   };
 
   /**
+   * Remove the directories that removing `removedPaths` left empty, as Git does.
+   *
+   * Without this a directory the tree dropped stays behind empty, and a revision
+   * that turns `foo/bar` into a file `foo` finds `foo` already taken. Deepest
+   * first, so a parent is tried after its children; the checkout root and every
+   * directory the target still writes into are never tried. A directory that
+   * still holds anything — an unversioned or ignored file, or a person's own
+   * empty folder — refuses a non-recursive `rmdir` and stays, as does a path
+   * something else already made a file again.
+   *
+   * @param live - The checkout's tree.
+   * @param removedPaths - The files this apply removed.
+   * @param targetPaths - Every file the target tree holds.
+   */
+  const pruneEmptiedDirectories = async (
+    live: RevisionFileSystem,
+    removedPaths: readonly string[],
+    targetPaths: Iterable<string>,
+  ): Promise<void> => {
+    const parentsOf = (path: string): string[] =>
+      path
+        .split('/')
+        .slice(0, -1)
+        .map((_, index, segments) => segments.slice(0, index + 1).join('/'));
+    const kept = new Set([...targetPaths].flatMap((path) => parentsOf(path)));
+    const emptied = [...new Set(removedPaths.flatMap((path) => parentsOf(path)))]
+      .filter((directory) => !kept.has(directory))
+      .sort((left, right) => right.length - left.length || right.localeCompare(left));
+    for (const directory of emptied) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- a child must go before its parent can be empty.
+        await live.rmdir(directory);
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null ? (error as NodeJS.ErrnoException).code : undefined;
+        if (code !== 'ENOTEMPTY' && code !== 'ENOENT' && code !== 'ENOTDIR') {
+          throw error;
+        }
+      }
+    }
+  };
+
+  /**
    * Write one tree over a checkout and verify exactly what it applied.
    *
    * The same primitive a settlement runs and a restore runs — applying a stored
@@ -191,6 +233,7 @@ export const createApplyTreeEffects = (
           // oxlint-disable-next-line no-await-in-loop -- the revision retains the removed bytes; the temporary copy is no longer needed.
           await live.unlink(backup);
         }
+        await pruneEmptiedDirectories(live, removedPaths, targetFiles.keys());
         const stagedFiles = changedFiles.map(([path, entry]) => ({
           path,
           entry,

@@ -1,0 +1,138 @@
+# Spike S35 (native-dependency-resolution charter, D37 / W11): can a second, native-only
+# runtime child under Node's permission model (--allow-child-process plus read grants on the
+# store and the workspace) launch the sandboxed build123d and PicoGK workers, while the
+# existing permissioned child keeps its flags?
+#
+# Dispatch-only. The prototype lives on the unmerged branch named by `ref`
+# (packages/host/src/runtime-child-supervisor*); this file only checks it out, runs the
+# existing desktop producers as CI already runs them, and runs the spike suite on macos-15
+# and ubuntu-latest. Evidence is the uploaded artifact, the job summary and the notice
+# annotations. Deleted when W11 lands.
+name: Spike S35 (native-only runtime child)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or commit carrying the S35 prototype'
+        required: true
+        default: 'spike/s35-native-child'
+
+permissions:
+  actions: read # nrwl/nx-set-shas inside setup-nx
+  contents: read
+
+concurrency:
+  group: spike-s35-${{ inputs.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  s35:
+    name: S35 native-only child (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            build123d: prepare-build123d-python-macos
+            picogk: prepare-picogk-dotnet-macos
+          - os: ubuntu-latest
+            build123d: prepare-build123d-python
+            picogk: prepare-picogk-dotnet
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Checkout the prototype
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+          save-pnpm-store: 'false'
+
+      - name: Setup Linux sandbox prerequisites
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/setup-linux-sandbox
+
+      - name: Install uv
+        if: runner.os == 'macOS'
+        run: |
+          command -v uv || pipx install uv
+          uv --version
+
+      - name: Prepare build123d Python (desktop producer)
+        env:
+          TARGET: ${{ matrix.build123d }}
+        run: pnpm nx run "desktop:$TARGET"
+
+      - name: Prepare PicoGK .NET (desktop producer)
+        env:
+          TARGET: ${{ matrix.picogk }}
+        run: pnpm nx run "desktop:$TARGET"
+
+      - name: Run the S35 suite
+        env:
+          S35_EVIDENCE_DIR: ${{ runner.temp }}/evidence
+        run: |
+          mkdir -p "$S35_EVIDENCE_DIR"
+          node --version | tee "$S35_EVIDENCE_DIR/node-version.txt"
+          set -o pipefail
+          node_modules/.bin/vitest run --root packages/host \
+            src/runtime-child-supervisor.native-spike.integration.test.ts \
+            --reporter=verbose --reporter=json --outputFile.json="$S35_EVIDENCE_DIR/vitest.json" \
+            2>&1 | tee "$S35_EVIDENCE_DIR/suite.log"
+
+      - name: Summarise
+        if: always()
+        env:
+          EVIDENCE: ${{ runner.temp }}/evidence
+        run: |
+          node --input-type=module -e '
+          import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+          import { join } from "node:path";
+          const directory = process.env.EVIDENCE;
+          const lines = [];
+          try {
+            const report = JSON.parse(readFileSync(join(directory, "vitest.json"), "utf8"));
+            for (const file of report.testResults) {
+              for (const test of file.assertionResults) {
+                lines.push(`${test.status.padEnd(7)} ${test.fullName}${test.failureMessages?.length ? " :: " + test.failureMessages[0].split("\n")[0].slice(0, 300) : ""}`);
+              }
+            }
+          } catch (error) { lines.push(`no vitest.json: ${error.message}`); }
+          for (const name of readdirSync(directory).filter((entry) => entry.endsWith(".json") && entry !== "vitest.json").sort()) {
+            const value = JSON.parse(readFileSync(join(directory, name), "utf8"));
+            const brief = name.startsWith("wrap-grant-discovery")
+              ? { ok: value.ok, grants: value.grants, profileIdenticalToUnrestricted: value.profileIdenticalToUnrestricted, first: value.steps[0], last: value.steps.at(-1) }
+              : name.endsWith("child.json") || name.startsWith("native-child") || name === "standard-child.json"
+                ? { execArgv: value.execArgv ?? value.probe?.execArgv, has: value.has ?? value.probe?.has, discovered: value.discoveredReadRoots }
+                : value;
+            lines.push(`${name}: ${JSON.stringify(brief).slice(0, 1500)}`);
+          }
+          writeFileSync(join(directory, "summary.txt"), lines.join("\n") + "\n");
+          '
+          cat "$EVIDENCE/summary.txt"
+          { echo '```'; cat "$EVIDENCE/summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the summary as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh "S35 ${{ matrix.os }}" "$RUNNER_TEMP/evidence/summary.txt"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s35-evidence-${{ matrix.os }}
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

@@ -11,6 +11,7 @@ import {
 import { fileDigestSchema, refusalReasons } from '#schemas/tools/arrange-workbench.tool.schema.js';
 import { messageStatuses } from '#constants/message.constants.js';
 import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
+import { cadReferencesSchema } from '#references/cad-reference.schema.js';
 
 /**
  * Schema for a file entry in the project filesystem.
@@ -96,6 +97,13 @@ export const snapshotSchema = z.object({
       refused: z.array(z.strictObject({ tab: workbenchTabSchema, reason: z.enum(refusalReasons) })).max(16),
     })
     .optional(),
+  /** The components the person has selected in the viewer, in the entry the viewer shows (blueprint D6). */
+  viewerSelection: z
+    .strictObject({
+      entryPath: projectPathSchema,
+      selected: cadReferencesSchema,
+    })
+    .optional(),
 });
 
 /**
@@ -115,4 +123,6 @@ export const snapshotSchema = z.object({
 export const messageMetadataSchema = z.object({
   createdAt: z.number().optional(),
   status: z.enum(messageStatuses).optional(),
+  /** The structured geometry references a user message carries; its text holds each one's `@cad[...]` token. */
+  references: cadReferencesSchema.optional(),
 });

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
 import { Auth } from '#components/auth/auth.js';
@@ -9,6 +9,7 @@ import { TauWordmark } from '#components/icons/tau-wordmark.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import type { Handle } from '#types/matches.types.js';
 import { DesignStory } from '#components/geometry/splash/design-story.js';
+import { setEntryPreference } from '#lib/entry-preference.js';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import type { ShellAuthHandoff } from '#providers/auth-provider.js';
@@ -75,18 +76,87 @@ export default function AuthPage(): React.JSX.Element {
   /* A session on a sign-in page continues to `redirectTo`: in the desktop window
      main only announces that the session changed, and a browser that is already
      signed in (e.g. `/auth/desktop` bouncing here) must not ask again. */
-  const { data: session } = useSession(authClient);
+  const { data: session, isSuccess, isFetching, isError, refetch } = useSession(authClient);
+  const [hasWaitExpired, setHasWaitExpired] = useState(false);
+  const [shouldShowForm, setShouldShowForm] = useState(false);
   const [searchParameters] = useSearchParams();
   const navigate = useNavigate();
-  const redirectTo = sanitizeVerifyEmailRedirectTo(searchParameters.get('redirectTo') ?? undefined);
+  const requestedDestination = sanitizeVerifyEmailRedirectTo(searchParameters.get('redirectTo') ?? undefined);
+  const destinationPath = requestedDestination.split(/[?#]/u)[0]?.replace(/\/+$/u, '');
+  const redirectTo =
+    destinationPath === '/auth/sign-in' || destinationPath === '/auth/sign-up' ? '/' : requestedDestination;
   const isSignInPage =
     shellHandoff === undefined ? segment === 'sign-in' || segment === 'sign-up' : shellHandoff.action === 'signIn';
   const isSignedIn = isSignInPage && Boolean(session);
   useEffect(() => {
+    // Preserve explicit app intent before OAuth leaves this origin or a magic
+    // link finishes. An older website choice must not intercept its callback.
+    if (!desktopTarget && (isSignInPage || segment === 'magic-link/verify' || segment === 'verify-email')) {
+      setEntryPreference('app');
+    }
+  }, [desktopTarget, isSignInPage, segment]);
+  useEffect(() => {
     if (isSignedIn) {
+      if (!desktopTarget) {
+        setEntryPreference('app');
+      }
       void navigate(redirectTo, { replace: true });
     }
-  }, [isSignedIn, navigate, redirectTo]);
+  }, [desktopTarget, isSignedIn, navigate, redirectTo]);
+  useEffect(() => {
+    if (isSuccess && !isFetching && !session) {
+      setShouldShowForm(true);
+    }
+  }, [isSuccess, isFetching, session]);
+  useEffect(() => {
+    if (!isSignInPage || shouldShowForm || hasWaitExpired || shellHandoff !== undefined) {
+      return;
+    }
+    // Milliseconds. Give a stalled session request a visible recovery path.
+    const sessionTimer = setTimeout(() => {
+      setHasWaitExpired(true);
+    }, 5000);
+    return () => {
+      clearTimeout(sessionTimer);
+    };
+  }, [hasWaitExpired, isSignInPage, shouldShowForm, shellHandoff]);
+  const shouldContinue = isSignInPage && (isSignedIn || !shouldShowForm);
+  if (shellHandoff === undefined && shouldContinue) {
+    return (
+      <main className='flex min-h-svh flex-col items-center justify-center gap-6 bg-background p-6 text-foreground'>
+        <TauWordmark className='h-7 text-primary' />
+        <div className='w-full max-w-md text-center'>
+          {!isSignedIn && (isError || hasWaitExpired) ? (
+            <>
+              <p role='alert'>We couldn&apos;t check your session.</p>
+              <div className='mt-4 flex justify-center gap-2'>
+                <Button
+                  variant='outline'
+                  onClick={() => {
+                    setHasWaitExpired(false);
+                    void refetch();
+                  }}
+                >
+                  Retry
+                </Button>
+                <Button
+                  onClick={() => {
+                    setShouldShowForm(true);
+                  }}
+                >
+                  Continue to sign in
+                </Button>
+              </div>
+            </>
+          ) : (
+            <p role='status' aria-label='Opening Tau' aria-busy='true' className='text-sm text-muted-foreground'>
+              Opening Tau…
+            </p>
+          )}
+        </div>
+      </main>
+    );
+  }
   return (
     <AuthEmailDraftProvider>
       <div className='grid min-h-svh lg:grid-cols-2'>

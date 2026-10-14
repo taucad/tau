@@ -1,0 +1,79 @@
+# Spike S12 (native-dependency-resolution charter, wave 0): serve UI layer size and serving from a digest store path (W18)
+# Spike code under scripts/spikes/native-deps/linux/s12; the run's evidence is the uploaded artifact
+# and the job summary. Downloaded bytes are inspected as data and never executed.
+name: Spike S12 (serve UI layer)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/spike-s12.yml'
+      - 'scripts/spikes/native-deps/linux/s12/**'
+      - 'scripts/spikes/native-deps/linux/annotate.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-s12-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s12:
+    name: S12 serve UI gzip size and store-path serving
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+      # The same build-time origins ci.yml and e2e-nightly.yml give every UI build.
+      TAU_API_URL: http://localhost:4000
+      TAU_WEBSOCKET_URL: ws://localhost:4001
+      TAU_FRONTEND_URL: http://localhost:3000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      # The UI bundles the GeoSpec engine's WASM binding; restore the products CI already built
+      # for this source closure (a miss fails here, by name, rather than inside the build).
+      - name: Identify the GeoSpec engine product closure
+        id: geospec-key
+        run: echo "key=geospec-transport-v1-$(node packages/geospec-engine-native/scripts/ci-artifacts.mjs product-key)" >> "$GITHUB_OUTPUT"
+      - name: Restore the GeoSpec engine products
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ steps.geospec-key.outputs.key }}
+          mode: restore
+      - name: Build the serve UI
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          set -o pipefail
+          start=$(date +%s)
+          pnpm nx run ui:build:serve --outputStyle=stream 2>&1 | tee "$RUNNER_TEMP/evidence/build.log"
+          echo "build_seconds=$(( $(date +%s) - start ))" | tee "$RUNNER_TEMP/evidence/build-time.txt"
+      - name: Measure the layer and serve it from the store
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          scripts/spikes/native-deps/linux/s12/measure-and-serve.sh "$RUNNER_TEMP/evidence" "$RUNNER_TEMP/store"
+      - name: Summarise
+        if: always()
+        run: |
+          { echo '```'; cat "$RUNNER_TEMP/evidence/measure.txt"; grep -hE 'Test Files|Tests ' "$RUNNER_TEMP"/evidence/serve-ui-build.*.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      - name: Collect the summary
+        if: always()
+        run: |
+          { cat "$RUNNER_TEMP/evidence/build-time.txt"; sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/evidence/build.log" | grep -iE '^ui: (error|.*killed|.*build failed)' | tail -20; cat "$RUNNER_TEMP/evidence/measure.txt"; for f in "$RUNNER_TEMP"/evidence/serve-ui-build.*.txt; do echo "== $(basename "$f")"; grep -E '✓|×|✗|FAIL|Test Files|Tests ' "$f"; done; } > "$RUNNER_TEMP/evidence/s12-summary.txt" 2>/dev/null || true
+      - name: Drop the layer and the build log from the evidence upload
+        if: always()
+        run: rm -f "$RUNNER_TEMP/evidence/serve-ui-client.tar.gz" "$RUNNER_TEMP/evidence/build.log"
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S12' "$RUNNER_TEMP/evidence/s12-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s12-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

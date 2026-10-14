@@ -1,6 +1,11 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { useChatEditor, extractContent, buildEditorContentJson } from '#components/chat/tiptap/use-chat-editor.js';
+import {
+  useChatEditor,
+  extractContent,
+  buildEditorContentJson,
+  cadReferencesOfChips,
+} from '#components/chat/tiptap/use-chat-editor.js';
 import type { UseChatEditorOptions } from '#components/chat/tiptap/use-chat-editor.js';
 import { defaultCommands } from '#components/chat/tiptap/slash-command-suggestion.js';
 import type { PastedContentSegment } from '#utils/at-reference.utils.js';
@@ -745,6 +750,24 @@ describe('buildEditorContentJson', () => {
       referenceToken: '@cad[main.ts#component:sun_gear]',
       geometryReference,
     });
+    expect(cadReferencesOfChips([...content.contextChips, ...content.contextChips])).toEqual([
+      {
+        resource: { kind: 'workspace-file', path: 'main.ts' },
+        target: {
+          kind: 'component',
+          componentId: 'component:sun_gear',
+          selector: '/nodes/0',
+          label: 'Sun Gear',
+          componentKind: 'part',
+        },
+      },
+    ]);
+    expect(
+      cadReferencesOfChips([
+        { id: 'a', label: 'a', chipType: 'geometry', geometryReference: '{not json' },
+        { id: 'b', label: 'b', chipType: 'geometry', geometryReference: '{"scheme":"other"}' },
+      ]),
+    ).toEqual([]);
   });
 
   it('should handle multiple adjacent chips', () => {

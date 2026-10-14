@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMorphingPointsNodeMaterial } from '#components/geometry/splash/morphing-points-material.node.js';
-import { serialiseStrippedTslGraph } from '#components/geometry/graphics/three/utils/tsl-node-graph-snapshot.js';
+import { serialiseStrippedTslGraph } from '@taucad/viewer/graphics/three/utils/tsl-node-graph-snapshot';
 
 const currentDirectory = fileURLToPath(new URL('.', import.meta.url));
 

@@ -70,6 +70,10 @@ export const refusals = {
   MODEL_ATTEMPT_OTHER_ACCOUNT: { owner: 'host', retry: 'reauth' },
   /** The model stream went silent past its stall bound (T9 E9). */
   MODEL_STREAM_STALLED: { owner: 'host', retry: 'resume' },
+  /** Automatic output-limit continuation exhausted its bound; offer Resume with the saved progress. */
+  MODEL_OUTPUT_LIMIT: { owner: 'host', retry: 'resume' },
+  /** A dispatched tool's result could not be saved; resume verifies uncertain effects before retrying. */
+  TOOL_RESULT_PERSISTENCE_FAILED: { owner: 'host', retry: 'resume' },
   /** A prepared model invocation has no recorded resolution; Resume reconciles it first (W3, RV1-F3). */
   INVOCATION_UNRESOLVED: { owner: 'host', retry: 'resume' },
   /** The host is closing (was `LAUNCHER_CLOSED`); re-send to its successor. */
@@ -240,6 +244,9 @@ export const refusals = {
   BRANCH_NEEDS_REVISION: { owner: 'revisions', retry: 'never' },
   /** A branch name under a namespace Tau keeps for itself (`conflicts/`, D14). */
   BRANCH_NAME_RESERVED: { owner: 'revisions', retry: 'never' },
+  /** A rename of a branch something else knows by its name: a linked checkout or a remote (D91). */
+  BRANCH_RENAME_LINKED: { owner: 'revisions', retry: 'never' },
+  BRANCH_RENAME_PUSHED: { owner: 'revisions', retry: 'never' },
   CHECKOUT_CONFLICT: { owner: 'revisions', retry: 'never' },
   ENGINE_FAILED: { owner: 'revisions', retry: 'never' },
   ENGINE_UNAVAILABLE: { owner: 'revisions', retry: 'never' },

@@ -29,8 +29,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
 import { tauDesktopDownloadUrl } from '#components/desktop/open-in-desktop.js';
-import { Loader } from '#components/ui/loader.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { Loader } from '@taucad/ui/components/loader';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { SidebarTrigger } from '#components/ui/sidebar.js';
 import { toast } from '#components/ui/sonner.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';

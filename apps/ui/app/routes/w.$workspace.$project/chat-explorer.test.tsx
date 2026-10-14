@@ -8,8 +8,11 @@ import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryCo
 import type { ActorRefFrom } from 'xstate';
 import { createActor } from 'xstate';
 import { StrictMode } from 'react';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
-import { createSourceModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import {
+  createSourceModelInteractionUnitId,
+  modelInteractionMachine,
+} from '@taucad/viewer/machines/model-interaction.machine';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { PartThumbnailService } from '#services/part-thumbnail.service.js';
 import * as partThumbnailVisual from '#services/part-thumbnail-visual.js';
@@ -51,7 +54,7 @@ vi.mock('#providers/headless-image-provider.js', () => ({
   useOptionalHeadlessImageService: () => mocks.imageService,
 }));
 
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Ctrl+A' }),
 }));
 

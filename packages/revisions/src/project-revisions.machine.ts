@@ -89,7 +89,7 @@ type ProjectRevisionsMachineContextFields = Readonly<{
   /** Every conflicted revision no decision has landed yet, from the registry's last listing (D14). */
   conflicts: readonly ConflictRecord[];
   /** Local branch refs learned from fetch that do not need a checkout yet. */
-  availableBranches: ReadonlyArray<Readonly<{ name: string; head: string }>>;
+  availableBranches: ReadonlyArray<Readonly<{ name: string; head: string; onRemote?: boolean }>>;
   checkoutStatus: Readonly<Record<string, CheckoutStatusEntry>>;
   liveCheckoutId: string | undefined;
   selectedCheckoutId: string | undefined;
@@ -143,7 +143,7 @@ export type ProjectRevisionsMachineEvent =
   | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[]; conflicts: readonly ConflictRecord[] }>
   | Readonly<{
       type: 'branchesFetched';
-      branches: ReadonlyArray<Readonly<{ name: string; head: string }>>;
+      branches: ReadonlyArray<Readonly<{ name: string; head: string; onRemote?: boolean }>>;
     }>
   | Readonly<{
       type: 'checkoutStatusChanged';
@@ -1012,6 +1012,17 @@ const projectRevisionsMachineDefinition = setup({
           ) {
             enq.sendTo('sync', { type: 'branchChanged', branch: event.branch });
           }
+          /* D88: a card reads its files once; a head that moves under it (a chat's turn, a save) re-reads them, or
+           * every choice is refused against files that no longer fight. */
+          const priorHead = context.checkoutStatus[event.checkoutId]?.headRevisionId;
+          if (priorHead !== undefined && priorHead !== event.headRevisionId) {
+            for (const conflict of context.conflicts) {
+              const ref = context.resolutionRefs[conflict.revisionId];
+              if (ref !== undefined && conflict.into === event.branch) {
+                enq.sendTo(ref, { type: 'reload' });
+              }
+            }
+          }
           return { context: { checkoutStatus: next.checkoutStatus } };
         },
         admitTurn: (
@@ -1388,6 +1399,13 @@ const projectRevisionsMachineDefinition = setup({
           return {};
         },
         pinTo: ({ context, event }: RootArgs<'pinTo'>, enq: ProjectRevisionsEnqueue): RootTransition => {
+          /* A pin a host remembered across a reload can name a checkout discarded
+           * since. Once the registry has answered, the workbench stays where it is
+           * rather than on a checkout with no root; before then, the registry's
+           * first answer checks it and falls back to the live checkout (R22). */
+          if (context.registrySettled && !context.checkouts.some((checkout) => checkout.id === event.checkoutId)) {
+            return {};
+          }
           const patch = {
             selectedCheckoutId: event.checkoutId,
             follow: 'pinned',
@@ -1631,6 +1649,7 @@ export const selectRevisionStatus = (
   return {
     projectId: context.projectId,
     checkoutId: context.selectedCheckoutId,
+    liveCheckoutId: context.liveCheckoutId,
     checkoutRoot: selected?.root,
     line: lineOf(selected?.branch, headRevisionId),
     registrySettled: context.registrySettled,
@@ -1692,25 +1711,31 @@ const selectConflicts = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>)
  */
 const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>): readonly RevisionBranchFacet[] => {
   const { context } = snapshot;
-  const checkedOut = viewsOf(context).flatMap((checkout) =>
-    checkout.branch === undefined
-      ? []
-      : [
-          {
-            name: checkout.branch,
-            /* The live child's head first, as `headRevisionId` reads it: the
-               registry record lags a save, and the row then counted the
-               branch behind itself (D47). */
-            head: context.checkoutStatus[checkout.id]?.headRevisionId ?? checkout.headRevisionId,
-            checkoutId: checkout.id,
-            checkoutRoot: checkout.root,
-            /* The registry's own record, not the root's routing memory: a chip
-               that came from `chatCheckouts` was gone the moment the page
-               reloaded, because nothing on disk said it (I3; review R9). */
-            leaseChatIds: checkout.leaseChatIds,
-          },
-        ],
-  );
+  /* The fetch's word on every branch, a checked-out one included: *Rename*
+     reads it, because a branch the remote holds is never renamed (D91). */
+  const onRemoteOf = new Map(context.availableBranches.map((branch) => [branch.name, branch.onRemote]));
+  const checkedOut = viewsOf(context).flatMap((checkout) => {
+    if (checkout.branch === undefined) {
+      return [];
+    }
+    const onRemote = onRemoteOf.get(checkout.branch);
+    return [
+      {
+        name: checkout.branch,
+        /* The live child's head first, as `headRevisionId` reads it: the
+           registry record lags a save, and the row then counted the
+           branch behind itself (D47). */
+        head: context.checkoutStatus[checkout.id]?.headRevisionId ?? checkout.headRevisionId,
+        checkoutId: checkout.id,
+        checkoutRoot: checkout.root,
+        /* The registry's own record, not the root's routing memory: a chip
+           that came from `chatCheckouts` was gone the moment the page
+           reloaded, because nothing on disk said it (I3; review R9). */
+        leaseChatIds: checkout.leaseChatIds,
+        ...(onRemote === undefined ? {} : { onRemote }),
+      },
+    ];
+  });
   const known = new Set(checkedOut.map((branch) => branch.name));
   /* A conflict line is listed while it holds a decision nobody landed, and
    * hidden once the line it decides contains it (D14). */
@@ -1725,7 +1750,7 @@ const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>):
     ...context.availableBranches.filter((branch) => !isConflictLine(branch.name) || undecided.has(branch.name)),
     ...[...undecided]
       .filter(([line]) => !context.availableBranches.some((branch) => branch.name === line))
-      .map(([name, head]) => ({ name, head })),
+      .map(([name, head]) => ({ name, head, onRemote: undefined })),
   ];
   return [
     ...checkedOut,
@@ -1737,6 +1762,7 @@ const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>):
         checkoutId: undefined,
         checkoutRoot: undefined,
         leaseChatIds: [],
+        onRemote: branch.onRemote,
       })),
   ];
 };
@@ -1797,7 +1823,11 @@ const selectSyncFacetOf = (snapshot: SnapshotFrom<typeof projectRevisionsMachine
   const sync = snapshot.children.sync?.getSnapshot();
   return sync === undefined
     ? { state: 'noRemote', pendingCount: 0, online: true, conflictRef: undefined, error: undefined, reason: undefined }
-    : selectSyncFacet(sync);
+    : selectSyncFacet(
+        sync,
+        /* A lost lease on a branch whose conflict waits is the person's to clear (D90). */
+        snapshot.context.conflicts.map((conflict) => conflict.into),
+      );
 };
 
 /**

@@ -501,6 +501,11 @@ describe('environmentSchema', () => {
       ...baseEnvironment(),
       NODE_ENV: 'development',
       GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.partial',
+      /* A developer's .env may configure the App; this row is about the partial one. */
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: undefined,
+      GITHUB_REPOSITORY_APP_SLUG: undefined,
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: undefined,
+      GITHUB_REPOSITORY_CONNECTION_KEY: undefined,
     });
 
     expect(result.success).toBe(false);

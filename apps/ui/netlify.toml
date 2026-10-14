@@ -159,21 +159,18 @@ Document-Policy = "js-profiling"
 #     immediately reported.
 #   - https://*.ingest.sentry.io / https://*.ingest.us.sentry.io: Sentry browser
 #     error reports (launch gate OBS-7), sent only when SENTRY_DSN is set.
-Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new https://*.ingest.sentry.io https://*.ingest.us.sentry.io wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+#   - https://registry.npmjs.org: packuments and tarballs for the Packages
+#     panel's Install (tarballs are checked against package-lock.json integrity).
+Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://registry.npmjs.org wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
 
-# Homepage cache policy. Previously a `headers` export in
-# `app/routes/_index/route.tsx`; moved here because React Router SPA mode (the
-# `ui:build:desktop` config) bans route `headers` exports and the desktop build
-# shares this route module. Values must stay in step with
-# `app/constants/cache.constants.ts` (`browserRevalidateCacheControl` +
-# `edgeShortLivedSsrRouteCacheControl`, `cacheTag.homepage`).
+# The apex selects marketing or the app from a presentation cookie. Never reuse
+# one visitor's document for another, or restore stale HTML after switching.
 [[headers]]
 for = "/"
 [headers.values]
-Cache-Control = "public, max-age=0, must-revalidate"
-Netlify-CDN-Cache-Control = "public, durable, s-maxage=600, stale-while-revalidate=86400"
-Cache-Tag = "homepage"
-Netlify-Vary = "query="
+Cache-Control = "private, no-store"
+CDN-Cache-Control = "no-store"
+Netlify-CDN-Cache-Control = "no-store"
 
 # Content-hashed Vite bundles + WASM (immutable filenames)
 [[headers]]

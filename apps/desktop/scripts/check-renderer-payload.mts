@@ -15,6 +15,7 @@ import { realpathSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { gunzipSync } from 'node:zlib';
 import { extractFile, listPackage, statFile } from '@electron/asar';
 import { parseAstAsync } from 'rolldown/parseAst';
 
@@ -155,7 +156,7 @@ export const isRendererExecutionModule = (moduleId: string): boolean => {
     /packages\/plugins\/image\/src\/(?:image-backend|image\.transcoder|svg(?:-renderer|\.transcoder)?|resvg)/u.test(
       path,
     ) ||
-    /packages\/geospec-engine\/(?:src\/(?:register|native|runner)|native\/)/u.test(path) ||
+    /packages\/geospec-engine\/src\/runner\//u.test(path) ||
     /(?:node_modules\/|\.pnpm\/)(?:[^/]*\/node_modules\/)?(?:@taulabs\/openrscad-engine|libassimp|nanoraster\/dist\/(?:renderer|native|wasm|create|render)|@resvg\/resvg-wasm|esbuild-wasm)/u.test(
       path,
     )
@@ -223,6 +224,34 @@ const fileKind = (path: string, bytes: Uint8Array<ArrayBuffer>): PayloadFile['ki
     return 'javascript';
   }
   return path.endsWith('.map') ? 'map' : 'other';
+};
+
+const maxInflatedBytes = 256 * 1024 * 1024;
+const maxGzipLayers = 4;
+const wasmPreamble = Buffer.from('0061736d01000000', 'hex');
+const isGzip = (bytes: Uint8Array<ArrayBuffer>): boolean => bytes[0] === 0x1f && bytes[1] === 0x8b;
+
+// Gzip is a transport encoding, not a content type: inflate it within a bound
+// and refuse inner WASM, native code or archives. Other inner bytes are data.
+const compressedPayloadViolation = (path: string, content: Uint8Array<ArrayBuffer>): string | undefined => {
+  let inner: Uint8Array<ArrayBuffer> = content;
+  for (let layer = 0; isGzip(inner); layer += 1) {
+    if (layer === maxGzipLayers) {
+      return `Unreadable compressed payload in renderer: ${path}`;
+    }
+    try {
+      inner = Uint8Array.from(gunzipSync(inner, { maxOutputLength: maxInflatedBytes }));
+    } catch {
+      return `Unreadable compressed payload in renderer: ${path}`;
+    }
+  }
+  const view = Buffer.from(inner.buffer, inner.byteOffset, inner.byteLength);
+  const kind = fileKind('', Uint8Array.from(view.subarray(0, 4)));
+  const archive = view.toString('hex', 0, 4) === '504b0304' || view.toString('ascii', 257, 262) === 'ustar';
+  if (kind === 'wasm' || kind === 'native' || archive || view.includes(wasmPreamble)) {
+    return `Compressed executable or archive in renderer: ${path}`;
+  }
+  return undefined;
 };
 
 const readGraph = (content: string): { chunks: ModuleChunk[]; assets: ModuleAsset[] } => {
@@ -387,7 +416,12 @@ export const inspectDesktopPayload = async (options: {
     if (kind === 'native') {
       inventory.violations.push(`Native executable in renderer: ${rendererPath}`);
     }
-    if (kind === 'other' && isUnclassifiedBinary(content)) {
+    const gzipped = kind === 'other' && isGzip(content);
+    const compressedViolation = gzipped ? compressedPayloadViolation(rendererPath, content) : undefined;
+    if (compressedViolation) {
+      inventory.violations.push(compressedViolation);
+    }
+    if (kind === 'other' && !gzipped && isUnclassifiedBinary(content)) {
       inventory.violations.push(`Unclassified binary in renderer: ${rendererPath}`);
     }
     if (browserExecutionEntry.test(rendererPath)) {

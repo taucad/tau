@@ -40,6 +40,6 @@ describe('retired money surface', () => {
 
   it('keeps the exact credit-atom formatters that replaced them', () => {
     expect(billing.formatCreditAtoms(12_345n)).toBe('1.2345');
-    expect(billing.formatCreditAtomsDisplay(12_345n)).toBe('1.23');
+    expect(billing.formatCreditAtomsDisplay(12_345n)).toBe('1');
   });
 });

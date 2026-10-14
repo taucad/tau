@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { Button } from '@taucad/ui/components/button';
-import { CopyButton } from '#components/copy-button.js';
+import { CopyButton } from '@taucad/ui/components/copy-button';
 import { Input } from '@taucad/ui/components/input';
 import { cn } from '@taucad/ui/utils/cn';
 

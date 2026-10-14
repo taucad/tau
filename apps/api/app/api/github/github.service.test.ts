@@ -2,6 +2,8 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
+import { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import type { Environment } from '#config/environment.config.js';
 import type { DatabaseService } from '#database/database.service.js';
 import type { RedisService } from '#redis/redis.service.js';
@@ -237,6 +239,16 @@ describe('GithubService connection completion', () => {
       'https://tau.test/github/complete?error=GITHUB_CALLBACK_EXPIRED',
     );
   });
+
+  it.each(['', 'attempt-1', '00000000-0000-0000-0000-000000000000'])(
+    'should refuse completion of the malformed attempt id %j with 400 GITHUB_COMPLETION_INVALID',
+    async (attemptId) => {
+      await expect(service().complete('tau-user', 'session-1', attemptId)).rejects.toMatchObject({
+        status: 400,
+        response: { code: 'GITHUB_COMPLETION_INVALID' },
+      });
+    },
+  );
 });
 
 describe('GithubService REST cache and refusals', () => {
@@ -478,6 +490,20 @@ describe('GithubService concurrent completion', () => {
     expect(database.database.insert).toHaveBeenCalledOnce();
     expect(database.database.update).not.toHaveBeenCalled();
   });
+
+  it('should refuse another Tau account as the wrong owner and keep the attempt for its own', async () => {
+    stubGithub(() => json(tokenBody));
+    const { github, database } = harness();
+    const started = await github.start('tau-user', 'session-1', '/import', 'browser');
+    await github.callback({ state: stateOf(started.authorizationUrl), code: 'a'.repeat(32) });
+
+    await expect(github.complete('other-user', 'session-9', started.attemptId)).rejects.toMatchObject({
+      status: 401,
+      response: { code: 'GITHUB_COMPLETION_OWNER_MISMATCH' },
+    });
+    expect(database.database.insert).not.toHaveBeenCalled();
+    await expect(github.complete('tau-user', 'session-1', started.attemptId)).resolves.toMatchObject({ subject: 42 });
+  });
 });
 
 describe('GithubService refresh token retention', () => {
@@ -590,6 +616,38 @@ describe('GithubService connection removal', () => {
 
     await expect(github.remove('tau-user', '00000000-0000-4000-8000-000000000001')).resolves.toBeUndefined();
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe('GithubService connection ownership', () => {
+  it("should refuse to mint a token from another Tau account's connection without calling GitHub", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const { github, rows, database, connect } = harness();
+    connect(new Date(Date.now() + 3_600_000));
+    // The harness answers any filter with its first row; evaluate the column equalities `owned()` sends instead.
+    Object.assign(database.database.query.githubConnection, {
+      findFirst: async (options: { where?: unknown }): Promise<Row | undefined> => {
+        if (!(options.where instanceof SQL)) {
+          throw new TypeError('Expected an SQL filter');
+        }
+        const { sql, params } = new PgDialect().sqlToQuery(options.where);
+        const equalities = [...sql.matchAll(/"(\w+)" = \$(\d+)/gu)].map(([, column = '', index = '']) => ({
+          key: column.replaceAll(/_(\w)/gu, (_match, letter: string) => letter.toUpperCase()),
+          value: params[Number(index) - 1],
+        }));
+        return rows.find((row) => equalities.every(({ key, value }) => row[key] === value));
+      },
+    });
+
+    await expect(github.token('other-user', '00000000-0000-4000-8000-000000000001')).rejects.toMatchObject({
+      status: 401,
+      response: { code: 'GITHUB_CONNECTION_NOT_FOUND' },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(github.token('tau-user', '00000000-0000-4000-8000-000000000001')).resolves.toMatchObject({
+      accessToken: 'stored-access',
+    });
   });
 });
 

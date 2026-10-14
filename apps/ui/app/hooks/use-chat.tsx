@@ -42,6 +42,7 @@ import type { Chat as AiSdkChat } from '@ai-sdk/react';
 import { useSelector } from '@xstate/react';
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
+import type { CadReference } from '@taucad/chat/references';
 import type { ChatError } from '@taucad/types';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { KernelId } from '@taucad/types/constants';
@@ -470,7 +471,11 @@ export type ChatActions = DraftActions & {
   continueChat: () => void;
   stop: (origin: StopOrigin) => void;
   setMessages: (messages: MyUIMessage[]) => void;
-  editMessage: (messageId: string, content: string, options?: { attachments?: readonly StoredAttachmentRef[] }) => void;
+  editMessage: (
+    messageId: string,
+    content: string,
+    options?: { attachments?: readonly StoredAttachmentRef[]; references?: readonly CadReference[] },
+  ) => void;
 };
 
 function warnNoCrossChatSession(action: string, chatId: string): void {
@@ -586,6 +591,7 @@ export function useChatActions(chatId?: string): ChatActions {
           messageId,
           text: content,
           ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
+          ...(options?.references === undefined ? {} : { references: options.references }),
         });
       },
     };

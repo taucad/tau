@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { KeyboardProvider } from '#hooks/use-keyboard.js';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 
 const mobile = vi.hoisted(() => ({ value: false }));
 

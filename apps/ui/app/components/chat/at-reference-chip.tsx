@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import type { ComponentProps } from 'react';
 import type { FileEntry } from '@taucad/types';
+import { parseCadReferenceTokens } from '@taucad/chat/references';
 import { ContextChip } from '#components/chat/context-chip.js';
+import { CadReferenceChip } from '#components/chat/cad-reference-chip.js';
 import { FileLink } from '#components/files/file-link.js';
 import { useAtReferenceContext } from '#components/chat/at-reference-context.js';
 import { resolveAtReference } from '#utils/at-reference.utils.js';
@@ -10,17 +12,25 @@ import type { ResolvedAtReference } from '#utils/at-reference.utils.js';
 type AtReferenceChipProps = ComponentProps<'mark'> & {
   readonly 'data-at-reference'?: string;
   readonly 'data-invocation'?: string;
+  readonly 'data-cad-reference'?: string;
 };
 
 /**
- * Renders `@path` references and known invocation tokens (`/skill`, `$skill`) as chips in chat messages.
+ * Renders `@path` references, `@cad[...]` component references and known invocation tokens (`/skill`, `$skill`) as
+ * chips in chat messages.
  * Resolves paths against the file tree and chats for display.
  *
  * Registered as the `mark` component override in `MarkdownViewerChat`.
- * `rehypeAtReferences` emits `<mark>` elements with either
- * `data-at-reference` or `data-invocation` attributes.
+ * `rehypeAtReferences` emits `<mark>` elements with a
+ * `data-at-reference`, `data-invocation` or `data-cad-reference` attribute.
  */
 export function AtReferenceChip(props: AtReferenceChipProps): React.JSX.Element {
+  const cadToken = props['data-cad-reference'];
+  if (cadToken) {
+    const [segment] = parseCadReferenceTokens(cadToken);
+    return segment?.type === 'cadReference' ? <CadReferenceChip target={segment.target} /> : <span>{cadToken}</span>;
+  }
+
   const invocation = props['data-invocation'];
   if (invocation) {
     return <InvocationChip token={invocation} />;

@@ -37,10 +37,11 @@ const verbs = {
   log: { pending: 'Reading', done: 'Read' },
   diff: { pending: 'Comparing', done: 'Compared' },
   describe: { pending: 'Checking', done: 'Checked' },
+  conflict: { pending: 'Reading', done: 'Read' },
 } as const satisfies Record<NonNullable<RevisionsAction>, { readonly pending: string; readonly done: string }>;
 
 const nounFor = (action: RevisionsAction | undefined): string =>
-  action === 'diff' ? 'what changed' : 'this project’s history';
+  action === 'diff' ? 'what changed' : action === 'conflict' ? 'both sides of a conflict' : 'this project’s history';
 
 const changeIcons = {
   added: FilePlus,
@@ -64,7 +65,19 @@ const countOf = (count: number, singular: string): string =>
  * @returns The rows, or `undefined` when this answer has none.
  */
 const revisionRows = (output: RevisionsOutput): ReactNode => {
-  const { branch, branches, changes, revisions } = output;
+  const { branch, branches, changes, conflict, revisions } = output;
+
+  if (conflict !== undefined) {
+    return (
+      <ChatToolCardList maxHeight='max-h-48'>
+        {conflict.files.map((file) => (
+          <ChatToolCardListItem key={file.path} icon={FileDiff}>
+            <span className='min-w-0 truncate font-mono text-xs'>{file.path}</span>
+          </ChatToolCardListItem>
+        ))}
+      </ChatToolCardList>
+    );
+  }
 
   if (revisions !== undefined) {
     return (
@@ -143,6 +156,9 @@ const summaryOf = (output: RevisionsOutput): string => {
   }
   if (output.branches !== undefined) {
     return countOf(output.branches.length, 'branch').replace('branchs', 'branches');
+  }
+  if (output.conflict !== undefined) {
+    return countOf(output.conflict.files.length, 'file');
   }
   return '';
 };

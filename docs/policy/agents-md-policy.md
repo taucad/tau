@@ -31,7 +31,7 @@ System, developer and current user instructions take precedence over repository 
 - `.agents/skills/<name>/SKILL.md` and linked resources own repeatable procedures.
 - Existing architecture/research owners and package READMEs retain rationale, incidents and superseded architecture.
 - The existing program's coordinator-owned execution record holds selection, checkpoints and acceptance.
-- Thin supported native adapters configure host discovery and permissions.
+- Thin supported native adapters configure host discovery, permissions and environment bootstrap; `scripts/agent-env.sh` owns the bootstrap they call.
 
 Do not maintain another active IDE rule hierarchy or duplicate instruction bodies. Product support for agents, skills or MCP is separate from the development harness.
 

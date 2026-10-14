@@ -104,7 +104,6 @@ type WireNull = null;
 const root = resolvePath(import.meta.dirname, '../../../..');
 const script = resolvePath(import.meta.dirname, 'performance-lab-cli.ts');
 const moduleFlags = [
-  ['legacy-module', 'legacy-wasm'],
   ['mixed-module', 'combined-wasm'],
   ['native-module', 'native-desktop'],
 ] as const;
@@ -115,7 +114,6 @@ const productFlags = [
   ['mixed-glue', 'mixedGlue', 'mixed-module'],
 ] as const;
 const help = `Private performance-lab diagnostic (not Q7 qualification).
-  --legacy-module=/absolute/installed/legacy.mjs
   --mixed-module=/absolute/installed/wasm.mjs
   --native-module=/absolute/installed/node.mjs
 Supply at least one module; only supplied engines run, with no fallback.
@@ -130,10 +128,10 @@ Supply at least one module; only supplied engines run, with no fallback.
   --contended-host                                 Opt-in: record load and mark guard violations as contended, never refuse.
   --max-child-rss-mib=4096                         Mark child above limit as resource failure.
   --cell-timeout-ms=900000                         Kill a cell past its wall limit.
-  --hash-manifest=/absolute/artifacts.json           Existing Artifact[]: [{path,sha256}]; required for full three-engine catalog.
-The manifest must include supplied modules, product overrides and the legacy cache control module when selected.
-Include their binaries/loaders to pin that closure. Without a manifest only entries and the
-legacy cache control are pinned; no transitive closure is claimed.
+  --hash-manifest=/absolute/artifacts.json           Existing Artifact[]: [{path,sha256}]; required for the full every-engine catalog.
+The manifest must include supplied modules and product overrides.
+Include their binaries/loaders to pin that closure. Without a manifest only entries
+are pinned; no transitive closure is claimed.
 Results: run.json, artifacts.json, rows.jsonl, summary.json, cells/*/{result.json,stdout.log,stderr.log}.
 Cold: fresh child/module/engine/subject. Warm: fresh child prewarms its module, then times a new engine/subject.
 Cold processWall spans spawn through close; warm processWall includes the untimed prewarm and is not a warm latency.
@@ -141,7 +139,7 @@ Cold harnessWall is processWall minus the runner total: Node start, TypeScript i
 Warm timing.total spans the measured runner's startup/admission/evaluation/cleanup after module prewarm.
 maxRSS is process.resourceUsage().maxRSS * 1024 (KiB to bytes), child process only, through cleanup.
 Unsupported and unverified cells remain raw; unexpected statuses and worker errors exit 1.
-Target differences, retained legacy numerical outcomes and known legacy defects have separate counts, never expected matches.
+Qualified target differences have their own count, never expected matches.
 `;
 
 /**
@@ -155,7 +153,6 @@ export const parseCliArguments = (args: string[]): Options => {
   const { values } = parseArgs({
     args,
     options: {
-      'legacy-module': { type: 'string' },
       'mixed-module': { type: 'string' },
       'native-module': { type: 'string' },
       'native-addon': { type: 'string' },
@@ -205,11 +202,11 @@ export const parseCliArguments = (args: string[]): Options => {
   }
   if (
     values['include-scale'] &&
-    modules.length === 3 &&
+    modules.length === moduleFlags.length &&
     values['hash-manifest'] === undefined &&
     values.cell === undefined
   ) {
-    throw new Error('The full three-engine catalog requires an explicit installed-product hash manifest.');
+    throw new Error('The full every-engine catalog requires an explicit installed-product hash manifest.');
   }
   const maxLoadPerCpu = Number(values['max-load-per-cpu']);
   const minFreeMemoryMiB = Number(values['min-free-memory-mib']);
@@ -275,7 +272,7 @@ export const selectLabFixtures = (includeScale: boolean): Selection[] => {
 };
 
 /**
- * Preserve exact public authoring arguments and legacy/query payloads.
+ * Preserve exact public authoring arguments and query payloads.
  * @internal
  * @param entry - One unchanged catalog matcher or query.
  * @returns Its shared-runner input, matching the UI adapter.
@@ -664,28 +661,6 @@ export const readLabChildReport = async (path: string): Promise<ChildReceipt> =>
 const errorRecord = (error: unknown): NonNullable<ChildReport['error']> =>
   error instanceof Error ? { message: error.message, stack: error.stack } : { message: String(error) };
 
-const legacyCacheModule = (path: string): string => resolvePath(dirname(path), 'cache/evidence-cache.mjs');
-
-/**
- * Select the retained legacy package's existing cache-off control before loading its engine.
- * @internal
- * @param path - Hash-bound installed legacy entry module.
- * @returns The unchanged legacy implementation with persistence explicitly disabled.
- */
-export const loadLegacyWithoutPersistence = async (
-  path: string,
-): ReturnType<NonNullable<PerformanceLabModules['legacy']>> => {
-  const cache = (await import(pathToFileURL(legacyCacheModule(path)).href)) as {
-    setGeoSpecEvidenceStore(store: undefined): void;
-    getGeoSpecEvidenceStore(): unknown;
-  };
-  cache.setGeoSpecEvidenceStore(undefined);
-  if (cache.getGeoSpecEvidenceStore() !== undefined) {
-    throw new Error('Legacy persistence was not disabled; a cold-subject comparison is unavailable.');
-  }
-  return import(pathToFileURL(path).href) as ReturnType<NonNullable<PerformanceLabModules['legacy']>>;
-};
-
 /**
  * Select exact product files once per process, before a host entry imports them.
  * @internal
@@ -751,9 +726,7 @@ export const isHostContended = (
 
 const readArtifacts = async (options: Options): Promise<Artifact[]> => {
   const required = [
-    ...options.modules.flatMap(({ engine, path }) =>
-      engine === 'legacy-wasm' ? [path, legacyCacheModule(path)] : [path],
-    ),
+    ...options.modules.map(({ path }) => path),
     ...productFlags.flatMap(([, key]) => options[key] ?? []),
   ];
   if (options.hashManifest === undefined) {
@@ -761,7 +734,7 @@ const readArtifacts = async (options: Options): Promise<Artifact[]> => {
   }
   const artifacts = JSON.parse(await readFile(options.hashManifest, 'utf8')) as Artifact[];
   if (!Array.isArray(artifacts) || required.some((path) => !artifacts.some((entry) => entry.path === path))) {
-    throw new Error('The hash manifest must include each supplied module and the legacy cache-control module.');
+    throw new Error('The hash manifest must include each supplied module and product override.');
   }
   return artifacts;
 };
@@ -798,11 +771,6 @@ const runChild = async (options: Options): Promise<void> => {
     const { path } = options.modules[0]!;
     const load = selectLabProducts(options);
     const modules: PerformanceLabModules = {
-      ...(input.engine === 'legacy-wasm'
-        ? {
-            legacy: async () => loadLegacyWithoutPersistence(path),
-          }
-        : {}),
       ...(input.engine === 'combined-wasm' ? { combined: async () => load(path) } : {}),
       ...(input.engine === 'native-desktop' ? { native: async () => load(path) } : {}),
     };
@@ -951,11 +919,10 @@ const runParent = async (options: Options): Promise<void> => {
     harnessWall:
       'cold only: processWall minus the runner total (Node start, TypeScript imports, product and fixture SHA-256, result write); product time is result.timing',
     comparability:
-      'per-case engine evaluations and per-fixture wall are descriptive; unsupported legacy work is never equal backend throughput',
-    legacyPersistence: 'disabled through the unchanged installed evidence-cache module before engine import',
+      'per-case engine evaluations and per-fixture wall are descriptive; unsupported work is never equal backend throughput',
     hashCoverage:
       options.hashManifest === undefined
-        ? 'module-entries-and-legacy-cache-control-only; transitive binaries not pinned'
+        ? 'module-entries-only; transitive binaries not pinned'
         : 'supplied-manifest-only; no inferred closure',
     artifacts,
     sources,
@@ -973,8 +940,6 @@ const runParent = async (options: Options): Promise<void> => {
     workerErrors: 0,
     expectedMatches: 0,
     qualifiedTargetDifferences: 0,
-    retainedLegacyNumericalOutcomes: 0,
-    knownLegacyDefects: 0,
     unexpectedStatuses: 0,
     unsupported: 0,
     unverifiedExpectations: 0,
@@ -1019,8 +984,6 @@ const runParent = async (options: Options): Promise<void> => {
     }
     summary.expectedMatches += counts.expectedMatches;
     summary.qualifiedTargetDifferences += counts.qualifiedTargetDifferences;
-    summary.retainedLegacyNumericalOutcomes += counts.retainedLegacyNumericalOutcomes;
-    summary.knownLegacyDefects += counts.knownLegacyDefects;
     summary.unexpectedStatuses += counts.unexpectedStatuses;
     summary.unsupported += counts.unsupported;
     summary.unverifiedExpectations += counts.unverifiedExpectations;
@@ -1051,8 +1014,6 @@ export const summarizeLabCaseResults = (
   counts: {
     expectedMatches: number;
     qualifiedTargetDifferences: number;
-    retainedLegacyNumericalOutcomes: number;
-    knownLegacyDefects: number;
     unexpectedStatuses: number;
     unsupported: number;
     unverifiedExpectations: number;
@@ -1062,8 +1023,6 @@ export const summarizeLabCaseResults = (
   const counts = {
     expectedMatches: 0,
     qualifiedTargetDifferences: 0,
-    retainedLegacyNumericalOutcomes: 0,
-    knownLegacyDefects: 0,
     unexpectedStatuses: 0,
     unsupported: 0,
     unverifiedExpectations: 0,
@@ -1078,19 +1037,13 @@ export const summarizeLabCaseResults = (
       counts.expectedMatches += 1;
     } else {
       const difference = classifyPerformanceLabDifference({ engine, ...entry });
-      if (difference) {
+      if (difference?.kind === 'qualified-target-difference') {
         knownDifferences.push({
           caseId: entry.caseId,
           repeat: entry.repeat,
           ...difference,
         });
-        if (difference.kind === 'qualified-target-difference') {
-          counts.qualifiedTargetDifferences += 1;
-        } else if (difference.kind === 'known-legacy-defect') {
-          counts.knownLegacyDefects += 1;
-        } else {
-          counts.retainedLegacyNumericalOutcomes += 1;
-        }
+        counts.qualifiedTargetDifferences += 1;
       } else {
         counts.unexpectedStatuses += 1;
       }

@@ -117,6 +117,15 @@ export const revisionFailureCopy: Readonly<
       ['BRANCH_NEEDS_REVISION', 'There is nothing to branch from yet. Add a file, then try again.'],
       /* D14: the name decisions travel under; the page shows the reason, not the generic refusal. */
       ['BRANCH_NAME_RESERVED', '“conflicts” is kept for decisions that travel between devices. Choose another name.'],
+      /* D91: a rename moves only the name, so a branch something else knows by its name is left alone. */
+      [
+        'BRANCH_RENAME_LINKED',
+        'This branch has its own set of files open, so Tau can’t rename it. Make a new branch from it instead.',
+      ],
+      [
+        'BRANCH_RENAME_PUSHED',
+        'This branch is already backed up under its name, and Tau can’t remove a name there. Make a new branch from it instead.',
+      ],
       /* Made, with nowhere for a chat to work in it. */
       ['BRANCH_UNPLACED', 'Tau made that branch but could not open its files. Reload the page and try again.'],
       ['CAS_LOST', 'Something else changed this project at the same time. Try again.'],

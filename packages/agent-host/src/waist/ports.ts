@@ -296,6 +296,10 @@ export type HostToolInvocation = {
  * answered by one of them, and re-deriving the choice from `approved` would
  * substitute the host's guess for the human's decision.
  *
+ * A host that asks through another app (an MCP client's form) rejects with code
+ * `APPROVAL_UNAVAILABLE` when that app could not ask: no person answered, so the
+ * tool hands its record back `awaiting-approval`, as under a host without one.
+ *
  * @public
  */
 export type HostToolApproval = ((request: {

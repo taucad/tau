@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { searchSettings, settingsSections } from '#components/settings/settings-registry.js';
-import { featureFlagNames } from '#flags/flag.constants.js';
+import { experimentalFeatureFlagNames } from '#flags/flag.constants.js';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -63,7 +63,7 @@ describe('searchSettings', () => {
     const entries = settingsSections.flatMap(({ entries }) => entries);
     const featureFlagIds = settingsSections.find(({ id }) => id === 'experimental')?.entries.map(({ id }) => id);
 
-    expect(featureFlagIds).toEqual(featureFlagNames.map((flag) => `flag-${flag}`));
+    expect(featureFlagIds).toEqual(experimentalFeatureFlagNames.map((flag) => `flag-${flag}`));
     expect(new Set(entries.map(({ id }) => id)).size).toBe(entries.length);
   });
 
@@ -103,6 +103,11 @@ describe('searchSettings', () => {
       'browser-storage',
     );
     expect(settingsSections.flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('browser-storage');
+  });
+
+  it('should hide automatic reload from search and Experimental', () => {
+    expect(searchSettings('automatic reload')).toEqual([]);
+    expect(experimentalFeatureFlagNames).not.toContain('automaticReload');
   });
 
   it('should keep API keys out of navigation and search', () => {

@@ -2,7 +2,7 @@ import { ArrowLeft, Home, Search, MapPin } from 'lucide-react';
 import { useNavigate, Link, useLocation } from 'react-router';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
-import { InlineCode } from '#components/code/code-block.js';
+import { InlineCode } from '@taucad/ui/components/inline-code';
 
 export function PageNotFound(): React.JSX.Element {
   const navigate = useNavigate();

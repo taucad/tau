@@ -1,0 +1,618 @@
+{
+  "name": "@taucad/viewer",
+  "version": "0.0.1",
+  "description": "Tau's interactive CAD viewer: the React Three Fiber canvas, graphics machines and model controls",
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/viewer"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/viewer#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "viewer",
+    "three",
+    "react-three-fiber",
+    "webgpu",
+    "react"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./cad/cad-viewer": "./src/cad/cad-viewer.tsx",
+    "./cad/fit-view-control": "./src/cad/fit-view-control.tsx",
+    "./cad/fullscreen-view-control": "./src/cad/fullscreen-view-control.tsx",
+    "./cad/grid-control": "./src/cad/grid-control.tsx",
+    "./cad/kernel-settings": "./src/cad/kernel-settings.tsx",
+    "./cad/material-swatch": "./src/cad/material-swatch.tsx",
+    "./cad/measure-control": "./src/cad/measure-control.tsx",
+    "./cad/measure-tool-row": "./src/cad/measure-tool-row.tsx",
+    "./cad/part-preview-image": "./src/cad/part-preview-image.tsx",
+    "./cad/part-properties-panel": "./src/cad/part-properties-panel.tsx",
+    "./cad/part-quantities": "./src/cad/part-quantities.ts",
+    "./cad/part-thumbnail-state": "./src/cad/part-thumbnail-state.ts",
+    "./cad/section-tool-row": "./src/cad/section-tool-row.tsx",
+    "./cad/section-view-control": "./src/cad/section-view-control.tsx",
+    "./cad/viewer-settings": "./src/cad/viewer-settings.tsx",
+    "./constants/length-units": "./src/constants/length-units.ts",
+    "./environment/viewer-environment": "./src/environment/viewer-environment.tsx",
+    "./graphics/graphics-backend": "./src/graphics/graphics-backend.ts",
+    "./graphics/graphics-settings": "./src/graphics/graphics-settings.ts",
+    "./graphics/metadata/geometry-component-reference": "./src/graphics/metadata/geometry-component-reference.ts",
+    "./graphics/metadata/gltf-component-manifest": "./src/graphics/metadata/gltf-component-manifest.ts",
+    "./graphics/metadata/gltf-component-visibility": "./src/graphics/metadata/gltf-component-visibility.ts",
+    "./graphics/section-cuts": "./src/graphics/section-cuts.ts",
+    "./graphics/three/canvas-three-gl": "./src/graphics/three/canvas-three-gl.ts",
+    "./graphics/three/controls/section-handles": "./src/graphics/three/controls/section-handles.ts",
+    "./graphics/three/controls/tau-camera-controls": "./src/graphics/three/controls/tau-camera-controls.tsx",
+    "./graphics/three/controls/viewport-gizmo-interaction-lock": "./src/graphics/three/controls/viewport-gizmo-interaction-lock.tsx",
+    "./graphics/three/gltf-world": "./src/graphics/three/gltf-world.ts",
+    "./graphics/three/materials/infinite-grid-material": "./src/graphics/three/materials/infinite-grid-material.ts",
+    "./graphics/three/materials/infinite-grid-material.node": "./src/graphics/three/materials/infinite-grid-material.node.ts",
+    "./graphics/three/post-processing-settings": "./src/graphics/three/post-processing-settings.ts",
+    "./graphics/three/react/exact-measurement": "./src/graphics/three/react/exact-measurement.tsx",
+    "./graphics/three/react/gltf-mesh": "./src/graphics/three/react/gltf-mesh.tsx",
+    "./graphics/three/render-frame-timing": "./src/graphics/three/render-frame-timing.ts",
+    "./graphics/three/render-loop-observer": "./src/graphics/three/render-loop-observer.ts",
+    "./graphics/three/renderer": "./src/graphics/three/renderer.ts",
+    "./graphics/three/scene-overlay": "./src/graphics/three/scene-overlay.tsx",
+    "./graphics/three/stage": "./src/graphics/three/stage.tsx",
+    "./graphics/three/stage-options": "./src/graphics/three/stage-options.ts",
+    "./graphics/three/three-canvas-instance": "./src/graphics/three/three-canvas-instance.tsx",
+    "./graphics/three/three-context": "./src/graphics/three/three-context.tsx",
+    "./graphics/three/three-graphics-backend-context": "./src/graphics/three/three-graphics-backend-context.tsx",
+    "./graphics/three/use-camera-framing": "./src/graphics/three/use-camera-framing.ts",
+    "./graphics/three/utils/camera-controls-adapter": "./src/graphics/three/utils/camera-controls-adapter.ts",
+    "./graphics/three/utils/geometry-presentation-admission": "./src/graphics/three/utils/geometry-presentation-admission.ts",
+    "./graphics/three/utils/infinite-grid-frame": "./src/graphics/three/utils/infinite-grid-frame.ts",
+    "./graphics/three/utils/lights.utils": "./src/graphics/three/utils/lights.utils.ts",
+    "./graphics/three/utils/model-component-owner": "./src/graphics/three/utils/model-component-owner.ts",
+    "./graphics/three/utils/render-order.utils": "./src/graphics/three/utils/render-order.utils.ts",
+    "./graphics/three/utils/scene-tags": "./src/graphics/three/utils/scene-tags.ts",
+    "./graphics/three/utils/section-cap-overlap": "./src/graphics/three/utils/section-cap-overlap.ts",
+    "./graphics/three/utils/section-cap-overlap-debug": "./src/graphics/three/utils/section-cap-overlap-debug.ts",
+    "./graphics/three/utils/section-cap-performance-debug": "./src/graphics/three/utils/section-cap-performance-debug.ts",
+    "./graphics/three/utils/section-cap-polygon-boolean-backend": "./src/graphics/three/utils/section-cap-polygon-boolean-backend.ts",
+    "./graphics/three/utils/section-cap-polygon-boolean-clipper2-ts": "./src/graphics/three/utils/section-cap-polygon-boolean-clipper2-ts.ts",
+    "./graphics/three/utils/section-cap-polygon-boolean-clipper2-wasm": "./src/graphics/three/utils/section-cap-polygon-boolean-clipper2-wasm.ts",
+    "./graphics/three/utils/section-cap-polygon-types": "./src/graphics/three/utils/section-cap-polygon-types.ts",
+    "./graphics/three/utils/section-cap-region": "./src/graphics/three/utils/section-cap-region.ts",
+    "./graphics/three/utils/section-cap-render-parts": "./src/graphics/three/utils/section-cap-render-parts.ts",
+    "./graphics/three/utils/three-shader-debug": "./src/graphics/three/utils/three-shader-debug.ts",
+    "./graphics/three/utils/tsl-node-graph-snapshot": "./src/graphics/three/utils/tsl-node-graph-snapshot.ts",
+    "./hooks/use-graphics": "./src/hooks/use-graphics.tsx",
+    "./hooks/use-webgl-context-tracker": "./src/hooks/use-webgl-context-tracker.tsx",
+    "./lib/renderer-telemetry": "./src/lib/renderer-telemetry.ts",
+    "./machines/graphics.machine": "./src/machines/graphics.machine.ts",
+    "./machines/kinematics.machine": "./src/machines/kinematics.machine.ts",
+    "./machines/model-interaction.machine": "./src/machines/model-interaction.machine.ts",
+    "./model-viewer": "./src/model-viewer.tsx",
+    "./parameters/parameter-edit": "./src/parameters/parameter-edit.ts",
+    "./parameters/parameter-group-card": "./src/parameters/parameter-group-card.tsx",
+    "./parameters/parameter-select": "./src/parameters/parameter-select.tsx",
+    "./panels/structure-section": "./src/panels/structure-section.tsx",
+    "./parameters/parameters": "./src/parameters/parameters.tsx",
+    "./parameters/parameters-boolean": "./src/parameters/parameters-boolean.tsx",
+    "./parameters/parameters-number": "./src/parameters/parameters-number.tsx",
+    "./parameters/parameters-number-field": "./src/parameters/parameters-number-field.tsx",
+    "./parameters/rjsf-context": "./src/parameters/rjsf-context.ts",
+    "./parameters/rjsf-field-path": "./src/parameters/rjsf-field-path.tsx",
+    "./parameters/rjsf-theme": "./src/parameters/rjsf-theme.tsx",
+    "./parameters/rjsf-utils": "./src/parameters/rjsf-utils.ts",
+    "./parameters/rjsf-validator": "./src/parameters/rjsf-validator.ts",
+    "./services/graphics-camera-registry": "./src/services/graphics-camera-registry.ts",
+    "./utils/inspect-glb": "./src/utils/inspect-glb.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      "./cad/cad-viewer": {
+        "types": "./dist/cad/cad-viewer.d.mts",
+        "import": "./dist/cad/cad-viewer.mjs",
+        "default": "./dist/cad/cad-viewer.mjs"
+      },
+      "./cad/fit-view-control": {
+        "types": "./dist/cad/fit-view-control.d.mts",
+        "import": "./dist/cad/fit-view-control.mjs",
+        "default": "./dist/cad/fit-view-control.mjs"
+      },
+      "./cad/fullscreen-view-control": {
+        "types": "./dist/cad/fullscreen-view-control.d.mts",
+        "import": "./dist/cad/fullscreen-view-control.mjs",
+        "default": "./dist/cad/fullscreen-view-control.mjs"
+      },
+      "./cad/grid-control": {
+        "types": "./dist/cad/grid-control.d.mts",
+        "import": "./dist/cad/grid-control.mjs",
+        "default": "./dist/cad/grid-control.mjs"
+      },
+      "./cad/kernel-settings": {
+        "types": "./dist/cad/kernel-settings.d.mts",
+        "import": "./dist/cad/kernel-settings.mjs",
+        "default": "./dist/cad/kernel-settings.mjs"
+      },
+      "./cad/material-swatch": {
+        "types": "./dist/cad/material-swatch.d.mts",
+        "import": "./dist/cad/material-swatch.mjs",
+        "default": "./dist/cad/material-swatch.mjs"
+      },
+      "./cad/measure-control": {
+        "types": "./dist/cad/measure-control.d.mts",
+        "import": "./dist/cad/measure-control.mjs",
+        "default": "./dist/cad/measure-control.mjs"
+      },
+      "./cad/measure-tool-row": {
+        "types": "./dist/cad/measure-tool-row.d.mts",
+        "import": "./dist/cad/measure-tool-row.mjs",
+        "default": "./dist/cad/measure-tool-row.mjs"
+      },
+      "./cad/part-preview-image": {
+        "types": "./dist/cad/part-preview-image.d.mts",
+        "import": "./dist/cad/part-preview-image.mjs",
+        "default": "./dist/cad/part-preview-image.mjs"
+      },
+      "./cad/part-properties-panel": {
+        "types": "./dist/cad/part-properties-panel.d.mts",
+        "import": "./dist/cad/part-properties-panel.mjs",
+        "default": "./dist/cad/part-properties-panel.mjs"
+      },
+      "./cad/part-quantities": {
+        "types": "./dist/cad/part-quantities.d.mts",
+        "import": "./dist/cad/part-quantities.mjs",
+        "default": "./dist/cad/part-quantities.mjs"
+      },
+      "./cad/part-thumbnail-state": {
+        "types": "./dist/cad/part-thumbnail-state.d.mts",
+        "import": "./dist/cad/part-thumbnail-state.mjs",
+        "default": "./dist/cad/part-thumbnail-state.mjs"
+      },
+      "./cad/section-tool-row": {
+        "types": "./dist/cad/section-tool-row.d.mts",
+        "import": "./dist/cad/section-tool-row.mjs",
+        "default": "./dist/cad/section-tool-row.mjs"
+      },
+      "./cad/section-view-control": {
+        "types": "./dist/cad/section-view-control.d.mts",
+        "import": "./dist/cad/section-view-control.mjs",
+        "default": "./dist/cad/section-view-control.mjs"
+      },
+      "./cad/viewer-settings": {
+        "types": "./dist/cad/viewer-settings.d.mts",
+        "import": "./dist/cad/viewer-settings.mjs",
+        "default": "./dist/cad/viewer-settings.mjs"
+      },
+      "./constants/length-units": {
+        "types": "./dist/constants/length-units.d.mts",
+        "import": "./dist/constants/length-units.mjs",
+        "default": "./dist/constants/length-units.mjs"
+      },
+      "./environment/viewer-environment": {
+        "types": "./dist/environment/viewer-environment.d.mts",
+        "import": "./dist/environment/viewer-environment.mjs",
+        "default": "./dist/environment/viewer-environment.mjs"
+      },
+      "./graphics/graphics-backend": {
+        "types": "./dist/graphics/graphics-backend.d.mts",
+        "import": "./dist/graphics/graphics-backend.mjs",
+        "default": "./dist/graphics/graphics-backend.mjs"
+      },
+      "./graphics/graphics-settings": {
+        "types": "./dist/graphics/graphics-settings.d.mts",
+        "import": "./dist/graphics/graphics-settings.mjs",
+        "default": "./dist/graphics/graphics-settings.mjs"
+      },
+      "./graphics/metadata/geometry-component-reference": {
+        "types": "./dist/graphics/metadata/geometry-component-reference.d.mts",
+        "import": "./dist/graphics/metadata/geometry-component-reference.mjs",
+        "default": "./dist/graphics/metadata/geometry-component-reference.mjs"
+      },
+      "./graphics/metadata/gltf-component-manifest": {
+        "types": "./dist/graphics/metadata/gltf-component-manifest.d.mts",
+        "import": "./dist/graphics/metadata/gltf-component-manifest.mjs",
+        "default": "./dist/graphics/metadata/gltf-component-manifest.mjs"
+      },
+      "./graphics/metadata/gltf-component-visibility": {
+        "types": "./dist/graphics/metadata/gltf-component-visibility.d.mts",
+        "import": "./dist/graphics/metadata/gltf-component-visibility.mjs",
+        "default": "./dist/graphics/metadata/gltf-component-visibility.mjs"
+      },
+      "./graphics/section-cuts": {
+        "types": "./dist/graphics/section-cuts.d.mts",
+        "import": "./dist/graphics/section-cuts.mjs",
+        "default": "./dist/graphics/section-cuts.mjs"
+      },
+      "./graphics/three/canvas-three-gl": {
+        "types": "./dist/graphics/three/canvas-three-gl.d.mts",
+        "import": "./dist/graphics/three/canvas-three-gl.mjs",
+        "default": "./dist/graphics/three/canvas-three-gl.mjs"
+      },
+      "./graphics/three/controls/section-handles": {
+        "types": "./dist/graphics/three/controls/section-handles.d.mts",
+        "import": "./dist/graphics/three/controls/section-handles.mjs",
+        "default": "./dist/graphics/three/controls/section-handles.mjs"
+      },
+      "./graphics/three/controls/tau-camera-controls": {
+        "types": "./dist/graphics/three/controls/tau-camera-controls.d.mts",
+        "import": "./dist/graphics/three/controls/tau-camera-controls.mjs",
+        "default": "./dist/graphics/three/controls/tau-camera-controls.mjs"
+      },
+      "./graphics/three/controls/viewport-gizmo-interaction-lock": {
+        "types": "./dist/graphics/three/controls/viewport-gizmo-interaction-lock.d.mts",
+        "import": "./dist/graphics/three/controls/viewport-gizmo-interaction-lock.mjs",
+        "default": "./dist/graphics/three/controls/viewport-gizmo-interaction-lock.mjs"
+      },
+      "./graphics/three/gltf-world": {
+        "types": "./dist/graphics/three/gltf-world.d.mts",
+        "import": "./dist/graphics/three/gltf-world.mjs",
+        "default": "./dist/graphics/three/gltf-world.mjs"
+      },
+      "./graphics/three/materials/infinite-grid-material": {
+        "types": "./dist/graphics/three/materials/infinite-grid-material.d.mts",
+        "import": "./dist/graphics/three/materials/infinite-grid-material.mjs",
+        "default": "./dist/graphics/three/materials/infinite-grid-material.mjs"
+      },
+      "./graphics/three/materials/infinite-grid-material.node": {
+        "types": "./dist/graphics/three/materials/infinite-grid-material.node.d.mts",
+        "import": "./dist/graphics/three/materials/infinite-grid-material.node.mjs",
+        "default": "./dist/graphics/three/materials/infinite-grid-material.node.mjs"
+      },
+      "./graphics/three/post-processing-settings": {
+        "types": "./dist/graphics/three/post-processing-settings.d.mts",
+        "import": "./dist/graphics/three/post-processing-settings.mjs",
+        "default": "./dist/graphics/three/post-processing-settings.mjs"
+      },
+      "./graphics/three/react/exact-measurement": {
+        "types": "./dist/graphics/three/react/exact-measurement.d.mts",
+        "import": "./dist/graphics/three/react/exact-measurement.mjs",
+        "default": "./dist/graphics/three/react/exact-measurement.mjs"
+      },
+      "./graphics/three/react/gltf-mesh": {
+        "types": "./dist/graphics/three/react/gltf-mesh.d.mts",
+        "import": "./dist/graphics/three/react/gltf-mesh.mjs",
+        "default": "./dist/graphics/three/react/gltf-mesh.mjs"
+      },
+      "./graphics/three/render-frame-timing": {
+        "types": "./dist/graphics/three/render-frame-timing.d.mts",
+        "import": "./dist/graphics/three/render-frame-timing.mjs",
+        "default": "./dist/graphics/three/render-frame-timing.mjs"
+      },
+      "./graphics/three/render-loop-observer": {
+        "types": "./dist/graphics/three/render-loop-observer.d.mts",
+        "import": "./dist/graphics/three/render-loop-observer.mjs",
+        "default": "./dist/graphics/three/render-loop-observer.mjs"
+      },
+      "./graphics/three/renderer": {
+        "types": "./dist/graphics/three/renderer.d.mts",
+        "import": "./dist/graphics/three/renderer.mjs",
+        "default": "./dist/graphics/three/renderer.mjs"
+      },
+      "./graphics/three/scene-overlay": {
+        "types": "./dist/graphics/three/scene-overlay.d.mts",
+        "import": "./dist/graphics/three/scene-overlay.mjs",
+        "default": "./dist/graphics/three/scene-overlay.mjs"
+      },
+      "./graphics/three/stage": {
+        "types": "./dist/graphics/three/stage.d.mts",
+        "import": "./dist/graphics/three/stage.mjs",
+        "default": "./dist/graphics/three/stage.mjs"
+      },
+      "./graphics/three/stage-options": {
+        "types": "./dist/graphics/three/stage-options.d.mts",
+        "import": "./dist/graphics/three/stage-options.mjs",
+        "default": "./dist/graphics/three/stage-options.mjs"
+      },
+      "./graphics/three/three-canvas-instance": {
+        "types": "./dist/graphics/three/three-canvas-instance.d.mts",
+        "import": "./dist/graphics/three/three-canvas-instance.mjs",
+        "default": "./dist/graphics/three/three-canvas-instance.mjs"
+      },
+      "./graphics/three/three-context": {
+        "types": "./dist/graphics/three/three-context.d.mts",
+        "import": "./dist/graphics/three/three-context.mjs",
+        "default": "./dist/graphics/three/three-context.mjs"
+      },
+      "./graphics/three/three-graphics-backend-context": {
+        "types": "./dist/graphics/three/three-graphics-backend-context.d.mts",
+        "import": "./dist/graphics/three/three-graphics-backend-context.mjs",
+        "default": "./dist/graphics/three/three-graphics-backend-context.mjs"
+      },
+      "./graphics/three/use-camera-framing": {
+        "types": "./dist/graphics/three/use-camera-framing.d.mts",
+        "import": "./dist/graphics/three/use-camera-framing.mjs",
+        "default": "./dist/graphics/three/use-camera-framing.mjs"
+      },
+      "./graphics/three/utils/camera-controls-adapter": {
+        "types": "./dist/graphics/three/utils/camera-controls-adapter.d.mts",
+        "import": "./dist/graphics/three/utils/camera-controls-adapter.mjs",
+        "default": "./dist/graphics/three/utils/camera-controls-adapter.mjs"
+      },
+      "./graphics/three/utils/geometry-presentation-admission": {
+        "types": "./dist/graphics/three/utils/geometry-presentation-admission.d.mts",
+        "import": "./dist/graphics/three/utils/geometry-presentation-admission.mjs",
+        "default": "./dist/graphics/three/utils/geometry-presentation-admission.mjs"
+      },
+      "./graphics/three/utils/infinite-grid-frame": {
+        "types": "./dist/graphics/three/utils/infinite-grid-frame.d.mts",
+        "import": "./dist/graphics/three/utils/infinite-grid-frame.mjs",
+        "default": "./dist/graphics/three/utils/infinite-grid-frame.mjs"
+      },
+      "./graphics/three/utils/lights.utils": {
+        "types": "./dist/graphics/three/utils/lights.utils.d.mts",
+        "import": "./dist/graphics/three/utils/lights.utils.mjs",
+        "default": "./dist/graphics/three/utils/lights.utils.mjs"
+      },
+      "./graphics/three/utils/model-component-owner": {
+        "types": "./dist/graphics/three/utils/model-component-owner.d.mts",
+        "import": "./dist/graphics/three/utils/model-component-owner.mjs",
+        "default": "./dist/graphics/three/utils/model-component-owner.mjs"
+      },
+      "./graphics/three/utils/render-order.utils": {
+        "types": "./dist/graphics/three/utils/render-order.utils.d.mts",
+        "import": "./dist/graphics/three/utils/render-order.utils.mjs",
+        "default": "./dist/graphics/three/utils/render-order.utils.mjs"
+      },
+      "./graphics/three/utils/scene-tags": {
+        "types": "./dist/graphics/three/utils/scene-tags.d.mts",
+        "import": "./dist/graphics/three/utils/scene-tags.mjs",
+        "default": "./dist/graphics/three/utils/scene-tags.mjs"
+      },
+      "./graphics/three/utils/section-cap-overlap": {
+        "types": "./dist/graphics/three/utils/section-cap-overlap.d.mts",
+        "import": "./dist/graphics/three/utils/section-cap-overlap.mjs",
+        "default": "./dist/graphics/three/utils/section-cap-overlap.mjs"
+      },
+      "./graphics/three/utils/section-cap-overlap-debug": {
+        "types": "./dist/graphics/three/utils/section-cap-overlap-debug.d.mts",
+        "import": "./dist/graphics/three/utils/section-cap-overlap-debug.mjs",
+        "default": "./dist/graphics/three/utils/section-cap-overlap-debug.mjs"
+      },
+      "./graphics/three/utils/section-cap-performance-debug": {
+        "types": "./dist/graphics/three/utils/section-cap-performance-debug.d.mts",
+        "import": "./dist/graphics/three/utils/section-cap-performance-debug.mjs",
+        "default": "./dist/graphics/three/utils/section-cap-performance-debug.mjs"
+      },
+      "./graphics/three/utils/section-cap-polygon-boolean-backend": {
+        "types": "./dist/graphics/three/utils/section-cap-polygon-boolean-backend.d.mts",
+        "import": "./dist/graphics/three/utils/section-cap-polygon-boolean-backend.mjs",
+        "default": "./dist/graphics/three/utils/section-cap-polygon-boolean-backend.mjs"
+      },
+      "./graphics/three/utils/section-cap-polygon-boolean-clipper2-ts": {
+        "types": "./dist/graphics/three/utils/section-cap-polygon-boolean-clipper2-ts.d.mts",
+        "import": "./dist/graphics/three/utils/section-cap-polygon-boolean-clipper2-ts.mjs",
+        "default": "./dist/graphics/three/utils/section-cap-polygon-boolean-clipper2-ts.mjs"
+      },
+      "./graphics/three/utils/section-cap-polygon-boolean-clipper2-wasm": {
+        "types": "./dist/graphics/three/utils/section-cap-polygon-boolean-clipper2-wasm.d.mts",
+        "import": "./dist/graphics/three/utils/section-cap-polygon-boolean-clipper2-wasm.mjs",
+        "default": "./dist/graphics/three/utils/section-cap-polygon-boolean-clipper2-wasm.mjs"
+      },
+      "./graphics/three/utils/section-cap-polygon-types": {
+        "types": "./dist/graphics/three/utils/section-cap-polygon-types.d.mts",
+        "import": "./dist/graphics/three/utils/section-cap-polygon-types.mjs",
+        "default": "./dist/graphics/three/utils/section-cap-polygon-types.mjs"
+      },
+      "./graphics/three/utils/section-cap-region": {
+        "types": "./dist/graphics/three/utils/section-cap-region.d.mts",
+        "import": "./dist/graphics/three/utils/section-cap-region.mjs",
+        "default": "./dist/graphics/three/utils/section-cap-region.mjs"
+      },
+      "./graphics/three/utils/section-cap-render-parts": {
+        "types": "./dist/graphics/three/utils/section-cap-render-parts.d.mts",
+        "import": "./dist/graphics/three/utils/section-cap-render-parts.mjs",
+        "default": "./dist/graphics/three/utils/section-cap-render-parts.mjs"
+      },
+      "./graphics/three/utils/three-shader-debug": {
+        "types": "./dist/graphics/three/utils/three-shader-debug.d.mts",
+        "import": "./dist/graphics/three/utils/three-shader-debug.mjs",
+        "default": "./dist/graphics/three/utils/three-shader-debug.mjs"
+      },
+      "./graphics/three/utils/tsl-node-graph-snapshot": {
+        "types": "./dist/graphics/three/utils/tsl-node-graph-snapshot.d.mts",
+        "import": "./dist/graphics/three/utils/tsl-node-graph-snapshot.mjs",
+        "default": "./dist/graphics/three/utils/tsl-node-graph-snapshot.mjs"
+      },
+      "./hooks/use-graphics": {
+        "types": "./dist/hooks/use-graphics.d.mts",
+        "import": "./dist/hooks/use-graphics.mjs",
+        "default": "./dist/hooks/use-graphics.mjs"
+      },
+      "./hooks/use-webgl-context-tracker": {
+        "types": "./dist/hooks/use-webgl-context-tracker.d.mts",
+        "import": "./dist/hooks/use-webgl-context-tracker.mjs",
+        "default": "./dist/hooks/use-webgl-context-tracker.mjs"
+      },
+      "./lib/renderer-telemetry": {
+        "types": "./dist/lib/renderer-telemetry.d.mts",
+        "import": "./dist/lib/renderer-telemetry.mjs",
+        "default": "./dist/lib/renderer-telemetry.mjs"
+      },
+      "./machines/graphics.machine": {
+        "types": "./dist/machines/graphics.machine.d.mts",
+        "import": "./dist/machines/graphics.machine.mjs",
+        "default": "./dist/machines/graphics.machine.mjs"
+      },
+      "./machines/kinematics.machine": {
+        "types": "./dist/machines/kinematics.machine.d.mts",
+        "import": "./dist/machines/kinematics.machine.mjs",
+        "default": "./dist/machines/kinematics.machine.mjs"
+      },
+      "./machines/model-interaction.machine": {
+        "types": "./dist/machines/model-interaction.machine.d.mts",
+        "import": "./dist/machines/model-interaction.machine.mjs",
+        "default": "./dist/machines/model-interaction.machine.mjs"
+      },
+      "./model-viewer": {
+        "types": "./dist/model-viewer.d.mts",
+        "import": "./dist/model-viewer.mjs",
+        "default": "./dist/model-viewer.mjs"
+      },
+      "./parameters/parameter-edit": {
+        "types": "./dist/parameters/parameter-edit.d.mts",
+        "import": "./dist/parameters/parameter-edit.mjs",
+        "default": "./dist/parameters/parameter-edit.mjs"
+      },
+      "./parameters/parameter-group-card": {
+        "types": "./dist/parameters/parameter-group-card.d.mts",
+        "import": "./dist/parameters/parameter-group-card.mjs",
+        "default": "./dist/parameters/parameter-group-card.mjs"
+      },
+      "./parameters/parameter-select": {
+        "types": "./dist/parameters/parameter-select.d.mts",
+        "import": "./dist/parameters/parameter-select.mjs",
+        "default": "./dist/parameters/parameter-select.mjs"
+      },
+      "./panels/structure-section": {
+        "types": "./dist/panels/structure-section.d.mts",
+        "import": "./dist/panels/structure-section.mjs",
+        "default": "./dist/panels/structure-section.mjs"
+      },
+      "./parameters/parameters": {
+        "types": "./dist/parameters/parameters.d.mts",
+        "import": "./dist/parameters/parameters.mjs",
+        "default": "./dist/parameters/parameters.mjs"
+      },
+      "./parameters/parameters-boolean": {
+        "types": "./dist/parameters/parameters-boolean.d.mts",
+        "import": "./dist/parameters/parameters-boolean.mjs",
+        "default": "./dist/parameters/parameters-boolean.mjs"
+      },
+      "./parameters/parameters-number": {
+        "types": "./dist/parameters/parameters-number.d.mts",
+        "import": "./dist/parameters/parameters-number.mjs",
+        "default": "./dist/parameters/parameters-number.mjs"
+      },
+      "./parameters/parameters-number-field": {
+        "types": "./dist/parameters/parameters-number-field.d.mts",
+        "import": "./dist/parameters/parameters-number-field.mjs",
+        "default": "./dist/parameters/parameters-number-field.mjs"
+      },
+      "./parameters/rjsf-context": {
+        "types": "./dist/parameters/rjsf-context.d.mts",
+        "import": "./dist/parameters/rjsf-context.mjs",
+        "default": "./dist/parameters/rjsf-context.mjs"
+      },
+      "./parameters/rjsf-field-path": {
+        "types": "./dist/parameters/rjsf-field-path.d.mts",
+        "import": "./dist/parameters/rjsf-field-path.mjs",
+        "default": "./dist/parameters/rjsf-field-path.mjs"
+      },
+      "./parameters/rjsf-theme": {
+        "types": "./dist/parameters/rjsf-theme.d.mts",
+        "import": "./dist/parameters/rjsf-theme.mjs",
+        "default": "./dist/parameters/rjsf-theme.mjs"
+      },
+      "./parameters/rjsf-utils": {
+        "types": "./dist/parameters/rjsf-utils.d.mts",
+        "import": "./dist/parameters/rjsf-utils.mjs",
+        "default": "./dist/parameters/rjsf-utils.mjs"
+      },
+      "./parameters/rjsf-validator": {
+        "types": "./dist/parameters/rjsf-validator.d.mts",
+        "import": "./dist/parameters/rjsf-validator.mjs",
+        "default": "./dist/parameters/rjsf-validator.mjs"
+      },
+      "./services/graphics-camera-registry": {
+        "types": "./dist/services/graphics-camera-registry.d.mts",
+        "import": "./dist/services/graphics-camera-registry.mjs",
+        "default": "./dist/services/graphics-camera-registry.mjs"
+      },
+      "./utils/inspect-glb": {
+        "types": "./dist/utils/inspect-glb.d.mts",
+        "import": "./dist/utils/inspect-glb.mjs",
+        "default": "./dist/utils/inspect-glb.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.jsx": "./src/*.tsx",
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "catalog:",
+    "@gltf-transform/core": "catalog:",
+    "@panzoom/panzoom": "^4.6.2",
+    "@react-three/drei": "^10.7.7",
+    "@rjsf/core": "5.24.13",
+    "@rjsf/utils": "5.24.13",
+    "@taucad/camera": "workspace:*",
+    "@taucad/geometry-core": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
+    "@taucad/parameters": "workspace:*",
+    "@taucad/spatial": "workspace:*",
+    "@taucad/three": "workspace:*",
+    "@taucad/units": "workspace:*",
+    "camera-controls": "3.1.2",
+    "clipper2-ts": "catalog:",
+    "clipper2-wasm": "catalog:",
+    "clsx": "catalog:",
+    "dompurify": "^3.4.11",
+    "lucide-react": "catalog:",
+    "n8ao": "catalog:",
+    "nanoid": "catalog:",
+    "pluralize": "^8.0.0",
+    "postprocessing": "catalog:",
+    "three-mesh-bvh": "^0.9.10",
+    "three-viewport-gizmo": "npm:@taulabs/three-viewport-gizmo@2.2.4"
+  },
+  "peerDependencies": {
+    "@react-three/fiber": "^9.0.0",
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "@taucad/ui": "^0.0.1",
+    "@xstate/react": "^7.0.0-alpha.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": "^0.184.0",
+    "xstate": "^6.0.0-alpha.59",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@react-three/fiber": "^9.6.1",
+    "@rjsf/validator-ajv8": "5.24.13",
+    "@taucad/assimp": "workspace:*",
+    "@taucad/events": "workspace:*",
+    "@taucad/image": "workspace:*",
+    "@taucad/nx": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/ui": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/pluralize": "^0.0.33",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@types/three": "^0.184.1",
+    "@xstate/react": "7.0.0-alpha.3",
+    "immer": "^10.2.0",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-virtuoso": "^4.18.7",
+    "three": "^0.184.0",
+    "type-fest": "catalog:",
+    "vitest-mock-extended": "^3.1.1",
+    "xstate": "catalog:",
+    "zod": "catalog:"
+  }
+}

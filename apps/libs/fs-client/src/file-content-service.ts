@@ -640,6 +640,29 @@ export class FileContentService {
   }
 
   /**
+   * Settle every editor value handed to {@link saveEditor} so far.
+   *
+   * A revision cut reads the filesystem, so *Save revision* waits here first:
+   * keystrokes after the first one only replace a queued value, and a cut taken
+   * mid-queue records the first keystroke alone (D80). An edit made during a
+   * move, rename or delete waits on that mutation's barrier instead.
+   *
+   * @returns Promise settled once no editor write is outstanding.
+   * @throws The first write's failure once every write has settled, a refused
+   *   write included: that edit is not on disk, so a cut now would not hold it.
+   */
+  public async settleEditorSaves(): Promise<void> {
+    const outcomes = await Promise.allSettled([
+      ...[...this.editorSaves.values()].map(async (state) => state.completion),
+      ...this.editorMutationBarriers.map(async (barrier) => barrier.settled.promise),
+    ]);
+    const failed = outcomes.find((outcome) => outcome.status === 'rejected');
+    if (failed !== undefined) {
+      throw failed.reason instanceof Error ? failed.reason : new Error(String(failed.reason));
+    }
+  }
+
+  /**
    * Write multiple files. Clones each buffer before transfer.
    *
    * Map keys **MUST** be workspace-relative; absolute keys that escape the

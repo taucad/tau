@@ -1,20 +1,10 @@
-import { Link, useLocation, useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import cookiePolicy from '#routes/legal.cookies/cookie-policy.txt?raw';
-import { Button } from '@taucad/ui/components/button';
-import { markdownHeaderAnchorComponents } from '#components/markdown/markdown-header-anchor.js';
-import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
+import { LegalDocument } from '#routes/legal/legal-document.js';
+import type { MetaFunction } from 'react-router';
 import { CookiePreferencesDialog } from '#components/cookie-consent.js';
-import type { Handle } from '#types/matches.types.js';
 
-export const handle: Handle = {
-  breadcrumb() {
-    return (
-      <Button asChild variant='ghost'>
-        <Link to='/legal/cookies'>Cookie Policy</Link>
-      </Button>
-    );
-  },
-};
+export const meta: MetaFunction = () => [{ title: 'Cookie Policy · Tau' }];
 
 export default function Cookies(): React.JSX.Element {
   const location = useLocation();
@@ -31,7 +21,7 @@ export default function Cookies(): React.JSX.Element {
 
   return (
     <>
-      <MarkdownViewer components={markdownHeaderAnchorComponents}>{cookiePolicy}</MarkdownViewer>
+      <LegalDocument>{cookiePolicy}</LegalDocument>
       <CookiePreferencesDialog isOpen={isPreferencesOpen} onOpenChange={handleOpenChange} />
     </>
   );

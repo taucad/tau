@@ -1,18 +1,33 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  KERNEL_MODULES_KEY,
   isRecordObject,
   getModuleRegistry,
   createKernelModuleShim,
+  registerKernelModule,
   createKernelParameterDeclaration,
   extractDefaultParameters,
   toVmEntryPath,
   convertRawIssuesToKernelIssues,
   enrichIssueLocation,
   loadBinaryFile,
+  toBuiltinModulePackage,
 } from '#kernels/kernel-module-helpers.js';
 import type { KernelIssue } from '#types/runtime.types.js';
+import type { BuiltinModule, KernelBundler } from '#types/runtime-bundler-service.types.js';
+import type { AnyKernelDefinitionV2 } from '#types/runtime-kernel-v2.types.js';
+import { defineBundler } from '#types/runtime-bundler.types.js';
+import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
+import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import { defineRuntime } from '#worker/runtime-definition.js';
+/* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
+import {
+  createGeometryFile,
+  getTestFileSystem,
+  initializeWorkerForTesting,
+  seedTestFileSystem,
+} from '../../test/support/kernel-worker.fixture.js';
+/* oxlint-enable no-restricted-imports, import/extensions */
 
 describe('isRecordObject', () => {
   it('should return true for plain objects', () => {
@@ -47,7 +62,7 @@ describe('getModuleRegistry', () => {
 
   it('should store the registry on globalThis', () => {
     const registry = getModuleRegistry();
-    expect((globalThis as Record<string, unknown>)[KERNEL_MODULES_KEY]).toBe(registry);
+    expect((globalThis as Record<string, unknown>)['__KERNEL_MODULES__']).toBe(registry);
   });
 });
 
@@ -78,6 +93,59 @@ describe('createKernelModuleShim', () => {
 
     expect(code).toContain('const __kernel_export_0 = __mod["class"];');
     expect(code).toContain('export { __kernel_export_0 as class };');
+  });
+});
+
+describe('toBuiltinModulePackage', () => {
+  it('declares a package installed under its import name by version', () => {
+    expect(toBuiltinModulePackage('manifold-3d', { name: 'manifold-3d', version: '3.4.1' })).toEqual({
+      name: 'manifold-3d',
+      spec: '3.4.1',
+    });
+  });
+
+  it('declares a package installed under another name as an npm alias', () => {
+    expect(toBuiltinModulePackage('replicad', { name: '@taulabs/replicad', version: '1.1.0-taulabs.0' })).toEqual({
+      name: 'replicad',
+      spec: 'npm:@taulabs/replicad@1.1.0-taulabs.0',
+    });
+  });
+
+  it('keys a subpath module by the package that owns it', () => {
+    expect(toBuiltinModulePackage('manifold-3d/manifoldCAD', { name: 'manifold-3d', version: '3.4.1' })).toEqual({
+      name: 'manifold-3d',
+      spec: '3.4.1',
+    });
+    expect(toBuiltinModulePackage('@jscad/modeling/booleans', { name: '@jscad/modeling', version: '2.13.0' })).toEqual({
+      name: '@jscad/modeling',
+      spec: '2.13.0',
+    });
+  });
+});
+
+describe('registerKernelModule package identity', () => {
+  const register = (options: Parameters<typeof registerKernelModule>[1]): BuiltinModule => {
+    const registerModule = vi.fn<KernelBundler['registerModule']>();
+    registerKernelModule({ bundler: { bundle: vi.fn(), resolveDependencies: vi.fn(), registerModule } }, options);
+    return registerModule.mock.calls[0]![1];
+  };
+
+  it('derives the version and npm identity from the installed manifest', () => {
+    const entry = register({
+      name: 'replicad',
+      exports: {},
+      package: { name: '@taulabs/replicad', version: '1.1.0-taulabs.0' },
+    });
+
+    expect(entry.version).toBe('1.1.0-taulabs.0');
+    expect(entry.package).toEqual({ name: 'replicad', spec: 'npm:@taulabs/replicad@1.1.0-taulabs.0' });
+  });
+
+  it('registers a module with no npm package by version alone', () => {
+    const entry = register({ name: 'tau-only', exports: {}, version: '1.0.0' });
+
+    expect(entry.version).toBe('1.0.0');
+    expect(entry).not.toHaveProperty('package');
   });
 });
 
@@ -220,5 +288,268 @@ describe('loadBinaryFile', () => {
   it('should return undefined for an unreachable HTTP URL', async () => {
     const result = await loadBinaryFile('http://127.0.0.1:1/nonexistent.ttf');
     expect(result).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// Worker-scoped built-in module registry
+// =============================================================================
+
+/** A bundler double that records registrations and returns the registered shim as the bundle. */
+const createRecordingBundler = (
+  registryScope: string,
+): KernelBundler & { readonly modules: Map<string, BuiltinModule> } => {
+  const modules = new Map<string, BuiltinModule>();
+  return {
+    modules,
+    registryScope,
+    bundle: async () => ({ code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] }),
+    resolveDependencies: async () => ({ resolved: [], unresolved: [] }),
+    registerModule: (name, entry) => {
+      modules.set(name, entry);
+    },
+  };
+};
+
+/** Evaluate a registry expression the way a bundle banner binds it. */
+const readRegistryExpression = async (expression: string | undefined): Promise<unknown> => {
+  expect(expression).toEqual(expect.any(String));
+  const source = `export default ${expression};`;
+  const module = (await import(/* @vite-ignore */ `data:text/javascript,${encodeURIComponent(source)}`)) as {
+    default: unknown;
+  };
+  return module.default;
+};
+
+describe('registerKernelModule', () => {
+  it('should give each bundler its own registry entry for one module name', async () => {
+    const exportsA = { token: 'A' };
+    const exportsB = { token: 'B' };
+    const bundlerA = createRecordingBundler('worker-a');
+    const bundlerB = createRecordingBundler('worker-b');
+
+    registerKernelModule({ bundler: bundlerA }, { name: 'scoped-fake', exports: exportsA, version: '1.0.0' });
+    registerKernelModule({ bundler: bundlerB }, { name: 'scoped-fake', exports: exportsB, version: '1.0.0' });
+
+    const entryA = bundlerA.modules.get('scoped-fake');
+    const entryB = bundlerB.modules.get('scoped-fake');
+    expect(await readRegistryExpression(entryA?.registryExpression)).toBe(exportsA);
+    expect(await readRegistryExpression(entryB?.registryExpression)).toBe(exportsB);
+    expect(entryA?.code).toContain(`const __mod = ${entryA?.registryExpression};`);
+    expect(entryA?.code).not.toBe(entryB?.code);
+  });
+
+  it('should forward the version and global name with the registry expression', () => {
+    const bundler = createRecordingBundler('worker');
+
+    registerKernelModule(
+      { bundler },
+      { name: 'global-fake', exports: { token: 'G' }, version: '2.0.0', globalName: 'globalFake' },
+    );
+
+    const entry = bundler.modules.get('global-fake');
+    expect(Object.keys(entry ?? {}).toSorted()).toEqual(['code', 'globalName', 'registryExpression', 'version']);
+    expect(entry).toMatchObject({ version: '2.0.0', globalName: 'globalFake' });
+    expect(entry?.code).toContain(`const __mod = ${entry?.registryExpression};`);
+  });
+
+  it('should expose one property of the exports as a subpath module', async () => {
+    const booleans = { union: (): string => 'union', subtract: (): string => 'subtract' };
+    const bundler = createRecordingBundler('worker');
+
+    registerKernelModule(
+      { bundler },
+      { name: '@fake/modeling/booleans', exports: { booleans, colors: {} }, exportPath: 'booleans', version: '1.0.0' },
+    );
+
+    const entry = bundler.modules.get('@fake/modeling/booleans');
+    expect(await readRegistryExpression(entry?.registryExpression)).toBe(booleans);
+    expect(entry?.code).toContain('export { union };');
+    expect(entry?.code).toContain('export { subtract };');
+    expect(entry?.code).not.toContain('colors');
+  });
+
+  it('should reject an export path that does not name a module object', () => {
+    const bundler = createRecordingBundler('worker');
+
+    expect(() => {
+      registerKernelModule(
+        { bundler },
+        { name: '@fake/modeling/missing', exports: { booleans: {} }, exportPath: 'missing', version: '1.0.0' },
+      );
+    }).toThrow(new TypeError('Kernel module "@fake/modeling/missing" export path "missing" is not an object.'));
+    expect(bundler.modules.has('@fake/modeling/missing')).toBe(false);
+  });
+});
+
+const fakeParameterDeclaration = {
+  schema: {
+    $schema: 'https://json-structure.org/meta/extended/v0/#',
+    $id: 'urn:taucad:test:registry-parameters',
+    $uses: ['JSONSchemaUnits'],
+    name: 'RegistryParameters',
+    type: 'object',
+  },
+  defaults: {},
+} as const;
+
+let executionNonce = 0;
+
+/** Bundles the registered `fake` shim as the program and executes it as an ES module. */
+const fakeBundler = defineBundler({
+  id: 'fake-bundler',
+  name: 'Fake bundler',
+  version: '1.0.0',
+  extensions: ['fake'],
+  async initialize() {
+    return { modules: new Map<string, BuiltinModule>() };
+  },
+  async detectImports() {
+    return { detectedModules: ['fake'], dependencies: [] };
+  },
+  async bundle({ entryPath }, _runtime, context) {
+    const shim = context.modules.get('fake');
+    return {
+      code: shim?.code ?? '',
+      issues: [],
+      success: shim !== undefined,
+      dependencies: [entryPath],
+      unresolvedPaths: [],
+    };
+  },
+  async execute({ code }) {
+    // A fresh specifier per execution: the realm's ESM cache must not replay an earlier evaluation.
+    executionNonce += 1;
+    const source = Buffer.from(`${code}\n// execution ${executionNonce}\n`).toString('base64');
+    const module = (await import(/* @vite-ignore */ `data:text/javascript;base64,${source}`)) as { default: unknown };
+    return { success: true, value: module.default };
+  },
+  registerModule({ name, module }, context) {
+    context.modules.set(name, module);
+  },
+});
+
+/** A kernel that registers `exports` as built-in `fake` and records what its bundles import. */
+const createRegistryKernel = (exports: Record<string, unknown>, executed: unknown[]): AnyKernelDefinitionV2 => ({
+  id: 'fake-kernel',
+  extensions: ['fake'],
+  name: 'Fake kernel',
+  version: '1.0.0',
+  views: { display: { title: 'Display', mimeType: 'model/gltf-binary' } },
+  exports: {},
+  initialize: async (_options, services) => {
+    registerKernelModule(services, { name: 'fake', exports, version: '1.0.0', globalName: 'fakeModule' });
+    return {};
+  },
+  resolve: async ({ entryPath }) => ({ resolved: [entryPath], unresolved: [] }),
+  describe: async () => ({ success: true, data: { parameters: fakeParameterDeclaration }, issues: [] }),
+  evaluate: async ({ entryPath }, services) => {
+    const bundle = await services.bundler.bundle(entryPath);
+    const result = await services.execute(bundle.code);
+    if (!result.success) {
+      throw new Error(result.issues.map((issue) => issue.message).join('\n'));
+    }
+    executed.push(result.value);
+    return { handle: {} };
+  },
+  render: async () => ({ content: new Uint8Array([1]) }),
+  export: async () => {
+    throw new Error('The fake kernel declares no exports.');
+  },
+});
+
+const registryWorkers: KernelRuntimeWorker[] = [];
+
+const startRegistryWorker = async (
+  exports: Record<string, unknown>,
+  executed: unknown[],
+): Promise<KernelRuntimeWorker> => {
+  const kernel = createRegistryKernel(exports, executed);
+  const worker = new KernelRuntimeWorker({
+    runtime: defineRuntime({
+      kernels: [attachRuntimePluginDefinition({ id: 'fake-kernel', extensions: ['fake'] }, () => kernel)],
+      bundlers: [fakeBundler()],
+    }),
+  });
+  registryWorkers.push(worker);
+  await initializeWorkerForTesting(worker);
+  return worker;
+};
+
+const evaluateDocument = async (worker: KernelRuntimeWorker, documentId: string): Promise<void> => {
+  const evaluated = vi.fn();
+  worker.onEvaluated = evaluated;
+  worker.handleOpenDocument({
+    documentId,
+    intent: 1,
+    file: createGeometryFile('model.fake'),
+    parameters: {},
+    watch: false,
+  });
+  await vi.waitFor(() => {
+    expect(evaluated).toHaveBeenCalledOnce();
+  });
+  expect(evaluated.mock.calls[0]![0] as unknown).toMatchObject({ success: true });
+};
+
+describe('worker-scoped kernel module registry', () => {
+  afterEach(async () => {
+    await Promise.all(registryWorkers.splice(0).map(async (worker) => worker.cleanup()));
+  });
+
+  it("should resolve a worker's built-in to its own exports after another worker registered the same name", async () => {
+    await seedTestFileSystem({ 'model.fake': 'fake' });
+    const exportsA = { token: 'A' };
+    const exportsB = { token: 'B' };
+    const executedA: unknown[] = [];
+    const executedB: unknown[] = [];
+
+    const workerA = await startRegistryWorker(exportsA, executedA);
+    await evaluateDocument(workerA, 'a-1');
+    const workerB = await startRegistryWorker(exportsB, executedB);
+    await evaluateDocument(workerB, 'b-1');
+    // An edited model re-executes its bundle; an unchanged one may replay the first evaluation.
+    await getTestFileSystem().writeFile('model.fake', 'fake, edited');
+    await evaluateDocument(workerA, 'a-2');
+
+    expect(executedA).toEqual([exportsA, exportsA]);
+    expect(executedA[1]).toBe(exportsA);
+    expect(executedB).toEqual([exportsB]);
+    expect(executedB[0]).toBe(exportsB);
+  });
+
+  it("should remove a worker's registry entries on cleanup and keep the other worker's", async () => {
+    await seedTestFileSystem({ 'model.fake': 'fake' });
+    const exportsA = { token: 'A' };
+    const exportsB = { token: 'B' };
+    const workerA = await startRegistryWorker(exportsA, []);
+    await evaluateDocument(workerA, 'a-1');
+    const workerB = await startRegistryWorker(exportsB, []);
+    await evaluateDocument(workerB, 'b-1');
+
+    const registered = (): unknown[] => [...getModuleRegistry().values()];
+    expect(registered()).toContain(exportsA);
+    expect(registered()).toContain(exportsB);
+
+    await workerA.cleanup();
+
+    expect(registered()).not.toContain(exportsA);
+    expect(registered()).toContain(exportsB);
+  });
+
+  it("should remove a worker's registry entries when its cleanup throws", async () => {
+    await seedTestFileSystem({ 'model.fake': 'fake' });
+    const exports = { token: 'A' };
+    const worker = await startRegistryWorker(exports, []);
+    await evaluateDocument(worker, 'a-1');
+    // `onCleanup` is protected; the spy reaches it to simulate a failing kernel teardown.
+    vi.spyOn(worker as unknown as { onCleanup(): Promise<void> }, 'onCleanup').mockRejectedValueOnce(
+      new Error('teardown failed'),
+    );
+
+    await expect(worker.cleanup()).rejects.toThrow('teardown failed');
+    registryWorkers.splice(registryWorkers.indexOf(worker), 1);
+
+    expect([...getModuleRegistry().values()]).not.toContain(exports);
   });
 });

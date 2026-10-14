@@ -17,7 +17,7 @@ import { compileParameterManifest, projectJsonSchemaToParameterDeclaration } fro
 import type { ParameterManifest } from '@taucad/parameters';
 import Form from '@rjsf/core';
 import type { IChangeEvent } from '@rjsf/core';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -27,11 +27,11 @@ import {
   FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useMainGraphics, useProject } from '#hooks/use-project.js';
-import type { LengthSymbol } from '#constants/length-units.js';
+import type { LengthSymbol } from '@taucad/viewer/constants/length-units';
 import { toast } from '#components/ui/sonner.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
@@ -40,7 +40,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { cn } from '@taucad/ui/utils/cn';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { selectCadFailureIssues } from '#machines/cad.machine.js';
@@ -52,9 +52,9 @@ import {
   getFormatInfo,
 } from '#utils/export-formats.utils.js';
 import { groupExportFormatsByFidelity } from '#components/files/export-format-groups.js';
-import { widgets, templates as rjsfTemplates } from '#components/geometry/parameters/rjsf-theme.js';
-import type { ParameterCommit, RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
-import { rjsfFields } from '#components/geometry/parameters/rjsf-field-path.js';
+import { widgets, templates as rjsfTemplates } from '@taucad/viewer/parameters/rjsf-theme';
+import type { ParameterCommit, RJSFContext } from '@taucad/viewer/parameters/rjsf-context';
+import { rjsfFields } from '@taucad/viewer/parameters/rjsf-field-path';
 import {
   getDiscriminatedUnionInfo,
   mergeFormDefaults,
@@ -63,12 +63,12 @@ import {
   rjsfDefaultFormStateBehavior,
   rjsfIdPrefix,
   rjsfIdSeparator,
-} from '#components/geometry/parameters/rjsf-utils.js';
+} from '@taucad/viewer/parameters/rjsf-utils';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { createExportArtifactZip, downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 import { downloadBlob } from '@taucad/utils/file';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { isJsonSchemaValid, rjsfValidator } from '#lib/rjsf-validator.js';
+import { isJsonSchemaValid, rjsfValidator } from '@taucad/viewer/parameters/rjsf-validator';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 
 const toggleConverterKeyCombination = projectWorkspaceKeyCombinations.export;

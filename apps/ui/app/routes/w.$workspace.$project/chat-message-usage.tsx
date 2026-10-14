@@ -112,7 +112,7 @@ export function ChatMessageUsage({
   return (
     <HoverCard openDelay={100} closeDelay={100}>
       <HoverCardTrigger asChild>
-        <Button size='icon-sm' variant='ghost' aria-label={label} className='cursor-help text-muted-foreground'>
+        <Button size='icon-xs' variant='ghost' aria-label={label} className='cursor-help text-muted-foreground'>
           <ModelGlyph model={model} isMono className='size-3.5 grayscale' />
         </Button>
       </HoverCardTrigger>

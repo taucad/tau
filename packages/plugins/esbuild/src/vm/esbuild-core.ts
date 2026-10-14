@@ -3,6 +3,8 @@
 import type { BuildOptions, Loader, Message, OnLoadArgs, OnLoadResult, Plugin } from 'esbuild-wasm';
 import type * as NativeEsbuild from 'esbuild';
 import * as wasmEsbuild from 'esbuild-wasm';
+import type * as NodeFsPromises from 'node:fs/promises';
+import type * as NodeUrl from 'node:url';
 
 import { createBundlerSourceHost } from '@taucad/bundler-core';
 import type {
@@ -10,6 +12,7 @@ import type {
   BundlerSourceIntent,
   BundlerSourceResolution,
   BundlerSourceSession,
+  PackageIssue,
 } from '@taucad/bundler-core';
 import type { BuiltinModule } from '@taucad/runtime/bundler';
 
@@ -49,7 +52,41 @@ let activeEsbuild: typeof wasmEsbuild = wasmEsbuild;
 export const getEsbuild = (): typeof wasmEsbuild => activeEsbuild;
 
 /**
+ * Whether Node's permission model refuses child processes here.
+ *
+ * Native esbuild and esbuild-wasm's Node build both run their service as a
+ * child process; `process.permission` exists only under `--permission`.
+ *
+ * @returns true when `--permission` runs without `--allow-child-process`.
+ */
+const childProcessesRefused = (): boolean =>
+  (process as { permission?: NodeJS.ProcessPermission }).permission?.has('child') === false;
+
+/**
+ * Start esbuild-wasm's browser build on this thread.
+ *
+ * Its in-thread service reads the host's globals through `self`, which Node
+ * does not define, so the realm gains a `self` alias for `globalThis` first —
+ * what a browser worker already has.
+ */
+const initializeInThreadEsbuild = async (): Promise<void> => {
+  const [browserEsbuild, { readFile }, { fileURLToPath }] = await Promise.all([
+    importNodeModule<typeof wasmEsbuild>('esbuild-wasm/esm/browser.js'),
+    importNodeModule<typeof NodeFsPromises>('node:fs/promises'),
+    importNodeModule<typeof NodeUrl>('node:url'),
+  ]);
+  const wasm = new Uint8Array(await readFile(fileURLToPath(import.meta.resolve('esbuild-wasm/esbuild.wasm'))));
+  (globalThis as { self?: typeof globalThis }).self ??= globalThis;
+  await browserEsbuild.initialize({ wasmModule: await WebAssembly.compile(wasm), worker: false });
+  activeEsbuild = browserEsbuild;
+};
+
+/**
  * Initialize native esbuild on Node or esbuild-wasm elsewhere.
+ *
+ * A Node realm that may not start child processes runs esbuild-wasm on its own
+ * thread instead.
+ *
  * @returns Completion after the selected engine is ready.
  * @public
  */
@@ -59,6 +96,11 @@ export const initializeEsbuild = async (): Promise<void> => {
   }
   initializationPromise ??= (async () => {
     try {
+      if (isNode() && childProcessesRefused()) {
+        await initializeInThreadEsbuild();
+        esbuildInitialized = true;
+        return;
+      }
       if (isNode()) {
         activeEsbuild = await importNodeModule<typeof NativeEsbuild>('esbuild');
       }
@@ -106,13 +148,6 @@ const scriptLoader = (path: string): Loader => {
   return 'js';
 };
 
-const toEsbuildPath = (resolution: BundlerSourceResolution): string => {
-  if (resolution.kind === 'project' || resolution.kind === 'package') {
-    return resolution.id;
-  }
-  return resolution.id;
-};
-
 const toNamespace = (resolution: BundlerSourceResolution): string => {
   if (resolution.kind === 'builtin') {
     return esbuildNamespace.builtin;
@@ -133,9 +168,11 @@ const importerId = (args: { readonly importer: string; readonly namespace: strin
   return args.importer;
 };
 
+// Package refusals pass their PackageIssue as esbuild `detail`; it reaches the issue as `details`.
 const issueFromMessage = (message: Message, severity: 'error' | 'warning'): VmIssue => ({
   message: message.text,
   code: 'BUNDLER_FAILED',
+  ...(message.detail === undefined ? {} : { details: message.detail as unknown }),
   type: 'compilation',
   severity,
   location:
@@ -146,6 +183,14 @@ const issueFromMessage = (message: Message, severity: 'error' | 'warning'): VmIs
           startLineNumber: message.location.line,
           startColumn: message.location.column,
         },
+});
+
+const packageWarning = (issue: PackageIssue): VmIssue => ({
+  message: issue.message,
+  code: 'BUNDLER_FAILED',
+  type: 'compilation',
+  severity: 'warning',
+  details: issue,
 });
 
 const issuesFromError = (error: unknown): VmIssue[] => {
@@ -207,10 +252,10 @@ const createSourcePlugin = (session: BundlerSourceSession, detect: boolean): Plu
           return { path: resolution.specifier, external: true };
         }
         if (resolution.kind === 'unsupported') {
-          return { errors: [{ text: resolution.message }] };
+          return { errors: [{ text: resolution.message, detail: resolution.issue }] };
         }
         return {
-          path: toEsbuildPath(resolution),
+          path: resolution.id,
           namespace: toNamespace(resolution),
           pluginData: resolution,
           ...(resolution.kind === 'project' && resolution.suffix.length > 0 ? { suffix: resolution.suffix } : {}),
@@ -231,11 +276,9 @@ const createSourcePlugin = (session: BundlerSourceSession, detect: boolean): Plu
 });
 
 const commonJsBanner = (modules: ReadonlyMap<string, BuiltinModule>): string => {
-  const globals = [...modules.entries()]
-    .filter(([, module]) => module.globalName !== undefined)
-    .map(
-      ([name, module]) => `const ${module.globalName} = globalThis.__KERNEL_MODULES__?.get(${JSON.stringify(name)});`,
-    )
+  const globals = [...modules.values()]
+    .filter((module) => module.globalName !== undefined && module.registryExpression !== undefined)
+    .map((module) => `const ${module.globalName} = ${module.registryExpression};`)
     .join('\n');
   return `${globals}\nconst exports = {};\nconst module = { exports };\n`;
 };
@@ -304,7 +347,10 @@ export class EsbuildBundler {
       const output = result.outputFiles?.find((file) => file.path.endsWith('.js')) ?? result.outputFiles?.[0];
       const sourceMap = result.outputFiles?.find((file) => file.path.endsWith('.js.map'))?.text;
       const observation = session.complete();
-      const issues = result.warnings.map((warning) => issueFromMessage(warning, 'warning'));
+      const issues = [
+        ...result.warnings.map((warning) => issueFromMessage(warning, 'warning')),
+        ...observation.issues.map(packageWarning),
+      ];
       if (output === undefined) {
         issues.push({
           message: 'No output generated',
@@ -326,7 +372,7 @@ export class EsbuildBundler {
       const observation = session.complete();
       return {
         code: '',
-        issues: issuesFromError(error),
+        issues: [...issuesFromError(error), ...observation.issues.map(packageWarning)],
         dependencies: observation.dependencies,
         unresolvedPaths: observation.unresolvedPaths,
         success: false,

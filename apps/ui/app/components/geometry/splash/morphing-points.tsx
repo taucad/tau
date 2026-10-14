@@ -3,7 +3,7 @@ import type { RefObject } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Group, Mesh } from 'three';
-import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
+import { useThreeGraphicsBackend } from '@taucad/viewer/graphics/three/three-graphics-backend-context';
 import { createMorphingPointsNodeMaterial } from '#components/geometry/splash/morphing-points-material.node.js';
 import {
   createMorphingPointsMaterial,

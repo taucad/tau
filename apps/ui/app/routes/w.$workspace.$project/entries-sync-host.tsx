@@ -13,8 +13,8 @@ import { useProject } from '#hooks/use-project.js';
 import {
   createSourceModelInteractionUnitId,
   serializeModelComponentDisplayState,
-} from '#machines/model-interaction.machine.js';
-import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
+} from '@taucad/viewer/machines/model-interaction.machine';
+import type { modelInteractionMachine } from '@taucad/viewer/machines/model-interaction.machine';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { createWorkbenchEntriesStore } from '#workbench-records/entries-store.js';
 import type { EntryRecordPatch } from '#workbench-records/entries-store.js';

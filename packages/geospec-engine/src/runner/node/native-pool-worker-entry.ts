@@ -7,8 +7,6 @@ import { Engine } from '@taucad/geospec-engine-native/node';
 import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
 import type { RuntimeDefinition } from '@taucad/runtime';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
-// oxlint-disable-next-line import/no-unassigned-import -- Worker-host registration is isolate-local.
-import '#register-node.js';
 import { createNodeVmFileSystem } from '#runner/node/node-vm-filesystem.js';
 import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
 

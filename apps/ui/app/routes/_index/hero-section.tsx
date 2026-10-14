@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { DesignStory } from '#components/geometry/splash/design-story.js';
 import { MarketingComposer } from '#routes/_index/marketing-composer.js';
 

@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { isValidElement } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { NavUser } from '#components/nav/nav-user.js';
+import * as Cookies from 'es-cookie';
 import { metaConfig } from '#constants/meta.constants.js';
 
 const clientEnvironment = globalThis.window.ENV;
@@ -52,7 +53,7 @@ vi.mock('@taucad/ui/components/dropdown-menu', () => ({
   DropdownMenuTrigger: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock('#components/ui/utils/client-only.js', () => ({
+vi.mock('@taucad/ui/components/client-only', () => ({
   ClientOnly: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
 }));
 
@@ -151,5 +152,37 @@ describe('NavUser', () => {
 
     expect(screen.getByRole('status', { name: 'Offline' })).toBeInTheDocument();
     expect(screen.getByText('Offline — online features unavailable')).toBeInTheDocument();
+  });
+});
+
+describe('Website preference navigation', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    Cookies.remove('tau-entry', { path: '/' });
+  });
+  it('should select the website and navigate to the bare URL', () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { protocol: 'http:', assign });
+    render(<NavUser />, { wrapper: MemoryRouter });
+    fireEvent.click(screen.getByRole('link', { name: 'Visit website' }));
+    expect(Cookies.get('tau-entry')).toBe('website');
+    expect(assign).toHaveBeenCalledWith('/');
+  });
+  it('should keep the explicit website link usable when cookies are blocked', () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { protocol: 'http:', assign });
+    vi.spyOn(document, 'cookie', 'set').mockImplementation(() => undefined);
+    render(<NavUser />, { wrapper: MemoryRouter });
+    const link = screen.getByRole('link', { name: 'Visit website' });
+    expect(link).toHaveAttribute('href', '/?website=1');
+    fireEvent.click(link);
+    expect(assign).not.toHaveBeenCalled();
+  });
+  it('should omit the web-only switch in desktop', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    render(<NavUser />, { wrapper: MemoryRouter });
+    expect(screen.queryByRole('link', { name: 'Visit website' })).not.toBeInTheDocument();
   });
 });

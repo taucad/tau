@@ -52,7 +52,7 @@ vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeSelector: <T,>(select: (tree: typeof treeSnapshot.current) => T): T => select(treeSnapshot.current),
   useFileTreeEntry: () => undefined,
 }));
-vi.mock('#hooks/use-keyboard.js', () => ({ useKeybinding: () => ({ formattedKeyCombination: 'Enter' }) }));
+vi.mock('@taucad/ui/components/keyboard', () => ({ useKeybinding: () => ({ formattedKeyCombination: 'Enter' }) }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({

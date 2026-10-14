@@ -5,6 +5,8 @@ import type { ProjectFileSystemConfig, Workspace, WorkspaceConnection } from '#f
 import type { ConnectedWorkspace } from '#hooks/use-project-manager.js';
 import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
 
+vi.mock('#filesystem/use-persistent-storage-status.js', () => ({ usePersistentStorageStatus: () => 'best-effort' }));
+
 type ToastSuccessOptions = {
   readonly action: { readonly label: string; readonly onClick: () => void | Promise<void> };
 };
@@ -95,6 +97,7 @@ vi.mock('#constants/browser.constants.js', () => ({
 }));
 
 vi.mock('#filesystem/handle-store.js', () => ({
+  refreshPersistentStorageStatus: vi.fn(async () => undefined),
   checkHandlePermission: mockCheckHandlePermission,
   createWorkspace: mockCreateWorkspace,
   getWorkspace: mockGetWorkspace,
@@ -151,7 +154,7 @@ describe('FileSystemSettings storage usage', () => {
 
     render(<FileSystemSettings />);
 
-    await screen.findByText(/available/i);
+    await screen.findByText(/total/i);
     expect(screen.queryByText(/storage is nearly full/i)).not.toBeInTheDocument();
   });
 
@@ -166,6 +169,7 @@ describe('FileSystemSettings storage usage', () => {
     await waitFor(() => {
       expect(warn).toHaveBeenCalled();
     });
+    expect(screen.getByRole('status')).toHaveTextContent('Saved in this browser');
   });
 });
 

@@ -1,6 +1,6 @@
 # kcl-std API index
 
-kcl-std 0.2.184 · 284 symbols · extracted by kcl-lib stdlib JSON export.
+kcl-std 0.2.191 · 284 symbols · extracted by kcl-lib stdlib JSON export.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 

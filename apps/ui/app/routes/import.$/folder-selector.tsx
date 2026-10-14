@@ -1,7 +1,7 @@
 import { useId, useMemo } from 'react';
 import { ChevronDown, Folder } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 
 /** The combobox needs a non-empty value, so the repository root is selected as `/`. */
 const rootValue = '/';

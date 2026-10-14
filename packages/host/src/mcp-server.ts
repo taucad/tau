@@ -22,18 +22,32 @@
  */
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { z } from 'zod';
 
-import { createTauMcpHttpHandler } from '@taucad/mcp';
-import type { TauMcpDispatch, TauMcpHostTool, TauMcpRpcFailure, TauMcpRpcName, TauMcpRpcSuccess } from '@taucad/mcp';
+import { createTauMcpHttpHandler, serveTauMcpStdio } from '@taucad/mcp';
+import type {
+  TauMcpConfirm,
+  TauMcpDispatch,
+  TauMcpHostCall,
+  TauMcpHostTool,
+  TauMcpRpcFailure,
+  TauMcpRpcName,
+  TauMcpRpcSuccess,
+  TauMcpStdioStreams,
+} from '@taucad/mcp';
 import { rpcName, toolName } from '@taucad/chat/constants';
 import { screenshotImageSchema, screenshotOutputSchema } from '@taucad/chat/schemas/tools/screenshot';
 import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 
 import type { JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
 import { saveChatAttachment } from '#acp/media.js';
+import { createLocalMcpViewer } from '#mcp-viewer.js';
 
 /**
  * Milliseconds a host-minted capability may live.
@@ -69,10 +83,13 @@ export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
 /**
  * The exact tool grant a host capability carries.
  *
- * The four CAD tools, the workbench record tool, and the print tools (blueprint D5, Bambu Studio D13): an
+ * The four CAD tools, the workbench record tool, the parameter tools (agent plugin UI blueprint G22), and the print
+ * tools (blueprint D5, Bambu Studio D13): an
  * external agent may read the slicing profiles a machine offers, and open,
  * read, list and stop a print request through the same ledger a Tau turn
- * uses, and is told to wait for the person — nothing here starts a print. Every name is dispatched into the daemon's own registry by tool name.
+ * uses. A print starts only on the person's answer: in the client's own approval form when it declares form
+ * elicitation (`tau mcp`), otherwise in Tau, while the agent is told to wait. Every name is dispatched into the
+ * daemon's own registry by tool name.
  *
  * @public
  */
@@ -82,6 +99,8 @@ export const hostMcpAllowedTools = [
   toolName.screenshot,
   toolName.exportModel,
   toolName.arrangeWorkbench,
+  toolName.getParameters,
+  toolName.applyParameterOperation,
   toolName.getPrintProfiles,
   toolName.requestPrint,
   toolName.getPrintRequest,
@@ -101,6 +120,8 @@ export type HostMcpAllowedTool = (typeof hostMcpAllowedTools)[number];
  */
 const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAllowedTool>([
   toolName.arrangeWorkbench,
+  toolName.getParameters,
+  toolName.applyParameterOperation,
   toolName.askQuestions,
   toolName.getPrintProfiles,
   toolName.requestPrint,
@@ -111,6 +132,7 @@ const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAll
 
 /** The registry tools that change nothing, here or on a machine. */
 const readOnlyRegistryTools: ReadonlySet<string> = new Set<string>([
+  toolName.getParameters,
   toolName.getPrintProfiles,
   toolName.getPrintRequest,
   toolName.listPrintRequests,
@@ -120,6 +142,19 @@ const readOnlyRegistryTools: ReadonlySet<string> = new Set<string>([
 const hostMcpAnnotationOverrides: Readonly<Partial<Record<string, NonNullable<TauMcpHostTool['annotations']>>>> = {
   [toolName.arrangeWorkbench]: {
     readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  /* Writes the entry's parameter sidecar in the project, through a checked write. */
+  [toolName.applyParameterOperation]: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  },
+  [toolName.getParameters]: {
+    readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
     openWorldHint: false,
@@ -201,6 +236,144 @@ const toolForRpc: Readonly<Record<TauMcpRpcName, HostMcpAllowedTool>> = {
   [rpcName.captureImages]: toolName.screenshot,
   [rpcName.exportModel]: toolName.exportModel,
 };
+
+/** One filed attachment: its `attachments/<sha256>.<ext>` reference, the real file, and its digest. */
+type SavedAttachment = Awaited<ReturnType<typeof saveChatAttachment>>;
+
+/** Where {@link present} files attachments, and what may still cancel the call. */
+type PresentContext = {
+  /** Files base64 bytes of one media type. */
+  readonly save: (data: string, mimeType: string) => Promise<SavedAttachment>;
+  readonly signals: ReadonlyArray<AbortSignal | undefined>;
+};
+
+/**
+ * One registry result as the MCP adapter returns it.
+ *
+ * Screenshots and oversized GeoSpec reports leave the result as attachment
+ * files; everything else passes through. Each screenshot keeps its bytes as
+ * `dataUrl` too, for a server that returns images inline; one that returns
+ * attachments drops them.
+ *
+ * @param context - Where attachments are filed, and the call's live signals.
+ * @param tool - The registry tool that answered.
+ * @param result - Its result.
+ * @returns The RPC-shaped result the adapter reads.
+ */
+const present = async (
+  context: PresentContext,
+  tool: HostMcpAllowedTool,
+  result: Awaited<ReturnType<ToolRegistry['invoke']>>,
+): Promise<TauMcpRpcSuccess | TauMcpRpcFailure> => {
+  if (!hostMcpRegistryTools.has(tool)) {
+    if (tool === toolName.screenshot && !result.isError && isJsonObject(result.content)) {
+      const { success: _success, ...payload } = result.content;
+      const capture = screenshotOutputSchema.parse(payload);
+      const images = await Promise.all(
+        capture.images.map(async (image) => {
+          const { dataUrl, ...echo } = screenshotImageSchema.parse(image);
+          const match = /^data:(image\/(?:png|webp));base64,([A-Za-z0-9+/]+=*)$/u.exec(dataUrl);
+          if (!match?.[1] || !match[2]) {
+            throw new Error('Tau screenshot returned an invalid image data URL.');
+          }
+          return { ...echo, ...(await context.save(match[2], match[1])), mimeType: match[1], dataUrl };
+        }),
+      );
+      return {
+        success: true,
+        images,
+        ...(capture.sourceRevision ? { sourceRevision: capture.sourceRevision } : {}),
+        ...(capture.message === undefined ? {} : { message: capture.message }),
+      };
+    }
+    if (tool === toolName.testModel && !result.isError && isJsonObject(result.content)) {
+      const { success: _success, ...payload } = result.content;
+      const verdict = testModelOutputSchema.parse(payload);
+      const full = JSON.stringify(verdict);
+      if (Buffer.byteLength(full, 'utf8') > 128 * 1024) {
+        const saved =
+          verdict.fullResult ?? (await context.save(Buffer.from(full, 'utf8').toString('base64'), 'application/json'));
+        for (const signal of context.signals) {
+          signal?.throwIfAborted();
+        }
+        const failures = verdict.failures.slice(0, 20).map((failure) => ({
+          id: shortDiagnostic(failure.id),
+          requirement: shortDiagnostic(failure.requirement),
+          reason: shortDiagnostic(failure.reason),
+          suggestion: shortDiagnostic(failure.suggestion),
+          targetFile: failure.targetFile,
+        }));
+        return {
+          success: true,
+          passed: verdict.passed,
+          total: verdict.total,
+          ...(verdict.runStatus === undefined ? {} : { runStatus: verdict.runStatus }),
+          ...(verdict.accounting === undefined ? {} : { accounting: verdict.accounting }),
+          ...(verdict.lineageStatus === undefined ? {} : { lineageStatus: verdict.lineageStatus }),
+          failures,
+          passes: [],
+          omittedFailures: (verdict.omittedFailures ?? 0) + verdict.failures.length - failures.length,
+          omittedPasses: (verdict.omittedPasses ?? 0) + verdict.passes.length,
+          omittedSourceRevisions: (verdict.omittedSourceRevisions ?? 0) + (verdict.sourceRevisions?.length ?? 0),
+          omittedTests: (verdict.omittedTests ?? 0) + (verdict.tests?.length ?? 0),
+          omittedLineage: (verdict.omittedLineage ?? 0) + (verdict.lineage?.length ?? 0),
+          fullResult: { ...saved, mimeType: 'application/json' },
+        };
+      }
+    }
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
+    return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
+  }
+  /* A registry tool answers plain content with the error bit beside it;
+   * the adapter reads `success` and `errorCode` the way it does for an
+   * RPC result, so the bit becomes the field here. */
+  const content = isJsonObject(result.content) ? result.content : { value: result.content };
+  if (!result.isError) {
+    return { success: true, ...content };
+  }
+  return {
+    ...content,
+    errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'TOOL_ERROR',
+    message: typeof content['message'] === 'string' ? content['message'] : `${tool} failed.`,
+  };
+};
+
+/**
+ * Which registry tool one adapter call names, and with what input.
+ *
+ * @param call - The adapter's validated call.
+ * @returns The tool and its input, or a refusal for a name outside the grant.
+ */
+const routeCall = (
+  call: TauMcpHostCall,
+): { readonly tool: HostMcpAllowedTool; readonly args: Readonly<Record<string, unknown>> } | TauMcpRpcFailure => {
+  if ('rpcName' in call) {
+    // Export RPCs carry call identity in args; the tool registry takes it
+    // from invocation metadata and adds it after strict input validation.
+    if (call.rpcName === rpcName.exportModel) {
+      const { toolCallId: _toolCallId, ...input } = call.args;
+      return { tool: toolName.exportModel, args: input };
+    }
+    return { tool: toolForRpc[call.rpcName], args: call.args };
+  }
+  const tool = hostMcpAllowedTools.find((name) => name === call.toolName);
+  if (tool === undefined) {
+    return { errorCode: 'TOOL_NOT_ALLOWED', message: `${call.toolName} is not in this capability's grant.` };
+  }
+  return { tool, args: call.args };
+};
+
+/**
+ * A Tau fault after the tool answered, coded so the agent does not retry it.
+ *
+ * @param tool - The tool whose result could not be returned.
+ * @param error - What went wrong presenting it.
+ * @returns The failure the agent sees.
+ */
+const hostFault = (tool: string, error: unknown): TauMcpRpcFailure => ({
+  errorCode: 'MCP_HOST_FAULT',
+  message: `Tau could not return this ${tool} result (${error instanceof Error ? error.message : String(error)}). This is a Tau fault, not a problem with the call; retrying will not help.`,
+});
 
 const capabilityClaimsSchema = z
   .object({
@@ -413,104 +586,6 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     signal: AbortSignal,
   ): TauMcpDispatch => {
     /**
-     * One registry result as the MCP adapter returns it.
-     *
-     * Screenshots and oversized GeoSpec reports leave the result as chat
-     * attachment files; everything else passes through.
-     *
-     * @param tool - The registry tool that answered.
-     * @param result - Its result.
-     * @returns The RPC-shaped result the adapter reads.
-     */
-    const present = async (
-      tool: HostMcpAllowedTool,
-      result: Awaited<ReturnType<ToolRegistry['invoke']>>,
-    ): Promise<TauMcpRpcSuccess | TauMcpRpcFailure> => {
-      if (!hostMcpRegistryTools.has(tool)) {
-        if (tool === toolName.screenshot && !result.isError && isJsonObject(result.content)) {
-          const { success: _success, ...payload } = result.content;
-          const capture = screenshotOutputSchema.parse(payload);
-          const images = await Promise.all(
-            capture.images.map(async (image) => {
-              const inline = screenshotImageSchema.parse(image);
-              const match = /^data:(image\/(?:png|webp));base64,([A-Za-z0-9+/]+=*)$/u.exec(inline.dataUrl);
-              if (!match?.[1] || !match[2]) {
-                throw new Error('Tau screenshot returned an invalid image data URL.');
-              }
-              const saved = await saveChatAttachment({
-                workspaceRoot: options.workspaceRoot,
-                chatId: claims.chatId,
-                data: match[2],
-                mimeType: match[1],
-              });
-              return { view: inline.view, ...saved, mimeType: match[1] };
-            }),
-          );
-          return {
-            success: true,
-            images,
-            ...(capture.sourceRevision ? { sourceRevision: capture.sourceRevision } : {}),
-            ...(capture.message === undefined ? {} : { message: capture.message }),
-          };
-        }
-        if (tool === toolName.testModel && !result.isError && isJsonObject(result.content)) {
-          const { success: _success, ...payload } = result.content;
-          const verdict = testModelOutputSchema.parse(payload);
-          const full = JSON.stringify(verdict);
-          if (Buffer.byteLength(full, 'utf8') > 128 * 1024) {
-            const saved =
-              verdict.fullResult ??
-              (await saveChatAttachment({
-                workspaceRoot: options.workspaceRoot,
-                chatId: claims.chatId,
-                data: Buffer.from(full, 'utf8').toString('base64'),
-                mimeType: 'application/json',
-              }));
-            signal.throwIfAborted();
-            binding?.signal.throwIfAborted();
-            const failures = verdict.failures.slice(0, 20).map((failure) => ({
-              id: shortDiagnostic(failure.id),
-              requirement: shortDiagnostic(failure.requirement),
-              reason: shortDiagnostic(failure.reason),
-              suggestion: shortDiagnostic(failure.suggestion),
-              targetFile: failure.targetFile,
-            }));
-            return {
-              success: true,
-              passed: verdict.passed,
-              total: verdict.total,
-              ...(verdict.runStatus === undefined ? {} : { runStatus: verdict.runStatus }),
-              ...(verdict.accounting === undefined ? {} : { accounting: verdict.accounting }),
-              ...(verdict.lineageStatus === undefined ? {} : { lineageStatus: verdict.lineageStatus }),
-              failures,
-              passes: [],
-              omittedFailures: (verdict.omittedFailures ?? 0) + verdict.failures.length - failures.length,
-              omittedPasses: (verdict.omittedPasses ?? 0) + verdict.passes.length,
-              omittedSourceRevisions: (verdict.omittedSourceRevisions ?? 0) + (verdict.sourceRevisions?.length ?? 0),
-              omittedTests: (verdict.omittedTests ?? 0) + (verdict.tests?.length ?? 0),
-              omittedLineage: (verdict.omittedLineage ?? 0) + (verdict.lineage?.length ?? 0),
-              fullResult: { ...saved, mimeType: 'application/json' },
-            };
-          }
-        }
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
-        return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
-      }
-      /* A registry tool answers plain content with the error bit beside it;
-       * the adapter reads `success` and `errorCode` the way it does for an
-       * RPC result, so the bit becomes the field here. */
-      const content = isJsonObject(result.content) ? result.content : { value: result.content };
-      if (!result.isError) {
-        return { success: true, ...content };
-      }
-      return {
-        ...content,
-        errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'TOOL_ERROR',
-        message: typeof content['message'] === 'string' ? content['message'] : `${tool} failed.`,
-      };
-    };
-
-    /**
      * One allowed tool, by name, into the daemon's registry.
      *
      * Keyed by tool name rather than RPC name because the print request tools
@@ -557,31 +632,22 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
         /* A throw here is Tau's own fault after the tool answered — the agent's
          * call was fine and a retry repeats it — so it is coded as such rather
          * than reaching the agent as a bare runtime message it reads as its own. */
-        return await present(tool, result).catch(
-          (error: unknown): TauMcpRpcFailure => ({
-            errorCode: 'MCP_HOST_FAULT',
-            message: `Tau could not return this ${tool} result (${error instanceof Error ? error.message : String(error)}). This is a Tau fault, not a problem with the call; retrying will not help.`,
-          }),
-        );
+        return await present(
+          {
+            save: async (data, mimeType) =>
+              saveChatAttachment({ workspaceRoot: options.workspaceRoot, chatId: claims.chatId, data, mimeType }),
+            signals: [signal, binding.signal],
+          },
+          tool,
+          result,
+        ).catch((error: unknown) => hostFault(tool, error));
       } finally {
         binding.pending.delete(pending);
       }
     };
     return async (call, dispatchOptions) => {
-      if ('rpcName' in call) {
-        // Export RPCs carry call identity in args; the tool registry takes it
-        // from invocation metadata and adds it after strict input validation.
-        if (call.rpcName === rpcName.exportModel) {
-          const { toolCallId: _toolCallId, ...input } = call.args;
-          return invokeAllowed(toolName.exportModel, input, dispatchOptions);
-        }
-        return invokeAllowed(toolForRpc[call.rpcName], call.args, dispatchOptions);
-      }
-      const tool = hostMcpAllowedTools.find((name) => name === call.toolName);
-      if (tool === undefined) {
-        return { errorCode: 'TOOL_NOT_ALLOWED', message: `${call.toolName} is not in this capability's grant.` };
-      }
-      return invokeAllowed(tool, call.args, dispatchOptions);
+      const route = routeCall(call);
+      return 'errorCode' in route ? route : invokeAllowed(route.tool, route.args, dispatchOptions);
     };
   };
 
@@ -672,6 +738,232 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       await Promise.allSettled([...active.values()].flatMap((binding) => [...binding.pending]));
       active.clear();
       await handler.close();
+    },
+  };
+};
+
+/** Options for {@link serveLocalHostMcp}. @public */
+export type LocalHostMcpOptions = {
+  /** The project a call works in when its client names none. */
+  readonly workspaceRoot: string;
+  /**
+   * Work in `workspaceRoot` even when a call names its own folder, because the
+   * launcher chose the project explicitly (`tau mcp --project`).
+   */
+  readonly pinned?: boolean | undefined;
+  /** A registry built with `checkouts` set to {@link LocalHostMcpOptions.checkouts}. */
+  readonly registry: ToolRegistry;
+  /**
+   * The registry's run → root map. A call that names another project folder
+   * is recorded here under its own run id, so the registry works in that folder.
+   */
+  readonly checkouts: Map<string, { readonly cwd: string }>;
+  /**
+   * The single-file viewer page and its SHA-256. With it, the server serves the
+   * page, `show_model` and the page's tools (blueprint W4); without it, the CAD
+   * tools alone.
+   */
+  readonly viewerPage?: Readonly<{ html: string; sha256: string }> | undefined;
+};
+
+/** A local MCP server serving one agent. @public */
+export type LocalHostMcp = {
+  readonly server: Awaited<ReturnType<typeof serveTauMcpStdio>>;
+  /** Close the server and remove the screenshots and reports it filed. */
+  close(): Promise<void>;
+};
+
+/**
+ * The project folder one call names, if any.
+ *
+ * Codex advertises no MCP roots; it names the thread's folder per call in
+ * `_meta["codex/sandbox-state-meta"].sandboxCwd`, a `file:` URL (Codex 0.157
+ * serializes its `PathUri` so), once the server declares that capability.
+ *
+ * @param meta - The request's `_meta`.
+ * @returns An absolute folder, or `undefined`.
+ */
+const callerRoot = (meta: Readonly<Record<string, unknown>> | undefined): string | undefined => {
+  const sandbox = meta?.['codex/sandbox-state-meta'];
+  const cwd =
+    typeof sandbox === 'object' && sandbox !== null && 'sandboxCwd' in sandbox ? sandbox.sandboxCwd : undefined;
+  if (typeof cwd !== 'string') {
+    return undefined;
+  }
+  try {
+    const path = cwd.startsWith('file:') ? fileURLToPath(cwd) : cwd;
+    return isAbsolute(path) ? path : undefined;
+  } catch {
+    // ponytail: a URL that names no local folder counts as no folder.
+    return undefined;
+  }
+};
+
+/**
+ * Serve Tau's CAD tools to one local agent over stdio.
+ *
+ * The local sibling of {@link createHostMcpEndpoint}: the agent launched this
+ * process, so its stdio pipe is the admission and there is no capability to
+ * mint. `ask_questions` is withheld because no Tau chat waits on the answer.
+ * Screenshots return inline, and they and large GeoSpec reports are filed in a
+ * temporary folder that `close` removes, never in the project, where Tau
+ * revisions or the agent's own commits would pick them up.
+ *
+ * @param options - Default project, registry and its run → root map.
+ * @param streams - Protocol streams; default this process's stdin and stdout.
+ * @returns The connected server and its cleanup; the server's `onclose` fires when the agent goes away.
+ * @public
+ *
+ * @example <caption>Serve the current folder</caption>
+ * ```typescript
+ * import { createHostToolRegistry } from '@taucad/host/agent-tools';
+ * import { serveLocalHostMcp } from '@taucad/host';
+ *
+ * const workspaceRoot = process.cwd();
+ * const checkouts = new Map<string, { readonly cwd: string }>();
+ * const registry = createHostToolRegistry({ workspaceRoot, checkouts });
+ * const local = await serveLocalHostMcp({ workspaceRoot, registry, checkouts });
+ * process.stdin.once('end', async () => {
+ *   await local.close();
+ * });
+ * ```
+ */
+export const serveLocalHostMcp = async (
+  options: LocalHostMcpOptions,
+  streams?: TauMcpStdioStreams,
+): Promise<LocalHostMcp> => {
+  const directory = await mkdtemp(join(tmpdir(), 'tau-mcp-'));
+  await mkdir(join(directory, 'attachments'));
+  /* Content-addressed like a chat attachment, so `path` keeps the
+   * `attachments/<sha256>.<ext>` shape the MCP screenshot schema requires. */
+  const save = async (data: string, mimeType: string): Promise<SavedAttachment> => {
+    const bytes = Buffer.from(data, 'base64');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const path = `attachments/${sha256}.${mimeType === 'application/json' ? 'json' : mimeType.slice('image/'.length)}`;
+    const absolutePath = join(directory, path);
+    await writeFile(absolutePath, bytes);
+    return { path, absolutePath, byteLength: bytes.length, sha256 };
+  };
+  const rootOf = (meta: Readonly<Record<string, unknown>> | undefined): string =>
+    (options.pinned ? undefined : callerRoot(meta)) ?? options.workspaceRoot;
+  const invokeIn = async ({
+    workspaceRoot,
+    tool,
+    args,
+    call,
+  }: {
+    readonly workspaceRoot: string;
+    readonly tool: HostMcpAllowedTool;
+    readonly args: Readonly<Record<string, unknown>>;
+    readonly call: {
+      readonly toolCallId: string;
+      readonly signal?: AbortSignal | undefined;
+      readonly confirm?: TauMcpConfirm | undefined;
+    };
+  }): Promise<Awaited<ReturnType<ToolRegistry['invoke']>>> => {
+    const runId = `mcp:${workspaceRoot}`;
+    options.checkouts.set(runId, { cwd: workspaceRoot });
+    const { confirm } = call;
+    return options.registry.invoke({
+      toolCallId: call.toolCallId,
+      toolName: tool,
+      runId,
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the args were validated against the tool's own schema.
+      input: args as unknown as JsonValue,
+      signal: call.signal ?? new AbortController().signal,
+      /* A client that draws forms asks the person inside this call, so a print starts only on their answer (E9,
+       * W11). Without one the tool leaves its request awaiting approval in Tau. Nothing pauses here, so there is
+       * no later attempt to recall an answer. */
+      ...(confirm === undefined
+        ? {}
+        : {
+            approve: async ({ prompt }: { readonly prompt: string }) => {
+              const outcome = await confirm({ message: prompt, label: 'Approve' }).catch((error: unknown) => {
+                /* Not the person's answer: the tool leaves its request for them in Tau, and the operator learns why. */
+                process.stderr.write(
+                  `tau mcp: the agent app could not ask the person to approve ${tool}, so it waits for them in Tau: ${String(error)}\n`,
+                );
+                throw Object.assign(new Error('The agent app could not ask the person.', { cause: error }), {
+                  code: 'APPROVAL_UNAVAILABLE',
+                });
+              });
+              return { interruptId: call.toolCallId, outcome };
+            },
+          }),
+    });
+  };
+  const viewer =
+    options.viewerPage === undefined
+      ? undefined
+      : createLocalMcpViewer({
+          page: options.viewerPage,
+          rootOf,
+          /* Stdout carries the protocol; a view the page could not keep is said on stderr, and the page works on. */
+          workbench: {
+            onError: (error) => {
+              process.stderr.write(`tau mcp: the viewer's view was not kept in .tau/workbench: ${String(error)}\n`);
+            },
+          },
+          renderGlb: async ({ root, targetFile, toolCallId, signal }) => {
+            const result = await invokeIn({
+              workspaceRoot: root,
+              tool: toolName.exportModel,
+              args: { targetFile, to: 'glb' },
+              call: { toolCallId, signal },
+            });
+            const content: JsonObject = isJsonObject(result.content) ? result.content : {};
+            const { files } = content;
+            const listed: readonly JsonValue[] = Array.isArray(files) ? (files as readonly JsonValue[]) : [];
+            const [first] = listed;
+            const artifactPath = first !== undefined && isJsonObject(first) ? first['artifactPath'] : undefined;
+            if (result.isError || content['success'] === false || typeof artifactPath !== 'string') {
+              return {
+                errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'RENDER_FAILED',
+                message:
+                  typeof content['message'] === 'string'
+                    ? content['message']
+                    : `${targetFile} could not be rendered to GLB.`,
+              };
+            }
+            return artifactPath;
+          },
+        });
+  const server = await serveTauMcpStdio(
+    {
+      ...(viewer === undefined ? {} : { viewer }),
+      hostTools: options.registry
+        .list()
+        .filter(
+          (definition) =>
+            hostMcpRegistryTools.has(definition.name as HostMcpAllowedTool) &&
+            !chatScopedRegistryTools.has(definition.name),
+        )
+        .map((definition) => hostToolOf(definition)),
+      screenshotImages: 'inline',
+      dispatch: async (call, dispatchOptions) => {
+        const route = routeCall(call);
+        if ('errorCode' in route) {
+          return route;
+        }
+        const result = await invokeIn({
+          workspaceRoot: rootOf(dispatchOptions.meta),
+          tool: route.tool,
+          args: route.args,
+          call: dispatchOptions,
+        });
+        return present({ save, signals: [dispatchOptions.signal] }, route.tool, result).catch((error: unknown) =>
+          hostFault(route.tool, error),
+        );
+      },
+    },
+    streams,
+  );
+  return {
+    server,
+    close: async () => {
+      await server.close();
+      await viewer?.close();
+      await rm(directory, { recursive: true, force: true });
     },
   };
 };

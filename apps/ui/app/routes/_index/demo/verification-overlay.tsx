@@ -5,7 +5,7 @@ import { Check, X, Loader2 } from 'lucide-react';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { Artifact } from '@taucad/runtime';
 import { cn } from '@taucad/ui/utils/cn';
-import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
+import { applyCanonicalGltfWorld } from '@taucad/viewer/graphics/three/gltf-world';
 
 // A common desktop FDM print bed edge, in millimetres. The bounding-box check
 // is real geometry verification, framed for a maker audience.

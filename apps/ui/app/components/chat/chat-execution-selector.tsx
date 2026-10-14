@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { Bot, Check, Server } from 'lucide-react';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { Badge } from '@taucad/ui/components/badge';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import type { ChatAgentActivity } from '#hooks/active-chat-provider.js';
@@ -192,17 +192,21 @@ const useExecutionTargets = (): {
 /**
  * Whether the composer offers the agent control, and what it is set to.
  *
- * One agent is not a choice, and the bottom row has no width to spend on a
- * control that cannot change anything (Q12.6). The label is the same one the
+ * Offer the control when a target differs from the saved selection, including
+ * a selection whose host is absent from discovery. The label is the same one the
  * trigger wears, so the tooltip can name the selected agent.
  *
  * @returns Whether to render the control, and the selected agent's name.
  * @public
  */
 export const useChatAgentSelection = (): { readonly isOffered: boolean; readonly label: string } => {
+  const { canSelectExecution } = useChatComposer();
   const { hostTargets, selectedTarget } = useExecutionTargets();
   return {
-    isOffered: hostTargets.length + (isDesktopTarget() ? 0 : 1) > 1,
+    isOffered:
+      canSelectExecution &&
+      ((!isDesktopTarget() && selectedTarget.key !== tauTarget.key) ||
+        hostTargets.some((target) => target.key !== selectedTarget.key)),
     label: selectedTarget.label,
   };
 };

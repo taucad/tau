@@ -37,6 +37,10 @@ const names = [
 const component = (index: number): string => `component:node-${index}`;
 const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const;
 const field = (id: string) => selectors.getByTestId(`kinematics-dof-${id}`).getByRole('spinbutton');
+/** The slide follows the handwheel: a one-line row whose text ends with its value in millimetres. */
+const slide = selectors.getByTestId('kinematics-dof-slide');
+const expectSlide = async (millimetres: number): Promise<void> =>
+  target.expectText(slide, new RegExp(`×${millimetres}mm$`, 'u'));
 
 async function openCommand(name: string): Promise<void> {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
@@ -196,14 +200,14 @@ test('should play, pause and reset the shipped PicoVoxel stage without remeshing
   expect(components).toEqual(names.map((name, index) => ({ id: component(index), name })));
   expectAsBuilt(await matrices());
   await target.click(selectors.getByRole('button', { name: 'Followers of Handwheel' }));
-  await target.expectValue(field('slide'), '0');
+  await expectSlide(0);
   await target.delay(500);
   const before = await buffers();
   expect(before.allocations, 'initial geometry was uploaded').toBeGreaterThan(0);
 
   await setDriver(90);
   expectPose(await matrices(), 90, 1);
-  await target.expectValue(field('slide'), '1');
+  await expectSlide(1);
   await target.screenshot(selectors.getByCss('body'), 'picovoxel-kinematics-quarter-turn.png');
   await setDriver(-90);
   expectPose(await matrices(), -90, -1);
@@ -230,13 +234,17 @@ test('should play, pause and reset the shipped PicoVoxel stage without remeshing
   await target.delay(500);
   expect(await state(), 'paused time and pose revision stay still').toEqual(paused);
   expect(await matrices()).toEqual(pausedMatrices);
-  const timeline = selectors.getByRole('group', { name: 'Timeline', exact: true }).getByRole('spinbutton');
-  await target.fill(timeline, '2');
-  await target.press(timeline, 'Enter');
+  // The strip steps in tenths of a second: Home, then twenty steps, seeks to 2 s.
+  await target.focus(selectors.getByRole('slider', { name: 'Time', exact: true }));
+  await target.keyboardPress('Home');
+  for (let step = 0; step < 20; step += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- Each key press is one step of the strip.
+    await target.keyboardPress('ArrowRight');
+  }
   await expect.poll(async () => stateField('playback')).toMatchObject({ status: 'paused', time: 2 });
   await expect.poll(async () => stateField('coordinates')).toEqual({ turn: 450 });
   expectPose(await matrices(), 450, 5);
-  await target.expectValue(field('slide'), '5');
+  await expectSlide(5);
   await reset();
   const after = await buffers();
   expect(after, 'pose controls reuse uploaded mesh buffers').toEqual(before);
@@ -252,7 +260,7 @@ test('should play, pause and reset the shipped PicoVoxel stage without remeshing
   expectAsBuilt(await matrices());
   await setDriver(90);
   expectPose(await matrices(), 90, 2);
-  await target.expectValue(field('slide'), '2');
+  await expectSlide(2);
   await reset();
   await target.click(selectors.getByCss('.dv-tab[aria-label="Parameters"]'));
   const position = selectors.getByLabelText('Input for Carriage Position').first();
@@ -283,7 +291,7 @@ test('should play, pause and reset the shipped PicoVoxel stage without remeshing
 
   // The selected component reveals its bound follower, using the same action as the viewer part menu.
   await target.click(selectors.getByRole('button', { name: 'Followers of Handwheel' }));
-  await target.expectCount(field('slide'), 0);
+  await target.expectCount(slide, 0);
   await openCommand('Open model structure');
   const parts = selectors.getByRole('list', { name: 'Model components for main.ts' });
   const carriage = parts.getByRole('button', { name: 'Carriage', exact: true });
@@ -295,8 +303,8 @@ test('should play, pause and reset the shipped PicoVoxel stage without remeshing
   await target.hover(carriage);
   await target.click(parts.getByRole('button', { name: 'Actions for Carriage' }));
   await target.click(selectors.getByRole('menuitem', { name: 'Show kinematics' }));
-  await target.expectVisible(field('slide'));
-  await target.expectValue(field('slide'), '0');
+  await target.expectVisible(slide);
+  await expectSlide(0);
   await target.screenshot(selectors.getByCss('body'), 'picovoxel-kinematics-selection.png');
 
   // Edit this fixture's private project copy. Rejected metadata must leave valid geometry viewable.

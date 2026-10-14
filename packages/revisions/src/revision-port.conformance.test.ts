@@ -1304,6 +1304,46 @@ describe.runIf(gitToolchainOnPath)('native-git store isolation (review 4 R2)', (
       await rm(root, { force: true, recursive: true });
     }
   }, 180_000);
+
+  it('refuses a linked worktree as the project path and leaves it and its repository untouched', async () => {
+    /* `tau serve` from a linked worktree adopted it: the open rewrote its index
+     * from the main checkout's HEAD and wrote LFS filters into the shared
+     * config, and the close committed it onto the main checkout's branch. */
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-worktree-'));
+    try {
+      const main = join(root, 'main');
+      const linked = join(root, 'linked');
+      execFileSync('git', ['init', '--quiet', '--initial-branch=main', main], { stdio: 'ignore' });
+      await writeFile(join(main, 'a.txt'), 'a\n');
+      const commit = (message: string): void => {
+        execFileSync('git', ['add', '--all'], { cwd: main, stdio: 'ignore' });
+        execFileSync(
+          'git',
+          ['-c', 'user.name=Ada', '-c', 'user.email=ada@example.com', 'commit', '--quiet', '-m', message],
+          {
+            cwd: main,
+            stdio: 'ignore',
+          },
+        );
+      };
+      commit('A');
+      execFileSync('git', ['worktree', 'add', '--quiet', '-b', 'side', linked], { cwd: main, stdio: 'ignore' });
+      // The main checkout moves on, so an index read from its HEAD would differ.
+      await writeFile(join(main, 'b.txt'), 'b\n');
+      commit('B');
+      const config = await readFile(join(main, '.git', 'config'), 'utf8');
+
+      const port = createNativeGitRevisionPort({ repositoryPath: linked });
+      await expect(port.init({ author })).rejects.toMatchObject({ code: 'INVALID_REPOSITORY' });
+
+      const contents = await readdir(linked);
+      expect(contents.toSorted()).toStrictEqual(['.git', 'a.txt']);
+      expect(await readFile(join(main, '.git', 'config'), 'utf8')).toBe(config);
+      expect(gitExitCode(linked, ['diff', '--cached', '--quiet'])).toBe(0);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 180_000);
 });
 
 /**
@@ -1393,6 +1433,13 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
         expect(await fixture.git(['rev-parse', 'refs/heads/main'])).toBe(head);
         expect(await fixture.git(['rev-parse', 'refs/tau/chats/kept'])).toBe(head);
         expect(gitExitCode(fixture.repositoryPath, ['rev-parse', '--verify', 'refs/tau/chats/refused'])).toBe(1);
+      }, 180_000);
+
+      it('reads an address not recorded yet, under the name it would have, and records nothing (R2)', async () => {
+        const advertised = await port.listRemoteRefs({ name: 'candidate', url: fixture.url });
+
+        expect(advertised.find((entry) => entry.name === 'refs/heads/main')?.head).toBe(head);
+        expect(await port.listRemotes()).toStrictEqual([{ name: 'tau', url: fixture.url, kind: 'tau' }]);
       }, 180_000);
 
       it('lists the remote’s refs and re-offers an unchanged one as up to date', async () => {
@@ -1628,47 +1675,57 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
 });
 
 describe.runIf(gitToolchainOnPath)('native remote credential transport', () => {
-  it('passes the credential only through the child environment', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-credential-'));
-    const fixture = await startGitHttpBackend({ root });
-    const repositoryPath = join(root, 'project');
-    const argumentsLog = join(root, 'arguments.log');
-    const environmentLog = join(root, 'environment.log');
-    const wrapper = join(root, 'git-credential-check');
-    const authorization = 'Bearer github-secret-value';
-    try {
-      await mkdir(repositoryPath, { recursive: true });
-      await writeFile(
-        wrapper,
-        [
-          '#!/bin/sh',
-          `printf '%s\\n' "$@" > ${argumentsLog}`,
-          `printf '%s\n%s\n%s\n%s' "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0" "$GIT_CONFIG_KEY_1" "$GIT_CONFIG_VALUE_1" > ${environmentLog}`,
-          'exec git "$@"',
-          '',
-        ].join('\n'),
-        { mode: 0o755 },
-      );
-      const port = createNativeGitRevisionPort({
-        repositoryPath,
-        gitExecutable: wrapper,
-        remoteCredential: () => ({ repositoryUrl: fixture.url, authorization }),
-      });
-      await port.init({ author });
-      await port.setRemote({ name: 'origin', url: fixture.url });
+  /* R2: an address *Change backup* probes before recording it is credited exactly as the recorded remote would be. */
+  it.each([{ recorded: true }, { recorded: false }])(
+    'passes the credential only through the child environment (recorded: $recorded)',
+    async ({ recorded }) => {
+      const root = await mkdtemp(join(tmpdir(), 'tau-revisions-credential-'));
+      const fixture = await startGitHttpBackend({ root });
+      const repositoryPath = join(root, 'project');
+      const argumentsLog = join(root, 'arguments.log');
+      const environmentLog = join(root, 'environment.log');
+      const wrapper = join(root, 'git-credential-check');
+      const authorization = 'Bearer github-secret-value';
+      try {
+        await mkdir(repositoryPath, { recursive: true });
+        await writeFile(
+          wrapper,
+          [
+            '#!/bin/sh',
+            `printf '%s\\n' "$@" > ${argumentsLog}`,
+            `printf '%s\n%s\n%s\n%s' "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0" "$GIT_CONFIG_KEY_1" "$GIT_CONFIG_VALUE_1" > ${environmentLog}`,
+            'exec git "$@"',
+            '',
+          ].join('\n'),
+          { mode: 0o755 },
+        );
+        const port = createNativeGitRevisionPort({
+          repositoryPath,
+          gitExecutable: wrapper,
+          remoteCredential: () => ({ repositoryUrl: fixture.url, authorization }),
+        });
+        await port.init({ author });
+        if (recorded) {
+          await port.setRemote({ name: 'origin', url: fixture.url });
+        }
 
-      await port.listRemoteRefs('origin');
+        await port.listRemoteRefs(recorded ? 'origin' : { name: 'origin', url: fixture.url });
 
-      expect(await readFile(argumentsLog, 'utf8')).not.toContain(authorization);
-      expect(await readFile(environmentLog, 'utf8')).toBe(
-        `http.${fixture.url}.extraHeader\nAuthorization: ${authorization}\nlfs.url\n${fixture.url}/info/lfs`,
-      );
-      expect(await readFile(join(repositoryPath, '.git', 'config'), 'utf8')).not.toContain(authorization);
-    } finally {
-      await fixture.close();
-      await rm(root, { force: true, recursive: true });
-    }
-  }, 180_000);
+        expect(await readFile(argumentsLog, 'utf8')).not.toContain(authorization);
+        expect(await readFile(environmentLog, 'utf8')).toBe(
+          `http.${fixture.url}.extraHeader\nAuthorization: ${authorization}\nlfs.url\n${fixture.url}/info/lfs`,
+        );
+        expect(await readFile(join(repositoryPath, '.git', 'config'), 'utf8')).not.toContain(authorization);
+        /* Read last: the wrapper logs only the newest git command. */
+        const remotes = await port.listRemotes();
+        expect(remotes.length).toBe(recorded ? 1 : 0);
+      } finally {
+        await fixture.close();
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+    180_000,
+  );
 });
 
 /**

@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { SettingsSection } from '#hooks/use-settings-dialog.js';
-import { featureFlagNames, flagRegistry } from '#flags/flag.constants.js';
+import { experimentalFeatureFlagNames, flagRegistry, featureFlagDefaults } from '#flags/flag.constants.js';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
@@ -103,6 +103,12 @@ const settingsCatalog = [
         keywords: ['github', 'google', 'login'],
       },
       {
+        id: 'github-permissions',
+        label: 'GitHub permissions',
+        description: "Review or revoke Tau's sign-in and Gist access on GitHub",
+        keywords: ['github', 'gist', 'revoke', 'authorization', 'oauth', 'consent'],
+      },
+      {
         id: 'active-sessions',
         label: 'Active sessions',
         description: 'Review devices and revoke sessions',
@@ -123,9 +129,14 @@ const settingsCatalog = [
         keywords: ['upgrade', 'cancel', 'payment'],
       },
       {
+        id: 'plan-limits',
+        label: 'Plan limits',
+        description: 'View your monthly credits and remaining percentage',
+      },
+      {
         id: 'credit-balance',
-        label: 'Credit balance',
-        description: 'View your balance and add credits',
+        label: 'Purchased credits',
+        description: 'View your purchased credit balance and add more',
         keywords: ['top up', 'purchase'],
       },
       {
@@ -136,7 +147,7 @@ const settingsCatalog = [
       },
       {
         id: 'close-account',
-        label: 'Close Tau account',
+        label: 'Close account',
         description: 'Close your account and delete your data',
         keywords: ['delete', 'remove'],
       },
@@ -282,7 +293,7 @@ const settingsCatalog = [
     label: 'Experimental',
     icon: FlaskConical,
     group: 'Advanced',
-    entries: featureFlagNames.map(
+    entries: experimentalFeatureFlagNames.map(
       (flag) =>
         ({
           id: `flag-${flag}`,
@@ -307,13 +318,18 @@ const cloudSections: readonly SettingsSectionDefinition[] = tauCloudEnabled
 /* Machines are hosted by the desktop services utility; the web build has no
  * host to add one to, so the section is hidden rather than shown empty. Desktop's
  * Home is a folder on disk, so it has no browser storage to show. */
-export const settingsSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
+const platformSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
   ? cloudSections.map((section) =>
       section.id === 'filesystem'
         ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'browser-storage') }
         : section,
     )
   : cloudSections.filter((section) => section.id !== 'machines');
+
+export const settingsSections: readonly SettingsSectionDefinition[] = platformSections.map((section) => ({
+  ...section,
+  entries: section.entries.filter((entry) => entry.id !== 'automatic-reload' || featureFlagDefaults.automaticReload),
+}));
 
 function normalizeSearch(value: string): string {
   return value

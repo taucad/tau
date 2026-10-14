@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Check } from 'lucide-react';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 

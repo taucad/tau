@@ -22,6 +22,7 @@
 @source '../../../../node_modules/@streamdown/math/dist';
 @source '../../../../node_modules/@streamdown/mermaid/dist';
 @source '../../../../packages/ui/src';
+@source '../../../../packages/viewer/src';
 
 /*
  * Vendor cursor adapters. Dockview and lazy runtime styles are unlayered, so

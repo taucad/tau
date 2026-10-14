@@ -1,16 +1,16 @@
 ---
 title: 'Keyboard Service Policy'
-description: 'Unified keyboard service (use-keyboard.tsx): event.key vs event.code, mod abstraction, scope model, consume/priority rules, and IME policy.'
+description: 'Unified keyboard service (`@taucad/ui/components/keyboard`): event.key vs event.code, mod abstraction, scope model, consume/priority rules, and IME policy.'
 status: active
 created: '2026-02-15'
-updated: '2026-09-04'
+updated: '2026-10-11'
 related:
-  - apps/ui/app/hooks/use-keyboard.tsx
+  - packages/ui/src/components/keyboard.tsx
 ---
 
 # Keyboard Service Policy
 
-Internal reference for the unified keyboard service (`apps/ui/app/hooks/use-keyboard.tsx`).
+Internal reference for the unified keyboard service (`packages/ui/src/components/keyboard.tsx`).
 
 ## Rationale
 

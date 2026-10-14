@@ -41,9 +41,9 @@ import type { ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.
 import { editorMachine } from '#machines/editor.machine.js';
 import { disposeCadRuntime } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import type { logMachine } from '#machines/logs.machine.js';
-import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
+import type { modelInteractionMachine } from '@taucad/viewer/machines/model-interaction.machine';
 import { inspect } from '#machines/inspector.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';

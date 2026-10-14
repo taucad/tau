@@ -267,7 +267,7 @@ vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({
 vi.mock('#hooks/use-monaco-model-service.js', () => ({
   MonacoModelServiceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock('#hooks/use-webgl-context-tracker.js', () => ({
+vi.mock('@taucad/viewer/hooks/use-webgl-context-tracker', () => ({
   WebglContextTrackerProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({

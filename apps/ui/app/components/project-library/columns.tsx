@@ -9,7 +9,7 @@ import { Checkbox } from '@taucad/ui/components/checkbox';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 

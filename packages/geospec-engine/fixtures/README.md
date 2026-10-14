@@ -1,6 +1,6 @@
 # GeoSpec Fixture Corpus
 
-The committed, adversarial STEP fixture corpus and its manifests — the red/green contract the selector engine (SB3) and relationship evidence engine (SB4) are verified against, and the conformance suite for the GeoSpec AP242 profile (a producer is GeoSpec-compatible exactly when its output passes this harness). Blueprint: `docs/research/geospec-fixture-acceptance-blueprint.md`; fixture semantics are transcribed from the V8 audit's fixture acceptance specs (`docs/research/v8-engine-brep-current-manufacturability-audit.md`), which remain normative.
+The committed, adversarial STEP fixture corpus and its manifests — the red/green contract for selector and relationship evidence, and the conformance corpus for the GeoSpec AP242 profile. The compiled engine verifies it: the Rust tests under `packages/geospec-engine-native/native/occt/rust/tests/` read these `model.step` files, and `fixtures/finite-contact/original44.tsv` there ports the manifests' relationship rows. Blueprint: `docs/research/geospec-fixture-acceptance-blueprint.md`; fixture semantics are transcribed from the V8 audit's fixture acceptance specs (`docs/research/v8-engine-brep-current-manufacturability-audit.md`), which remain normative.
 
 ## Layout
 
@@ -24,7 +24,7 @@ fixtures/
 Each fixture directory holds exactly two files:
 
 - `model.step` — the committed STEP AP242 artifact. Tests never depend on the runtime to run.
-- `manifest.json` — the single source the acceptance harness reads expectations from: generator provenance (`script` + `parameters`, exactly the CLI invocation), tolerance context, selector expectations (statuses, entity counts, subject-frame facts, diagnostic mentions — selectors are **full composed names**, `<occurrencePath>.<interfaceName>`), relationship expectations with explicit `broadPhase`/`final` separation, and optional `adversarialAabb` (the whole-part AABB-overlap premise of master acceptance case 6). Schema: `src/acceptance/manifest-types.ts`; harness: `src/acceptance/acceptance.test.ts`.
+- `manifest.json` — the single source of expectations: generator provenance (`script` + `parameters`, exactly the CLI invocation), tolerance context, selector expectations (statuses, entity counts, subject-frame facts, diagnostic mentions — selectors are **full composed names**, `<occurrencePath>.<interfaceName>`), relationship expectations with explicit `broadPhase`/`final` separation, and optional `adversarialAabb` (the whole-part AABB-overlap premise of master acceptance case 6).
 
 ## Regeneration
 
@@ -50,12 +50,12 @@ One fixture is not CLI-generated:
 
 ## Determinism rule
 
-Regenerating a fixture from its script must produce **geometrically identical** STEP. Byte identity is not required (header timestamps and entity ids may differ); the harness compares via reader-derived structure, resolved selector facts, and native datum-placement rows — never bytes.
+Regenerating a fixture from its script must produce **geometrically identical** STEP. Byte identity is not required (header timestamps and entity ids may differ); consumers compare via reader-derived structure, resolved selector facts, and native datum-placement rows — never bytes.
 
 ## Budgets
 
-- **Corpus size**: total committed `model.step` bytes stay under **5 MiB** (enforced by the harness; currently ~1.6 MiB across 36 fixtures). Keep geometry primitive and dimensions exact.
-- **Performance canary**: the largest fixture (`mate.dowel-located-flange-positive`) records a wall-clock budget in its manifest (`budgets.loadAndResolve`, milliseconds) for the full public path `loadStep → selector index → resolve-all`; SB4's broad phase is accountable to it.
+- **Corpus size**: total committed `model.step` bytes stay under **5 MiB** (currently ~1.6 MiB across 36 fixtures). Keep geometry primitive and dimensions exact.
+- **Performance canary**: the largest fixture (`mate.dowel-located-flange-positive`) records a wall-clock budget in its manifest (`budgets.loadAndResolve`, milliseconds) for loading the model and resolving every selector.
 
 ## Conventions
 

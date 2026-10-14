@@ -5,9 +5,9 @@ import { Button } from '@taucad/ui/components/button';
 import { SwitchRow } from '@taucad/ui/components/switch';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { useModels } from '#hooks/use-models.js';
-import { SearchInput } from '#components/search-input.js';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
-import { Loader } from '#components/ui/loader.js';
+import { SearchInput } from '@taucad/ui/components/search-input';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
+import { Loader } from '@taucad/ui/components/loader';
 
 export function ModelSettings(): React.JSX.Element {
   const { data = [], isLoading, recommendedModels, isAvailable, setAvailable } = useModels();

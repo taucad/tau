@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Matrix4 } from 'three';
 import type { Mechanism, Pose } from '@taucad/kinematics';
-import { parseGltfBytes } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import { parseGltfBytes } from '@taucad/viewer/graphics/metadata/gltf-component-manifest';
 import { prepareCapturePresentation } from '#services/headless-capture-presentation.js';
 
 const preservedExtension = 'VENDOR_preserved';

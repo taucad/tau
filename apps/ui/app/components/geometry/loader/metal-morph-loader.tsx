@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
-import {
-  probeWebGpuSupport,
-  readGraphicsBackendQueryOverride,
-  resolveGraphicsBackendPreference,
-} from '#components/geometry/graphics/graphics-backend.js';
+import { probeWebGpuSupport, resolveGraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-backend';
+import { readGraphicsBackendQueryOverride } from '#utils/graphics-backend-override.js';
 import { createMetalMorphLoader } from '#components/geometry/loader/metal-morph-controller.js';
 import type {
   MetalMorphLoaderController,
@@ -12,8 +9,8 @@ import type {
   MetalMorphSequenceState,
 } from '#components/geometry/loader/metal-morph-controller.js';
 import type { MetalMorphShapeId } from '#components/geometry/loader/metal-morph-shapes.js';
-import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
-import { Loader } from '#components/ui/loader.js';
+import type { ResolvedGraphicsBackend } from '@taucad/viewer/graphics/graphics-settings';
+import { Loader } from '@taucad/ui/components/loader';
 import { useTheme } from '#hooks/use-theme.js';
 
 export type MetalMorphLoaderStatus = 'pending' | 'ready' | 'failed';

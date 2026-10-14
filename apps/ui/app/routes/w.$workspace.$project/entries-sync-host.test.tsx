@@ -6,7 +6,7 @@ import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
-import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
+import type { modelInteractionMachine } from '@taucad/viewer/machines/model-interaction.machine';
 import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
 import { readRecordIssues, subscribeRecordIssues } from '#workbench-records/record-issues.js';

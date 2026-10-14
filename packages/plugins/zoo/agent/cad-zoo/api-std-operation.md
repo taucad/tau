@@ -14,7 +14,7 @@ operation::facing(
 //   toolDiameter: A number
 //   stepOver: A number
 // Example:
-//   @settings(defaultLengthUnit = mm, kclVersion = 2.0, experimentalFeatures = allow)
+//   @settings(defaultLengthUnit = mm, kclVersion = 3.0, experimentalFeatures = allow)
 //   stockLength = 100mm
 //   stockWidth = 60mm
 //   stockHeight = 20mm

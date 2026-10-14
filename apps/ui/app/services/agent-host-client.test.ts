@@ -24,6 +24,29 @@ import {
 import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
 import { agentHostWorkerProtocolSchemas, parseAgentHostWorkerConnect } from '#workers/agent-host.contract.js';
 
+/* R21: the session the default principal reads, as the auth client answers it; `$sessionSignal` is the atom it toggles
+ * on a sign-in, a sign-out or a session change. */
+const auth = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  return {
+    getSession: vi.fn<() => Promise<unknown>>(),
+    signal: {
+      listen: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    },
+    changeSession: () => {
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+  };
+});
+vi.mock('#lib/auth-client.js', () => ({
+  authClient: { getSession: auth.getSession, $store: { atoms: { $sessionSignal: auth.signal } } },
+}));
+
 type FakeRequest = { readonly name: string; readonly args: Record<string, unknown> };
 type ErrorListener = (event: ErrorEvent) => void;
 
@@ -101,6 +124,8 @@ class FakeResidentWorker {
       },
     });
   });
+
+  public holdNextProvide: Promise<void> | undefined;
 
   private frozen = false;
   private readonly held: Array<() => void> = [];
@@ -199,7 +224,15 @@ class FakeResidentWorker {
       case 'provide': {
         const previous = this.hosts.get(args['projectId'] as string);
         this.hosts.set(args['projectId'] as string, args['hostId'] as string);
-        return previous === undefined ? {} : { replaced: previous };
+        const answer = previous === undefined ? {} : { replaced: previous };
+        const held = this.holdNextProvide;
+        this.holdNextProvide = undefined;
+        return held === undefined
+          ? answer
+          : (async () => {
+              await held;
+              return answer;
+            })();
       }
       case 'release': {
         if (this.hosts.get(args['projectId'] as string) === args['hostId']) {
@@ -906,6 +939,7 @@ describe('re-brokering project hosts', () => {
     expect(rebridges[0]?.args).toMatchObject({ projectId: 'project-one', hostId: provides[0]?.args['hostId'] });
     expect(rebridges[0]?.args['fileSystemPort']).toBeInstanceOf(MessagePort);
     expect(rebridges[0]?.args['projectRootPort']).toBeInstanceOf(MessagePort);
+    expect(rebridges[0]?.args['placementPort']).toBeInstanceOf(MessagePort);
     expect(bridges.counts()).toEqual([1, 1, 0, 0]);
     /* The same stream still reaches the same host. */
     await expect(cancelRun(client, 'chat-reprovide', 'run-1')).resolves.toMatchObject({ status: 'applied' });
@@ -934,11 +968,64 @@ describe('re-brokering project hosts', () => {
     await residentAgentWorker(createWorker).reprovide();
 
     expect(requestsNamed(worker, 'rebridge').map(({ args }) => args['hostId'])).toEqual([hostId]);
+    expect(requestsNamed(worker, 'rebridge')[0]?.args['placementPort']).toBeInstanceOf(MessagePort);
     expect(bridges.counts()).toEqual([1, 1, 0, 0]);
     drained.resolve();
     await vi.waitFor(() => {
       expect(bridges.counts()).toEqual([1, 1, 1, 1]);
     });
+  });
+
+  it('should renew only the successor placement when an older host is draining', async () => {
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    const first = createTestClient(createWorker);
+    await startRun(first, 'chat-old', 'run-old', 'Build.');
+    const drained = Promise.withResolvers<void>();
+    worker.holdRelease = drained.promise;
+    await first.close();
+    await vi.waitFor(() => {
+      expect(requestsNamed(worker, 'release')).toHaveLength(1);
+    });
+    const second = createTestClient(createWorker);
+    await startRun(second, 'chat-new', 'run-new', 'Build.');
+    await residentAgentWorker(createWorker).reprovide();
+    const currentHost = requestsNamed(worker, 'provide')[1]?.args['hostId'];
+    const refreshed = requestsNamed(worker, 'rebridge');
+    expect(refreshed).toHaveLength(2);
+    expect(
+      refreshed.filter(({ args }) => args['placementPort'] !== undefined).map(({ args }) => args['hostId']),
+    ).toEqual([currentHost]);
+    drained.resolve();
+    await second.close();
+  });
+
+  it('should not let a pending released provide fence a successor during reprovide', async () => {
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    const pending = Promise.withResolvers<void>();
+    worker.holdNextProvide = pending.promise;
+    const first = createTestClient(createWorker);
+    const starting = startRun(first, 'chat-pending', 'run-pending', 'Build.');
+    const settled = Promise.allSettled([starting]);
+    await vi.waitFor(() => {
+      expect(requestsNamed(worker, 'provide')).toHaveLength(1);
+    });
+    const originalHost = requestsNamed(worker, 'provide')[0]?.args['hostId'];
+    const rebrokering = residentAgentWorker(createWorker).reprovide();
+    await first.close();
+    const second = createTestClient(createWorker);
+    await startRun(second, 'chat-successor', 'run-successor', 'Build.');
+    pending.resolve();
+    await rebrokering;
+    await settled;
+    expect(
+      requestsNamed(worker, 'rebridge').filter(
+        ({ args }) => args['hostId'] === originalHost && args['placementPort'] !== undefined,
+      ),
+    ).toEqual([]);
+    await expect(cancelRun(second, 'chat-successor', 'run-successor')).resolves.toMatchObject({ status: 'applied' });
+    await second.close();
   });
 
   it('should dispose the fresh bridges when the host they name is gone', async () => {
@@ -1121,5 +1208,102 @@ describe('the funding principal', () => {
 
     expect(requestsNamed(worker, 'provide')[0]?.args).not.toHaveProperty('principal');
     await client.close();
+  });
+});
+
+/* R21: the default principal reads the session once per worker, not once per provide, and again once it changed. */
+describe('the session read', () => {
+  const signedIn = (id: string) => ({ data: { user: { id } }, error: null });
+  const otherProject = (createWorker: () => Worker) =>
+    createTestClient(createWorker, {
+      authority: { projectId: 'project-two', workspaceId: 'workspace-one' },
+      principal: undefined,
+    });
+
+  it('should read the session once for every provide in one worker', async () => {
+    auth.getSession.mockReset().mockResolvedValue(signedIn('user-one'));
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    /* The revision root opens after the first provide was refused, as it does while a project is still opening. */
+    let placements = 0;
+    const openPlacementPort = (): MessagePort | undefined => {
+      placements += 1;
+      return placements === 1 ? undefined : new MessageChannel().port1;
+    };
+    const first = createTestClient(createWorker, { principal: undefined, openPlacementPort });
+    const second = otherProject(createWorker);
+
+    await expect(startRun(first, 'chat-a', 'run-a', 'A.')).rejects.toMatchObject({ code: 'REVISIONS_UNAVAILABLE' });
+    await startRun(first, 'chat-a', 'run-a', 'A.');
+    await startRun(second, 'chat-b', 'run-b', 'B.');
+
+    expect(auth.getSession).toHaveBeenCalledTimes(1);
+    expect(requestsNamed(worker, 'provide').map((provide) => provide.args['principal'])).toEqual([
+      'user-one',
+      'user-one',
+    ]);
+    await first.close();
+    await second.close();
+  });
+
+  it('should read the session again once the auth client heard it change', async () => {
+    auth.getSession.mockReset().mockResolvedValue(signedIn('user-one'));
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    const first = createTestClient(createWorker, { principal: undefined });
+    await startRun(first, 'chat-a', 'run-a', 'A.');
+
+    auth.getSession.mockResolvedValue(signedIn('user-two'));
+    auth.changeSession();
+    const second = otherProject(createWorker);
+    await startRun(second, 'chat-b', 'run-b', 'B.');
+
+    expect(auth.getSession).toHaveBeenCalledTimes(2);
+    expect(requestsNamed(worker, 'provide')[1]?.args).toMatchObject({ principal: 'user-two' });
+    await first.close();
+    await second.close();
+  });
+
+  it('should read the session again once the page is shown again, as another tab may have changed it', async () => {
+    auth.getSession.mockReset().mockResolvedValue(signedIn('user-one'));
+    const page = Object.assign(new EventTarget(), { visibilityState: 'visible' as DocumentVisibilityState });
+    vi.stubGlobal('document', page);
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    const first = createTestClient(createWorker, { principal: undefined });
+    await startRun(first, 'chat-a', 'run-a', 'A.');
+
+    auth.getSession.mockResolvedValue(signedIn('user-two'));
+    page.visibilityState = 'hidden';
+    page.dispatchEvent(new Event('visibilitychange'));
+    page.visibilityState = 'visible';
+    page.dispatchEvent(new Event('visibilitychange'));
+    const second = otherProject(createWorker);
+    await startRun(second, 'chat-b', 'run-b', 'B.');
+
+    expect(auth.getSession).toHaveBeenCalledTimes(2);
+    expect(requestsNamed(worker, 'provide')[1]?.args).toMatchObject({ principal: 'user-two' });
+    await first.close();
+    await second.close();
+  });
+
+  it('should not keep a session read the auth server refused', async () => {
+    auth.getSession
+      .mockReset()
+      .mockResolvedValueOnce({ data: null, error: { status: 429 } })
+      .mockResolvedValue(signedIn('user-one'));
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    const first = createTestClient(createWorker, { principal: undefined });
+    await startRun(first, 'chat-a', 'run-a', 'A.');
+
+    const second = otherProject(createWorker);
+    await startRun(second, 'chat-b', 'run-b', 'B.');
+
+    expect(auth.getSession).toHaveBeenCalledTimes(2);
+    expect(requestsNamed(worker, 'provide')[0]?.args).not.toHaveProperty('principal');
+    expect(requestsNamed(worker, 'provide')[1]?.args).toMatchObject({ principal: 'user-one' });
+    await first.close();
+    await second.close();
   });
 });

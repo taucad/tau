@@ -54,14 +54,14 @@ import { SvgIcon } from '#components/icons/svg-icon.js';
 import type { IconId } from '#components/icons/svg-icon.js';
 import { Tau } from '#components/icons/tau.js';
 import { ThoughtBubble } from '#components/icons/thought-bubble.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { configOptionOf, configValues } from '#components/chat/use-agent-config.js';
 import type { AgentConfig, AgentConfigOption } from '#components/chat/use-agent-config.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useBrowserAgentHostProjectAvailability } from '#hooks/use-cad-agent-config.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useModels } from '#hooks/use-models.js';
 import type { Model } from '#hooks/use-models.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
@@ -69,8 +69,8 @@ import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { externalAgentFixCommand, externalAgentRefusalReasons } from '#lib/external-agent.js';
-import { ariaKeyShortcuts, formatKeyCombination } from '#utils/keys.utils.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
+import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
+import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { groupModelsByTier } from '#utils/model-tier.js';
 import { tauModelReadiness, tauModelRefusal } from '#utils/new-chat-execution.js';
 import { modelReasoning, offeredReasoningLevels } from '#utils/model-reasoning.js';
@@ -1143,6 +1143,7 @@ function Sheet({
   const {
     model: { setActiveModel },
     execution: { execution, setActiveExecution },
+    canSelectExecution,
   } = useChatComposer();
   const { lastTauExecution } = useModels();
   const [view, setView] = useState<SheetView>('settings');
@@ -1157,7 +1158,7 @@ function Sheet({
   const surfaceRef = useRef<HTMLDivElement>(null);
   const agentRowRef = useRef<HTMLButtonElement>(null);
   const modelRowRef = useRef<HTMLButtonElement>(null);
-  const hasChoice = agents.length > 1;
+  const hasChoice = canSelectExecution && agents.some((agent) => agent.key !== current.key);
   const browsed = agents.find((agent) => agent.key === browseKey) ?? current;
   useEffect(() => {
     if (!hasNavigated || view !== 'settings') {

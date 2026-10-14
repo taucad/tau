@@ -35,5 +35,12 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
-docker-compose -f "${REPO_ROOT}/infra/docker-compose.yml" up -d postgres redis minio minio-bootstrap
+# Compose v2 is a docker plugin (GitHub's Ubuntu runners ship only that); v1 is a
+# standalone binary some local installs still use.
+if docker compose version >/dev/null 2>&1; then
+  compose=(docker compose)
+else
+  compose=(docker-compose)
+fi
+"${compose[@]}" -f "${REPO_ROOT}/infra/docker-compose.yml" up -d postgres redis minio minio-bootstrap
 TAU_CLOUD_ENABLED=true pnpm --dir "${REPO_ROOT}" exec nx run api:db-migrate

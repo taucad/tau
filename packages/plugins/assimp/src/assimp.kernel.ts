@@ -106,7 +106,8 @@ export const assimpKernel = defineKernel({
     const filename = basename(canonicalEntryPath);
     const options = {
       to: 'glb',
-      postProcess: [...defaultPostProcess, 'embedTextures'],
+      // The headless renderer needs authored normals; this fills only meshes the source left without them.
+      postProcess: [...defaultPostProcess, 'generateNormals', 'embedTextures'],
       resolve: (name: string): ReturnType<ResolveFile> => {
         const path =
           name.startsWith('/') || uriSchemePattern.test(name)

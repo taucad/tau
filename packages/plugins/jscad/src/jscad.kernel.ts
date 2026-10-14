@@ -12,9 +12,6 @@ import {
   asBuffer,
   jsonSchemaFromJson,
   defineKernel,
-  createKernelModuleShim,
-  createKernelModuleRegistryExpression,
-  getModuleRegistry,
   isRecordObject,
   extractDefaultParameters,
   registerKernelModule,
@@ -29,6 +26,8 @@ import {
   deriveLocationFromFrames,
 } from '@taucad/runtime/kernel';
 import type { KernelServices } from '@taucad/runtime/kernel';
+
+import modelingPackage from '@jscad/modeling/package.json' with { type: 'json' };
 
 import { jscadExportSchemas } from '#jscad.schemas.js';
 
@@ -207,20 +206,17 @@ function registerJscadModules(runtime: KernelServices, modeling: JscadModeling):
   registerKernelModule(runtime, {
     name: '@jscad/modeling',
     exports: modeling,
-    version: '2.12.6',
+    package: modelingPackage,
     globalName: 'jscadModeling',
   });
 
   for (const subpath of jscadSubmodules) {
-    const submoduleName = `@jscad/modeling/${subpath}`;
-    const submoduleExports: unknown = Reflect.get(modeling, subpath);
-    if (isRecordObject(submoduleExports)) {
-      runtime.bundler.registerModule(submoduleName, {
-        code: createKernelModuleShim({
-          moduleExpression: `${createKernelModuleRegistryExpression('@jscad/modeling')}.${subpath}`,
-          exports: submoduleExports,
-        }),
-        version: '2.12.6',
+    if (isRecordObject(Reflect.get(modeling, subpath))) {
+      registerKernelModule(runtime, {
+        name: `@jscad/modeling/${subpath}`,
+        exports: modeling,
+        exportPath: subpath,
+        package: modelingPackage,
       });
     }
   }
@@ -230,16 +226,18 @@ function registerJscadModules(runtime: KernelServices, modeling: JscadModeling):
 // Module execution helpers
 // =============================================================================
 
-async function runMain(module: Record<string, unknown>, parameters: Record<string, unknown>): Promise<unknown> {
+async function runMain(
+  module: Record<string, unknown>,
+  parameters: Record<string, unknown>,
+  modeling: JscadModeling,
+): Promise<unknown> {
   const mainFunction = module['default'] ?? module['main'];
   if (!isCallable(mainFunction)) {
     return undefined;
   }
 
   if (mainFunction.length >= 2) {
-    const registry = getModuleRegistry();
-    const injectedModule = registry.values().next();
-    return mainFunction(injectedModule.done ? undefined : injectedModule.value, parameters);
+    return mainFunction(modeling, parameters);
   }
 
   return mainFunction(parameters);
@@ -272,6 +270,7 @@ export const jscadKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: jscadDetectPattern,
   builtinModuleNames: ['@jscad/modeling'],
+  builtinPackages: { '@jscad/modeling': modelingPackage },
   name: 'JscadKernel',
   version: '1.0.0',
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: ['includeEdges'] } },
@@ -371,7 +370,7 @@ export const jscadKernel = defineKernel({
 
     let shapes: unknown;
     try {
-      shapes = await runMain(module, parameters);
+      shapes = await runMain(module, parameters, context.modeling);
     } catch (error) {
       const stackFrames = parseStackTrace(error, {
         classifyFrame: createFrameClassifier(),

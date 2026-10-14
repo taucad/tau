@@ -2,7 +2,7 @@
 import { useParams } from 'react-router';
 import { useState } from 'react';
 import type { Handle } from '#types/matches.types.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { ProjectNotFound } from '#routes/w.$workspace.$project/project-not-found.js';
 import ProjectPreview, {
   PreviewSession,

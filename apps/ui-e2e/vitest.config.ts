@@ -7,6 +7,8 @@ import { playwright } from '@vitest/browser-playwright';
 import { uiBrowserCommands } from './src/support/browser-command.ts';
 // oxlint-disable-next-line no-restricted-imports -- Vitest config owns the browser launch profile before aliases exist.
 import { resolveRequiredWebGpuProfile, webGpuLaunchArguments } from './src/support/webgpu-profile.ts';
+// oxlint-disable-next-line no-restricted-imports -- Vitest config reads which live GitHub variables are set before aliases exist.
+import { missingLiveGithubVariables } from './src/support/github-identity.ts';
 
 const isCi = Boolean(process.env['CI']);
 const requiredWebGpuProfile = resolveRequiredWebGpuProfile(process.env['TAU_E2E_WEBGPU_PROFILE']);
@@ -71,7 +73,15 @@ export default defineConfig({
     hookTimeout: 300_000,
     retry: isCi ? 2 : 0,
     fileParallelism: false,
-    provide: { crossOriginIsolation: !disableCoi, picovoxelExactPins },
+    provide: {
+      crossOriginIsolation: !disableCoi,
+      picovoxelExactPins,
+      /* Names only: the live GitHub rows skip naming what is missing (R17). */
+      liveGithubMissing: {
+        c10: missingLiveGithubVariables(['first', 'second']),
+        a4: missingLiveGithubVariables(['second']),
+      },
+    },
     browser: {
       enabled: true,
       headless: true,

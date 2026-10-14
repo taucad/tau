@@ -2,8 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { captureDictation } from '#components/chat/dictation-capture.js';
-import type { transcribeDictation } from '#components/chat/dictation-client.js';
+import type { captureDictation } from '#components/dictation/dictation-capture.js';
+import type { transcribeDictation } from '#components/dictation/dictation-client.js';
 import type { AcpSessionData } from '@taucad/chat';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -16,8 +16,8 @@ const dictationDependencies = vi.hoisted(() => ({
   capture: vi.fn<typeof captureDictation>(),
   transcribe: vi.fn<typeof transcribeDictation>(),
 }));
-vi.mock('#components/chat/dictation-capture.js', () => ({ captureDictation: dictationDependencies.capture }));
-vi.mock('#components/chat/dictation-client.js', () => ({
+vi.mock('#components/dictation/dictation-capture.js', () => ({ captureDictation: dictationDependencies.capture }));
+vi.mock('#components/dictation/dictation-client.js', () => ({
   fetchDictationStatus: async () => ({ available: dictationDependencies.available }),
   transcribeDictation: dictationDependencies.transcribe,
 }));
@@ -42,7 +42,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
 }));
 
 const keybindings = vi.hoisted(() => new Map<string, { callback: () => void; enabled: () => boolean }>());
-vi.mock('#hooks/use-keyboard.js', () => ({
+vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: (
     combination: { key: string },
     callback: () => void,
@@ -317,15 +317,25 @@ describe('ChatTextareaDesktop draft rehydration', () => {
   const renderComposer = (
     inputText: string,
     acpSessionData: AcpSessionData,
-    options: { canResume?: boolean; handleSubmit?: (text?: string) => Promise<void>; useTauSkills?: boolean } = {},
+    options: {
+      canResume?: boolean;
+      handleSubmit?: (text?: string) => Promise<void>;
+      useTauSkills?: boolean;
+      status?: 'ready' | 'submitted' | 'streaming';
+      isSubmitting?: boolean;
+      handleCancelClick?: () => void;
+      mode?: 'main' | 'edit';
+      enableAutoFocus?: boolean;
+    } = {},
   ) => {
     const { canResume = false, handleSubmit = asyncNoop } = options;
     const element = (session: AcpSessionData): React.JSX.Element => (
       <TooltipProvider>
         <ChatTextareaDesktop
-          enableAutoFocus={false}
+          enableAutoFocus={options.enableAutoFocus ?? false}
+          mode={options.mode}
           dragKind={undefined}
-          isSubmitting={false}
+          isSubmitting={options.isSubmitting ?? false}
           isAttaching={false}
           canResume={canResume}
           inputText={inputText}
@@ -334,7 +344,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           sendBlockReason={undefined}
           attachmentAccept='image/png'
           attachmentInputSupported
-          status='ready'
+          status={options.status ?? 'ready'}
           formattedCancelKeyCombination='⇧⌘⌫'
           treeService={undefined}
           chats={[]}
@@ -347,7 +357,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           addContextChipsRef={{ current: undefined }}
           addContextReferencesRef={{ current: undefined }}
           handleSubmit={handleSubmit}
-          handleCancelClick={noop}
+          handleCancelClick={options.handleCancelClick ?? noop}
           handleDragOver={noop}
           handleDragLeave={noop}
           handleDrop={asyncNoop}
@@ -369,6 +379,29 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       },
     };
   };
+
+  it.each(['main', 'edit'] as const)(
+    'should focus the %s draft after rehydration without moving an edit to its end',
+    async (mode) => {
+      // The jsdom environment supplies selection, but not the layout methods ProseMirror uses to scroll it.
+      const createRange = document.createRange.bind(document);
+      vi.spyOn(document, 'createRange').mockImplementation(() =>
+        Object.assign(createRange(), {
+          getClientRects: () => [],
+          getBoundingClientRect: () => new DOMRect(),
+        }),
+      );
+      const text = 'A restored message with several words';
+      renderComposer(text, codexSession, { mode, enableAutoFocus: true });
+
+      await waitFor(() => {
+        const selection = globalThis.getSelection();
+        expect(screen.getByRole('textbox')).toHaveFocus();
+        expect(selection?.anchorNode?.textContent).toBe(text);
+        expect(selection?.anchorOffset).toBe(mode === 'edit' ? 0 : text.length);
+      });
+    },
+  );
 
   it('should show skill recovery in the functional composer after catalog closure', async () => {
     catalogHealth.status = 'closed';
@@ -416,6 +449,44 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     });
     expect(view.container.querySelector('.ProseMirror')).toHaveTextContent('Make a render of this using $imagegen');
   });
+  it.each(['submitted', 'streaming'] as const)(
+    'should dictate into the draft while a chat is %s without sending or stopping it',
+    async (status) => {
+      const createRange = document.createRange.bind(document);
+      vi.spyOn(document, 'createRange').mockImplementation(() =>
+        Object.assign(createRange(), {
+          getClientRects: () => [],
+          getBoundingClientRect: () => new DOMRect(),
+        }),
+      );
+      dictationDependencies.available = true;
+      dictationDependencies.capture.mockResolvedValue({
+        finish: async () => new Blob([], { type: 'audio/wav' }),
+        cancel: noop,
+      });
+      dictationDependencies.transcribe.mockResolvedValue('Make the corners round.');
+      const submit = vi.fn().mockResolvedValue(undefined);
+      const cancelChat = vi.fn();
+      renderComposer('Existing draft.', codexSession, {
+        status,
+        isSubmitting: status === 'submitted',
+        handleSubmit: submit,
+        handleCancelClick: cancelChat,
+      });
+      const dictate = await screen.findByRole('button', { name: 'Dictate' });
+      expect(dictate).toHaveAttribute('aria-disabled', 'false');
+      await userEvent.click(dictate);
+      await userEvent.click(await screen.findByRole('button', { name: 'Stop dictation' }));
+      await waitFor(() => {
+        expect(screen.getByRole('textbox')).toHaveTextContent('Existing draft. Make the corners round.');
+      });
+      expect(submit).not.toHaveBeenCalled();
+      expect(cancelChat).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      expect(cancelChat).toHaveBeenCalledOnce();
+    },
+  );
+
   it('should place the microphone beside Send and send the final transcript exactly once after recording', async () => {
     const createRange = document.createRange.bind(document);
     vi.spyOn(document, 'createRange').mockImplementation(() =>

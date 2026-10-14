@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ReleaseScope } from '#check-release-projects.js';
-import { findReleaseScopeMismatches, findVersionPlanScopeMismatches } from '#check-release-projects.js';
+import { findReleaseScopeMismatches, findVersionPlanScopeMismatches, selectorsIn } from '#check-release-projects.js';
 
 const scope: ReleaseScope = {
   selectors: [
@@ -75,6 +75,25 @@ describe('findVersionPlanScopeMismatches', () => {
     ).toEqual(['.nx/version-plans/filesystem.md: project "filesystem" is outside the release scope']);
   });
 
+  it('accepts the default release group of a fixed train', () => {
+    expect(
+      findVersionPlanScopeMismatches(
+        [{ path: '.nx/version-plans/train.md', text: '---\n__default__: minor\n---\n' }],
+        scope.releaseTrain,
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects the default group when nx.json declares named groups', () => {
+    expect(
+      findVersionPlanScopeMismatches(
+        [{ path: '.nx/version-plans/train.md', text: '---\n__default__: minor\n---\n' }],
+        scope.releaseTrain,
+        ['packages'],
+      ),
+    ).toEqual(['.nx/version-plans/train.md: project "__default__" is outside the release scope']);
+  });
+
   it('rejects a file without version-plan frontmatter', () => {
     expect(
       findVersionPlanScopeMismatches(
@@ -82,5 +101,22 @@ describe('findVersionPlanScopeMismatches', () => {
         scope.releaseTrain,
       ),
     ).toEqual(['.nx/version-plans/broken.md: missing YAML frontmatter']);
+  });
+});
+
+describe('selectorsIn', () => {
+  it('reads project lists from Nx commands only', () => {
+    const workflow = [
+      '          mkdir -p out/artifacts/geospec-native-engine/plan',
+      '          pnpm nx run-many -t pkgcheck --projects=tag:type:package,cli',
+      '          pnpm nx run-many -t build -p runtime',
+      '          # pnpm nx run-many -t build -p commented',
+    ].join('\n');
+
+    expect(selectorsIn(workflow, 'publish.yml').map(({ value }) => value)).toEqual([
+      'tag:type:package',
+      'cli',
+      'runtime',
+    ]);
   });
 });

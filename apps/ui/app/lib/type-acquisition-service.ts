@@ -8,7 +8,11 @@
  *    content is bundled at build time and injected immediately during activation.
  *
  * 2. **Dynamic types**: User-imported packages (lodash, three, etc.) whose types
- *    are fetched from esm.sh CDN on demand when detected in editor content.
+ *    are fetched from esm.sh CDN on demand when detected in editor content. A project
+ *    with a `package-lock.json` gets the types of the version it locks: the installed
+ *    `node_modules/<name>` declarations when present, else esm.sh for that exact version.
+ *    Tau-only modules (`@taucad/replicad/annotations`) have no npm identity; their types
+ *    stay static.
  *
  * This service is standalone with no dependencies on MonacoModelService, FileManagerApi,
  * or any virtual filesystem layer. It communicates with Monaco purely through
@@ -44,7 +48,18 @@ export type StaticTypeDefinition = {
 export type TypeAcquisitionConfig = {
   /** Static type definitions to inject immediately on initialization */
   staticTypes: StaticTypeDefinition[];
+  /**
+   * Reads a file of the open project as text, by project-relative path (`package-lock.json`,
+   * `node_modules/lodash/package.json`); `undefined` when it does not exist. Without it, dynamic
+   * types always come from esm.sh's latest.
+   */
+  readProjectFile?: ProjectFileReader;
 };
+
+type ProjectFileReader = (path: string) => Promise<string | undefined>;
+
+/** The package a project's lock pins for an import: its real (unaliased) name and exact version. */
+type LockedPackage = { name: string; version: string };
 
 // =============================================================================
 // Constants
@@ -76,6 +91,7 @@ function ataLog(...args: unknown[]): void {
 
 export class TypeAcquisitionService {
   private monaco: typeof Monaco | undefined;
+  private readProjectFile: TypeAcquisitionConfig['readProjectFile'];
 
   // --- Session safety ---
   private sessionEpoch = 0;
@@ -99,7 +115,7 @@ export class TypeAcquisitionService {
   private readonly cdnUrlAliases = new Map<string, Set<string>>();
 
   // --- Fetch management ---
-  private readonly fetchCache = new Map<string, string>(); // PackageName -> .d.ts content
+  private readonly fetchCache = new Map<string, string>(); // PackageName, or name@version when locked -> .d.ts content
   private readonly pendingFetches = new Map<string, Promise<void>>(); // Dedup in-flight
   private readonly failedPackages = new Map<string, number>(); // Pkg -> timestamp of last failure
 
@@ -109,6 +125,7 @@ export class TypeAcquisitionService {
    */
   public initialize(monaco: typeof Monaco, config: TypeAcquisitionConfig): void {
     this.monaco = monaco;
+    this.readProjectFile = config.readProjectFile;
     this.abortController = new AbortController();
 
     // Register static types via addExtraLib on both defaults
@@ -400,22 +417,40 @@ export class TypeAcquisitionService {
       return;
     }
 
-    // Check fetch cache (persisted across sessions)
-    const cached = this.fetchCache.get(packageName);
-    if (cached) {
-      ataLog('cache hit:', packageName);
-      this.injectDynamicTypes(packageName, cached);
-      return;
-    }
-
-    ataLog('fetch:', packageName);
     // Capture epoch for async safety
     const currentEpoch = this.sessionEpoch;
     const { signal } = this.abortController ?? {};
 
     const promise = (async (): Promise<void> => {
       try {
-        await this.fetchAndInjectTypes(packageName, currentEpoch, signal);
+        // Awaits only for a project reader, so an unlocked fetch starts in the same tick as before.
+        const locked = this.readProjectFile
+          ? await this.readLockedPackage(packageName, this.readProjectFile)
+          : undefined;
+        if (this.sessionEpoch !== currentEpoch) {
+          return;
+        }
+
+        // The fetch cache persists across sessions, so a locked package is keyed by its exact version.
+        const cacheKey = locked ? `${locked.name}@${locked.version}` : packageName;
+        const cached =
+          this.fetchCache.get(cacheKey) ??
+          (locked && this.readProjectFile
+            ? await this.readInstalledTypes(packageName, locked, this.readProjectFile)
+            : undefined);
+        if (this.sessionEpoch !== currentEpoch) {
+          return;
+        }
+
+        if (cached !== undefined) {
+          ataLog('cache or node_modules hit:', cacheKey);
+          this.fetchCache.set(cacheKey, cached);
+          this.injectDynamicTypes(packageName, cached);
+          return;
+        }
+
+        ataLog('fetch:', cacheKey);
+        await this.fetchAndInjectTypes(packageName, { cacheKey, epoch: currentEpoch, signal });
       } finally {
         this.pendingFetches.delete(packageName);
       }
@@ -425,14 +460,51 @@ export class TypeAcquisitionService {
     return promise;
   }
 
+  /**
+   * The package the project's `package-lock.json` pins at `node_modules/<packageName>`, or
+   * `undefined` without a readable lock or that row. An alias row names its real
+   * package in `name`.
+   */
+  private async readLockedPackage(
+    packageName: string,
+    readProjectFile: ProjectFileReader,
+  ): Promise<LockedPackage | undefined> {
+    const lock = parseJsonObject(await readProjectFile('package-lock.json'));
+    const packages = lock?.['packages'];
+    const entry = isJsonObject(packages) ? packages[`node_modules/${packageName}`] : undefined;
+    if (!isJsonObject(entry) || typeof entry['version'] !== 'string') {
+      return undefined;
+    }
+
+    return { name: typeof entry['name'] === 'string' ? entry['name'] : packageName, version: entry['version'] };
+  }
+
+  /**
+   * The declarations Install materialised for the locked version: `node_modules/<packageName>`'s
+   * `types` (or `typings`) file, when that directory holds exactly the locked version.
+   */
+  private async readInstalledTypes(
+    packageName: string,
+    locked: LockedPackage,
+    readProjectFile: ProjectFileReader,
+  ): Promise<string | undefined> {
+    const packageRoot = `node_modules/${packageName}`;
+    const manifest = parseJsonObject(await readProjectFile(`${packageRoot}/package.json`));
+    const typesFile = manifest?.['types'] ?? manifest?.['typings'];
+    if (manifest?.['version'] !== locked.version || typeof typesFile !== 'string') {
+      return undefined;
+    }
+
+    return readProjectFile(`${packageRoot}/${typesFile.replace(/^\.\//, '')}`);
+  }
+
   private async fetchAndInjectTypes(
     packageName: string,
-    epoch: number,
-    signal: AbortSignal | undefined,
+    { cacheKey, epoch, signal }: { cacheKey: string; epoch: number; signal: AbortSignal | undefined },
   ): Promise<void> {
     try {
-      // Fetch the module to discover the X-TypeScript-Types header
-      const moduleHref = `${esmShBase}/${packageName}`;
+      // Fetch the module to discover the X-TypeScript-Types header; `cacheKey` is `name@version` when locked.
+      const moduleHref = `${esmShBase}/${cacheKey}`;
       const moduleResponse = await fetch(moduleHref, { signal });
 
       if (this.sessionEpoch !== epoch) {
@@ -442,7 +514,7 @@ export class TypeAcquisitionService {
       const typesUrl = moduleResponse.headers.get('X-TypeScript-Types');
       if (!typesUrl) {
         // No .d.ts types available -- try generating stub types from JS exports
-        await this.generateStubTypes(packageName, moduleResponse, { epoch, signal });
+        await this.generateStubTypes(packageName, moduleResponse, { cacheKey, epoch, signal });
         return;
       }
 
@@ -465,7 +537,7 @@ export class TypeAcquisitionService {
       }
 
       // Cache and inject
-      this.fetchCache.set(packageName, typesContent);
+      this.fetchCache.set(cacheKey, typesContent);
       this.injectDynamicTypes(packageName, typesContent);
       this.failedPackages.delete(packageName);
 
@@ -494,7 +566,7 @@ export class TypeAcquisitionService {
   private async generateStubTypes(
     packageName: string,
     moduleResponse: Response,
-    { epoch, signal }: { epoch: number; signal: AbortSignal | undefined },
+    { cacheKey, epoch, signal }: { cacheKey: string; epoch: number; signal: AbortSignal | undefined },
   ): Promise<void> {
     // The X-ESM-Path header points to the actual bundled module (bypasses the
     // thin entry re-export wrapper where `export *` yields no named exports).
@@ -533,7 +605,7 @@ export class TypeAcquisitionService {
 
     const stubContent = generateStubDeclarations(exportNames);
 
-    this.fetchCache.set(packageName, stubContent);
+    this.fetchCache.set(cacheKey, stubContent);
     this.injectDynamicTypes(packageName, stubContent);
     this.failedPackages.delete(packageName);
 
@@ -557,6 +629,8 @@ export class TypeAcquisitionService {
       return;
     }
 
+    // ponytail: a locked package is cached as name@version, so a CDN URL added after its bare import gets its
+    // types on the next session; look up the package's cache key here if that gap matters.
     const cached = this.fetchCache.get(packageName);
     if (cached) {
       this.injectDynamicTypes(cdnUrl, cached);
@@ -605,6 +679,26 @@ export class TypeAcquisitionService {
 // =============================================================================
 // Utility functions
 // =============================================================================
+
+type JsonObject = Record<string, unknown>;
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Parse a JSON object, or `undefined` for absent or malformed text (the caller falls back to esm.sh latest). */
+function parseJsonObject(text: string | undefined): JsonObject | undefined {
+  if (text === undefined) {
+    return undefined;
+  }
+
+  try {
+    const value: unknown = JSON.parse(text);
+    return isJsonObject(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Extract the package name from a bare specifier, stripping any subpath.

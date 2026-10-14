@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as GraphicsBackendModule from '#components/geometry/graphics/graphics-backend.js';
+import type * as GraphicsBackendModule from '@taucad/viewer/graphics/graphics-backend';
 import type {
   GlassPrismLoaderController,
   GlassPrismLoaderStatistics,
@@ -70,7 +70,7 @@ vi.mock('#components/geometry/loader/glass-prism-controller.js', () => ({
   }),
 }));
 
-vi.mock('#components/geometry/graphics/graphics-backend.js', async (importOriginal) => {
+vi.mock('@taucad/viewer/graphics/graphics-backend', async (importOriginal) => {
   const actual = await importOriginal<typeof GraphicsBackendModule>();
   return {
     ...actual,

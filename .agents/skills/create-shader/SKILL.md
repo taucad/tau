@@ -13,7 +13,7 @@ Read these sources completely before editing:
 
 1. `docs/policy/graphics-backend-policy.md`
 2. `docs/policy/webgpu-shader-and-pipeline-policy.md`
-3. `apps/ui/app/components/geometry/graphics/three/shader-policy.ts`
+3. `apps/ui/app/components/geometry/shader-policy.ts`
 4. The shader factory, all owners/callers, its paired backend implementation, and its current tests.
 
 For spatial math, also read `docs/policy/spatial-policy.md`. For an upstream Three.js implementation detail, use the tracked `repos/three.js` checkout and guard any copied/forked source against the installed `THREE.REVISION` and the exact upstream source fingerprint.
@@ -64,7 +64,7 @@ A graph snapshot never proves compilation or pixels. A mocked renderer never pro
 
 ### 4. Register the executable contract
 
-Update `apps/ui/app/components/geometry/graphics/three/shader-policy.ts` in the same change:
+Update `apps/ui/app/components/geometry/shader-policy.ts` in the same change:
 
 - one stable site id;
 - every implementation module;

@@ -2,17 +2,22 @@
 
 // oxlint-disable-next-line import/no-unassigned-import -- extends Vitest matchers for DOM assertions.
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as VerifyEmailModule from '#components/auth/verify-email.js';
+import * as Cookies from 'es-cookie';
 import AuthPage from '#routes/auth.$/route.js';
 
 const routeMocks = vi.hoisted(() => ({
   segment: 'sign-in',
   search: '',
+  isSuccess: true,
+  isFetching: false,
+  isError: false,
+  refetch: vi.fn(),
   navigate: vi.fn(),
   session: undefined as { user: { id: string } } | undefined,
 }));
@@ -29,7 +34,13 @@ vi.mock('react-router', () => ({
 }));
 
 vi.mock('@better-auth-ui/react', () => ({
-  useSession: () => ({ data: routeMocks.session }),
+  useSession: () => ({
+    data: routeMocks.session,
+    isSuccess: routeMocks.isSuccess,
+    isFetching: routeMocks.isFetching,
+    isError: routeMocks.isError,
+    refetch: routeMocks.refetch,
+  }),
 }));
 
 vi.mock('#components/auth/auth-email-draft.js', () => ({
@@ -55,17 +66,31 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
   TooltipTrigger: ({ children }: React.PropsWithChildren): React.ReactNode => children,
 }));
 
-vi.mock('#components/ui/utils/client-only.js', () => ({
+vi.mock('@taucad/ui/components/client-only', () => ({
   ClientOnly: () => null,
 }));
 
 describe('AuthPage', () => {
   beforeEach(() => {
+    routeMocks.isFetching = false;
+    routeMocks.isSuccess = true;
+    routeMocks.isError = false;
     routeMocks.segment = 'sign-in';
     routeMocks.search = '';
     routeMocks.session = undefined;
     routeMocks.navigate.mockClear();
   });
+
+  it.each(['sign-in', 'sign-up', 'magic-link/verify', 'verify-email'])(
+    'should replace an explicit website preference before %s completes',
+    (segment) => {
+      Cookies.set('tau-entry', 'website', { path: '/' });
+      routeMocks.segment = segment;
+      render(<AuthPage />);
+      expect(Cookies.get('tau-entry')).toBe('app');
+      Cookies.remove('tau-entry', { path: '/' });
+    },
+  );
 
   it('routes magic-link verification links to the callback surface', () => {
     routeMocks.segment = 'magic-link/verify';
@@ -92,6 +117,7 @@ describe('AuthPage', () => {
     render(<AuthPage />);
 
     expect(routeMocks.navigate).toHaveBeenCalledWith('/auth/desktop?state=abc', { replace: true });
+    expect(screen.queryByText(`auth:${segment}`)).not.toBeInTheDocument();
   });
 
   it('keeps a signed-in browser on the other auth pages', () => {
@@ -204,5 +230,101 @@ describe('AuthPage', () => {
       expect(screen.getByText('verify-email')).toBeInTheDocument();
       expect(signIn).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('Auth session continuation', () => {
+  beforeEach(() => {
+    routeMocks.segment = 'sign-in';
+    routeMocks.session = undefined;
+    routeMocks.isFetching = true;
+    routeMocks.isSuccess = false;
+    routeMocks.isError = false;
+    routeMocks.navigate.mockClear();
+  });
+  it('should never mount the form while pending or when the session arrives', () => {
+    const view = render(<AuthPage />);
+    expect(screen.getByRole('status', { name: 'Opening Tau' })).toBeInTheDocument();
+    expect(screen.queryByText('auth:sign-in')).not.toBeInTheDocument();
+    routeMocks.session = { user: { id: 'returning' } };
+    routeMocks.isFetching = false;
+    routeMocks.isSuccess = true;
+    view.rerender(<AuthPage />);
+    expect(screen.queryByText('auth:sign-in')).not.toBeInTheDocument();
+    expect(routeMocks.navigate).toHaveBeenCalled();
+    expect(document.cookie).toContain('tau-entry=app');
+  });
+  it('should expose the form only after a confirmed anonymous response', () => {
+    const view = render(<AuthPage />);
+    routeMocks.isFetching = false;
+    routeMocks.isSuccess = true;
+    view.rerender(<AuthPage />);
+    expect(screen.getByText('auth:sign-in')).toBeInTheDocument();
+  });
+  it('should retry a failed session without exposing the form', async () => {
+    routeMocks.isError = true;
+    routeMocks.isFetching = false;
+    routeMocks.refetch.mockClear();
+    const view = render(<AuthPage />);
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(routeMocks.refetch).toHaveBeenCalledOnce();
+    expect(screen.queryByText('auth:sign-in')).not.toBeInTheDocument();
+    routeMocks.isError = false;
+    routeMocks.isSuccess = true;
+    routeMocks.session = { user: { id: 'returning' } };
+    view.rerender(<AuthPage />);
+    expect(screen.queryByText('auth:sign-in')).not.toBeInTheDocument();
+    expect(routeMocks.navigate).toHaveBeenCalled();
+  });
+  it('should keep an established anonymous form mounted during background refresh', () => {
+    routeMocks.isSuccess = true;
+    routeMocks.isFetching = false;
+    const view = render(<AuthPage />);
+    expect(screen.getByText('auth:sign-in')).toBeInTheDocument();
+    routeMocks.isFetching = true;
+    view.rerender(<AuthPage />);
+    expect(screen.getByText('auth:sign-in')).toBeInTheDocument();
+  });
+  it('should bound an unresponsive session and let the visitor explicitly choose the form', async () => {
+    vi.useFakeTimers();
+    try {
+      render(<AuthPage />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(screen.getByRole('alert')).toHaveTextContent("couldn't check your session");
+      expect(screen.queryByText('auth:sign-in')).not.toBeInTheDocument();
+      vi.useRealTimers();
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: 'Continue to sign in' }));
+      expect(screen.getByText('auth:sign-in')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('Cached session and safe continuation', () => {
+  it('should not expose a stale anonymous form during session refresh', () => {
+    routeMocks.segment = 'sign-in';
+    routeMocks.session = undefined;
+    routeMocks.isSuccess = true;
+    routeMocks.isFetching = true;
+    const view = render(<AuthPage />);
+    expect(screen.queryByText('auth:sign-in')).not.toBeInTheDocument();
+    routeMocks.session = { user: { id: 'returning' } };
+    routeMocks.isFetching = false;
+    view.rerender(<AuthPage />);
+    expect(screen.queryByText('auth:sign-in')).not.toBeInTheDocument();
+  });
+  it.each(['sign-in', 'sign-up'])('should continue home instead of looping back to %s', (destination) => {
+    routeMocks.segment = 'sign-in';
+    routeMocks.search = `?redirectTo=%2Fauth%2F${destination}`;
+    routeMocks.session = { user: { id: 'returning' } };
+    routeMocks.isSuccess = true;
+    routeMocks.isFetching = false;
+    render(<AuthPage />);
+    expect(routeMocks.navigate).toHaveBeenLastCalledWith('/', { replace: true });
   });
 });

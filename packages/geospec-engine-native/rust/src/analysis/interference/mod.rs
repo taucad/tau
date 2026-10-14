@@ -617,6 +617,37 @@ pub(crate) fn build_component_labels(
         .collect())
 }
 
+/// Component interference needs two or more components (policy §5, §9): with
+/// fewer there is no pair to check, so a pass would be vacuous. The count is
+/// the partition's own (C3): named mesh primitives, else faced STEP leaves,
+/// else one occurrence-free body with faces.
+pub(crate) fn pair_partition_refusal(
+    subject: &Subject,
+    identities: &[ComponentIdentity],
+) -> Result<Option<Diagnostic>, BackendError> {
+    if identities.len() >= 2 {
+        return Ok(None);
+    }
+    let count = match components(subject)? {
+        Partition::Inconclusive(count) => count,
+        Partition::Components(value) => value.len(),
+    };
+    Ok(Some(partition_inconclusive(count)))
+}
+
+fn partition_inconclusive(primitive_count: usize) -> Diagnostic {
+    let mut diagnostic = Diagnostic::error(
+        "GEOSPEC_COMPONENT_PARTITION_INCONCLUSIVE",
+        "GeoSpec could not partition this subject into two or more components.",
+    );
+    diagnostic.suggestion = Some("Name the parts in the source model (one glTF node per part) so component interference has identifiable components.".into());
+    diagnostic.details = Some(Json::object([(
+        "primitiveCount",
+        Json::Number(primitive_count as f64),
+    )]));
+    diagnostic
+}
+
 /// C2 (rulings 6 and 32): the component partition is the leaves (occurrences
 /// no other occurrence names as parent) that own at least one face. A parent
 /// is assembly structure, and a zero-face leaf stays a selector occurrence.
@@ -880,16 +911,9 @@ pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents
     let components = match partition {
         Partition::Components(value) => value,
         Partition::Inconclusive(primitive_count) => {
-            let mut diagnostic = Diagnostic::error(
-                "GEOSPEC_COMPONENT_PARTITION_INCONCLUSIVE",
-                "GeoSpec could not partition this subject into two or more components.",
-            );
-            diagnostic.suggestion = Some("Name the parts in the source model (one glTF node per part) so component interference has identifiable components.".into());
-            diagnostic.details = Some(Json::object([(
-                "primitiveCount",
-                Json::Number(primitive_count as f64),
+            return Ok(PreparedComponents::Refused(vec![partition_inconclusive(
+                primitive_count,
             )]));
-            return Ok(PreparedComponents::Refused(vec![diagnostic]));
         }
     };
 
@@ -1028,14 +1052,17 @@ pub(crate) fn analyze_overlap(
 
     // Spatial-weld closure is only the legacy observation's premise. It must
     // never reject an exact material predicate before its own admission runs.
-    if let Some(diagnostic)=prepared.observation_refusal.get_or_init(||{
-        if prepared.components.len()<2{
-            let mut diagnostic=Diagnostic::error("GEOSPEC_COMPONENT_PARTITION_INCONCLUSIVE","GeoSpec could not partition this subject into two or more components.");
-            diagnostic.suggestion=Some("Name the parts in the source model (one glTF node per part) so component interference has identifiable components.".into());
-            diagnostic.details=Some(Json::object([("primitiveCount",Json::Number(prepared.components.len() as f64))]));
-            Some(diagnostic)
-        }else{prepared.components.iter().cloned().find_map(|mut component|closure_refusal(&mut component))}
-    }){
+    if let Some(diagnostic) = prepared.observation_refusal.get_or_init(|| {
+        if prepared.components.len() < 2 {
+            Some(partition_inconclusive(prepared.components.len()))
+        } else {
+            prepared
+                .components
+                .iter()
+                .cloned()
+                .find_map(|mut component| closure_refusal(&mut component))
+        }
+    }) {
         return Ok(Analysis::Refused(vec![diagnostic.clone()]));
     }
 
@@ -2171,5 +2198,54 @@ mod tests {
             components(&subject).unwrap(),
             Partition::Inconclusive(1)
         ));
+    }
+
+    #[test]
+    fn one_component_refuses_interference_instead_of_passing_with_no_pairs() {
+        // One named mesh primitive (every single-mesh Manifold Boolean result).
+        let subject = Subject::new(
+            "one".into(),
+            crate::subject::SubjectFormat::Glb,
+            "mm".into(),
+        );
+        let _ = subject.mesh_record.set(Rc::new(MeshAnalysisRecord {
+            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            triangles: vec![[0, 1, 2]],
+            triangle_primitives: vec![0],
+            primitives: vec![Primitive {
+                name: "Solid#0".into(),
+                vertex_start: 0,
+                vertex_count: 3,
+            }],
+        }));
+        let identities = build_component_labels(&subject).unwrap();
+        assert!(identities.is_empty());
+        let diagnostic = pair_partition_refusal(&subject, &identities)
+            .unwrap()
+            .unwrap();
+        assert_eq!(diagnostic.code, "GEOSPEC_COMPONENT_PARTITION_INCONCLUSIVE");
+        assert_eq!(
+            diagnostic.details,
+            Some(Json::object([("primitiveCount", Json::Number(1.0))]))
+        );
+
+        // One faced STEP leaf counts as one structural component.
+        let subject = step_subject(vec![occurrence("part", None, 6)]);
+        let identities = build_component_labels(&subject).unwrap();
+        let diagnostic = pair_partition_refusal(&subject, &identities)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            diagnostic.details,
+            Some(Json::object([("primitiveCount", Json::Number(1.0))]))
+        );
+
+        // Two leaves have a pair to check.
+        let subject = step_subject(vec![occurrence("a", None, 6), occurrence("b", None, 6)]);
+        let identities = build_component_labels(&subject).unwrap();
+        assert_eq!(identities.len(), 2);
+        assert!(pair_partition_refusal(&subject, &identities)
+            .unwrap()
+            .is_none());
     }
 }

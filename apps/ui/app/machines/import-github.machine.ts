@@ -1,6 +1,7 @@
 import { createCallbackLogic, setup, types } from 'xstate';
 import type { AnyActorRef, EnqueueObject, SystemRegistry } from 'xstate';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { isReservedBranchName } from '@taucad/revisions';
 import { getGitHubClient } from '#lib/github-api.js';
 import type { ImportWorkerRequest, ImportWorkerResponse } from '#workers/import.worker.js';
 import { normalizeRepositoryFolder, parseGitHubUrl } from '#routes/import.$/import.utils.js';
@@ -296,7 +297,8 @@ const getBranchesActor = fromSafeAsync<BranchesResult, { owner: string; repo: st
 
     return {
       type: 'branchesRetrieved',
-      branches: result.branches,
+      /* A conflict line is a decision, not a branch to copy (D14). */
+      branches: result.branches.filter(({ name }) => !isReservedBranchName(name)),
       hasMore: result.hasMore,
       endCursor: result.endCursor,
     };

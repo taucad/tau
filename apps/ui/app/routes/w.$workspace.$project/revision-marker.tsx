@@ -57,10 +57,10 @@ import { cn } from '@taucad/ui/utils/cn';
 import type { RevisionDiffEntry } from '@taucad/revisions';
 import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
 import { Spinner } from '#components/ui/spinner.js';
-import { CopyButton } from '#components/copy-button.js';
+import { CopyButton } from '@taucad/ui/components/copy-button';
 import { DiffViewer } from '#components/code/diff-viewer.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
-import { ActionButton, ActionsRow, disclosureMotion } from '#components/revisions/revision-actions.js';
+import { ActionButton, ActionsRow, disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import {
   timelineGutter,
@@ -70,7 +70,7 @@ import {
   timelineRowContent,
   timelineRowHover,
 } from '#components/revisions/revision-timeline.js';
-import { useTickAnimation } from '#hooks/use-tick-animation.js';
+import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import { useProject } from '#hooks/use-project.js';

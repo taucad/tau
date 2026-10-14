@@ -1,7 +1,8 @@
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -13,9 +14,13 @@ const proofSchema = z.object({
   filesystem: z.literal(true),
   childProcess: z.literal(true),
   worker: z.literal(true),
+  workerExecArgvEscalation: z.literal(true),
+  workerNodeOptionsEscalation: z.literal(true),
   addon: z.literal(true),
   wasi: z.literal(true),
   inspector: z.literal(true),
+  temporaryDirectoryReadable: z.literal(true),
+  temporaryDirectory: z.string(),
   environmentSecretAbsent: z.literal(true),
   network: z.literal(true),
   arbitraryNetworkAllowed: z.literal(true),
@@ -32,7 +37,7 @@ afterEach(async () => {
 });
 
 describe('runtime child permission boundary', () => {
-  it('denies host capabilities, strips secrets, and pins unrestricted network egress', async () => {
+  it('denies host capabilities and every worker, strips secrets, reads back its own temp files, and pins unrestricted network egress', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-permissions-'));
     const proofPath = join(temporaryDirectory, 'proof.json');
     const server = createServer((_request, response) => {
@@ -52,20 +57,28 @@ describe('runtime child permission boundary', () => {
       modulePath,
       args: [proofPath, `http://127.0.0.1:${String(address.port)}`],
     });
-    const proof = proofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
+    const { temporaryDirectory: childTemporaryDirectory, ...proof } = proofSchema.parse(
+      JSON.parse(await readFile(proofPath, 'utf8')),
+    );
 
     expect(proof).toEqual({
       filesystem: true,
       childProcess: true,
       worker: true,
+      workerExecArgvEscalation: true,
+      workerNodeOptionsEscalation: true,
       addon: true,
       wasi: true,
       inspector: true,
+      temporaryDirectoryReadable: true,
       environmentSecretAbsent: true,
       network: true,
       arbitraryNetworkAllowed: true,
     });
+    expect(childTemporaryDirectory.startsWith(join(await realpath(tmpdir()), 'tau-runtime-child-'))).toBe(true);
     await child.close();
+    await child.closed;
+    await expect(access(childTemporaryDirectory)).rejects.toThrow(/ENOENT/u);
     await new Promise<void>((resolve, reject) => {
       server.close((error) => {
         if (error) {
@@ -99,5 +112,39 @@ describe('runtime child control frames', () => {
       { type: 'zoo-proxy-credential', url: 'wss://api.example.test/v1/kernels/zoo' },
     ]);
     await child.close();
+  });
+
+  it('settles close only after closed, once the child has exited and its private directory is removed', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-close-'));
+    const modulePath = fileURLToPath(new URL('fixtures/message-echo-child.mjs', import.meta.url));
+    const child = await startRuntimeChild({ modulePath, args: [join(temporaryDirectory, 'messages.jsonl')] });
+
+    await child.close();
+
+    /* No timer: an already-settled `closed` wins the race, and one still removing the directory loses it. */
+    expect(await Promise.race([child.closed, Promise.resolve('pending')])).toEqual({ exitCode: 0 });
+  });
+
+  it('closes twice, without an uncaught error, a child whose channel disconnected before it exited', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-disconnect-'));
+    const modulePath = fileURLToPath(new URL('fixtures/message-echo-child.mjs', import.meta.url));
+    const child = await startRuntimeChild({ modulePath, args: [join(temporaryDirectory, 'messages.jsonl')] });
+    const uncaught: unknown[] = [];
+    const onUncaught = (error: unknown): void => {
+      uncaught.push(error);
+    };
+    process.on('uncaughtException', onUncaught);
+    try {
+      child.post({ type: 'disconnect' });
+      /* The child exits 500 ms after disconnecting; both closes land in between. */
+      await delay(200);
+
+      await Promise.all([child.close(), child.close()]);
+      await delay(0);
+
+      expect(uncaught).toEqual([]);
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
   });
 });

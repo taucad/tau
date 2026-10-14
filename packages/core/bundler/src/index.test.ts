@@ -7,8 +7,16 @@ describe('public surface', () => {
     expect(Object.keys(bundlerCore).sort()).toEqual([
       'PackageArtifactCache',
       'createBundlerSourceHost',
+      'createPackageManifestCommit',
+      'installPackages',
+      'lockMatchesManifest',
+      'materializePackages',
       'normalizeAssetImportAttributes',
+      'parsePackageLock',
+      'readPackageLock',
       'resolveAssetIntent',
+      'resolveDependencyTree',
+      'serializePackageLock',
       'splitAssetSpecifier',
     ]);
   });

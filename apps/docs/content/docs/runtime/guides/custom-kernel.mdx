@@ -146,6 +146,7 @@ Entries and dependencies share the canonical, root-relative [runtime-path namesp
 - **views / exports**: Colocate each route's title, MIME type, options schema, and content declaration. Exports also declare an extension; views may declare `instances: true` and return named instances from `evaluate`. Only offer routes the current handle can fulfill.
 - **evaluateOptionsSchema**: Add a Zod object schema for construction-affecting evaluation options; the inferred value reaches `evaluate({ options })`. Route-specific options belong on the selected view or export declaration.
 - **onDispose**: Implement `onDispose(context)` to release WASM instances or temporary resources when the worker is disposed. Render the same handle without changing it; release retained handles through `releaseHandle` when needed.
+- **Realm-shared backends**: Declare a library bound at module scope once, `const engine = createRealmGroup<Engine>('@acme/kernel/engine')`; hold it via `services.realm.hold({ group: engine, key, create })` and release it in `onDispose`.
 - **detectImport / builtinModuleNames**: For JS/TS kernels, add `detectImport` (RegExp) or `builtinModuleNames` so the framework can select your kernel from imports.
 - **Bundler integration**: JS/TS kernels use `services.bundler` and `services.execute` — see [Configure the Bundler](./bundler-configuration).
 

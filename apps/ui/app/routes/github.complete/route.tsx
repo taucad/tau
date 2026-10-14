@@ -1,15 +1,39 @@
-import { useEffect, useState } from 'react';
+import type { MetaFunction } from 'react-router';
+import type { Handle } from '#types/matches.types.js';
+import { PageContent } from '#components/layout/page-content.js';
+import { PageHeader } from '#components/layout/page-header.js';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
-import { githubConnections, githubErrorMessage, githubSetupReturn, safeReturnPath } from '#lib/github-connections.js';
+import {
+  GithubRequestError,
+  githubConnectReturn,
+  githubConnections,
+  githubErrorMessage,
+  githubSetupReturn,
+  safeReturnPath,
+} from '#lib/github-connections.js';
 
-type Outcome = Readonly<{ title: string; detail: string; failed: boolean }>;
+export const meta: MetaFunction = () => [{ title: 'GitHub connection · Tau' }];
+export const handle: Handle = { enableOverflowY: true };
+
+/** What the page says; `code` is the refusal's, when it named one. */
+type Outcome = Readonly<{ title: string; detail: string; failed: boolean; code?: string | undefined }>;
+
+/*
+ * R24: an attempt lives 600 s. One that outlived its start or completion record
+ * is not wrong, only late, so the page starts a fresh one instead of only
+ * pointing back.
+ */
+const expiredAttemptCodes: ReadonlySet<string> = new Set(['GITHUB_CALLBACK_EXPIRED', 'GITHUB_COMPLETION_EXPIRED']);
 
 export default function GithubConnectionCompleteRoute(): React.JSX.Element {
   const [parameters] = useSearchParams();
   const navigate = useNavigate();
   const attemptId = parameters.get('attempt');
-  const returnTo = safeReturnPath(parameters.get('returnTo') ?? undefined) ?? '/import';
+  /* An expired attempt's callback names no return: its start record, which held it, is gone. */
+  const requestedReturn = safeReturnPath(parameters.get('returnTo') ?? undefined);
+  const returnTo = requestedReturn ?? '/import';
   const desktopPolling = parameters.get('mode') === 'desktop-poll';
   /* D7: the API redirects every callback failure here as `?error=<CODE>`. */
   const callbackError = parameters.get('error');
@@ -23,6 +47,7 @@ export default function GithubConnectionCompleteRoute(): React.JSX.Element {
           ? `${githubErrorMessage({ code: callbackError })} Return to the Tau desktop app to try again.`
           : githubErrorMessage({ code: callbackError }),
         failed: true,
+        code: callbackError,
       };
     }
     if (desktopPolling) {
@@ -33,6 +58,9 @@ export default function GithubConnectionCompleteRoute(): React.JSX.Element {
     }
     return undefined;
   });
+  const [restarting, setRestarting] = useState(false);
+  /* R10: the setup return is taken once per page, so an effect that runs again (Strict Mode) still has it. */
+  const setupPath = useRef<{ path: string | undefined }>(undefined);
 
   useEffect(() => {
     if (outcome !== undefined) {
@@ -40,8 +68,9 @@ export default function GithubConnectionCompleteRoute(): React.JSX.Element {
     }
     if (setupReturn) {
       /* Session storage is read here, not during render, so the server render matches the first client one. */
-      const setupPath = githubSetupReturn.read();
-      if (setupPath === undefined) {
+      setupPath.current ??= { path: githubSetupReturn.take() };
+      const { path } = setupPath.current;
+      if (path === undefined) {
         // oxlint-disable-next-line react/set-state-in-effect -- the remembered return exists only in this tab's storage.
         setOutcome({
           title: 'GitHub access updated',
@@ -49,7 +78,7 @@ export default function GithubConnectionCompleteRoute(): React.JSX.Element {
           failed: false,
         });
       } else {
-        void navigate(setupPath, { replace: true });
+        void navigate(path, { replace: true });
       }
       return;
     }
@@ -65,7 +94,12 @@ export default function GithubConnectionCompleteRoute(): React.JSX.Element {
         }
       } catch (error) {
         if (active) {
-          setOutcome({ title: 'GitHub connection failed', detail: githubErrorMessage(error), failed: true });
+          setOutcome({
+            title: 'GitHub connection failed',
+            detail: githubErrorMessage(error),
+            failed: true,
+            code: error instanceof GithubRequestError ? error.code : undefined,
+          });
         }
       }
     };
@@ -76,25 +110,45 @@ export default function GithubConnectionCompleteRoute(): React.JSX.Element {
     };
   }, [attemptId, navigate, outcome, returnTo, setupReturn]);
 
+  const connectAgain = async (): Promise<void> => {
+    setRestarting(true);
+    try {
+      const started = await githubConnections.start(requestedReturn ?? githubConnectReturn.read() ?? '/import');
+      globalThis.location.assign(started.authorizationUrl);
+    } catch (error) {
+      setOutcome({ title: 'GitHub connection failed', detail: githubErrorMessage(error), failed: true });
+      setRestarting(false);
+    }
+  };
+  const offersConnectAgain = !desktopPolling && outcome?.code !== undefined && expiredAttemptCodes.has(outcome.code);
+
   return (
-    <main className='flex min-h-full items-center justify-center p-6'>
-      <div
-        role={outcome?.failed === true ? 'alert' : 'status'}
-        aria-busy={outcome === undefined}
-        className='flex max-w-md flex-col items-center gap-4 text-center'
-      >
+    <PageContent>
+      <div role={outcome?.failed === true ? 'alert' : 'status'} aria-busy={outcome === undefined} className='space-y-6'>
         <div>
-          <h1 className='text-xl font-semibold'>{outcome?.title ?? 'Connecting GitHub…'}</h1>
+          <PageHeader title={outcome?.title ?? 'Connecting GitHub…'} />
           <p className='mt-2 text-sm text-muted-foreground'>
             {outcome?.detail ?? 'You will return to Tau automatically.'}
           </p>
         </div>
         {outcome === undefined || desktopPolling ? undefined : (
-          <Button asChild variant='outline'>
-            <Link to={returnTo}>Back to Tau</Link>
-          </Button>
+          <div className='flex flex-wrap gap-2'>
+            {offersConnectAgain ? (
+              <Button
+                disabled={restarting}
+                onClick={() => {
+                  void connectAgain();
+                }}
+              >
+                Connect GitHub again
+              </Button>
+            ) : undefined}
+            <Button asChild variant='outline'>
+              <Link to={returnTo}>Back to Tau</Link>
+            </Button>
+          </div>
         )}
       </div>
-    </main>
+    </PageContent>
   );
 }

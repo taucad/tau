@@ -1,6 +1,6 @@
 import qrcodeScad from '#routes/_index/qrcode.scad?raw';
 import { KernelDemo } from '#routes/_index/demo/kernel-demo.js';
-import type { Units } from '#components/geometry/parameters/rjsf-context.js';
+import type { Units } from '@taucad/viewer/parameters/rjsf-context';
 import { qrClientOptions } from '#runtime/demo-client-options.js';
 
 const qrMainFile = 'main.scad';

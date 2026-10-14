@@ -281,6 +281,41 @@ describe('remoteTransportError', () => {
     expect(refused('<!DOCTYPE html><html>…</html>').message).toBe('The remote rejected the saved credentials.');
   });
 
+  /* D77: GitHub answers a revoked grant with a sentence about passwords. */
+  it('does not show a remote’s 401 body for a credential Tau minted', () => {
+    const error = remoteTransportError(
+      Object.assign(new Error('HTTP Error: 401 Unauthorized'), {
+        data: {
+          statusCode: 401,
+          response: 'Invalid username or token. Password authentication is not supported for Git operations.\n',
+        },
+      }),
+      { remote: 'github-1' },
+    );
+
+    expect(error).toMatchObject({
+      code: 'REMOTE_REAUTHORIZATION_REQUIRED',
+      message: 'The remote rejected the saved credentials.',
+    });
+  });
+
+  /* D94: an *Advanced HTTPS* remote is anonymous by design, so a host that
+   * answers a missing or private repository with 401 (GitLab does) refused no
+   * saved credential — there is none. */
+  it('does not blame saved credentials an anonymous remote never had', () => {
+    const error = remoteTransportError(
+      Object.assign(new Error('HTTP Error: 401 Unauthorized'), {
+        data: { statusCode: 401, response: 'HTTP Basic: Access denied.\n' },
+      }),
+      { remote: 'origin' },
+    );
+
+    expect(error).toMatchObject({
+      code: 'REMOTE_REAUTHORIZATION_REQUIRED',
+      message: 'This remote asked for a sign-in Tau does not have, or has no repository at this address.',
+    });
+  });
+
   /* Contract §4: the server refuses a rewind or a deletion on *every* ref
    * family from its `pre-receive` hook, which answers over the sideband and
    * never with an HTTP status — so the status rule alone read a refusal every

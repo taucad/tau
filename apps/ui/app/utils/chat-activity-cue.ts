@@ -1,57 +1,80 @@
+import type { MyMessagePart } from '@taucad/chat';
 import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
+import {
+  describeActivity,
+  findLastMeaningfulPartIndex,
+  isActivityPartActive,
+} from '#utils/assistant-message-activity.js';
 
-/**
- * What the chat history's bottom activity indicator may say.
- *
- * `waiting` is a paused or approval-gated run: the person's own control owns
- * that state, so the indicator speaks only once their answer is in.
- *
- * @public
- */
+/** The current activity shown beside the composer. */
 export type ChatActivityCue = Readonly<{
   kind: 'working' | 'waiting' | 'reconnecting';
   sentence: string;
 }>;
 
-/** The request facts the cue reads beside the run state. @public */
+/** Authoritative run state and the latest assistant output. */
 export type ChatActivityFacts = Readonly<{
-  /** The chat's run state, or `undefined` before its machine exists. */
   runState: ChatSidebarState | undefined;
-  /** The AI SDK chat status. */
   chatStatus: 'submitted' | 'streaming' | 'ready' | 'error';
+  parts?: readonly MyMessagePart[];
 }>;
 
-/**
- * Whether a chat has live work, and the sentence for it (chat activity
- * indicator closeout R1).
- *
- * The run state is the authority. The chat status only covers the moments the
- * run machine has not caught up with yet: a submit before admission, or a
- * reload before the machine exists.
- *
- * @param facts - The chat's run and request facts.
- * @returns The cue, or `undefined` when nothing is running.
- * @public
- */
-export const selectChatActivityCue = (facts: ChatActivityFacts): ChatActivityCue | undefined => {
-  /* A finished run says nothing here: the revision card alone says "Saving revision" (§5.10, V5 B1). */
-  if (facts.runState === 'reconnecting') {
+/** Select an honest current action without cycling through invented progress. */
+export const selectChatActivityCue = ({
+  runState,
+  chatStatus,
+  parts = [],
+}: ChatActivityFacts): ChatActivityCue | undefined => {
+  if (runState === 'reconnecting') {
     return { kind: 'reconnecting', sentence: 'Reconnecting…' };
   }
-  switch (facts.runState) {
-    case 'approval':
-    case 'question': {
-      return { kind: 'waiting', sentence: 'Planning next moves…' };
-    }
-    case 'queued':
-    case 'working':
-    case 'tool': {
-      return { kind: 'working', sentence: 'Planning next moves…' };
-    }
-    default: {
-      return facts.chatStatus === 'submitted' || facts.chatStatus === 'streaming'
-        ? { kind: 'working', sentence: 'Planning next moves…' }
-        : undefined;
-    }
+  if (runState === 'approval') {
+    return { kind: 'waiting', sentence: 'Waiting for approval' };
   }
+  if (runState === 'question') {
+    return { kind: 'waiting', sentence: 'Waiting for your answer' };
+  }
+  // Terminal host state wins over stale streaming parts/status during settlement.
+  if (chatStatus !== 'submitted' && (runState === 'done' || runState === 'failed' || runState === 'stopped')) {
+    return undefined;
+  }
+  if (runState === 'queued') {
+    return { kind: 'working', sentence: 'Queued…' };
+  }
+  const isLive =
+    runState === 'working' || runState === 'tool' || chatStatus === 'submitted' || chatStatus === 'streaming';
+  if (!isLive) {
+    return undefined;
+  }
+  return selectPartActivity(parts);
+};
+
+const selectPartActivity = (parts: readonly MyMessagePart[]): ChatActivityCue => {
+  const pendingApproval = parts.some((part) => Reflect.get(part, 'state') === 'approval-requested');
+  if (pendingApproval) {
+    return { kind: 'waiting', sentence: 'Waiting for approval' };
+  }
+  const tool = parts.findLast(
+    (part) => (part.type === 'dynamic-tool' || part.type.startsWith('tool-')) && isActivityPartActive(part),
+  );
+  if (tool) {
+    return { kind: 'working', sentence: describeActivity([tool]) };
+  }
+  const tail = parts[findLastMeaningfulPartIndex(parts)];
+  if (tail?.type === 'reasoning' && tail.state === 'streaming') {
+    const thought = tail.text
+      .split('\n')
+      .findLast((line) => line.trim() !== '')
+      ?.replaceAll(/[*#`]/gu, '')
+      .trim();
+    return { kind: 'working', sentence: thought ? thought.slice(0, 160) : 'Thinking…' };
+  }
+  if (
+    tail?.type === 'text' &&
+    tail.state === 'streaming' &&
+    tail.providerMetadata?.['common']?.['streamState'] !== 'checkpoint'
+  ) {
+    return { kind: 'working', sentence: 'Writing response…' };
+  }
+  return { kind: 'working', sentence: 'Planning next moves…' };
 };

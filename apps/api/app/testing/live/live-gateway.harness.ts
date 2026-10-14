@@ -179,7 +179,7 @@ export const liveSessionModel = (modelId: string): AgentSessionModel => {
  * @returns What `createAgentSession` would put on the provider request.
  */
 export const liveCompletionCeiling = (modelId: string): number =>
-  requestedMaxTokens(row(modelId).details.maxTokens, undefined);
+  requestedMaxTokens(row(modelId).details.maxTokens, undefined, liveSessionModel(modelId).reasoning);
 
 /**
  * The real CAD system prompt a browser turn carries.

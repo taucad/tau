@@ -1,7 +1,7 @@
 /** Bambu Studio's selected process; the printer and filament presets are overrides in Advanced settings. */
 import type { BambuPresetSummary } from '@taucad/slicer/bambu-studio';
-import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
-import type { ParameterSelectGroup } from '#components/geometry/parameters/parameter-select.js';
+import { ParameterSelect } from '@taucad/viewer/parameters/parameter-select';
+import type { ParameterSelectGroup } from '@taucad/viewer/parameters/parameter-select';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import type { BambuStudioMode } from '#components/print/use-bambu-studio.js';
 

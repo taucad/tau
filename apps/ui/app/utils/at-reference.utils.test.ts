@@ -281,6 +281,28 @@ describe('buildPastedContent', () => {
     ]);
   });
 
+  it('should rehydrate a geometry reference token into its chip', () => {
+    const fileTree = createFileTree([['gears/main.ts', { name: 'main.ts' }]]);
+    const result = buildPastedContent('widen @cad[gears/main.ts#component:sun_gear] next to @gears/main.ts', {
+      fileTree,
+      chats: [],
+    });
+
+    expect(result).toEqual([
+      { type: 'text', value: 'widen ' },
+      {
+        type: 'chip',
+        id: '@cad[gears/main.ts#component:sun_gear]',
+        label: 'sun_gear',
+        chipType: 'geometry',
+        path: 'gears/main.ts',
+        referenceToken: '@cad[gears/main.ts#component:sun_gear]',
+      },
+      { type: 'text', value: ' next to ' },
+      { type: 'chip', id: 'gears/main.ts', label: 'main.ts', chipType: 'file', path: 'gears/main.ts' },
+    ]);
+  });
+
   it('should keep invalid reference as plain text', () => {
     const result = buildPastedContent('check @far-out/some-path/deep', { fileTree: new Map(), chats: [] });
 

@@ -10,12 +10,10 @@
  * @module
  */
 
-// oxlint-disable-next-line eslint-plugin-import/no-unassigned-import -- installs the GeoSpec engine implementation
-import '@taucad/geospec-engine/register/node';
 import { Engine } from '@taucad/geospec-engine-native/node';
 import { runnerResultToTestModelOutput } from '@taucad/agent-tools/geospec';
-import { createGeoSpecNodeRunner } from 'geospec/runner/node';
-import { createModelLoader } from 'geospec/model';
+import { createGeoSpecNativeModelLoader, createNativeGeoSpecRunner } from 'geospec/runner/native';
+import type { GeoSpecNativeLoadModelOptions, ManagedGeoSpecNativeModelLoader } from 'geospec/runner/native';
 import type { GeoSpecModelFormat, LoadModelSourceOptions } from 'geospec/model';
 import type { RunGeoSpecModuleOptions } from 'geospec/runner';
 import type { TestModelOutput } from '@taucad/chat/schemas/tools/test-model';
@@ -36,7 +34,6 @@ type TauModelRenderer = (input: {
 
 type RunTauGeoSpecTestsOptions = {
   filesystem: RunGeoSpecModuleOptions['filesystem'];
-  projectPath: string;
   entryPaths: readonly string[];
   renderer: TauModelRenderer;
   testNamePattern?: string | RegExp;
@@ -62,7 +59,7 @@ const isRendererOutput = (value: unknown): value is TauModelRendererOutput => {
 export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Promise<TestModelOutput> {
   const engine = new Engine();
   try {
-    const managed = createModelLoader({
+    const managed = createGeoSpecNativeModelLoader({
       engine,
       readSource: async (source) => {
         if (typeof source !== 'string') {
@@ -71,8 +68,8 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
         return options.filesystem.readFile(source);
       },
     });
-    const modelLoader: NonNullable<RunGeoSpecModuleOptions['modelLoader']> = Object.assign(
-      async (input: Parameters<typeof managed>[0]) => {
+    const nativeModelLoader: ManagedGeoSpecNativeModelLoader = Object.assign(
+      async (input: GeoSpecNativeLoadModelOptions) => {
         if ('source' in input) {
           return managed(input);
         }
@@ -97,14 +94,12 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
           ...(input.parameters === undefined ? {} : { parameters: input.parameters }),
         });
       },
-      { dispose: async () => managed.dispose() },
+      { releaseAll: async () => managed.releaseAll() },
     );
-    const runner = createGeoSpecNodeRunner({
+    const runner = createNativeGeoSpecRunner({
       filesystem: options.filesystem,
-      projectPath: options.projectPath,
-      cache: false,
-      modelLoader,
       nativeAssertions: { engine },
+      nativeModelLoader,
     });
     try {
       const aggregate = await runner.run({

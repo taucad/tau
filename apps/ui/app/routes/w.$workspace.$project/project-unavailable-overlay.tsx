@@ -27,7 +27,7 @@ import { ArrowLeft, OctagonAlert, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { WorkspaceUnavailableRecovery } from '#routes/w.$workspace.$project/workspace-unavailable-recovery.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';

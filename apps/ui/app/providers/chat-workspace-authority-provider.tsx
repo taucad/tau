@@ -25,7 +25,9 @@ type ChatWorkspaceAuthorityContextValue = Readonly<{
   placeChat: (chatId: string, checkoutId: string) => Promise<void>;
   /**
    * Say this chat exists to resolve one conflicted revision (S33, AC14): its
-   * turns land on the conflicted branch's own checkout.
+   * turns land on the checkout of the branch the decision lands on. Only the
+   * checkout is kept; the seeded prompt names the revision, which the agent
+   * reads with the `revisions` tool's `conflict` action.
    */
   bindConflict: (
     chatId: string,

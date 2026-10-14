@@ -1,3 +1,5 @@
+import { BrowserStorageStatus } from '#components/settings/browser-storage-status.js';
+import { usePersistentStorageStatus } from '#filesystem/use-persistent-storage-status.js';
 import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
 /**
  * Filesystem settings pane.
@@ -22,12 +24,13 @@ import {
   listProjectsForWorkspace,
   listWorkspaces,
   requestHandlePermission,
+  refreshPersistentStorageStatus,
 } from '#filesystem/handle-store.js';
 import { isWorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from '#filesystem/workspace-errors.js';
 import type { Workspace } from '#filesystem/handle-store.js';
 import { webAccessDirectoryPicker } from '#constants/browser.constants.js';
 import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { toast } from '#components/ui/sonner.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
@@ -45,6 +48,7 @@ type WorkspaceRow = {
 };
 
 export function FileSystemSettings(): React.JSX.Element {
+  const persistenceStatus = usePersistentStorageStatus();
   const [rows, setRows] = useState<WorkspaceRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [busyWorkspaceId, setBusyWorkspaceId] = useState<string | undefined>(undefined);
@@ -371,30 +375,32 @@ export function FileSystemSettings(): React.JSX.Element {
       ) : undefined}
 
       {/* Desktop's Home is a folder on disk, so the origin's storage quota says nothing about it. */}
-      {storageUsage && !isDesktopTarget() ? (
+      {isDesktopTarget() ? undefined : (
         <SettingsItem settingId='browser-storage'>
           <SettingsSectionCard>
             <CardHeader>
-              <CardTitle>Browser Storage</CardTitle>
+              <CardTitle>Browser storage</CardTitle>
             </CardHeader>
             <CardContent className='flex flex-col gap-4'>
-              <div className='flex items-center gap-3'>
-                <HardDrive className='size-5 shrink-0 text-muted-foreground' />
-                <div className='flex flex-1 flex-col gap-1.5'>
-                  <div className='flex items-center justify-between text-sm'>
-                    <span>{formatBytes(storageUsage.used)} used</span>
-                    <span className='text-muted-foreground'>{formatBytes(storageUsage.quota)} available</span>
-                  </div>
-                  <div className='h-2 w-full overflow-hidden rounded-full bg-muted'>
-                    <div
-                      className='h-full rounded-full bg-primary transition-all'
-                      style={{
-                        width: `${storageUsage.quota > 0 ? Math.min((storageUsage.used / storageUsage.quota) * 100, 100).toFixed(1) : 0}%`,
-                      }}
-                    />
+              {storageUsage ? (
+                <div className='flex items-center gap-3'>
+                  <HardDrive className='size-5 shrink-0 text-muted-foreground' />
+                  <div className='flex flex-1 flex-col gap-1.5'>
+                    <div className='flex items-center justify-between text-sm'>
+                      <span>{formatBytes(storageUsage.used)} used</span>
+                      <span className='text-muted-foreground'>{formatBytes(storageUsage.quota)} total</span>
+                    </div>
+                    <div className='h-2 w-full overflow-hidden rounded-full bg-muted'>
+                      <div
+                        className='h-full rounded-full bg-primary transition-all'
+                        style={{
+                          width: `${storageUsage.quota > 0 ? Math.min((storageUsage.used / storageUsage.quota) * 100, 100).toFixed(1) : 0}%`,
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : undefined}
               {isStorageUnderPressure ? (
                 <div className='flex items-center gap-3 rounded-md border border-warning/40 p-3'>
                   <AlertCircle className='size-4 shrink-0 text-warning' />
@@ -404,14 +410,16 @@ export function FileSystemSettings(): React.JSX.Element {
                   </p>
                 </div>
               ) : undefined}
-              <p className='text-xs text-muted-foreground'>
-                Home uses browser-managed storage and can be cleared or evicted. Connected workspaces live on your disk
-                and are not counted here.
-              </p>
+              <BrowserStorageStatus
+                status={persistenceStatus}
+                onCheckStatus={() => {
+                  void refreshPersistentStorageStatus();
+                }}
+              />
             </CardContent>
           </SettingsSectionCard>
         </SettingsItem>
-      ) : undefined}
+      )}
     </div>
   );
 }

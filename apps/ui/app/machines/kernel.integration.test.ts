@@ -70,8 +70,11 @@ const createIntegrationClient = (fileSystem = fromMemoryFs()) =>
 
 const expectNonEmptyGlb = (outcome: ViewUpdateOutcome): Uint8Array<ArrayBuffer> => {
   expect(outcome.superseded).toBe(false);
-  if (outcome.superseded || !outcome.rendering.success) {
-    throw new Error('Expected a successful view rendering');
+  if (outcome.superseded) {
+    throw new Error('Expected a current view rendering');
+  }
+  if (!outcome.rendering.success) {
+    throw new Error(`Expected a successful view rendering, got issues: ${JSON.stringify(outcome.rendering.issues)}`);
   }
   const artifact = asKnownArtifact(outcome.rendering.artifact);
   expect(artifact?.mimeType).toBe('model/gltf-binary');
@@ -179,6 +182,24 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
         for (const outcome of outcomes) {
           expectNonEmptyGlb(outcome);
         }
+
+        // Each client re-opens its model after the other rendered: a fresh evaluation must
+        // still export through its own client's OpenCASCADE instance. Both clients are
+        // checked because either may initialise last.
+        const exportReopenedStep = async (client: IntegrationClient, path: string): Promise<void> => {
+          const reopened = client.open({ source: { path }, watch: false });
+          try {
+            const step = await reopened.export('step');
+            if (!step.success) {
+              throw new Error(`Expected a STEP export of ${path}, got issues: ${JSON.stringify(step.issues)}`);
+            }
+            expect(step.files[0].bytes.byteLength).toBeGreaterThan(0);
+          } finally {
+            reopened.close();
+          }
+        };
+        await exportReopenedStep(rootClient, 'main.ts');
+        await exportReopenedStep(nestedClient, 'lib/cube.ts');
       } finally {
         rootView.close();
         nestedView.close();

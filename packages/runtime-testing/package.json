@@ -1,6 +1,6 @@
 {
   "name": "@taucad/runtime-testing",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Runtime and geometry test utilities for Tau plugin authors",
   "type": "module",
   "sideEffects": false,
@@ -34,6 +34,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./browser/three-renderer-output": "./src/browser/three-renderer-output.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -43,6 +44,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./browser/three-renderer-output": {
+        "types": "./dist/browser/three-renderer-output.d.mts",
+        "import": "./dist/browser/three-renderer-output.mjs",
+        "default": "./dist/browser/three-renderer-output.mjs"
       },
       "./package.json": "./package.json"
     },
@@ -62,11 +68,21 @@
   },
   "peerDependencies": {
     "@taucad/runtime": "^0.1.0-beta.0",
+    "three": "^0.184.0",
     "vitest": ">=2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "three": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@taucad/runtime": "workspace:*",
-    "vitest": "catalog:"
+    "@types/three": "catalog:",
+    "jsdom": "catalog:",
+    "three": "catalog:",
+    "vitest": "catalog:",
+    "vitest-mock-extended": "catalog:"
   },
   "taucad": {
     "hostTarget": "browser"

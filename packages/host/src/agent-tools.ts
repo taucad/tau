@@ -18,7 +18,9 @@
  * `test_model` and `use_skill` were the two absentees, both for the same
  * reason: their adapters lived in `apps/ui`. They now live in
  * `@taucad/agent-tools`, so this module only has to supply the Node halves —
- * a disk reader for skills, and the engine's Node runner for GeoSpec.
+ * a disk reader for skills, and for GeoSpec the native engine running over
+ * the same runtime client the geometry tools use, so `test_model` is offered
+ * exactly when they are.
  */
 
 import { readFile, realpath, readdir, stat } from 'node:fs/promises';
@@ -33,6 +35,7 @@ import { MachineSettingsOwner } from '@taucad/runtime/host';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
 import { rpcClientErrorCode } from '@taucad/chat';
+import { toolName } from '@taucad/chat/constants';
 import { toRpcError } from '@taucad/chat/rpc';
 import type { RpcGeoSpecClient, RpcSkillResolver } from '@taucad/chat/rpc';
 import {
@@ -68,8 +71,11 @@ import type { ProjectRevisions } from '#revisions.js';
 
 type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
 
-/** Runtime surface accepted by the host's GeoSpec model loader. @public */
-export type HostGeoSpecRuntimeClient = GeoSpecRuntimeClient;
+/**
+ * Runtime surface the host's GeoSpec runner borrows. It never terminates it, so termination is not required.
+ * @public
+ */
+export type HostGeoSpecRuntimeClient = Omit<GeoSpecRuntimeClient, 'terminate'>;
 
 /**
  * The canonical host runner. Per-load source identity belongs to its finalized lineage.
@@ -186,35 +192,16 @@ const runtimeFailure = (
  */
 const geoSpecEngineResolves = (): boolean => {
   try {
-    /* Both are this host's own declared dependencies, so its own module is the
-     * correct base — unlike the kernel plugins next door. */
+    /* The modules the runner imports, all this host's own declared
+     * dependencies, so its own module is the correct base — unlike the kernel
+     * plugins next door. */
     import.meta.resolve('@taucad/geospec-engine-native/node');
-    import.meta.resolve('geospec/runner/node');
+    import.meta.resolve('geospec/runner/native');
+    import.meta.resolve('@taucad/geospec-engine/node-filesystem');
     return true;
   } catch {
     return false;
   }
-};
-
-/**
- * Build the compiled Node runner over the workspace directory.
- * A supplied project runtime is borrowed by the existing serialized native host owner;
- * otherwise the compiled pool owns its runtime and native engine.
- *
- * @param workspaceRoot - Absolute project root the runner executes against.
- * @param runtime - Optional project runtime used to load every model.
- * @returns A runner scoped to one `test_model` call.
- * @public
- */
-export const createHostGeoSpecRunner = async (
-  workspaceRoot: string,
-  runtime?: HostGeoSpecRuntimeClient,
-): Promise<HostGeoSpecRunner> => {
-  if (runtime !== undefined) {
-    return createHostNativeGeoSpecRunner(workspaceRoot, runtime);
-  }
-  const { createGeoSpecNodePoolRunner } = await import('geospec/runner/node');
-  return createGeoSpecNodePoolRunner({ projectPath: workspaceRoot });
 };
 
 /** One serialized native engine retains subjects only within its canonical root. */
@@ -256,7 +243,7 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
 };
 
 /**
- * Create a compiled runner for one tool call using the host's existing runtime.
+ * Create the GeoSpec runner for one `test_model` call over the host's existing runtime.
  *
  * Every call in this process shares one engine and runs after the previous call's runner
  * closes. A call keeps its subjects admitted until the next call settles, which releases
@@ -268,7 +255,7 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
  * @returns The ordinary GeoSpec runner contract over the shared native engine.
  * @public
  */
-export const createHostNativeGeoSpecRunner = async (
+export const createHostGeoSpecRunner = async (
   workspaceRoot: string,
   runtime: HostGeoSpecRuntimeClient,
 ): Promise<HostGeoSpecRunner> => {
@@ -293,7 +280,8 @@ export const createHostNativeGeoSpecRunner = async (
       nativeAssertions: { engine: session.engine, evidenceProfile: 'bounded' },
       model: {
         projectPath: workspaceRoot,
-        runtime,
+        /* The loader terminates only runtimes it creates; a borrowed client is never terminated. */
+        runtime: runtime as GeoSpecRuntimeClient,
         readSource: async (source) => {
           if (typeof source !== 'string') {
             throw new TypeError('Native GeoSpec file sources must be project paths.');
@@ -353,9 +341,10 @@ export type HostToolRegistryOptions = {
     | undefined;
   /**
    * Builds the GeoSpec runner one `test_model` call runs on, in the root the
-   * calling turn works in. Defaults to the engine's Node runner when
-   * `@taucad/geospec-engine` resolves; pass `false` to withhold `test_model`
-   * from an installation that has the engine.
+   * calling turn works in. Defaults to {@link createHostGeoSpecRunner} over
+   * `runtimeClient` when that is supplied and the GeoSpec engine resolves;
+   * otherwise `test_model` is not offered rather than offered-and-failing.
+   * Pass `false` to withhold `test_model` from an installation that has both.
    */
   readonly geospecRunner?: ((workspaceRoot: string) => Promise<HostGeoSpecRunner>) | false | undefined;
   /**
@@ -397,7 +386,18 @@ export type HostToolRegistryOptions = {
    * never guesses one.
    */
   readonly projectId?: string | undefined;
+  /**
+   * Names the project each root holds, for a host whose calls name their own folder: `tau mcp`, where Codex names
+   * the thread's folder per call and the folder the server started in may hold no project. Asked when a print tool
+   * is called, so the slice lands in the calling root and names that root's project, which the machine host then
+   * reads it from. With it `request_print` is offered whatever `workspaceRoot` holds, a root that names no project
+   * refuses the print, and `projectId` is not used.
+   */
+  readonly projectIdOf?: ((workspaceRoot: string) => Promise<string | undefined>) | undefined;
 };
+
+/** The tools that name the project a print artifact belongs to. */
+const projectPrintTools: ReadonlySet<string> = new Set([toolName.requestPrint, 'prepare_machine_print']);
 
 /**
  * Build the daemon's tool registry.
@@ -414,7 +414,8 @@ export type HostToolRegistryOptions = {
  * ```
  */
 export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRegistry => {
-  const rooted = new Map<string, ToolRegistry>();
+  /* Each root's registry, with the project id its print tools name. */
+  const rooted = new Map<string, Readonly<{ registry: ToolRegistry; projectId: string | undefined }>>();
   const settingsOwners = new Map<string, MachineSettingsOwner>();
   const liveProvider =
     options.filesystem?.(options.workspaceRoot) ?? new NodeFsProvider(options.workspaceRoot, { policy: tauPathPolicy });
@@ -444,9 +445,13 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
    * Every tool this host serves, over one absolute root.
    *
    * @param workspaceRoot - The tree this registry's tools read and write.
-   * @returns The registry for that tree.
+   * @param projectId - The `tau.json` id every print artifact sliced there names; without one nothing is printed.
+   * @returns The registry for that tree, and the machine settings owner it reads through.
    */
-  const registryFor = (workspaceRoot: string): ToolRegistry => {
+  const registryFor = (
+    workspaceRoot: string,
+    projectId: string | undefined,
+  ): Readonly<{ registry: ToolRegistry; settingsOwner: MachineSettingsOwner }> => {
     /* The fence and the skill overlay are one function on every host (charter
      * D1): this provider is the checkout, and what the agent sees over it is
      * the composed view. The skill resolver below reads the disk directly and
@@ -465,7 +470,6 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
     );
     const recordView = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
     const settingsOwner = new MachineSettingsOwner({ filesystem: view, definitions: [] });
-    settingsOwners.set(workspaceRoot, settingsOwner);
     const mutations = workspaceRoot === options.workspaceRoot ? liveMutations : new ResourceQueue();
     const { runtimeClient } = options;
 
@@ -546,7 +550,9 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       options.geospecRunner === false
         ? undefined
         : (options.geospecRunner ??
-          (geoSpecEngineResolves() ? async () => createHostGeoSpecRunner(workspaceRoot) : undefined));
+          (runtimeClient !== undefined && geoSpecEngineResolves()
+            ? async () => createHostGeoSpecRunner(workspaceRoot, await runtimeClient(workspaceRoot))
+            : undefined));
 
     /**
      * `test_model` in process: discovery walks the real directory, the runner
@@ -593,8 +599,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * a runtime to slice with and a machine to ask are attached too. A
      * candidate turn's slice lands in its checkout, which the machine host
      * finds through the same project id. */
-    const { revisions, machines, projectId } = options;
-    return createChatToolRegistry({
+    const { revisions, machines } = options;
+    const registry = createChatToolRegistry({
       machineSettings: {
         readMachineSettings: async (typeId: MachineTypeId) => settingsOwner.read({ typeId }),
       },
@@ -626,6 +632,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       skillResolver,
       testingEnabled: geospec !== undefined,
     });
+    return { registry, settingsOwner };
   };
 
   /**
@@ -639,27 +646,36 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
    * would grow, so a steady state costs nothing.
    *
    * @param workspaceRoot - The tree the calling turn works in.
+   * @param projectId - The project its print tools name.
    * @returns That tree's registry.
    */
-  const rootedRegistry = (workspaceRoot: string): ToolRegistry => {
+  const rootedRegistry = (workspaceRoot: string, projectId: string | undefined): ToolRegistry => {
     const existing = rooted.get(workspaceRoot);
-    if (existing) {
-      return existing;
+    if (existing !== undefined && existing.projectId === projectId) {
+      return existing.registry;
     }
     const live = new Set([options.workspaceRoot, ...[...(options.checkouts?.values() ?? [])].map(({ cwd }) => cwd)]);
     for (const cached of rooted.keys()) {
-      if (!live.has(cached)) {
+      /* A root whose project changed is rebuilt to name the new one. */
+      if (!live.has(cached) || cached === workspaceRoot) {
         settingsOwners.get(cached)?.dispose();
         settingsOwners.delete(cached);
         rooted.delete(cached);
       }
     }
-    const created = registryFor(workspaceRoot);
-    rooted.set(workspaceRoot, created);
-    return created;
+    const created = registryFor(workspaceRoot, projectId);
+    settingsOwners.set(workspaceRoot, created.settingsOwner);
+    rooted.set(workspaceRoot, { registry: created.registry, projectId });
+    return created.registry;
   };
 
-  const live = rootedRegistry(options.workspaceRoot);
+  const { projectIdOf } = options;
+  /* A host whose calls name their own project lists the print tools whatever its own root holds; this registry only
+   * lists and settles answers, and the id it names is never sliced under, since every call goes to its root's own. */
+  const live =
+    projectIdOf === undefined
+      ? rootedRegistry(options.workspaceRoot, options.projectId)
+      : registryFor(options.workspaceRoot, 'proj_listed-only').registry;
   return {
     /* The tool *list* is the host's, not the turn's: every root serves the same
      * names, descriptions and schemas, and the list is read before any run
@@ -667,10 +683,28 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
     list: () => live.list(),
     /* An answer names no checkout: every root's registry settles it through the same machine client (D5). */
     answerApproval: async (answer) => live.answerApproval?.(answer),
-    invoke: async (invocation) =>
-      rootedRegistry(
+    invoke: async (invocation) => {
+      const root =
         (invocation.runId === undefined ? undefined : options.checkouts?.get(invocation.runId)?.cwd) ??
-          options.workspaceRoot,
-      ).invoke(invocation),
+        options.workspaceRoot;
+      if (projectIdOf === undefined) {
+        return rootedRegistry(root, options.projectId).invoke(invocation);
+      }
+      if (!projectPrintTools.has(invocation.toolName)) {
+        /* Only a print names the project; any other tool runs on whatever registry the root has. */
+        return (rooted.get(root)?.registry ?? rootedRegistry(root, undefined)).invoke(invocation);
+      }
+      const projectId = await projectIdOf(root);
+      if (projectId === undefined) {
+        return {
+          content: {
+            errorCode: 'PROJECT_NOT_NAMED',
+            message: `${root} holds no tau.json, so nothing in it can be printed. Print from a Tau project folder.`,
+          },
+          isError: true,
+        };
+      }
+      return rootedRegistry(root, projectId).invoke(invocation);
+    },
   };
 };

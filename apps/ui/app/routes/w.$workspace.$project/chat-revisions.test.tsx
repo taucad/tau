@@ -78,12 +78,10 @@ vi.mock('#hooks/use-chat-records.js', () => ({
   useChatRecords: () => ({ chats, isLoading: false, error: undefined }),
 }));
 /* Whether the creation toast is still carrying the backup offer. */
-let backupAnnouncing = false;
 /* D19: the backup-by-default line asks about the account; these rows are signed in and entitled. */
 vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useTauCloudEligibility: () => ({ auth: 'authed', isResolved: true, canSyncFiles: true }),
-  useBackupAnnouncing: () => backupAnnouncing,
 }));
 const placeChat = vi.fn(async () => undefined);
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
@@ -824,6 +822,7 @@ describe('Revisions pane closeout', () => {
       ...revisionStatusHarness.status,
       line: { kind: 'branch', name: 'main' },
       checkoutId: 'live',
+      liveCheckoutId: 'live',
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -843,6 +842,31 @@ describe('Revisions pane closeout', () => {
     expect(await screen.findByText('Linked')).toBeInTheDocument();
   });
 
+  it('marks the linked branch, not the live one, while the pane is on the linked checkout (D96)', async () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'bracket-fillet' },
+      checkoutId: 'co-2',
+      liveCheckoutId: 'live',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: undefined,
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+    };
+
+    renderPane();
+
+    const badges = await screen.findAllByText('Linked');
+    expect(badges).toHaveLength(1);
+    expect(badges[0]!.closest('li')).toHaveTextContent('bracket-fillet');
+  });
+
   it('places no chat on a remote-only branch, which has no checkout (D37)', async () => {
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
@@ -850,7 +874,14 @@ describe('Revisions pane closeout', () => {
       checkoutId: 'live',
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
-        { name: 'upstream-only', head: undefined, checkoutId: undefined, checkoutRoot: undefined, leaseChatIds: [] },
+        {
+          name: 'upstream-only',
+          head: undefined,
+          checkoutId: undefined,
+          checkoutRoot: undefined,
+          leaseChatIds: [],
+          onRemote: true,
+        },
       ],
     };
 
@@ -1253,7 +1284,6 @@ describe('Revisions pane vocabulary and History', () => {
 describe('Backup by default (D19)', () => {
   beforeEach(() => {
     localStorage.clear();
-    backupAnnouncing = false;
   });
 
   it.each(['default', 'noticed'] as const)(
@@ -1342,19 +1372,9 @@ describe('Backup by default (D19)', () => {
     expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();
   });
 
-  /* DESIGN's one concise offer: the creation toast carries it first, and the line
-     takes it over once the toast closes, still before the first save (W10-L B-2). */
-  it('holds the pending offer back while the creation toast shows it', async () => {
+  it('should show the pending inline offer immediately before the first save', async () => {
     tauCloudIntent.set('p', 'noticed');
-    backupAnnouncing = true;
-
-    const { rerender } = render(<RevisionsPanelBody />, { wrapper });
-
-    await screen.findByRole('region', { name: 'Where you are' });
-    expect(screen.queryByRole('group', { name: 'Backup by default' })).not.toBeInTheDocument();
-
-    backupAnnouncing = false;
-    rerender(<RevisionsPanelBody />);
+    renderPane();
     expect(await screen.findByRole('group', { name: 'Backup by default' })).toHaveTextContent('Turn off backup');
   });
 

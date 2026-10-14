@@ -507,7 +507,7 @@ describe('convertReplicadGeometriesToGltf', () => {
     };
 
     expect(json.asset.version).toBe('2.0');
-    expect(json.asset.generator).toBe('@taucad/geometry-core@0.1.0-beta.0');
+    expect(json.asset.generator).toMatch(/^@taucad\/geometry-core@\d+\.\d+\.\d+/);
     expect(json.meshes).toHaveLength(1);
     expect(json.buffers[0]!.uri).toMatch(/^data:application\/octet-stream;base64,/);
   });

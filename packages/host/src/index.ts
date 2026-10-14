@@ -73,6 +73,8 @@ export type {
   ProjectHostRuntimeClient,
 } from '#project-host.js';
 export { keyedResource } from '#keyed-resource.js';
+export { openLocalParameterActors } from '#local-parameters.js';
+export type { LocalParameterActors } from '#local-parameters.js';
 export type { KeyedIncarnation, KeyedResource } from '#keyed-resource.js';
 export {
   createMachineSecretStore,
@@ -84,6 +86,14 @@ export {
   readProjectId,
 } from '#machine-host.js';
 export type { CreateNodeMachineRuntimeOptions, MachineHostIdentity, MachineSecretStore } from '#machine-host.js';
+export { openLocalMachines, openSharedMachineHost } from '#local-machines.js';
+export type {
+  LocalMachines,
+  LocalMachinesRefusal,
+  OpenLocalMachinesOptions,
+  OpenSharedMachineHostOptions,
+  SharedMachineHost,
+} from '#local-machines.js';
 export { completeMachineBinding } from '#machine-binding-ceremony.js';
 export type { CompleteMachineBindingInput, MachineBindingCeremonyEvent } from '#machine-binding-ceremony.js';
 export {
@@ -139,5 +149,12 @@ export {
   hostMcpLeaseCeiling,
   HostMcpCapabilityError,
   hostMcpCapabilityPrefix,
+  serveLocalHostMcp,
 } from '#mcp-server.js';
-export type { HostMcpCapabilityClaims, HostMcpEndpoint, HostMcpEndpointOptions } from '#mcp-server.js';
+export type {
+  HostMcpCapabilityClaims,
+  HostMcpEndpoint,
+  HostMcpEndpointOptions,
+  LocalHostMcp,
+  LocalHostMcpOptions,
+} from '#mcp-server.js';

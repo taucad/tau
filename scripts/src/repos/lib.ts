@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
@@ -15,6 +15,8 @@ export type RepoConfig = {
   path?: string;
   description?: string;
   shallow?: boolean;
+  /** Non-cone sparse-checkout patterns; absent means the whole tree. */
+  sparse?: string[];
 };
 
 export type GroupConfig = {
@@ -133,7 +135,7 @@ const resolveRoot = (root?: string): string => {
 
 const publicCatalogKeys = new Set(['version', 'repos_dir', 'owner', 'groups', 'repos']);
 const privateCatalogKeys = new Set(['version', 'groups', 'repos']);
-const repoKeys = new Set(['upstream', 'fork', 'branch', 'commit', 'path', 'description', 'shallow']);
+const repoKeys = new Set(['upstream', 'fork', 'branch', 'commit', 'path', 'description', 'shallow', 'sparse']);
 const groupKeys = new Set(['description', 'repos']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -171,6 +173,15 @@ const parseRepo = (value: unknown, label: string): RepoConfig => {
   if (raw['shallow'] !== undefined && typeof raw['shallow'] !== 'boolean') {
     throw new Error(`${label}.shallow must be a boolean.`);
   }
+  const { sparse } = raw;
+  if (
+    sparse !== undefined &&
+    (!Array.isArray(sparse) ||
+      sparse.length === 0 ||
+      sparse.some((pattern) => typeof pattern !== 'string' || pattern.length === 0))
+  ) {
+    throw new Error(`${label}.sparse must be a non-empty array of non-empty strings.`);
+  }
 
   const fork = optionalString(raw['fork'], `${label}.fork`);
   const branch = optionalString(raw['branch'], `${label}.branch`);
@@ -185,6 +196,7 @@ const parseRepo = (value: unknown, label: string): RepoConfig => {
     ...(path && { path }),
     ...(description && { description }),
     ...(raw['shallow'] === true && { shallow: true }),
+    ...(sparse !== undefined && { sparse: [...(sparse as string[])] }),
   };
 };
 
@@ -268,7 +280,7 @@ const readCatalog = (root: string, catalog: CatalogName): PublicCatalog | Privat
   if (!existsSync(filePath)) {
     if (catalog === 'private') {
       throw new Error(
-        `Private repos catalog not found at ${filePath}. Authorized setup: GIT_LFS_SKIP_SMUDGE=1 gh repo clone taucad/tau-brain repos/tau-brain`,
+        `Private repos catalog not found at ${filePath}. Authorized setup mounts Tau Brain: pnpm agent-env brain`,
       );
     }
 
@@ -621,12 +633,20 @@ export const removeRepo = (state: CatalogState, name: string): CatalogState => {
 
 // ── Clone / Sync ────────────────────────────────────────────────
 
-export type BuildCloneArgsOptions = { cloneUrl: string; directory: string; branch?: string; shallow?: boolean };
+export type BuildCloneArgsOptions = {
+  cloneUrl: string;
+  directory: string;
+  branch?: string;
+  shallow?: boolean;
+  sparse?: boolean;
+};
 
+/** Full-history clones are blobless (contents download on demand); sparse clones check out after the patterns are set. */
 export const buildCloneArgs = (options: BuildCloneArgsOptions): string[] => {
   const args = ['git', 'clone'];
-  if (options.shallow) {
-    args.push('--depth', '1');
+  args.push(...(options.shallow ? ['--depth', '1'] : ['--filter=blob:none']));
+  if (options.sparse) {
+    args.push('--no-checkout');
   }
   if (options.branch) {
     args.push('--branch', options.branch);
@@ -650,8 +670,18 @@ export const cloneRepo = (context: RepoContext): { action: 'cloned' | 'skipped';
   }
 
   const cloneUrl = repo.fork ? repoUrl(repo.fork) : repoUrl(repo.upstream);
-  const args = buildCloneArgs({ cloneUrl, directory, branch: repo.branch, shallow: repo.shallow && !repo.commit });
+  const args = buildCloneArgs({
+    cloneUrl,
+    directory,
+    branch: repo.branch,
+    shallow: repo.shallow && !repo.commit,
+    sparse: Boolean(repo.sparse),
+  });
   execSync(args.join(' '), { stdio: 'inherit' });
+  if (repo.sparse) {
+    execFileSync('git', ['-C', directory, 'sparse-checkout', 'set', '--no-cone', ...repo.sparse], { stdio: 'inherit' });
+    execFileSync('git', ['-C', directory, 'reset', '-q', '--hard'], { stdio: 'inherit' });
+  }
   if (repo.fork) {
     execSync(`git -C ${directory} remote add upstream ${repoUrl(repo.upstream)}`, { stdio: 'inherit' });
   }

@@ -65,7 +65,7 @@
       }
     },
     "test": {
-      "dependsOn": ["^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets"],
       "inputs": ["default", "^production"]
     },
     "build": {

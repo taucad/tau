@@ -3,6 +3,13 @@ import { useSelector } from '@xstate/react';
 import type { ChatSnapshot } from '@taucad/chat';
 import type { WorkbenchEntries, WorkbenchNode, WorkbenchTab, WorkbenchView } from '@taucad/workbench';
 import type { FileEntry } from '@taucad/types';
+import { cadReferenceFromGeometryComponent, maxCadReferences } from '@taucad/chat/references';
+import type { CadReference } from '@taucad/chat/references';
+import { buildGeometryComponentReference } from '@taucad/viewer/graphics/metadata/geometry-component-reference';
+import type {
+  ModelInteractionContext,
+  ModelInteractionUnitState,
+} from '@taucad/viewer/machines/model-interaction.machine';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -62,6 +69,40 @@ export const projectWorkbenchSnapshot = ({
   return { layoutDigest, lanes: layout.lanes, visible, views, entries, unavailable, refused: boundedRefused };
 };
 
+const sourceUnitPrefix = 'file:';
+
+const selectedReferences = (unit: ModelInteractionUnitState): CadReference[] => {
+  const { manifest } = unit;
+  if (!manifest) {
+    return [];
+  }
+  return unit.selectedComponentIds.slice(0, maxCadReferences).flatMap((componentId) => {
+    const node = manifest.nodesById[componentId];
+    const reference = node ? buildGeometryComponentReference(manifest, node) : undefined;
+    return reference ? [cadReferenceFromGeometryComponent(reference)] : [];
+  });
+};
+
+/**
+ * The viewer's selection as structured references (blueprint D6): the selected components of one source file's
+ * model, preferring the entry the editor shows when several files have a selection. Geometry without a source file
+ * (`geometry:<hash>` units) cannot be referenced and is skipped.
+ */
+export const projectViewerSelection = (
+  context: Pick<ModelInteractionContext, 'unitsById' | 'unitOrder'>,
+  preferredPath: string | undefined,
+): ChatSnapshot['viewerSelection'] => {
+  const candidates = context.unitOrder.flatMap((unitId) => {
+    const unit = context.unitsById[unitId];
+    if (!unitId.startsWith(sourceUnitPrefix) || !unit || unit.selectedComponentIds.length === 0) {
+      return [];
+    }
+    const selected = selectedReferences(unit);
+    return selected.length === 0 ? [] : [{ entryPath: unitId.slice(sourceUnitPrefix.length), selected }];
+  });
+  return candidates.find((candidate) => candidate.entryPath === preferredPath) ?? candidates[0];
+};
+
 /**
  * Hook to get the current chat snapshot for message context.
  * This provides the LLM with awareness of what the user is currently working on.
@@ -70,6 +111,7 @@ export const projectWorkbenchSnapshot = ({
  * - fileTree: Cached/partial project file tree via `getCachedFileItems()` (memoized, invalidated on tree change)
  * - activeFile: The file currently being rendered by the CAD engine
  * - openFiles: The files currently open in editor tabs
+ * - viewerSelection: The components selected in the viewer, as structured references
  *
  * Each component can be toggled via user preferences (cookies).
  *
@@ -154,6 +196,12 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
       previous.openFiles.every((file, index) => file.path === next.openFiles[index]?.path),
   );
 
+  const viewerSelection = useSelector(
+    projectContext?.modelInteractionRef,
+    (state) => (state ? projectViewerSelection(state.context, editorState.activeFilePath) : undefined),
+    (previous, next) => JSON.stringify(previous) === JSON.stringify(next),
+  );
+
   const [includeFileSystem] = useCookie(cookieName.chatCtxFs, true);
   const [includeActiveFile] = useCookie(cookieName.chatCtxActive, true);
   const [includeOpenFiles] = useCookie(cookieName.chatCtxOpen, true);
@@ -212,6 +260,10 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
       snapshot.workbench = workbench;
     }
 
+    if (viewerSelection) {
+      snapshot.viewerSelection = viewerSelection;
+    }
+
     if (Object.keys(snapshot).length === 0) {
       return undefined;
     }
@@ -228,5 +280,6 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
     projectContext?.viewRecords,
     projectContext?.entriesRecord,
     isTauDebugEnabled,
+    viewerSelection,
   ]);
 }

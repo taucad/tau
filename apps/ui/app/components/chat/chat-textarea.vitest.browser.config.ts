@@ -3,12 +3,15 @@ import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Browser acceptance shares the application's native-module aliases.
+import { uiResolveAlias } from '../../../vite.config.js';
 
 /** Real-browser composer spacing acceptance with the shipped styles. */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
   define: { tauCloudBuildEnabled: 'false' },
   plugins: [tailwindcss(), tauRuntime()],
+  resolve: { alias: uiResolveAlias },
   optimizeDeps: {
     include: [
       '@tiptap/core',
@@ -22,7 +25,6 @@ export default defineConfig({
       '@tiptap/pm/state',
       '@tiptap/react',
       '@tiptap/suggestion',
-      'embla-carousel-react',
       'react-dom',
     ],
   },

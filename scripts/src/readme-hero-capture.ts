@@ -30,7 +30,10 @@
  *     composer shows a raw model id. The catalog is fetched here and served to the renderer.
  *   - A fresh launch does not apply the view record's display flags, so Axes and Post-processing are set in the viewer
  *     menu and verified.
- *   - The window is focused for coloured traffic lights and ignores real mouse events, so the pointer adds no hover.
+ *   - The window is focused for coloured traffic lights and ignores real mouse events from launch, so a pointer
+ *     neither hovers, orbits the camera nor seeks the clip.
+ *   - Saved lane widths and window state survive between runs, so both are reset before the project opens.
+ *   - TAU_DEBUG is dropped from the app's environment: any value, `false` included, shows the FPS readout.
  *   - The terminal running this needs macOS Screen Recording permission; without it the capture has no contents.
  *
  * Exit codes: 0 success, 1 bad arguments or an unexpected app state, 2 network failure, 3 missing dependency.
@@ -51,7 +54,7 @@ const outputDirectory = join(repoRoot, 'out/screenshots/readme-hero');
 const projectName = 'Planetary Gear System';
 const projectSlug = 'planetary-gear-system';
 const chatName = 'Initial design';
-const sunJoint = 'sun';
+const sunJoint = 'Sun';
 const sunAngle = '30';
 const windowWidth = 1728;
 const windowHeight = 1080;
@@ -65,6 +68,10 @@ const workbenchLayout = {
     { kind: 'group', size: 0.68, tabs: [{ kind: 'pane', pane: 'kinematics' }] },
   ],
 };
+/** Chat and workbench lane widths in CSS pixels, as the earlier hero framed them. */
+const laneWidths = { chatWidth: 360, workbenchWidth: 420 };
+/** The viewer tab the capture shows, on `main.ts`. */
+const heroView = 'hero';
 /** A window capture smaller than this is the frame without contents (no Screen Recording permission). */
 const minimumCaptureBytes = 200_000;
 type Theme = (typeof themes)[number];
@@ -135,7 +142,8 @@ const fetchCatalog = async (apiUrl: string): Promise<string> => {
 };
 
 /**
- * Put Parameters above Kinematics in the project's saved workbench layout; the app reads it when the project opens.
+ * Put Parameters above Kinematics in the project's saved workbench layout and the viewer on `main.ts`; the app reads
+ * both when the project opens.
  *
  * @param projectDirectory - The hero project inside the profile's home.
  */
@@ -145,7 +153,26 @@ const writeWorkbenchLayout = (projectDirectory: string): void => {
     throw new UsageError(`No ${file}; open the project once in the app, then rerun.`);
   }
   const layout = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-  writeFileSync(file, `${JSON.stringify({ ...layout, workbench: workbenchLayout }, undefined, 2)}\n`);
+  mkdirSync(join(projectDirectory, '.tau/workbench/views'), { recursive: true });
+  writeFileSync(
+    join(projectDirectory, `.tau/workbench/views/${heroView}.json`),
+    `${JSON.stringify({ version: 1, entryPath: 'main.ts' }, undefined, 2)}\n`,
+  );
+  const viewer = { kind: 'group', tabs: [{ kind: 'view', view: heroView }] };
+  writeFileSync(file, `${JSON.stringify({ ...layout, viewer, workbench: workbenchLayout }, undefined, 2)}\n`);
+};
+
+/**
+ * Clear a saved maximized or full-screen window: the app restores it after launch, over the capture's window size.
+ *
+ * @param profile - The Electron userData directory.
+ */
+const resetWindowState = (profile: string): void => {
+  const file = join(profile, 'window-state.json');
+  if (existsSync(file)) {
+    const state = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    writeFileSync(file, `${JSON.stringify({ ...state, maximized: false, fullScreen: false }, undefined, 2)}\n`);
+  }
 };
 
 /**
@@ -172,6 +199,52 @@ const setTheme = async (app: ElectronApplication, page: Page, theme: Theme): Pro
   }, theme);
   await sleep(page, 3500);
 };
+
+/**
+ * Pin the lane widths in every saved editor row before the project opens; a resize in an earlier run (a maximized
+ * window, say) is saved there and would reframe the capture.
+ */
+/* oxlint-disable tau-lint/no-direct-indexeddb -- The capture resets its own hero profile from outside the app. */
+const setLaneWidths = async (page: Page): Promise<void> => {
+  const updated = await page.evaluate(async (widths) => {
+    const request = async (target: IDBRequest): Promise<unknown> =>
+      new Promise((resolve, reject) => {
+        target.addEventListener('success', () => {
+          resolve(target.result);
+        });
+        target.addEventListener('error', () => {
+          reject(target.error ?? new Error('IndexedDB request failed.'));
+        });
+      });
+    let count = 0;
+    for (const { name } of await indexedDB.databases()) {
+      if (name === undefined) {
+        continue;
+      }
+      // oxlint-disable-next-line eslint/no-await-in-loop -- a profile holds one or two databases.
+      const database = (await request(indexedDB.open(name))) as IDBDatabase;
+      if (database.objectStoreNames.contains('editor')) {
+        const store = database.transaction('editor', 'readwrite').objectStore('editor');
+        // oxlint-disable-next-line eslint/no-await-in-loop -- see above.
+        const rows = (await request(store.getAll())) as Array<{
+          panelState?: { desktopLayout?: Record<string, unknown> };
+        }>;
+        for (const row of rows) {
+          const panelState = row.panelState ?? {};
+          store.put({
+            ...row,
+            panelState: { ...panelState, desktopLayout: { ...panelState.desktopLayout, ...widths } },
+          });
+          count += 1;
+        }
+      }
+      database.close();
+    }
+    return count;
+  }, laneWidths);
+  console.log(`→ lane widths set in ${updated} editor row(s)`);
+};
+/* oxlint-enable tau-lint/no-direct-indexeddb -- End of the hero profile reset. */
 
 /** Open the project's chat from the sidebar, expanding the sidebar and the project row when needed. */
 const openProject = async (page: Page): Promise<void> => {
@@ -204,7 +277,7 @@ const stageKinematics = async (page: Page): Promise<void> => {
   await angle.fill(sunAngle);
   await angle.press('Enter');
   await sleep(page, 2500);
-  if (!(await page.getByText('planet-1', { exact: true }).isVisible())) {
+  if (!(await page.getByText('Planet 1', { exact: true }).isVisible())) {
     await page.getByText('Followers', { exact: true }).first().click();
     await sleep(page, 1200);
   }
@@ -263,6 +336,9 @@ const stageViewer = async (page: Page): Promise<void> => {
     await page.mouse.wheel(0, -50);
     await sleep(page, 2000);
   }
+  // Park the pointer on the empty tab strip: over the model it holds a hover tooltip, over the chat message actions.
+  await page.mouse.move(770, 18);
+  await sleep(page, 1000);
 };
 
 /**
@@ -277,13 +353,11 @@ const captureWindow = async (app: ElectronApplication, page: Page, theme: Theme)
       document.activeElement.blur();
     }
   });
-  await page.mouse.move(700, 120);
   const sourceId = await app.evaluate(({ app: electronApp, BrowserWindow }) => {
     const [appWindow] = BrowserWindow.getAllWindows();
     if (appWindow === undefined) {
       throw new Error('No app window.');
     }
-    appWindow.setIgnoreMouseEvents(true);
     electronApp.focus({ steal: true });
     appWindow.moveTop();
     appWindow.focus();
@@ -323,6 +397,7 @@ const main = async (): Promise<void> => {
   parseUrlFlag('api-url', apiUrl);
   const catalog = await fetchCatalog(apiUrl);
   writeWorkbenchLayout(projectDirectory);
+  resetWindowState(profile);
   mkdirSync(outputDirectory, { recursive: true });
 
   // The `electron` package's main export is the path of its binary.
@@ -330,12 +405,22 @@ const main = async (): Promise<void> => {
   if (typeof electronPath !== 'string') {
     throw new MissingDependencyError('Electron is not installed; run pnpm install.');
   }
+  // Any TAU_DEBUG value, `false` included, turns on the viewer's FPS readout in a dev renderer; the hero has none.
+  const environment = Object.fromEntries(
+    Object.entries({
+      ...readUiEnvironment(),
+      ...process.env,
+      /* eslint-disable @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE. */
+      TAU_API_URL: apiUrl,
+      ELECTRON_RENDERER_URL: rendererUrl,
+      /* eslint-enable @typescript-eslint/naming-convention -- End of the environment names. */
+    }).filter(([name]) => name !== 'TAU_DEBUG'),
+  );
   const app = await electron.launch({
     executablePath: electronPath,
     args: [desktopDirectory, `--user-data-dir=${profile}`],
     cwd: desktopDirectory,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
-    env: { ...readUiEnvironment(), ...process.env, TAU_API_URL: apiUrl, ELECTRON_RENDERER_URL: rendererUrl },
+    env: environment,
     timeout: 120_000,
   });
   try {
@@ -352,6 +437,8 @@ const main = async (): Promise<void> => {
     await app.evaluate(
       ({ BrowserWindow }, size) => {
         const [appWindow] = BrowserWindow.getAllWindows();
+        // A pointer or trackpad over the window would orbit the camera or seek the clip; Playwright's input still lands.
+        appWindow?.setIgnoreMouseEvents(true);
         appWindow?.setFullScreen(false);
         appWindow?.unmaximize();
         appWindow?.setContentSize(size.width, size.height);
@@ -360,6 +447,7 @@ const main = async (): Promise<void> => {
       { width: windowWidth, height: windowHeight },
     );
     await sleep(page, 6000);
+    await setLaneWidths(page);
     console.log('→ opening the project');
     await openProject(page);
     await stageKinematics(page);

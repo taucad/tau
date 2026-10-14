@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { NavChat } from '#components/nav/nav-chat.js';
 import { SidebarProvider } from '#components/ui/sidebar.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { KeyboardProvider } from '#hooks/use-keyboard.js';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 
 function NavigationTypeProbe(): React.JSX.Element {
   return <output data-testid='navigation-type'>{useNavigationType()}</output>;

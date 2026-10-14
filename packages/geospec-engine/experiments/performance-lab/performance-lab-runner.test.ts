@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { HostEngine, HostSubjectLifecycle } from '@taucad/geospec-engine-native/node';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- Private bench test consumes the public protocol types.
-import type { GeoSpecEngineImplementation, GeoSpecEngineProtocol } from 'geospec/engine';
 import {
   numericProfileOfCanonicalResult,
   parsePerformanceLabRunInput,
@@ -22,7 +20,7 @@ const sha256 = async (): Promise<string> =>
 
 const input = async () =>
   parsePerformanceLabRunInput({
-    engine: 'legacy-wasm',
+    engine: 'native-desktop',
     fixture: {
       id: 'ordinary-step',
       format: 'step',
@@ -262,76 +260,5 @@ describe('ordinary performance lab runner', () => {
         new TextEncoder().encode(JSON.stringify({ results: [{ numericProfile: 'wrong-level' }] })),
       ),
     ).toBeNull();
-  });
-
-  it('should admit once and preserve authored legacy claim payloads and ordinary outcomes', async () => {
-    const protocol = mock<GeoSpecEngineProtocol>({
-      initialize: vi.fn<GeoSpecEngineProtocol['initialize']>(() => ({
-        protocolVersion: 2,
-        engine: { name: 'legacy', version: 'test' },
-        determinism: 'reference-wasm',
-        capabilities: [
-          { name: 'toHaveBoundingBox', registryVersion: 3 },
-          { name: 'analyzeMesh', registryVersion: 3 },
-        ],
-        provenance: {},
-      })),
-      ingestSubject: vi.fn<GeoSpecEngineProtocol['ingestSubject']>(async ({ requestId, contentHash }) => ({
-        requestId,
-        subject: {
-          kind: 'geometry-subject-reference',
-          subjectId: 'subject-1',
-          contentHash,
-        },
-      })),
-      submitClaims: vi.fn<GeoSpecEngineProtocol['submitClaims']>(({ requestId, claims }) => {
-        const claim = JSON.parse(new TextDecoder().decode(claims[0])) as {
-          claimId: string;
-        };
-        return {
-          requestId,
-          results: [
-            {
-              claimId: claim.claimId,
-              status: claim.claimId.startsWith('bounds') ? 'passed' : 'failed',
-              diagnostics: [],
-              provenance: {},
-            },
-          ],
-        };
-      }),
-      releaseSubject: vi.fn<GeoSpecEngineProtocol['releaseSubject']>(({ requestId }) => ({
-        requestId,
-        released: true,
-      })),
-    });
-    const implementation = mock<GeoSpecEngineImplementation>({ protocol });
-    const result = await runPerformanceLabCell(await input(), {
-      legacy: async () => ({ geoSpecEngineImplementation: implementation }),
-    });
-    expect(protocol.ingestSubject).toHaveBeenCalledTimes(1);
-    expect(protocol.submitClaims).toHaveBeenCalledTimes(2);
-    expect(protocol.releaseSubject).toHaveBeenCalledTimes(1);
-    expect(result.perCase.map(({ status }) => status)).toEqual(['passed', 'failed']);
-    expect(result.initializationTiming).toBe('lazy-in-admission-or-evaluation');
-    expect(JSON.parse(result.perCase[0]!.canonicalClaimUtf8!)).toEqual({
-      claimId: 'bounds-authority',
-      capability: 'toHaveBoundingBox',
-      subjectIds: ['subject-1'],
-      payload: { kind: 'boundingBox', expected: { size: [10, 20, 30] } },
-      workUnitBudget: 10_000,
-    });
-    expect(result.perCase.every(({ canonicalResultSha256 }) => typeof canonicalResultSha256 === 'string')).toBe(true);
-    const discarded = await runPerformanceLabCell(
-      await input(),
-      {
-        legacy: async () => ({ geoSpecEngineImplementation: implementation }),
-      },
-      'discard',
-    );
-    expect(discarded.perCase).toEqual([]);
-    expect(protocol.ingestSubject).toHaveBeenCalledTimes(2);
-    expect(protocol.submitClaims).toHaveBeenCalledTimes(4);
-    expect(protocol.releaseSubject).toHaveBeenCalledTimes(2);
   });
 });

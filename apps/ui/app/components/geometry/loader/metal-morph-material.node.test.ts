@@ -11,7 +11,7 @@ import {
   readMetalMorphMaterialTuning,
 } from '#components/geometry/loader/metal-morph-material.node.js';
 import { metalMorphShapeIds } from '#components/geometry/loader/metal-morph-shapes.js';
-import { serialiseStrippedTslGraph } from '#components/geometry/graphics/three/utils/tsl-node-graph-snapshot.js';
+import { serialiseStrippedTslGraph } from '@taucad/viewer/graphics/three/utils/tsl-node-graph-snapshot';
 
 const currentDirectory = fileURLToPath(new URL('.', import.meta.url));
 

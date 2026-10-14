@@ -33,6 +33,7 @@
  * @see https://developer.mozilla.org/en-US/docs/Web/API/FileSystemDirectoryHandle
  */
 
+import { Topic } from '@taucad/events';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
@@ -67,6 +68,7 @@ const dbVersion = 4;
 const projectRootConfigurationChannelName = `${metaConfig.databasePrefix}project-root-configuration`;
 const homeBackendMetaKey = 'home-storage-backend';
 const projectCreationLocationMetaKey = 'project-creation-location';
+const persistentStorageRequestMetaKey = 'persistent-storage-request';
 
 /**
  * Physical engine backing the system-owned Home workspace. `node` is the
@@ -173,12 +175,6 @@ export type Workspace = {
    * before slugs existed is backfilled on first read (L10).
    */
   slug: string;
-  /**
-   * Outcome of `navigator.storage.persist()` at the last connect, or
-   * `undefined` when the browser has no Storage Manager. `false` means the
-   * origin is evictable and the UI may warn.
-   */
-  storagePersisted?: boolean;
   /**
    * Absolute host directory, present only on a **node** workspace — a folder
    * picked through the desktop dialog. A webaccess workspace is identified by
@@ -381,25 +377,112 @@ async function withDb<T>(operation: (db: IDBDatabase) => Promise<T>): Promise<T>
 
 // ============ Persistent storage + disk-side identity marker ============
 
+/** Current browser-reported protection from automatic storage eviction. */
+export type PersistentStorageStatus = 'unknown' | 'best-effort' | 'persistent' | 'unavailable';
+
+let persistentStorageStatus: PersistentStorageStatus = 'unknown';
+const persistentStorageChanges = new Topic<void>({ name: 'HandleStore.persistentStorageChanges' });
+let persistenceOperation = Promise.resolve();
+let persistenceRequestedThisSession = false;
+
+function setPersistentStorageStatus(status: PersistentStorageStatus): void {
+  if (persistentStorageStatus !== status) {
+    persistentStorageStatus = status;
+    persistentStorageChanges.emit();
+  }
+}
+
+/** Read the latest observation, without requesting browser permission. */
+export function getPersistentStorageStatus(): PersistentStorageStatus {
+  return persistentStorageStatus;
+}
+
 /**
- * Ask the browser to move the origin out of the evictable best-effort bucket
- * (R1). Connecting a workspace is the strongest available signal of intent, so
- * that is where the request lives. Never throws: Safari/Firefox-without-flag
- * and jsdom simply have no Storage Manager.
- *
- * @returns the persistence state, or `undefined` when the API is absent.
+ * Observe status changes, including permissions granted or revoked outside Tau.
+ * @param listener - React external-store listener.
+ * @returns Unsubscribe.
  */
-async function ensurePersistentStorage(): Promise<boolean | undefined> {
+export function subscribePersistentStorageStatus(listener: () => void): () => void {
+  return persistentStorageChanges.subscribe(listener);
+}
+
+async function readPersistentStorageStatus(): Promise<void> {
   const storage = globalThis.navigator.storage as StorageManager | undefined;
-  if (typeof storage?.persisted !== 'function' || typeof storage.persist !== 'function') {
-    return undefined;
+  if (isDesktopTarget || typeof storage?.persisted !== 'function') {
+    setPersistentStorageStatus('unavailable');
+    return;
   }
   try {
-    return (await storage.persisted()) || (await storage.persist());
+    setPersistentStorageStatus((await storage.persisted()) ? 'persistent' : 'best-effort');
   } catch (error) {
-    console.warn('Persistent storage request failed', error);
-    return undefined;
+    setPersistentStorageStatus('unknown');
+    console.warn('Could not check persistent storage', error);
   }
+}
+
+/** Refresh status without prompting. Serialize reads so an older read cannot undo a grant. */
+export async function refreshPersistentStorageStatus(): Promise<void> {
+  const previous = persistenceOperation;
+  persistenceOperation = (async () => {
+    await previous;
+    await readPersistentStorageStatus();
+  })();
+  return persistenceOperation;
+}
+
+/**
+ * Request eviction protection after a successful Home save. Never rejects or
+ * participates in the save transaction. The durable claim precedes the browser
+ * request, so tabs, reloads and refused requests do not repeatedly prompt.
+ */
+export async function requestHomeStoragePersistence(): Promise<void> {
+  if (persistenceRequestedThisSession || isDesktopTarget) {
+    return persistenceOperation;
+  }
+  persistenceRequestedThisSession = true;
+  const previous = persistenceOperation;
+  persistenceOperation = (async () => {
+    await previous;
+    await readPersistentStorageStatus();
+    const storage = globalThis.navigator.storage as StorageManager | undefined;
+    if (persistentStorageStatus !== 'best-effort' || typeof storage?.persist !== 'function') {
+      return;
+    }
+    try {
+      if (await claimPersistentStorageRequest()) {
+        setPersistentStorageStatus((await storage.persist()) ? 'persistent' : 'best-effort');
+      }
+    } catch (error) {
+      // A missing claim must never turn into a repeated permission prompt.
+      setPersistentStorageStatus('unknown');
+      console.warn('Could not request persistent storage', error);
+    }
+  })();
+  return persistenceOperation;
+}
+
+async function claimPersistentStorageRequest(): Promise<boolean> {
+  return withDb(
+    async (db) =>
+      new Promise<boolean>((resolve, reject) => {
+        const tx = db.transaction(metaStoreName, 'readwrite');
+        const store = tx.objectStore(metaStoreName);
+        const read = store.get(persistentStorageRequestMetaKey);
+        let claimed = false;
+        read.addEventListener('success', () => {
+          if (read.result === undefined) {
+            claimed = true;
+            store.put({ key: persistentStorageRequestMetaKey, requestedAt: Date.now() });
+          }
+        });
+        tx.addEventListener('complete', () => {
+          resolve(claimed);
+        });
+        tx.addEventListener('abort', () => {
+          reject(tx.error ?? new Error('Failed to record the persistent storage request'));
+        });
+      }),
+  );
 }
 
 const [markerDirectoryName, markerFileName] = workspaceMarkerPath.split('/') as [string, string];
@@ -702,7 +785,6 @@ async function createWorkspaceLocked(
 ): Promise<WorkspaceConnection> {
   return withProjectRootConfigurationMutation(async () =>
     withDb(async (db) => {
-      const storagePersisted = await ensurePersistentStorage();
       const marker = await readWorkspaceMarker(handle);
       const existing = await readAllWorkspaces(db);
       /* oxlint-disable eslint/no-await-in-loop -- Handle identity checks must stop at the first matching durable workspace. */
@@ -720,7 +802,6 @@ async function createWorkspaceLocked(
             name: options?.name ?? workspace.name,
             slug,
             lastConnectedAt: Date.now(),
-            ...(storagePersisted === undefined ? {} : { storagePersisted }),
           };
           await new Promise<void>((resolve, reject) => {
             const tx = db.transaction([workspacesStoreName, handlesStoreName], 'readwrite');
@@ -746,7 +827,6 @@ async function createWorkspaceLocked(
           ...markedWorkspace,
           name: options?.name ?? markedWorkspace.name,
           lastConnectedAt: Date.now(),
-          ...(storagePersisted === undefined ? {} : { storagePersisted }),
         };
         await new Promise<void>((resolve, reject) => {
           const tx = db.transaction([workspacesStoreName, handlesStoreName], 'readwrite');
@@ -775,7 +855,6 @@ async function createWorkspaceLocked(
         name: options?.name ?? handle.name,
         lastConnectedAt: Date.now(),
         slug,
-        ...(storagePersisted === undefined ? {} : { storagePersisted }),
       };
 
       await new Promise<void>((resolve, reject) => {
@@ -1450,11 +1529,6 @@ function isFlatProjectBasePath(providerBasePath: string): boolean {
   }
 }
 
-// Profiles that connected their workspace before R1 landed never re-run
-// createWorkspace, so the connect-time persist() request alone would leave
-// them evictable forever. One boot-time request closes that gap.
-let persistRequestedThisSession = false;
-
 /** Why a workspace was left out of the route topology. */
 export type WorkspaceRootSkip = {
   readonly workspaceId: string;
@@ -1520,10 +1594,6 @@ export function setCheckoutRootConfigs(routes: readonly CheckoutRootConfig[]): b
 export async function getProjectRootConfigs(
   onRootSkipped?: (skip: WorkspaceRootSkip) => void,
 ): Promise<ProjectRootConfiguration> {
-  if (!persistRequestedThisSession) {
-    persistRequestedThisSession = true;
-    void ensurePersistentStorage();
-  }
   const { configs, handles, workspaces } = await withDb(async (db) => {
     const [configs, handles, workspaces] = await Promise.all([
       readAllProjectFileSystemConfigs(db),

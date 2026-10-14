@@ -1,7 +1,11 @@
+import type { MetaFunction } from 'react-router';
+import type { Handle } from '#types/matches.types.js';
+import { PageContent } from '#components/layout/page-content.js';
+import { PageHeader } from '#components/layout/page-header.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Artifact } from '@taucad/runtime';
 import { Button } from '@taucad/ui/components/button';
-import { ModelViewer } from '#components/model-viewer.js';
+import { ModelViewer } from '@taucad/viewer/model-viewer';
 import { pairedCaseVerdict } from '#routes/debug.geospec/paired-result.js';
 import { ENV } from '#environment.config.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
@@ -32,9 +36,11 @@ import type {
 } from '../../../../../packages/geospec-engine/experiments/performance-lab/performance-lab-runner.js';
 /* oxlint-enable no-restricted-imports */
 
-const engines = ['legacy-wasm', 'combined-st', 'combined-mt', 'native-desktop'] as const;
+export const meta: MetaFunction = () => [{ title: 'GeoSpec performance lab · Tau' }];
+export const handle: Handle = { enableOverflowY: true };
+
+const engines = ['combined-st', 'combined-mt', 'native-desktop'] as const;
 const label = {
-  'legacy-wasm': 'Legacy WASM',
   'combined-st': 'Combined WASM ST',
   'combined-mt': 'Combined WASM MT',
   'native-desktop': 'Desktop native',
@@ -195,11 +201,7 @@ function GeoSpecLab(): React.JSX.Element {
     const runNumber = runSequence.current++;
     const selectedCombined: Engine[] =
       wasmMode === 'compare' ? ['combined-st', 'combined-mt'] : [wasmMode === 'mt' ? 'combined-mt' : 'combined-st'];
-    const available: Engine[] = [
-      'legacy-wasm',
-      ...selectedCombined,
-      ...(desktop ? (['native-desktop'] as Engine[]) : []),
-    ];
+    const available: Engine[] = [...selectedCombined, ...(desktop ? (['native-desktop'] as Engine[]) : [])];
     const offset = runNumber % available.length;
     const engineOrder =
       wasmMode === 'compare' ? available : [...available.slice(offset), ...available.slice(0, offset)];
@@ -294,23 +296,27 @@ function GeoSpecLab(): React.JSX.Element {
   };
 
   if (!fixture) {
-    return <main className='p-6'>No performance lab fixtures are available.</main>;
+    return (
+      <PageContent className='space-y-6'>
+        <PageHeader title='GeoSpec performance lab' />
+        <p>No performance lab fixtures are available.</p>
+      </PageContent>
+    );
   }
   return (
-    <main className='min-h-screen bg-background p-4 text-foreground md:p-6'>
-      <div className='mx-auto max-w-screen-2xl space-y-6'>
+    <PageContent>
+      <div className='space-y-6'>
         <header className='space-y-1'>
-          <p className='font-mono text-xs text-muted-foreground'>TAU / DEBUG / GEOSPEC</p>
-          <h1 className='text-2xl font-semibold'>GeoSpec performance lab</h1>
+          <PageHeader title='GeoSpec performance lab' />
           <p className='text-sm text-muted-foreground'>
             Actual engine results, one fixture admission per run. Preview loading is outside engine timings.
           </p>
         </header>
         <div className='flex flex-wrap items-end gap-3 border-b pb-4'>
-          <label className='grid gap-1 text-sm'>
+          <label className='grid max-w-full min-w-0 gap-1 text-sm'>
             Fixture
             <select
-              className='h-9 rounded-md border bg-background px-2'
+              className='h-9 w-full min-w-0 rounded-md border bg-background px-2'
               value={fixtureId}
               disabled={busy}
               onChange={(event) => {
@@ -463,9 +469,8 @@ function GeoSpecLab(): React.JSX.Element {
           <div className='min-w-0 space-y-2 xl:col-span-3'>
             <h2 className='text-lg font-medium'>Matcher comparison</h2>
             <p className='text-xs text-muted-foreground'>
-              Startup includes module import and eager initialization. Legacy kernels initialize lazily during admission
-              or evaluation, so compare engine and UI totals across engines. Admission is shared by every selected
-              matcher; UI wall includes worker transport.
+              Startup includes module import and eager initialization. Admission is shared by every selected matcher; UI
+              wall includes worker transport.
             </p>
             <div className='overflow-x-auto rounded-md border'>
               <table className='w-full min-w-[52rem] border-collapse text-left text-sm'>
@@ -625,13 +630,17 @@ function GeoSpecLab(): React.JSX.Element {
           </p>
         ) : null}
       </div>
-    </main>
+    </PageContent>
   );
 }
 
 export default function GeoSpecDebugRoute(): React.JSX.Element {
   if (!ENV.TAU_DEBUG) {
-    return <main className='p-6'>Not found</main>;
+    return (
+      <PageContent>
+        <PageHeader title='Not found' />
+      </PageContent>
+    );
   }
   return <GeoSpecLab />;
 }

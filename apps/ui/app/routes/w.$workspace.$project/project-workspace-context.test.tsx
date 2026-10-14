@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { act, fireEvent, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkbenchLaneNode, WorkbenchLayout } from '@taucad/workbench';
-import type * as KeyboardModule from '#hooks/use-keyboard.js';
+import type * as KeyboardModule from '@taucad/ui/components/keyboard';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 
 const state = vi.hoisted(() => ({ isMobile: false, isEditorReady: true }));
@@ -47,14 +47,14 @@ vi.mock('@xstate/react', () => ({
 }));
 const stubKeybinding = (): ReturnType<typeof KeyboardModule.useKeybinding> => ({ formattedKeyCombination: '' });
 const keyboard = vi.hoisted(() => ({ useKeybinding: vi.fn<typeof KeyboardModule.useKeybinding>() }));
-vi.mock('#hooks/use-keyboard.js', async (importOriginal) => ({
+vi.mock('@taucad/ui/components/keyboard', async (importOriginal) => ({
   ...(await importOriginal<typeof KeyboardModule>()),
   useKeybinding: keyboard.useKeybinding,
 }));
 
 const { ProjectWorkspaceProvider, resolveCompactAuxiliary, useFileReturn, useProjectWorkspace } =
   await import('./project-workspace-context.js');
-const keyboardActual = await vi.importActual<typeof KeyboardModule>('#hooks/use-keyboard.js');
+const keyboardActual = await vi.importActual<typeof KeyboardModule>('@taucad/ui/components/keyboard');
 type Workspace = NonNullable<ReturnType<typeof useProjectWorkspace>>;
 
 let workspace: Workspace;

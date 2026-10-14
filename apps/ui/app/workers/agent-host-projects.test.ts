@@ -30,7 +30,13 @@ const provideOf = (hostId: string): AgentHostProjectProvide =>
 const rebridgeOf = (hostId: string): AgentHostProjectRebridge => {
   const fileSystem = new MessageChannel();
   const projectRoot = new MessageChannel();
-  return { projectId: 'project-1', hostId, fileSystemPort: fileSystem.port1, projectRootPort: projectRoot.port1 };
+  return {
+    projectId: 'project-1',
+    hostId,
+    fileSystemPort: fileSystem.port1,
+    projectRootPort: projectRoot.port1,
+    placementPort: new MessageChannel().port1,
+  };
 };
 
 /**

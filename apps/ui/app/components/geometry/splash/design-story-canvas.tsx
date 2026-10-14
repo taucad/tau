@@ -5,8 +5,8 @@ import { agentLane, assemblyStep, assemblySteps, explodeLift, partPose, printedP
 import type { DesignStoryActor } from '#components/geometry/splash/design-story.machine.js';
 import type { StoryBeat } from '#components/geometry/splash/design-story.constants.js';
 import { storyFrame } from '#components/geometry/splash/design-story-timeline.js';
-import { createTauR3fGlProp } from '#components/geometry/graphics/three/canvas-three-gl.js';
-import { readGraphicsBackendQueryOverride } from '#components/geometry/graphics/graphics-backend.js';
+import { createTauR3fGlProp } from '@taucad/viewer/graphics/three/canvas-three-gl';
+import { readGraphicsBackendQueryOverride } from '#utils/graphics-backend-override.js';
 import { createPrintVolume, gearboxColors } from '#components/geometry/gearbox/gearbox.js';
 import type { GearboxPart } from '#components/geometry/gearbox/gearbox.js';
 import { useGearboxParts } from '#components/geometry/gearbox/use-gearbox-parts.js';
@@ -295,7 +295,7 @@ export function DesignStoryCanvas({ actor, isPlaying, onReady }: StoryProperties
   const [error, setError] = useState<Error>();
   // Public viewers stay on WebGL; the existing internal override is used for parity checks.
   const backend = readGraphicsBackendQueryOverride() ?? 'webgl';
-  const gl = useMemo(() => createTauR3fGlProp(backend, [], setError), [backend]);
+  const gl = useMemo(() => createTauR3fGlProp(backend, [], { onCreateError: setError }), [backend]);
   const parts = useGearboxParts(onReady, setError);
   if (error) {
     throw error;

@@ -128,6 +128,19 @@ const attributesMarker = '# BEGIN Tau generated — large objects are git LFS ob
 const markerEnd = '# END Tau generated';
 
 /**
+ * Whether an ignore or attributes file carries one of Tau's generated blocks.
+ *
+ * A store Tau created writes its ignore block before `git init`, so a
+ * repository already at the project path whose files carry neither block is
+ * one the person made.
+ *
+ * @param content - File content, or `undefined` when absent.
+ * @returns Whether a generated block is present.
+ */
+export const hasGeneratedBlock = (content: string | undefined): boolean =>
+  content !== undefined && (content.includes(ignoreMarker) || content.includes(attributesMarker));
+
+/**
  * Replace Tau's generated block in a hand-written file, or append it.
  *
  * Existing content is preserved: a hand-written file keeps every line it had,

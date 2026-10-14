@@ -16,11 +16,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { SearchInput } from '#components/search-input.js';
-import { HighlightText } from '#components/highlight-text.js';
+import { SearchInput } from '@taucad/ui/components/search-input';
+import { HighlightText } from '@taucad/ui/components/highlight-text';
 import {
   PaneviewHeader,
   PaneviewHeaderControls,

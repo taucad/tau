@@ -66,7 +66,7 @@ import { ProjectActionDropdown } from '#components/project-library/project-actio
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { formatRelativeTime } from '#utils/date.utils.js';
-import { Loader } from '#components/ui/loader.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { cookieName } from '#constants/cookie.constants.js';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { flagParameter } from '#utils/search-parameter.codecs.js';
@@ -165,7 +165,7 @@ function ManifestIssueLines({ issue }: { readonly issue: ProjectManifestParseIss
  *
  * @returns The library.
  */
-export function ProjectLibrary(): React.JSX.Element {
+export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1 | 2 }): React.JSX.Element {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
   /*
    * D1: the Trash is a place, not a menu tick. `/projects?trash=1` is what the
@@ -442,6 +442,7 @@ export function ProjectLibrary(): React.JSX.Element {
     <PageContent>
       <PageHeader
         title='Projects'
+        headingLevel={headingLevel}
         className='mb-6'
         action={
           <Button asChild>

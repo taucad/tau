@@ -132,6 +132,94 @@ export type KernelFileSystem = Omit<RuntimeFileSystemBase, 'watch'> & {
   ensureDir(path: string): Promise<void>;
 };
 
+/**
+ * One holder's share of a realm-shared resource.
+ * @public
+ */
+export type RealmHold<Value> = {
+  /** The realm's single instance, shared with every other holder. */
+  readonly value: Value;
+  /** Give up this share; idempotent. The last release disposes the instance. */
+  release(): void;
+};
+
+/**
+ * Slot holding a realm group's live instance. Keyed with `Symbol.for` so duplicate runtime copies in one realm
+ * read the same slot; its shape is part of the same-realm plugin ABI (`runtimePluginAbiVersion`).
+ * @internal
+ */
+export const realmGroupState: unique symbol = Symbol.for('@taucad/runtime/realm-group');
+
+/**
+ * Live state of one realm group, carried by its token.
+ * @internal
+ */
+export type RealmGroupState<Value> = {
+  /** `runtimePluginAbiVersion` of the runtime copy that made the token. */
+  readonly abi: number;
+  /** The realm's instance of this group while it has holders or a pending creation. */
+  entry:
+    | {
+        readonly key: string;
+        readonly value: Promise<Value>;
+        readonly dispose: ((value: Value) => void) | undefined;
+        holders: number;
+      }
+    | undefined;
+};
+
+/**
+ * A backend that every kernel in a JavaScript realm must share, such as a library's module-scope WASM instance.
+ *
+ * Create it once, at module scope, with `createRealmGroup`; hold it through `services.realm`. The token carries
+ * the realm's one instance, so a hold returns exactly what this token's `create` made.
+ * @public
+ */
+export type RealmGroup<Value> = {
+  /** Realm-wide name, e.g. `'replicad-occt'`. A second token with a held name is refused. */
+  readonly name: string;
+  /** @internal */
+  readonly [realmGroupState]: RealmGroupState<Value>;
+};
+
+/**
+ * Input of `services.realm.hold`.
+ * @public
+ */
+export type RealmHoldInput<Value> = {
+  /** The backend to hold; its token fixes `Value`. */
+  readonly group: RealmGroup<Value>;
+  /** Build identity of the instance, e.g. `'single:<wasmUrl>'`. Another key for a held group is refused. */
+  readonly key: string;
+  /** Creates the instance once for every holder. */
+  readonly create: () => Promise<Value>;
+  /** Frees the instance after its last holder released it. */
+  readonly dispose?: (value: Value) => void;
+};
+
+/**
+ * Realm-shared resources: at most one live instance per group in a JavaScript realm.
+ *
+ * For a library that binds its backend at module scope (replicad's OpenCASCADE), every kernel in
+ * the realm must use the same instance. Hold it from `initialize` and release it from `onDispose`.
+ * @public
+ */
+export type RealmResources = {
+  /**
+   * Hold the realm's single instance of `group`; `key` identifies its build.
+   *
+   * Concurrent and later holders of the same group and key share one `create` call. A rejected
+   * `create` is retried by the next holder. The hold rejects with an error whose `issues` carry
+   * `KERNEL_REALM_CONFLICT` when the realm holds another `key` of the group (`details.reason: 'build'`),
+   * another token holds the group's name (`'declaration'`), or the token or the realm's shared state
+   * comes from a runtime copy with another plugin ABI (`'runtime'`).
+   *
+   * @param input - Group token, build key, creator and optional disposer.
+   * @returns This holder's share of the instance.
+   */
+  hold<Value>(input: RealmHoldInput<Value>): Promise<RealmHold<Value>>;
+};
+
 // =============================================================================
 // Kernel Runtime
 // =============================================================================
@@ -168,6 +256,8 @@ export type KernelRuntime = {
   tracer: RuntimeSpanTracer;
   /** Compute reuse facet for the active operation. `off` carries no operations at all. */
   readonly compute: KernelComputeCapability;
+  /** Resources shared by every kernel in this JavaScript realm. */
+  readonly realm: RealmResources;
   /** Resolve a host-compiled WASM module by its absolute asset URL. */
   getCompiledWasmModule(url: string): WebAssembly.Module | undefined;
   /**

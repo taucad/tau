@@ -782,12 +782,20 @@ it('rejects an invalid target before opening observation or loading authority', 
 });
 
 /** Files over an empty root whose one sidecar watch the test can reset or close. */
-const watchedFiles = (): Readonly<{ files: ParameterFiles; emit(type: string): void; close(): void }> => {
+const watchedFiles = (): Readonly<{
+  files: ParameterFiles;
+  emit(type: string): void;
+  close(): void;
+  opened(): number;
+}> => {
   const closed = Promise.withResolvers<void>();
   let onEvent: ((event: Readonly<{ type: string }>) => void) | undefined;
+  let opened = 0;
   return {
+    opened: () => opened,
     files: {
       watchReady: (_request, handler) => {
+        opened += 1;
         onEvent = handler;
         return { ready: Promise.resolve(), closed: closed.promise, unsubscribe: () => undefined };
       },
@@ -830,11 +838,141 @@ it('should fail a parameter actor with WATCH_CLOSED when its watch closes', asyn
   actor.send({ type: 'close' });
 });
 
-it('should fail a parameter actor with WATCH_RESET when its watch resets', async () => {
+it('should re-arm and reload a parameter actor when its watch resets', async () => {
   const watch = watchedFiles();
   const actor = await readyFactoryActor(watch.files);
   watch.emit('reset');
-  expect(actor.getSnapshot().context.diagnostic).toEqual({ code: 'WATCH_RESET', message: 'Parameter watch reset.' });
-  expect(actor.getSnapshot().matches({ open: 'disconnected' })).toBe(true);
+  expect(actor.getSnapshot().matches({ open: 'loading' })).toBe(true);
+  await waitFor(actor, (state) => state.matches({ open: 'ready' }));
+  expect(watch.opened()).toBe(2);
+  expect(actor.getSnapshot().context.diagnostic).toBeUndefined();
+  actor.send({ type: 'close' });
+});
+
+/**
+ * A project with no `.tau/` yet, whose sidecar bytes live in memory. Reads and writes can be held, so a test can land a
+ * watch reset while one is in flight, as a native watch re-arming on a newly created `.tau/parameters/` does.
+ */
+const freshProjectFiles = () => {
+  let sidecar: Uint8Array<ArrayBuffer> | undefined;
+  let onEvent: ((event: Readonly<{ type: string }>) => void) | undefined;
+  let opened = 0;
+  let readGate: Promise<void> | undefined;
+  let writeGate: Promise<void> | undefined;
+  const hold = (): Readonly<{ gate: Promise<void>; release(): void }> => {
+    const held = Promise.withResolvers<void>();
+    return {
+      gate: held.promise,
+      release: () => {
+        held.resolve();
+      },
+    };
+  };
+  const files: ParameterFiles = {
+    watchReady: (_request, handler) => {
+      opened += 1;
+      onEvent = handler;
+      return {
+        ready: Promise.resolve(),
+        closed: new Promise<void>(() => {
+          /* Never closes on its own. */
+        }),
+        unsubscribe: () => undefined,
+      };
+    },
+    exists: async () => {
+      await readGate;
+      return sidecar !== undefined;
+    },
+    readFile: async () => sidecar!,
+    writeFileChecked: async (write) => {
+      await writeGate;
+      sidecar = typeof write.data === 'string' ? new TextEncoder().encode(write.data) : write.data;
+      return { status: 'applied', content: sidecar };
+    },
+  };
+  return {
+    files,
+    opened: () => opened,
+    reset: () => onEvent?.({ type: 'reset' }),
+    holdRead: () => {
+      const held = hold();
+      readGate = held.gate;
+      return () => {
+        readGate = undefined;
+        held.release();
+      };
+    },
+    holdWrite: () => {
+      const held = hold();
+      writeGate = held.gate;
+      return () => {
+        writeGate = undefined;
+        held.release();
+      };
+    },
+  };
+};
+
+const freshProjectActor = async () => {
+  const fixture = await parameterSetHarness();
+  fixture.actor.stop();
+  const files = freshProjectFiles();
+  const actor = createParameterSetActor({
+    target: fixture.snapshot.target,
+    files: files.files,
+    resolve: async () => fixture.snapshot.manifest,
+  });
+  await waitFor(actor, (state) => state.matches({ open: 'ready' }));
+  const widthRequest = (requestId: string, value: number): ParameterSetRequest => ({
+    requestId,
+    fingerprint: requestId,
+    pressure: 'final',
+    expected: actor.getSnapshot().context.current!.identity,
+    operation: { kind: 'native-value', group: 'default', pointer: '/width', value },
+  });
+  return { actor, files, widthRequest };
+};
+
+/* What an agent read waits for (`createRuntimeParameterAgentClient.getParameters`). */
+const readSettled = (state: ReturnType<ReturnType<typeof createParameterSetActor>['getSnapshot']>): boolean =>
+  state.matches({ open: 'ready' }) ||
+  state.matches({ open: 'confirmation' }) ||
+  state.matches({ open: 'disconnected' }) ||
+  state.matches({ open: 'uncertain' }) ||
+  state.status === 'done';
+
+it('should answer a read that a watch reset interrupts with the first sidecar write', async () => {
+  const { actor, files, widthRequest } = await freshProjectActor();
+  await expect(submitParameterRequest(actor, widthRequest('first', 30))).resolves.toMatchObject({
+    status: 'committed',
+  });
+  const written = actor.getSnapshot().context.current!.bytes;
+
+  const release = files.holdRead();
+  actor.send({ type: 'resolve' });
+  files.reset();
+  release();
+  const settled = await waitFor(actor, readSettled);
+
+  expect(settled.matches({ open: 'ready' })).toBe(true);
+  expect(settled.context.diagnostic).toBeUndefined();
+  expect(settled.context.current?.bytes).toEqual(written);
+  expect(files.opened()).toBe(2);
+  actor.send({ type: 'close' });
+});
+
+it('should commit a write that a watch reset overtakes and re-arm once it settles', async () => {
+  const { actor, files, widthRequest } = await freshProjectActor();
+  const release = files.holdWrite();
+  const outcome = submitParameterRequest(actor, widthRequest('first', 30));
+  await waitFor(actor, (state) => state.matches({ open: 'applying' }));
+  files.reset();
+  release();
+
+  await expect(outcome).resolves.toMatchObject({ status: 'committed' });
+  const settled = await waitFor(actor, readSettled);
+  expect(settled.matches({ open: 'ready' })).toBe(true);
+  expect(files.opened()).toBe(2);
   actor.send({ type: 'close' });
 });

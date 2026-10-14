@@ -201,6 +201,29 @@ export function resolveGitHubImportTarget(splatPath: string, search: string): Gi
 }
 
 /**
+ * What the import route opens: a GitHub repository, the empty form, or the form holding an address it cannot import.
+ *
+ * @param splatPath - The `*` route parameter.
+ * @param search - The query string, including its leading `?`.
+ * @returns The target; `rejectedUrl` names an address that is not a GitHub repository.
+ */
+export function resolveImportRoute(
+  splatPath: string,
+  search: string,
+): GitHubRepoInfo & { readonly rejectedUrl?: string } {
+  return (
+    resolveGitHubImportTarget(splatPath, search) ?? {
+      owner: '',
+      repo: '',
+      ref: 'main',
+      path: '',
+      mainFile: '',
+      rejectedUrl: normalizeGitHubUrl(splatPath),
+    }
+  );
+}
+
+/**
  * Document title and description for a resolved import target.
  *
  * @param target - The resolved import target.

@@ -1886,3 +1886,21 @@ main > .band:first-child::before {
     border: 0;
   }
 }
+
+/* The head bootstrap chooses a document before exposing either experience. */
+.entry-continuation {
+  display: none;
+}
+.entry-pending body > :not(.entry-continuation) {
+  display: none;
+}
+.entry-pending .entry-continuation {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gutter);
+  color: var(--foreground);
+  background: var(--background);
+}

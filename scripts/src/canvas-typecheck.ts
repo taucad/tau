@@ -19,6 +19,12 @@ const subject = basename(dirname(canvasRoot));
 
 // Mirrors the aliases in canvas-vite.config.ts; `paths` in an extending tsconfig replaces the base map, so the app's entries are restated.
 const paths: Record<string, string[]> = {
+  '@taucad/billing': [resolve(repoRoot, 'apps/libs/billing/src/index.ts')],
+  '@taucad/billing/hooks/*': [
+    resolve(repoRoot, 'apps/libs/billing/src/hooks/*.ts'),
+    resolve(repoRoot, 'apps/libs/billing/src/hooks/*.tsx'),
+  ],
+  '@tanstack/*': [resolve(repoRoot, 'apps/ui/node_modules/@tanstack/*')],
   '@taucad/ui/*': [resolve(repoRoot, 'packages/ui/src/*')],
   '@taucad/grammars': [resolve(repoRoot, 'libs/grammars/src/index.ts')],
   '@tau/api-guide': [resolve(repoRoot, 'scripts/canvas/api-guide.tsx')],

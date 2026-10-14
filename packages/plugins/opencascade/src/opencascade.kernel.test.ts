@@ -7,7 +7,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { Description, ExportResult, Rendering } from '@taucad/runtime/client';
 import { opencascadeKernel } from '#opencascade.kernel.js';
-import { getModuleRegistry } from '@taucad/runtime/kernel';
+import type * as KernelModule from '@taucad/runtime/kernel';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { OpenCascadeInstance } from 'libcascade/init';
 import {
@@ -23,6 +23,22 @@ import {
 import { esbuildBundler } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { opencascadeExportSchemas, opencascadeRenderSchema } from '#opencascade.schemas.js';
+
+/** The `libcascade` module object the kernel registered most recently (its OpenCascade instance). */
+const registered = vi.hoisted(() => ({ libcascade: undefined as unknown }));
+
+vi.mock('@taucad/runtime/kernel', async (importOriginal) => {
+  const actual = await importOriginal<typeof KernelModule>();
+  return {
+    ...actual,
+    registerKernelModule(...arguments_: Parameters<typeof actual.registerKernelModule>) {
+      if (arguments_[1].name === 'libcascade') {
+        registered.libcascade = arguments_[1].exports;
+      }
+      actual.registerKernelModule(...arguments_);
+    },
+  };
+});
 
 // =============================================================================
 // Test Utilities
@@ -134,7 +150,7 @@ function assertDocumentFailure(result: Description | ExportResult | Rendering, c
 }
 
 function assertStepRoundTripVolumeMm3(stepBytes: Uint8Array<ArrayBuffer>, expectedMm3: number): void {
-  const oc = getModuleRegistry().get('libcascade') as unknown as OpenCascadeInstance | undefined;
+  const oc = registered.libcascade as OpenCascadeInstance | undefined;
   expect(oc, 'expected worker to have registered libcascade module').toBeDefined();
   const cascade = oc!;
 
@@ -498,7 +514,7 @@ export default function main() {
       assertRenderingSuccess(result, 'named PBR shape createGeometry for native-handle snapshot');
       expect(result).not.toHaveProperty('serializedNativeHandle');
 
-      const oc = getModuleRegistry().get('libcascade') as unknown as OpenCascadeInstance | undefined;
+      const oc = registered.libcascade as OpenCascadeInstance | undefined;
       expect(oc, 'expected worker to have registered libcascade module').toBeDefined();
       const cascade = oc!;
       const writeSpy = vi.spyOn(cascade.BRepTools, 'Write');
@@ -508,6 +524,7 @@ export default function main() {
       let snapshotNumber = 0;
       const context = {
         oc: cascade,
+        occt: { value: cascade, release: vi.fn() },
         isParallelMeshing: false,
         tracingSummary: undefined,
         nextSnapshotPath: (index: number) => `/tmp/tau_opencascade_test_snapshot_${++snapshotNumber}_${index}.brep`,

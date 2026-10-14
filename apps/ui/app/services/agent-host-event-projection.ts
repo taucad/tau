@@ -1,3 +1,4 @@
+import { cadReferencesSchema } from '@taucad/chat/references';
 import { z } from 'zod';
 import type { ProviderMetadata, UIMessageChunk } from 'ai';
 import type { AgentLiveEvent, AgentLogEvent, KnownProjectionEvent, ProviderMessageMetadata } from '@taucad/agent-host';
@@ -580,11 +581,16 @@ export const projectAgentHostUserMessage = (message: UserProviderMessage, record
   const createdAt =
     message.metadata?.timestamp ??
     (recordedTimestamp !== undefined && Number.isFinite(recordedTimestamp) ? recordedTimestamp : undefined);
+  const references = cadReferencesSchema.safeParse(message.metadata?.['references']);
   return {
     id: message.id,
     role: 'user',
     parts,
-    metadata: { status: 'success', ...(createdAt === undefined ? {} : { createdAt }) },
+    metadata: {
+      status: 'success',
+      ...(createdAt === undefined ? {} : { createdAt }),
+      ...(references.success && references.data.length > 0 ? { references: references.data } : {}),
+    },
   };
 };
 

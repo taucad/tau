@@ -13,7 +13,17 @@ const originalSha256 = '3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a82de83
 const profileSha256 = 'eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d';
 const successorSha256 = '5dfd1c400ff18b91804cf5514dfc862f47a975bea00877fbd4f2d5ffe609e34f';
 const materialSuccessorSha256 = 'c36f2296878e3daa57cc0cdfe8c86dac3b77ed80d6ddbd60de68b31a64bba5f7';
-const materialCorpusSha256 = '45b98aa9bdc83b0846e74837e5891f4d9c7c7a51b6488db2ae23e8ccbe833975';
+// Each separately authored material authority: v6-01 history and its v6-02 successor.
+const materialCorpora = new Map([
+  [
+    '45b98aa9bdc83b0846e74837e5891f4d9c7c7a51b6488db2ae23e8ccbe833975',
+    { id: 'material-v6-01', meshes: 20, records: 46 },
+  ],
+  [
+    '613a98156d7cfad0b28e6b6caba654fc443b9c2ecba64aa0e9a8a6738df9b13d',
+    { id: 'material-v6-02', meshes: 22, records: 51 },
+  ],
+]);
 const oldNumericProfileField = '"numericProfile":"geospec-st-logical-requests-v3"';
 const stringAxisIds = new Set([
   'a2/invalid-claim/string-axis',
@@ -247,23 +257,25 @@ export const joinCurrentCorpus = async (originalBytes, profileBytes, bindingProf
 };
 
 /**
- * Read the separately authored v6 material controls, without projecting old geometry oracles.
+ * Read a pinned separately authored v6 material authority, without projecting old geometry oracles.
  * Every admission is a genuine existing glTF byte ingress, not a synthetic mesh subject.
  * @internal
  * @type {(bytes: Uint8Array) => Promise<Corpus & { materialSha256: string }>}
  */
 export const loadMaterialCorpus = async (bytes) => {
-  requireMatch((await digest(bytes)) === materialCorpusSha256, 'material corpus SHA-256');
+  const materialSha256 = await digest(bytes);
+  const pinned = materialCorpora.get(materialSha256);
+  requireMatch(pinned !== undefined, 'material corpus SHA-256');
   const corpus = /** @type {Corpus & { authority: { id: string, numericProfile: string } }} */ (
     JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
   );
   requireMatch(
     corpus.schemaVersion === 1 &&
-      corpus.authority.id === 'material-v6-01' &&
+      corpus.authority.id === pinned?.id &&
       corpus.authority.numericProfile === 'geospec-demand-v6',
     'material authority',
   );
-  requireMatch(corpus.meshes.length === 20 && corpus.records.length === 46, 'material counts');
+  requireMatch(corpus.meshes.length === pinned?.meshes && corpus.records.length === pinned.records, 'material counts');
   const ids = new Set(corpus.meshes.map((mesh) => mesh.id));
   requireMatch(ids.size === corpus.meshes.length, 'material admission IDs');
   requireMatch(new Set(corpus.records.map((row) => row.id)).size === corpus.records.length, 'material record IDs');
@@ -346,7 +358,7 @@ export const loadMaterialCorpus = async (bytes) => {
       `${row.id}: selected subject identity`,
     );
   }
-  return { ...corpus, materialSha256: materialCorpusSha256 };
+  return { ...corpus, materialSha256 };
 };
 
 /**

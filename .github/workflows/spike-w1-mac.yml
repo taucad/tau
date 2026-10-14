@@ -1107,3 +1107,26 @@ jobs:
 
       - *annotate
       - *upload-evidence
+
+  # The seed entries exist only for this run: delete them so the shared 10 GB cache keeps the
+  # GeoSpec entries. The cache REST path is unreachable from outside, so the run cleans up itself.
+  cleanup:
+    name: Delete this run's seed caches
+    needs: [seed, s14, s15]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete the spike-w1 seed cache entries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          gh cache list --key spike-w1-seed --limit 100 || true
+          for key in "spike-w1-seed-$RUN_KEY" "spike-w1-seed-miss-$RUN_KEY" spike-w1-seed-38381658620-1; do
+            gh cache delete "$key" || echo "no cache entry $key"
+          done
+          gh cache list --key spike-w1-seed --limit 100 || true

@@ -47,6 +47,17 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
       await selectKernel(page, 'Build123d');
       await connectPickedFolder(session);
       expect(await selectAgent(page, 'Grok Build', 'Grok 4.7')).toMatch(/^Agent and model: Grok Build, /u);
+      await page.getByRole('button', { name: /^Agent and model: Grok Build/u }).click();
+      const reasoning = page.getByRole('tablist', { name: /Reasoning for Grok Build/u });
+      await expect
+        .poll(async () => reasoning.getByRole('tab').allTextContents())
+        .toEqual(['Low', 'Medium', 'High', 'Extra High']);
+      await reasoning.getByRole('tab', { name: 'Low', exact: true }).click();
+      await expect
+        .poll(async () => reasoning.getByRole('tab', { name: 'Low', exact: true }).getAttribute('aria-selected'))
+        .toBe('true');
+      await session.capture('grok-reasoning-order');
+      await page.keyboard.press('Escape');
       const slug = await submitPrompt(
         page,
         'Remember the number 8127. Reply with the single word pong. Do not use tools.',

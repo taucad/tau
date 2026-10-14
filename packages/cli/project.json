@@ -33,7 +33,7 @@
       }
     },
     "test": {
-      "dependsOn": ["^copy-assets"]
+      "dependsOn": ["build", "^copy-assets"]
     },
     "test:ds3": {
       "executor": "nx:run-commands",

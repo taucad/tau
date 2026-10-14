@@ -298,6 +298,8 @@ try {
   const packagePaths = await packager({
     dir: stageRoot,
     out: outputRoot,
+    // Packager clears its temp base at startup; keep other worktrees out of that cleanup.
+    tmpdir: resolve(outputRoot, 'packager-tmp'),
     overwrite: true,
     platform: 'darwin',
     arch: 'arm64',

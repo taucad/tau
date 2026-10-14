@@ -41,11 +41,14 @@ describe('macOS GeoSpec assembly selection', () => {
     const conditional = source.indexOf('if (selectedGeoSpecAssembly === undefined)', selection);
     const snapshot = source.indexOf("'snapshot-delivery'", conditional);
     const selected = source.indexOf('geospecAssemblyInput = selections[0]', snapshot);
-    const realPath = source.indexOf('const geospecAssemblyRoot = await realpath(', selected);
+    const realPath = source.indexOf('await realpath(resolve(workspaceRoot, geospecAssemblyInput))', selected);
     const stage = source.indexOf('await rm(outputRoot, { recursive: true, force: true })', realPath);
     const nativeCopy = source.indexOf('copyGeoSpecNativeAssembly(', stage);
     const sourceCopy = source.indexOf('copyGeoSpecSourceRelink(geospecAssemblyRoot', nativeCopy);
-    const earlyCleanupBranch = source.indexOf('if (selectedGeoSpecAssembly === undefined)', sourceCopy);
+    const earlyCleanupBranch = source.indexOf(
+      'if (selectedGeoSpecAssembly === undefined && geospecAssemblyRoot)',
+      sourceCopy,
+    );
     const earlyCleanup = source.indexOf(
       'await rm(geospecAssemblyRoot, { recursive: true, force: true })',
       earlyCleanupBranch,

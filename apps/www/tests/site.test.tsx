@@ -1,8 +1,9 @@
+import { detectDesktopPlatform, desktopDownloadHref } from '#www/downloads.js';
 import { test, expect, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
 import { ctaPlacements, sanitizeEvent } from '#www/analytics.js';
-import { environmentHref, stagingDesktop } from '#www/environment.js';
+import { environmentHref, stagingDesktopNote } from '#www/environment.js';
 import { PublishedArticleContent } from '#www/page-components.js';
 import { content as home } from '#app/routes/home.js';
 import { content as product } from '#app/routes/product.js';
@@ -140,8 +141,11 @@ test('should keep staging application links on staging and leave production unch
   expect(environmentHref('https://tau.new/projects/new', 'taucad.dev')).toBe('https://taucad.dev/projects/new');
   expect(environmentHref('https://docs.tau.new/', 'taucad.dev')).toBe('https://docs.taucad.dev/');
   expect(environmentHref('https://tau.new/projects/new', 'tau.new')).toBe('https://tau.new/projects/new');
-  expect(stagingDesktop('tau.new')).toBeUndefined();
-  expect(stagingDesktop('taucad.dev')?.href).toContain('desktop-staging');
+  expect(stagingDesktopNote('tau.new')).toBeUndefined();
+  expect(stagingDesktopNote('taucad.dev')).toContain('signed without notarization');
+  expect(environmentHref('https://downloads.tau.new/latest/Tau-macos-arm64.zip', 'taucad.dev')).toBe(
+    'https://downloads.taucad.dev/latest/Tau-macos-arm64.zip',
+  );
 });
 
 test('should render reviewed articles as escaped text and remove the empty blog state', () => {
@@ -172,4 +176,53 @@ test('should render reviewed articles as escaped text and remove the empty blog 
   expect(html).not.toContain('<script>');
   expect(html).toMatch(/datetime="2026-09-01"/iu);
   expect(renderToStaticMarkup(<MemoryRouter>{blog(true)}</MemoryRouter>)).not.toContain('blog-empty');
+});
+
+test('should render download CTAs and every archive before JavaScript', () => {
+  const html = renderToStaticMarkup(<MemoryRouter>{home()}</MemoryRouter>);
+  const heroLink = /<a\b[^>]*data-placement="hero"[^>]*>/u.exec(html)?.[0];
+  expect(heroLink).toContain('href="/download/"');
+  expect(heroLink).toContain('data-host-download="page"');
+  expect(html).toContain('Download Tau');
+  const downloads = renderToStaticMarkup(<MemoryRouter>{download()}</MemoryRouter>);
+  for (const platform of ['mac', 'macIntel', 'windows', 'linux'] as const) {
+    expect(downloads).toContain(desktopDownloadHref(platform));
+  }
+  expect(downloads).toContain('data-mac-intel="true" hidden=""');
+  expect(downloads).toContain('Download for Intel');
+  expect(downloads).not.toContain('No installer is published');
+});
+
+test('should recommend supported desktop hosts and keep mobile or unknown hosts neutral', () => {
+  const cases: Array<[Parameters<typeof detectDesktopPlatform>[0], ReturnType<typeof detectDesktopPlatform>]> = [
+    [{ userAgentData: { platform: 'macOS' } }, 'mac'],
+    [{ platform: 'MacIntel', userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' }, 'mac'],
+    [{ userAgentData: { platform: 'Windows' } }, 'windows'],
+    [{ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, 'windows'],
+    [{ platform: 'Linux x86_64' }, 'linux'],
+    [{ userAgentData: { platform: 'Android', mobile: true }, platform: 'Linux armv8l' }, undefined],
+    [{ platform: 'MacIntel', maxTouchPoints: 5 }, undefined],
+    [{ userAgent: 'Mozilla/5.0 (X11; CrOS x86_64)' }, undefined],
+    [{ platform: 'Linux aarch64' }, undefined],
+    [{}, undefined],
+  ];
+  for (const [browser, expected] of cases) {
+    expect(detectDesktopPlatform(browser)).toBe(expected);
+  }
+});
+
+test('should reject Linux ARM hints even when another hint only names Linux', () => {
+  for (const architecture of ['aarch64', 'armv8l', 'arm64']) {
+    for (const browser of [
+      {
+        userAgentData: { platform: 'Linux' },
+        platform: `Linux ${architecture}`,
+        userAgent: 'Mozilla/5.0 (X11; Linux)',
+      },
+      { userAgentData: { platform: `Linux ${architecture}` }, platform: 'Linux' },
+      { userAgentData: { platform: 'Linux' }, userAgent: `Mozilla/5.0 (X11; Linux ${architecture})` },
+    ]) {
+      expect(detectDesktopPlatform(browser)).toBeUndefined();
+    }
+  }
 });

@@ -73,6 +73,7 @@ function Navigation({ label }: { label: string }) {
         </Link>
       ))}
       <a href='https://docs.tau.new/'>Docs ↗</a>
+      {label === 'Mobile navigation' ? <a href={`${appOrigin}/auth/sign-in`}>Sign in ↗</a> : null}
     </nav>
   );
 }
@@ -116,8 +117,8 @@ function SiteShell() {
             <Navigation label='Main navigation' />
           </div>
           <div className='header-actions'>
-            <a className='signin' href={`${appOrigin}/projects`} data-open-app>
-              Open app
+            <a className='signin' href={`${appOrigin}/auth/sign-in`}>
+              Sign in
             </a>
             <Button asChild size='sm'>
               <a href='https://tau.new/projects/new' data-event='cta' data-placement='header'>

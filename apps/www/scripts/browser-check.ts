@@ -155,6 +155,43 @@ try {
   assert.equal(await navigationPage.locator('#main:focus').count(), 1);
   assert.deepEqual(navigationErrors, []);
   await navigationContext.close();
+  await serial(
+    [
+      { platform: 'MacIntel', label: 'Mac', file: 'Tau-macos-arm64.zip', intel: true },
+      { platform: 'Win32', label: 'Windows', file: 'Tau-win32-x64.zip', intel: false },
+      { platform: 'Linux x86_64', label: 'Linux', file: 'Tau-linux-x64.tar.gz', intel: false },
+    ],
+    async ({ platform, label, file, intel }) => {
+      const downloadContext = await browser.newContext({ reducedMotion: 'reduce' });
+      await downloadContext.addInitScript((hostPlatform: string) => {
+        Object.defineProperty(navigator, 'platform', { value: hostPlatform });
+        Object.defineProperty(navigator, 'userAgentData', { value: undefined });
+        Object.defineProperty(navigator, 'userAgent', { value: hostPlatform });
+      }, platform);
+      const downloadPage = await downloadContext.newPage();
+      const errors: string[] = [];
+      downloadPage.on('pageerror', (error) => errors.push(error.message));
+      await downloadPage.goto(origin);
+      await downloadPage
+        .locator('[data-placement="hero"]')
+        .filter({ hasText: `Download for ${label}` })
+        .waitFor();
+      await downloadPage.locator('[data-placement="hero"]').click();
+      await downloadPage.waitForURL(`${origin}/download/`);
+      const primaryDownload = downloadPage.locator('[data-host-download="direct"]');
+      await primaryDownload.filter({ hasText: `Download for ${label}` }).waitFor();
+      assert.equal(await primaryDownload.getAttribute('href'), `https://downloads.tau.new/latest/${file}`);
+      assert.equal(await downloadPage.locator('[data-mac-intel]').isVisible(), intel);
+      await downloadPage.getByRole('link', { name: 'Tau home' }).first().click();
+      await downloadPage.waitForURL(`${origin}/`);
+      await downloadPage
+        .locator('[data-placement="hero"]')
+        .filter({ hasText: `Download for ${label}` })
+        .waitFor();
+      assert.deepEqual(errors, []);
+      await downloadContext.close();
+    },
+  );
   const nojs = await browser.newContext({
     javaScriptEnabled: false,
     viewport: { width: 390, height: 844 },
@@ -168,6 +205,11 @@ try {
     .getByRole('link', { name: 'Pricing', exact: true })
     .click();
   assert.ok(nojsPage.url().endsWith('/pricing/'));
+  await nojsPage.goto(origin + '/download/');
+  for (const file of ['Tau-macos-arm64.zip', 'Tau-macos-x64.zip', 'Tau-win32-x64.zip', 'Tau-linux-x64.tar.gz']) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Inspect all four SSR archive links in this one browser document.
+    assert.equal(await nojsPage.locator(`#downloads a[href="https://downloads.tau.new/latest/${file}"]`).count(), 1);
+  }
   await nojsPage.goto(origin + '/privacy/');
   assert.equal(await nojsPage.getByRole('button', { name: 'Reset analytics preference' }).isDisabled(), true);
   await nojs.close();
@@ -276,7 +318,8 @@ try {
           `${results.length} route/viewport accessibility audits`,
           'mobile menu open/close',
           'menu and Escape',
-          'no-JS navigation',
+          'no-JS navigation and desktop archive links',
+          'Mac, Windows and Linux download recommendations across client navigation',
           'client navigation, data-route ownership and focus restoration',
           'real 404',
           'no overflow at 320/390/1440',

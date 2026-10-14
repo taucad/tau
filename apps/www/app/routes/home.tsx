@@ -29,7 +29,7 @@ export const content = (): React.JSX.Element => (
           requirements. Export for machining or 3D printing, then make it, assemble it and put it to work.
         </p>
         <div className='actions'>
-          {cta('Start designing', '/projects/new', 'hero')}
+          {cta('Download Tau', '/download/', 'hero')}
           <SiteLink className='text-link' href='#story'>
             Watch it come together {down}
           </SiteLink>

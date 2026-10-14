@@ -16,11 +16,17 @@ export const out = (
 );
 export const down = <span aria-hidden='true'>↓</span>;
 export const cta: (label?: string, path?: string, placement?: string) => ReactNode = (
-  label = 'Start designing',
-  path = '/projects/new',
+  label = 'Download Tau',
+  path = '/download/',
   placement = 'primary',
 ) => (
-  <SiteLink className='button primary' href={`${appOrigin}${path}`} data-event='cta' data-placement={placement}>
+  <SiteLink
+    className='button primary'
+    href={path === '/download/' ? path : `${appOrigin}${path}`}
+    data-event='cta'
+    data-placement={placement}
+    data-host-download={path === '/download/' ? 'page' : undefined}
+  >
     {label} {out}
   </SiteLink>
 );
@@ -482,7 +488,7 @@ export const closing = (
       {kicker('Design. Verify. Make.')}
       <h2 id='closing-title'>{title}</h2>
       <div className='actions'>
-        {cta('Start designing', '/projects/new', 'closing')}
+        {cta('Download Tau', '/download/', 'closing')}
         <SiteLink className='text-link' href={`${docsOrigin}/`}>
           Read the docs {out}
         </SiteLink>

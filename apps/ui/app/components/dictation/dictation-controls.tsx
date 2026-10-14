@@ -86,7 +86,7 @@ export const DictationRecording = memo(function ({
           aria-label='Microphone waveform'
           data-slot='dictation-waveform'
           data-level={levels.at(-1) ?? 0}
-          className='flex h-7 min-w-0 flex-1 items-center justify-end gap-0.75 overflow-hidden mask-x-from-[calc(100%-var(--spacing)*4)] mask-x-to-100% text-muted-foreground motion-reduce:hidden'
+          className='flex h-7 min-w-0 flex-1 items-center justify-end gap-0.75 overflow-hidden mask-x-from-[calc(100%-var(--spacing)*4)] mask-x-to-100% text-muted-foreground/70 motion-reduce:hidden'
         >
           {levels.map((level, index) => (
             <span

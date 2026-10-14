@@ -1,6 +1,6 @@
 import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
-import { mkdir, mkdtemp, rm, stat, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
@@ -14,6 +14,7 @@ import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   computeControlChannels,
+  openDirectoryChannel,
   machinesChannels,
   quitChannels,
   servicesPortRelayTag,
@@ -230,7 +231,7 @@ vi.mock('electron', () => ({
       webRequest: {},
     },
   },
-  shell: { openExternal: vi.fn() },
+  shell: { openExternal: vi.fn(), openPath: vi.fn(async () => '') },
   utilityProcess: { fork: vi.fn() },
 }));
 
@@ -475,6 +476,24 @@ describe('desktop main compute owner', () => {
     },
     bootMilliseconds,
   );
+  it('should open only granted directories and propagate file manager failures', async () => {
+    const directory = await bootstrap();
+    await mkdir(directory, { recursive: true });
+    const { shell } = await import('electron');
+    const open = state.handlers.get(openDirectoryChannel)!;
+    await expect(open({ senderFrame: {} }, directory)).resolves.toBeUndefined();
+    const canonicalDirectory = await realpath(directory);
+    expect(shell.openPath).toHaveBeenCalledWith(canonicalDirectory);
+    vi.mocked(shell.openPath).mockClear();
+    await expect(open({ senderFrame: {} }, tmpdir())).rejects.toThrow('Reopen this folder');
+    await expect(open({ senderFrame: {} }, 42)).rejects.toThrow('refused');
+    await expect(open({ senderFrame: {} }, join(directory, 'missing'))).rejects.toThrow('ENOENT');
+    await symlink(tmpdir(), join(directory, 'escape'));
+    await expect(open({ senderFrame: {} }, join(directory, 'escape'))).rejects.toThrow('Reopen this folder');
+    expect(shell.openPath).not.toHaveBeenCalled();
+    vi.mocked(shell.openPath).mockResolvedValueOnce('No file manager available');
+    await expect(open({ senderFrame: {} }, directory)).rejects.toThrow('No file manager available');
+  }, 120_000);
 
   /* AF-L03-1: the descriptors used to be frozen into the window's
    * `additionalArguments`, so a vendor model probe on a 5 s clock was a

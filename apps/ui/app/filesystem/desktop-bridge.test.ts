@@ -20,7 +20,13 @@ const relayTag = 'tau:services-port';
  * @param options - `foreign` posts the relay from another frame instead.
  * @returns The stub's captured calls and the port it relays.
  */
-const installShellGlobal = (options: { foreign?: boolean; slicers?: unknown } = {}) => {
+const installShellGlobal = (
+  options: {
+    foreign?: boolean;
+    slicers?: unknown;
+    directories?: DesktopBridgeModule.DesktopBridge['directories'];
+  } = {},
+) => {
   const port = new MessageChannel().port1;
   const requestServicesPort = vi.fn((requestId: string, _concern: string, _context?: Record<string, string>) => {
     globalThis.dispatchEvent(
@@ -61,6 +67,7 @@ const installShellGlobal = (options: { foreign?: boolean; slicers?: unknown } = 
     appIcon: { setTheme: setAppIconTheme },
     quit: { isReady: isQuitReady, onAsk: onQuitAsk, reportQuiesced: vi.fn() },
     dialog: { selectDirectory },
+    ...(options.directories === undefined ? {} : { directories: options.directories }),
     ...(options.slicers === undefined ? {} : { slicers: options.slicers }),
   });
   return {
@@ -93,6 +100,20 @@ describe('desktopBridge', () => {
     const { desktopBridge, isDesktopTarget } = await loadBridge();
     expect(isDesktopTarget).toBe(false);
     expect(desktopBridge()).toBeUndefined();
+  });
+
+  it('should expose native directory access only when the shell advertises it', async () => {
+    installShellGlobal();
+    const legacy = await loadBridge();
+    expect(legacy.desktopBridge()?.directories).toBeUndefined();
+    const open = vi.fn(async (_path: string) => undefined);
+    installShellGlobal({ directories: { openLabel: 'Open in Finder', openIcon: 'finder', open } });
+    const current = await loadBridge();
+    const directories = current.desktopBridge()?.directories;
+    expect(directories?.openLabel).toBe('Open in Finder');
+    expect(directories?.openIcon).toBe('finder');
+    await directories?.open('/picked/project');
+    expect(open).toHaveBeenCalledWith('/picked/project');
   });
 
   it('builds the contract from the preload-exposed object and memoises it', async () => {

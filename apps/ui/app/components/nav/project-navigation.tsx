@@ -1,5 +1,18 @@
 import { Fragment, useMemo, useState } from 'react';
-import { ChevronRight, Copy, Forward, EllipsisVertical, Pencil, SquarePen, Trash2, X } from 'lucide-react';
+import { SvgIcon } from '#components/icons/svg-icon.js';
+import {
+  ChevronRight,
+  Cloud,
+  Copy,
+  FolderOpen,
+  PanelsTopLeft,
+  Forward,
+  EllipsisVertical,
+  Pencil,
+  SquarePen,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -54,6 +67,9 @@ import {
   useProjectSidebarRow,
   useSidebarCommands,
 } from '#hooks/use-sidebar-status.js';
+
+import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopWorkspaceRoot } from '#lib/agent-host-placement.js';
 
 const projectsPerPage = 5;
 
@@ -255,6 +271,23 @@ function ProjectNavigationItem({
   readonly onDelete: () => Promise<void>;
 }): React.JSX.Element {
   const { isMobile } = useSidebar();
+  const directories = project.locator.backend === 'node' ? desktopBridge()?.directories : undefined;
+  const [isOpeningDirectory, setIsOpeningDirectory] = useState(false);
+  const openDirectory = async (): Promise<void> => {
+    if (!directories || isOpeningDirectory) {
+      return;
+    }
+    setIsOpeningDirectory(true);
+    try {
+      await directories.open(await desktopWorkspaceRoot(project.id));
+    } catch (error) {
+      toast.error(`Could not open ${project.name}`, {
+        description: error instanceof Error ? error.message : 'Try opening the folder again.',
+      });
+    } finally {
+      setIsOpeningDirectory(false);
+    }
+  };
   const navigate = useNavigate();
   const location = useLocation();
   const chatsId = `project-chats-${project.id}`;
@@ -317,9 +350,25 @@ function ProjectNavigationItem({
         <SquarePen aria-hidden />
         New chat
       </Item>
-      <Item disabled={!project.slugs} onSelect={openSyncDetails}>
-        View sync status
-      </Item>
+      {directories ? (
+        <Item
+          disabled={isOpeningDirectory}
+          aria-busy={isOpeningDirectory}
+          onSelect={() => {
+            void openDirectory();
+          }}
+        >
+          {directories.openIcon === 'finder' ? (
+            <SvgIcon id='finder' aria-hidden />
+          ) : directories.openIcon === 'file-explorer' ? (
+            <PanelsTopLeft aria-hidden />
+          ) : (
+            <FolderOpen aria-hidden />
+          )}
+          {directories.openLabel}
+        </Item>
+      ) : null}
+      <Separator />
       <Item onSelect={onRename}>
         <Pencil aria-hidden />
         Rename
@@ -336,6 +385,11 @@ function ProjectNavigationItem({
         <Forward aria-hidden />
         Share project
       </Item>
+      <Item disabled={!project.slugs} onSelect={openSyncDetails}>
+        <Cloud aria-hidden />
+        View sync status
+      </Item>
+      <Separator />
       {row.glyph === 'none' ? null : (
         <Item
           aria-label={`Close ${project.name}`}
@@ -351,7 +405,6 @@ function ProjectNavigationItem({
           Close
         </Item>
       )}
-      <Separator />
       <Item
         variant='destructive'
         onSelect={() => {

@@ -678,7 +678,12 @@ const mcpResult = (
     let structuredContent: unknown;
     if (qualified && typeof text === 'string') {
       try {
-        structuredContent = JSON.parse(text);
+        // Grok joins screenshot instructions and the final JSON block into one string.
+        const json =
+          tool.toolName === toolName.screenshot && /^Captured \d+ CAD views?\./u.test(text)
+            ? text.slice(text.lastIndexOf('\n') + 1)
+            : text;
+        structuredContent = JSON.parse(json);
       } catch {
         /* Invalid JSON is refused by the output schema below. */
       }

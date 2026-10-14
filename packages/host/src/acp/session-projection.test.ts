@@ -80,6 +80,51 @@ it('should normalize a qualified Grok MCP call and its JSON output', async () =>
   });
 });
 
+it.each([false, true])('should validate a Grok screenshot with flattened text blocks (invalid=%s)', async (invalid) => {
+  const image = {
+    view: 'front',
+    path: `attachments/${'0'.repeat(64)}.png`,
+    absolutePath: '/tmp/capture.png',
+    mimeType: 'image/png',
+    byteLength: 70,
+    sha256: '0'.repeat(64),
+  };
+  const output = { images: invalid ? [{ view: 'front' }] : [image] };
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'capture',
+        title: 'use_tool',
+        rawInput: { tool_name: 'tau__screenshot', tool_input: { targetFile: 'main.py' } },
+        _meta: { 'x.ai/tool': { name: 'use_tool', namespace: 'grok_build' } },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'capture',
+        status: 'completed',
+        rawOutput: {
+          type: 'MCP',
+          tool_name: 'screenshot',
+          server_name: 'tau',
+          output: {
+            OkayOutput: `Captured 1 CAD view. Open each local image with your image-viewing tool:\nfront: /tmp/capture.png\n${JSON.stringify(output)}`,
+          },
+        },
+      },
+    ],
+    'grok',
+    undefined,
+    'tau',
+  );
+  expect(messages[1]).toMatchObject({
+    role: 'tool-output',
+    toolName: 'screenshot',
+    isError: invalid,
+    content: invalid ? { errorCode: 'MCP_RESULT_INVALID' } : output,
+  });
+});
+
 it('should prefer standard usage and ignore malformed or foreign Grok metadata', () => {
   const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
   const response = { stopReason: 'end_turn', _meta: { usage } } as const;

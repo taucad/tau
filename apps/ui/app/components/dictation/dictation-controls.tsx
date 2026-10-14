@@ -4,8 +4,8 @@ import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
-import { dictationLabels } from '#components/chat/use-dictation.js';
-import type { DictationPhase } from '#components/chat/use-dictation.js';
+import { dictationLabels } from '#components/dictation/use-dictation.js';
+import type { DictationPhase } from '#components/dictation/use-dictation.js';
 
 type DictationControls = {
   readonly phase: DictationPhase;
@@ -13,7 +13,7 @@ type DictationControls = {
   readonly onStop: () => Promise<boolean>;
 };
 
-export const ChatDictationButton = memo(function ({ phase, onStart, onStop }: DictationControls): React.JSX.Element {
+export const DictationButton = memo(function ({ phase, onStart, onStop }: DictationControls): React.JSX.Element {
   const recording = phase === 'recording';
   const busy = phase !== 'idle' && !recording;
   const label = recording ? 'Stop dictation' : busy ? dictationLabels[phase] : 'Dictate';
@@ -54,7 +54,7 @@ export const ChatDictationButton = memo(function ({ phase, onStart, onStop }: Di
   );
 });
 
-export const ChatDictationRecording = memo(function ({
+export const DictationRecording = memo(function ({
   phase,
   levels,
   onCancel,
@@ -109,8 +109,32 @@ export const ChatDictationRecording = memo(function ({
             : 'flex h-7 min-w-0 flex-1 items-center justify-center text-sm text-muted-foreground'
         }
       >
-        {dictationLabels[phase]}
+        <span className='truncate'>{dictationLabels[phase]}</span>
       </span>
     </>
   );
 });
+
+/** Shared preview and recoverable error feedback; neither changes the input value. */
+export function DictationFeedback({
+  transcript,
+  error,
+}: {
+  readonly transcript: string;
+  readonly error: string | undefined;
+}): React.JSX.Element {
+  return (
+    <>
+      {transcript === '' ? null : (
+        <p data-slot='dictation-transcript' className='px-3 py-1 text-sm text-muted-foreground'>
+          {transcript}
+        </p>
+      )}
+      {error === undefined ? null : (
+        <p role='alert' aria-label='Dictation error' className='px-3 py-1 text-xs text-muted-foreground'>
+          {error}
+        </p>
+      )}
+    </>
+  );
+}

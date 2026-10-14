@@ -216,6 +216,16 @@ const routes = [
     rates('.4', '.04', '.5', '1.8', '30m'),
   ),
   route('openai-gpt-5.5', 'GPT-5.5', 'openai-responses', 1_050_000, 128_000, rates('10', '1', undefined, '45')),
+  // https://cloud.google.com/blog/products/ai-machine-learning/gemini-4-argon-available-on-google-cloud
+  route(
+    'google-gemini-4-argon',
+    'Gemini 4 Argon',
+    'openai-completions',
+    1_048_576,
+    65_536,
+    rates('2', '.1', undefined, '10'),
+    { pricingRevision: '2026-10-14', validThrough: '2026-11-30T23:59:59.999Z' },
+  ),
   route(
     'google-gemini-3.1-pro',
     'Gemini 3.1 Pro',

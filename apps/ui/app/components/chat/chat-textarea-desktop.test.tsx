@@ -2,8 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { captureDictation } from '#components/chat/dictation-capture.js';
-import type { transcribeDictation } from '#components/chat/dictation-client.js';
+import type { captureDictation } from '#components/dictation/dictation-capture.js';
+import type { transcribeDictation } from '#components/dictation/dictation-client.js';
 import type { AcpSessionData } from '@taucad/chat';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -16,8 +16,8 @@ const dictationDependencies = vi.hoisted(() => ({
   capture: vi.fn<typeof captureDictation>(),
   transcribe: vi.fn<typeof transcribeDictation>(),
 }));
-vi.mock('#components/chat/dictation-capture.js', () => ({ captureDictation: dictationDependencies.capture }));
-vi.mock('#components/chat/dictation-client.js', () => ({
+vi.mock('#components/dictation/dictation-capture.js', () => ({ captureDictation: dictationDependencies.capture }));
+vi.mock('#components/dictation/dictation-client.js', () => ({
   fetchDictationStatus: async () => ({ available: dictationDependencies.available }),
   transcribeDictation: dictationDependencies.transcribe,
 }));

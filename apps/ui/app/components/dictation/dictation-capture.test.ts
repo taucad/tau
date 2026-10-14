@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { encodeDictationWav } from '#components/chat/dictation-capture.js';
+import { encodeDictationWav } from '#components/dictation/dictation-capture.js';
 
 describe('encodeDictationWav', () => {
   it('should write a mono PCM16 WAV header and clamped little-endian samples across chunks', async () => {

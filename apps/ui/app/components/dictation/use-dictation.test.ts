@@ -1,20 +1,24 @@
 // @vitest-environment jsdom
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { captureDictation, DictationCapture } from '#components/chat/dictation-capture.js';
-import type { transcribeDictation } from '#components/chat/dictation-client.js';
-import { useDictation } from '#components/chat/use-dictation.js';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { captureDictation, DictationCapture } from '#components/dictation/dictation-capture.js';
+import type { transcribeDictation } from '#components/dictation/dictation-client.js';
+import { useDictation } from '#components/dictation/use-dictation.js';
 
 const dependencies = vi.hoisted(() => ({
   capture: vi.fn<typeof captureDictation>(),
   status: vi.fn(),
   transcribe: vi.fn<typeof transcribeDictation>(),
 }));
-vi.mock('#components/chat/dictation-capture.js', () => ({ captureDictation: dependencies.capture }));
-vi.mock('#components/chat/dictation-client.js', () => ({
+vi.mock('#components/dictation/dictation-capture.js', () => ({ captureDictation: dependencies.capture }));
+vi.mock('#components/dictation/dictation-client.js', () => ({
   fetchDictationStatus: dependencies.status,
   transcribeDictation: dependencies.transcribe,
 }));
+
+afterEach(() => {
+  cleanup();
+});
 
 const wav = new Blob([new Uint8Array([1])], { type: 'audio/wav' });
 let capture: DictationCapture;
@@ -157,5 +161,66 @@ describe('useDictation', () => {
 
     expect(denied.result.current.error).toMatch(/Microphone access was denied/u);
     await expect(denied.result.current.stop()).resolves.toBe(false);
+  });
+  it('should keep one destination active and release it for another input', async () => {
+    const first = await begin();
+    const second = renderHook(() => useDictation(vi.fn(), 'answer'));
+    await waitFor(() => {
+      expect(second.result.current.available).toBe(true);
+    });
+    await act(async () => second.result.current.start());
+    expect(second.result.current.error).toBe('Finish or cancel dictation in the other input first.');
+    expect(dependencies.capture).toHaveBeenCalledOnce();
+    act(() => {
+      first.result.current.cancel();
+    });
+    await act(async () => second.result.current.start());
+    expect(second.result.current.phase).toBe('recording');
+    expect(second.result.current.error).toBeUndefined();
+  });
+
+  it('should release late microphone permission after the destination changes', async () => {
+    const permission = Promise.withResolvers<DictationCapture>();
+    dependencies.capture.mockReturnValue(permission.promise);
+    const onTranscript = vi.fn();
+    const hook = renderHook(({ owner }) => useDictation(onTranscript, owner), { initialProps: { owner: 'first' } });
+    await waitFor(() => {
+      expect(hook.result.current.available).toBe(true);
+    });
+    let starting: Promise<void> | undefined;
+    act(() => {
+      starting = hook.result.current.start();
+    });
+    hook.rerender({ owner: 'second' });
+    await act(async () => {
+      permission.resolve(capture);
+      await starting;
+    });
+    expect(capture.cancel).toHaveBeenCalledOnce();
+    expect(onTranscript).not.toHaveBeenCalled();
+    expect(hook.result.current.phase).toBe('idle');
+  });
+  it('should deliver to the latest callback for the same destination', async () => {
+    const response = Promise.withResolvers<string>();
+    dependencies.transcribe.mockReturnValue(response.promise);
+    const original = vi.fn();
+    const latest = vi.fn();
+    const hook = renderHook(({ receive }) => useDictation(receive, 'same'), { initialProps: { receive: original } });
+    await waitFor(() => {
+      expect(hook.result.current.available).toBe(true);
+    });
+    await act(async () => hook.result.current.start());
+    act(() => {
+      void hook.result.current.stop();
+    });
+    await waitFor(() => {
+      expect(hook.result.current.phase).toBe('transcribing');
+    });
+    hook.rerender({ receive: latest });
+    await act(async () => {
+      response.resolve('Current draft.');
+    });
+    expect(original).not.toHaveBeenCalled();
+    expect(latest).toHaveBeenCalledExactlyOnceWith('Current draft.');
   });
 });

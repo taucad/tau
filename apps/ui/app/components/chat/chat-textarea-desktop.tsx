@@ -3,8 +3,8 @@ import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef }
 import type { Editor } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { AtSign, Paperclip, Plus } from 'lucide-react';
-import { useDictation } from '#components/chat/use-dictation.js';
-import { ChatDictationButton, ChatDictationRecording } from '#components/chat/chat-dictation-controls.js';
+import { useDictation } from '#components/dictation/use-dictation.js';
+import { DictationButton, DictationRecording, DictationFeedback } from '#components/dictation/dictation-controls.js';
 import type { AcpSessionData } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { FileEntry } from '@taucad/types';
@@ -478,14 +478,14 @@ export const ChatTextareaDesktop = memo(function ({
   const dictationButton = useMemo(
     () =>
       dictation.available === true ? (
-        <ChatDictationButton phase={dictation.phase} onStart={dictation.start} onStop={dictation.stop} />
+        <DictationButton phase={dictation.phase} onStart={dictation.start} onStop={dictation.stop} />
       ) : undefined,
     [dictation.available, dictation.phase, dictation.start, dictation.stop],
   );
   const dictationRecording = useMemo(
     () =>
       dictationActive ? (
-        <ChatDictationRecording phase={dictation.phase} levels={dictation.levels} onCancel={dictation.cancel} />
+        <DictationRecording phase={dictation.phase} levels={dictation.levels} onCancel={dictation.cancel} />
       ) : undefined,
     [dictation.cancel, dictation.levels, dictation.phase, dictationActive],
   );
@@ -563,16 +563,7 @@ export const ChatTextareaDesktop = memo(function ({
           </div>
         ) : null}
 
-        {dictation.transcript === '' ? null : (
-          <p data-slot='dictation-transcript' className='px-3 py-1 text-sm text-muted-foreground'>
-            {dictation.transcript}
-          </p>
-        )}
-        {dictation.error === undefined ? null : (
-          <p role='alert' aria-label='Dictation error' className='px-3 py-1 text-xs text-muted-foreground'>
-            {dictation.error}
-          </p>
-        )}
+        <DictationFeedback transcript={dictation.transcript} error={dictation.error} />
         <ChatTextareaBar
           dictationButton={dictationButton}
           dictationRecording={dictationRecording}

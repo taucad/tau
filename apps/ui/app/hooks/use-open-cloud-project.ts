@@ -33,6 +33,7 @@ export const cloudProjectStub = (entry: CloudProject): CreateProjectOptions => (
      chat nobody asked for that the pull cannot remove and the next push offers
      to the account (review R5). */
   chat: false,
+  deferInitialView: true,
   project: {
     name: entry.name,
     description: '',

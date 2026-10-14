@@ -364,7 +364,7 @@ export const launchDesktopApp = async (options: {
       ([key, value]) =>
         key.startsWith('TAU_E2E_') && key.endsWith('_MANUAL') && value !== undefined && value !== 'false',
     );
-  const snapshots = manual || configuredSnapshots !== 'false';
+  const snapshots = configuredSnapshots !== 'false';
   const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
   const startupNetworkLogPath = options.captureStartupNetwork ? join(userData, 'startup-network.json') : undefined;
   /* A fixed, already-lowercase leaf inside the random parent: the workspace

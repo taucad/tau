@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { CircleAlert, Ellipsis } from 'lucide-react';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
@@ -52,15 +52,13 @@ const notSaved: Record<RecordIssueKind, string> = {
 function consequence(issue: RecordIssue, correction: EntriesCorrection | undefined): string {
   switch (issue.state) {
     case 'unconfirmed': {
-      return 'Your latest change is kept here. Tau has not heard whether it reached the file, so it is not yet saved.';
+      return 'Your latest change is kept here. Tau has not heard whether it reached the file, so it is not yet confirmed saved.';
     }
     case 'invalid': {
       if (correction) {
-        return `${correction.renamed.map((rename) => rename.path).join(', ')} ${correction.renamed.length === 1 ? 'uses' : 'use'} an older setting name. The values loaded before are still in use; ${notSaved.entries} until the file is fixed.`;
+        return `${correction.renamed.map((rename) => rename.path).join(', ')} ${correction.renamed.length === 1 ? 'uses' : 'use'} an older setting name. The file could not be applied; ${notSaved.entries} until the file is fixed.`;
       }
-      return issue.kind === 'entries'
-        ? `The file could not be read. Default settings are in use; ${notSaved.entries} until the file is fixed.`
-        : `${kept[issue.kind]}. The file could not be read, so ${notSaved[issue.kind]} until it is fixed.`;
+      return `The file could not be applied; ${notSaved[issue.kind]} until it is fixed.`;
     }
     case 'newer': {
       return `${kept[issue.kind]}. ${notSaved[issue.kind].replace(/^./u, (first) => first.toUpperCase())} until this project is opened with a newer Tau.`;
@@ -118,12 +116,23 @@ const resetCopy: Record<RecordIssueKind, { title: string; description: (project:
  *
  * @returns The trigger, its popover and its Reset confirmation.
  */
-export function RecordIssuesAction(): React.JSX.Element {
+export function RecordIssuesAction({ fallbackFocus }: { readonly fallbackFocus: () => void }): React.JSX.Element {
   const { projectId, projectRef, editorRef } = useProject();
   const issues = useRecordIssues(projectId);
   const summary = summarizeRecordIssues(issues);
   const debug = useFeature('tauDebug');
   const trigger = useRef<HTMLButtonElement>(null);
+  const setTrigger = useCallback(
+    // oxlint-disable-next-line no-restricted-types -- React callback refs receive null on detach.
+    (node: HTMLButtonElement | null): void => {
+      // A settled async reset can remove the trigger after the dialog already returned focus.
+      if (!node && trigger.current === document.activeElement) {
+        fallbackFocus();
+      }
+      trigger.current = node;
+    },
+    [fallbackFocus],
+  );
   const [resetting, setResetting] = useState<RecordIssue>();
   const projectName = projectRef.getSnapshot().context.project?.name ?? 'this project';
   const name = summary
@@ -142,7 +151,7 @@ export function RecordIssuesAction(): React.JSX.Element {
           name={name}
           projectName={projectName}
           isDebug={debug}
-          triggerRef={trigger}
+          triggerRef={setTrigger}
           onOpenFile={(issue) => {
             editorRef.send({ type: 'openFile', path: issue.path, source: 'user' });
           }}
@@ -160,7 +169,11 @@ export function RecordIssuesAction(): React.JSX.Element {
         <AlertDialogContent
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            trigger.current?.focus();
+            if (trigger.current?.isConnected) {
+              trigger.current.focus();
+            } else {
+              fallbackFocus();
+            }
           }}
         >
           <AlertDialogHeader>

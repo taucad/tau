@@ -512,6 +512,10 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         // this admitted stream until its replacement is ready, then reconcile.
         await open(entry);
         emit({ type: 'reset' });
+      } else if (previous && !entry.targetIsDirectory) {
+        // The ancestor stream may miss leaf events before this directory is
+        // observed. Reconcile the exact target once its replacement is ready.
+        classify(entry.rootedPath, entry.target);
       }
     };
     const unsubscribe = (): void => {

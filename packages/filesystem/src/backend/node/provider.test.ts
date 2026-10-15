@@ -184,6 +184,59 @@ describe('NodeFsProvider atomic writes', () => {
     }
   });
 
+  it.each(['before rearm', 'during rearm', 'deleted during rearm'] as const)(
+    'should reconcile the watched file when it is %s without a native leaf event',
+    async (timing) => {
+      const root = createRoot();
+      const target = join(root, 'absent', 'nested', 'deep.txt');
+      const replacement = Promise.withResolvers<Awaited<ReturnType<typeof parcelWatcher.subscribe>>>();
+      const replacementStarted = Promise.withResolvers<void>();
+      const callbacks: Array<Parameters<typeof parcelWatcher.subscribe>[1]> = [];
+      const firstClose = vi.fn(async () => undefined);
+      const replacementClose = vi.fn(async () => undefined);
+      vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
+        callbacks.push(callback);
+        if (callbacks.length === 1) {
+          return { unsubscribe: firstClose };
+        }
+        replacementStarted.resolve();
+        return replacement.promise;
+      });
+      const provider = new NodeFsProvider(root);
+      const events: unknown[] = [];
+      try {
+        const stop = await provider.watch({ paths: ['absent/nested/deep.txt'] }, (event) => events.push(event));
+        mkdirSync(join(root, 'absent', 'nested'), { recursive: true });
+        if (timing !== 'during rearm') {
+          writeFileSync(target, 'created');
+        }
+        // Native observation can report only the new ancestor before its subtree is observed.
+        callbacks[0]?.(null, [{ type: 'create', path: join(root, 'absent') }]);
+        await replacementStarted.promise;
+        if (timing === 'during rearm') {
+          writeFileSync(target, 'created');
+        } else if (timing === 'deleted during rearm') {
+          rmSync(target);
+        }
+        replacement.resolve({ unsubscribe: replacementClose });
+        await drainNodeFsProviderWatchClosures(provider);
+        expect(events).toContainEqual(
+          timing === 'deleted during rearm'
+            ? { type: 'delete', path: 'absent/nested/deep.txt' }
+            : { type: 'change', path: 'absent/nested/deep.txt', kind: 'file' },
+        );
+        expect(firstClose).toHaveBeenCalledOnce();
+        stop();
+        await drainNodeFsProviderWatchClosures(provider);
+        expect(replacementClose).toHaveBeenCalledOnce();
+      } finally {
+        replacement.resolve({ unsubscribe: replacementClose });
+        provider.dispose();
+        await drainNodeFsProviderWatchClosures(provider);
+      }
+    },
+  );
+
   it.each(['temp-write', 'file-fsync', 'rename', 'directory-fsync', 'read-back'] as const)(
     'should leave old or new bytes and no temporary file after a %s failure',
     async (stage) => {

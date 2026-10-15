@@ -2,7 +2,7 @@ import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
 import { cn } from '@taucad/ui/utils/cn';
 
-const pageContentVariants = cva('container mx-auto px-4 pt-5 pb-8', {
+const pageContentVariants = cva('container mx-auto px-4 pt-5 pb-8 md:pt-14', {
   variants: {
     layout: {
       document: '',

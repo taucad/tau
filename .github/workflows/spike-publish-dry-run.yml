@@ -15,8 +15,11 @@
 # application under the OS temp dir and run the installed `tau` there (`check-pack-install.ts`).
 #
 # Differences from `publish.yml`, findings for W16: it installs Chromium before the gate
-# (`scripts:check-pack-install` launches it) and uv (`desktop:prepare-build123d-python`, in the
-# gate's graph, resolves its wheels with uv; run 38668092247 failed with `spawnSync uv ENOENT`).
+# (`scripts:check-pack-install` launches it) and the Linux sandbox prerequisites, which include uv
+# (`desktop:prepare-build123d-python`, in the gate's graph, resolves its wheels with uv; run
+# 38668092247 failed with `spawnSync uv ENOENT`), Bubblewrap and unrestricted user namespaces
+# (`native-process-core:test` and `build123d:test` run workers in the sandbox and fail closed on
+# CI without it; run 38678949557 failed with both).
 name: Spike publish dry run
 
 on:
@@ -101,12 +104,11 @@ jobs:
         if: env.SPIKE_GATE == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
-      # prepare-build123d-python resolves its wheels with uv, as in release-build.yml.
-      - name: Install uv
+      # The gate's native kernel suites run workers under Bubblewrap, and
+      # prepare-build123d-python resolves its wheels with uv; the action provides both, as in ci.yml.
+      - name: Setup Linux sandbox prerequisites
         if: env.SPIKE_GATE == 'true'
-        run: |
-          command -v uv || pipx install uv
-          uv --version
+        uses: ./.github/actions/setup-linux-sandbox
 
       - name: Run the release gate
         if: env.SPIKE_GATE == 'true'

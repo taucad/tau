@@ -24,6 +24,7 @@ import type {
 import { createAskId, recordAsk, settleAsk, waitForAnswers } from '@taucad/chat/rpc';
 import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
 import { askOfGrok, grokQuestionResponseOf } from '#acp/grok-questions.js';
+import { providerPermissionPayload } from '#acp/provider-permission.js';
 import type { Ask, AskAnswers } from '@taucad/chat';
 import { askOutcomeOf } from '@taucad/chat';
 
@@ -279,7 +280,7 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
             try {
               const resolution = await projection.approve({
                 prompt: params.toolCall.title ?? `Allow ${params.toolCall.toolCallId}?`,
-                payload: asJson({ toolCall: params.toolCall, options: params.options }),
+                payload: providerPermissionPayload(params, input.adapter),
               });
               const optionId = chooseOption(params.options, resolution);
               if (optionId !== undefined) {

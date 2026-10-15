@@ -490,7 +490,12 @@ describe('the ACP turn projection', () => {
       title: 'mcp.cua_repl.js',
       kind: 'execute',
       status: 'pending',
-      rawInput: { server: 'cua_repl', tool: 'js', arguments: { code: 'await inspect()' } },
+      rawInput: {
+        server: 'cua_repl',
+        tool: 'js',
+        arguments: { code: 'await inspect()', apiKey: 'merge-secret' },
+        _meta: { token: 'hidden-metadata' },
+      },
     });
     await projection.approve({
       prompt: 'Allow call-opaque?',
@@ -502,7 +507,8 @@ describe('the ACP turn projection', () => {
 
     expect(approvals).toEqual([
       {
-        prompt: 'Allow mcp.cua_repl.js with {"server":"cua_repl","tool":"js","arguments":{"code":"await inspect()"}}?',
+        prompt:
+          'Allow mcp.cua_repl.js with {"server":"cua_repl","tool":"js","arguments":{"code":"await inspect()","apiKey":"[redacted]"}}?',
         payload: {
           toolCall: {
             toolCallId: 'call-opaque',
@@ -511,7 +517,7 @@ describe('the ACP turn projection', () => {
             title: 'mcp.cua_repl.js',
             nativeName: 'js',
           },
-          input: { server: 'cua_repl', tool: 'js', arguments: { code: 'await inspect()' } },
+          input: { server: 'cua_repl', tool: 'js', arguments: { code: 'await inspect()', apiKey: '[redacted]' } },
           options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
         },
       },

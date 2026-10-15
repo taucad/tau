@@ -877,6 +877,17 @@ describe('the external agent run kind', () => {
       };
       await until(awaitingApproval, 'the approval request', { dump: async () => readLog(workspaceRoot, chatId) });
       const [pending] = await launcher.pendingInterrupts(runId);
+      expect(pending?.payload).toMatchObject({
+        providerPermission: {
+          owner: 'provider',
+          persistence: 'unverified',
+          options: ['allow', 'allow-session', 'allow-always', 'reject'].map((optionId) => ({
+            optionId,
+            requestedScope: 'unspecified',
+          })),
+        },
+      });
+      expect(JSON.stringify(pending?.payload)).not.toContain('permission-metadata-canary');
       await launcher.execute({
         type: 'resolve-interrupt',
         commandId: 'cmd-2',

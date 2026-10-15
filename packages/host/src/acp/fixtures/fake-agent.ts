@@ -718,11 +718,16 @@ const writeGatedFile = async (sessionId: string, session: SessionState, text: st
     ? { result: { outcome: { outcome: 'selected', optionId: 'allow' } } }
     : await request('session/request_permission', {
         sessionId,
-        toolCall: { toolCallId: 'write-1', title: 'write hello.txt' },
+        toolCall: { toolCallId: 'write-1', title: 'write hello.txt', _meta: { token: 'permission-metadata-canary' } },
         options: [
           { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
           { optionId: 'allow-session', name: 'Allow for this session', kind: 'allow_always' },
-          { optionId: 'allow-always', name: 'Always allow', kind: 'allow_always' },
+          {
+            optionId: 'allow-always',
+            name: 'Always allow',
+            kind: 'allow_always',
+            _meta: { token: 'permission-metadata-canary' },
+          },
           { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
         ],
       });

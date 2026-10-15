@@ -55,6 +55,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { lstat, realpath } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
+import { redactPermissionMetadata } from '#acp/provider-permission.js';
 
 import { CreateElicitationRequest as CreateElicitationRequestGuards } from '@agentclientprotocol/sdk';
 import type {
@@ -1766,14 +1767,17 @@ export const createTurnProjection = (options: {
         (typeof requestedCall?.['title'] === 'string' && requestedCall['title'] !== ''
           ? requestedCall['title']
           : open.facts.title) ?? open.toolName;
-      const summary = JSON.stringify(open.input).slice(0, 500);
+      const safeInput = redactPermissionMetadata(open.input);
+      const summary = JSON.stringify(safeInput).slice(0, 500);
       return turn.approve({
         prompt: `Allow ${title}${summary === 'null' ? '' : ` with ${summary}`}?`,
-        payload: asJson({
-          ...payload,
-          toolCall: { ...open.facts, ...requestedCall, title },
-          input: open.input,
-        }),
+        payload: redactPermissionMetadata(
+          asJson({
+            ...payload,
+            toolCall: { ...open.facts, ...requestedCall, title },
+            input: safeInput,
+          }),
+        ),
       });
     },
     report: (input) => {

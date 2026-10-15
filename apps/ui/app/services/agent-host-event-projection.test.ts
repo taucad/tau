@@ -33,6 +33,69 @@ const base = {
   runId: 'run-1',
 } as const;
 
+it('should preserve unverified provider scope without turning a recorded response into a saved permission', () => {
+  const providerPermission = {
+    owner: 'provider',
+    persistence: 'unverified',
+    options: [
+      { optionId: 'allow_session', requestedScope: 'session' },
+      { optionId: 'allow_always', requestedScope: 'persistent' },
+    ],
+  };
+  const [part] = projectAgentHostEvent({
+    ...base,
+    type: 'interrupt.recorded',
+    interruptId: 'provider-permission',
+    phase: 'requested',
+    reason: 'Allow tool?',
+    payload: {
+      agentId: 'codex',
+      context: {
+        providerPermission,
+        options: [
+          { optionId: 'allow_session', name: 'Session', kind: 'allow_always' },
+          { optionId: 'allow_always', name: 'Always', kind: 'allow_always' },
+        ],
+      },
+    },
+  });
+  expect(part).toMatchObject({ type: 'tool-input-available', input: { providerPermission } });
+  if (part?.type !== 'tool-input-available') {
+    throw new Error('Expected the permission presentation input.');
+  }
+  expect(parseAgentHostApproval(part.input)).toMatchObject({ providerPermission });
+  expect(
+    projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'provider-permission',
+      phase: 'resolved',
+      reason: 'approved',
+      payload: { outcome: 'approved', optionId: 'allow_always' },
+    }),
+  ).toEqual([{ type: 'tool-output-available', toolCallId: 'provider-permission', output: { outcome: 'approved' } }]);
+});
+
+it('should retain offered choices when unsupported provider status claims are omitted', () => {
+  const options = [{ optionId: 'once', name: 'Allow once', kind: 'allow_once' }];
+  const [part] = projectAgentHostEvent({
+    ...base,
+    type: 'interrupt.recorded',
+    interruptId: 'unverified',
+    phase: 'requested',
+    reason: 'Allow tool?',
+    payload: {
+      agentId: 'codex',
+      context: { options, providerPermission: { owner: 'provider', persistence: 'saved', options: [] } },
+    },
+  });
+  expect(part).toMatchObject({ type: 'tool-input-available', input: { agentId: 'codex', options } });
+  if (part?.type !== 'tool-input-available') {
+    throw new Error('Expected the permission presentation input.');
+  }
+  expect(parseAgentHostApproval(part.input)?.providerPermission).toBeUndefined();
+});
+
 it('should keep external reasoning open across an interleaved tool result', async () => {
   const blocks = new Map();
   const live = { chatId: 'chat', runId: base.runId, messageId: 'thought', contentIndex: 0 };

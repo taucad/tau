@@ -3,12 +3,11 @@ import { createRuntimeClient } from '@taucad/runtime/client';
 import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer';
 import { createHostGeoSpecRunner } from '@taucad/host/agent-tools';
 import { queryDirectAp242MinimumDistance } from '@taucad/agent-tools/geospec';
-import { Engine } from '@taucad/geospec-engine-native/node';
+import { Engine } from 'geospec-engine/node';
 import type { HostGeoSpecRuntimeClient } from '@taucad/host/agent-tools';
 import type { UtilityPort } from '#tau/services-host.impl.js';
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
 import { createGeometryHost } from '#tau/geometry-host.impl.js';
-import { runGeoSpecPerformanceInput } from '#tau/geospec-performance.js';
 
 type DesktopRuntime = ReturnType<typeof createDesktopRuntime>;
 type ParentPort = {
@@ -39,7 +38,6 @@ const host = createGeometryHost({
       engine.close();
     }
   },
-  performance: runGeoSpecPerformanceInput,
   createRunner: async ({ root, runtimePort, runtimeConfig }) => {
     const client = createRuntimeClient<DesktopRuntime>({
       transport: electronUtilityMainTransport({ port: runtimePort, release: () => undefined }),

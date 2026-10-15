@@ -11,7 +11,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
-import { Engine } from '@taucad/geospec-engine-native/node';
+import { Engine } from 'geospec-engine/node';
 import { createExampleRuntimeClient } from '@taucad/tau-examples/runtime';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';

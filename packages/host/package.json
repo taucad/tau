@@ -88,10 +88,10 @@
   },
   "peerDependencies": {
     "@taucad/geospec-engine": "^0.1.0-beta.0",
-    "@taucad/geospec-engine-native": "^0.1.0-beta.0",
     "@taucad/revisions": "^0.1.0-beta.0",
     "@taucad/runtime": "^0.1.0-beta.0",
     "geospec": "^0.1.0-beta.0",
+    "geospec-engine": "^0.1.0-next.19",
     "xstate": "^6.0.0-alpha.59",
     "zod": "^4.0.0"
   },
@@ -99,10 +99,10 @@
     "@taucad/geospec-engine": {
       "optional": true
     },
-    "@taucad/geospec-engine-native": {
+    "geospec": {
       "optional": true
     },
-    "geospec": {
+    "geospec-engine": {
       "optional": true
     }
   },
@@ -111,7 +111,6 @@
     "@taucad/chat": "workspace:*",
     "@taucad/formal": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
-    "@taucad/geospec-engine-native": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/types": "workspace:*",
@@ -119,6 +118,7 @@
     "@taucad/xstate-testing": "workspace:*",
     "@types/ws": "^8.18.1",
     "geospec": "workspace:*",
+    "geospec-engine": "catalog:",
     "xstate": "catalog:",
     "zod": "catalog:"
   }

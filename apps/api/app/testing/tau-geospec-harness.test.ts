@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { Accessor, Document, WebIO } from '@gltf-transform/core';
-import { Engine } from '@taucad/geospec-engine-native/node';
+import { Engine } from 'geospec-engine/node';
 import { describe, expect, it, vi } from 'vitest';
 import { runTauGeoSpecTests } from '#testing/tau-geospec-harness.js';
 import type { TauModelRendererOutput } from '#testing/tau-geospec-harness.js';

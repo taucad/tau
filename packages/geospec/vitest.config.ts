@@ -1,4 +1,17 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { configDefaults, defineConfig } from 'vitest/config';
+
+// `test` depends on `test-installed-vitest`, which prepares the installed consumer and records
+// it in this receipt; the native-runner suites load the engine from that consumer.
+const consumerReceipt = fileURLToPath(
+  new URL('../../out/artifacts/geospec-test-consumer/receipt.json', import.meta.url),
+);
+const installedConsumerRoot =
+  process.env['GEOSPEC_INSTALLED_CONSUMER_ROOT'] ??
+  (existsSync(consumerReceipt)
+    ? (JSON.parse(readFileSync(consumerReceipt, 'utf8')) as { consumerRoot: string }).consumerRoot
+    : undefined);
 
 /** Broad by construction: only type-only and test-support source is excluded. */
 export const substrateCoverageSourcePolicy = {
@@ -16,6 +29,12 @@ export const substrateCoverageSourcePolicy = {
 export default defineConfig({
   test: {
     environment: 'node',
+    env: installedConsumerRoot
+      ? {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+          GEOSPEC_INSTALLED_CONSUMER_ROOT: installedConsumerRoot,
+        }
+      : {},
     // Source checks and externally installed campaigns remain required test dependencies.
     exclude: [
       ...configDefaults.exclude,

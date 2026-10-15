@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import {
   evaluateModelOutputSchema,
@@ -8,6 +8,8 @@ import {
   testModelOutputSchema,
 } from '@taucad/chat';
 import { systemSkillBundles } from '@taucad/skills/resources';
+import { glbToDocument } from '@taucad/runtime-testing';
+import type { TauCadTopologyRoot } from '@taucad/geometry-core';
 import { currentRun, durableMessages, latestCompletedRun } from '#support/acp-evidence.js';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
@@ -15,6 +17,7 @@ import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau
 import {
   activeChatId,
   connectPickedFolder,
+  expectGeometryFramed,
   expectSignedIn,
   expectVisible,
   selectAgent,
@@ -25,11 +28,15 @@ import {
 /** Real Codex authoring acceptance; opt-in because this uses the operator's quota. */
 const enabled = process.env['TAU_E2E_BUILD123D_ADOPTION'] === 'true';
 const packaged = process.env['TAU_E2E_ACP_PACKAGED'] === 'true';
+const planetarySource = readFileSync(
+  resolve(import.meta.dirname, '../../../libs/tau-examples/src/kernels/build123d/planetary-gear-system/main.py'),
+  'utf8',
+);
 const prompt = `Use the cad-build123d and geospec-authoring skills to create a small reusable two-rotor assembly in main.py.
 Make a 100 by 40 by 6 mm chassis, and define one reusable Python factory that returns a native Compound module with a housing and an asymmetric rotor. Instantiate it twice, 50 mm apart. Each rotor must connect to its housing using native RevoluteJoint and RigidJoint objects; each complete module connects to the chassis with native RigidJoint attachment points. Keep the resulting assembly hierarchy and give parts meaningful labels.
 Use a native bd_materials wood.oak() textured material on one housing and a plain green color on the other. Use native materials on the rotors too. Do not invent a material library, tessellator or GLB writer.
 Using the skill's supported motion(model) supplement, ground the chassis, give the chassis, rotors and housings the occurrence_ids chassis, left-rotor, right-rotor, left-housing and right-housing, and add one named animation that turns the two rotors independently in opposite directions. The left housing is oak and the right housing is green. Keep geometry and joint authoring in Build123D.
-Write deterministic GeoSpec tests for the chassis dimensions and assembly separation, run them and fix errors until they pass. Evaluate main.py, export a canonical GLB with export_model, inspect the model with a screenshot and leave the final assembly visible. Report the result.`;
+Write deterministic GeoSpec tests for the chassis dimensions and assembly separation, run them and fix errors until they pass. Evaluate main.py, export a canonical GLB with export_model, inspect the model with a screenshot and leave the final assembly visible. Report the result. Work only inside this project; if the desktop runtime itself is unavailable, report the blocker without modifying app installations or other worktrees.`;
 
 let session: DesktopSession | undefined;
 let seededEmail: string | undefined;
@@ -228,12 +235,33 @@ test.skipIf(!enabled)(
         .toBe(true);
       await session.capture(`build123d-adoption-isolated-${runId}`);
       await row.getByRole('button', { name: /^Remove isolation for /u }).click();
+      await page.getByRole('button', { name: 'Fit view', exact: true }).first().click();
+      await expectGeometryFramed(page);
       const directory = await session.capture(`build123d-adoption-${runId}`);
       const glb = exported.files.find((file) => file.mimeType === 'model/gltf-binary');
       if (glb === undefined) {
         throw new Error('Codex did not produce a canonical GLB artifact');
       }
       copyFileSync(join(projectRoot, glb.artifactPath), join(directory, 'authored-assembly.glb'));
+      const reopened = await glbToDocument(Uint8Array.from(readFileSync(join(directory, 'authored-assembly.glb'))));
+      const reopenedTopology = reopened.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload();
+      expect(reopenedTopology?.mechanismIntent?.schemaVersion).toBe(1);
+      expect(reopenedTopology?.mechanismIntent?.ground).toBe('occurrence:chassis');
+      expect(reopenedTopology?.mechanismIntent?.connections.length).toBeGreaterThan(0);
+      expect(reopenedTopology?.mechanism?.animations?.length).toBeGreaterThan(0);
+      expect(reopened.getRoot().listTextures().length).toBeGreaterThan(0);
+      expect(
+        reopened
+          .getRoot()
+          .listTextures()
+          .every((texture) => (texture.getImage()?.byteLength ?? 0) > 0),
+      ).toBe(true);
+      expect(
+        reopened
+          .getRoot()
+          .listMaterials()
+          .some((material) => material.getBaseColorTexture() !== null),
+      ).toBe(true);
       writeFileSync(join(directory, 'authored-source.json'), JSON.stringify(authoredFiles, null, 2));
       writeFileSync(
         join(directory, 'build123d-adoption.json'),
@@ -243,10 +271,131 @@ test.skipIf(!enabled)(
           2,
         ),
       );
+
+      // Keep the real agent-authored model editable, then qualify the original
+      // tracked planetary baseline in this same desktop and renderer.
+      copyFileSync(join(projectRoot, 'main.py'), join(projectRoot, 'reusable-assembly.py'));
+      writeFileSync(join(projectRoot, 'main.py'), planetarySource);
+      await page.keyboard.press('Control+m');
+      const planetary = async () =>
+        page.evaluate(() => {
+          const bridge = (
+            globalThis as typeof globalThis & {
+              __TAU_KINEMATICS_TEST__?: {
+                getState(unit: string): { coordinates: Record<string, number> } | undefined;
+                getComponentWorldMatrix(unit: string, component: string): number[] | undefined;
+              };
+            }
+          ).__TAU_KINEMATICS_TEST__;
+          return {
+            coordinates: bridge?.getState('file:main.py')?.coordinates,
+            matrices: ['ring', 'sun', 'carrier-front', 'planet-1-gear', 'planet-2-gear', 'planet-3-gear'].map((id) =>
+              bridge?.getComponentWorldMatrix('file:main.py', `occurrence:${id}`),
+            ),
+          };
+        });
+      await expect
+        .poll(
+          async () => {
+            const state = await planetary();
+            return state.matrices.every((matrix) => matrix !== undefined);
+          },
+          { timeout: 420_000 },
+        )
+        .toBe(true);
+      await expect.poll(async () => page.locator('[data-driver-control]').count()).toBe(1);
+      const planetaryInitial = await planetary();
+      const time = page.getByRole('slider', { name: 'Time', exact: true });
+      await time.press('Home');
+      await time.press('ArrowRight');
+      const ratiosApplied = async () => {
+        const state = await planetary();
+        const angle = Object.values(state.coordinates ?? {})[0] ?? 0;
+        if (angle <= 5 || angle >= 170) {
+          return false;
+        }
+        return [1, 0.25, -0.5, -0.5, -0.5].every((ratio, index) => {
+          const matrix = state.matrices[index + 1];
+          return (
+            matrix !== undefined &&
+            Math.abs((Math.atan2(matrix[8]!, matrix[0]!) * 180) / Math.PI - angle * ratio) < 0.01
+          );
+        });
+      };
+      await expect.poll(ratiosApplied).toBe(true);
+      const planetaryFirstPose = await planetary();
+      await time.press('ArrowRight');
+      await expect.poll(ratiosApplied).toBe(true);
+      const planetarySecondPose = await planetary();
+      expect(planetarySecondPose.coordinates).not.toEqual(planetaryFirstPose.coordinates);
+      expect(planetarySecondPose.matrices[0]).toEqual(planetaryInitial.matrices[0]);
+      await page.getByTestId('kinematics-play').click();
+      await expect
+        .poll(async () => {
+          const state = await planetary();
+          return JSON.stringify(state.matrices[1]) !== JSON.stringify(planetarySecondPose.matrices[1]);
+        })
+        .toBe(true);
+      await page.getByTestId('kinematics-pause').click();
+      await page.keyboard.press('Control+a');
+      await expectVisible(page.getByText('Weight · 0 of 34 parts known', { exact: true }), 60_000);
+      const planetaryParts = await page.evaluate(() => {
+        const bridges =
+          (
+            globalThis as typeof globalThis & {
+              __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
+                getModelComponents(): Array<{ id: string; name: string }>;
+                getRenderedModelComponentState(id: string): { meshCount: number };
+              }>;
+            }
+          ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+        return bridges
+          .map((bridge) =>
+            bridge.getModelComponents().filter((part) => bridge.getRenderedModelComponentState(part.id).meshCount > 0),
+          )
+          .find((parts) => parts.length === 34);
+      });
+      expect(planetaryParts).toHaveLength(34);
+      const ringRow = page.locator('[data-model-component-row][data-model-component-id="occurrence:ring"]');
+      await expectVisible(ringRow);
+      await expect
+        .poll(
+          async () =>
+            ringRow
+              .locator('img')
+              .evaluateAll(
+                (images) =>
+                  images.length > 0 &&
+                  images.every(
+                    (image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0,
+                  ),
+              ),
+          { timeout: 120_000 },
+        )
+        .toBe(true);
+      await page.getByRole('button', { name: 'Fit view', exact: true }).first().click();
+      await expectGeometryFramed(page);
+      const planetaryDirectory = await session.capture(`build123d-planetary-${runId}`);
+      writeFileSync(
+        join(planetaryDirectory, 'planetary-baseline.json'),
+        JSON.stringify(
+          {
+            projectRoot,
+            originalAuthoredEntry: 'reusable-assembly.py',
+            source: planetarySource,
+            initial: planetaryInitial,
+            firstPose: planetaryFirstPose,
+            secondPose: planetarySecondPose,
+            parts: planetaryParts,
+          },
+          null,
+          2,
+        ),
+      );
     } catch (error) {
       await session.capture('build123d-adoption-failure');
       throw error;
     }
   },
-  1_500_000,
+  1_800_000,
 );

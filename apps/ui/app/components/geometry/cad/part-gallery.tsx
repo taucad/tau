@@ -538,12 +538,13 @@ function PartStrip({
   readonly previews: ReadonlyMap<string, PartThumbnailState>;
   readonly onShow: (id: string) => void;
 }): React.JSX.Element {
-  const shownRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   useEffect(() => {
-    shownRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    listRef.current?.children[index]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [index]);
   return (
     <ul
+      ref={listRef}
       aria-label='Parts in this model'
       className='absolute inset-x-0 bottom-0 flex gap-1.5 overflow-x-auto border-t bg-background/90 p-2'
     >
@@ -556,7 +557,6 @@ function PartStrip({
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  ref={isShown ? shownRef : undefined}
                   type='button'
                   aria-label={node.name}
                   aria-current={isShown || undefined}

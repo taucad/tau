@@ -17,7 +17,6 @@ import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeClient } from '@taucad/runtime';
-import type { HostAdmissionAuthority } from '@taucad/runtime/host';
 import { MachineHostStartInFlightError } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput } from '@taucad/runtime/host/node';
 import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
@@ -26,7 +25,7 @@ import type { RuntimeClient } from '@taucad/runtime/client';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
 
 import { startAgentServer } from '#agent-server.js';
-import type { AgentServerHandle, AgentServerOptions } from '#agent-server.js';
+import type { AgentServerHandle } from '#agent-server.js';
 import { discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
 import { chatToReport, startRunReporter } from '#run-reporter.js';
 import type { RunReporter } from '#run-reporter.js';
@@ -40,11 +39,12 @@ import {
   writeHostCredential,
 } from '#credential-store.js';
 import type { HostCredential } from '#credential-store.js';
-import { localMachineFacet, machineAgentGrants, readProjectId } from '#machine-host.js';
+import { readProjectId } from '#machine-host.js';
 import type { CreateNodeMachineRuntimeOptions } from '#machine-host.js';
-import { openSharedMachineHost } from '#local-machines.js';
 import { keepAwakeWhileStreaming, platformKeepAwakeBlocker } from '#keep-awake.js';
 import type { KeepAwakeBlocker } from '#keep-awake.js';
+import { agentMachineFacet, openSharedMachineHost } from '#local-machines.js';
+import type { SharedMachineHost } from '#local-machines.js';
 import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
 import type { HostJobWorkerFactory, HostJobWorkerHandle } from '#job-worker.js';
@@ -524,7 +524,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   let agentExternalAgents: readonly ExternalAgentDescriptor[] = [];
   let agentRunReporter: RunReporter | undefined;
   let agentFileSystem: AgentFileSystemAuthority | undefined;
-  let agentMachines: NonNullable<AgentServerOptions['machines']> | undefined;
+  let agentMachines: SharedMachineHost | undefined;
   /* Releases the computer when the agent stops; set while a machine host serves. */
   let stopKeepingAwake: (() => void) | undefined;
   /* Close failures of a released candidate root's runtime, reported by the next `stopAgent`. */
@@ -770,9 +770,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   const openMachineHost = async (
     providers: CreateNodeMachineHostInput['providers'],
     readArtifact: CreateNodeMachineRuntimeOptions['readArtifact'],
-  ): Promise<
-    (NonNullable<AgentServerOptions['machines']> & Readonly<{ admission: HostAdmissionAuthority }>) | undefined
-  > => {
+  ): Promise<SharedMachineHost | undefined> => {
     const shared = await openSharedMachineHost({
       providers,
       readArtifact,
@@ -882,22 +880,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       ...(projectId === undefined ? {} : { projectId }),
       /* The agent's facet rides an agent session of its own, so the host applies the agent rules whatever a call
        * claims; the route's session stays the person's. */
-      ...(machines
-        ? {
-            machines: localMachineFacet((port) => {
-              const session = machines.host.issueSession({
-                actor: { kind: 'agent', id: 'tau' },
-                grants: machineAgentGrants,
-              });
-              const channel = machines.host.serve({ port, session });
-              /* As the desktop does: the session lives only as long as its channel. */
-              channel.onClose(() => {
-                machines.admission.revoke(session);
-              });
-              return channel;
-            }),
-          }
-        : {}),
+      ...(machines ? { machines: agentMachineFacet(machines, 'tau') } : {}),
       fileSystem: {
         open: providerForAgentRoot,
         admit: (root) => admitAgentRoot(filesystem, root),

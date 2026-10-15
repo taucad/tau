@@ -60,14 +60,15 @@ Which extensions and export routes exist remains owned by the plugin packages.
 
 ## PicoGK
 
-Point the CLI at a prepared, target-specific PicoGK payload to run C# entry points natively. The worker runs inside the operating-system sandbox described by `@taucad/native-process-core`; the export fails with a native-runtime-unavailable error when that sandbox cannot start.
+Prepare the PicoGK kernel once, then export C# entry points natively. `tau prepare picogk` downloads Microsoft's .NET runtime archive and the Tau PicoGK layer that `@taucad/picogk`'s `tau-plugin.json` pins, verifies both and seals them as one closure in the payload store; `tau export` then launches the worker from that closure with no environment variable. The worker runs inside the operating-system sandbox described by `@taucad/native-process-core`; the export fails with a native-runtime-unavailable error when that sandbox cannot start.
 
 ```bash
-TAU_PICOGK_RESOURCE_ROOT=/path/to/picogk-resources tau export model.cs --ext=3mf
-TAU_PICOGK_RESOURCE_ROOT=/path/to/picogk-resources tau export model.cs --ext=usdz
+tau prepare picogk
+tau export model.cs --ext=3mf
+tau export model.cs --ext=usdz
 ```
 
-The resource root contains directories such as `darwin-arm64/` with `tau-runtime-manifest.json` and the integrity-pinned worker payload prepared by the desktop build.
+An export of a `.cs` file before `tau prepare picogk` exits 3 with `KERNEL_NOT_PREPARED`, and on a host no closure supports (PicoGK runs on macOS 14 or later on Apple silicon) with `UNSUPPORTED_TARGET`.
 
 ## Tau Host
 

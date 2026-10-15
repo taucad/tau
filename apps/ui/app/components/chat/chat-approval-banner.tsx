@@ -63,19 +63,22 @@ export const pendingAgentHostApprovals = (messages: readonly MyUIMessage[]): rea
       part.type === 'dynamic-tool' && part.toolName === agentApprovalToolName
         ? parseAgentHostApproval(part.input)
         : undefined;
-    pending.push({
-      messageId: message.id,
-      approvalId: part.approval.id,
-      interruptId: projected?.interruptId ?? part.approval.id,
-      kind: projected?.kind ?? 'approval',
-      prompt: projected?.prompt ?? getToolPartName(part),
-      options: projected?.options ?? [],
-      ...(projected?.agentId === undefined ? {} : { agentId: projected.agentId }),
-      ...(projected?.login === undefined ? {} : { login: projected.login }),
-      ...(projected?.context === undefined ? {} : { context: projected.context }),
-      ...(projected?.request === undefined ? {} : { request: projected.request }),
-      ...(projected === undefined ? { tauTool: true, request: { input: part.input } } : {}),
-    });
+    // A projected interrupt keeps all it carries, its ledger correlation (`context`) included: the Print pane finds a
+    // job's or a machine action's interrupt by it.
+    pending.push(
+      projected === undefined
+        ? {
+            messageId: message.id,
+            approvalId: part.approval.id,
+            interruptId: part.approval.id,
+            kind: 'approval',
+            prompt: getToolPartName(part),
+            options: [],
+            tauTool: true,
+            request: { input: part.input },
+          }
+        : { ...projected, messageId: message.id, approvalId: part.approval.id },
+    );
   }
   return pending;
 };

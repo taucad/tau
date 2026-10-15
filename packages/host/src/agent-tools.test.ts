@@ -793,7 +793,7 @@ describe('createHostToolRegistry', () => {
     expect(withdrawJob).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ jobId: 'call-1' }));
   });
 
-  it('names the project of the root each print is called in, when the host resolves projects per call', async () => {
+  it('names the project of the root each job is called in, when the host resolves projects per call', async () => {
     /* `tau mcp` under Codex: started in a folder with no project, each call naming the thread's folder. */
     const startFolder = await makeWorkspace();
     const project = await makeWorkspace();
@@ -814,14 +814,14 @@ describe('createHostToolRegistry', () => {
     });
     expect(registry.list().map((tool) => tool.name)).toContain('request_job');
 
-    const printed = await registry.invoke({
+    const requested = await registry.invoke({
       toolCallId: 'call-1',
       toolName: 'request_job',
       input: { targetFile: 'main.ts' },
       runId: 'mcp:project',
       signal: new AbortController().signal,
     });
-    expect(printed).toMatchObject({ isError: false, content: { job: { state: 'awaiting-approval' } } });
+    expect(requested).toMatchObject({ isError: false, content: { job: { state: 'awaiting-approval' } } });
     const { artifact } = requestJob.mock.calls[0]![0];
     expect(artifact.projectId).toBe(projectId);
     /* The slice lands in the calling root, where the machine host reads it by that root's id. */
@@ -839,10 +839,10 @@ describe('createHostToolRegistry', () => {
       content: { errorCode: 'PROJECT_NOT_NAMED', message: expect.stringContaining(unnamed) as string },
     });
     expect(requestJob).toHaveBeenCalledOnce();
-    /* Only a print asks which project a root is. */
+    /* Only a job tool asks which project a root is. */
     await registry.invoke({
       toolCallId: 'call-3',
-      toolName: 'list_jobs',
+      toolName: 'list_machines',
       input: {},
       runId: 'mcp:unnamed',
       signal: new AbortController().signal,

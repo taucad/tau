@@ -1896,7 +1896,7 @@ export function FailureEvidence({
   ].sort();
   const failure =
     codes.length > 0 ? codes.join(', ') : entry.snapshot.run?.state === 'failed' ? 'Print failed' : undefined;
-  if (failure === undefined) {
+  if (failure === undefined || !entry.descriptor.capabilities.components.some(({ kind }) => kind === 'camera')) {
     return undefined;
   }
   return (

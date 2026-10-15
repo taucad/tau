@@ -573,23 +573,37 @@ const machineAction = async (
     };
   }
   const prompt = `${isSimulatedMachine(entry.descriptor.capabilities) ? 'Simulated: ' : ''}${actionPrompt(entry, descriptor, parameters)}`;
-  const resolution = await invocation.approve({
-    key,
-    prompt,
-    /* The Print pane shows the parameters and the prompt beside Approve: the person approves exactly this. */
-    payload: {
-      kind: 'machine-action',
-      machineId: entry.machineId,
-      componentId,
-      action,
-      operationId: intent.operationId,
-      label: descriptor.label,
-      parameters,
+  const resolution = await invocation
+    .approve({
+      key,
       prompt,
-      // SAFETY: every field of the intent is JSON.
-      intent: intent as unknown as JsonObject,
-    },
-  });
+      /* The Print pane shows the parameters and the prompt beside Approve: the person approves exactly this. */
+      payload: {
+        kind: 'machine-action',
+        machineId: entry.machineId,
+        componentId,
+        action,
+        operationId: intent.operationId,
+        label: descriptor.label,
+        parameters,
+        prompt,
+        // SAFETY: every field of the intent is JSON.
+        intent: intent as unknown as JsonObject,
+      },
+    })
+    .catch((error: unknown) => {
+      /* The host could not ask (an MCP client's form failed): no person answered, so the action waits for Tau. */
+      if ((error as { readonly code?: unknown } | undefined)?.code === 'APPROVAL_UNAVAILABLE') {
+        return undefined;
+      }
+      throw error;
+    });
+  if (resolution === undefined) {
+    return {
+      status: 'needs-approval',
+      message: `${descriptor.label} on ${entry.name} needs a person's approval, which this app could not ask for. Ask the person to do it in Tau.`,
+    };
+  }
   if (resolution.outcome !== 'approved') {
     return unapprovedReport(resolution.outcome, `${descriptor.label} on ${entry.name}`);
   }

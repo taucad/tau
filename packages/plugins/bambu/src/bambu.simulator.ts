@@ -47,6 +47,7 @@ export type BambuSimulatorFault =
   | 'reply-lost-after-accept'
   /** Answer "fail" to a profile write and apply it anyway, as an X1C does (bambuddy notes). */
   | 'replies-lie'
+  /** Report print_error 0500-402F, a microSD card with damaged sectors. */
   | 'storage-damaged'
   | 'storage-full'
   | 'timeout'
@@ -313,6 +314,8 @@ const text = (value: unknown, fallback: string): string =>
 
 /** `print_error` 0500-400E, "Printing was cancelled", which an X1C reports with FAILED after a stop. */
 const cancelledError = 0x05_00_40_0e;
+/** `print_error` 0500-402F, a microSD card with damaged sectors. */
+const storageDamagedError = 0x05_00_40_2f;
 /** Degrees Celsius the enclosure settles to with its heaters off. */
 const ambient = 25;
 /** Degrees Celsius per simulated second while each heater heats and while it cools passively. */
@@ -734,11 +737,12 @@ export const createBambuSimulator = async (
       ...(input.calibrationTable === false ? {} : { cali_version: caliVersion }),
       flag3: 0b1000,
       ...(x1c ? { fun: developerMode ? '0' : '20000000' } : {}),
-      print_error: faults.has('storage-damaged')
-        ? 0x05_00_40_2f
-        : cancelled || calibration?.cancelled === true
+      print_error:
+        cancelled || calibration?.cancelled === true
           ? cancelledError
-          : 0,
+          : faults.has('storage-damaged')
+            ? storageDamagedError
+            : 0,
       hms: refused && !developerMode ? [{ attr: 0x05_00_05_00, code: 0x00_01_00_07 }] : [],
       ams: {
         tray_exist_bits: exist.toString(16),
@@ -1342,7 +1346,7 @@ export const createBambuSimulator = async (
 
 const simulatorBindingConfiguration = defineConfiguration({
   id: 'bambu.simulator.binding',
-  version: '2.1.0',
+  version: '2.2.0',
   schema: z.object({
     faults: z
       .array(z.enum(['storage-damaged', 'camera-unavailable']))
@@ -1414,13 +1418,13 @@ const simulatorParts = (model: BambuModel, input: Readonly<{ simulator?: BambuSi
       if (input.simulator) {
         return input.simulator.connect();
       }
-      const { speed, developerMode, wireForm } = connectInput.configuration;
+      const { speed, developerMode, wireForm, faults } = connectInput.configuration;
       const simulator = await createBambuSimulator({
         model,
-        faults: connectInput.configuration.faults,
         clock: runtime.clock,
         speed,
         developerMode,
+        faults,
         ...(wireForm === undefined ? {} : { form: wireForm }),
         readArtifact: (read) => runtime.readArtifact(read),
         cadence: true,

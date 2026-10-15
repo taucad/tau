@@ -8,7 +8,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { disclosureMotion } from '@taucad/ui/components/actions';
 import { compileExportConfigurationManifest } from '#components/machines/configuration-manifest.js';
 import { rjsfValidator } from '@taucad/viewer/parameters/rjsf-validator';
-import { formatDisplayLabel } from '@taucad/ui/utils/label';
+import { formatFieldLabel } from '@taucad/ui/utils/label';
 
 /** A draft-7 schema and the defaults its owner declares. @public */
 export type ResolvedSchema = Readonly<{ schema: JSONSchema7; defaults: Record<string, unknown> }>;
@@ -36,7 +36,7 @@ export const formIncomplete = (schema: JSONSchema7, values: Record<string, unkno
       const key = JSON.parse(segment) as string;
       const field = schema.properties?.[key];
       const title = typeof field === 'object' ? field.title : undefined;
-      return [title ?? formatDisplayLabel(key)];
+      return [formatFieldLabel(title ?? key, title)];
     }),
   );
   return `Complete ${labels.size === 0 ? 'the form' : [...labels].join(', ')} first.`;

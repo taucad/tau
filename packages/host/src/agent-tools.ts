@@ -388,15 +388,15 @@ export type HostToolRegistryOptions = {
   readonly projectId?: string | undefined;
   /**
    * Names the project each root holds, for a host whose calls name their own folder: `tau mcp`, where Codex names
-   * the thread's folder per call and the folder the server started in may hold no project. Asked when a print tool
+   * the thread's folder per call and the folder the server started in may hold no project. Asked when a job tool
    * is called, so the slice lands in the calling root and names that root's project, which the machine host then
    * reads it from. With it `request_job` is offered whatever `workspaceRoot` holds, a root that names no project
-   * refuses the print, and `projectId` is not used.
+   * refuses the job, and `projectId` is not used.
    */
   readonly projectIdOf?: ((workspaceRoot: string) => Promise<string | undefined>) | undefined;
 };
 
-/** The tools that name the project a print artifact belongs to. */
+/** The tools that name the project a job's artifact belongs to. */
 const projectPrintTools: ReadonlySet<string> = new Set([toolName.requestJob, toolName.checkJob]);
 
 /**
@@ -699,7 +699,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
         return {
           content: {
             errorCode: 'PROJECT_NOT_NAMED',
-            message: `${root} holds no tau.json, so nothing in it can be printed. Print from a Tau project folder.`,
+            message: `${root} holds no tau.json, so nothing in it can run on a machine. Request jobs from a Tau project folder.`,
           },
           isError: true,
         };

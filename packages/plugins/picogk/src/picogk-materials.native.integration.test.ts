@@ -16,26 +16,13 @@ import { mock } from 'vitest-mock-extended';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { createMockKernelRuntime, createTestRuntimeClient, extractGltfFromResult } from '@taucad/runtime-testing';
 import { describe, expect, it, vi } from 'vitest';
-import { loadPicogkKernelOptions, picogkKernel } from '#index.js';
+import { picogkKernel } from '#index.js';
+import { nativeEngineAvailable, nativeKernelOptions } from '#picogk-native.fixture.js';
 import { PicogkSession } from '#picogk-session.js';
 import { picogkBuildSchema, picogkProtocolVersion } from '#picogk.protocol.js';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
-const manifest = JSON.parse(
-  readFileSync(
-    resolve(
-      workspaceRoot,
-      `apps/desktop/resources/picogk/${process.platform}-${process.arch}/tau-runtime-manifest.json`,
-    ),
-    'utf8',
-  ),
-) as { resourceFiles: ReadonlyArray<{ path: string }> };
-// Upstream PicoGK ships no Linux voxel library, so a Linux payload carries the managed worker
-// without it and these suites run only where the native engine is present.
-const nativeEngineAvailable = manifest.resourceFiles.some(({ path }) => /^picogk\.\d/u.test(path));
-const options = loadPicogkKernelOptions({
-  resourceRoot: resolve(workspaceRoot, 'apps/desktop/resources/picogk'),
-});
+const options = nativeKernelOptions;
 const runtime = defineRuntime({ kernels: [picogkKernel(options)] });
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=';
 const fullMaterialSource = `using System.Numerics;

@@ -451,9 +451,9 @@ describe('Bambu printer diagnostics', () => {
       expect(report({ print_error: value }).alerts).toEqual([
         {
           code: '0500-402F',
-          blocks: 'nothing',
           message:
             'The microSD card has damaged sector data. Back up readable files, then repair or format the card. Replace it if the printer still cannot read it.',
+          blocks: 'nothing',
         },
       ]);
     },

@@ -20,16 +20,29 @@ const readFile = async (path: string): Promise<string | undefined> => {
   return files[path];
 };
 
-const openProject = async (): Promise<void> => {
+const openProject = async (): Promise<Readonly<Record<string, string>>> => {
+  let snapshot: Readonly<Record<string, string>> = {};
   await target.setViewport({ width: 1440, height: 900 });
   await target.navigate(`/__e2e/project-file-tree?workspace=${workspace}`);
   await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
-  await expect.poll(async () => (await readFile(layoutPath)) !== undefined, { timeout: 60_000 }).toBe(true);
+  const decline = selectors.getByRole('button', { name: 'Decline', exact: true });
+  if (await target.isVisible(decline)) {
+    await target.click(decline);
+  }
+  await expect
+    .poll(
+      async () => {
+        snapshot = await readWorkbenchTree(workspace);
+        return snapshot[layoutPath];
+      },
+      { timeout: 60_000 },
+    )
+    .toBeDefined();
+  return snapshot;
 };
 
 test('reloads authored records and preserves invalid and newer bytes', async () => {
-  await openProject();
-  const seeded = await readWorkbenchTree(workspace);
+  const seeded = await openProject();
   const initial = JSON.parse(seeded[layoutPath]!) as {
     version: number;
     lanes: { chat: boolean; workbench: boolean };
@@ -119,11 +132,41 @@ test('reloads authored records and preserves invalid and newer bytes', async () 
   try {
     await target.expectVisible(settingsTrigger, 60_000);
     invalidDocument = await target.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }));
-    await target.click(settingsTrigger);
+    await target.focus(settingsTrigger);
+    await target.keyboardPress('Enter');
     await target.expectVisible(layoutIssue);
+    expect(await target.textContent(layoutIssue)).toContain('The file could not be applied');
+    expect(await target.textContent(selectors.getByCss('body'))).not.toMatch(/Bridge call .+ timed out/u);
+    await target.emulateColorScheme('light');
+    await target.screenshot(undefined, 'record-recovery-light.png');
+    await target.emulateColorScheme('dark');
+    await target.screenshot(undefined, 'record-recovery-dark.png');
+    await target.setViewport({ width: 320, height: 720 });
+    // Responsive layout replacement closes the old popover; reopen the surviving action by keyboard.
+    await target.focus(settingsTrigger);
+    await target.keyboardPress('Enter');
+    const popover = selectors.getByRole('dialog', { name: 'Settings not applied', exact: true });
+    await target.expectVisible(popover);
+    const bounds = await target.boundingBox(popover);
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320);
+    await target.screenshot(undefined, 'record-recovery-320.png');
+    await target.setViewport({ width: 1440, height: 900 });
+    await target.focus(settingsTrigger);
+    await target.keyboardPress('Enter');
+    await target.evaluate(() => {
+      document.documentElement.style.fontSize = '200%';
+    });
+    await target.expectVisible(popover);
+    await target.screenshot(undefined, 'record-recovery-text-200.png');
+    await target.evaluate(() => {
+      document.documentElement.style.fontSize = '';
+    });
     expect(await readFile(layoutPath)).toBe(invalid);
-    await target.click(layoutIssue.getByRole('button', { name: 'More actions for Pane layout', exact: true }));
-    await target.click(selectors.getByRole('menuitem', { name: 'Reset settings…', exact: true }));
+    await target.focus(layoutIssue.getByRole('button', { name: 'More actions for Pane layout', exact: true }));
+    await target.keyboardPress('Enter');
+    await target.keyboardPress('ArrowDown');
+    await target.keyboardPress('Enter');
     await target.expectVisible(selectors.getByRole('alertdialog', { name: 'Reset pane layout?', exact: true }));
   } catch (error) {
     try {
@@ -155,11 +198,12 @@ test('reloads authored records and preserves invalid and newer bytes', async () 
     throw error;
   }
   expect(await readFile(layoutPath)).toBe(invalid);
-  await target.click(
+  await target.press(
     selectors.getByRole('alertdialog', { name: 'Reset pane layout?', exact: true }).getByRole('button', {
       name: 'Reset settings',
       exact: true,
     }),
+    'Enter',
   );
   await expect
     .poll(
@@ -170,6 +214,11 @@ test('reloads authored records and preserves invalid and newer bytes', async () 
       { timeout: 60_000 },
     )
     .toBe(1);
+  await expect
+    .poll(async () => target.evaluate(() => document.activeElement?.getAttribute('aria-label')))
+    .toBe('Share');
+  await target.expectCount(selectors.getByRole('dialog'), 0);
+  await target.screenshot(undefined, 'record-recovery-reset-focus.png');
 
   expect(await target.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }))).toEqual(
     invalidDocument,

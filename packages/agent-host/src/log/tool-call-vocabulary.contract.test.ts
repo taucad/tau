@@ -167,6 +167,7 @@ describe('the durable tool-call vocabulary', () => {
     expect(tauToolKinds.get('install_packages')).toBe('edit');
     expect(tauToolKinds.get('machine_action')).toBe('other');
     expect(tauToolKinds.get('list_machines')).toBe('read');
+    expect(tauToolKinds.get('install_packages')).toBe('edit');
     expect(tauToolKinds.size).toBe(28);
   });
 

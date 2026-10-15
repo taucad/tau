@@ -1,7 +1,7 @@
 # =============================================================================
-# .dockerignore — shared production build context rules.
+# Dockerfile-specific production build context rules.
 #
-# Build context is the repo root. Production Docker builds use COPY . . to ingest
+# Patterns are relative to the repo-root context, not this file. Builds use COPY . . to ingest
 # the full Nx monorepo, so only exclude items that the build doesn't need.
 # =============================================================================
 

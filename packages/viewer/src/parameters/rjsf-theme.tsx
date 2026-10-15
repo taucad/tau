@@ -24,7 +24,7 @@ import { ParameterSelect } from '#parameters/parameter-select.jsx';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
-import { formatDisplayLabel } from '@taucad/ui/utils/label';
+import { formatDisplayLabel, formatFieldLabel } from '@taucad/ui/utils/label';
 import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
 import { HighlightText } from '@taucad/ui/components/highlight-text';
 import { PaneVirtualList } from '@taucad/ui/components/pane-virtual-list';
@@ -953,7 +953,3 @@ export const uiSchema: UiSchema<Record<string, unknown>, RJSFSchema, RJSFContext
     },
   },
 } as const satisfies UiSchema<Record<string, unknown>, RJSFSchema, RJSFContext>;
-
-/** Preserve schema-authored titles; humanize only generated property labels. */
-const formatFieldLabel = (label: string, title: unknown): string =>
-  title === label ? label : formatDisplayLabel(label);

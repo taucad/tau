@@ -637,6 +637,13 @@ describe('Simulated X1C jobs and run control', () => {
     await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({ connection: 'connected' });
   });
 
+  it('should report a damaged microSD card through the real decoder without a physical write', async () => {
+    const { simulator } = await open({ faults: ['storage-damaged'] });
+    const report = await simulator.session.getSnapshot({ signal });
+    expect(JSON.stringify(report)).toContain('The microSD card has damaged sector data.');
+    expect(simulator.writes()).toEqual([]);
+  });
+
   it.each(['wrong-credential', 'certificate-changed', 'protected-mode', 'timeout'] as const)(
     'should fail to describe itself under %s',
     async (fault) => {

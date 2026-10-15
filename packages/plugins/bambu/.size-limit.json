@@ -1,6 +1,6 @@
 [
   {
-    "name": "@taucad/bambu (.) static graph, without the lazy host, session and archive chunks — measured 19.99 kB brotli on 2026-10-10",
+    "name": "@taucad/bambu (.) static graph, without the lazy host, session, archive and simulator image chunks — measured 20.15 kB brotli on 2026-10-15",
     "path": [
       "dist/*.mjs",
       "!dist/bambu.host.mjs",

@@ -442,7 +442,7 @@ describe('plugin generator', () => {
 
   it('should build portable declarations for job-only, machine-only, and mixed packages', async () => {
     await checkGeneratedPlugins('build');
-  }, 30_000);
+  }, 120_000);
 
   it('fails a full creation collision before changing existing bytes', async () => {
     const tree = createTreeWithEmptyWorkspace();

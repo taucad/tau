@@ -5,14 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
 import { FailureEvidence } from '#components/machines/machine-controls.js';
-import { entry as createEntry } from '#routes/w.$workspace.$project/chat-print.fixture.js';
+import { entry as createEntry, printingRun } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 
 const entry = createEntry();
 const failed = (): MachineDirectoryEntry => ({
   ...entry,
   snapshot: {
     ...entry.snapshot,
-    alerts: [{ blocks: 'nothing', code: '0500-402F', message: 'The microSD card has damaged sector data.' }],
+    alerts: [{ code: '0500-402F', message: 'The microSD card has damaged sector data.', blocks: 'nothing' }],
   },
 });
 const captureStill = vi.fn<MachineClient['captureStill']>();
@@ -76,7 +76,7 @@ describe('failure camera evidence', () => {
               connection: condition === 'disconnected' ? 'disconnected' : 'connected',
               alerts:
                 condition === 'warning' || condition === 'info'
-                  ? [{ blocks: 'nothing', code: 'notice', message: 'Notice', severity: condition }]
+                  ? [{ code: 'notice', message: 'Notice', severity: condition, blocks: 'nothing' }]
                   : machine.snapshot.alerts,
             },
           }}
@@ -122,40 +122,13 @@ describe('failure camera evidence', () => {
   it('should keep the first failure still when a printing run becomes terminal', async () => {
     const machine = failed();
     const view = render(
-      <FailureEvidence
-        client={client}
-        entry={{
-          ...machine,
-          snapshot: {
-            ...machine.snapshot,
-            run: {
-              runId: 'run-1',
-              origin: 'tau',
-              delivery: 'stored',
-              progress: { basis: 'executed', counters: [] },
-              state: 'running',
-            },
-          },
-        }}
-      />,
+      <FailureEvidence client={client} entry={{ ...machine, snapshot: { ...machine.snapshot, run: printingRun } }} />,
     );
     await screen.findByRole('img');
     view.rerender(
       <FailureEvidence
         client={client}
-        entry={{
-          ...machine,
-          snapshot: {
-            ...machine.snapshot,
-            run: {
-              runId: 'run-1',
-              origin: 'tau',
-              delivery: 'stored',
-              progress: { basis: 'executed', counters: [] },
-              state: 'failed',
-            },
-          },
-        }}
+        entry={{ ...machine, snapshot: { ...machine.snapshot, run: { ...printingRun, state: 'failed' } } }}
       />,
     );
     expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:failure');
@@ -163,8 +136,9 @@ describe('failure camera evidence', () => {
     expect(revokeObjectURL).not.toHaveBeenCalled();
   });
 
-  it('should explain unsupported cameras and capture a failed run without an alert code', async () => {
+  it('should show nothing for a machine without a camera and capture a failed run without an alert code', async () => {
     const machine = failed();
+    const { capabilities } = machine.descriptor;
     const view = render(
       <FailureEvidence
         client={client}
@@ -173,31 +147,19 @@ describe('failure camera evidence', () => {
           descriptor: {
             ...machine.descriptor,
             capabilities: {
-              ...machine.descriptor.capabilities,
-              components: machine.descriptor.capabilities.components.filter((component) => component.kind !== 'camera'),
+              ...capabilities,
+              components: capabilities.components.filter(({ kind }) => kind !== 'camera'),
             },
           },
         }}
       />,
     );
-    expect(screen.getByText('Still capture is unavailable for this printer.')).toBeVisible();
+    expect(screen.queryByRole('figure')).not.toBeInTheDocument();
     expect(captureStill).not.toHaveBeenCalled();
     view.rerender(
       <FailureEvidence
         client={client}
-        entry={{
-          ...entry,
-          snapshot: {
-            ...entry.snapshot,
-            run: {
-              runId: 'run-1',
-              origin: 'tau',
-              delivery: 'stored',
-              progress: { basis: 'executed', counters: [] },
-              state: 'failed',
-            },
-          },
-        }}
+        entry={{ ...entry, snapshot: { ...entry.snapshot, run: { ...printingRun, state: 'failed' } } }}
       />,
     );
     await screen.findByRole('img');

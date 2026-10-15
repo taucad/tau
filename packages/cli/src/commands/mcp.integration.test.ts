@@ -709,11 +709,11 @@ describe('tau mcp viewer presentation', () => {
 
 describe("tau mcp with this computer's printers (blueprint W11)", () => {
   const printTools = [
-    'get_print_profiles',
     'list_machines',
     'get_machine',
     'machine_action',
     'stop_machine',
+    'get_print_profiles',
     'request_job',
     'check_job',
   ];
@@ -816,7 +816,7 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
   );
 
   it(
-    'should request a job in the folder Codex names and preserve machine approval ownership',
+    'should request a job from the folder Codex names with each call, leaving its approval to the Print pane',
     async () => {
       const { configDirectory, environment } = await isolatedStore('config-codex');
       /* The simulator, bound in the store before the server starts, as the person binds a printer in Tau. */
@@ -824,7 +824,7 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
       process.env['TAU_SECRET_VAULT'] = 'memory';
       const providers = await defaultMachineProviders();
       const store = await openSharedMachineHost({
-        providers: providers.filter((provider) => provider.id === 'bambu-simulator'),
+        providers: providers.filter(({ id }) => id === 'bambu-simulator'),
         readArtifact: async () => {
           throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
         },
@@ -847,7 +847,7 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
         let candidate: Parameters<typeof machines.beginBinding>[0]['candidate'] | undefined;
         for await (const event of machines.discover({
           providerId: 'bambu-simulator',
-          configuration: { logicalId: 'simulated-x1c' },
+          configuration: {},
         })) {
           if (event.type === 'found') {
             candidate = event.candidate;
@@ -877,11 +877,10 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
       const server = launch(undefined, undefined, { env: environment });
       disposers.push(stopIfRunning(server));
       const asked: string[] = [];
-      let approve = false;
       const client = new Client(hostShapes.codexCli.clientInfo, { capabilities: { elicitation: { form: {} } } });
       client.setRequestHandler(ElicitRequestSchema, async (request) => {
         asked.push(request.params.message);
-        return { action: 'accept', content: { approve } };
+        return { action: 'accept', content: { approve: true } };
       });
       await connect(client, server);
       expect(await namesOf(client)).toEqual(expect.arrayContaining(printTools));
@@ -900,36 +899,24 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
         );
       type Answer = {
         approval?: string;
-        machineName?: string;
-        job: { state: string; program: { name: string } };
-        nextStep?: string;
+        job?: { state: string; program: { name: string } };
       };
 
       const unnamedFolder = await requestIn(join(scratch, 'codex-unnamed'));
       expect(unnamedFolder.isError).toBe(true);
       expect(textOf(unnamedFolder)).toContain('holds no tau.json');
 
-      const denied = await requestIn(project);
-      expect(denied.isError ?? false, textOf(denied)).toBe(false);
-      const deniedAnswer = JSON.parse(textOf(denied)) as Answer;
-      expect(deniedAnswer).toMatchObject({ approval: 'denied', job: { state: 'withdrawn' } });
-      expect(asked).toHaveLength(1);
-      /* The form names the sliced file and the machine it would print on. */
-      expect(asked[0]).toContain(deniedAnswer.job.program.name);
-      expect(asked[0]).toContain(deniedAnswer.machineName);
-
-      /* An MCP form cannot grant machine attestations: acceptance still waits for the person's Print pane. */
-      approve = true;
-      const approved = await requestIn(project);
-      expect(approved.isError ?? false, textOf(approved)).toBe(false);
-      const approvedAnswer = JSON.parse(textOf(approved)) as Answer;
-      expect(approvedAnswer, textOf(approved)).toMatchObject({
-        approval: 'approved',
-        job: { state: 'awaiting-approval' },
-      });
-      expect(approvedAnswer.nextStep).toContain('Print pane');
-      const artifacts = await readdir(join(project, '.tau/artifacts'), { recursive: true });
-      expect(artifacts.some((path) => path.endsWith(approvedAnswer.job.program.name))).toBe(true);
+      /* The job waits for the person in Tau's Print pane, where their session approves it; the agent app's form is
+       * never asked, even though it can draw one. */
+      const requested = await requestIn(project);
+      expect(requested.isError ?? false, textOf(requested)).toBe(false);
+      const answer = JSON.parse(textOf(requested)) as Answer;
+      expect(answer, textOf(requested)).toMatchObject({ job: { state: 'awaiting-approval' } });
+      expect(answer).not.toHaveProperty('approval');
+      expect(asked).toEqual([]);
+      /* The slice lands in the folder the call named, where the machine host reads it by that folder's project. */
+      const artifacts = await readdir(join(project, '.tau', 'artifacts'), { recursive: true });
+      expect(artifacts).toContainEqual(expect.stringContaining(answer.job?.program.name ?? 'missing'));
       await client.close();
     },
     kernelCallLimit,

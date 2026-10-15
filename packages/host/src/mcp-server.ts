@@ -32,7 +32,6 @@ import { z } from 'zod';
 
 import { createTauMcpHttpHandler, serveTauMcpStdio } from '@taucad/mcp';
 import type {
-  TauMcpConfirm,
   TauMcpDispatch,
   TauMcpHostCall,
   TauMcpHostTool,
@@ -83,11 +82,11 @@ export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
 /**
  * The exact tool grant a host capability carries.
  *
- * The four CAD tools, the workbench record tool, the parameter tools, and the machine tools: an external agent may read machines and
- * their slicing profiles, apply the host's unattended actions (anything needing a person's approval is refused with
- * the step to take in Tau, since only a Tau turn can pause for it), stop a machine, and request or check a job,
- * which a person approves through the client’s form when supported or in Tau. Every name is dispatched into the daemon's own
- * registry by tool name.
+ * The four CAD tools, the workbench record tool, the parameter tools (agent plugin UI blueprint G22), and the
+ * machine tools: an external agent may read machines and their slicing profiles, apply the host's unattended
+ * actions, stop a machine, and request or check a job. A job, or an action needing a person's approval, goes ahead
+ * only on the person's answer in Tau's Print pane, while the agent is told so: nothing here starts a program. Every
+ * name is dispatched into the daemon's own registry by tool name.
  *
  * @public
  */
@@ -865,12 +864,10 @@ export const serveLocalHostMcp = async (
     readonly call: {
       readonly toolCallId: string;
       readonly signal?: AbortSignal | undefined;
-      readonly confirm?: TauMcpConfirm | undefined;
     };
   }): Promise<Awaited<ReturnType<ToolRegistry['invoke']>>> => {
     const runId = `mcp:${workspaceRoot}`;
     options.checkouts.set(runId, { cwd: workspaceRoot });
-    const { confirm } = call;
     return options.registry.invoke({
       toolCallId: call.toolCallId,
       toolName: tool,
@@ -878,25 +875,8 @@ export const serveLocalHostMcp = async (
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the args were validated against the tool's own schema.
       input: args as unknown as JsonValue,
       signal: call.signal ?? new AbortController().signal,
-      /* A client that draws forms asks the person inside this call, so a print starts only on their answer (E9,
-       * W11). Without one the tool leaves its request awaiting approval in Tau. Nothing pauses here, so there is
-       * no later attempt to recall an answer. */
-      ...(confirm === undefined
-        ? {}
-        : {
-            approve: async ({ prompt }: { readonly prompt: string }) => {
-              const outcome = await confirm({ message: prompt, label: 'Approve' }).catch((error: unknown) => {
-                /* Not the person's answer: the tool leaves its request for them in Tau, and the operator learns why. */
-                process.stderr.write(
-                  `tau mcp: the agent app could not ask the person to approve ${tool}, so it waits for them in Tau: ${String(error)}\n`,
-                );
-                throw Object.assign(new Error('The agent app could not ask the person.', { cause: error }), {
-                  code: 'APPROVAL_UNAVAILABLE',
-                });
-              });
-              return { interruptId: call.toolCallId, outcome };
-            },
-          }),
+      /* No approve here: a job or an action needing a person waits for them in Tau's Print pane, where their own
+       * session records the approval with its attestations (machines contract R15). */
     });
   };
   const viewer =

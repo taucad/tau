@@ -8,6 +8,7 @@
 
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, relative } from 'node:path';
@@ -400,9 +401,25 @@ describe('GeoSpec engine staging', () => {
     try {
       const { desktopRoot } = await writeEngineFixture(directory);
       await rm(join(desktopRoot, 'node_modules/geospec-engine-darwin-arm64'), { recursive: true });
-      await expect(copyGeoSpecEngine(desktopRoot, join(directory, 'stage/node_modules'))).rejects.toThrow(
-        'geospec-engine-darwin-arm64 is not installed beside geospec-engine',
+      // The pnpm test launcher adds workspace dependencies to NODE_PATH.
+      // Exclude that fallback to exercise a genuinely absent platform package.
+      const nodeEnvironment = { ...process.env };
+      delete nodeEnvironment['NODE_PATH'];
+      const result = spawnSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `import { copyGeoSpecEngine } from ${JSON.stringify(pathToFileURL(join(appRoot, 'scripts/runtime-closure.mts')).href)};
+           await copyGeoSpecEngine(process.argv[1], process.argv[2]);`,
+          desktopRoot,
+          join(directory, 'stage/node_modules'),
+        ],
+        { encoding: 'utf8', env: nodeEnvironment },
       );
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('geospec-engine-darwin-arm64 is not installed beside geospec-engine');
+      await expect(readdir(join(directory, 'stage/node_modules'))).rejects.toThrow('ENOENT');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

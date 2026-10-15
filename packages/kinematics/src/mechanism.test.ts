@@ -623,3 +623,31 @@ describe('unitScale', () => {
     expect(() => unitScale(from, to)).toThrow(`@taucad/kinematics: cannot convert ${from} to ${to}.`);
   });
 });
+
+describe('one-sided travel', () => {
+  it('should preserve a finite lower bound and unbounded upper travel through JSON admission', () => {
+    const mechanism = {
+      schemaVersion: 1,
+      units: { length: 'm', angle: 'deg' },
+      root: 'base',
+      links: { base: { components: [] }, slide: { components: ['slide'] } },
+      joints: {
+        rail: {
+          type: 'prismatic',
+          parent: 'base',
+          child: 'slide',
+          origin: [0, 0, 0],
+          axis: [1, 0, 0],
+          limits: { lower: -0.01 },
+        },
+      },
+    };
+    // oxlint-disable-next-line unicorn/prefer-structured-clone -- Exercise the portable JSON wire boundary.
+    const admitted = admitMechanism(JSON.parse(JSON.stringify(mechanism)));
+    expect(admitted.status).toBe('admitted');
+    if (admitted.status !== 'admitted') {
+      throw new Error('Expected admitted one-sided bounds');
+    }
+    expect(listDegreesOfFreedom(admitted.mechanism)[0]?.limits).toEqual({ lower: -0.01, upper: Infinity });
+  });
+});

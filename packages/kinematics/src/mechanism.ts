@@ -75,10 +75,13 @@ export const dofId = (jointId: string, suffix: string): string => (suffix === ''
  * @param spec - The degree of freedom's spec.
  * @returns The limits, or `undefined` when the joint declares none.
  */
-export const dofLimits = (joint: Joint, spec: DegreeOfFreedomSpec): JointLimits | undefined => {
+export const dofLimits = (joint: Joint, spec: DegreeOfFreedomSpec): DegreeOfFreedom['limits'] => {
   const limits: unknown = 'limits' in joint ? joint.limits : undefined;
   // Admission establishes that a joint's limits (or each nested entry) are JointLimits.
-  return (spec.limitKey === undefined || !isRecord(limits) ? limits : limits[spec.limitKey]) as JointLimits | undefined;
+  const bounds = (spec.limitKey === undefined || !isRecord(limits) ? limits : limits[spec.limitKey]) as
+    | JointLimits
+    | undefined;
+  return bounds === undefined ? undefined : { lower: bounds.lower ?? -Infinity, upper: bounds.upper ?? Infinity };
 };
 
 // Issue codes are wire-visible constants, so the table is keyed by code rather than property names.
@@ -340,11 +343,19 @@ const checkLimits = (value: unknown, path: string, symmetric: boolean): Issue[] 
   }
   const issues = unknownKeys(value, ['lower', 'upper'], path);
   const { lower, upper } = value;
-  if (!isFiniteNumber(lower) || !isFiniteNumber(upper) || lower > upper) {
+  if (
+    (lower !== undefined && !isFiniteNumber(lower)) ||
+    (upper !== undefined && !isFiniteNumber(upper)) ||
+    (isFiniteNumber(lower) && isFiniteNumber(upper) && lower > upper)
+  ) {
     issues.push(
       problem('INVALID_LIMITS', path, `Limits need finite lower ≤ upper; got ${show(lower)} and ${show(upper)}.`),
     );
-  } else if (symmetric && lower !== -upper) {
+  } else if (
+    symmetric &&
+    (lower !== undefined || upper !== undefined) &&
+    (!isFiniteNumber(lower) || !isFiniteNumber(upper) || lower !== -upper)
+  ) {
     // One box shared by the three rotation-vector components stays one box only if it is symmetric.
     issues.push(
       problem('INVALID_LIMITS', path, `Spherical limits must be symmetric, lower = −upper; got ${lower} and ${upper}.`),

@@ -253,7 +253,7 @@ for pair in build123d:py picogk:cs; do
   workers=$(grep -cE 'python3|dotnet' "$OUT/ps-$kernel.txt" || true)
   under_tau=$(grep -cF "(${TAU_BIN})" "$OUT/ps-$kernel.txt" || true)
   if [[ $status -ne 0 || "$bytes" -eq 0 || "$under_tau" -eq 0 ]]; then ready_ok=false; fi
-  ready_detail+="$kernel export exit $status in ${seconds} s, GLB $bytes bytes, worker samples $workers, of them with the notarised Tau binary as parent $under_tau; "
+  ready_detail+="$kernel export exit $status in ${seconds} s, GLB $bytes bytes, worker samples $workers, of them with the Tau.app binary as parent $under_tau; "
   tail -3 "$OUT/export-$kernel.stderr.txt" || true
 done
 WINDOW_END="$(stamp)"

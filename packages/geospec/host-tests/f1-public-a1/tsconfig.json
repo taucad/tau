@@ -6,8 +6,7 @@
     "paths": {
       "#*": ["../../src/*"],
       "@taucad/geospec/assertion-client": ["../../src/assertion-client/index.ts"],
-      "@taucad/geospec/vitest": ["../../src/vitest/index.ts"],
-      "@taucad/geospec-engine-native/node": ["../../../geospec-engine-native/src/node.ts"]
+      "@taucad/geospec/vitest": ["../../src/vitest/index.ts"]
     }
   },
   "files": ["authority.mjs", "f1-public.vitest.test.mjs", "standalone.mjs", "type-consumer.ts", "vitest.config.mjs"],

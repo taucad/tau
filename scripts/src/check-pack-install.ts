@@ -1171,10 +1171,10 @@ type InstallPlan = {
 };
 
 /**
- * The GeoSpec engine projects: published from taucad/geospec, never by Tau's train (charter D36), so a
- * consumer of the CLI closure installs without them. `@taucad/host` declares both as optional peers.
+ * The GeoSpec engine project: outside Tau's train (charter D36), so a consumer of the CLI closure
+ * installs without it. `@taucad/host` declares it, and the published `geospec-engine`, as optional peers.
  */
-const geospecEngineProjects: ReadonlySet<string> = new Set(['geospec-engine', 'geospec-engine-native']);
+const geospecEngineProjects: ReadonlySet<string> = new Set(['geospec-engine']);
 
 /** Pack the requested (or every) publishable directory into TGZs. */
 const planFromTarballs = async (requested: readonly string[], artifactRoot: string): Promise<InstallPlan> => {

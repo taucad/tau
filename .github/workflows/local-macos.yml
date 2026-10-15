@@ -1,0 +1,24 @@
+name: Local Mac smoke test
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  smoke:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on:
+      group: local-mac-trusted
+      labels: [self-hosted, macOS, ARM64, local-mac]
+    timeout-minutes: 5
+    steps:
+      - name: Verify native macOS environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          sw_vers
+          uname -m
+          git --version
+          xcrun clang --version
+          df -h "$GITHUB_WORKSPACE"
+          echo "Runner: $RUNNER_NAME / $RUNNER_OS / $RUNNER_ARCH"

@@ -33,7 +33,6 @@
     // reaching runtime-internal seams through a loader hook; outside tsconfig.
     "apps/runtime-e2e/src/compute-baseline/harness/**",
     // Pinned external CAD model sources are fixture bytes, not GeoSpec library code.
-    "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/**",
     "**/*.jscad.js",
     // Same class: PicoVoxel example sources are byte-pinned upstream ports (`provenance.json`
     // hashes, `picovoxel-provenance.test.ts`). Only Tau's `main.ts` adapters and GeoSpec suites are linted.

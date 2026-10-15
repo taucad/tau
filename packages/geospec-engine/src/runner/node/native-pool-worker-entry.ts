@@ -3,7 +3,7 @@
 import { memoryUsage } from 'node:process';
 import { resolve } from 'node:path';
 import { parentPort, workerData } from 'node:worker_threads';
-import { Engine } from '@taucad/geospec-engine-native/node';
+import { Engine } from 'geospec-engine/node';
 import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
 import type { RuntimeDefinition } from '@taucad/runtime';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';

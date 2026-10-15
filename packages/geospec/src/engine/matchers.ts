@@ -5,7 +5,7 @@
  *
  * The registry is **data**: `geoSpecMatcherDescriptors` is a frozen,
  * JSON-serializable table that a non-TypeScript client can emit verbatim. The
- * substrate owns it; the compiled `@taucad/geospec-engine-native` core
+ * substrate owns it; the compiled `geospec-engine` core
  * evaluates every claim lowered from it.
  *
  * @module

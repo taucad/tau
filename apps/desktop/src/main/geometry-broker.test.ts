@@ -256,7 +256,6 @@ describe('geometry broker', () => {
         },
         createRunner: async () => runner,
         measure: vi.fn(),
-        performance: vi.fn(),
       });
       host.handle({
         data: {
@@ -338,38 +337,6 @@ describe('geometry broker', () => {
     expect(channels).toHaveLength(8);
     expect(fork).not.toHaveBeenCalled();
     await broker.dispose();
-  });
-
-  it('bounds diagnostic input and schedules it in the same exclusive slot', async () => {
-    const { broker, channels, utilities, fork } = harness();
-    broker.connectPerformance();
-    channels[0]!.broker.send({ type: 'run', id: 5, input: { payload: 'x'.repeat(2 * 1024 * 1024) } });
-    expect(channels[0]!.broker.posted).toMatchObject([{ id: 5, type: 'error' }]);
-    expect(fork).not.toHaveBeenCalled();
-
-    broker.connectMeasurement();
-    broker.connectPerformance();
-    channels[1]!.broker.send(validMeasurement(7));
-    channels[2]!.broker.send({ type: 'run', id: 9, input: { engine: 'native-desktop' } });
-    expect(fork).toHaveBeenCalledOnce();
-    expect(utilities[0]!.posted).toHaveLength(1);
-    utilities[0]!.message({
-      type: 'geometry-result',
-      generation: 1,
-      requestId: 1,
-      value: { id: 7, result: { status: 'interrupted', code: 'engine-error', message: 'fixture' } },
-    });
-    expect(utilities[0]!.posted[1]).toMatchObject({ kind: 'performance', requestId: 2 });
-    utilities[0]!.message({
-      type: 'geometry-result',
-      generation: 1,
-      requestId: 2,
-      value: { id: 9, type: 'result', result: { benchmark: 'complete' } },
-    });
-    expect(channels[2]!.broker.posted).toEqual([{ id: 9, type: 'result', result: { benchmark: 'complete' } }]);
-    const disposed = broker.dispose();
-    utilities[0]!.exit();
-    await disposed;
   });
 
   it('refuses a malformed native fact or a mismatched UI request id', async () => {

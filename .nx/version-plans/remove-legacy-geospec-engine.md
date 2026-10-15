@@ -3,7 +3,7 @@ geospec: minor
 geospec-engine: minor
 ---
 
-Remove the TypeScript/WASM GeoSpec engine. The compiled engine (`@taucad/geospec-engine-native`) is now the only executor; hosts run specs through `createNativeGeoSpecRunner` from `geospec/runner/native`, the `geospec` CLI, or `createGeoSpecNativeNodePoolRunner` from `@taucad/geospec-engine/native-pool/node`.
+Remove the TypeScript/WASM GeoSpec engine. The compiled engine (`geospec-engine`, published from taucad/geospec) is now the only executor; hosts run specs through `createNativeGeoSpecRunner` from `geospec/runner/native`, the `geospec` CLI, or `createGeoSpecNativeNodePoolRunner` from `@taucad/geospec-engine/native-pool/node`.
 
 Breaking:
 

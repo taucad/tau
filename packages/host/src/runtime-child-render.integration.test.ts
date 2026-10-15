@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
-import { Engine, initialize } from '@taucad/geospec-engine-native/wasm';
+import { Engine, initialize } from 'geospec-engine/wasm';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import type { RuntimeClient } from '@taucad/runtime/client';
 
@@ -306,7 +306,7 @@ const render = async (document: RuntimeDocument): Promise<string> => {
 /* The WASM engine, not the NAPI binding: CI ships the binding only to its Darwin lane, and the Linux lanes that run
  * this suite carry the WASM product. */
 const loadWasm = async (): Promise<void> => {
-  const bytes = await readFile(createRequire(import.meta.url).resolve('@taucad/geospec-engine-native/wasm-binary'));
+  const bytes = await readFile(createRequire(import.meta.url).resolve('geospec-engine/wasm-binary'));
   await initialize(new Uint8Array(bytes));
 };
 let wasmReady: Promise<void> | undefined;

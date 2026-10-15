@@ -13,10 +13,7 @@ import {
 } from '#support/geometry-host-observation.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 
-const smallFixture = new URL(
-  '../../../packages/geospec-engine-native/native/occt/rust/tests/fixtures/two-cube-assembly.step',
-  import.meta.url,
-);
+const smallFixture = new URL('../fixtures/two-cube-assembly.step', import.meta.url);
 type NativeReply = {
   readonly id: number;
   readonly result: {

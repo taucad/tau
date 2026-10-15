@@ -32,10 +32,10 @@
     "@taucad/agent-host": "workspace:*",
     "@taucad/agent-tools": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
-    "@taucad/geospec-engine-native": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/vite": "workspace:*",
     "geospec": "workspace:*",
+    "geospec-engine": "catalog:",
     "pino-pretty": "catalog:"
   },
   "imports": {

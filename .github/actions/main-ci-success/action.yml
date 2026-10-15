@@ -1,0 +1,51 @@
+name: 'Main CI success'
+description: >-
+  Requires the `ci.yml` push run on `main` for a commit to have passed, optionally
+  waiting for it to finish. Release builds, production UI deploys and package previews
+  ship only a commit that main CI has passed.
+
+inputs:
+  sha:
+    description: 'Commit whose main CI run must have passed; defaults to the checked-out commit'
+    required: false
+    default: ''
+  wait-minutes:
+    description: 'How long to wait for that CI run to finish; 0 requires it to be finished already'
+    required: false
+    default: '0'
+  github-token:
+    description: 'Token with actions: read'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Require the main CI run to have passed
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        SHA: ${{ inputs.sha }}
+        WAIT_MINUTES: ${{ inputs.wait-minutes }}
+      run: |
+        set -euo pipefail
+        SHA=${SHA:-$(git rev-parse HEAD)}
+        deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
+        while :; do
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&branch=main&per_page=1" \
+            --jq '.workflow_runs[0] | select(.) | "\(.id) \(.status) \(.conclusion)"')
+          if [ -n "$run" ]; then
+            read -r run_id status conclusion <<< "$run"
+            if [ "$status" = completed ]; then break; fi
+          fi
+          if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "::error::The ci.yml push run on main for $SHA has not finished (${run:-no run found})."
+            exit 1
+          fi
+          echo "Waiting for the ci.yml push run on main for $SHA (${run:-not started})"
+          sleep 60
+        done
+        if [ "$conclusion" != success ]; then
+          echo "::error::The ci.yml push run on main for $SHA (run $run_id) concluded $conclusion; fix main before releasing or deploying it."
+          exit 1
+        fi
+        echo "The ci.yml push run on main for $SHA (run $run_id) passed."

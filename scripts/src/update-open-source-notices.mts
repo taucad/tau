@@ -3,12 +3,15 @@
  *
  * It walks the production dependency closure of `apps/ui` and `apps/desktop`
  * (through the workspace libraries they bundle), lists every third-party
- * package with its declared license, names the vendored tscircuit engine
- * components from their own license record, lists the MIT components of the
- * desktop app's C# runtime, and carries the Open CASCADE Technology notice with
- * the unmodified LGPL-2.1 and Open CASCADE exception texts. The UI renders the
- * file at `/legal/open-source`; the macOS package ships the same file inside the
- * app bundle.
+ * package with its declared license (the engine's platform packages from the
+ * installed `geospec-engine`'s optionalDependencies, so every host lists the
+ * same set), names the vendored tscircuit engine components from their own
+ * license record, lists the MIT components of the desktop app's C# runtime,
+ * and carries the Open CASCADE Technology notice with the unmodified LGPL-2.1
+ * and Open CASCADE exception texts, read from the installed `geospec-engine`
+ * package together with the OCCT revision its SOURCE-RELINK receipt pins. The
+ * UI renders the file at `/legal/open-source`; the macOS package ships the same
+ * file inside the app bundle.
  *
  * Usage: node --import tsx scripts/src/update-open-source-notices.mts [--check]
  */
@@ -28,7 +31,7 @@ import type { PackageInfo, ScannedPackage } from '#update-license-deps.mts';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDirectory = join(__dirname, '../..');
 const appDirectories = [join(rootDirectory, 'apps/ui'), join(rootDirectory, 'apps/desktop')];
-const occtLicenseDirectory = join(rootDirectory, 'packages/geospec-engine-native/licenses');
+const engineName = 'geospec-engine';
 const tscircuitLicenseFile = join(rootDirectory, 'packages/plugins/tscircuit/THIRD_PARTY_LICENSES.md');
 export const outputFile = join(rootDirectory, 'apps/ui/app/routes/legal.open-source/open-source-notices.txt');
 const desktopRuntimeFile = join(rootDirectory, 'apps/ui/app/routes/legal.open-source/desktop-runtime-notices.json');
@@ -57,6 +60,34 @@ export function platformFamilyName(manifest: { os?: string[]; cpu?: string[] }, 
   }
 
   return platformSuffix.test(name) ? name.replace(platformSuffix, '$1{platform}') : undefined;
+}
+
+/** The engine's platform packages, which pnpm installs only on their own host. */
+const isEnginePlatformPackage = (name: string): boolean => name.startsWith(`${engineName}-`);
+
+/**
+ * List the engine's platform packages from the installed engine's
+ * optionalDependencies, so the notices name every native binding the engine
+ * ships whichever host generates them. A platform package is published with
+ * the engine and carries its license and repository.
+ *
+ * @returns One entry per platform package, sorted by name.
+ */
+export function enginePlatformPackages(
+  engine: PackageInfo,
+  optionalDependencies: Record<string, string> | undefined,
+): PackageInfo[] {
+  return Object.entries(optionalDependencies ?? {})
+    .map(([name, version]) => {
+      if (!isEnginePlatformPackage(name)) {
+        throw new Error(`${engine.name} has an optional dependency outside its platform packages: ${name}`);
+      }
+      if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version)) {
+        throw new Error(`${engine.name} pins ${name} to "${version}", not an exact version`);
+      }
+      return { ...engine, name, version };
+    })
+    .toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -97,6 +128,11 @@ async function collectAppClosure(): Promise<ScannedPackage[]> {
     const manifest = await readManifest(directory);
     const packageInfo = manifest && toPackageInfo(manifest);
     if (!manifest || !packageInfo) {
+      continue;
+    }
+
+    if (isEnginePlatformPackage(packageInfo.name)) {
+      // Listed from the engine's optionalDependencies instead, so the host's platform does not decide the list.
       continue;
     }
 
@@ -174,14 +210,34 @@ const fence = (text: string): string[] => ['```text', text.replace(/\s+$/, ''), 
 const repositoryLink = (packageInfo: PackageInfo): string =>
   packageInfo.repository?.startsWith('https://') ? ` ([source](${packageInfo.repository}))` : '';
 
+/** The installed GeoSpec engine release and the OCCT revision it compiles in. */
+export type EngineRelease = { version: string; occtRevision: string };
+
+/**
+ * Read the OCCT upstream revision from the engine's SOURCE-RELINK receipt.
+ *
+ * @returns The 40-hex revision the receipt's OCCT source archive URL pins.
+ */
+export function parseOcctRevision(receipt: string): string {
+  const parsed = JSON.parse(receipt) as { occtSourceArchive?: { url?: unknown } };
+  const url = parsed.occtSourceArchive?.url;
+  const match = typeof url === 'string' ? /\/archive\/([0-9a-f]{40})\.tar\.gz$/u.exec(url) : null;
+  if (!match) {
+    throw new Error('The GeoSpec engine SOURCE-RELINK receipt names no OCCT upstream revision.');
+  }
+
+  return match[1]!;
+}
+
 export function generateNotices(input: {
   packages: PackageInfo[];
   vendored: VendoredComponent[];
   desktopRuntime: DesktopRuntimeNotices;
   lgpl: string;
   occtException: string;
+  engine: EngineRelease;
 }): string {
-  const { packages, vendored, desktopRuntime, lgpl, occtException } = input;
+  const { packages, vendored, desktopRuntime, lgpl, occtException, engine } = input;
   const sorted = packages.toSorted((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
   const occtPackages = sorted.filter(({ name }) =>
     ['libcascade', 'occt-import-js', 'replicad-opencascadejs'].includes(name),
@@ -191,8 +247,9 @@ export function generateNotices(input: {
     '# Open-Source Notices',
     '',
     'Tau is open-source software. All Tau-authored source, including the GeoSpec engine, is licensed under the',
-    '[Apache License 2.0](https://github.com/taucad/tau/blob/main/license), and its complete source is published at',
-    '[github.com/taucad/tau](https://github.com/taucad/tau).',
+    '[Apache License 2.0](https://github.com/taucad/tau/blob/main/license). The complete source of Tau is published at',
+    '[github.com/taucad/tau](https://github.com/taucad/tau), and that of the GeoSpec engine at',
+    '[github.com/taucad/geospec](https://github.com/taucad/geospec).',
     '',
     'Tau includes third-party software, listed on this page with its licenses. Each component remains under its own',
     'license, and nothing in our [Terms of Service](/legal/terms) limits the rights those licenses give you.',
@@ -207,15 +264,15 @@ export function generateNotices(input: {
     'OCCT runs in the web and desktop apps as WebAssembly and, in the desktop app, as a native library, through these',
     'components:',
     '',
-    '- The GeoSpec engine (`@taucad/geospec-engine-native`), built from OCCT upstream',
-    '  revision `3d097a0328e71b826377d4814ab05ec3c3d23871`',
+    `- The GeoSpec engine (\`${engineName}\` ${engine.version}), built from OCCT upstream`,
+    `  revision \`${engine.occtRevision}\` ([source](https://github.com/taucad/geospec))`,
     ...occtPackages.map((packageInfo) => `- ${packageInfo.name} ${packageInfo.version}${repositoryLink(packageInfo)}`),
     '',
     'You may modify the OCCT portions of Tau for your own use, and reverse engineer them to debug such modifications.',
     'Every Tau web and desktop release on [GitHub Releases](https://github.com/taucad/tau/releases) attaches the',
     'corresponding OCCT source and relink kit, these license texts and the GeoSpec engine notices. The macOS app also',
-    'carries the kit inside the app bundle, under `Tau.app/Contents/Resources/SOURCES`. The source of Tau, including how',
-    'it builds and links OCCT, is at [github.com/taucad/tau](https://github.com/taucad/tau).',
+    'carries the kit inside the app bundle, under `Tau.app/Contents/Resources/SOURCES`. The source of the GeoSpec engine,',
+    'including how it builds and links OCCT, is at [github.com/taucad/geospec](https://github.com/taucad/geospec).',
     '',
     '## Third-Party Packages',
     '',
@@ -281,21 +338,33 @@ async function main(): Promise<void> {
   const isCheck = process.argv.includes('--check');
 
   const closure = await collectAppClosure();
+  const engineDirectory = await resolvePackageDirectory(engineName, appDirectories[0]!);
+  if (!engineDirectory) {
+    throw new Error(`${engineName} is not installed for apps/ui; run pnpm install.`);
+  }
+  const engineManifest = await readManifest(engineDirectory);
+  const engineInfo = engineManifest && toPackageInfo(engineManifest);
+  if (engineManifest?.name !== engineName || !engineManifest.version || !engineInfo) {
+    throw new Error(`The installed ${engineName} manifest is invalid.`);
+  }
   const packages = [
     ...new Map(
-      selectThirdPartyPackages(closure, rootDirectory).map((packageInfo) => [
-        `${packageInfo.name}@${packageInfo.version}`,
-        packageInfo,
-      ]),
+      [
+        ...selectThirdPartyPackages(closure, rootDirectory),
+        ...enginePlatformPackages(engineInfo, engineManifest.optionalDependencies),
+      ].map((packageInfo) => [`${packageInfo.name}@${packageInfo.version}`, packageInfo]),
     ).values(),
   ];
-  const [tscircuitRecord, desktopRuntimeRecord, picoGkWorkerLock, lgpl, occtException] = await Promise.all([
-    readFile(tscircuitLicenseFile, 'utf8'),
-    readFile(desktopRuntimeFile, 'utf8'),
-    readFile(picoGkWorkerLockFile, 'utf8'),
-    readFile(join(occtLicenseDirectory, 'OCCT-LGPL-2.1.txt'), 'utf8'),
-    readFile(join(occtLicenseDirectory, 'OCCT-LGPL-exception.txt'), 'utf8'),
-  ]);
+  const occtLicenseDirectory = join(engineDirectory, 'licenses');
+  const [tscircuitRecord, desktopRuntimeRecord, picoGkWorkerLock, lgpl, occtException, sourceRelink] =
+    await Promise.all([
+      readFile(tscircuitLicenseFile, 'utf8'),
+      readFile(desktopRuntimeFile, 'utf8'),
+      readFile(picoGkWorkerLockFile, 'utf8'),
+      readFile(join(occtLicenseDirectory, 'OCCT-LGPL-2.1.txt'), 'utf8'),
+      readFile(join(occtLicenseDirectory, 'OCCT-LGPL-exception.txt'), 'utf8'),
+      readFile(join(occtLicenseDirectory, 'SOURCE-RELINK.json'), 'utf8'),
+    ]);
   const desktopRuntime = JSON.parse(desktopRuntimeRecord) as DesktopRuntimeNotices;
   const drift = desktopRuntimeDrift(
     desktopRuntime,
@@ -313,6 +382,7 @@ async function main(): Promise<void> {
     desktopRuntime,
     lgpl,
     occtException,
+    engine: { version: engineManifest.version, occtRevision: parseOcctRevision(sourceRelink) },
   });
   console.log(`App closure: ${String(closure.length)} packages, ${String(packages.length)} third-party listed`);
 

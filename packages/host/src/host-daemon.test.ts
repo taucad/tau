@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -286,7 +287,12 @@ type StubRelay = {
  * each one back by path. Unlike the real API it reaps nothing on its own, so a
  * test decides exactly when a peerless route dies.
  */
-const startRelay = async (options: { readonly refuse?: (pathname: string) => boolean } = {}): Promise<StubRelay> => {
+const startRelay = async (
+  options: {
+    readonly refuse?: (pathname: string) => boolean;
+    readonly onRequest?: (pathname: string) => void;
+  } = {},
+): Promise<StubRelay> => {
   const httpServer = createServer();
   resources.push(httpServer);
   const socketServer = new WebSocketServer({ noServer: true });
@@ -313,6 +319,7 @@ const startRelay = async (options: { readonly refuse?: (pathname: string) => boo
       line: `${request.method ?? ''} ${request.url ?? ''}`,
       authorization: request.headers.authorization,
     });
+    options.onRequest?.(new URL(request.url ?? '/', 'http://relay.invalid').pathname);
     response.statusCode = 404;
     response.end();
   });
@@ -1708,7 +1715,15 @@ describe('startHostDaemon', () => {
       temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-connect-tau-'));
       process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
       process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
-      const relay = await startRelay();
+      const configPath = join(temporaryDirectory, 'workspace', '.git', 'config');
+      let advertisedConfig: string | undefined;
+      const relay = await startRelay({
+        onRequest(pathname) {
+          if (pathname === '/v1/git/workspace.git/info/refs') {
+            advertisedConfig = readFileSync(configPath, 'utf8');
+          }
+        },
+      });
       let project: ReturnType<typeof realCreateProjectRevisions> | undefined;
       revisionsSpy.mockImplementationOnce((options) => {
         project = realCreateProjectRevisions(options);
@@ -1716,18 +1731,17 @@ describe('startHostDaemon', () => {
       });
 
       const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
-      await daemon.ready;
-      await project!.channel.request({ command: 'connectRemote', kind: 'tau' });
+      try {
+        await daemon.ready;
+        await project!.channel.request({ command: 'connectRemote', kind: 'tau' });
 
-      /* Git's own remotes list is the record (D29), so that is what is read —
-       * and it is written before the registration this fixture's API never
-       * answers, which is why nothing here waits for a `connected` phase. */
-      const workspaceRoot = join(temporaryDirectory, 'workspace');
-      await expect
-        .poll(async () => readFile(join(workspaceRoot, '.git', 'config'), 'utf8').catch(() => ''), { timeout: 10_000 })
-        .toContain(tauRemoteUrl(relay.url.origin, 'workspace'));
-
-      await daemon.close();
+        // Observe the recorded URL before the fixture's refusal makes the actor remove it.
+        const remoteUrl = tauRemoteUrl(relay.url.origin, 'workspace');
+        await expect.poll(() => advertisedConfig, { timeout: 10_000 }).toContain(remoteUrl);
+        await expect.poll(async () => readFile(configPath, 'utf8'), { timeout: 10_000 }).not.toContain(remoteUrl);
+      } finally {
+        await daemon.close();
+      }
     },
     30_000,
   );

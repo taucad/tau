@@ -62,8 +62,8 @@ import {
   PrintRow,
   PrintStage,
   useCompiledConfigurationManifest,
-} from '#routes/w.$workspace.$project/chat-print-section.js';
-import type { ResolvedSchema } from '#routes/w.$workspace.$project/chat-print-section.js';
+} from '#components/machines/machine-section.js';
+import type { ResolvedSchema } from '#components/machines/machine-section.js';
 import { operator } from '#hooks/use-machine-control.js';
 import {
   describePrintError,
@@ -75,8 +75,8 @@ import {
   slotKey,
 } from '#components/print/machine-facts.js';
 import type { ObservedSlot } from '#components/print/machine-facts.js';
-import { JobChecks, requestKeptJob, startBlocker } from '#routes/w.$workspace.$project/chat-print-send.js';
-import type { KeptJobId } from '#routes/w.$workspace.$project/chat-print-send.js';
+import { JobChecks, requestKeptJob, startBlocker } from '#components/machines/machine-send.js';
+import type { KeptJobId } from '#components/machines/machine-send.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import {
   fitsPlate,
@@ -84,8 +84,8 @@ import {
   formatFilament,
   formatProducer,
   formatSize,
-} from '#routes/w.$workspace.$project/chat-print-summary.js';
-import type { PlateFit } from '#routes/w.$workspace.$project/chat-print-summary.js';
+} from '#components/machines/machine-summary.js';
+import type { PlateFit } from '#components/machines/machine-summary.js';
 import type { SliceSummary } from '#components/printer/printer-summary.js';
 import { bestRouteForActiveKernel, exportDocumentWithValidatedInput } from '#utils/export-formats.utils.js';
 
@@ -1738,7 +1738,11 @@ function BambuStudioSettings({
 }): React.JSX.Element {
   const { settings, overrides, setSettings } = studio;
   const form = useMemo(() => (settings ? bambuSettingsForm(settings) : undefined), [settings]);
-  const manifest = useCompiledConfigurationManifest('bambu-studio', 'print/settings', form?.resolved);
+  const {
+    manifest,
+    error: formError,
+    retry: retryForm,
+  } = useCompiledConfigurationManifest('bambu-studio', 'print/settings', form?.resolved);
   /* Other presets keep the last form on screen until theirs compiles, so open groups stay open. */
   const [shown, setShown] = useState<Readonly<{ form: BambuSettingsFormModel; manifest: ParameterManifest }>>();
   if (form !== undefined && manifest !== undefined && (shown?.form !== form || shown.manifest !== manifest)) {
@@ -1770,7 +1774,14 @@ function BambuStudioSettings({
     },
     [shown, setSettings],
   );
-  return shown ? (
+  return formError ? (
+    <PrintNotice tone='error'>
+      {formError}
+      <Button size='xs' onClick={retryForm}>
+        Retry settings form
+      </Button>
+    </PrintNotice>
+  ) : shown ? (
     <div role='group' aria-label='Bambu Studio settings' className='min-w-0'>
       <Parameters
         parameters={parameters}
@@ -1910,8 +1921,16 @@ function AdvancedSettingsStage({
       ? String(route.kernelId)
       : `${String(route.kernelId)}+${String(route.transcoderId)}`
     : undefined;
-  const optionsManifest = useCompiledConfigurationManifest(providerKey, 'print/options', optionsSchema);
-  const submissionManifest = useCompiledConfigurationManifest(provider?.id, 'print/submission', submissionSchema);
+  const {
+    manifest: optionsManifest,
+    error: optionsFormError,
+    retry: retryOptionsForm,
+  } = useCompiledConfigurationManifest(providerKey, 'print/options', optionsSchema);
+  const {
+    manifest: submissionManifest,
+    error: submissionFormError,
+    retry: retrySubmissionForm,
+  } = useCompiledConfigurationManifest(provider?.id, 'print/submission', submissionSchema);
   /* The submission schema without the fields Prepare sets itself; the observed diameters are read-only. */
   const advancedSubmissionSchema = useMemo<JSONSchema7 | undefined>(() => {
     if (!submissionSchema) {
@@ -1935,6 +1954,22 @@ function AdvancedSettingsStage({
 
   return (
     <PrintStage icon={Settings2} title='Advanced settings'>
+      {optionsFormError ? (
+        <PrintNotice tone='error'>
+          {optionsFormError}
+          <Button size='xs' onClick={retryOptionsForm}>
+            Retry options form
+          </Button>
+        </PrintNotice>
+      ) : null}
+      {submissionFormError ? (
+        <PrintNotice tone='error'>
+          {submissionFormError}
+          <Button size='xs' onClick={retrySubmissionForm}>
+            Retry submission form
+          </Button>
+        </PrintNotice>
+      ) : null}
       {/* The stage is the forms' frame, as the catalog card is in Parameters: top-level fields take no inset of
           their own, so their labels line up with the stage's rows; fields inside a group keep the group's. */}
       <fieldset

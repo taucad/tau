@@ -31,6 +31,12 @@ export const searchParameterName = {
   // The remote-compute pairing code being redeemed.
   pair: 'pair',
 
+  /* Machines */
+  machine: 'machine',
+  machineHost: 'machineHost',
+  machineJob: 'job',
+  machineStatus: 'status',
+
   /* Project route */
   // The focused chat within the open project.
   chat: 'chat',

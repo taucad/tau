@@ -39,6 +39,10 @@ describe('utilityEnvironment', () => {
     expect(environment).toEqual({ PATH: '/usr/bin' });
   });
 
+  it('passes the explicit machines deployment choice to the utility', () => {
+    expect(utilityEnvironment({ TAU_MACHINES_ENABLED: 'true' })).toEqual({ TAU_MACHINES_ENABLED: 'true' });
+  });
+
   it('should pass the Bambu Studio location to the utilities that slice and plan with it', () => {
     expect(utilityEnvironment({ TAU_BAMBU_STUDIO_PATH: '/opt/BambuStudio.app' })).toEqual({
       TAU_BAMBU_STUDIO_PATH: '/opt/BambuStudio.app',

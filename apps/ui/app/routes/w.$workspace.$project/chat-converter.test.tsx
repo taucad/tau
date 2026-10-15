@@ -1,3 +1,4 @@
+import { compileExportConfigurationManifest } from '#components/machines/configuration-manifest.js';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
@@ -361,8 +362,7 @@ vi.mock('@taucad/viewer/parameters/rjsf-theme', () => ({
   templates: {},
 }));
 
-const { ChatConverter, ExportSchemaForm, compileExportConfigurationManifest, resolveActiveSchema } =
-  await import('./chat-converter.js');
+const { ChatConverter, ExportSchemaForm, resolveActiveSchema } = await import('./chat-converter.js');
 
 function createCapabilities(overrides?: Partial<CapabilitiesManifest>): CapabilitiesManifest {
   return {

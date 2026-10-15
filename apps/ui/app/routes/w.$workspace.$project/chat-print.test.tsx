@@ -1,10 +1,12 @@
+import { presentMachine } from '#components/machines/machine-presentation.js';
 /* eslint-disable @typescript-eslint/naming-convention -- Fixtures retain Bambu Studio wire setting names. */
 // @vitest-environment jsdom
+import { hasSomethingToStop } from '#components/machines/machine-workbench.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import axe from 'axe-core';
-import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
-import type { BoundFunctions, queries } from '@testing-library/react';
+import { act, fireEvent, render as renderTesting, renderHook, screen, waitFor, within } from '@testing-library/react';
+import type { BoundFunctions, queries, RenderOptions } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -45,7 +47,7 @@ import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import { summarizeGcodeContainer } from '#components/printer/printer-summary.js';
 import type { SliceSummary } from '#components/printer/printer-summary.js';
-import type * as PrintSummary from '#routes/w.$workspace.$project/chat-print-summary.js';
+import type * as PrintSummary from '#components/machines/machine-summary.js';
 import {
   agentJob,
   artifact,
@@ -81,13 +83,8 @@ import {
 } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 import { submissionDefaults } from '#routes/w.$workspace.$project/chat-print-prepare.js';
 import { programExtensions } from '#routes/w.$workspace.$project/chat-print-program.js';
-import { startBlocker } from '#routes/w.$workspace.$project/chat-print-send.js';
-import {
-  PrintPanel,
-  hasSomethingToStop,
-  nextAction,
-  presentMachine,
-} from '#routes/w.$workspace.$project/chat-print.js';
+import { startBlocker } from '#components/machines/machine-send.js';
+import { PrintPanel, nextAction } from '#routes/w.$workspace.$project/chat-print.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 
 vi.mock('#machines/await-fresh-render.js', () => ({ awaitFreshRender: vi.fn() }));
@@ -105,7 +102,7 @@ vi.mock('#hooks/use-file-manager.js', async () => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
   return fixtures.fileManagerMock;
 });
-vi.mock('#routes/w.$workspace.$project/chat-converter.js', async (importOriginal) => {
+vi.mock('#components/machines/configuration-manifest.js', async (importOriginal) => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
   return fixtures.converterMock(await importOriginal());
 });
@@ -132,6 +129,9 @@ vi.mock('#components/printer/printer-preparation.js', async () => {
     },
   };
 });
+
+const render = (element: React.ReactNode, options?: RenderOptions) =>
+  renderTesting(element, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>, ...options });
 
 const renderPane = (client: MachineClient, bridge: MachineApprovalBridge = createBridge().bridge) =>
   render(
@@ -405,9 +405,10 @@ describe('Print pane orientation', () => {
     );
     const { client } = createFixture();
     const { bridge } = createBridge();
+    const machines = { available: true, ...client } as const;
     const view = render(
       <TooltipProvider>
-        <PrintPanel machines={{ available: true, ...client }} bridge={bridge} isShown />
+        <PrintPanel machines={machines} bridge={bridge} isShown />
       </TooltipProvider>,
     );
     await findMachine('Ready');
@@ -420,7 +421,7 @@ describe('Print pane orientation', () => {
 
     view.rerender(
       <TooltipProvider>
-        <PrintPanel machines={{ available: true, ...client }} bridge={bridge} isShown={false} />
+        <PrintPanel machines={machines} bridge={bridge} isShown={false} />
       </TooltipProvider>,
     );
     expect(mockProjectSend).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: claims[0]?.claimId });
@@ -534,7 +535,10 @@ describe('Print pane orientation', () => {
         return pending.promise;
       }),
     };
-    globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
+    globalThis.localStorage.setItem(
+      `tau:print:selected-machine:${JSON.stringify(['host-1', projectId])}`,
+      first.machineId,
+    );
     renderPane(captureClient);
     // The camera leads Control, which an idle printer keeps closed.
     await findMachine('Ready');
@@ -1004,7 +1008,10 @@ describe('Print pane prepare and send', () => {
     const first = entry();
     const mini = entry({ machineId: 'mini', name: 'Mini' });
     const fixture = createFixture({ entries: [first, mini] });
-    globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
+    globalThis.localStorage.setItem(
+      `tau:print:selected-machine:${JSON.stringify(['host-1', projectId])}`,
+      first.machineId,
+    );
     const user = userEvent.setup();
     renderPane(fixture.client);
     await findMachine('Ready');
@@ -1358,7 +1365,7 @@ describe('Print pane external spool', () => {
 
 describe('Print pane slice summary', () => {
   it('should measure the part apart from the purge line and end lift and check the plate fit on the part', async () => {
-    const summary = await vi.importActual<typeof PrintSummary>('#routes/w.$workspace.$project/chat-print-summary.js');
+    const summary = await vi.importActual<typeof PrintSummary>('#components/machines/machine-summary.js');
     const bytes = writeBambuContainer({
       gcode: fixtureGcode({ layers: 10, size: 40 }),
       modelName: 'tube',
@@ -1412,7 +1419,7 @@ describe('Print pane slice summary', () => {
   });
 
   it('should check every nozzle move and say so when the G-code labels no part', async () => {
-    const summary = await vi.importActual<typeof PrintSummary>('#routes/w.$workspace.$project/chat-print-summary.js');
+    const summary = await vi.importActual<typeof PrintSummary>('#components/machines/machine-summary.js');
     const buildVolume = x1cBuildVolume;
 
     expect(
@@ -3174,7 +3181,10 @@ describe('Saved machine profiles', () => {
     const first = entry();
     const second = entry({ machineId: 'second-x1c', name: 'Second X1C' });
     const fixture = createFixture({ entries: [first, second] });
-    globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
+    globalThis.localStorage.setItem(
+      `tau:print:selected-machine:${JSON.stringify(['host-1', projectId])}`,
+      first.machineId,
+    );
     const pane = renderPane(fixture.client);
     await findMachine('Ready');
     const profile = () => within(prepareRegion()).getByRole('combobox', { name: 'Profile' });
@@ -3281,7 +3291,10 @@ describe('Saved machine profiles', () => {
         },
       ],
     };
-    globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
+    globalThis.localStorage.setItem(
+      `tau:print:selected-machine:${JSON.stringify(['host-1', projectId])}`,
+      first.machineId,
+    );
     renderPane(client);
     await findMachine('Ready');
     await chooseOption(user, screen.getByRole('combobox', { name: 'Quality' }), 'Fine');
@@ -3614,7 +3627,7 @@ describe('Print pane without printers', () => {
     function Location(): React.JSX.Element {
       return <output aria-label='location'>{useLocation().search}</output>;
     }
-    render(
+    renderTesting(
       <MemoryRouter initialEntries={['/w/workspace/project']}>
         <TooltipProvider>
           <PrintPanel machines={{ available: true, ...fixture.client }} bridge={createBridge().bridge} />
@@ -3990,3 +4003,5 @@ describe('Agent machine actions an interrupt names', () => {
     });
   });
 });
+
+/* eslint-enable @typescript-eslint/naming-convention -- End Bambu wire fixtures. */

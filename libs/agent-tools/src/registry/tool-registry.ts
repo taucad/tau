@@ -12,7 +12,7 @@
  * @module
  */
 
-import { rpcClientErrorCode, testModelOutputSchema } from '@taucad/chat';
+import { rpcClientErrorCode } from '@taucad/chat/schemas/rpc';
 import type { RpcCall, RpcName, ToolInputValidationError } from '@taucad/chat';
 import { mutatingRpcNames, rpcName, toolDescriptions, toolMode, toolName } from '@taucad/chat/constants';
 import { createRpcDispatcher, writeArtifactSet } from '@taucad/chat/rpc';
@@ -27,8 +27,11 @@ import type {
   RpcWorkbenchClient,
   RpcSkillResolver,
 } from '@taucad/chat/rpc';
-import { getProviderFacingToolInputSchemas, toProviderToolJsonSchema } from '@taucad/chat/schemas';
-import { geoSpecRunLineageSchema } from '@taucad/chat/schemas/tools/test-model';
+import {
+  getProviderFacingToolInputSchemas,
+  toProviderToolJsonSchema,
+} from '@taucad/chat/schemas/provider-tool-schemas';
+import { geoSpecRunLineageSchema, testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { sha256Bytes, sha256String } from '@taucad/utils/hash';

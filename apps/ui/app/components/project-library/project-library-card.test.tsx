@@ -32,12 +32,12 @@ const mockActions: ProjectActions = {
 };
 let providerMountCount = 0;
 
-vi.mock('#components/inline-text-editor.js', () => ({
-  InlineTextEditor: ({ value }: { readonly value: string }) => <button type='button'>Edit {value}</button>,
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({ getProjectClosePlan: vi.fn() }),
 }));
-
-vi.mock('#components/project-library/project-action-dropdown.js', () => ({
-  ProjectActionDropdown: () => <button type='button'>Actions</button>,
+vi.mock('#hooks/use-sidebar-status.js', () => ({
+  useProjectSidebarRow: () => undefined,
+  useSidebarCommands: () => ({ closeProject: vi.fn() }),
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => {
@@ -153,10 +153,31 @@ describe('ProjectLibraryCard live preview', () => {
     providerMountCount = 0;
   });
 
+  it('should focus and select the inline name from Rename, save with Enter, and cancel with Escape', async () => {
+    renderCard();
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for Library Preview Demo' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const input = await screen.findByRole('textbox', { name: 'Project name' });
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue(mockProject.name);
+    expect(input).toHaveProperty('selectionStart', 0);
+    expect(input).toHaveProperty('selectionEnd', mockProject.name.length);
+    await userEvent.keyboard('Renamed project{Enter}');
+    expect(mockActions.handleRename).toHaveBeenCalledExactlyOnceWith(mockProject.id, 'Renamed project');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('/projects');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for Library Preview Demo' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    await userEvent.keyboard('Discarded{Escape}');
+    expect(mockActions.handleRename).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: mockProject.name })).toBeVisible();
+  });
+
   it('should render the static thumbnail and no project-scoped FM until preview is toggled', () => {
     renderCard();
 
-    expect(screen.getByRole('presentation')).toBeInTheDocument();
+    expect(screen.getByLabelText('No saved preview')).toBeInTheDocument();
     expect(screen.getAllByRole('link')).toHaveLength(1);
     const cardLink = screen.getByRole('link', { name: 'Open Library Preview Demo' });
     expect(cardLink).toHaveAttribute('href', '/w/home/library');
@@ -205,7 +226,7 @@ describe('ProjectLibraryCard live preview', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Preview model' }));
 
-    expect(screen.queryByRole('presentation')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('No saved preview')).not.toBeInTheDocument();
     expect(screen.getByTestId('shared-worker-gate')).toBeInTheDocument();
 
     const fm = screen.getByTestId('file-manager-provider');
@@ -227,7 +248,7 @@ describe('ProjectLibraryCard live preview', () => {
     expect(screen.getByTestId('file-manager-provider')).toBeInTheDocument();
 
     await userEvent.click(previewToggle);
-    expect(screen.getByRole('presentation')).toBeInTheDocument();
+    expect(screen.getByLabelText('No saved preview')).toBeInTheDocument();
     expect(screen.queryByTestId('file-manager-provider')).not.toBeInTheDocument();
     expect(screen.queryByTestId('cad-preview-provider')).not.toBeInTheDocument();
   });
@@ -267,10 +288,10 @@ describe('ProjectLibraryCard live preview', () => {
     expect(onSelect).toHaveBeenCalledOnce();
     expect(screen.getByTestId('location')).toHaveTextContent('/projects');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Edit Library Preview Demo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Library Preview Demo' }));
     expect(screen.getByTestId('location')).toHaveTextContent('/projects');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for Library Preview Demo' }));
     expect(screen.getByTestId('location')).toHaveTextContent('/projects');
   });
 });

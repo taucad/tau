@@ -26,7 +26,7 @@ import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
 import { askOfGrok, grokQuestionResponseOf } from '#acp/grok-questions.js';
 import { providerPermissionPayload } from '#acp/provider-permission.js';
 import type { Ask, AskAnswers } from '@taucad/chat';
-import { askOutcomeOf } from '@taucad/chat';
+import { askOutcomeOf } from '@taucad/chat/schemas/questions';
 
 import { createAdapterConnection } from '#acp/adapter-connection.js';
 import { askOfElicitation, elicitationResponseOf } from '#acp/elicitation-questions.js';

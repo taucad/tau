@@ -18,7 +18,7 @@ import {
   isQuestionAnswerValid,
   questionFieldSchema,
   askSchema,
-} from '@taucad/chat';
+} from '@taucad/chat/schemas/questions';
 import type { Ask, AskAnswers, AskedQuestion } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 

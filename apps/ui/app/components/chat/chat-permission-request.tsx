@@ -1,3 +1,4 @@
+import { machinesDisabledMessage } from '@taucad/types/constants';
 import { useRef, useState } from 'react';
 import { Check, ChevronDown, CircleX, ShieldQuestion, TriangleAlert } from 'lucide-react';
 import { isRecord } from '@taucad/utils/schema';
@@ -47,8 +48,8 @@ export function permissionContent(approval: AgentHostApproval): {
           ? 'Ask the agent to describe this action before allowing it.'
           : undefined
         : approval.context.jobId === undefined
-          ? 'This acts on a physical machine.'
-          : 'This starts a job on a physical machine.',
+          ? 'This changes the machine. Review the action before allowing it.'
+          : 'Review the job and confirm the work area is clear in the Print pane.',
   };
 }
 
@@ -56,9 +57,8 @@ type ChatPermissionRequestProps = {
   readonly approval: AgentHostApproval;
   readonly name: string;
   readonly outcome?: string | undefined;
+  readonly onReview?: (() => void) | undefined;
   readonly onRespond?: ((approved: boolean, optionId?: string) => Promise<void>) | undefined;
-  /** Where the approval is given instead, when it cannot be given here; Deny still answers here. */
-  readonly review?: Readonly<{ label: string; onClick: () => void }> | undefined;
 };
 
 /** Compact permission surface; acknowledgement never claims that the operation completed. */
@@ -71,9 +71,11 @@ function PermissionRequest({
   name,
   outcome,
   onRespond,
-  review,
+  onReview,
 }: ChatPermissionRequestProps): React.JSX.Element {
   const isDebug = useFeature('tauDebug');
+  const machinesEnabled = useFeature('machines');
+  const machineDisabled = !machinesEnabled && approval.context?.machineId !== undefined;
   const [pendingResponse, setPendingResponse] = useState<string | boolean>();
   const isSending = outcome === undefined && pendingResponse !== undefined;
   const [failure, setFailure] = useState<string>();
@@ -124,10 +126,10 @@ function PermissionRequest({
         </p>
       ) : null}
       <p className='text-sm/5 font-medium [overflow-wrap:anywhere] wrap-break-word'>{content.title}</p>
-      {!isSettled && content.consequence ? (
+      {!isSettled && (machineDisabled || content.consequence) ? (
         <p className='flex items-start gap-2 text-xs/5'>
           <TriangleAlert aria-hidden className='size-4 shrink-0 text-warning' />
-          {content.consequence}
+          {machineDisabled ? machinesDisabledMessage : content.consequence}
         </p>
       ) : null}
       {!isSettled && content.facts.length > 0 ? (
@@ -176,7 +178,38 @@ function PermissionRequest({
       ) : null}
       {!isSettled && onRespond ? (
         <div className='flex flex-wrap gap-2'>
-          {approval.options.length > 0 ? (
+          {machineDisabled ? (
+            <Button
+              size='xs'
+              variant='outline'
+              disabled={isSending}
+              aria-busy={isSending && pendingResponse === false}
+              onClick={() => {
+                void respond(false);
+              }}
+            >
+              Deny
+              {isSending && pendingResponse === false ? <Loader className='motion-reduce:animate-none' /> : null}
+            </Button>
+          ) : onReview ? (
+            <>
+              <Button size='xs' disabled={isSending} onClick={onReview}>
+                Review in the Print pane
+              </Button>
+              <Button
+                size='xs'
+                variant='outline'
+                disabled={isSending}
+                aria-busy={isSending && pendingResponse === false}
+                onClick={() => {
+                  void respond(false);
+                }}
+              >
+                Deny
+                {isSending && pendingResponse === false ? <Loader className='motion-reduce:animate-none' /> : null}
+              </Button>
+            </>
+          ) : approval.options.length > 0 ? (
             approval.options.map((option) => (
               <Button
                 key={option.optionId}
@@ -198,24 +231,18 @@ function PermissionRequest({
             ))
           ) : (
             <>
-              {review ? (
-                <Button size='xs' autoFocus disabled={isSending} onClick={review.onClick}>
-                  {review.label}
-                </Button>
-              ) : (
-                <Button
-                  size='xs'
-                  autoFocus
-                  disabled={isSending}
-                  aria-busy={isSending && pendingResponse === true}
-                  onClick={() => {
-                    void respond(true);
-                  }}
-                >
-                  Approve
-                  {isSending && pendingResponse === true ? <Loader className='motion-reduce:animate-none' /> : null}
-                </Button>
-              )}
+              <Button
+                size='xs'
+                autoFocus
+                disabled={isSending}
+                aria-busy={isSending && pendingResponse === true}
+                onClick={() => {
+                  void respond(true);
+                }}
+              >
+                Approve
+                {isSending && pendingResponse === true ? <Loader className='motion-reduce:animate-none' /> : null}
+              </Button>
               <Button
                 size='xs'
                 variant='outline'

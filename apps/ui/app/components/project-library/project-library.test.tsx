@@ -332,7 +332,10 @@ describe('ProjectLibrary', () => {
       cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
       renderLibrary();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Open Hinge Delta' }));
+      const open = screen.getByRole('button', { name: 'Open Hinge Delta' });
+      expect(open).toHaveClass('absolute', 'inset-0');
+      expect(open.parentElement).toHaveClass('hover:border-foreground/30');
+      fireEvent.click(open);
 
       await waitFor(() => {
         expect(mockOpenCloudProject).toHaveBeenCalledWith(
@@ -359,6 +362,8 @@ describe('ProjectLibrary', () => {
       const opening = await screen.findByRole('button', { name: 'Opening… Hinge Delta' });
       expect(opening).toHaveAttribute('aria-busy', 'true');
       expect(opening).toBeDisabled();
+      fireEvent.click(opening);
+      expect(mockOpenCloudProject).toHaveBeenCalledOnce();
       finish();
       expect(await screen.findByRole('button', { name: 'Open Hinge Delta' })).toHaveAttribute('aria-busy', 'false');
     });

@@ -351,10 +351,12 @@ const platformSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
     )
   : cloudSections.filter((section) => section.id !== 'machines' && section.id !== 'browser');
 
-export const settingsSections: readonly SettingsSectionDefinition[] = platformSections.map((section) => ({
-  ...section,
-  entries: section.entries.filter((entry) => entry.id !== 'automatic-reload' || featureFlagDefaults.automaticReload),
-}));
+export const settingsSections: readonly SettingsSectionDefinition[] = platformSections
+  .filter((section) => section.id !== 'machines' || featureFlagDefaults.machines)
+  .map((section) => ({
+    ...section,
+    entries: section.entries.filter((entry) => entry.id !== 'automatic-reload' || featureFlagDefaults.automaticReload),
+  }));
 
 function normalizeSearch(value: string): string {
   return value

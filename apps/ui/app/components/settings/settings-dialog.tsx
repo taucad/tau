@@ -126,7 +126,11 @@ export function SettingsDialog(): React.JSX.Element {
   );
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      {isOpen ? <SettingsSurface activeSection={activeSection} /> : null}
+      {isOpen ? (
+        <SettingsSurface
+          activeSection={settingsSections.some(({ id }) => id === activeSection) ? activeSection : 'general'}
+        />
+      ) : null}
     </Dialog>
   );
 }

@@ -7,6 +7,7 @@ import type {
   Integrity,
   PluginDeployment,
   PreparationErrorCode,
+  ReceiptFile,
   VariantAxis,
   DependencyVariant,
 } from '#preparation/preparation.types.js';
@@ -69,8 +70,9 @@ export type PreparationState =
   | {
       readonly status: 'preparing';
       readonly attemptId: string;
-      readonly phase: 'downloading' | 'verifying' | 'extracting';
-      /** Name of the payload the phase is about. */
+      /** `sealing` runs the plugin's seal step (such as bytecode compilation) after every payload is unpacked. */
+      readonly phase: 'downloading' | 'verifying' | 'extracting' | 'sealing';
+      /** Name of the payload the phase is about; the dependency's name while `sealing`. */
       readonly payload: string;
       readonly completedPayloads: number;
       readonly totalPayloads: number;
@@ -250,6 +252,34 @@ export type PreparationHost = {
 };
 
 /**
+ * Input of a plugin's {@link PreparationPlugin.seal} step.
+ * @public
+ */
+export type SealClosureInput = {
+  /** The declaring plugin's npm package name. */
+  readonly package: string;
+  readonly dependency: string;
+  /** The selected variant's target. */
+  readonly target: DependencyTarget;
+  /** Absolute closure root: the staging directory while preparing, the sealed closure while repairing. */
+  readonly root: string;
+  /** Rows of the files the payloads wrote, sorted by path. */
+  readonly files: readonly ReceiptFile[];
+  readonly signal: AbortSignal;
+};
+
+/**
+ * Why a seal step refuses a closure this host cannot run, such as a missing system library. Preparation then ends
+ * `blocked` with this reason; nothing is sealed and the verified blobs are kept.
+ * @public
+ */
+export type SealClosureRefusal = {
+  readonly reason: PreparationBlockedReason;
+  readonly message: string;
+  readonly detail?: Extract<PreparationState, { status: 'blocked' }>['detail'];
+};
+
+/**
  * One plugin the host can prepare.
  * @public
  */
@@ -260,6 +290,15 @@ export type PreparationPlugin = {
   readonly deployment: PluginDeployment;
   /** Absolute package root; required when a payload's origin is `packagePath` or `packageAsset`. */
   readonly directory?: string;
+  /**
+   * Seal-time compute, run after every payload of a closure is unpacked and before its receipt is written: it may
+   * only add files, which the host receipts (with no payload name, regular files normalised to mode `0o644`, or
+   * `0o755` when executable) so `treeIntegrity` covers them. A repair that touches the closure runs it again in place.
+   * It runs verified bytes only and must be deterministic: the same closure must give the same files on every host.
+   * @param input - The closure being sealed.
+   * @returns A refusal when this host cannot run the closure, else `undefined`.
+   */
+  readonly seal?: (input: SealClosureInput) => Promise<SealClosureRefusal | undefined>;
 };
 
 /**

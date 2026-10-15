@@ -4,3 +4,5 @@ export { build123d, build123d as plugin } from '#build123d.plugin.js';
 export { build123dKernel } from '#build123d.kernel.js';
 export type { Build123dNativeHandle } from '#build123d.kernel.js';
 export { build123dExportSchemas, build123dOptionsSchema, build123dRenderSchema } from '#build123d.schemas.js';
+export { build123dOptionsFromClosure, sealBuild123dClosure } from '#build123d-closure.js';
+export type { Build123dClosureOptions } from '#build123d-closure.js';

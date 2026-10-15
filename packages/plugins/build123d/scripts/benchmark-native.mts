@@ -3,7 +3,8 @@
 /**
  * Purpose: Measure the shipped Build123d process protocol and native CAD workload.
  * Why: Release thresholds need a repeatable baseline from the exact bundled interpreter.
- * Environment: Node 24+, macOS/Linux, and a prepared Build123d Python resource for the host target.
+ * Environment: Node 24+, macOS/Linux, and the payload seed for the host target (`pnpm nx run build123d:seed`); the
+ * benchmark runs the sealed closure `tau prepare build123d` installs, prepared offline from that seed.
  * Usage: node --import @oxc-node/core/register packages/plugins/build123d/scripts/benchmark-native.mts [--iterations 200]
  * Exit codes: 0 when every workload and cancellation completes; non-zero on integrity or runtime failure.
  */
@@ -24,6 +25,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import type { RuntimeLogger } from '@taucad/runtime/kernel';
+import { targetKey } from '@taucad/runtime/preparation/node';
 
 import {
   build123dAnalysisSchema,
@@ -31,32 +33,20 @@ import {
   build123dBuildSchema,
   build123dEmptySchema,
 } from '#build123d.protocol.js';
+import { prepareFromSeed } from '#build123d-closure.fixture.js';
+import { build123dOptionsFromClosure } from '#build123d-closure.js';
 import { PythonSession } from '#python-session.js';
 
-type ResourceManifest = {
-  readonly pythonRelativePath: string;
-  readonly pythonSha256: string;
-  readonly supportFiles: ReadonlyArray<{ readonly path: string; readonly sha256: string }>;
-  readonly target: string;
-  readonly workerPath: string;
-  readonly workerSha256: string;
-};
-
 const repoRoot = resolve(import.meta.dirname, '../../../..');
-const target = `${process.platform}-${process.arch}`;
-const resourceRoot = resolve(repoRoot, `apps/desktop/resources/python/${target}`);
-const manifest = JSON.parse(
-  readFileSync(resolve(resourceRoot, 'tau-runtime-manifest.json'), 'utf8'),
-) as ResourceManifest;
 const arguments_ = process.argv.slice(2);
 const iterations =
   arguments_.length === 0 ? 200 : arguments_[0] === '--iterations' ? Number(arguments_[1]) : Number.NaN;
 if (!Number.isInteger(iterations) || iterations < 100 || arguments_.length > 2) {
   throw new TypeError('Usage: benchmark-native.mts [--iterations <integer >= 100>]');
 }
-if (manifest.target !== target) {
-  throw new Error(`Build123d resource target mismatch: expected ${target}, received ${manifest.target}`);
-}
+const receipt = await prepareFromSeed();
+const target = targetKey(receipt.target);
+const closure = build123dOptionsFromClosure(receipt);
 
 const source = (defaultWidth = 40): string => `from dataclasses import dataclass
 from build123d import Box
@@ -126,11 +116,7 @@ mkdirSync(workspacePath);
 mkdirSync(artifactPath);
 writeFileSync(join(workspacePath, 'main.py'), source());
 const session = new PythonSession({
-  pythonExecutable: resolve(resourceRoot, manifest.pythonRelativePath),
-  pythonSha256: manifest.pythonSha256,
-  workerPath: resolve(resourceRoot, manifest.workerPath),
-  workerSha256: manifest.workerSha256,
-  supportFiles: manifest.supportFiles.map(({ path, sha256 }) => ({ path: resolve(resourceRoot, path), sha256 })),
+  ...closure,
   workspacePath,
   artifactPath,
   requestTimeout: 120_000,
@@ -269,7 +255,7 @@ try {
         peakResidentKilobytes,
         steadyResidentKilobytes,
         cancellationMilliseconds: performance.now() - cancellationStarted,
-        runtimeResourceBytes: bytesUnder(resourceRoot),
+        runtimeResourceBytes: bytesUnder(receipt.root),
       },
       undefined,
       2,

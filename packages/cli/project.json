@@ -33,7 +33,14 @@
       }
     },
     "test": {
-      "dependsOn": ["build", "^copy-assets"]
+      "dependsOn": [
+        "build",
+        "^copy-assets",
+        {
+          "projects": ["build123d"],
+          "target": "seed"
+        }
+      ]
     },
     "test:ds3": {
       "executor": "nx:run-commands",

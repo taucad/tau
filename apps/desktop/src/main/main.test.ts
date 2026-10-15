@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
 import { mkdir, mkdtemp, realpath, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,6 +9,7 @@ import type * as WorkerThreads from 'node:worker_threads';
 
 import type * as Host from '@taucad/host';
 import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
+import type { DesktopUpdaterOptions } from '#main/updater.js';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -60,20 +63,21 @@ const state = vi.hoisted(() => ({
     status: 'bound',
     machineId: 'workshop-x1c',
   })),
-  servicesStreaming: vi.fn(async (_boundMilliseconds: number): Promise<readonly string[]> => []),
+  servicesStreaming: vi.fn(async (_boundMilliseconds: number): Promise<readonly StreamingMachine[]> => []),
   servicesResumeStarts: vi.fn(),
+  servicesRecover: vi.fn(async () => undefined),
   runtimePrewarm: vi.fn(),
   runtimeMaxUtilities: undefined as number | undefined,
   servicesQuiesce: vi.fn(
     async (
       _boundMilliseconds: number,
-      _options?: Readonly<{ quitIfStreamingUnknown?: boolean }>,
+      _options?: MachineQuitDecision,
     ): Promise<
       | { status: 'quiesced' }
       | { status: 'failed'; message: string }
       | { status: 'timeout' }
       | { status: 'no-utility' }
-      | { status: 'streaming'; machines: readonly string[] }
+      | { status: 'streaming'; machines: readonly StreamingMachine[] }
       | { status: 'streaming-unknown'; message: string }
     > => ({ status: 'quiesced' }),
   ),
@@ -83,10 +87,19 @@ const state = vi.hoisted(() => ({
   /* A renderer that closes its sessions at once, which is what every case but
    * the ordering pin is about. */
   autoQuiesce: true,
+  autoForced: false,
+  prepareToRestart: undefined as undefined | (() => Promise<boolean>),
   /* Lets a case hold ACP discovery open while the window boots (D17). */
   acpDiscovery: undefined as Promise<{ agents: never[]; refused: never[] }> | undefined,
   bambuStudioStatus: vi.fn(async () => ({ available: false, reason: 'not installed' })),
   log: vi.fn(),
+}));
+
+vi.mock('#main/updater.js', () => ({
+  startDesktopUpdater: (options: DesktopUpdaterOptions) => {
+    state.prepareToRestart = options.prepareToRestart;
+    return { check: async () => undefined, install: async () => undefined, status: () => 'disabled' };
+  },
 }));
 
 vi.mock('node:worker_threads', async (importOriginal) => {
@@ -133,12 +146,17 @@ const fakeWindow = {
   webContents: {
     id: 1,
     getURL: vi.fn(() => 'app://tau/'),
-    send: vi.fn((channel: string) => {
+    mainFrame: {},
+    send: vi.fn((channel: string, _attemptId?: string) => {
       state.sentToRenderer.push(channel);
       if (channel === 'tau:quit:ask' && state.autoQuiesce) {
         queueMicrotask(() => {
           for (const listener of state.ipcListeners.get('tau:quit:quiesced') ?? []) {
-            listener(undefined, false);
+            listener(
+              { sender: fakeWindow.webContents, senderFrame: fakeWindow.webContents.mainFrame },
+              fakeWindow.webContents.send.mock.calls.findLast(([channel]) => channel === quitChannels.ask)?.[1],
+              state.autoForced,
+            );
           }
         });
       }
@@ -152,11 +170,14 @@ const fakeWindow = {
   isFullScreen: vi.fn(() => false),
   restore: vi.fn(),
   loadURL: vi.fn(async () => undefined),
+  reload: vi.fn(),
   show: vi.fn(),
   focus: vi.fn(),
   once: vi.fn(),
   on: vi.fn<(event: string, listener: (...args: unknown[]) => void) => void>(),
 };
+
+const getWindows = vi.fn(() => [fakeWindow]);
 
 /* The quit hold's only visible surface when it cannot settle (C69). */
 const dialog = {
@@ -168,13 +189,17 @@ const dialog = {
 
 vi.mock('electron', () => ({
   app,
+  Menu: { getApplicationMenu: vi.fn(() => undefined) },
+  MenuItem: vi.fn(function MenuItem() {
+    return {};
+  }),
   autoUpdater: { setFeedURL: vi.fn(), checkForUpdates: vi.fn(), quitAndInstall: vi.fn(), on: vi.fn() },
   BrowserWindow: Object.assign(
     vi.fn(function BrowserWindow() {
       return fakeWindow;
     }),
     {
-      getAllWindows: vi.fn(() => [fakeWindow]),
+      getAllWindows: getWindows,
       fromWebContents: vi.fn(() => fakeWindow),
     },
   ),
@@ -267,6 +292,7 @@ vi.mock('#main/environment.js', async (importOriginal) => ({
   desktopAgentGatewayBaseUrl: vi.fn(() => 'http://127.0.0.1:1'),
   desktopAgentSystemPrompt: vi.fn(() => 'test'),
   desktopEnvironment: vi.fn(() => ({
+    TAU_MACHINES_ENABLED: 'true',
     TAU_API_URL: 'http://127.0.0.1:1',
     TAU_WEBSOCKET_URL: 'ws://127.0.0.1:1',
     TAU_FRONTEND_URL: 'http://127.0.0.1:1',
@@ -297,6 +323,7 @@ vi.mock('#main/services-broker.js', () => ({
       streamingMachines: state.servicesStreaming,
       peekStreamingMachines: vi.fn(async () => []),
       resumeMachineStarts: state.servicesResumeStarts,
+      recover: state.servicesRecover,
       quiesce: state.servicesQuiesce,
       dispose: state.servicesDispose,
       computeProjectRoot: (root: string) =>
@@ -361,6 +388,9 @@ afterEach(async () => {
   state.ipcListeners.clear();
   state.sentToRenderer.length = 0;
   state.autoQuiesce = true;
+  state.autoForced = false;
+  state.prepareToRestart = undefined;
+  getWindows.mockReturnValue([fakeWindow]);
   state.acpDiscovery = undefined;
   state.ready = undefined;
   state.shellApplied = undefined;
@@ -417,6 +447,37 @@ describe('desktop main compute owner', () => {
     return resolve(join(state.userData, 'home', 'project'));
   };
 
+  it(
+    'settles restart without normal quit stealing the updater finalizer',
+    async () => {
+      await bootstrap();
+      const assessment = Promise.withResolvers<readonly StreamingMachine[]>();
+      state.servicesStreaming.mockReturnValueOnce(assessment.promise);
+      const restart = state.prepareToRestart!();
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      assessment.resolve([]);
+      await expect(restart).resolves.toBe(true);
+      expect(state.servicesDispose).toHaveBeenCalledOnce();
+      expect(app.quit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'refuses updater takeover of a normal quit attempt',
+    async () => {
+      await bootstrap();
+      const assessment = Promise.withResolvers<readonly StreamingMachine[]>();
+      state.servicesStreaming.mockReturnValueOnce(assessment.promise);
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await expect(state.prepareToRestart!()).resolves.toBe(false);
+      assessment.resolve([]);
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
+    },
+    bootMilliseconds,
+  );
   it('should open only granted directories and propagate file manager failures', async () => {
     const directory = await bootstrap();
     await mkdir(directory, { recursive: true });
@@ -672,7 +733,11 @@ describe('desktop main compute owner', () => {
       });
       expect(order).toEqual([]);
       for (const listener of state.ipcListeners.get(quitChannels.quiesced) ?? []) {
-        listener(undefined, false);
+        listener(
+          { sender: fakeWindow.webContents, senderFrame: fakeWindow.webContents.mainFrame },
+          fakeWindow.webContents.send.mock.calls.findLast(([channel]) => channel === quitChannels.ask)?.[1],
+          false,
+        );
       }
 
       await vi.waitFor(() => {
@@ -687,134 +752,138 @@ describe('desktop main compute owner', () => {
     bootMilliseconds,
   );
 
-  /* Q-streamed-host: quitting would stop a machine this app is feeding mid-run, so there is no way past it. */
   it(
-    'should refuse to quit while a program streams, before anything is quiesced, with no Quit anyway',
+    'requires every window, rejects stale attempts and subframes, and ignores duplicate replies',
     async () => {
       await bootstrap();
-      state.servicesStreaming.mockResolvedValueOnce(['LongMill']);
-
-      const quit = state.appListeners.get('before-quit')!.at(-1)!;
-      quit({ preventDefault: vi.fn() });
-
+      state.autoQuiesce = false;
+      const second = {
+        ...fakeWindow,
+        id: 2,
+        webContents: { ...fakeWindow.webContents, id: 2, mainFrame: {}, send: vi.fn() },
+      };
+      getWindows.mockReturnValue([fakeWindow, second]);
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
       await vi.waitFor(() => {
-        expect(dialog.showMessageBox).toHaveBeenCalled();
+        expect(second.webContents.send).toHaveBeenCalled();
       });
-      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
-        buttons: ['Keep Tau open'],
-        message: 'A program is streaming to LongMill; stop it first.',
-      });
-      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      const attempt = fakeWindow.webContents.send.mock.calls.findLast(([channel]) => channel === quitChannels.ask)?.[1];
+      const reply = (sender: typeof fakeWindow.webContents, id = attempt, frame = sender.mainFrame): void => {
+        for (const listener of state.ipcListeners.get(quitChannels.quiesced) ?? []) {
+          listener({ sender, senderFrame: frame }, id, false);
+        }
+      };
+      reply(fakeWindow.webContents, 'retired');
+      reply(second.webContents, attempt, {});
+      reply(fakeWindow.webContents);
+      reply(fakeWindow.webContents);
       expect(state.servicesQuiesce).not.toHaveBeenCalled();
-      expect(state.servicesDispose).not.toHaveBeenCalled();
-      expect(app.quit).not.toHaveBeenCalled();
-    },
-    bootMilliseconds,
-  );
-
-  it(
-    'should ask before quitting when Tau cannot tell whether a program streams, and quit only on Quit anyway',
-    async () => {
-      await bootstrap();
-      state.servicesStreaming.mockRejectedValue(new Error('The desktop machine host did not answer.'));
-
-      const quit = state.appListeners.get('before-quit')!.at(-1)!;
-      quit({ preventDefault: vi.fn() });
-
-      await vi.waitFor(() => {
-        expect(dialog.showMessageBox).toHaveBeenCalled();
-      });
-      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
-        buttons: ['Keep Tau open', 'Quit anyway'],
-        defaultId: 0,
-        message: "Tau can't tell whether a program is streaming to a machine.",
-      });
-      expect(state.servicesQuiesce).not.toHaveBeenCalled();
-      expect(app.quit).not.toHaveBeenCalled();
-
-      dialog.showMessageBox.mockResolvedValue({ response: 1 });
-      quit({ preventDefault: vi.fn() });
-
+      reply(second.webContents);
       await vi.waitFor(() => {
         expect(app.quit).toHaveBeenCalledOnce();
       });
-      expect(state.servicesQuiesce).toHaveBeenCalledWith(expect.any(Number), { quitIfStreamingUnknown: true });
-      dialog.showMessageBox.mockResolvedValue({ response: 0 });
-      state.servicesStreaming.mockResolvedValue([]);
     },
     bootMilliseconds,
   );
 
-  /* The utility reads again before it closes anything when its store opened after main asked: a stream found then
-   * still holds the quit, and the machines start jobs again. */
   it(
-    'should refuse to quit when the utility finds a stream that began after the first question',
+    'requires explicit unsaved-edit consent before forced renderer recovery reloads',
     async () => {
       await bootstrap();
-      state.servicesQuiesce.mockResolvedValueOnce({ status: 'streaming', machines: ['LongMill'] });
-
-      const quit = state.appListeners.get('before-quit')!.at(-1)!;
-      quit({ preventDefault: vi.fn() });
-
+      state.autoForced = true;
+      state.servicesQuiesce.mockResolvedValueOnce({ status: 'failed', message: 'drain failed' });
+      const decision = Promise.withResolvers<{ response: number }>();
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 0 }).mockImplementationOnce(async () => decision.promise);
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
       await vi.waitFor(() => {
-        expect(dialog.showMessageBox).toHaveBeenCalled();
+        expect(dialog.showMessageBox).toHaveBeenCalledTimes(2);
       });
-      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
-        buttons: ['Keep Tau open'],
-        message: 'A program is streaming to LongMill; stop it first.',
+      expect(fakeWindow.reload).not.toHaveBeenCalled();
+      expect(state.servicesRecover).not.toHaveBeenCalled();
+      expect(dialog.showMessageBox.mock.calls[1]?.[0]).toMatchObject({
+        buttons: ['Review again', 'Restore and discard unsaved changes'],
+        defaultId: 0,
       });
-      expect(state.servicesQuiesce).toHaveBeenCalledWith(expect.any(Number), { quitIfStreamingUnknown: false });
-      expect(state.servicesResumeStarts).toHaveBeenCalledOnce();
-      expect(state.servicesDispose).not.toHaveBeenCalled();
-      expect(app.quit).not.toHaveBeenCalled();
+      decision.resolve({ response: 1 });
+      await vi.waitFor(() => {
+        expect(fakeWindow.reload).toHaveBeenCalledOnce();
+      });
     },
     bootMilliseconds,
   );
 
-  /*
-   * C69: a quit that cannot settle has to be *visible*.
-   *
-   * Aborting the quit is right — the projects keep their unrecorded work — but
-   * the renderer has already dismissed its overlay by then, so without a dialog
-   * Cmd+Q simply does nothing, with no reason and nothing to act on. *Quit
-   * anyway* re-enters the same shutdown, forced.
-   */
   it(
-    'names what could not settle when a quit is held, and quits anyway on request',
+    'offers machine navigation before any teardown and releases the quit fence',
     async () => {
       await bootstrap();
-      state.servicesQuiesce.mockResolvedValue({ status: 'failed', message: 'utility drain failed' });
-
+      state.servicesStreaming.mockResolvedValueOnce([{ hostId: 'host', machineId: 'mill', name: 'LongMill' }]);
       const quit = state.appListeners.get('before-quit')!.at(-1)!;
       quit({ preventDefault: vi.fn() });
-
-      await vi.waitFor(() => {
-        expect(dialog.showMessageBox).toHaveBeenCalled();
-      });
-      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
-        buttons: expect.arrayContaining(['Quit anyway']) as unknown as string[],
-      });
-      expect(app.quit).not.toHaveBeenCalled();
-      expect(state.servicesDispose).not.toHaveBeenCalled();
-      /* B3H-3: the renderer let go and the person kept Tau open: the machines it asks about start jobs again. */
-      expect(state.sentToRenderer).toContain(quitChannels.ask);
       await vi.waitFor(() => {
         expect(state.servicesResumeStarts).toHaveBeenCalledOnce();
       });
-      /* The outcome itself is logged, not just its name, so what refused to
-       * settle is recoverable from the log. */
-      expect(state.log).toHaveBeenCalledWith('error', 'main.quiesce', {
-        outcome: { status: 'failed', message: 'utility drain failed' },
+      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        buttons: ['View machines', 'Keep Tau open', 'Quit anyway'],
+        cancelId: 1,
       });
+      expect(fakeWindow.webContents.send).toHaveBeenCalledWith(quitChannels.navigate, '/machines/host/mill');
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      expect(state.servicesDispose).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
 
-      dialog.showMessageBox.mockResolvedValue({ response: 1 });
-      quit({ preventDefault: vi.fn() });
-
+  it(
+    'requires explicit interruption confirmation for an unknown assessment',
+    async () => {
+      await bootstrap();
+      state.servicesStreaming.mockRejectedValueOnce(new Error('Host did not answer'));
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 2 }).mockResolvedValueOnce({ response: 1 });
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
       await vi.waitFor(() => {
         expect(app.quit).toHaveBeenCalledOnce();
       });
-      dialog.showMessageBox.mockResolvedValue({ response: 0 });
-      state.servicesQuiesce.mockResolvedValue({ status: 'quiesced' });
+      expect(dialog.showMessageBox.mock.calls[1]?.[0]).toMatchObject({
+        buttons: ['Go back', 'Quit anyway'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      expect(state.servicesQuiesce).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.objectContaining({ forceMachines: true }),
+      );
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'recovers the service and reloads a usable renderer when saving fails and Keep open is chosen',
+    async () => {
+      await bootstrap();
+      state.servicesQuiesce.mockResolvedValueOnce({ status: 'failed', message: 'drain failed' });
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(fakeWindow.reload).toHaveBeenCalledOnce();
+      });
+      expect(state.servicesRecover).toHaveBeenCalledWith(expect.any(String), expect.any(Number));
+      expect(state.servicesDispose).not.toHaveBeenCalled();
+      expect(app.quit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'requires a separate confirmation after a utility settlement failure',
+    async () => {
+      await bootstrap();
+      state.servicesQuiesce.mockResolvedValueOnce({ status: 'failed', message: 'drain failed' });
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 }).mockResolvedValueOnce({ response: 1 });
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
+      expect(dialog.showMessageBox).toHaveBeenCalledTimes(2);
     },
     bootMilliseconds,
   );
@@ -1232,6 +1301,42 @@ describe('desktop main Bambu Studio channels', () => {
 });
 
 describe('desktop main machine binding channel', () => {
+  it('refuses machine and slicer IPC without creating the machine store when disabled', async () => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    const { desktopEnvironment } = await import('#main/environment.js');
+    vi.mocked(desktopEnvironment).mockReturnValueOnce({
+      TAU_API_URL: 'http://127.0.0.1:1',
+      TAU_WEBSOCKET_URL: 'ws://127.0.0.1:1',
+      TAU_FRONTEND_URL: 'http://127.0.0.1:1',
+    });
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-machines-disabled-'));
+    await import('#main/main.js');
+    await vi.waitFor(() => {
+      expect(state.handlers.has(machinesChannels.completeBinding)).toBe(true);
+    });
+    const complete = state.handlers.get(machinesChannels.completeBinding)!;
+    await expect(complete({ senderFrame: {} }, { ceremonyId: 'old' })).resolves.toMatchObject({
+      status: 'failed',
+      code: 'MACHINES_DISABLED',
+    });
+    expect(state.servicesCompleteBinding).not.toHaveBeenCalled();
+    const status = state.handlers.get(slicersChannels.bambuStudio.status)!;
+    await expect(status({ senderFrame: {} })).rejects.toThrow('Machines are not available');
+    const postMessage = vi.fn();
+    for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+      listener(
+        { senderFrame: { url: 'app://tau/index.html', postMessage } },
+        { requestId: 'disabled', concern: 'machines' },
+      );
+    }
+    expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
+      requestId: 'disabled',
+      error: 'Machines are not available in this release.',
+    });
+    expect(state.servicesConnect).not.toHaveBeenCalled();
+    expect(existsSync(join(state.userData, 'config', 'machines'))).toBe(false);
+  }, 30_000);
+
   const bootMilliseconds = 30_000;
 
   it(
@@ -1425,3 +1530,5 @@ describe('desktop main machine store', () => {
     bootMilliseconds,
   );
 });
+
+/* eslint-enable @typescript-eslint/naming-convention -- End environment fixtures. */

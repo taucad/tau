@@ -88,8 +88,6 @@ export {
   readProjectId,
 } from '#machine-host.js';
 export type { CreateNodeMachineRuntimeOptions, MachineHostIdentity, MachineSecretStore } from '#machine-host.js';
-export { keepAwakeWhileStreaming, platformKeepAwakeBlocker } from '#keep-awake.js';
-export type { KeepAwakeBlocker, KeepAwakeRelease, KeepAwakeWhileStreamingOptions } from '#keep-awake.js';
 export { agentMachineFacet, openLocalMachines, openSharedMachineHost } from '#local-machines.js';
 export type {
   LocalMachines,
@@ -98,6 +96,8 @@ export type {
   OpenSharedMachineHostOptions,
   SharedMachineHost,
 } from '#local-machines.js';
+export { keepAwakeWhileStreaming, platformKeepAwakeBlocker } from '#keep-awake.js';
+export type { KeepAwakeBlocker, KeepAwakeRelease, KeepAwakeWhileStreamingOptions } from '#keep-awake.js';
 export { completeMachineBinding } from '#machine-binding-ceremony.js';
 export type { CompleteMachineBindingInput, MachineBindingCeremonyEvent } from '#machine-binding-ceremony.js';
 export {

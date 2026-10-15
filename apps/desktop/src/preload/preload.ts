@@ -63,14 +63,30 @@ ipcRenderer.on(windowFullscreenChannel, (_event, isFullscreen: unknown) => {
   }
 });
 
-let pendingQuitAsk = false;
-let quitAskHandler: (() => void) | undefined;
-ipcRenderer.on(quitChannels.ask, () => {
-  if (quitAskHandler === undefined) {
-    pendingQuitAsk = true;
+let pendingQuitAsk: string | undefined;
+let quitAskHandler: ((attemptId: string) => void) | undefined;
+ipcRenderer.on(quitChannels.ask, (_event, attemptId: unknown) => {
+  if (typeof attemptId !== 'string') {
     return;
   }
-  quitAskHandler();
+  if (quitAskHandler === undefined) {
+    pendingQuitAsk = attemptId;
+    return;
+  }
+  quitAskHandler(attemptId);
+});
+
+let pendingMachineRoute: string | undefined;
+let machineNavigationHandler: ((route: string) => void) | undefined;
+ipcRenderer.on(quitChannels.navigate, (_event, route: unknown) => {
+  if (typeof route !== 'string' || !/^\/machines(?:\/[^/?#]+\/[^/?#]+)?$/u.test(route)) {
+    return;
+  }
+  if (machineNavigationHandler) {
+    machineNavigationHandler(route);
+  } else {
+    pendingMachineRoute = route;
+  }
 });
 
 exposeElectronRuntime();
@@ -176,11 +192,25 @@ contextBridge.exposeInMainWorld('tau', {
   },
   quit: {
     isReady: (): boolean => quitAskHandler !== undefined,
-    onAsk: (handler: () => void): (() => void) => {
+    onNavigate: (handler: (route: string) => void): (() => void) => {
+      machineNavigationHandler = handler;
+      if (pendingMachineRoute !== undefined) {
+        const route = pendingMachineRoute;
+        pendingMachineRoute = undefined;
+        handler(route);
+      }
+      return () => {
+        if (machineNavigationHandler === handler) {
+          machineNavigationHandler = undefined;
+        }
+      };
+    },
+    onAsk: (handler: (attemptId: string) => void): (() => void) => {
       quitAskHandler = handler;
-      if (pendingQuitAsk) {
-        pendingQuitAsk = false;
-        handler();
+      if (pendingQuitAsk !== undefined) {
+        const attemptId = pendingQuitAsk;
+        pendingQuitAsk = undefined;
+        handler(attemptId);
       }
       return () => {
         if (quitAskHandler === handler) {
@@ -188,8 +218,8 @@ contextBridge.exposeInMainWorld('tau', {
         }
       };
     },
-    reportQuiesced: (forced: boolean): void => {
-      ipcRenderer.send(quitChannels.quiesced, forced);
+    reportQuiesced: (attemptId: string, forced: boolean): void => {
+      ipcRenderer.send(quitChannels.quiesced, attemptId, forced);
     },
   },
   dialog: {

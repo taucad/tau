@@ -28,7 +28,7 @@ import type { BambuPresetSummary, BambuStudioSelection, BambuStudioSettings } fr
 import type { RJSFSchema } from '@rjsf/utils';
 import type { ParameterManifest } from '@taucad/parameters';
 import type * as ParametersModule from '@taucad/viewer/parameters/parameters';
-import type * as ChatConverter from '#routes/w.$workspace.$project/chat-converter.js';
+import type * as ChatConverter from '#components/machines/configuration-manifest.js';
 import { mergeFormDefaults } from '@taucad/viewer/parameters/rjsf-utils';
 import { projectFiles } from '#components/print/testing/project-files.js';
 import { formatDisplayLabel } from '@taucad/ui/utils/label';

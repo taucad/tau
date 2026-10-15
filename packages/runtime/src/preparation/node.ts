@@ -29,6 +29,8 @@ export type {
   PreparationState,
   PrepareInput,
   PrepareOutcome,
+  SealClosureInput,
+  SealClosureRefusal,
   SelectVariantOptions,
   VariantSelection,
   VerifyInput,

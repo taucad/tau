@@ -18,16 +18,16 @@ import {
   describeStillFailure,
   formChoices,
   formNumber,
-} from '#routes/w.$workspace.$project/chat-print-controls.js';
-import { PressureAdvanceStage } from '#routes/w.$workspace.$project/chat-print-materials.js';
+} from '#components/machines/machine-controls.js';
+import { PressureAdvanceStage } from '#components/machines/machine-materials.js';
 import {
   MachineAlerts,
   MonitorStage,
   RunBlock,
   describeRun,
   isObservationStale,
-} from '#routes/w.$workspace.$project/chat-print-monitor.js';
-import { PrintStages } from '#routes/w.$workspace.$project/chat-print-section.js';
+} from '#components/machines/machine-monitor.js';
+import { PrintStages } from '#components/machines/machine-section.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import {
   defineMachineAction,
@@ -1397,7 +1397,7 @@ describe('Monitor readings', () => {
     ] satisfies readonly ComponentObservation[];
     renderControl(entry({ snapshot: machineSnapshot(components) }));
     const monitor = screen.getByRole('region', { name: 'Monitor' });
-    expect(within(monitor).getByRole('heading', { name: /chamber/iu })).toBeInTheDocument();
+    expect(within(monitor).getByRole('heading', { name: /^chamber$/iu, level: 3 })).toBeInTheDocument();
     expect(monitor).toHaveTextContent('Humidity40');
     // One component unknown, its siblings still read.
     expect(monitor).toHaveTextContent('Bed24 °C');

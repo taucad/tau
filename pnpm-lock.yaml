@@ -2009,6 +2009,9 @@ importers:
       '@electron/packager':
         specifier: ^20.3.0
         version: 20.3.0
+      '@taucad/xstate-testing':
+        specifier: workspace:*
+        version: link:../../libs/xstate-testing
       electron:
         specifier: ^43.5.1
         version: 43.7.9
@@ -3524,6 +3527,9 @@ importers:
       '@taucad/brep':
         specifier: workspace:*
         version: link:../plugins/brep
+      '@taucad/build123d':
+        specifier: workspace:*
+        version: link:../plugins/build123d
       '@taucad/bundler-core':
         specifier: workspace:*
         version: link:../core/bundler
@@ -3615,6 +3621,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 'catalog:'
         version: 1.32.1(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../runtime-testing
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../libs/utils
@@ -4146,6 +4155,9 @@ importers:
       '@taucad/agent-tools':
         specifier: workspace:*
         version: link:../../../libs/agent-tools
+      '@taucad/archive-core':
+        specifier: workspace:*
+        version: link:../../core/archive
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry

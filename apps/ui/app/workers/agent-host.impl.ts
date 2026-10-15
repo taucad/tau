@@ -644,7 +644,7 @@ const composeProjectHost = async (
       ...runtimeRpc,
       parameters,
       geospec: geoSpecClient,
-      machines: runtimeClient.machines,
+      ...(provide.machinesEnabled === true ? { machines: runtimeClient.machines } : {}),
       machineSettings: preferences,
       print: {
         /* The `tau.json` id every print request from this project's agent names (blueprint D5). An attempt reads

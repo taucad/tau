@@ -1,15 +1,9 @@
-import { readFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
-
 import { defaultPayloadStore } from '@taucad/host';
 import {
   createPreparationHost,
   describeEffectiveProfile,
   detectHostIndicators,
-  parsePluginDeployment,
   PreparationError,
-  readManagedPreparation,
 } from '@taucad/runtime/preparation/node';
 import type {
   ClosureVerification,
@@ -23,41 +17,13 @@ import { defineCommand } from 'citty';
 import type { ArgsDef, CommandDef, ParsedArgs } from 'citty';
 import type { ConsolaInstance } from 'consola';
 
+import { nativePreparationPlugins, readManaged } from '#native-kernels.js';
 import { cliError, createOutput, emit, exitCodes, sanitize, writeStdout } from '#output.js';
-
-/** Packages whose `tau-plugin.json` declares native runtime payloads; each is read without running plugin code. */
-const nativePackages = ['@taucad/build123d', '@taucad/picogk'] as const;
 
 /** Progress lines on stderr are written at most this often. Milliseconds. */
 const progressInterval = 1000;
 
 const megabytes = (byteLength: number): string => `${(byteLength / 1e6).toFixed(1)} MB`;
-
-/**
- * The native plugins this CLI can prepare: each package that ships a `tau-plugin.json`. A package that is not
- * installed or ships none is skipped, so the roster grows as plugins adopt the manifest.
- * @returns The roster.
- */
-const installedPlugins = async (): Promise<readonly PreparationPlugin[]> => {
-  const require = createRequire(import.meta.url);
-  const plugins: PreparationPlugin[] = [];
-  for (const packageName of nativePackages) {
-    let manifestPath: string;
-    try {
-      manifestPath = require.resolve(`${packageName}/tau-plugin.json`);
-    } catch {
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- two small manifests, read in roster order
-    const manifest: unknown = JSON.parse(await readFile(manifestPath, 'utf8'));
-    plugins.push({
-      package: packageName,
-      deployment: parsePluginDeployment(manifest, `${packageName} tau-plugin.json`),
-      directory: dirname(manifestPath),
-    });
-  }
-  return plugins;
-};
 
 const kernelsOf = (plugins: readonly PreparationPlugin[]): string[] =>
   plugins.flatMap((plugin) => Object.keys(plugin.deployment.kernels)).toSorted();
@@ -78,14 +44,6 @@ const findKernel = (
     `No native kernel is called '${sanitize(kernel)}'. Kernels that can be prepared: ${known.length === 0 ? 'none are installed' : known.join(', ')}.`,
     exitCodes.usage,
   );
-};
-
-const readManaged = (): ManagedPreparation => {
-  try {
-    return readManagedPreparation(process.env);
-  } catch (error) {
-    throw cliError('MANAGED_PROFILE_INVALID', error instanceof Error ? error.message : String(error), exitCodes.usage);
-  }
 };
 
 const preparationFailure = (error: unknown): unknown =>
@@ -321,7 +279,7 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
     async run({ args }) {
       const output = await createOutput();
       const managed = readManaged();
-      const plugins = await (options.plugins ?? installedPlugins)();
+      const plugins = await (options.plugins ?? nativePreparationPlugins)();
       const store = defaultPayloadStore();
       const indicators = detectHostIndicators();
       const host = createPreparationHost({

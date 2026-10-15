@@ -1129,6 +1129,27 @@ describe('the external agent run kind', () => {
     expect(lifecycleOf(events)).not.toContain('completed');
   }, 90_000);
 
+  it.each(['codex', 'grok'])(
+    'should negotiate the intended file authority for %s',
+    async (agentId) => {
+      const harness = await startHarness({ agents: [{ ...fakeAgent, id: agentId }] });
+      await runTurn(harness, { chatId: 'file-authority', runId: 'file-authority', text: 'noask', agentId });
+      const initialize = harness.frames.find(
+        ({ direction, frame }) => direction === 'client->agent' && frame.includes('"method":"initialize"'),
+      );
+      expect(JSON.parse(initialize?.frame ?? '{}')).toMatchObject({
+        params: {
+          clientCapabilities: {
+            fs: { readTextFile: agentId !== 'grok', writeTextFile: agentId !== 'grok' },
+            elicitation: { url: {}, form: {} },
+            terminal: false,
+          },
+        },
+      });
+    },
+    90_000,
+  );
+
   /* A usage limit is the person's own account, not a crash: it is recorded once,
    * typed, in the provider's words, with no duplicate prose and no stack. */
   it('should record a provider usage limit as one typed stop without a stack trace', async () => {
@@ -3175,6 +3196,11 @@ describe('external turns through the revision port', () => {
     await symlink(join(root, 'publication'), join(skills, 'escape'), 'dir');
 
     await expect(readSessionTextFile(cwd, { path: resource }, [skills])).resolves.toBe('skill marker');
+    await expect(readSessionTextFile(cwd, { path: '.tau/private.png' }, [skills])).rejects.toMatchObject({
+      message: 'No path under .tau/private.png exists for this agent.',
+    });
+    await writeFile(join(cwd, 'image.png'), new Uint8Array([137, 80, 78, 71, 0, 255]));
+    await expect(readSessionTextFile(cwd, { path: 'image.png' }, [skills])).rejects.toThrow('UTF-8 text');
     await expect(writeSessionTextFile(cwd, { path: resource, content: 'changed' })).rejects.toMatchObject({
       code: 'WORKSPACE_MASKED_PATH',
     });

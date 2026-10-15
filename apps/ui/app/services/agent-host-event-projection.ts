@@ -10,6 +10,7 @@ import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
 import { errorCategory } from '@taucad/types/constants';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { isRecord } from '@taucad/utils/schema';
+import { externalToolOutputText } from '#utils/external-tool-output.js';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
 import { normalizedErrorCategoryOf } from '#utils/chat-error-card.js';
 
@@ -33,9 +34,8 @@ const failedOutputText = (value: unknown): string | undefined => {
   if (!isRecord(value)) {
     return undefined;
   }
-  const output = [value['formatted_output'], value['aggregated_output'], value['output'], value['error']].find(
-    (candidate): candidate is string => typeof candidate === 'string' && candidate.trim() !== '',
-  );
+  const decoded = externalToolOutputText(value);
+  const output = decoded?.trim() ? decoded : typeof value['error'] === 'string' ? value['error'] : undefined;
   const result =
     isRecord(value['result']) && Array.isArray(value['result']['content']) ? value['result']['content'] : [];
   const resultText = result
@@ -891,11 +891,11 @@ export const projectAgentHostLiveEvent = (
   return chunks;
 };
 
-/** Whether this run left a checkpointed block open, so its next delta continues the same part. */
+/** Whether this run has open parts that must survive an approval pause in the same SDK step. */
 const hasOpenBlock = (runId: string, streamedBlocks: AgentHostLiveBlocks | undefined): boolean => {
   const prefix = `[${JSON.stringify(runId)},`;
   for (const [key, block] of streamedBlocks ?? []) {
-    if (block.type !== 'tool' && !block.closed && key.startsWith(prefix)) {
+    if (!block.closed && key.startsWith(prefix)) {
       return true;
     }
   }
@@ -918,12 +918,13 @@ const lifecycleChunks = (
       ];
     }
     case 'running': {
-      return [{ type: 'start-step' }];
+      // Input refinements are step-scoped in the SDK; a resumed call must not become a second tool part.
+      return hasOpenBlock(event.runId, streamedBlocks) ? [] : [{ type: 'start-step' }];
     }
     case 'paused': {
       /* The reducer forgets its active parts on `finish-step` without closing
-       * them, so a resumed checkpoint block would throw on its next delta
-       * (chat activity indicator closeout R5). The step stays open instead. */
+       * them. Keep the step open until its text and tools settle, so resume
+       * continues those same parts. */
       return hasOpenBlock(event.runId, streamedBlocks) ? [] : [{ type: 'finish-step' }];
     }
     case 'completed': {

@@ -39,6 +39,7 @@ import { FileLink } from '#components/files/file-link.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 import type { ChatMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 import { summarizeExternalCall, summaryNoun } from '#utils/external-call-summary.js';
+import { externalToolOutputText } from '#utils/external-tool-output.js';
 import { externalCommandOf } from '#utils/shell-command-summary.js';
 
 /** ACP's whole `ToolKind` taxonomy, in the order the protocol declares it. @see https://agentclientprotocol.com */
@@ -170,18 +171,26 @@ const factsOf = (part: DynamicToolUIPart, output: unknown): AcpFacts => {
 const diffBlocks = (
   content: readonly unknown[],
 ): ReadonlyArray<{ path: string; oldText: string | undefined; newText: string }> =>
-  content.flatMap((block) => {
-    if (!isRecord(block) || block['type'] !== 'diff' || typeof block['path'] !== 'string') {
-      return [];
-    }
-    return [
-      {
-        path: block['path'],
-        oldText: typeof block['oldText'] === 'string' ? block['oldText'] : undefined,
-        newText: typeof block['newText'] === 'string' ? block['newText'] : '',
-      },
-    ];
-  });
+  content
+    .flatMap((block) => {
+      if (!isRecord(block) || block['type'] !== 'diff' || typeof block['path'] !== 'string') {
+        return [];
+      }
+      return [
+        {
+          path: block['path'],
+          oldText: typeof block['oldText'] === 'string' ? block['oldText'] : undefined,
+          newText: typeof block['newText'] === 'string' ? block['newText'] : '',
+        },
+      ];
+    })
+    .filter(
+      (diff, index, diffs) =>
+        diffs.findIndex(
+          (candidate) =>
+            candidate.path === diff.path && candidate.oldText === diff.oldText && candidate.newText === diff.newText,
+        ) === index,
+    );
 
 /** The ACP content blocks a call rendered, unwrapped from their `{type:'content'}` envelopes. */
 const contentBlocks = (facts: AcpFacts): ReadonlyArray<Record<string, unknown>> =>
@@ -249,13 +258,9 @@ const bodyText = (facts: AcpFacts, output: unknown): string => {
         : (stringAt(block, 'title') ?? stringAt(block, 'name')));
     return text === undefined ? [] : [text];
   });
-  if (typeof output === 'string') {
-    blocks.push(output);
-  } else if (isRecord(output)) {
-    const formatted = stringAt(output, 'formatted_output') ?? stringAt(output, 'output') ?? stringAt(output, 'text');
-    if (formatted !== undefined) {
-      blocks.push(formatted);
-    }
+  const formatted = externalToolOutputText(output);
+  if (formatted !== undefined && !blocks.includes(formatted)) {
+    blocks.push(formatted);
   }
   return blocks.join('\n');
 };

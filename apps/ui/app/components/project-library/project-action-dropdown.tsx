@@ -21,9 +21,10 @@ import { toast } from '#components/ui/sonner.js';
 type ProjectActionDropdownProps = {
   readonly project: ProjectListItem;
   readonly actions: ProjectActions;
+  readonly onRename?: () => void;
 };
 
-export function ProjectActionDropdown({ project, actions }: ProjectActionDropdownProps): ReactNode {
+export function ProjectActionDropdown({ project, actions, onRename }: ProjectActionDropdownProps): ReactNode {
   const isDeleted = Boolean(project.deletedAt);
   const [isRenaming, setIsRenaming] = useState(false);
   const [isConfirmingClose, setIsConfirmingClose] = useState(false);
@@ -73,7 +74,16 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
             <EllipsisVertical className='size-4' />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align='end'>
+        <DropdownMenuContent
+          align='end'
+          onCloseAutoFocus={(event) => {
+            if (isRenaming && onRename) {
+              event.preventDefault();
+              setIsRenaming(false);
+              onRename();
+            }
+          }}
+        >
           {isDeleted ? (
             <>
               <DropdownMenuItem
@@ -140,7 +150,7 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Popover open={isRenaming} onOpenChange={setIsRenaming}>
+      <Popover open={isRenaming && !onRename} onOpenChange={setIsRenaming}>
         <PopoverContent align='end' className='w-64 p-1'>
           <form className='flex items-center gap-2 align-middle' onSubmit={handleRename}>
             <Input

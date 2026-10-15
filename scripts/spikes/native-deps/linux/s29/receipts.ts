@@ -74,7 +74,8 @@ const compare = async (storeA: string, storeB: string): Promise<void> => {
     if (other === undefined) {
       return { closure: key, present: false };
     }
-    const sources = (value: Receipt): string[] => [...new Set(value.payloads.map((p) => p.acquiredFrom.kind))].toSorted();
+    const sources = (value: Receipt): string[] =>
+      [...new Set(value.payloads.map((p) => p.acquiredFrom.kind))].toSorted();
     return {
       closure: key,
       present: true,
@@ -101,7 +102,15 @@ const compare = async (storeA: string, storeB: string): Promise<void> => {
         row.treeIntegrity !== 'DIFFERS' &&
         row.payloadPinsIdentical,
     );
-  console.log(JSON.stringify({ kind: 'compare', g5: pass ? 'pass' : 'fail', closuresA: left.length, closuresB: right.length, rows }));
+  console.log(
+    JSON.stringify({
+      kind: 'compare',
+      g5: pass ? 'pass' : 'fail',
+      closuresA: left.length,
+      closuresB: right.length,
+      rows,
+    }),
+  );
 };
 
 const tally = async (log: string, allowedOrigin: string | undefined): Promise<void> => {
@@ -125,7 +134,8 @@ const tally = async (log: string, allowedOrigin: string | undefined): Promise<vo
       log,
       requests: entries.length,
       refused: entries.filter((entry) => !entry.permitted).length,
-      nonMirror: allowedOrigin === undefined ? undefined : entries.filter((entry) => entry.origin !== allowedOrigin).length,
+      nonMirror:
+        allowedOrigin === undefined ? undefined : entries.filter((entry) => entry.origin !== allowedOrigin).length,
       perOrigin,
     }),
   );

@@ -37,7 +37,11 @@ type Measured = {
     readonly tamperedFetchWithIntegrity: Outcome;
     readonly tamperedStreamingWithIntegrity: Outcome;
     readonly tamperedStreamingWithoutIntegrity: Outcome;
-    readonly medians: { readonly compile: number; readonly streamingPlain: number; readonly streamingIntegrity: number };
+    readonly medians: {
+      readonly compile: number;
+      readonly streamingPlain: number;
+      readonly streamingIntegrity: number;
+    };
     readonly samples: Readonly<Record<'compile' | 'plain' | 'checked', readonly number[]>>;
   }>;
 };
@@ -68,7 +72,9 @@ const leb = (bytes: Uint8Array<ArrayBuffer>, offset: number): { readonly value: 
 
 // Change one byte inside the data section (id 11), so the tampered module still compiles without integrity and only
 // the integrity check can refuse it. Falls back to the last byte when a module has no data section.
-const tamper = (original: Uint8Array<ArrayBuffer>): { readonly bytes: Uint8Array<ArrayBuffer>; readonly target: number } => {
+const tamper = (
+  original: Uint8Array<ArrayBuffer>,
+): { readonly bytes: Uint8Array<ArrayBuffer>; readonly target: number } => {
   const bytes = new Uint8Array(original);
   let offset = 8;
   let target = bytes.length - 1;
@@ -166,7 +172,10 @@ const probe = async (input: { readonly catalog: readonly Entry[]; readonly itera
       for (const kind of index % 2 === 0 ? ['plain', 'checked'] : ['checked', 'plain']) {
         start = now();
         await WebAssembly.compileStreaming(
-          fetch(entry.url, kind === 'checked' ? { cache: 'no-store', integrity: entry.integrity } : { cache: 'no-store' }),
+          fetch(
+            entry.url,
+            kind === 'checked' ? { cache: 'no-store', integrity: entry.integrity } : { cache: 'no-store' },
+          ),
         );
         (kind === 'checked' ? checked : plain).push(now() - start);
       }
@@ -260,7 +269,10 @@ const verdict = {
   refusals: !failed && measuredRows.every((entry) => entry.pass),
   maximumOverheadOfCompilePercent: Math.max(...measuredRows.map((entry) => entry.overheadOfCompilePercent)),
 };
-writeFileSync(`${evidence}/s31.json`, `${JSON.stringify({ origin, iterations, catalog, verdict, results }, undefined, 2)}\n`);
+writeFileSync(
+  `${evidence}/s31.json`,
+  `${JSON.stringify({ origin, iterations, catalog, verdict, results }, undefined, 2)}\n`,
+);
 const lines = [`verdict ${JSON.stringify(verdict)}`];
 for (const row of results) {
   if ('error' in row) {

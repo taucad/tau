@@ -147,6 +147,10 @@ describe('Vitest Browser test-runner ownership', () => {
       'packages/agent-plugin/e2e/viewer-page.hosts.test.ts',
       'scripts/src/canvas-vite.config.test.ts',
       'scripts/src/check-pack-install.ts',
+      // Native-dependency spikes S31 and S32 measure WASM integrity and loopback reachability across three engines,
+      // which Browser Mode cannot host; both are dispatch-only and ship nothing.
+      'scripts/spikes/native-deps/linux/s31/run.ts',
+      'scripts/spikes/native-deps/linux/s32/run.ts',
       // The README hero capture drives the Electron desktop app, which Browser Mode cannot host.
       'scripts/src/readme-hero-capture.ts',
       'scripts/src/reference-html.test.ts',
@@ -167,6 +171,7 @@ describe('Vitest Browser test-runner ownership', () => {
     // The staging billing harness workflow installs Chromium for the hosted Checkout its rows pay.
     // The pkg.pr.new consumer leg, the publish workflow's release gate and the publish dry-run spike install Chromium
     // for check-pack-install's browser checks.
+    // The S31 and S32 native-dependency spikes install the three engines they measure.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
@@ -176,6 +181,9 @@ describe('Vitest Browser test-runner ownership', () => {
         '.github/workflows/preview-packages.yml',
         '.github/workflows/publish.yml',
         '.github/workflows/spike-publish-dry-run.yml',
+        '.github/workflows/spike-s31.yml',
+        '.github/workflows/spike-s32.yml',
+        'scripts/spikes/native-deps/linux/s31/run.ts',
         'apps/docs/project.json',
         'apps/www/README.md',
       ].sort(),

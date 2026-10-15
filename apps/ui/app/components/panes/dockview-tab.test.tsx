@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { DockviewApi, DockviewPanelApi, IDockviewPanelHeaderProps } from 'dockview-react';
 import { describe, expect, it, vi } from 'vitest';
@@ -40,20 +40,7 @@ describe('DockviewTab', () => {
     expect(title).toHaveClass('dockview-tab-title', 'fade-label', 'flex-1');
     expect(title).not.toHaveClass('truncate');
     expect(title.className).not.toMatch(/scroll-shadow-right|--scroll-fade-size|whitespace-nowrap|overflow-hidden/);
-    expect(close).toHaveClass(
-      'fade-action',
-      'absolute',
-      'right-1',
-      'z-10',
-      'size-4.5!',
-      'rounded-[calc(var(--dv-tab-border-radius)-0.25rem)]!',
-      'bg-transparent',
-      'hover:bg-nested-action-hover!',
-    );
-    expect(close?.className).not.toMatch(/before:/);
-    expect(close).not.toHaveClass('rounded-[5px]!');
-    expect(close).not.toHaveClass('group-hover/default-tab:bg-nested-action-hover!');
-    expect(close).not.toHaveClass('right-0', 'right-0.5', 'bg-muted-foreground/10');
+    expect(close).toBeNull();
   });
 
   it('keeps its leading icon compact and non-shrinking', () => {
@@ -103,27 +90,15 @@ describe('DockviewTab', () => {
     expect(await screen.findByRole('tooltip')).toHaveTextContent(expectedTitle);
   });
 
-  it('uses one native, named close button and keeps its events inside the tab action', async () => {
-    const user = userEvent.setup();
-    const parentClick = vi.fn();
-    const parentPointerDown = vi.fn();
-    const properties = createProperties('main.scad');
-
+  it('leaves closing to the group action and Dockview keyboard handler, without nesting a button in a tab', () => {
     render(
       <TooltipProvider>
-        <div className='dv-tab' onClick={parentClick} onPointerDown={parentPointerDown}>
-          <DockviewTab {...properties} />
+        <div className='dv-tab' role='tab' tabIndex={0}>
+          <DockviewTab {...createProperties()} />
         </div>
       </TooltipProvider>,
     );
-
-    const close = screen.getByRole('button', { name: 'Close models/main.scad' });
-
-    fireEvent.pointerDown(close);
-    await user.click(close);
-
-    expect(properties.api.close).toHaveBeenCalledOnce();
-    expect(parentPointerDown).not.toHaveBeenCalled();
-    expect(parentClick).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab')).toHaveAccessibleName('models/main.scad');
   });
 });

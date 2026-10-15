@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) \u2014 measured 8669 bytes brotli on 2026-10-15; native intent/playback admission and four checked support modules; shared kinematics stays external",
+    "name": "total (ESM JS) \u2014 measured 9381 B; native mechanism admission plus project library-version validation",
     "path": "dist/**/*.mjs",
-    "limit": "8.9 kB"
+    "limit": "9.5 kB"
   }
 ]

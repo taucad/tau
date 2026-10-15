@@ -12,7 +12,7 @@ import {
   FolderOpen,
   House,
 } from 'lucide-react';
-import { NavLink, useNavigate } from 'react-router';
+import { NavLink, useNavigate, useNavigation } from 'react-router';
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -985,6 +985,9 @@ export function ProjectLibraryCard({
   isSelected,
   onSelect,
 }: ProjectLibraryCardProps): React.JSX.Element {
+  const navigation = useNavigation();
+  const projectUrl = projectUrlOr(project.slugs);
+  const isOpening = navigation.location?.pathname === projectUrl;
   const nameEditor = useRef<InlineTextEditorHandle>(null);
   const [showPreview, setShowPreview] = useState(false);
   const thumbnail = useProjectThumbnail(project.id);
@@ -1004,8 +1007,9 @@ export function ProjectLibraryCard({
 
   return (
     <ProjectCard
-      to={projectUrlOr(project.slugs)}
-      linkLabel={`Open ${project.name}`}
+      to={projectUrl}
+      isOpening={isOpening}
+      linkLabel={`${isOpening ? 'Opening…' : 'Open'} ${project.name}`}
       className={cn('flex flex-col', isSelected && 'ring-3 ring-primary')}
     >
       <div className='absolute top-2 left-2 z-20'>
@@ -1072,8 +1076,8 @@ export function ProjectLibraryCard({
       <CardFooter className='mt-auto flex items-center justify-between'>
         <Button asChild variant='outline'>
           <span aria-hidden='true' className='pointer-events-none'>
-            <ArrowRight className='size-4' />
-            <span>Open</span>
+            {isOpening ? 'Opening…' : 'Open'}
+            {isOpening ? <Loader /> : <ArrowRight />}
           </span>
         </Button>
 

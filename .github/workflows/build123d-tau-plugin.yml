@@ -1,6 +1,7 @@
 # Build123d's registry-native closure (native-dependency-resolution charter W3, D2, D17, D22, I13).
 # On a pull request that touches the pins or the generator, `--check` regenerates tau-plugin.json, the per-target
-# pylock files, the SBOM and the golden receipts from the publishers' metadata and fails on any byte difference.
+# pylock files, the SBOM and the golden receipts from the publishers' metadata and fails on any byte difference;
+# the project template check (W9) does the same for the new-project pyproject.toml, pylock.toml and uv.lock.
 # On dispatch, each target's runner prepares its closure from the seed (sandboxed compileall and self-test included)
 # and reports the golden receipt entry it sealed, which a maintainer commits to tau-plugin.golden.json.
 name: Build123d tau-plugin
@@ -12,6 +13,9 @@ on:
       - packages/plugins/build123d/scripts/generate-tau-plugin.mts
       - packages/plugins/build123d/scripts/tau-plugin-generator.mts
       - packages/plugins/build123d/tau-plugin*.json
+      - packages/plugins/build123d/project/**
+      - packages/plugins/build123d/scripts/generate-project-template.mts
+      - packages/plugins/build123d/scripts/project-template.mts
       - .github/workflows/build123d-tau-plugin.yml
   workflow_dispatch:
 
@@ -40,6 +44,12 @@ jobs:
         uses: ./.github/actions/setup-nx
       - name: Regenerate and compare byte for byte
         run: pnpm nx run build123d:generate-tau-plugin:check --outputStyle=stream
+      - name: Install uv
+        run: command -v uv || pipx install uv
+      # W9: the new-project template must equal its rendering from the per-target pylocks, and uv.lock must still
+      # satisfy its pyproject.toml at the closure's versions.
+      - name: Check the project template
+        run: pnpm nx run build123d:generate-project-template:check --outputStyle=stream
 
   golden:
     name: Golden receipt (${{ matrix.target }})

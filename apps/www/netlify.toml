@@ -1,7 +1,7 @@
 # Dedicated marketing site. The UI edge function proxies its public routes.
 [build]
 base = "apps/www"
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build www"
+command = "NODE_OPTIONS='--import tsx' NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build www"
 publish = "build/client"
 
 [build.environment]

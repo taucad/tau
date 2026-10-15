@@ -100,6 +100,8 @@ This will:
 - Delete applied version plan files
 - Commit changes and create a git tag using the configured `v{version}` pattern
 
+  The committed agent bundles embed each owner's version, so regenerate them before the release commit leaves your machine, and amend them into it: `pnpm nx run api-extractor:generate-bundles --skip-nx-cache`. Otherwise `api-extractor`'s regeneration test fails on `main` and in the publish workflow's release gate.
+
 5. The `main` ruleset rejects direct pushes, so push the release commit on a branch, open a pull request, and squash-merge it once CI is green. The squash merge gives the release a new commit, so delete the local tag Nx created (`git tag -d v<version>`). The release commit uses the `root` scope (`chore(root): Release the npm packages as v{version}`), because the commit-msg hook accepts only `root` and project names.
 6. Tag the merge commit `v<version>` (only the tag ruleset's bypass actors may create `v*` tags), then dispatch `gh workflow run publish.yml --ref v<version>`. A pushed tag alone publishes nothing. When the tag cannot be created, dispatch on `main` at the merge commit: the publish reads versions from the package manifests, not from the tag.
 
@@ -112,7 +114,7 @@ NX_CLOUD=false NX_DAEMON=false pnpm nx release version prerelease --preid beta -
   --git-commit=false --git-tag=false --stage-changes=false
 ```
 
-The explicit git flags are required because `release.git` in `nx.json` is not allowed with the `version` subcommand. The command bumps every manifest in the group (plus `packages/agent-plugin/.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`), writes no changelog, and keeps the version plans for the stable release. Commit the result as in step 5 and continue with step 6. `publish.yml` publishes under the `beta` dist-tag.
+The explicit git flags are required because `release.git` in `nx.json` is not allowed with the `version` subcommand. The command bumps every manifest in the group (plus `packages/agent-plugin/.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`), writes no changelog, and keeps the version plans for the stable release. Regenerate the agent bundles (`pnpm nx run api-extractor:generate-bundles --skip-nx-cache`), commit them with the manifests as in step 5, and continue with step 6. `publish.yml` publishes under the `beta` dist-tag.
 
 A package name that has never been published needs the operator's bootstrap first: a `0.0.0` placeholder and an `npm trust` binding to `taucad/tau` `publish.yml`, since Trusted Publishing cannot create a name.
 

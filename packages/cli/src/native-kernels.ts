@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 
@@ -91,11 +91,11 @@ export const nativePreparationPlugins = async (): Promise<readonly PreparationPl
 
 // A preparation host over the shared payload store; `inspect` reads receipts and never downloads, so an inspect-only
 // host starts no attempt and holds nothing to dispose.
-const storeReader = (plugin: PreparationPlugin): PreparationHost => {
+const storeReader = (plugin: PreparationPlugin, store = defaultPayloadStore()): PreparationHost => {
   const managed = readManaged();
   return createPreparationHost({
     plugins: [plugin],
-    store: defaultPayloadStore(),
+    store,
     ...(managed.seed === undefined ? {} : { seed: managed.seed }),
     selection: managed.selection,
   });
@@ -173,13 +173,17 @@ const preparationBytes = (plugin: PreparationPlugin, requires: readonly string[]
  */
 export const composeNativeKernels = async (): Promise<NativeComposition> => {
   const managed = readManaged();
+  /* Closures are composed by the store's real path. The native sandbox denies reads under shared roots such as `/tmp`
+   * and grants a closure by its real path, so a worker started through a link (macOS's `/tmp` is one to
+   * `/private/tmp`, as a linked home or `TAU_CONFIG_DIR` may be) exits before it runs. */
+  const store = await realpath(defaultPayloadStore()).catch(() => defaultPayloadStore());
   const kernels: { build123d?: Build123dClosureOptions; picogk?: PicogkKernelOptions } = {};
   const unavailable: UnavailableNativeKernel[] = [];
   const closureRoots: string[] = [];
   for (const plugin of await nativePreparationPlugins()) {
     for (const [kernel, { requires, extensions }] of Object.entries(plugin.deployment.kernels)) {
       // oxlint-disable-next-line no-await-in-loop -- two small manifests, read in roster order
-      const { state } = await storeReader(plugin).inspect({ package: plugin.package, dependencies: requires });
+      const { state } = await storeReader(plugin, store).inspect({ package: plugin.package, dependencies: requires });
       const receipt = state.status === 'ready' ? state.receipts[requires[0]] : undefined;
       const options = receipt === undefined ? undefined : adopters[plugin.package]?.options(receipt);
       if (receipt !== undefined && options !== undefined) {

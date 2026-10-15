@@ -1,7 +1,8 @@
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import type * as PreparationNode from '@taucad/runtime/preparation/node';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -11,6 +12,19 @@ import {
   openNativePreparation,
   refusedKernels,
 } from '#native-kernels.js';
+
+/* The stores each preparation host is opened over; the hosts themselves are the real ones. */
+const opened = vi.hoisted(() => ({ stores: [] as string[] }));
+vi.mock('@taucad/runtime/preparation/node', async (importOriginal) => {
+  const actual = await importOriginal<typeof PreparationNode>();
+  return {
+    ...actual,
+    createPreparationHost: (options: Parameters<typeof actual.createPreparationHost>[0]) => {
+      opened.stores.push(options.store);
+      return actual.createPreparationHost(options);
+    },
+  };
+});
 
 describe('native kernels from the payload store', () => {
   let configDirectory: string;
@@ -98,6 +112,23 @@ describe('native kernels from the payload store', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     const entries = await readdir(configDirectory, { recursive: true });
     expect(entries.filter((entry) => entry.includes('closures') || entry.includes('blobs'))).toEqual([]);
+  });
+
+  it('should compose from the store by its real path when the store is reached through a link', async () => {
+    /* As under macOS's `/tmp` (a link to `/private/tmp`), whose spelling a sandboxed worker cannot start through. */
+    const realConfig = join(configDirectory, 'real');
+    await mkdir(join(realConfig, 'payloads'), { recursive: true });
+    const linkedConfig = join(configDirectory, 'linked');
+    await symlink(realConfig, linkedConfig);
+    vi.stubEnv('TAU_CONFIG_DIR', linkedConfig);
+    opened.stores.length = 0;
+
+    await composeNativeKernels();
+
+    const realStore = await realpath(join(linkedConfig, 'payloads'));
+    expect(realStore).not.toBe(join(linkedConfig, 'payloads'));
+    expect(opened.stores.length).toBeGreaterThan(0);
+    expect(new Set(opened.stores)).toEqual(new Set([realStore]));
   });
 
   it('should find the refused kernels wherever a tool result carries its issues', () => {

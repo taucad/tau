@@ -30,7 +30,7 @@ export function KernelSelector({
                 'flex h-auto flex-col items-center justify-center gap-2 rounded-lg border-border p-2 transition-all hover:border-ring/50 hover:bg-primary/20',
                 'max-md:min-w-[calc((100%-1.5rem)/3.3)] max-md:shrink-0 max-md:snap-start',
                 selectedKernel === option.id &&
-                  'border-ring bg-primary/5 text-primary hover:border-ring hover:bg-primary/10 dark:border-ring',
+                  'border-ring bg-primary/5 text-foreground hover:border-ring hover:bg-primary/10 dark:border-ring',
               )}
               onClick={() => {
                 onKernelChange(option.id);

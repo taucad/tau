@@ -125,7 +125,7 @@ export const DesktopTitlebarControls = ({
       <div
         data-slot='desktop-titlebar-controls'
         className={cn(
-          'flex h-9 items-center gap-1 bg-transparent pl-(--desktop-titlebar-inset) [app-region:no-drag] [&_button]:[app-region:no-drag]',
+          'flex h-9 items-center gap-1 bg-transparent pl-(--desktop-titlebar-inset) [&_button]:[app-region:no-drag] [&_a]:[app-region:no-drag]',
           open && !isMobile ? 'pr-2' : 'pr-1',
         )}
       >

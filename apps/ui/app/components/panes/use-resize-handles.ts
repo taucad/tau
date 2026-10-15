@@ -129,7 +129,20 @@ export function useResizeHandles(
         .map((sash) => ({ sash, handle: describeRef.current(sash) }));
       for (const { sash, handle } of handles) {
         const isDisabled = !handle || handle.maximum <= handle.minimum || sash.matches('.sash-disabled, .dv-disabled');
-        sash.setAttribute('role', 'separator');
+        sash.setAttribute('role', handle ? 'separator' : 'presentation');
+        if (!handle) {
+          for (const name of [
+            'aria-label',
+            'aria-orientation',
+            'aria-valuemin',
+            'aria-valuemax',
+            'aria-valuenow',
+            'aria-valuetext',
+            'aria-description',
+          ]) {
+            sash.removeAttribute(name);
+          }
+        }
         sash.setAttribute('aria-disabled', String(isDisabled));
         sash.tabIndex = isDisabled ? -1 : 0;
         if (handle) {

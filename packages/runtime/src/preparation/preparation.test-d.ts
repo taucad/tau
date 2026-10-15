@@ -1,12 +1,23 @@
 import { expectTypeOf, test } from 'vitest';
 
 import { parsePluginDeployment } from '#preparation/plugin-deployment.js';
+import { createPreparationHost } from '#preparation/preparation-host.js';
+import type {
+  PreparationBlockedReason,
+  PreparationHost,
+  PreparationState,
+  PrepareInput,
+  PrepareOutcome,
+  VariantSelection,
+} from '#preparation/preparation-host.types.js';
+import { selectVariant } from '#preparation/select-variant.js';
 import type {
   DependencyPayload,
   DependencyTarget,
   Integrity,
   PayloadOrigin,
   PluginDeployment,
+  VariantAxis,
 } from '#preparation/preparation.types.js';
 
 test('parsePluginDeployment returns the schema v1 type', () => {
@@ -45,4 +56,35 @@ test('an origin needs its canonical URL', () => {
   const empty: PayloadOrigin = { kind: 'url', urls: [] };
   expectTypeOf(empty).toExtend<PayloadOrigin>();
   expectTypeOf<DependencyPayload['format']>().toEqualTypeOf<'raw' | 'tar.gz' | 'zip' | 'wheel'>();
+});
+
+test('prepare requires a signal and settles as ready, blocked or cancelled, never failed', () => {
+  expectTypeOf<PrepareInput['signal']>().toEqualTypeOf<AbortSignal>();
+  // @ts-expect-error — every prepare is cancellable; a call without a signal is refused.
+  const unsignalled: PrepareInput = { package: '@taucad/build123d' };
+  expectTypeOf(unsignalled).toExtend<PrepareInput>();
+  expectTypeOf<PrepareOutcome['status']>().toEqualTypeOf<'ready' | 'blocked' | 'cancelled'>();
+  expectTypeOf<Extract<PreparationState, { status: 'failed' }>>().not.toExtend<PrepareOutcome>();
+  expectTypeOf(createPreparationHost).returns.toEqualTypeOf<PreparationHost>();
+});
+
+test('a blocked state names its reason, and a missing system library carries the library', () => {
+  expectTypeOf<PreparationBlockedReason>().toEqualTypeOf<
+    'unsupported-target' | 'offline-miss' | 'missing-system-library'
+  >();
+  const blocked: Extract<PreparationState, { status: 'blocked' }> = {
+    status: 'blocked',
+    attemptId: 'a',
+    reason: 'missing-system-library',
+    message: 'm',
+    detail: { library: 'libGL.so.1' },
+  };
+  // @ts-expect-error — a missing download is not a blocked reason; it is a failed DOWNLOAD_FAILED.
+  const notBlocked: PreparationBlockedReason = 'download-failed';
+  expectTypeOf([blocked, notBlocked]).toBeArray();
+});
+
+test('selectVariant answers a selection or the failing axis', () => {
+  expectTypeOf(selectVariant).returns.toEqualTypeOf<VariantSelection>();
+  expectTypeOf<Extract<VariantSelection, { status: 'unsupported' }>['axis']>().toEqualTypeOf<VariantAxis>();
 });

@@ -147,7 +147,15 @@ const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelI
   revisions: 'revisions',
 };
 
-export function ProjectWorkspaceProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
+export function ProjectWorkspaceProvider({
+  children,
+  workbenchMode = 'responsive',
+  onWorkbenchOpen,
+}: {
+  readonly children: React.ReactNode;
+  readonly workbenchMode?: 'responsive' | 'pane';
+  readonly onWorkbenchOpen?: () => void;
+}): React.JSX.Element {
   const { editorRef, mainEntryPath } = useProject();
   const location = useLocation();
   const routeKey = location.key;
@@ -155,10 +163,12 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
   const isEditorReady = useSelector(editorRef, (snapshot) => snapshot.matches('ready'));
   const openerRef = useRef<((panelId: WorkbenchPanelId) => void) | undefined>(undefined);
   const pendingFilesRef = useRef<string | undefined>(undefined);
+  const pendingPreviewPanel = useRef<{ route: string; panel: WorkbenchPanelId } | undefined>(undefined);
   const committedRouteKeyRef = useRef(routeKey);
   useLayoutEffect(() => {
     if (committedRouteKeyRef.current !== routeKey) {
       pendingFilesRef.current = undefined;
+      pendingPreviewPanel.current = undefined;
       openerRef.current = undefined;
       committedRouteKeyRef.current = routeKey;
     }
@@ -168,6 +178,7 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
     providerActiveRef.current = true;
     return () => {
       providerActiveRef.current = false;
+      pendingPreviewPanel.current = undefined;
       pendingFilesRef.current = undefined;
     };
   }, []);
@@ -261,6 +272,15 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
   const openPanel = useCallback(
     (panelId: WorkbenchPanelId) => {
       pendingFilesRef.current = undefined;
+      if (workbenchMode === 'pane') {
+        onWorkbenchOpen?.();
+        if (openerRef.current) {
+          openerRef.current(panelId);
+        } else {
+          pendingPreviewPanel.current = { route: routeKey, panel: panelId };
+        }
+        return;
+      }
       if (isMobile) {
         const mobilePanel = mobilePanelByWorkbenchPanel[panelId];
         if (mobilePanel) {
@@ -277,7 +297,7 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
         layoutController.personWorkbenchChanged((node) => addPane(node, panelId));
       }
     },
-    [editorRef, isMobile, layoutController, setWorkbenchOpen, routeKey],
+    [editorRef, isMobile, layoutController, setWorkbenchOpen, routeKey, workbenchMode, onWorkbenchOpen],
   );
 
   const connectWorkbench = useCallback(
@@ -286,6 +306,11 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
         return () => undefined;
       }
       openerRef.current = opener;
+      const pendingPreview = pendingPreviewPanel.current;
+      pendingPreviewPanel.current = undefined;
+      if (pendingPreview?.route === routeKey) {
+        opener(pendingPreview.panel);
+      }
       const pendingFiles = pendingFilesRef.current;
       pendingFilesRef.current = undefined;
       if (pendingFiles !== undefined && pendingFiles === routeKey) {

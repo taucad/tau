@@ -34,6 +34,32 @@ export const defaultConfigDirectory = (): string => {
   return join(process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config'), 'tau');
 };
 
+/**
+ * Resolve the digest-keyed payload store shared by the CLI, `tau mcp`, the daemon and the desktop: the per-OS data
+ * root (Application Support on macOS, `$XDG_DATA_HOME/tau` on Linux, `%LOCALAPPDATA%\tau` on Windows), never the
+ * roaming or config roots, or `<TAU_CONFIG_DIR>/payloads` when the one override is set.
+ * @returns Absolute store root.
+ * @public
+ */
+export const defaultPayloadStore = (): string => {
+  if (process.env['TAU_CONFIG_DIR']) {
+    return join(process.env['TAU_CONFIG_DIR'], 'payloads');
+  }
+  if (platform() === 'win32') {
+    return join(process.env['LOCALAPPDATA'] ?? join(homedir(), 'AppData', 'Local'), 'tau', 'payloads');
+  }
+  if (platform() === 'darwin') {
+    return join(homedir(), 'Library', 'Application Support', 'tau', 'payloads');
+  }
+  // An empty XDG_DATA_HOME means the default, as the XDG Base Directory specification says.
+  const dataHome = process.env['XDG_DATA_HOME'];
+  return join(
+    dataHome === undefined || dataHome === '' ? join(homedir(), '.local', 'share') : dataHome,
+    'tau',
+    'payloads',
+  );
+};
+
 export const hostCredentialPath = (): string => join(defaultConfigDirectory(), 'host.json');
 
 export const readHostCredential = async (): Promise<HostCredential | undefined> => {

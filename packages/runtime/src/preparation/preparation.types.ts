@@ -140,6 +140,8 @@ export type ReceiptFile = {
   /** Permission bits, `0o777` at most. */
   readonly mode: number;
   readonly symlinkTarget?: string;
+  /** Name of the payload that wrote the file, so a repair re-unpacks only that payload; not part of any identity. */
+  readonly payload?: string;
 };
 
 /**

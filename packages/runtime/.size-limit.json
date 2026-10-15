@@ -1,8 +1,8 @@
 [
   {
-    "name": "total (ESM JS) — measured 207.55 kB brotli on 2026-10-10",
+    "name": "total (ESM JS) — measured 226.56 kB brotli on 2026-10-15; approved 228 kB combined budget for Machines and the Node preparation host",
     "path": ["dist/**/*.mjs", "!dist/**/wasm/**", "!dist/**/fonts/**"],
-    "limit": "210 kB"
+    "limit": "228 kB"
   },
   {
     "name": "@taucad/runtime",
@@ -33,6 +33,11 @@
     "name": "@taucad/runtime/node",
     "path": "dist/node.mjs",
     "limit": "1 kB"
+  },
+  {
+    "name": "@taucad/runtime/preparation/node",
+    "path": "dist/preparation/node.mjs",
+    "limit": "500 B"
   },
   {
     "name": "@taucad/runtime/electron/utility",

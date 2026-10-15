@@ -40,11 +40,11 @@ import {
   printOptionKeys,
   requestJobInputSchema,
   stopMachineInputSchema,
-} from '@taucad/chat';
+} from '@taucad/chat/schemas/tools/machine';
 import { toolDescriptions, toolName } from '@taucad/chat/constants';
 import type { ToolInputValidationError } from '@taucad/chat';
 import type { MachineSettingsService } from '@taucad/types';
-import { toProviderToolJsonSchema } from '@taucad/chat/schemas';
+import { toProviderToolJsonSchema } from '@taucad/chat/schemas/provider-tool-schemas';
 import type { SlicerOptionsInput } from '@taucad/slicer';
 import { z } from 'zod';
 

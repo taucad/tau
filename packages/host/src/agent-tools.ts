@@ -34,7 +34,7 @@ import type { MachineTypeId } from '@taucad/types';
 import { MachineSettingsOwner } from '@taucad/runtime/host';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
-import { rpcClientErrorCode } from '@taucad/chat';
+import { rpcClientErrorCode } from '@taucad/chat/schemas/rpc';
 import { toolName } from '@taucad/chat/constants';
 import { toRpcError } from '@taucad/chat/rpc';
 import type { RpcGeoSpecClient, RpcSkillResolver } from '@taucad/chat/rpc';

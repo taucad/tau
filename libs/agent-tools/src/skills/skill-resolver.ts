@@ -15,7 +15,7 @@
  */
 
 import type { ResolveSkillRpcResult, SkillMetadata } from '@taucad/chat';
-import { rpcClientErrorCode } from '@taucad/chat';
+import { rpcClientErrorCode } from '@taucad/chat/schemas/rpc';
 import { getErrno } from '@taucad/utils/error';
 
 import {

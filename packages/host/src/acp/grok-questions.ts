@@ -1,6 +1,6 @@
 /** Grok's native question extension, projected into the shared question record. */
 import { z } from 'zod';
-import { askedOptionSchema, resolveAnswers } from '@taucad/chat';
+import { askedOptionSchema, resolveAnswers } from '@taucad/chat/schemas/questions';
 import type { Ask, AskAnswers } from '@taucad/chat';
 
 /** Validate xAI's extension at the connection boundary. @internal */

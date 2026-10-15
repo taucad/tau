@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { fork } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
@@ -274,6 +274,66 @@ const brokerNativeWorkers = (
   });
 };
 
+/** Milliseconds a child directory may go without its owner marker before a sweep takes it for abandoned. */
+const unmarkedDirectoryGrace = 10 * 60_000;
+const childDirectoryPrefix = 'tau-runtime-child-';
+/* The directories a sweep has already run for in this process. */
+const swept = new Set<string>();
+
+/** Whether a process with this id is running; a process this one may not signal is running too. */
+const processAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
+/**
+ * Remove the child directories a daemon left behind under its native directory, which, unlike TMPDIR, no OS cleans:
+ * a daemon that crashed or was killed, or a removal that failed while a worker still wrote. Each directory's owner
+ * marker (`<directory>.pid`, beside it where neither the child nor a worker can write) names the daemon that made it;
+ * one whose daemon still runs is kept, so concurrent daemons leave each other alone. Runs once per directory.
+ *
+ * @param directory - The daemon's native directory.
+ */
+const sweepAbandonedChildDirectories = async (directory: string): Promise<void> => {
+  if (swept.has(directory)) {
+    return;
+  }
+  swept.add(directory);
+  let entries: string[];
+  try {
+    entries = await readdir(directory);
+  } catch {
+    return;
+  }
+  const abandoned = async (name: string): Promise<boolean> => {
+    const owner = Number.parseInt(await readFile(join(directory, `${name}.pid`), 'utf8').catch(() => ''), 10);
+    if (Number.isSafeInteger(owner) && owner > 0) {
+      return owner !== process.pid && !processAlive(owner);
+    }
+    /* No marker: a daemon stopped between creating the directory and marking it, or is marking it now. */
+    const { mtimeMs } = await stat(join(directory, name));
+    return Date.now() - mtimeMs > unmarkedDirectoryGrace;
+  };
+  await Promise.all(
+    entries
+      .filter((name) => name.startsWith(childDirectoryPrefix) && !name.endsWith('.pid'))
+      .map(async (name) => {
+        try {
+          if (await abandoned(name)) {
+            await rm(join(directory, name), { recursive: true, force: true });
+            await rm(join(directory, `${name}.pid`), { force: true });
+          }
+        } catch {
+          // The next daemon's sweep tries again.
+        }
+      }),
+  );
+};
+
 const minimalEnvironment = (): NodeJS.ProcessEnv => {
   const environment: NodeJS.ProcessEnv = {};
   for (const name of ['PATH', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'WINDIR', 'LANG', 'LC_ALL']) {
@@ -389,9 +449,15 @@ export const startRuntimeChild = async (options: {
   const parentDirectory = options.native?.directory ?? tmpdir();
   if (options.native !== undefined) {
     await mkdir(parentDirectory, { recursive: true, mode: 0o700 });
+    await sweepAbandonedChildDirectories(parentDirectory);
   }
   /* What the child's exit removes: its temp directory, or the daemon's directory that holds it. */
-  const removableDirectory = await realpath(await mkdtemp(join(parentDirectory, 'tau-runtime-child-')));
+  const removableDirectory = await realpath(await mkdtemp(join(parentDirectory, childDirectoryPrefix)));
+  /* Outside TMPDIR nothing reclaims a directory this daemon leaves behind; the marker lets the next sweep do it. */
+  const ownerMarker = options.native === undefined ? undefined : `${removableDirectory}.pid`;
+  if (ownerMarker !== undefined) {
+    await writeFile(ownerMarker, `${String(process.pid)}\n`, { mode: 0o600 });
+  }
   const temporaryDirectory = options.native === undefined ? removableDirectory : join(removableDirectory, 'tmp');
   /* The child may write the daemon's temp directory, so a sandbox root inside it could be swapped after all. */
   const childWritableTemporary = await realpath(tmpdir());
@@ -433,13 +499,17 @@ export const startRuntimeChild = async (options: {
       });
     });
   });
-  /* The directory is the child's alone, so it goes with the child; a failed removal leaves only temp files. */
+  /* The directory is the child's alone, so it goes with the child. A failed removal leaves it to the OS in TMPDIR, and
+   * to the next daemon's sweep in the native directory, whose marker then names a daemon that is gone. */
   const removeTemporaryDirectoryOnExit = async (): Promise<Awaited<typeof exited>> => {
     const exit = await exited;
     try {
       await rm(removableDirectory, { recursive: true, force: true });
+      if (ownerMarker !== undefined) {
+        await rm(ownerMarker, { force: true });
+      }
     } catch {
-      // The OS reclaims the temp directory.
+      // Reclaimed later, as above.
     }
     return exit;
   };

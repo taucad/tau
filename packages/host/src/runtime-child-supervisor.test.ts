@@ -1,7 +1,20 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { access, chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -341,6 +354,54 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     expect(granted.startsWith(`${directory}/tau-runtime-child-`)).toBe(true);
     expect(elsewhere.startsWith(`${granted}/`)).toBe(false);
     expect(granted.startsWith(`${daemonTemporaryDirectory}/`)).toBe(false);
+  });
+
+  it('reclaims the child directories a gone daemon left in its native directory, and keeps those of a running one', async () => {
+    const { daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-sweep-');
+    const proofPath = join(daemonTemporaryDirectory, 'proof.json');
+    /* A process that has exited: its id names no running daemon. */
+    const gone = spawn(process.execPath, ['-e', '']);
+    const gonePid = gone.pid!;
+    await once(gone, 'exit');
+    const leftBehind = {
+      gone: { pid: gonePid, keep: false },
+      running: { pid: process.ppid, keep: true },
+      unmarkedOld: { pid: undefined, keep: false },
+      unmarkedFresh: { pid: undefined, keep: true },
+    };
+    await mkdir(directory, { recursive: true });
+    for (const [name, { pid }] of Object.entries(leftBehind)) {
+      const path = join(directory, `tau-runtime-child-${name}`);
+      // oxlint-disable-next-line no-await-in-loop -- four fixtures, laid out in order.
+      await mkdir(join(path, 'tmp'), { recursive: true });
+      if (pid !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- four fixtures, laid out in order.
+        await writeFile(`${path}.pid`, `${String(pid)}\n`);
+      }
+    }
+    const anHourAgo = new Date(Date.now() - 60 * 60_000);
+    await utimes(join(directory, 'tau-runtime-child-unmarkedOld'), anHourAgo, anHourAgo);
+
+    const child = await startRuntimeChild({
+      modulePath: fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url)),
+      args: [proofPath, '[]'],
+      native: { directory, compose: async () => ({ unavailable: [] }), closureRoots: async () => [], start: vi.fn() },
+    });
+    const whileRunning = await readdir(directory);
+    await child.close();
+    const afterClose = await readdir(directory);
+
+    for (const [name, { keep }] of Object.entries(leftBehind)) {
+      expect(whileRunning.includes(`tau-runtime-child-${name}`), name).toBe(keep);
+    }
+    expect(whileRunning).not.toContain(`tau-runtime-child-gone.pid`);
+    /* The running child's own directory carries this daemon's marker, and both go when it exits. */
+    const own = whileRunning.filter(
+      (name) =>
+        name.startsWith('tau-runtime-child-') && !Object.keys(leftBehind).some((fixture) => name.includes(fixture)),
+    );
+    expect(own).toHaveLength(2);
+    expect(afterClose.filter((name) => own.includes(name))).toEqual([]);
   });
 
   it('refuses every launch when the daemon would keep its directory where the child may write', async () => {

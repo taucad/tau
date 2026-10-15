@@ -53,8 +53,8 @@ def _axis(vector: Any) -> list[float]:
 
 def _range(bounds: Any, reference: float = 0., scale: float = 1.) -> dict[str, float]:
     lower, upper = bounds
-    if math.isnan(lower) or math.isnan(upper) or lower > upper:
-        raise ValueError("Joint bounds require lower <= upper and cannot contain NaN")
+    if math.isnan(lower) or math.isnan(upper) or lower > upper or lower == math.inf or upper == -math.inf:
+        raise ValueError("Joint bounds require lower <= upper, a finite admissible coordinate, and cannot contain NaN")
     return {key: (value - reference) * scale for key, value in (("lower", lower), ("upper", upper)) if math.isfinite(value)}
 
 

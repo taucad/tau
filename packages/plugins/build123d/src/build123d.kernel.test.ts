@@ -235,6 +235,7 @@ describe('Build123d kernel lifecycle errors', () => {
       artifactPath: '/private/model.glb',
       byteLength: 3,
       mechanismDiagnostics: [diagnostic],
+      mechanismIntent: { connections: [] },
     });
     const result = await definition.render?.(
       { view: 'model', handle: { sessionGeneration: 2, handleId: 'shape' }, options: renderOptions },
@@ -265,6 +266,37 @@ describe('Build123d kernel lifecycle errors', () => {
       links: { base: { components: [] }, arm: { components: ['arm'] }, tool: { components: ['tool'] } },
       joints,
     };
+    const checkProjection = async (projection: Record<string, unknown>) => {
+      const context = createContext();
+      context.session.request.mockResolvedValue({ artifactPath: '/private/model.glb', byteLength: 3, ...projection });
+      const handle = { sessionGeneration: 2, handleId: 'shape' };
+      const rejection = {
+        issues: expect.arrayContaining([
+          expect.objectContaining({
+            code: 'INVALID_ANNOTATION',
+            severity: 'error',
+            details: expect.objectContaining({ producer: { kernelId: 'build123d' } }),
+          }),
+        ]),
+      };
+      await Promise.all([
+        expect(
+          definition.render?.({ view: 'model', handle, options: renderOptions }, runtime, context),
+        ).rejects.toMatchObject(rejection),
+        expect(
+          definition.export!(
+            {
+              exportId: 'glb',
+              handle,
+              options: { ...renderOptions, coordinateSystem: 'y-up', unit: { length: 'meter' } },
+            },
+            runtime,
+            context,
+          ),
+        ).rejects.toMatchObject(rejection),
+      ]);
+    };
+    const checks: Array<Promise<void>> = [];
     for (const invalid of [
       { ...base, couplings: [{ driver: 'first', follower: 'second', ratio: 'invalid' }] },
       {
@@ -276,36 +308,27 @@ describe('Build123d kernel lifecycle errors', () => {
       },
       { ...base, animations: [{ id: 'turn', duration: 1, keyframes: [{ time: 2, coordinates: { first: 1 } }] }] },
     ]) {
-      const context = createContext();
-      context.session.request.mockResolvedValue({
-        artifactPath: '/private/model.glb',
-        byteLength: 3,
-        mechanism: invalid,
-      });
-      const handle = { sessionGeneration: 2, handleId: 'shape' };
-      for (const result of [
-        definition.render?.({ view: 'model', handle, options: renderOptions }, runtime, context),
-        definition.export!(
-          {
-            exportId: 'glb',
-            handle,
-            options: { ...renderOptions, coordinateSystem: 'y-up', unit: { length: 'meter' } },
+      for (const projection of [
+        { mechanism: invalid },
+        {
+          mechanismIntent: {
+            ...invalid,
+            connections: [{ playbackCoordinates: { angle: 'first', distance: 'second' } }],
           },
-          runtime,
-          context,
-        ),
-      ]) {
-        await expect(result).rejects.toMatchObject({
-          issues: [
-            expect.objectContaining({
-              code: 'INVALID_ANNOTATION',
-              severity: 'error',
-              details: expect.objectContaining({ producer: { kernelId: 'build123d' } }),
-            }),
+          mechanismDiagnostics: [
+            {
+              code: 'UNSUPPORTED_MECHANISM',
+              path: '/mechanismIntent',
+              message: 'Unsupported graph',
+              recovery: 'Inspect the retained intent.',
+            },
           ],
-        });
+        },
+      ]) {
+        checks.push(checkProjection(projection));
       }
     }
+    await Promise.all(checks);
   });
 
   it('handles mesh/export worker failures and GLB export naming', async () => {

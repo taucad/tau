@@ -1011,7 +1011,7 @@ class Worker:
             projection = project_mechanism(shapes, components, self.motion.get(params["handleId"]), meshes=meshes)
             artifact = self._artifact("glb")
             write_glb(artifact, components, meshes, topology_metadata=projection)
-            return {"artifactPath": str(artifact), "byteLength": artifact.stat().st_size, "mechanismDiagnostics": projection.get("mechanismDiagnostics", []), **({"mechanism": projection["mechanism"]} if "mechanism" in projection else {})}
+            return {"artifactPath": str(artifact), "byteLength": artifact.stat().st_size, "mechanismDiagnostics": projection.get("mechanismDiagnostics", []), **{key: projection[key] for key in ("mechanism", "mechanismIntent") if key in projection}}
         if method == "export":
             if params["format"] != "step":
                 raise ValueError(f"Unsupported Build123d export format: {params['format']}")

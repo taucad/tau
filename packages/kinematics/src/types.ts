@@ -251,6 +251,19 @@ export type IssueCode =
 /** A diagnostic with a JSON-pointer-style `path` into the offending input. @public */
 export type Issue = Readonly<{ code: IssueCode; path: string; message: string; recovery: string }>;
 
+/**
+ * Validate motion relationships independently of physical graph playback support.
+ * @public
+ */
+export type ValidateMechanismMotionInput = Readonly<{
+  /** Known coordinate identities from physical connections or an admitted mechanism. */
+  coordinates: readonly string[];
+  /** Untrusted coupling declarations, checked with the mechanism admission rules. */
+  couplings?: unknown;
+  /** Untrusted animation declarations, checked with the mechanism admission rules. */
+  animations?: unknown;
+}>;
+
 /** Outcome of admitting unknown input as a {@link Mechanism}. @public */
 export type AdmitMechanismOutcome =
   | Readonly<{ status: 'admitted'; mechanism: Mechanism }>

@@ -1,4 +1,4 @@
-import { admitMechanism, listDegreesOfFreedom } from '@taucad/kinematics';
+import { admitMechanism, listDegreesOfFreedom, validateMechanismMotion } from '@taucad/kinematics';
 import type { SpatialMatrix } from '@taucad/spatial';
 import type { TauCadTopologyPayload } from '#extensions/tau-cad-topology.types.js';
 
@@ -145,6 +145,13 @@ export const mechanismIntentIssues = (payload: TauCadTopologyPayload): string[] 
     (payload.mechanism.units.length !== intent.units.length || payload.mechanism.units.angle !== intent.units.angle)
   ) {
     issues.push('mechanismIntent and playback mechanism units must agree');
+  }
+  for (const issue of validateMechanismMotion({
+    coordinates: intent.connections.flatMap((connection) => Object.values(connection.playbackCoordinates ?? {})),
+    couplings: intent.couplings,
+    animations: intent.animations,
+  })) {
+    issues.push(`mechanismIntent${issue.path}: ${issue.message}`);
   }
   const ids = new Set<string>();
   for (const connection of intent.connections) {

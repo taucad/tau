@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 18997 bytes on 2026-10-02; 503 bytes headroom",
+    "name": "total (ESM JS) — measured 20755 bytes on 2026-10-15 including native mechanism intent validation; 545 bytes headroom",
     "path": "dist/**/*.mjs",
-    "limit": "19.5 kB"
+    "limit": "21.3 kB"
   }
 ]

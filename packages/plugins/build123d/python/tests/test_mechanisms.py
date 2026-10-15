@@ -163,7 +163,14 @@ class AdmissionTests(unittest.TestCase):
             with self.subTest(message=message), self.assertRaisesRegex(ValueError,message): project_mechanism((a,),components((a,)),supplement)
         with self.assertRaisesRegex(ValueError,'traversals'): project_mechanism((a,),[])
         with self.assertRaisesRegex(ValueError,'occurs twice'): project_mechanism((a,a),components((a,a)))
-        with self.assertRaisesRegex(ValueError,'lower <= upper'): _range((2,1))
+        for bounds in ((2,1),(math.inf,math.inf),(-math.inf,-math.inf)):
+            with self.subTest(bounds=bounds), self.assertRaisesRegex(ValueError,'lower <= upper'): _range(bounds)
+        for bounds in ((math.inf,math.inf),(-math.inf,-math.inf)):
+            part=Box(1,1,1)
+            RevoluteJoint('unconnected',part,angular_range=bounds)
+            with self.subTest(unconnected=bounds), self.assertRaisesRegex(ValueError,'finite admissible coordinate'):
+                project_mechanism((part,),components((part,)))
+        self.assertEqual(_range((-math.inf,math.inf)),{})
         with self.assertRaisesRegex(ValueError,'Unsupported native'): _interface(object())
         with self.assertRaisesRegex(ValueError,'retained coordinate'): _reference(joint,mount)
         linear=LinearJoint('linear',a)

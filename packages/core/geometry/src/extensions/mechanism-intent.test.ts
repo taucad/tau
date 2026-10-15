@@ -86,3 +86,40 @@ describe('physical mechanism intent', () => {
     ).toBe(true);
   });
 });
+
+it('should reject malformed supplementary motion on unsupported physical graphs', () => {
+  const base = fixture.mechanismIntent!;
+  const intent = {
+    ...base,
+    connections: base.connections.map((connection) => ({ ...connection, playbackCoordinates: { distance: 'travel' } })),
+  };
+  const invalidCoupling = {
+    ...fixture,
+    mechanismIntent: { ...intent, couplings: [{ driver: 'travel', follower: 'travel', ratio: 0 }] },
+  };
+  expect(
+    validateTauCadTopology(invalidCoupling, bounds).some((issue) =>
+      issue.includes('mechanismIntent/couplings/0/ratio'),
+    ),
+  ).toBe(true);
+  const invalidClip = {
+    ...fixture,
+    mechanismIntent: {
+      ...intent,
+      animations: [{ id: 'move', duration: 1, keyframes: [{ time: 2, coordinates: { travel: 1 } }] }],
+    },
+  };
+  expect(
+    validateTauCadTopology(invalidClip, bounds).some((issue) =>
+      issue.includes('mechanismIntent/animations/0/keyframes/0/time'),
+    ),
+  ).toBe(true);
+  const validClip = {
+    ...fixture,
+    mechanismIntent: {
+      ...intent,
+      animations: [{ id: 'move', duration: 1, keyframes: [{ time: 1, coordinates: { travel: 1 } }] }],
+    },
+  };
+  expect(validateTauCadTopology(validClip, bounds)).toEqual([]);
+});

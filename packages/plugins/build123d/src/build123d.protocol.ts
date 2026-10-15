@@ -108,7 +108,6 @@ export const build123dComputeDescriptorSchema = z.object({
   actionDigest: actionDigestSchema,
   contentDigest: contentDigestSchema,
   byteLength: z.number().int().nonnegative(),
-  mechanism: z.unknown().optional(),
 });
 
 /** EQ16: one control frame carries at most this many descriptors. */
@@ -165,6 +164,14 @@ export const build123dBuildSchema = z.object({
 export const build123dArtifactSchema = z.object({
   artifactPath: z.string().min(1),
   byteLength: z.number().int().nonnegative(),
+  mechanism: z.unknown().optional(),
+  mechanismIntent: z
+    .object({
+      connections: z.array(z.object({ playbackCoordinates: z.record(z.string(), z.string()).optional() })),
+      couplings: z.unknown().optional(),
+      animations: z.unknown().optional(),
+    })
+    .optional(),
   mechanismDiagnostics: z
     .array(
       z.object({

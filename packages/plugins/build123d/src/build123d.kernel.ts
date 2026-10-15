@@ -4,7 +4,7 @@ import { createExportFile } from '@taucad/runtime/types';
 import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import { sha256StringSync } from '@taucad/utils/hash';
-import { admitMechanism } from '@taucad/kinematics';
+import { admitMechanism, validateMechanismMotion } from '@taucad/kinematics';
 
 import {
   build123dAnalysisSchema,
@@ -80,8 +80,34 @@ const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
   ];
 };
 
-/** Convert preserved native intent diagnostics into warnings shown by the Kinematics pane. */
+/**
+ * Admit authored motion independently of solver support, then expose retained intent warnings.
+ * @param artifact - Native artifact and its projected mechanical metadata.
+ * @returns Unsupported intent warnings shown by the Kinematics pane.
+ * @throws {Build123dKernelError} When intent or compiled playback violates the shared contract.
+ */
 const mechanismIssues = (artifact: Build123dArtifact): KernelIssue[] => {
+  if (artifact.mechanismIntent !== undefined) {
+    const intent = artifact.mechanismIntent;
+    const issues = validateMechanismMotion({
+      coordinates: [
+        ...new Set(intent.connections.flatMap((connection) => Object.values(connection.playbackCoordinates ?? {}))),
+      ],
+      couplings: intent.couplings,
+      animations: intent.animations,
+    });
+    if (issues.length > 0) {
+      throw new Build123dKernelError(
+        issues.map((issue) => ({
+          code: 'INVALID_ANNOTATION',
+          severity: 'error',
+          type: 'kernel',
+          message: `Mechanism intent ${issue.path}: ${issue.message} ${issue.recovery}`,
+          details: { producer: { kernelId: 'build123d' }, mechanism: issue },
+        })),
+      );
+    }
+  }
   if (artifact.mechanism !== undefined) {
     const admission = admitMechanism(artifact.mechanism);
     if (admission.status === 'invalid') {

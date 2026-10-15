@@ -87,8 +87,31 @@ import type {
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import { maskedPathCode } from '@taucad/agent-tools/registry';
+import { seemsBinary } from '@taucad/filesystem/content-metadata';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
+import {
+  getParametersInputSchema,
+  getParametersOutputSchema,
+  applyParameterOperationInputSchema,
+  applyParameterOperationOutputSchema,
+} from '@taucad/chat/schemas/tools/parameter';
+import {
+  machineActionInputSchema,
+  machineActionOutputSchema,
+  stopMachineInputSchema,
+  stopMachineOutputSchema,
+  getPrintProfilesInputSchema,
+  getPrintProfilesOutputSchema,
+  requestJobInputSchema,
+  requestJobOutputSchema,
+  checkJobInputSchema,
+  checkJobOutputSchema,
+  listMachinesInputSchema,
+  listMachinesOutputSchema,
+  getMachineInputSchema,
+  getMachineOutputSchema,
+} from '@taucad/chat/schemas/tools/machine';
 import { exportModelInputSchema, exportModelOutputSchema } from '@taucad/chat/schemas/tools/export-model';
 import { evaluateModelInputSchema, evaluateModelOutputSchema } from '@taucad/chat/schemas/tools/evaluate-model';
 import { screenshotInputSchema, screenshotMcpOutputSchema } from '@taucad/chat/schemas/tools/screenshot';
@@ -280,10 +303,28 @@ export const readSessionTextFile = async (
     if (skillRoot === undefined || !(error instanceof Error) || !('code' in error) || error.code !== maskedPathCode) {
       throw error;
     }
-    return readSessionTextFile(skillRoot, { ...params, path: resolve(cwd, params.path) }, remaining);
+    try {
+      return await readSessionTextFile(skillRoot, { ...params, path: resolve(cwd, params.path) }, remaining);
+    } catch (skillError) {
+      if (skillError instanceof Error && 'code' in skillError && skillError.code === maskedPathCode) {
+        throw error;
+      }
+      throw skillError;
+    }
   }
   const provider = new NodeFsProvider(cwd);
-  const content = new TextDecoder().decode(await provider.readFile(path));
+  const bytes = await provider.readFile(path);
+  let content: string;
+  try {
+    if (seemsBinary(bytes)) {
+      throw new TypeError('Binary file');
+    }
+    content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new TypeError(
+      'ACP fs/read_text_file supports UTF-8 text only. Images must be delivered as image content blocks.',
+    );
+  }
   /* `unknown`, because ACP spells "no window" as an omitted field *and* as an
    * explicit JSON `null`, and a reader that trusted the declared type would
    * turn the second one into line zero and drop the file's first line. */
@@ -587,6 +628,43 @@ type JsonSchema = {
 };
 
 const tauMcpSchemas = {
+  [toolName.getParameters]: {
+    input: getParametersInputSchema,
+    output: getParametersOutputSchema,
+  },
+  [toolName.applyParameterOperation]: {
+    input: applyParameterOperationInputSchema,
+    output: applyParameterOperationOutputSchema,
+  },
+  [toolName.machineAction]: {
+    input: machineActionInputSchema,
+    output: machineActionOutputSchema,
+  },
+  [toolName.stopMachine]: {
+    input: stopMachineInputSchema,
+    output: stopMachineOutputSchema,
+  },
+  [toolName.getPrintProfiles]: {
+    input: getPrintProfilesInputSchema,
+    output: getPrintProfilesOutputSchema,
+  },
+  [toolName.requestJob]: {
+    input: requestJobInputSchema,
+    output: requestJobOutputSchema,
+  },
+  [toolName.checkJob]: {
+    input: checkJobInputSchema,
+    output: checkJobOutputSchema,
+  },
+  [toolName.listMachines]: {
+    input: listMachinesInputSchema,
+    output: z.object({ value: listMachinesOutputSchema }).transform(({ value }) => value),
+  },
+  [toolName.getMachine]: {
+    input: getMachineInputSchema,
+    output: z.object({ value: getMachineOutputSchema }).transform(({ value }) => value),
+  },
+
   [toolName.arrangeWorkbench]: { input: arrangeWorkbenchInputSchema, output: arrangeWorkbenchOutputSchema },
   [toolName.evaluateModel]: { input: evaluateModelInputSchema, output: evaluateModelOutputSchema },
   [toolName.testModel]: { input: testModelInputSchema, output: testModelOutputSchema },

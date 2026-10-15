@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
@@ -74,6 +74,21 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
       await expectVisible(page.getByRole('article').getByText(/^8127[.!]?$/u));
       expect(readEvents()).toContain('"agentId":"grok"');
       await session.capture('grok-composer-continuity');
+      const memoryRun = latestCompletedRun(readEvents());
+      writeFileSync(
+        join(session.pickedDirectory, slug, 'visual-check.png'),
+        Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAdklEQVR4nO3PQQkAMAzAwPo33Yno4xgEIuAyO/t1wwUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWHHtBp+HSthEAJgAAAABJRU5ErkJggg==',
+          'base64',
+        ),
+      );
+      await sendPrompt(
+        page,
+        'Open visual-check.png with your file-reading tool and identify its dominant color. Inspect the image itself; do not decode its bytes with code. Reply with only the color.',
+      );
+      await expect.poll(() => latestCompletedRun(readEvents()), { timeout: 180_000 }).not.toBe(memoryRun);
+      await expectVisible(page.getByRole('article').getByText(/^(?:magenta|fuchsia)[.!]?$/iu));
+      await session.capture('grok-composer-image-read');
       const secondRun = latestCompletedRun(readEvents());
       await sendPrompt(
         page,

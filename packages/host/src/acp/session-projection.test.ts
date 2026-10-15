@@ -38,6 +38,83 @@ const stubTurn = (appended: ExternalAgentLogEvent[] = []): AcpPromptTurn => ({
   signal: new AbortController().signal,
 });
 
+it.each(['grok', 'codex'])('should project every additional Tau MCP capability for %s', async (agentId) => {
+  const cases = [
+    ['get_parameters', { targetFile: 'main.py' }],
+    ['apply_parameter_operation', { action: 'cancel', targetFile: 'main.py', requestId: 'request-1' }],
+    ['list_machines', {}],
+    ['get_machine', { machineId: 'fixture' }],
+    ['machine_action', { machineId: 'fixture', componentId: 'switch', action: 'switch.set' }],
+    ['stop_machine', { machineId: 'fixture' }],
+    ['get_print_profiles', { machineId: 'fixture' }],
+    ['request_job', { targetFile: 'main.py' }],
+    ['check_job', { targetFile: 'main.py' }],
+  ] as const;
+  for (const [name, input] of cases) {
+    // oxlint-disable-next-line no-await-in-loop -- Exercise each call's independent projection lifecycle.
+    const messages = await project(
+      [
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: name,
+          title: `tau__${name}`,
+          rawInput:
+            agentId === 'grok'
+              ? { tool_name: `tau__${name}`, tool_input: input }
+              : { server: 'tau', tool: name, arguments: input },
+          _meta:
+            agentId === 'grok'
+              ? { 'x.ai/tool': { name: 'use_tool', namespace: 'grok_build' } }
+              : { is_mcp_tool_call: true },
+        },
+      ],
+      agentId,
+      undefined,
+      'tau',
+    );
+    expect(messages[0]).toMatchObject({
+      role: 'tool-input',
+      toolName: name,
+      content: input,
+      metadata: { tauInternal: { presentation: 'tau-mcp' } },
+    });
+  }
+});
+
+it.each(['list_machines', 'get_machine'])('should unwrap the MCP string carrier for %s', async (name) => {
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: name,
+        title: name,
+        rawInput: { tool_name: `tau__${name}`, tool_input: {} },
+        _meta: { 'x.ai/tool': { name: 'use_tool', namespace: 'grok_build' } },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: name,
+        status: 'completed',
+        rawOutput: {
+          type: 'MCP',
+          tool_name: name,
+          server_name: 'tau',
+          output: { OkayOutput: '{"value":"No machines bound."}' },
+        },
+      },
+    ],
+    'grok',
+    undefined,
+    'tau',
+  );
+  expect(messages[1]).toMatchObject({
+    role: 'tool-output',
+    toolName: name,
+    content: 'No machines bound.',
+    isError: false,
+  });
+});
+
 it('should normalize a qualified Grok MCP call and its JSON output', async () => {
   const output = { status: 'ready' };
   const messages = await project(

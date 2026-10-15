@@ -10,6 +10,7 @@ import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
 import { errorCategory } from '@taucad/types/constants';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { isRecord } from '@taucad/utils/schema';
+import { externalToolOutputText } from '#utils/external-tool-output.js';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
 import { normalizedErrorCategoryOf } from '#utils/chat-error-card.js';
 
@@ -33,9 +34,7 @@ const failedOutputText = (value: unknown): string | undefined => {
   if (!isRecord(value)) {
     return undefined;
   }
-  const output = [value['formatted_output'], value['aggregated_output'], value['output'], value['error']].find(
-    (candidate): candidate is string => typeof candidate === 'string' && candidate.trim() !== '',
-  );
+  const output = externalToolOutputText(value) ?? (typeof value['error'] === 'string' ? value['error'] : undefined);
   const result =
     isRecord(value['result']) && Array.isArray(value['result']['content']) ? value['result']['content'] : [];
   const resultText = result

@@ -34,12 +34,12 @@ describe('external session host ownership', () => {
       acpSessionId: 'session-A',
       config: { 'tau.grok.permissions': 'ask' },
     });
-    expect(externalSessionOf(events, 'grok', 'B')?.['acpSessionId']).toBe('session-B');
+    expect(externalSessionOf(events, 'grok', 'B')?.acpSessionId).toBe('session-B');
     expect(externalSessionOf(events, 'grok', 'C')).toBeUndefined();
   });
   it('does not infer ownership for legacy records', () => {
     const events = [session(undefined, 'legacy', 0)];
     expect(externalSessionOf(events, 'grok', 'A')).toBeUndefined();
-    expect(externalSessionOf(events, 'grok')?.['acpSessionId']).toBe('legacy');
+    expect(externalSessionOf(events, 'grok')?.acpSessionId).toBe('legacy');
   });
 });

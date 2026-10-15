@@ -118,11 +118,10 @@ export const useAgentConfig = (
       const selectedReasoning = liveModel
         ? {}
         : Object.fromEntries(
-            discoveredOptions.flatMap((option) =>
-              option.category === 'thought_level' && execution.config?.[option.id] !== undefined
-                ? [[option.id, execution.config[option.id]]]
-                : [],
-            ),
+            discoveredOptions.flatMap((option): Array<[string, string | boolean]> => {
+              const value = execution.config?.[option.id];
+              return option.category === 'thought_level' && value !== undefined ? [[option.id, value]] : [];
+            }),
           );
       const config = { ...selectedReasoning, ...actual, ...retained };
       setActiveExecution({ ...selection, ...(Object.keys(config).length === 0 ? {} : { config }) });

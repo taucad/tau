@@ -1,4 +1,4 @@
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useLayoutEffect, useRef } from 'react';
 import { Mic, Square, X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -6,12 +6,6 @@ import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
 import { dictationLabels } from '#components/dictation/use-dictation.js';
 import type { DictationPhase } from '#components/dictation/use-dictation.js';
-
-/** Bars below this share of the track render at the minimum height, so they ripple instead of sitting flat. */
-const waveformIdleHeight = 0.125;
-/** Bars per idle ripple period and the phase offset between neighbours, matching the 1.2s ripple. */
-const waveformIdleWavelength = 24;
-const waveformIdleStep = 1200 / waveformIdleWavelength;
 
 type DictationControls = {
   readonly phase: DictationPhase;
@@ -69,6 +63,16 @@ export const DictationRecording = memo(function ({
   readonly levels: readonly number[];
   readonly onCancel: () => void;
 }): React.JSX.Element {
+  const row = useRef<HTMLDivElement>(null);
+  // Each batch shifts the levels one slot left, which the finished glide already shows, so rewinding the glide in
+  // the same frame keeps the row travelling continuously instead of stepping or, in silence, standing still.
+  useLayoutEffect(() => {
+    if (row.current && 'getAnimations' in row.current) {
+      for (const animation of row.current.getAnimations()) {
+        animation.currentTime = 0;
+      }
+    }
+  }, [levels]);
   return (
     <>
       <Tooltip>
@@ -92,26 +96,19 @@ export const DictationRecording = memo(function ({
           aria-label='Microphone waveform'
           data-slot='dictation-waveform'
           data-level={levels.at(-1) ?? 0}
-          className='flex h-7 min-w-0 flex-1 items-center justify-end gap-0.75 overflow-hidden mask-x-from-[calc(100%-var(--spacing)*4)] mask-x-to-100% text-muted-foreground/70 motion-reduce:hidden'
+          className='flex h-7 min-w-0 flex-1 items-center justify-end overflow-hidden mask-x-from-[calc(100%-var(--spacing)*4)] mask-x-to-100% text-muted-foreground/70 motion-reduce:hidden'
         >
-          {levels.map((level, index) => {
-            const height = Math.max(0, Math.min(1, level * 8));
-            return (
+          <div ref={row} className='flex h-full shrink-0 animate-dictation-scroll items-center gap-0.75'>
+            {levels.map((level, index) => (
               <span
                 // Fixed time slots, never interactive or reordered.
                 // oxlint-disable-next-line react/no-array-index-key -- Fixed waveform time slots shift levels, not DOM identity.
                 key={index}
-                className={cn(
-                  'max-h-6 min-h-0.75 w-0.75 shrink-0 rounded-full bg-current',
-                  height < waveformIdleHeight && 'animate-dictation-idle',
-                )}
-                style={{
-                  height: `${height * 100}%`,
-                  animationDelay: `${(index % waveformIdleWavelength) * -waveformIdleStep}ms`,
-                }}
+                className='max-h-6 min-h-0.75 w-0.75 shrink-0 rounded-full bg-current'
+                style={{ height: `${Math.max(0, Math.min(1, level * 8)) * 100}%` }}
               />
-            );
-          })}
+            ))}
+          </div>
         </div>
       ) : null}
       <span

@@ -4,7 +4,8 @@
 # tau-seed.json) from the build123d seed and PicoGK's verified origin blobs (W6's layout does
 # not exist yet), then prepares both kernels offline from it into an empty store: cold (purged),
 # warm, and with the seed blobs APFS-cloned into the store first (/bin/cp -c -R). Records time,
-# the df disk delta, the store's du and quarantine attributes. Deleted when W6 lands.
+# the df disk delta, the store's du and quarantine attributes. Two more legs seed the sealed closures
+# themselves (APFS clone of the tree, and an uncompressed tar), as D10/W6 ship them. Deleted when W6 lands.
 name: Spike S30 (desktop seed first use)
 
 on:

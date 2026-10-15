@@ -20,6 +20,8 @@ import { join } from 'node:path';
 import process from 'node:process';
 
 /* oxlint-disable no-restricted-imports -- spike-only: the siblings and the CLI's native composition are imported by relative path; deleted with W21. */
+// eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: the CLI composition is not a public export.
+import { composeNativeKernels } from '../../../packages/cli/src/native-kernels.ts';
 import { hostFacts, median, parseFlags, requiredFlag } from './spike-common.mts';
 import {
   build123dSeed,
@@ -67,8 +69,6 @@ const hashAll = async (files: ReadonlyArray<{ path: string; sha256: string }>): 
 /** One first-session sample, in a fresh process: compose both kernels from the receipts, then hash what each checks. */
 const measure = async (): Promise<void> => {
   // The composition reads TAU_CONFIG_DIR, which the parent set.
-  // eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: the CLI composition is not a public export.
-  const { composeNativeKernels } = await import('../../../packages/cli/src/native-kernels.ts');
   const cpu = process.cpuUsage();
   const started = performance.now();
   const composition = await composeNativeKernels();
@@ -161,11 +161,48 @@ type CaseInput = {
   readonly step: () => Promise<Record<string, unknown>>;
 };
 
+/** The `tau prepare --verify --json` result, reduced to each closure's status and named rows, or the refusal. */
+const briefReport = (stdout: string): unknown => {
+  try {
+    const report = JSON.parse(stdout.trim().split('\n').at(-1) ?? '') as {
+      kind?: string;
+      closures?: ReadonlyArray<{ package: string; status: string; payloads?: unknown[]; files?: unknown[] }>;
+      code?: string;
+      message?: string;
+    };
+    if (report.kind === 'verify') {
+      return (report.closures ?? []).map((closure) => ({
+        package: closure.package,
+        status: closure.status,
+        payloads: closure.payloads,
+        files: closure.files?.slice(0, 5),
+      }));
+    }
+    return { code: report.code, message: report.message?.slice(0, 300) };
+  } catch {
+    return tail(stdout, 300);
+  }
+};
+
+// The summary keeps the decisive facts of a case: the last stderr lines and the brief verify report.
+const compactCase = (key: string, value: unknown): unknown => {
+  if (key === 'stdout') {
+    return undefined;
+  }
+  if (key === 'stderr' && typeof value === 'string') {
+    return value.trim().split('\n').slice(-2).join(' | ');
+  }
+  if (key === 'report' && typeof value === 'string') {
+    return briefReport(value);
+  }
+  return value;
+};
+
 const runCase = async ({ summary, records, name, expectation, step }: CaseInput): Promise<void> => {
   try {
     const result = await step();
     records.push({ name, expectation, ...result });
-    summary.line(`case ${name}: ${JSON.stringify(result).slice(0, 900)}`);
+    summary.line(`case ${name}: ${JSON.stringify(result, compactCase).slice(0, 2400)}`);
   } catch (error) {
     records.push({ name, expectation, harnessError: String(error) });
     summary.line(`case ${name}: HARNESS ERROR ${String(error).slice(0, 600)}`);
@@ -263,12 +300,16 @@ const main = async (): Promise<void> => {
   }
   const build123d = receiptOf(store, '@taucad/build123d', 'engine');
   const picogk = receiptOf(store, '@taucad/picogk', 'runtime');
+  // What the composition parses: the whole receipt of each closure.
+  summary.line(
+    `receipts parsed at compose: ${[build123d, picogk].map((receipt) => `${receipt.package} ${String(statSync(join(receipt.root, 'receipt.json')).size)} bytes, ${String(receipt.files.length)} rows`).join('; ')}`,
+  );
   const verify = async (): Promise<Record<string, unknown>> => {
     const run = await runTau(['prepare', '--verify', '--json'], { configDirectory, killTimeout: 15 * 60_000 });
     return {
       exitCode: run.exitCode,
       milliseconds: run.milliseconds,
-      report: tail(run.stdout, 1500),
+      report: run.stdout,
       stderr: tail(run.stderr, 300),
     };
   };

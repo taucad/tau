@@ -6,7 +6,8 @@
  *   without APFS clones of the seed blobs.
  * Why: D10 phase 1 seeds the store from archives in the app bundle through the ordinary verify-before-write path,
  *   cloning by `/bin/cp -c -R` where the volume allows. W6 has not built that layout yet, so this harness assembles
- *   the closest equivalent from the build123d seed and PicoGK's verified origin blobs.
+ *   the closest equivalent from the build123d seed and PicoGK's verified origin blobs, and also seeds the sealed
+ *   closures themselves (cloned tree and tar archive), which skips the seal-time compile.
  * Environment: Node 24+ on darwin-arm64 (APFS); the built CLI; the build123d seed; network once for PicoGK's
  *   origins; passwordless `sudo purge` for the cold legs.
  * Usage: node --import @oxc-node/core/register scripts/spikes/native-deps/s30-desktop-seed.mts --work <dir> --out <dir>
@@ -15,7 +16,7 @@
 
 /* oxlint-disable no-await-in-loop -- legs run one after another on one volume. */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 
@@ -92,10 +93,30 @@ const main = async (): Promise<void> => {
     `seed: ${String(seedBlobs)} blobs, ${String(Math.round(seedBytes / 1e6))} MB at ${payloads.slice(root.length)}`,
   );
 
+  // 1b. D10/W6 ship sealed closures, not only their payloads: a producer store prepared from the seed gives the
+  // sealed `closures/` tree, kept as a tree (seeded by clonefile, D24) and as one uncompressed tar archive.
+  const sealedProducer = join(root, 'sealed-producer');
+  for (const { kernel } of kernels) {
+    const run = await runTau(['prepare', kernel, '--offline', '--json'], {
+      configDirectory: sealedProducer,
+      seed: payloads,
+    });
+    if (run.exitCode !== 0) {
+      throw new Error(`sealing ${kernel} from the seed failed: ${tail(run.stderr)}`);
+    }
+  }
+  const sealedClosures = join(sealedProducer, 'payloads', 'closures');
+  const closureArchive = join(payloads, 'closures.tar');
+  execFileSync('tar', ['-cf', closureArchive, '-C', join(sealedProducer, 'payloads'), 'closures']);
+  summary.line(
+    `sealed closures: ${String(Math.round(duBytes(sealedClosures) / 1e6))} MB tree, ${String(Math.round(duBytes(closureArchive) / 1e6))} MB tar`,
+  );
+
   // 2. Legs: an empty store each time, both kernels prepared offline from the seed.
   type Leg = Record<string, unknown> & { readonly mode: string; readonly totalMilliseconds: number };
   const legs: Leg[] = [];
-  for (const mode of ['cold', 'warm', 'clone-cold', 'clone-warm'] as const) {
+  const modes = ['cold', 'warm', 'clone-cold', 'clone-warm', 'closure-clone-cold', 'closure-archive-cold'] as const;
+  for (const mode of modes) {
     for (let index = 0; index < repeats; index += 1) {
       const configDirectory = join(root, `store-${mode}-${String(index)}`);
       const store = join(configDirectory, 'payloads');
@@ -104,10 +125,16 @@ const main = async (): Promise<void> => {
       const freeBefore = freeBytes(root);
       const started = performance.now();
       let cloneMilliseconds: number | undefined;
+      const cloneStarted = performance.now();
       if (mode.startsWith('clone')) {
-        const cloneStarted = performance.now();
         mkdirSync(join(store, 'blobs'), { recursive: true });
         execFileSync('/bin/cp', ['-c', '-R', blobs, join(store, 'blobs', 'sha256')]);
+        cloneMilliseconds = Math.round(performance.now() - cloneStarted);
+      } else if (mode === 'closure-clone-cold') {
+        execFileSync('/bin/cp', ['-c', '-R', sealedClosures, join(store, 'closures')]);
+        cloneMilliseconds = Math.round(performance.now() - cloneStarted);
+      } else if (mode === 'closure-archive-cold') {
+        execFileSync('tar', ['-xf', closureArchive, '-C', store]);
         cloneMilliseconds = Math.round(performance.now() - cloneStarted);
       }
       const runs: Record<string, number | undefined> = {};
@@ -120,6 +147,12 @@ const main = async (): Promise<void> => {
         }
       }
       const totalMilliseconds = Math.round(performance.now() - started);
+      // A seeded closure is only as good as its receipt: the full re-verification a desktop could run after seeding.
+      if (mode.startsWith('closure') && index === 0) {
+        const verify = await runTau(['prepare', '--verify', '--offline', '--json'], { configDirectory });
+        runs['verifyMilliseconds'] = verify.milliseconds;
+        runs['verifyExit'] = verify.exitCode;
+      }
       const freeAfter = freeBytes(root);
       const sources = sealedReceipts(store).flatMap((receipt) =>
         receipt.payloads.map(({ acquiredFrom }) => (acquiredFrom as { kind?: string } | undefined)?.kind ?? '?'),
@@ -133,7 +166,7 @@ const main = async (): Promise<void> => {
         ...runs,
         diskDeltaBytes: freeBefore - freeAfter,
         storeDuBytes: duBytes(store),
-        blobsDuBytes: duBytes(join(store, 'blobs')),
+        blobsDuBytes: existsSync(join(store, 'blobs')) ? duBytes(join(store, 'blobs')) : 0,
         acquiredFrom: Object.fromEntries(
           [...new Set(sources)].map((kind) => [kind, sources.filter((entry) => entry === kind).length]),
         ),
@@ -160,14 +193,17 @@ const main = async (): Promise<void> => {
   const medianOf = (mode: string, field: string): number =>
     median(legs.filter((leg) => leg.mode === mode).map((leg) => Number(leg[field])));
   const line = m2ProBudgetSeconds * runnerSlack;
-  for (const mode of ['cold', 'warm', 'clone-cold', 'clone-warm']) {
+  for (const mode of modes) {
     summary.line(
       `S30 ${mode}: total ${String(round1(medianOf(mode, 'totalMilliseconds') / 1000))} s (build123d ${String(round1(medianOf(mode, 'build123dMilliseconds') / 1000))} s, picogk ${String(round1(medianOf(mode, 'picogkMilliseconds') / 1000))} s), disk delta ${String(Math.round(medianOf(mode, 'diskDeltaBytes') / 1e6))} MB (df), store du ${String(Math.round(medianOf(mode, 'storeDuBytes') / 1e6))} MB`,
     );
   }
-  const cold = medianOf('cold', 'totalMilliseconds') / 1000;
+  const verdict = (mode: string): string => {
+    const seconds = medianOf(mode, 'totalMilliseconds') / 1000;
+    return `${mode} ${String(round1(seconds))} s ${seconds <= line ? 'within' : 'OVER'}`;
+  };
   summary.line(
-    `S30 verdict: cold ${String(round1(cold))} s against ${String(line)} s runner line (${String(m2ProBudgetSeconds)} s M-series): ${cold <= line ? 'within' : 'OVER'}; quarantined files ${JSON.stringify(legs[0]?.['quarantinedFiles'] ?? '?')}`,
+    `S30 verdict against the ${String(line)} s runner line (${String(m2ProBudgetSeconds)} s M-series): payload seed ${verdict('cold')}; sealed-closure seed ${verdict('closure-clone-cold')}, ${verdict('closure-archive-cold')}; quarantined files ${JSON.stringify(legs[0]?.['quarantinedFiles'] ?? '?')}`,
   );
 };
 

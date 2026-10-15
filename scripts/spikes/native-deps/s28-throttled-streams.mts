@@ -31,7 +31,11 @@ import type { Socket } from 'node:net';
 import { join } from 'node:path';
 import process from 'node:process';
 
+import { createPreparationHost, detectHostIndicators } from '@taucad/runtime/preparation/node';
+
 /* oxlint-disable no-restricted-imports -- spike-only: siblings and the CLI's native roster by relative path; deleted with W21. */
+// eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: the CLI roster is not a public export.
+import { nativePreparationPlugins } from '../../../packages/cli/src/native-kernels.ts';
 import { hostFacts, parseFlags, requiredFlag } from './spike-common.mts';
 import { round1, runTau, Summary, tail } from './store-spike.mts';
 /* oxlint-enable no-restricted-imports */
@@ -74,8 +78,13 @@ const runProxy = (rateMbit: number, portFile: string, log: string): void => {
       }
     }
   };
+  // Refill by elapsed time, not per tick: timers fire late under load, which would silently lower the link rate.
+  const bytesPerMillisecond = (rateMbit * 1e6) / 8 / 1000;
+  let refilled = performance.now();
   setInterval(() => {
-    tokens = Math.min(burst, tokens + bytesPerTick);
+    const now = performance.now();
+    tokens = Math.min(burst, tokens + bytesPerMillisecond * (now - refilled));
+    refilled = now;
     pump();
   }, tickMilliseconds);
   setInterval(() => {
@@ -135,9 +144,6 @@ const runProxy = (rateMbit: number, portFile: string, log: string): void => {
 
 /** One host-level preparation of build123d from its origins, with every progress event timestamped. */
 const runPrepare = async (store: string, events: string, cancelAt: number | undefined): Promise<void> => {
-  const { createPreparationHost, detectHostIndicators } = await import('@taucad/runtime/preparation/node');
-  // eslint-disable-next-line @nx/enforce-module-boundaries -- spike-only: the CLI roster is not a public export.
-  const { nativePreparationPlugins } = await import('../../../packages/cli/src/native-kernels.ts');
   const plugins = await nativePreparationPlugins();
   const indicators = detectHostIndicators();
   const host = createPreparationHost({ plugins, store, ...(indicators === undefined ? {} : { indicators }) });

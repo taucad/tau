@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
+import Ajv2020 from 'ajv/dist/2020.js';
 import {
   evaluateModelOutputSchema,
   exportModelOutputSchema,
@@ -9,7 +10,8 @@ import {
 } from '@taucad/chat';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import { glbToDocument } from '@taucad/runtime-testing';
-import type { TauCadTopologyRoot } from '@taucad/geometry-core';
+import { validateTauCadTopology } from '@taucad/geometry-core';
+import type { TauCadTopologyPayload, TauCadTopologyRoot } from '@taucad/geometry-core';
 import { currentRun, durableMessages, latestCompletedRun } from '#support/acp-evidence.js';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
@@ -28,10 +30,18 @@ import {
 /** Real Codex authoring acceptance; opt-in because this uses the operator's quota. */
 const enabled = process.env['TAU_E2E_BUILD123D_ADOPTION'] === 'true';
 const packaged = process.env['TAU_E2E_ACP_PACKAGED'] === 'true';
+const retainReview = process.env['TAU_E2E_RETAIN_REVIEW'] === 'true';
 const planetarySource = readFileSync(
   resolve(import.meta.dirname, '../../../libs/tau-examples/src/kernels/build123d/planetary-gear-system/main.py'),
   'utf8',
 );
+const topologySchema = JSON.parse(
+  readFileSync(
+    resolve(import.meta.dirname, '../../../packages/core/geometry/schema/tau-cad-topology.schema.json'),
+    'utf8',
+  ),
+) as Record<string, unknown>;
+const isTopologyPayload = new Ajv2020({ strict: true, allErrors: true }).compile<TauCadTopologyPayload>(topologySchema);
 const prompt = `Use the cad-build123d and geospec-authoring skills to create a small reusable two-rotor assembly in main.py.
 Make a 100 by 40 by 6 mm chassis, and define one reusable Python factory that returns a native Compound module with a housing and an asymmetric rotor. Instantiate it twice, 50 mm apart. Each rotor must connect to its housing using native RevoluteJoint and RigidJoint objects; each complete module connects to the chassis with native RigidJoint attachment points. Keep the resulting assembly hierarchy and give parts meaningful labels.
 Use a native bd_materials wood.oak() textured material on one housing and a plain green color on the other. Use native materials on the rotors too. Do not invent a material library, tessellator or GLB writer.
@@ -45,7 +55,9 @@ afterEach(async () => {
   await session?.close();
   session = undefined;
   if (seededEmail !== undefined) {
-    await deleteTauTestUser(seededEmail);
+    if (!retainReview) {
+      await deleteTauTestUser(seededEmail);
+    }
     seededEmail = undefined;
   }
 });
@@ -245,10 +257,30 @@ test.skipIf(!enabled)(
       copyFileSync(join(projectRoot, glb.artifactPath), join(directory, 'authored-assembly.glb'));
       const reopened = await glbToDocument(Uint8Array.from(readFileSync(join(directory, 'authored-assembly.glb'))));
       const reopenedTopology = reopened.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload();
-      expect(reopenedTopology?.mechanismIntent?.schemaVersion).toBe(1);
-      expect(reopenedTopology?.mechanismIntent?.ground).toBe('occurrence:chassis');
-      expect(reopenedTopology?.mechanismIntent?.connections.length).toBeGreaterThan(0);
-      expect(reopenedTopology?.mechanism?.animations?.length).toBeGreaterThan(0);
+      if (!isTopologyPayload(reopenedTopology)) {
+        throw new Error(`Exported topology failed structural admission: ${JSON.stringify(isTopologyPayload.errors)}`);
+      }
+      const meshes = reopened.getRoot().listMeshes();
+      expect(
+        validateTauCadTopology(reopenedTopology, {
+          nodes: reopened
+            .getRoot()
+            .listNodes()
+            .map((node) => ({
+              meshIndex: node.getMesh() === null ? undefined : meshes.indexOf(node.getMesh()!),
+            })),
+          meshes: meshes.map((mesh) =>
+            mesh.listPrimitives().map((primitive) => ({
+              mode: primitive.getMode(),
+              indexCount: primitive.getIndices()?.getCount() ?? primitive.getAttribute('POSITION')?.getCount() ?? 0,
+            })),
+          ),
+        }),
+      ).toEqual([]);
+      expect(reopenedTopology.mechanismIntent?.schemaVersion).toBe(1);
+      expect(reopenedTopology.mechanismIntent?.ground).toBe('occurrence:chassis');
+      expect(reopenedTopology.mechanismIntent?.connections.length).toBeGreaterThan(0);
+      expect(reopenedTopology.mechanism?.animations?.length).toBeGreaterThan(0);
       expect(reopened.getRoot().listTextures().length).toBeGreaterThan(0);
       expect(
         reopened
@@ -381,6 +413,8 @@ test.skipIf(!enabled)(
         JSON.stringify(
           {
             projectRoot,
+            desktopLogPath: session.logPath,
+            retainedReview: retainReview,
             originalAuthoredEntry: 'reusable-assembly.py',
             source: planetarySource,
             initial: planetaryInitial,

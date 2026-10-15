@@ -1590,6 +1590,9 @@ importers:
       '@vvago/vale':
         specifier: 3.17.1
         version: 3.17.1
+      ajv:
+        specifier: 'catalog:'
+        version: 8.20.0
       axe-core:
         specifier: 'catalog:'
         version: 4.14.0

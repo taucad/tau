@@ -10,6 +10,15 @@ export type KernelDimensions = 2 | 3;
 export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad' | 'build123d' | 'picogk' | 'tscircuit';
 
 /**
+ * The package ecosystem a kernel's projects belong to, which picks the project files Tau writes at creation:
+ * `npm` a `package.json`, `pypi` a `pyproject.toml` with its `pylock.toml` and `uv.lock`, `nuget` a `<name>.csproj`
+ * with its `packages.lock.json`, `kcl` Zoo's `project.toml`, and `none` nothing (OpenSCAD has no manifest).
+ *
+ * @public
+ */
+export type KernelEcosystem = 'npm' | 'pypi' | 'nuget' | 'kcl' | 'none';
+
+/**
  * Product catalog entry for a kernel offering, not an engine registry.
  *
  * `name`, `description`, `longDescription`, `recommended`, `tags`, and
@@ -29,6 +38,8 @@ export type KernelConfiguration = {
   id: string;
   name: string;
   language: CodeLanguage;
+  /** The package ecosystem of this offering's projects; it picks the manifest a new project gets. */
+  ecosystem: KernelEcosystem;
   dimensions: KernelDimensions[];
   description: string;
   mainFile: string;
@@ -49,6 +60,7 @@ export const kernelConfigurations = [
     name: 'PicoGK',
     dimensions: [3],
     language: 'csharp',
+    ecosystem: 'nuget',
     description: 'Native C# voxel CAD for computational engineering',
     mainFile: 'main.cs',
     backendProvider: 'picogk',
@@ -76,6 +88,7 @@ public static class Params
     name: 'PicoVoxel',
     dimensions: [3],
     language: 'typescript',
+    ecosystem: 'npm',
     description: 'TypeScript voxel and implicit CAD that runs in the browser',
     mainFile: 'main.ts',
     // PicoVoxel is the PicoGK engine compiled to WebAssembly; the field is display-only.
@@ -104,6 +117,7 @@ export default function main(pico: Pico, params = defaultParams): Voxels[] {
     name: 'Build123d',
     dimensions: [2, 3],
     language: 'python',
+    ecosystem: 'pypi',
     description: 'Native Python BRep CAD for desktop engineering',
     mainFile: 'main.py',
     backendProvider: 'build123d',
@@ -129,6 +143,7 @@ def main(params: Params) -> Shape | None:
     name: 'OpenSCAD',
     dimensions: [3],
     language: 'openscad',
+    ecosystem: 'none',
     description: 'Constructive Solid Geometry for 3D printing',
     mainFile: 'main.scad',
     backendProvider: 'manifold',
@@ -144,6 +159,7 @@ def main(params: Params) -> Shape | None:
     name: 'Replicad',
     dimensions: [2, 3],
     language: 'typescript',
+    ecosystem: 'npm',
     description: 'TypeScript CAD for precise engineering',
     mainFile: 'main.ts',
     backendProvider: 'opencascade',
@@ -164,6 +180,7 @@ export default function main(p = defaultParams) {}
     name: 'Manifold',
     dimensions: [2, 3],
     language: 'typescript',
+    ecosystem: 'npm',
     description: 'Fast mesh-focused CAD with robust booleans',
     mainFile: 'main.ts',
     backendProvider: 'manifold',
@@ -184,6 +201,7 @@ export default function main(p = defaultParams) {}
     name: 'Zoo (KCL)',
     dimensions: [3],
     language: 'kcl',
+    ecosystem: 'kcl',
     description: 'Server-side engine for heavy models',
     mainFile: 'main.kcl',
     backendProvider: 'zoo',
@@ -206,6 +224,7 @@ export default function main(p = defaultParams) {}
     name: 'JSCAD',
     dimensions: [2, 3],
     language: 'typescript',
+    ecosystem: 'npm',
     description: 'TypeScript CAD for Constructive Solid Geometry',
     mainFile: 'main.ts',
     backendProvider: 'jscad',
@@ -231,6 +250,7 @@ export default function main(p = defaultParams) {}
     name: 'OpenCascade',
     dimensions: [2, 3],
     language: 'typescript',
+    ecosystem: 'npm',
     description: 'Direct OpenCASCADE API for advanced CAD',
     mainFile: 'main.ts',
     backendProvider: 'opencascade',
@@ -257,6 +277,7 @@ export default function main(p = defaultParams) {}
     name: 'tscircuit',
     dimensions: [2, 3],
     language: 'tsx',
+    ecosystem: 'npm',
     description: 'Electronics design in TSX: boards, schematics, PCB layouts and BOM',
     mainFile: 'main.tsx',
     backendProvider: 'tscircuit',

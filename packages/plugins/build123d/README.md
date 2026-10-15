@@ -71,6 +71,10 @@ A `.py` entry defines a top-level `@dataclass(frozen=True) class Params` and syn
 
 See the package's [`cad-build123d` agent skill](./agent/SKILL.md) and the [Build123d runtime reference](https://docs.tau.new/runtime/reference/build123d) for the complete authoring and trust contract.
 
+## Project files
+
+`@taucad/build123d/project/*` holds the files a new Build123d project carries, so it runs outside Tau with uv (`uv sync --locked`, then `uv run main.py`): a `pyproject.toml` that pins `build123d` and `cadquery-ocp-novtk` at the versions this kernel runs, a PEP 751 `pylock.toml` of the kernel's own wheels for every supported target, and a `uv.lock` of the same versions. `pnpm nx run build123d:generate-project-template` regenerates them from `python/pylock.<target>.toml`. When a project's `pyproject.toml` pins one of those libraries at another version, evaluation succeeds with a `LIBRARY_VERSION_MISMATCH` warning located at the pin.
+
 ## Versioning and stability
 
 Pre-1.0: a minor version may break. Pin `~0.1.0` rather than `^0.1.0`. This package releases in the

@@ -165,6 +165,9 @@ describe('provider-facing tool schema compatibility', () => {
     expect(collectKeywordPaths(schema)).toEqual(emptyKeywordPaths());
     expect(toolDescriptions[toolName.installPackages]).toContain('package-not-locked');
     expect(toolDescriptions[toolName.installPackages]).toContain(
+      'A Python or C# project declares its packages in pyproject.toml or its .csproj instead; there it refuses with manifest-conflict',
+    );
+    expect(toolDescriptions[toolName.installPackages]).toContain(
       'when a JavaScript or TypeScript model imports an npm package that package.json does not list',
     );
     expect(installPackagesInputSchema.parse({})).toEqual({});

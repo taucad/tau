@@ -1,19 +1,17 @@
 # Reusable workflow that builds the UI in GitHub Actions and deploys it to Netlify.
 #
-# Netlify does not build Tau itself: the UI build needs the GeoSpec engine
-# products (the emscripten binding and the CI assembly), which only the macOS
-# `geospec-producer` job in `ci.yml` can make. So Actions brings those products
-# into the checkout, then `netlify deploy` runs the Netlify build itself: it
-# reads `apps/ui/netlify.toml` and the site's environment variables as a
-# Netlify Git build did, and publishes the result.
+# Netlify does not build Tau itself: Actions checks out and installs the
+# workspace (the GeoSpec engine comes from npm as the `geospec-engine` catalog
+# pin), then `netlify deploy` runs the Netlify build itself: it reads
+# `apps/ui/netlify.toml` and the site's environment variables as a Netlify Git
+# build did, and publishes the result.
 #
 #   - staging (taucad.dev): `ci.yml` → `deploy-ui-staging` on a push to `main`
-#     that affects the UI since its last staging deploy, using this run's
-#     GeoSpec products.
+#     that affects the UI since its last staging deploy.
 #   - production (tau.new): `release-build.yml` calls this workflow in a `ui@x.y.z`
 #     release's own run, and `deploy-production.yml` dispatches it at the tag
-#     for a rollback or redeploy. Either way it uses the artifact of the `ci.yml`
-#     push run on `main` for the tag's commit.
+#     for a rollback or redeploy. Either way the `ci.yml` push run on `main` for
+#     the tag's commit must have passed.
 #
 # Both Netlify sites run with `deploy_mode = "ci"` in tau-cloud, so Netlify's Git
 # integration no longer builds them. Each environment holds a `NETLIFY_AUTH_TOKEN`
@@ -34,15 +32,6 @@ on:
         required: true
         type: string
         description: 'staging or production'
-      transport:
-        required: true
-        type: string
-        description: '`this-run`: the calling run produced the GeoSpec artifact; `cache`: the calling run restored its products from an earlier run under `geospec-key`; `main-run`: take it from the passed ci.yml push run on main for this commit'
-      geospec-key:
-        required: false
-        type: string
-        default: ''
-        description: 'The products cache key, for `transport: cache`'
   workflow_dispatch:
     inputs:
       environment:
@@ -110,38 +99,12 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
-      - name: Download this run's GeoSpec artifact
-        if: inputs.transport == 'this-run'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: geospec-ci-${{ github.sha }}
-          path: .
-
-      - name: Verify this run's GeoSpec artifact against the checkout
-        if: inputs.transport == 'this-run'
-        run: pnpm nx run-many -t require-geospec-delivery --parallel=1
-
-      # A run whose native source closure matched an earlier build skips the producer, so
-      # there is no same-run artifact: restore the products as the Linux CI lanes do.
-      - name: Restore GeoSpec engine products from an earlier run
-        if: inputs.transport == 'cache'
-        uses: ./.github/actions/geospec-transport
-        with:
-          key: ${{ inputs.geospec-key }}
-          mode: restore
-
-      - name: Verify the restored GeoSpec products against the checkout
-        if: inputs.transport == 'cache'
-        run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
-
-      - name: Take the GeoSpec artifact from this commit's main CI run
-        if: inputs.transport != 'this-run' && inputs.transport != 'cache'
-        uses: ./.github/actions/geospec-artifact-from-main
+      # Production ships only a commit whose main CI run passed.
+      - name: Require this commit's main CI run to have passed
+        if: inputs.environment == 'production'
+        uses: ./.github/actions/main-ci-success
         with:
           sha: ${{ github.sha }}
-          # Staging needs only the producer's artifact; production also requires
-          # the whole main run to have passed.
-          require-success: ${{ inputs.environment == 'production' }}
           github-token: ${{ github.token }}
 
       # `ui:sourcemaps` uploads with the PostHog CLI key. The Netlify site's own

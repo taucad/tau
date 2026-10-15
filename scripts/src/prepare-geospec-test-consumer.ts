@@ -1,9 +1,10 @@
 /**
  * Prepare one current installed GeoSpec test consumer; never import or probe products.
- * Usage: node scripts/src/prepare-geospec-test-consumer.ts <assembly-root> <receipt.json>
- * Inputs: completed SDK dependency builds and assemble-package.sh's root/platform TGZs.
- * Output: retained consumer, initial SDK/framework receipts and eleven hash-bound harness files.
- * Environment: existing Node/pnpm/npm/tar/git on PATH; no build or install scripts run.
+ * Usage: node scripts/src/prepare-geospec-test-consumer.ts <receipt.json>
+ * Inputs: completed SDK dependency builds, and the `geospec-engine` catalog pin with its
+ * pnpm-lock.yaml integrity; the engine installs from the npm registry at exactly that pin.
+ * Output: retained consumer, initial SDK/framework receipts and ten hash-bound harness files.
+ * Environment: existing Node/pnpm/npm/tar/git on PATH and registry access; no build or install scripts run.
  * Exit: 0 prepared and inventoried; 1 missing inputs, incomplete closure or install failure.
  */
 import assert from 'node:assert/strict';
@@ -40,8 +41,15 @@ type Manifest = {
 type LockEntry = { version?: string; resolved?: string; integrity?: string; link?: boolean };
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
-const nativeName = '@taucad/geospec-engine-native';
-const platformName = `${nativeName}-darwin-arm64`;
+/** The compiled engine published from taucad/geospec; the workspace CLI package is `@taucad/geospec-engine`. */
+const engineName = 'geospec-engine';
+const enginePayload = [
+  'dist/node.mjs',
+  'dist/native/index.js',
+  'dist/bindings/mixed-wasm/geospec_engine_native.mjs',
+  'dist/bindings/mixed-wasm/geospec_engine_native.wasm',
+  'licenses/SOURCE-RELINK.json',
+];
 const sha256 = (bytes: BinaryLike): string => createHash('sha256').update(bytes).digest('hex');
 const readManifest = (path: string): Manifest => JSON.parse(readFileSync(path, 'utf8')) as Manifest;
 const run = (command: string, arguments_: string[], cwd = repositoryRoot): string => {
@@ -89,25 +97,23 @@ const installedFiles = (root: string) =>
     .sort((left, right) => left.path.localeCompare(right.path));
 
 const main = async (): Promise<void> => {
-  const [assemblyArgument, receiptArgument] = process.argv.slice(2);
-  assert.ok(assemblyArgument && receiptArgument && process.argv.length === 4, 'Supply assembly-root and receipt.json');
-  assert.ok(
-    process.platform === 'darwin' && process.arch === 'arm64',
-    'Selected native test consumer requires Darwin ARM64',
-  );
-  const assemblyRoot = realpathSync(resolve(assemblyArgument));
+  const [receiptArgument] = process.argv.slice(2);
+  assert.ok(receiptArgument && process.argv.length === 3, 'Supply receipt.json');
   const receiptPath = resolve(receiptArgument);
   rmSync(receiptPath, { force: true });
-  const nativeRoot = join(repositoryRoot, 'packages/geospec-engine-native');
-  requireBuilt(nativeRoot, readManifest(join(nativeRoot, 'package.json')));
-  const nativePayload = [
-    'dist/native/index.js',
-    'dist/bindings/mixed-wasm/geospec_engine_native.mjs',
-    'dist/bindings/mixed-wasm/geospec_engine_native.wasm',
-  ];
-  for (const path of [...nativePayload, 'bindings/node/generated/geospec-engine-native.darwin-arm64.node']) {
-    assert.ok(fileRecord(join(nativeRoot, path)).bytes > 0, `Missing native payload: ${path}`);
-  }
+  const catalog = load(readFileSync(join(repositoryRoot, 'pnpm-workspace.yaml'), 'utf8')) as {
+    catalog: Record<string, unknown>;
+  };
+  const engineVersion = catalog.catalog[engineName];
+  assert.ok(
+    typeof engineVersion === 'string' && /^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(engineVersion),
+    `Pin an exact ${engineName} version in the pnpm catalog`,
+  );
+  const lockfile = load(readFileSync(join(repositoryRoot, 'pnpm-lock.yaml'), 'utf8')) as {
+    packages?: Record<string, { resolution?: { integrity?: string } }>;
+  };
+  const engineIntegrity = lockfile.packages?.[`${engineName}@${engineVersion}`]?.resolution?.integrity;
+  assert.ok(engineIntegrity, `pnpm-lock.yaml has no integrity for ${engineName}@${engineVersion}`);
   const resolved = await workspace({ fresh: true });
   const projects = new Map(publishable(resolved).map((project) => [project.name, project]));
   const closure = publishableClosure(resolved, ['geospec', 'geospec-engine']);
@@ -123,7 +129,6 @@ const main = async (): Promise<void> => {
   });
   const sourcePaths = [
     ...packages.map(({ root }) => relative(repositoryRoot, root)),
-    'packages/geospec-engine-native',
     'tools/nx',
     'pnpm-lock.yaml',
     'pnpm-workspace.yaml',
@@ -137,10 +142,6 @@ const main = async (): Promise<void> => {
     manifests: packages.map(({ root }) => fileRecord(join(root, 'package.json'))),
   });
   const source = sourceIdentity();
-  const nativeTarballs = ['root', 'darwin-arm64'].map((name) => join(assemblyRoot, 'tarballs', `${name}.tgz`));
-  for (const tarball of nativeTarballs) {
-    assert.ok(fileRecord(tarball).bytes > 0, `Empty assembled tarball: ${tarball}`);
-  }
   const temporaryRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tau-geospec-consumer-')));
   const distance = relative(realpathSync(repositoryRoot), temporaryRoot);
   assert.ok(isAbsolute(distance) || distance.startsWith(`..${sep}`), 'Consumer must be outside the workspace');
@@ -149,11 +150,8 @@ const main = async (): Promise<void> => {
   mkdirSync(artifactRoot);
   mkdirSync(consumerRoot);
   console.log(`Preparing retained consumer: ${consumerRoot}`);
-  const tarballs = [...nativeTarballs];
+  const tarballs: string[] = [];
   for (const { root, manifest } of packages) {
-    if (manifest.name === nativeName) {
-      continue;
-    }
     const destination = join(artifactRoot, manifest.name.replaceAll('/', '-'));
     mkdirSync(destination);
     run('pnpm', ['pack', '--pack-destination', destination], root);
@@ -172,15 +170,7 @@ const main = async (): Promise<void> => {
   });
   const byName = new Map(packed.map((entry) => [entry.manifest.name, entry]));
   assert.equal(byName.size, packed.length, 'Duplicate packed package names');
-  const native = byName.get(nativeName);
-  const platform = byName.get(platformName);
-  assert.ok(native && platform, 'Assembly lacks native root/platform packages');
-  assert.equal(native.manifest.version, platform.manifest.version, 'Native root/platform versions differ');
-  assert.equal(native.manifest.optionalDependencies?.[platformName], platform.manifest.version);
-  assert.equal(
-    native.manifest.version,
-    readManifest(join(repositoryRoot, 'packages/geospec-engine-native/package.json')).version,
-  );
+  assert.ok(!byName.has(engineName), `${engineName} must come from the registry, not a local tarball`);
   const workspaceNames = new Set(
     resolved.projects.flatMap((project) => (project.manifest?.name ? [project.manifest.name] : [])),
   );
@@ -192,14 +182,35 @@ const main = async (): Promise<void> => {
           `Unpublished dependency: ${manifest.name} ${name}`,
         );
         assert.ok(!workspaceNames.has(name) || byName.has(name), `Missing local workspace dependency: ${name}`);
+        assert.ok(name !== engineName || version === engineVersion, `${manifest.name} pins another ${engineName}`);
       }
     }
   }
   writeFileSync(join(consumerRoot, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
-  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs], consumerRoot);
+  run(
+    'npm',
+    ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs, `${engineName}@${engineVersion}`],
+    consumerRoot,
+  );
   const lock = JSON.parse(readFileSync(join(consumerRoot, 'package-lock.json'), 'utf8')) as {
     packages: Record<string, LockEntry>;
   };
+  // The engine resolves exactly once, from the registry, with the bytes the workspace lockfile admitted.
+  const engineEntries = Object.entries(lock.packages).filter(
+    ([path]) => path.split('node_modules/').at(-1) === engineName,
+  );
+  assert.deepEqual(
+    engineEntries.map(([path]) => path),
+    [`node_modules/${engineName}`],
+    `Expected one ${engineName} occurrence`,
+  );
+  const engineEntry = engineEntries[0]![1];
+  assert.equal(engineEntry.version, engineVersion, `Installed ${engineName} differs from the catalog pin`);
+  assert.ok(
+    !engineEntry.link && typeof engineEntry.resolved === 'string' && engineEntry.resolved.startsWith('https://'),
+    `${engineName} did not install from the registry`,
+  );
+  assert.equal(engineEntry.integrity, engineIntegrity, `${engineName} integrity differs from pnpm-lock.yaml`);
   // Inspect every occurrence, including nested npm copies, so a mismatched sibling cannot use the registry.
   for (const [path, entry] of Object.entries(lock.packages)) {
     const name = path.split('node_modules/').at(-1)!;
@@ -224,13 +235,7 @@ const main = async (): Promise<void> => {
     assert.equal(actual.version, manifest.version);
     assert.ok(lock.packages[`node_modules/${manifest.name}`], `Package absent from lock: ${manifest.name}`);
     const files = installedFiles(root);
-    if (manifest.name === nativeName) {
-      for (const path of nativePayload) {
-        assert.ok(fileRecord(join(root, path)).bytes > 0, `Missing installed native payload: ${path}`);
-      }
-    }
-    const builtRoot =
-      manifest.name === nativeName ? nativeRoot : packages.find((entry) => entry.manifest.name === manifest.name)?.root;
+    const builtRoot = packages.find((entry) => entry.manifest.name === manifest.name)?.root;
     if (builtRoot) {
       requireBuilt(root, actual);
       for (const file of files.filter((entry) => entry.path.startsWith('dist/'))) {
@@ -241,24 +246,28 @@ const main = async (): Promise<void> => {
         );
       }
     }
-    if (manifest.name === platformName) {
-      assert.ok(
-        actual.main && !actual.main.includes('/') && actual.main.endsWith('.node'),
-        'Invalid platform addon path',
-      );
-      assert.equal(
-        fileRecord(join(root, actual.main)).sha256,
-        fileRecord(join(repositoryRoot, 'packages/geospec-engine-native/bindings/node/generated', actual.main)).sha256,
-        'Assembly addon differs from current built addon',
-      );
-    }
     return { name: actual.name, version: actual.version, root, files };
   });
+  const engineRoot = join(consumerRoot, 'node_modules', engineName);
+  assert.ok(lstatSync(engineRoot).isDirectory() && !lstatSync(engineRoot).isSymbolicLink(), `Linked ${engineName}`);
+  const engineManifest = readManifest(join(engineRoot, 'package.json'));
+  assert.equal(engineManifest.name, engineName);
+  assert.equal(engineManifest.version, engineVersion);
+  for (const path of enginePayload) {
+    assert.ok(fileRecord(join(engineRoot, path)).bytes > 0, `Missing installed engine payload: ${path}`);
+  }
+  installed.push({ name: engineName, version: engineVersion, root: engineRoot, files: installedFiles(engineRoot) });
+  const engine = {
+    name: engineName,
+    version: engineVersion,
+    resolved: engineEntry.resolved,
+    integrity: engineIntegrity,
+  };
   assert.deepEqual(sourceIdentity(), source, 'Source inputs changed during consumer preparation');
   const receipt = {
     consumerRoot,
-    assemblyRoot,
     source,
+    engine,
     packages: packed,
     installed,
     lock: fileRecord(join(consumerRoot, 'package-lock.json')),
@@ -269,9 +278,6 @@ const main = async (): Promise<void> => {
   for (const name of ['package.json', 'package-lock.json']) {
     writeFileSync(join(temporaryRoot, `sdk-${name}`), readFileSync(join(consumerRoot, name)));
   }
-  const catalog = load(readFileSync(join(repositoryRoot, 'pnpm-workspace.yaml'), 'utf8')) as {
-    catalog: Record<string, unknown>;
-  };
   const vitestVersion = catalog.catalog['vitest'];
   assert.ok(typeof vitestVersion === 'string' && /^\d+\.\d+\.\d+$/.test(vitestVersion), 'Pin an exact Vitest version');
   run(
@@ -283,7 +289,7 @@ const main = async (): Promise<void> => {
   // Framework installation may change npm flags, but never the selected local package identities.
   for (const path of new Set([...Object.keys(lock.packages), ...Object.keys(successorLock.packages)])) {
     const name = path.split('node_modules/').at(-1)!;
-    if (!workspaceNames.has(name) && !byName.has(name)) {
+    if (!workspaceNames.has(name) && !byName.has(name) && name !== engineName) {
       continue;
     }
     const before = lock.packages[path];

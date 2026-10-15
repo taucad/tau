@@ -3,7 +3,7 @@
  *
  * Every GeoSpec matcher is described here once; the authoring surface, the
  * native assertion client and tooling read the same registry. The compiled
- * `@taucad/geospec-engine-native` core evaluates the claims, so nothing
+ * `geospec-engine` core evaluates the claims, so nothing
  * registers into this subpath.
  *
  * @module

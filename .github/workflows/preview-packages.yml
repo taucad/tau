@@ -20,15 +20,9 @@ on:
   workflow_dispatch:
     inputs:
       wait-minutes:
-        description: "How long to wait for the commit's ci.yml run on main to finish (it supplies the GeoSpec products)"
+        description: "How long to wait for the commit's ci.yml run on main to finish; previews publish only a passed commit"
         required: false
         default: '90'
-      products-sha:
-        description: >-
-          Commit on main whose finished ci.yml run supplies the GeoSpec products (default: this commit). Any
-          commit whose GeoSpec inputs match this checkout works; the step verifies them against it.
-        required: false
-        default: ''
   pull_request:
     types: [labeled, opened, reopened, synchronize]
 
@@ -67,16 +61,13 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
-      # The macOS producer cannot run here: take the GeoSpec products from a main CI run (this
-      # commit's, or `products-sha`'s, on a dispatch; the pull request's base on a pull request)
-      # and verify them against this checkout, which fails when the GeoSpec inputs differ. That
-      # run waits on the shared macOS queue, so a dispatch can name an earlier, finished commit.
-      - name: GeoSpec products from main
-        uses: ./.github/actions/geospec-artifact-from-main
+      # A dispatch publishes only a commit whose main CI run passed; a pull request's
+      # own CI checks its commit.
+      - name: Require this commit's main CI run to have passed
+        if: github.event_name == 'workflow_dispatch'
+        uses: ./.github/actions/main-ci-success
         with:
-          sha: ${{ github.event.pull_request.base.sha || inputs.products-sha }}
           wait-minutes: ${{ inputs.wait-minutes || '90' }}
-          require-success: ${{ github.event_name == 'pull_request' && 'false' || 'true' }}
           github-token: ${{ github.token }}
 
       - name: Build every publishable package
@@ -89,7 +80,7 @@ jobs:
             import { appendFileSync, readFileSync, existsSync } from "node:fs";
             import { execFileSync } from "node:child_process";
             // Published from taucad/geospec, not from this train (charter D36); `geospec` stays in.
-            const geospecEngine = new Set(["@taucad/geospec-engine", "@taucad/geospec-engine-native"]);
+            const geospecEngine = new Set(["@taucad/geospec-engine"]);
             const projects = JSON.parse(execFileSync("pnpm", ["-r", "--depth", "-1", "ls", "--json"], { encoding: "utf8" }));
             const folders = projects
               .filter(({ path }) => existsSync(`${path}/project.json`))

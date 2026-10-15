@@ -3,15 +3,8 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/geospec-engine",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package", "host:darwin-arm64"],
+  "tags": ["scope:shared", "type:package"],
   "targets": {
-    "test-performance-lab-node": {
-      "command": "node --test experiments/performance-lab/performance-lab.test.ts experiments/performance-lab/performance-lab-cli.test.ts experiments/performance-lab/performance-lab-focus.test.ts",
-      "options": {
-        "cwd": "{projectRoot}"
-      },
-      "cache": false
-    },
     "generate-provenance": {
       "command": "node scripts/generate-provenance.mjs",
       "options": {

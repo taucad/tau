@@ -65,9 +65,10 @@ import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { ActorRefFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 
-import type { ToolRegistry } from '@taucad/agent-host';
+import type { JsonObject, ToolRegistry } from '@taucad/agent-host';
 
 import type { ProjectRevisions } from '#revisions.js';
+import { prepareKernelDescription, prepareKernelInputSchema, prepareKernelToolName } from '#prepare-kernel-tool.js';
 
 type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
 
@@ -312,6 +313,23 @@ export const createHostGeoSpecRunner = async (
   }
 };
 
+/** One progress report: bytes done of the total, strictly increasing within a call. @public */
+export type HostPrepareKernelProgress = Readonly<{ progress: number; total: number; message: string }>;
+
+/**
+ * The host's preparation behind `prepare_kernel`.
+ *
+ * Resolves with the outcome (`ready`, `blocked`, `cancelled` or `failed`, each naming the kernel); rejects for a
+ * kernel no installed package declares, with an `UNKNOWN_KERNEL` code and a message naming the kernels that can be
+ * prepared. A `ready` outcome is reported only once the host composes the kernel on its next call.
+ *
+ * @public
+ */
+export type HostPrepareKernel = (
+  input: Readonly<{ kernel: string }>,
+  context: Readonly<{ signal: AbortSignal; onProgress: (progress: HostPrepareKernelProgress) => void }>,
+) => Promise<JsonObject & Readonly<{ status: string }>>;
+
 /** Options for {@link createHostToolRegistry}. @public */
 export type HostToolRegistryOptions = {
   /** Absolute workspace root every file tool is confined to. */
@@ -394,6 +412,55 @@ export type HostToolRegistryOptions = {
    * refuses the job, and `projectId` is not used.
    */
   readonly projectIdOf?: ((workspaceRoot: string) => Promise<string | undefined>) | undefined;
+  /**
+   * The native kernel preparation this host offers as `prepare_kernel` (D7): `tau mcp` and the daemon, which prepare
+   * in their own process. Omit it and the tool is not offered, and an unprepared kernel's refusal names `tau prepare`.
+   */
+  readonly prepareKernel?: HostPrepareKernel | undefined;
+};
+
+/**
+ * One `prepare_kernel` call: the outcome as content, an error unless it is `ready`, and each progress report as a
+ * partial result the MCP projection forwards as `notifications/progress`.
+ *
+ * @param prepareKernel - The host's preparation.
+ * @param invocation - The call.
+ * @returns Its result.
+ */
+const invokePrepareKernel = async (
+  prepareKernel: HostPrepareKernel,
+  invocation: Parameters<ToolRegistry['invoke']>[0],
+): Promise<Awaited<ReturnType<ToolRegistry['invoke']>>> => {
+  const { input } = invocation;
+  const named: unknown = typeof input === 'object' && input !== null ? Reflect.get(input, 'kernel') : undefined;
+  const kernel = typeof named === 'string' ? named : '';
+  if (kernel === '') {
+    return {
+      content: { errorCode: 'INVALID_INPUT', message: 'prepare_kernel needs { "kernel": "<name>" }.' },
+      isError: true,
+    };
+  }
+  try {
+    const outcome = await prepareKernel(
+      { kernel },
+      {
+        signal: invocation.signal,
+        onProgress: (progress) => {
+          invocation.onUpdate?.({ content: { ...progress }, isError: false });
+        },
+      },
+    );
+    return { content: outcome, isError: outcome.status !== 'ready' };
+  } catch (error) {
+    const code = error instanceof Error ? (error as Error & { readonly code?: unknown }).code : undefined;
+    return {
+      content: {
+        errorCode: typeof code === 'string' ? code : 'PREPARE_KERNEL_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+      },
+      isError: true,
+    };
+  }
 };
 
 /** The tools that name the project a job's artifact belongs to. */
@@ -676,14 +743,30 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
     projectIdOf === undefined
       ? rootedRegistry(options.workspaceRoot, options.projectId)
       : registryFor(options.workspaceRoot, 'proj_listed-only').registry;
+  const { prepareKernel } = options;
   return {
     /* The tool *list* is the host's, not the turn's: every root serves the same
      * names, descriptions and schemas, and the list is read before any run
      * exists. */
-    list: () => live.list(),
+    list: () =>
+      prepareKernel === undefined
+        ? live.list()
+        : [
+            ...live.list(),
+            {
+              name: prepareKernelToolName,
+              description: prepareKernelDescription,
+              inputSchema: prepareKernelInputSchema,
+              /* It writes the shared store, outside every workspace. */
+              executionMode: 'sequential',
+            },
+          ],
     /* An answer names no checkout: every root's registry settles it through the same machine client (D5). */
     answerApproval: async (answer) => live.answerApproval?.(answer),
     invoke: async (invocation) => {
+      if (prepareKernel !== undefined && invocation.toolName === prepareKernelToolName) {
+        return invokePrepareKernel(prepareKernel, invocation);
+      }
       const root =
         (invocation.runId === undefined ? undefined : options.checkouts?.get(invocation.runId)?.cwd) ??
         options.workspaceRoot;

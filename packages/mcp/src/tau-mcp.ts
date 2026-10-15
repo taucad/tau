@@ -7,7 +7,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult, ServerNotification, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { ZodType } from 'zod';
 import { rpcName, toolName } from '@taucad/chat/constants';
@@ -87,7 +87,22 @@ export type TauMcpDispatchOptions = {
    * the host must leave the effect for Tau's own surface (blueprint E9).
    */
   confirm?: TauMcpConfirm | undefined;
+  /**
+   * Report progress on this call as `notifications/progress`. Present only on a host tool's call whose client sent a
+   * `progressToken`; best-effort, since a client may drop a report that races the result, and it never rejects.
+   * `progress` must increase with every report.
+   */
+  progress?: TauMcpProgress | undefined;
 };
+
+/** One progress report on a host tool's call, as {@link TauMcpDispatchOptions.progress} sends it. @public */
+export type TauMcpProgress = (
+  report: Readonly<{
+    progress: number;
+    total?: number | undefined;
+    message?: string | undefined;
+  }>,
+) => Promise<void>;
 
 /**
  * One approval question asked through the MCP client (blueprint E9, W11).
@@ -543,6 +558,39 @@ const confirmFor = (
   };
 };
 
+/**
+ * The progress reporter for one call, when its client asked for progress.
+ *
+ * @param extra - The call's `_meta` and notification sender.
+ * @returns The reporter, or `undefined` when the request carried no `progressToken`.
+ */
+const progressFor = (
+  extra: Readonly<{
+    _meta?: Readonly<{ progressToken?: string | number | undefined }> | undefined;
+    sendNotification: (notification: ServerNotification) => Promise<void>;
+  }>,
+): TauMcpProgress | undefined => {
+  const progressToken = extra._meta?.progressToken;
+  if (progressToken === undefined) {
+    return undefined;
+  }
+  return async ({ progress, total, message }) => {
+    try {
+      await extra.sendNotification({
+        method: 'notifications/progress',
+        params: {
+          progressToken,
+          progress,
+          ...(total === undefined ? {} : { total }),
+          ...(message === undefined ? {} : { message }),
+        },
+      });
+    } catch {
+      /* Best-effort: a closed transport ends the call anyway. */
+    }
+  };
+};
+
 const registerTools = (
   server: McpServer,
   options: Pick<TauMcpServerOptions, 'dispatch' | 'screenshotImages' | 'viewer'>,
@@ -629,6 +677,7 @@ const registerTools = (
             signal: extra.signal,
             meta: extra._meta,
             confirm: confirmFor(server, extra),
+            progress: progressFor(extra),
           },
         );
         return result.success === true ? rpcSuccess(withoutSuccess(result)) : rpcFailure(result);

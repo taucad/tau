@@ -116,12 +116,10 @@ const offline = async (): Promise<Record<string, unknown>> => {
     await delay(1000);
   }
   const aliveAfter60 = daemon.child.exitCode === null;
-  const warningLines = daemon
-    .output()
-    .split('\n')
-    .filter((line) => /warn|relay|reconnect/iu.test(line))
-    .slice(0, 8);
-  const warnings = warningLines.filter((line) => /warn/iu.test(line)).length;
+  // Count every warning; record only the first eight relevant lines as a sample.
+  const outputLines = daemon.output().split('\n');
+  const warnings = outputLines.filter((line) => /warn/iu.test(line)).length;
+  const warningLines = outputLines.filter((line) => /warn|relay|reconnect/iu.test(line)).slice(0, 8);
   const exitOnTerm = await stopDaemon(daemon);
   writeFileSync(join(evidence, 'offline-serve.log'), daemon.output());
   return {

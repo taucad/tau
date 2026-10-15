@@ -276,8 +276,9 @@ try {
   assert.equal(events[0].headers['referer'], undefined);
   assert.equal(JSON.stringify(events[0].body).includes('secret-bearer'), false);
   assert.equal(JSON.stringify(events[0].body).includes('person@example.com'), false);
+  const acceptedCookies = await context.cookies();
   assert.equal(
-    (await context.cookies()).find(({ name }) => name === 'tau-cookie-consent')?.value,
+    acceptedCookies.find(({ name }) => name === 'tau-cookie-consent')?.value,
     encodeURIComponent(JSON.stringify({ status: 'accepted', version: 1 })),
   );
   await page.getByRole('button', { name: 'Cookie preferences' }).click();
@@ -295,8 +296,9 @@ try {
   assert.equal(events.filter((item) => item.body['event'] === 'marketing_cta_click').length, 1);
   await page.goto(origin + '/privacy/');
   await page.getByRole('button', { name: 'Reset analytics preference' }).click();
+  const withdrawnCookies = await context.cookies();
   assert.equal(
-    (await context.cookies()).find(({ name }) => name === 'tau-cookie-consent'),
+    withdrawnCookies.find(({ name }) => name === 'tau-cookie-consent'),
     undefined,
   );
   assert.equal(await page.evaluate(() => localStorage.getItem('tau-www-visited-v1')), null);

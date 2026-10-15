@@ -1,0 +1,147 @@
+# Lane W9 oracles (native dependency charter, D34, D35, I14): a project Tau creates runs outside Tau with its
+# ecosystem's own tools, from the files in the project folder.
+#
+# Each job writes the project the UI's createInitialProject makes (scripts/spikes/native-deps/w9-create-project.mts)
+# into a bare directory outside the checkout and runs it with the native toolchain only:
+# - build123d: `uv sync --locked`, then `uv run main.py`, on Linux x64 and macOS arm64;
+# - PicoGK: `dotnet restore --locked-mode`, then `dotnet run` on macOS arm64 (upstream PicoGK's native engine ships
+#   for osx-arm64 and win-x64 only). The template's `Library.Go` opens PicoGK's viewer and keeps it open, so the job
+#   passes once PicoGK has started the model's task and the process is still running, and then closes it.
+# Results are the step summary. W23 replaces these jobs with the standalone-project check in ci.yml.
+name: Spike W9 (standalone projects)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/spike-w9-standalone.yml
+      - scripts/spikes/native-deps/w9-create-project.mts
+      - apps/ui/app/constants/project.constants.ts
+      - packages/plugins/build123d/project/**
+      - packages/plugins/picogk/project/**
+
+permissions:
+  actions: read # nrwl/nx-set-shas inside setup-nx
+  contents: read
+
+concurrency:
+  group: spike-w9-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build123d:
+    name: build123d outside Tau (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      PROJECT: ${{ github.workspace }}/../standalone/build123d
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Install uv
+        run: command -v uv || pipx install uv
+
+      - name: Create the project Tau creates
+        run: node --import @oxc-node/core/register scripts/spikes/native-deps/w9-create-project.mts --kernel build123d --name 'Mounting Bracket v2' --out "$PROJECT"
+
+      - name: uv sync --locked, then uv run main.py
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          {
+            echo '### build123d outside Tau (${{ matrix.runner }})'
+            echo '```'
+            ls -1
+            uv --version
+          } >> "$GITHUB_STEP_SUMMARY"
+          uv sync --locked 2>&1 | tee sync.log
+          uv run main.py
+          uv run python -c 'import build123d, main; from build123d import Box; print("build123d", build123d.__version__, "main ->", main.main(main.Params()), "box volume", Box(10, 20, 30).volume)' | tee run.log
+          { tail -n 3 sync.log; cat run.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  picogk:
+    name: PicoGK outside Tau (macos-15)
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      PROJECT: ${{ github.workspace }}/../standalone/picogk
+      # The SDK Tau's own PicoGK build pins (apps/desktop/scripts/prepare-picogk-dotnet.mts), checked by its sha512.
+      DOTNET_SDK_URL: https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.400/dotnet-sdk-10.0.400-osx-arm64.tar.gz
+      DOTNET_SDK_SHA512: e440e9a58d4ff7741c8342ac3e086fa9ee2dadc25e01c0449a88317a74cfbd63625b8092c3b2a131ae14b16ab3401e9cc470e578e4c65a72a0b5786bd2308cde
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Install the .NET 10 SDK
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/dotnet-sdk.tar.gz" "$DOTNET_SDK_URL"
+          echo "$DOTNET_SDK_SHA512  $RUNNER_TEMP/dotnet-sdk.tar.gz" | shasum -a 512 -c -
+          mkdir -p "$RUNNER_TEMP/dotnet"
+          tar -xzf "$RUNNER_TEMP/dotnet-sdk.tar.gz" -C "$RUNNER_TEMP/dotnet"
+          echo "DOTNET_ROOT=$RUNNER_TEMP/dotnet" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/dotnet" >> "$GITHUB_PATH"
+
+      - name: Create the project Tau creates
+        run: node --import @oxc-node/core/register scripts/spikes/native-deps/w9-create-project.mts --kernel picogk --name 'Mounting Bracket v2' --out "$PROJECT"
+
+      - name: dotnet restore --locked-mode, then dotnet run
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          {
+            echo '### PicoGK outside Tau (macos-15)'
+            echo '```'
+            ls -1
+            dotnet --version
+          } >> "$GITHUB_STEP_SUMMARY"
+          dotnet restore --locked-mode | tee restore.log
+          log="$HOME/Documents/PicoGK.log"
+          rm -f "$log"
+          dotnet run --no-restore > run.log 2>&1 &
+          pid=$!
+          status=fail
+          for _ in $(seq 1 240); do
+            if ! kill -0 "$pid" 2>/dev/null; then
+              wait "$pid" && status=exited-0 || status="exited-$?"
+              break
+            fi
+            if grep -q 'Starting tasks' "$log" 2>/dev/null; then
+              sleep 5
+              kill -0 "$pid" 2>/dev/null && status=running
+              break
+            fi
+            sleep 1
+          done
+          kill "$pid" 2>/dev/null || true
+          {
+            tail -n 2 restore.log
+            echo "dotnet run: $status"
+            tail -n 20 run.log
+            echo '--- PicoGK.log'
+            tail -n 40 "$log" 2>/dev/null || echo '(no log)'
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          [[ "$status" == running || "$status" == exited-0 ]]

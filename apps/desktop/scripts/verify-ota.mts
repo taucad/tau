@@ -58,7 +58,7 @@ const main = async (): Promise<void> => {
   if (signature.status !== 0) {
     throw new Error('Cannot read baseline signing requirement');
   }
-  // codesign writes identity details to stderr and the designated requirement to stdout.
+  // Identity details go to stderr; codesign writes the designated requirement to stdout.
   const requirement = `${signature.stderr}\n${signature.stdout}`;
   const team = /^TeamIdentifier=(.+)$/mu.exec(requirement)?.[1];
   if (!team || !requirement.includes('Authority=Developer ID Application:')) {

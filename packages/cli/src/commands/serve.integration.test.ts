@@ -675,7 +675,9 @@ describe.runIf(nativeDarwin)('tau serve native kernels on darwin-arm64 (W11 tier
   let scratch = '';
 
   beforeAll(async () => {
-    scratch = await mkdtemp(join(tmpdir(), 'tau-serve-native-darwin-'));
+    /* A short root: the daemon's temp directory sits inside it, and the sandbox runtime listens on a Unix socket
+     * there, whose path macOS limits to 104 bytes; the runner's own temp directory is already about 50. */
+    scratch = await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'tsd-'));
   });
 
   afterAll(async () => {
@@ -685,7 +687,7 @@ describe.runIf(nativeDarwin)('tau serve native kernels on darwin-arm64 (W11 tier
   it(
     'should refuse .py and .cs from an empty store, prepare each kernel once over the daemon, then evaluate and export both models with no egress',
     async ({ annotate }) => {
-      const root = await mkdtemp(join(scratch, 'real-'));
+      const root = await mkdtemp(join(scratch, 'r-'));
       const workspace = join(root, 'workspace');
       await mkdir(workspace, { recursive: true });
       const canary = await startCanary();

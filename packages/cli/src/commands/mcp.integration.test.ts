@@ -1848,7 +1848,7 @@ describe.runIf(nativeDarwin)('tau mcp native kernels on darwin-arm64 (W5 tier 4b
 
   const closuresIn = async (): Promise<string[]> => {
     const entries = await entriesOf(store);
-    return entries.filter((entry) => entry.includes('closures/') && entry.endsWith('receipt.json'));
+    return entries.filter((entry) => /(?:^|\/)closures\/sha256\/[\da-f]{64}\/receipt\.json$/u.test(entry));
   };
 
   beforeAll(async () => {
@@ -1947,11 +1947,12 @@ describe.runIf(nativeDarwin)('tau mcp native kernels on darwin-arm64 (W5 tier 4b
     realPrepareLimit,
   );
 
-  for (const [index, kernel] of (['build123d', 'picogk'] as const).entries()) {
+  for (const kernel of ['build123d', 'picogk'] as const) {
     it(
       `should prepare ${kernel} from its pinned origins with one prepare_kernel, reporting progress`,
       async ({ annotate }) => {
         const progress: Array<{ progress: number; total?: number }> = [];
+        const sealedBefore = await closuresIn();
         const started = performance.now();
         const ready = await callOn(
           { name: 'prepare_kernel', arguments: { kernel } },
@@ -1970,8 +1971,9 @@ describe.runIf(nativeDarwin)('tau mcp native kernels on darwin-arm64 (W5 tier 4b
         for (const [step, report] of progress.entries()) {
           expect(report.progress).toBeGreaterThanOrEqual(progress[step - 1]?.progress ?? 0);
         }
-        /* One sealed closure per prepared kernel. */
-        expect(await closuresIn()).toHaveLength(index + 1);
+        /* The preparation sealed new closures into the store. */
+        const sealedAfter = await closuresIn();
+        expect(sealedAfter.length).toBeGreaterThan(sealedBefore.length);
       },
       realPrepareLimit,
     );

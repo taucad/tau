@@ -438,6 +438,129 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Standalone-project oracles (native dependency charter W23, D34, I14; go-live row PRJ-1): every
+  # template Tau creates runs outside Tau with its ecosystem's own toolchain, from the files in the
+  # project folder, and produces the geometry Tau exports for the same project.
+  # `scripts/src/check-standalone-project.ts` creates each project with the UI's factory and its
+  # fixture (`libs/tau-examples/src/standalone/<kernel>/`), copies it to a bare directory outside the
+  # checkout, installs it with the native tool only (`npm ci --ignore-scripts`, `uv sync --locked`,
+  # `dotnet restore --locked-mode`; nothing for OpenSCAD and KCL), runs it with the native runner and
+  # compares the volume with `tau export` of the same project (1e-6 relative). One job per ecosystem;
+  # a row that diverges fails its job with both measurements in the step summary. Not required
+  # checks. PicoGK's upstream engine ships for osx-arm64 and win-x64 only, so its row runs on macOS
+  # when the native projects are affected and on every push to `main`, as the native-darwin row does.
+  standalone:
+    name: Standalone projects (${{ matrix.ecosystem }})
+    strategy:
+      fail-fast: false
+      matrix:
+        ecosystem: [npm, pypi, none, kcl]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      # KCL: Tau's export reaches Zoo through Tau Cloud's proxy, never the local API this workflow sets.
+      TAU_API_URL: ${{ matrix.ecosystem != 'kcl' && 'http://localhost:4000' || '' }}
+      TAU_WEBSOCKET_URL: ${{ matrix.ecosystem != 'kcl' && 'ws://localhost:4001' || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Install uv
+        if: matrix.ecosystem == 'pypi'
+        run: |
+          pipx install uv==0.12.20
+          uv --version
+
+      - name: Install OpenSCAD
+        if: matrix.ecosystem == 'none'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openscad=2021.01-6build4
+          openscad --version
+
+      # Zoo's CLI, pinned by release and by the sha256 GitHub records for the asset.
+      - name: Install the Zoo CLI
+        if: matrix.ecosystem == 'kcl'
+        env:
+          ZOO_CLI_URL: https://github.com/KittyCAD/cli/releases/download/v0.2.203/zoo-x86_64-unknown-linux-musl
+          ZOO_CLI_SHA256: 86a72e94136cf0fc0acaaef309bab79f9c940d89c278689b69dfcc44231df43c
+        run: |
+          mkdir -p "$RUNNER_TEMP/zoo"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/zoo/zoo" "$ZOO_CLI_URL"
+          echo "$ZOO_CLI_SHA256  $RUNNER_TEMP/zoo/zoo" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/zoo/zoo"
+          echo "$RUNNER_TEMP/zoo" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/zoo/zoo" --version
+          echo "::notice title=Zoo CLI::$("$RUNNER_TEMP/zoo/zoo" --version) / $("$RUNNER_TEMP/zoo/zoo" kcl export --help 2>&1 | tr '\n' ' ' | cut -c1-900)"
+
+      # `tau prepare build123d` seals the closure inside the native sandbox, as on a user's machine.
+      - name: Setup Linux sandbox prerequisites
+        if: matrix.ecosystem == 'pypi'
+        uses: ./.github/actions/setup-linux-sandbox
+
+      - name: Check every template outside Tau
+        env:
+          ZOO_TOKEN: ${{ secrets.ZOO_TOKEN }}
+          TAU_API_TOKEN: ${{ secrets.TAU_STANDALONE_API_TOKEN }}
+        run: node scripts/src/check-standalone-project.ts --ecosystem "${{ matrix.ecosystem }}" --work "$RUNNER_TEMP/standalone"
+
+      # The lock-parity oracle of the JavaScript row (blueprint I5): the lock Tau writes passes `npm ci`
+      # unmodified and installs and bundles the same tree.
+      - name: Check package-lock.json parity with npm ci
+        if: ${{ !cancelled() && matrix.ecosystem == 'npm' }}
+        env:
+          TAU_NPM_LIVE_TESTS: 'true'
+        run: |
+          set -o pipefail
+          pnpm exec vitest run --root apps/runtime-e2e src/package-lock-parity.test.ts | tee "$RUNNER_TEMP/parity.log"
+          grep -q '"parity":"npm-ci"' "$RUNNER_TEMP/parity.log"
+
+  standalone-darwin:
+    name: Standalone projects (nuget, macos-15)
+    needs: [plan]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (github.event_name == 'push' || needs.plan.outputs.native-darwin == 'true') &&
+      (github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]')
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      # The SDK Tau's own PicoGK build pins (apps/desktop/scripts/prepare-picogk-dotnet.mts), checked by its sha512.
+      DOTNET_SDK_URL: https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.400/dotnet-sdk-10.0.400-osx-arm64.tar.gz
+      DOTNET_SDK_SHA512: e440e9a58d4ff7741c8342ac3e086fa9ee2dadc25e01c0449a88317a74cfbd63625b8092c3b2a131ae14b16ab3401e9cc470e578e4c65a72a0b5786bd2308cde
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+          save-pnpm-store: 'false'
+
+      - name: Install the .NET 10 SDK
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/dotnet-sdk.tar.gz" "$DOTNET_SDK_URL"
+          echo "$DOTNET_SDK_SHA512  $RUNNER_TEMP/dotnet-sdk.tar.gz" | shasum -a 512 -c -
+          mkdir -p "$RUNNER_TEMP/dotnet"
+          tar -xzf "$RUNNER_TEMP/dotnet-sdk.tar.gz" -C "$RUNNER_TEMP/dotnet"
+          echo "DOTNET_ROOT=$RUNNER_TEMP/dotnet" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/dotnet" >> "$GITHUB_PATH"
+
+      - name: Check every template outside Tau
+        run: node scripts/src/check-standalone-project.ts --ecosystem nuget --work "$RUNNER_TEMP/standalone"
+
   # The required check. It passes only when the plan and every affected lane passed, and the
   # browser lane too when this run needed it.
   affected:

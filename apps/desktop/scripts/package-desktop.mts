@@ -4,10 +4,13 @@
  * Purpose: Assemble an unsigned Tau desktop package and its distribution archive for Linux x64 or Windows x64.
  * Why: CI publishes development builds for every desktop platform; only macOS is signed and notarized.
  * Environment: the matching host (no cross-builds): ubuntu-24.04 for linux-x64, windows-2025 for win32-x64;
- * built desktop/UI artifacts and the target's Build123d Python resource; network access for Electron Packager's
- * Electron download; optional TAU_DESKTOP_PACKAGE_OUTPUT_ROOT (default apps/desktop/package-out); optional
- * TAU_DESKTOP_CHANNEL (production, the default, or staging).
- * Payloads: Build123d Python ships on both targets. git ships on linux-x64 when prepare-git has built it, and
+ * built desktop/UI artifacts; network access for Electron Packager's Electron download and the native kernel
+ * closures (or TAU_PAYLOAD_DIR / TAU_PAYLOAD_MIRROR); on Linux the native sandbox (Bubblewrap), which seals them;
+ * optional TAU_DESKTOP_PACKAGE_OUTPUT_ROOT (default apps/desktop/package-out); optional TAU_DESKTOP_CHANNEL
+ * (production, the default, or staging).
+ * Payloads: the sealed Build123d closure ships on linux-x64 under resources/payloads, which the app seeds its payload
+ * store from (charter W6); none ships on win32-x64, where native kernels do not run. git ships on linux-x64 when
+ * prepare-git has built it, and
  * never on win32-x64 (prepare-git compiles kernel.org source, which is not how git ships on Windows). PicoGK
  * and the GeoSpec native engine ship on darwin-arm64 only: the desktop enables PicoGK there alone, its voxel
  * natives are built on Darwin arm64 only, and the GeoSpec native assembly is produced for darwin-arm64 only.
@@ -42,6 +45,7 @@ import {
   excludesBuildDiagnostics,
   resolveRuntimePackages,
   runtimeAsarOptions,
+  stageNativePayloads,
   stageRuntimePackages,
 } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
@@ -65,18 +69,12 @@ if (writesArchive) {
 
 const stageRoot = resolve(outputRoot, 'stage');
 const uiClientRoot = resolve(workspaceRoot, 'apps/ui/desktop/build/client');
-const pythonResourceRoot = resolve(desktopRoot, 'resources/python', plan.target);
 const gitResourceRoot = resolve(desktopRoot, 'resources/git', plan.target);
 /* GPL-2.0 §3(a): the exact source the payload was built from travels with it (`prepare-git.mts`). */
 const gitSourceRoot = resolve(desktopRoot, 'resources/git/SOURCES');
 const shipsGit = plan.gitPayloadSupported && existsSync(gitResourceRoot);
 if (shipsGit && !existsSync(gitSourceRoot)) {
   throw new Error(`The git payload ships with its source; ${gitSourceRoot} is missing. Run prepare-git again.`);
-}
-if (!existsSync(resolve(pythonResourceRoot, 'tau-runtime-manifest.json'))) {
-  throw new Error(
-    `No Build123d Python resource at ${pythonResourceRoot}; run prepare-build123d-python --target ${plan.target}.`,
-  );
 }
 console.log(`Tau ${plan.target} leaves out:`);
 for (const omission of desktopPackageOmissions(plan, { git: shipsGit, gitResourceRoot })) {
@@ -131,7 +129,11 @@ await Promise.all([
   ...plan.branding.map(async (name) =>
     cp(resolve(desktopRoot, 'resources', name), resolve(resources, 'branding', name)),
   ),
-  copyTree(pythonResourceRoot, resolve(resources, 'python', plan.target)),
+  stageNativePayloads({
+    target: plan.target,
+    payloadsRoot: resolve(resources, 'payloads'),
+    workRoot: resolve(outputRoot, 'native-payloads'),
+  }),
   ...(shipsGit
     ? [
         copyTree(gitResourceRoot, resolve(resources, 'git', plan.target)),

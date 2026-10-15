@@ -1,3 +1,4 @@
+/* oxlint-disable new-cap -- NestJS parameter decorators are factories */
 import { Readable } from 'node:stream';
 import {
   BadRequestException,
@@ -16,7 +17,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { dictationMaxAudioBytes } from '@taucad/chat/schemas';
 import type { DictationStatus } from '@taucad/chat/schemas';
 import { AuthGuard } from '#auth/auth.guard.js';
-import { User } from '#auth/decorators/auth.decorator.js';
+import { OptionalAuth, OptionalUser, User } from '#auth/decorators/auth.decorator.js';
 import { invocationSignal } from '#api/llm/llm-gateway.headers.js';
 import { VoiceService } from '#api/voice/voice.service.js';
 
@@ -34,9 +35,14 @@ export class VoiceController implements OnModuleInit {
     private readonly adapterHost: HttpAdapterHost,
   ) {}
 
+  /**
+   * Whether this API can transcribe for the caller. A signed-out caller cannot dictate, so it reads as
+   * unavailable instead of a 401 every composer would log while loading.
+   */
   @Get('status')
-  public status(): DictationStatus {
-    return this.voice.status();
+  @OptionalAuth()
+  public status(@OptionalUser('id') userId: string | undefined): DictationStatus {
+    return userId === undefined ? { available: false } : this.voice.status();
   }
 
   @Post('transcriptions')

@@ -62,9 +62,16 @@ export const getModels = async (): Promise<Model[]> => {
   return data as Model[];
 };
 
+/**
+ * How long a fetched catalog counts as fresh. Milliseconds. The catalog is the same for every visitor and changes
+ * only with an API deploy, so remounts and window focus reuse it instead of refetching.
+ */
+const catalogFreshness = 30 * 60 * 1000;
+
 const modelsQuery = {
   queryKey: ['models'],
   queryFn: getModels,
+  staleTime: catalogFreshness,
   /* One retry, whatever the network reports: admission waits on this fetch, so it must settle. */
   retry: 1,
   networkMode: 'always',

@@ -661,7 +661,13 @@ jobs:
             sudo apt-get install -y -qq libcurl4-openssl-dev zlib1g-dev
           fi
 
-      # On Windows the archive and the Python payload use the inbox bsdtar,
+      # The Linux package seals the build123d closure it ships (charter W6), and its
+      # seal step compiles bytecode inside the native sandbox.
+      - name: Setup Linux sandbox prerequisites
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/setup-linux-sandbox
+
+      # On Windows the archive uses the inbox bsdtar,
       # which must come before Git Bash's GNU tar on PATH.
       - name: Record package source identity
         shell: bash

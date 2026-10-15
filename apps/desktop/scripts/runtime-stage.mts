@@ -1,5 +1,6 @@
 /**
- * Purpose: Resolve and stage the desktop app's runtime-loaded npm packages for one packaged target.
+ * Purpose: Resolve and stage the desktop app's runtime-loaded npm packages for one packaged target, and seal the
+ * native kernel closures it ships for seeding the payload store.
  * Why: Every package script (macOS, Linux, Windows) ships the same externalized engines, adapters and
  * bundled imports; only the native platform packages beside them differ per target.
  * Environment: Node with filesystem access to the workspace store and the staging directory.
@@ -7,11 +8,15 @@
  * Exit codes: n/a (library module).
  */
 
-import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { basename, dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
+import { build123dLaunchSet, sealBuild123dClosure } from '@taucad/build123d';
 import { acpAgentProfiles } from '@taucad/host';
+import { picogkLaunchSet } from '@taucad/picogk';
+import { createPreparationHost, parsePluginDeployment, readManagedPreparation } from '@taucad/runtime/preparation/node';
+import type { Integrity, PreparationPlugin } from '@taucad/runtime/preparation/node';
 
 import { desktopReleaseIdentity } from '#shared/desktop-release.js';
 
@@ -379,4 +384,108 @@ export const stageRuntimePackages = async (
       filter: (path) => excludesBuildDiagnostics(path) && !unusedSandboxHelpers.has(path),
     });
   }
+};
+
+/** The preparation target key (`<os>-<arch>[-<libc>]`) each packaged target's native closures are sealed for. */
+const nativePayloadTargets: Readonly<Record<RuntimeTarget, string | undefined>> = {
+  'darwin-arm64': 'darwin-arm64',
+  'darwin-x64': 'darwin-x64',
+  'linux-x64': 'linux-x64-glibc',
+  /* Native kernels do not run on Windows (no sandbox), so a Windows package ships no closure. */
+  'win32-x64': undefined,
+};
+
+/** One sealed closure a package ships under `Contents/Resources/payloads`. */
+export type StagedNativeClosure = Readonly<{
+  package: string;
+  dependency: string;
+  closureIntegrity: Integrity;
+  treeIntegrity: Integrity;
+  fileCount: number;
+}>;
+
+/**
+ * Seal the desktop's native kernel closures for one target and stage them in the store's own layout
+ * (`<payloadsRoot>/closures/sha256/<hex>`), which the app seeds its payload store from at first launch (charter W6
+ * phase 1, D10, ruling X30). They are prepared exactly as `tau prepare` prepares them: from each package's
+ * `tau-plugin.json` pins, through the same verify-before-write path and seal steps (build123d's bytecode), honouring
+ * the managed profile (`TAU_PAYLOAD_DIR`, `TAU_PAYLOAD_MIRROR`) for where the bytes come from. The closures are shipped
+ * byte for byte: the package's signing pass must leave them alone, and nothing rewrites a digest afterwards.
+ * @param options - The packaged target, the bundle's `payloads` directory and a scratch directory on the same volume.
+ * @returns The staged closures; none for a target that runs no native kernel.
+ * @throws When a closure the target declares cannot be prepared.
+ */
+export const stageNativePayloads = async (
+  options: Readonly<{ target: RuntimeTarget; payloadsRoot: string; workRoot: string }>,
+): Promise<readonly StagedNativeClosure[]> => {
+  const target = nativePayloadTargets[options.target];
+  if (target === undefined) {
+    return [];
+  }
+  const require = createRequire(import.meta.url);
+  const plugin = async (
+    name: string,
+    adopter: Pick<PreparationPlugin, 'seal' | 'launchSet'>,
+  ): Promise<PreparationPlugin> => {
+    const manifestPath = require.resolve(`${name}/tau-plugin.json`);
+    return {
+      package: name,
+      deployment: parsePluginDeployment(JSON.parse(await readFile(manifestPath, 'utf8')), `${name} tau-plugin.json`),
+      directory: dirname(manifestPath),
+      ...adopter,
+    };
+  };
+  const plugins = [
+    await plugin('@taucad/build123d', { seal: sealBuild123dClosure, launchSet: build123dLaunchSet }),
+    await plugin('@taucad/picogk', { launchSet: picogkLaunchSet }),
+  ];
+  const managed = readManagedPreparation(process.env);
+  const store = join(options.workRoot, 'payload-store');
+  await rm(options.workRoot, { recursive: true, force: true });
+  await mkdir(store, { recursive: true });
+  const host = createPreparationHost({
+    plugins,
+    store: await realpath(store),
+    hostPath: options.workRoot,
+    selection: { target, emulation: false },
+    ...(managed.mirror === undefined ? {} : { mirror: managed.mirror }),
+    ...(managed.seed === undefined ? {} : { seed: managed.seed }),
+  });
+  const staged: StagedNativeClosure[] = [];
+  try {
+    for (const description of await host.describe()) {
+      if (description.state === 'unsupported') {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one closure at a time; build123d's seal step uses every core
+      const outcome = await host.prepare({
+        package: description.package,
+        dependencies: [description.dependency],
+        offline: managed.offline,
+        signal: AbortSignal.timeout(3_600_000),
+      });
+      if (outcome.status !== 'ready') {
+        throw new Error(
+          `${description.package} ${description.dependency} for ${target} did not prepare: ${outcome.status === 'blocked' ? outcome.message : outcome.status}`,
+        );
+      }
+      const receipt = outcome.receipts[description.dependency];
+      if (receipt === undefined) {
+        throw new Error(`${description.package} prepared no ${description.dependency} closure for ${target}.`);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- ditto
+      await copyTree(receipt.root, resolve(options.payloadsRoot, 'closures', 'sha256', basename(receipt.root)));
+      staged.push({
+        package: receipt.package,
+        dependency: receipt.dependency,
+        closureIntegrity: receipt.closureIntegrity,
+        treeIntegrity: receipt.treeIntegrity,
+        fileCount: receipt.files.length,
+      });
+    }
+  } finally {
+    host.dispose();
+    await rm(options.workRoot, { recursive: true, force: true });
+  }
+  return staged;
 };

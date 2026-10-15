@@ -32,6 +32,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/jscad',
   '@taucad/manifold',
   '@taucad/middleware',
+  '@taucad/native-process-core',
   '@taucad/opencascade',
   '@taucad/openrscad',
   '@taucad/picogk',

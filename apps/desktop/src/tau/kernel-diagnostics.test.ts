@@ -4,14 +4,14 @@ import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
+import { nativeKernelsFixture } from '#tau/native-kernels.fixture.js';
 import { createDesktopRuntime, desktopAssimpBackend, desktopOpenrscadKernel } from '#tau/desktop-runtime.factory.js';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 
 import { kernelEngineEvent, kernelEngineRecord } from '#tau/kernel-diagnostics.js';
 
-// The prepared Python and .NET payloads are build outputs; middleware composition does not read them.
-vi.mock('#tau/build123d-resources.js', () => ({ build123dKernelOptions: () => ({}) }));
-vi.mock('#tau/picogk-resources.js', () => ({ picogkKernelOptions: () => ({}) }));
+// Main composes PicoGK where its manifest declares a closure: Apple Silicon only.
+const isAppleSilicon = process.platform === 'darwin' && process.arch === 'arm64';
 
 describe('kernelEngineRecord', () => {
   it('selects native Assimp only for the supported Apple Silicon slice', () => {
@@ -65,10 +65,13 @@ describe('kernelEngineRecord', () => {
 
 describe('the identity the record reports', () => {
   it('enables one unit-inference middleware after the parameter file resolver', async () => {
-    const resolved = await resolveRuntimeDefinition(createDesktopRuntime(), {
-      tauApiUrl: 'http://localhost:4000',
-      tauWebSocketUrl: 'ws://localhost:4001',
-    });
+    const resolved = await resolveRuntimeDefinition(
+      createDesktopRuntime({ nativeKernels: async () => nativeKernelsFixture({ picogk: isAppleSilicon }) }),
+      {
+        tauApiUrl: 'http://localhost:4000',
+        tauWebSocketUrl: 'ws://localhost:4001',
+      },
+    );
     expect(resolved.middleware.map(({ id }) => id)).toEqual([
       'parameterFileResolver',
       'parameterUnits',

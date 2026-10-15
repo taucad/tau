@@ -52,8 +52,12 @@ const environmentSchema = z.preprocess(
 
     return {
       ...rawEnvironment,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+      /* eslint-disable @typescript-eslint/naming-convention -- environment variable names */
       TAU_FRONTEND_URL: frontendUrl,
+      /* A build product, not deployment configuration: the web build defines it for the server graph
+       * only, so client chunks keep stable hashes across rebuilds (`#lib/build-identity`). */
+      TAU_BUILD_ID: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
+      /* eslint-enable @typescript-eslint/naming-convention -- environment variable names */
     };
   },
   z.object({
@@ -62,6 +66,8 @@ const environmentSchema = z.preprocess(
     ...cloudEnvironmentShape,
     TAU_WEBSOCKET_URL: z.url().describe('WebSocket URL for the API (e.g., wss://api.tau.new or ws://localhost:4001)'),
     TAU_FRONTEND_URL: z.url(),
+    /** Ordered build identity for the stale-tab skew guard (blueprint DF20); set by the build, never the host. */
+    TAU_BUILD_ID: z.string().optional(),
     /** Deployment opt-in while machine qualification is incomplete. Never a localStorage override. */
     TAU_MACHINES_ENABLED: z.string().optional().transform(isMachinesFeatureEnabled),
     /**
@@ -136,6 +142,7 @@ const baseClientEnvironmentKeys = [
   'TAU_API_URL',
   'TAU_WEBSOCKET_URL',
   'TAU_FRONTEND_URL',
+  'TAU_BUILD_ID',
   'TAU_DEBUG',
   'TAU_MACHINES_ENABLED',
   'TAU_GIT_REMOTE_ALLOW_PRIVATE',

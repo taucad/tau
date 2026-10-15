@@ -67,6 +67,7 @@ describe('ACP adapter connection', () => {
       child.emit('exit');
       expect(events.filter((event) => event.type === 'adapterExited')).toHaveLength(1);
     } finally {
+      actor.stop();
       parent.stop();
     }
   });

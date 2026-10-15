@@ -51,6 +51,8 @@ jobs:
       version: ${{ steps.tag.outputs.version }}
       kind: ${{ steps.tag.outputs.kind }}
       channel: ${{ steps.tag.outputs.channel }}
+      macos: ${{ steps.tag.outputs.macos }}
+      macos-targets: ${{ steps.tag.outputs.macos-targets }}
     steps:
       - name: Resolve the release tag
         id: tag
@@ -97,12 +99,31 @@ jobs:
             echo "::error::$TAG is not on main (compare status: $status); refusing to build it."
             exit 1
           fi
+          # Mac architectures: a production release packages both. A staging candidate packages Intel
+          # only when release-desktop-staging.yml annotated its tag with the line below (the nightly);
+          # every other staging candidate is Apple silicon only.
+          arches='arm64 x64'
+          if [ "$channel" = staging ]; then
+            arches=arm64
+            object=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object | "\(.type) \(.sha)"')
+            if [ "${object%% *}" = tag ]; then
+              message=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/${object#* }" --jq .message)
+              if grep -qx 'Mac architectures: arm64 x64' <<< "$message"; then arches='arm64 x64'; fi
+            fi
+          fi
+          macos=$(jq -cn --arg arches "$arches" '[
+            {arch: "arm64", runner: "macos-26", machine: "arm64", "package-target": "package-macos-release"},
+            {arch: "x64", runner: "macos-26-intel", machine: "x86_64", "package-target": "package-macos-release-intel"}
+          ] | map(select(.arch as $arch | $arches | split(" ") | index($arch)))')
+          echo "Mac architectures: $arches"
           {
             echo "tag=$TAG"
             echo "project=$project"
             echo "version=$version"
             echo "kind=$kind"
             echo "channel=$channel"
+            echo "macos=$macos"
+            echo "macos-targets=$(sed -E 's/(^| )/\1darwin-/g' <<< "$arches")"
           } >> "$GITHUB_OUTPUT"
 
   verify-app:
@@ -269,15 +290,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: arm64
-            runner: macos-26
-            machine: arm64
-            package-target: package-macos-release
-          - arch: x64
-            runner: macos-26-intel
-            machine: x86_64
-            package-target: package-macos-release-intel
+        # arm64 always; x64 on production tags and full staging candidates (resolve).
+        include: ${{ fromJSON(needs.resolve.outputs.macos) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
     environment:
@@ -792,11 +806,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: arm64
-            runner: macos-26
-          - arch: x64
-            runner: macos-26-intel
+        include: ${{ fromJSON(needs.resolve.outputs.macos) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     steps:
@@ -931,20 +941,23 @@ jobs:
           pattern: ota-acceptance-*
           merge-multiple: true
           path: out/desktop/acceptance
-      - name: Require qualification for both Mac architectures
+      # Every Mac architecture this release packaged: both on production, arm64 alone on most
+      # staging candidates, whose promotion leaves the Intel feed and archive on the last full one.
+      - name: Require qualification for every packaged Mac architecture
         id: qualification
         env:
           TAG: ${{ needs.resolve.outputs.tag }}
+          TARGETS: ${{ needs.resolve.outputs.macos-targets }}
         run: |
           accepted=true
-          for target in darwin-arm64 darwin-x64; do
+          for target in $TARGETS; do
             file=$(find out/desktop/acceptance -name "ota-qualification-$target.json")
             test -n "$file"
             jq -e --arg tag "$TAG" --arg target "$target" '.tag == $tag and .target == $target and (.accepted | type == "boolean")' "$file" > /dev/null
             if [ "$(jq -r .accepted "$file")" != true ]; then accepted=false; fi
           done
           echo "accepted=$accepted" >> "$GITHUB_OUTPUT"
-          if [ "$accepted" = false ]; then echo 'Both Mac architectures need an older qualified baseline. No channel pointers changed.' >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ "$accepted" = false ]; then echo "Each packaged Mac architecture ($TARGETS) needs an older qualified baseline. No channel pointers changed." >> "$GITHUB_STEP_SUMMARY"; fi
       - name: Gather the release metadata and OTA receipts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -952,12 +965,13 @@ jobs:
           DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
           DESKTOP_ASSETS_DIR: out/desktop/assets
           ACCEPTED: ${{ steps.qualification.outputs.accepted }}
+          TARGETS: ${{ needs.resolve.outputs.macos-targets }}
         run: |
           set -euo pipefail
           mkdir -p "$DESKTOP_ASSETS_DIR" out/desktop/receipts
           gh release download "$DESKTOP_RELEASE_TAG" --dir "$DESKTOP_ASSETS_DIR" --pattern 'desktop-update-*.json' --pattern download.json
           if [ "$ACCEPTED" = true ]; then
-            for target in darwin-arm64 darwin-x64; do
+            for target in $TARGETS; do
               receipt=$(find out/desktop/acceptance -name "ota-receipt-$target.json")
               test -n "$receipt"
               cp "$receipt" "out/desktop/receipts/ota-receipt-$target.json"

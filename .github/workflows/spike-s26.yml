@@ -3,18 +3,13 @@
 # On each runner, two stores at different paths prepare the same closures with the built CLI
 # (store A from the origins, store B's build123d offline from the seed), then `diff -r` the trees
 # and compare the receipts' identity fields; build123d also against its golden darwin-arm64
-# receipt. The compare job checks the two runner images give one treeIntegrity per kernel. The
+# receipt. The compare job checks two macOS 26 machines give one treeIntegrity per kernel. The
 # seed round trip (`--bundle` on A, `--seed` on an air-gapped B) is blocked on W19: tau prepare
 # has neither flag yet. Deleted when W21 lands.
 name: Spike S26 (deterministic preparation)
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - .github/workflows/spike-s26.yml
-      - scripts/spikes/native-deps/store-spike.mts
-      - scripts/spikes/native-deps/s26-determinism.mts
 
 permissions:
   actions: read # nrwl/nx-set-shas inside setup-nx
@@ -30,16 +25,18 @@ defaults:
 
 jobs:
   s26:
-    name: S26 two stores (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: S26 two stores (macos-26, machine ${{ matrix.machine }})
+    runs-on: macos-26
     timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, macos-26]
+        # Two separate macOS 26 machines: macOS 26 is Tau's only image (ruling X39), and the
+        # macOS 15 against macOS 26 comparison already passed before X39.
+        machine: [a, b]
     outputs:
-      macos-15: ${{ steps.tree.outputs.macos-15 }}
-      macos-26: ${{ steps.tree.outputs.macos-26 }}
+      a: ${{ steps.tree.outputs.a }}
+      b: ${{ steps.tree.outputs.b }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -66,7 +63,7 @@ jobs:
               .toSorted();
             console.log(createHash("sha256").update(pins.join("\n")).digest("hex"));
           ')
-          echo "key=native-seed-v1-build123d-darwin-arm64-$digest" >> "$GITHUB_OUTPUT"
+          echo "key=native-seed-v2-macos$(sw_vers -productVersion | cut -d. -f1)-build123d-darwin-arm64-$digest" >> "$GITHUB_OUTPUT"
 
       - name: Restore the seed
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -84,35 +81,35 @@ jobs:
         run: |
           set -o pipefail
           node --import @oxc-node/core/register scripts/spikes/native-deps/s26-determinism.mts \
-            --work "$RUNNER_TEMP/s26" --out "$RUNNER_TEMP/out" --label "${{ matrix.os }}" 2>&1 | tee "$RUNNER_TEMP/console.log"
+            --work "$RUNNER_TEMP/s26" --out "$RUNNER_TEMP/out" --label "macos-26-${{ matrix.machine }}" 2>&1 | tee "$RUNNER_TEMP/console.log"
 
       - name: Record this runner's trees
         id: tree
         if: always()
         env:
-          OS: ${{ matrix.os }}
+          MACHINE: ${{ matrix.machine }}
         run: |
           trees=$(cat "$RUNNER_TEMP"/out/s26-*-tree.txt 2>/dev/null | tr '\n' ';')
-          echo "$OS=$trees" >> "$GITHUB_OUTPUT"
+          echo "$MACHINE=$trees" >> "$GITHUB_OUTPUT"
 
       - name: Publish the summary
         if: always()
         run: |
           { echo '```'; cat "$RUNNER_TEMP/out/s26-summary.txt" 2>/dev/null || echo 'no summary'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          scripts/spikes/native-deps/linux/annotate.sh "S26 ${{ matrix.os }}" "$RUNNER_TEMP/out/s26-summary.txt"
+          scripts/spikes/native-deps/linux/annotate.sh "S26 macos-26 ${{ matrix.machine }}" "$RUNNER_TEMP/out/s26-summary.txt"
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: spike-s26-evidence-${{ matrix.os }}
+          name: spike-s26-evidence-${{ matrix.machine }}
           path: |
             ${{ runner.temp }}/out
             ${{ runner.temp }}/console.log
           retention-days: 30
 
   compare:
-    name: S26 across runner images
+    name: S26 across machines
     needs: [s26]
     if: always()
     runs-on: ubuntu-latest
@@ -120,10 +117,10 @@ jobs:
     steps:
       - name: Compare the trees
         env:
-          MACOS_15: ${{ needs.s26.outputs.macos-15 }}
-          MACOS_26: ${{ needs.s26.outputs.macos-26 }}
+          MACHINE_A: ${{ needs.s26.outputs.a }}
+          MACHINE_B: ${{ needs.s26.outputs.b }}
         run: |
-          line="S26 cross-image: macos-15 [$MACOS_15] macos-26 [$MACOS_26] => "
-          if [ -n "$MACOS_15" ] && [ "$MACOS_15" = "$MACOS_26" ]; then line+="identical"; else line+="DIFFERENT or missing"; fi
+          line="S26 cross-machine (macos-26): a [$MACHINE_A] b [$MACHINE_B] => "
+          if [ -n "$MACHINE_A" ] && [ "$MACHINE_A" = "$MACHINE_B" ]; then line+="identical"; else line+="DIFFERENT or missing"; fi
           echo "$line" >> "$GITHUB_STEP_SUMMARY"
-          echo "::notice title=S26 cross-image::$line"
+          echo "::notice title=S26 cross-machine::$line"

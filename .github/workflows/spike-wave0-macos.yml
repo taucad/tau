@@ -47,7 +47,7 @@ jobs:
   produce:
     name: Produce the build123d and PicoGK trees
     if: inputs.trees-run-id == ''
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 180
     steps:
       - &checkout
@@ -134,7 +134,7 @@ jobs:
     if: >-
       !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
       contains(format(',{0},', inputs.spikes), ',S1,')
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       SPIKE_ID: S1
@@ -236,7 +236,7 @@ jobs:
     if: >-
       !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
       contains(format(',{0},', inputs.spikes), ',S2,')
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       SPIKE_ID: S2
@@ -280,7 +280,7 @@ jobs:
     if: >-
       !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
       contains(format(',{0},', inputs.spikes), ',S3,')
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       SPIKE_ID: S3
@@ -341,7 +341,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-26]
+        runner: [macos-26]
     env:
       SPIKE_ID: S5
       SPIKE_TITLE: S5 macOS wheel tier (${{ matrix.runner }})
@@ -382,7 +382,7 @@ jobs:
     if: >-
       !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
       contains(format(',{0},', inputs.spikes), ',S6,')
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 90
     env:
       SPIKE_ID: S6
@@ -452,7 +452,7 @@ jobs:
     if: >-
       !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
       contains(format(',{0},', inputs.spikes), ',S13,')
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       SPIKE_ID: S13

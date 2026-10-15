@@ -9,11 +9,6 @@ name: Spike S28 (throttled parallel streams)
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - .github/workflows/spike-s28.yml
-      - scripts/spikes/native-deps/store-spike.mts
-      - scripts/spikes/native-deps/s28-throttled-streams.mts
 
 permissions:
   actions: read # nrwl/nx-set-shas inside setup-nx
@@ -29,8 +24,8 @@ defaults:
 
 jobs:
   s28:
-    name: S28 throttled parallel streams (macos-15)
-    runs-on: macos-15
+    name: S28 throttled parallel streams (macos-26)
+    runs-on: macos-26
     timeout-minutes: 75
     steps:
       - name: Checkout
@@ -58,7 +53,7 @@ jobs:
               .toSorted();
             console.log(createHash("sha256").update(pins.join("\n")).digest("hex"));
           ')
-          echo "key=native-seed-v1-build123d-darwin-arm64-$digest" >> "$GITHUB_OUTPUT"
+          echo "key=native-seed-v2-macos$(sw_vers -productVersion | cut -d. -f1)-build123d-darwin-arm64-$digest" >> "$GITHUB_OUTPUT"
 
       - name: Restore the seed
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5

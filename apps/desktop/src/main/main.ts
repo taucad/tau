@@ -47,6 +47,7 @@ import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import {
   defaultConfigDirectory,
+  defaultPayloadStore,
   discoverAcpAgents,
   externalAgentDescriptors,
   keepAwakeWhileStreaming,
@@ -107,6 +108,7 @@ import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
 import { startDesktopUpdater } from '#main/updater.js';
+import { startNativeStore } from '#tau/native-store.js';
 import {
   appIconThemeChannel,
   openDirectoryChannel,
@@ -423,12 +425,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const environment = desktopEnvironment(process.env, { locked: environmentLocked, channel: desktopChannel });
 
   const logDirectory = join(app.getPath('userData'), 'logs');
-  const build123dResourceRoot = app.isPackaged
-    ? join(process.resourcesPath, 'python')
-    : join(import.meta.dirname, '../../resources/python');
-  const picogkResourceRoot = app.isPackaged
-    ? join(process.resourcesPath, 'picogk')
-    : join(import.meta.dirname, '../../resources/picogk');
   /* The `git` this app records revisions with, when this build ships one (OQ3, C68). */
   const gitEnvironment = bundledGitEnvironment(
     app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
@@ -623,8 +619,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...esbuildEnvironment,
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
-      TAU_BUILD123D_RESOURCE_ROOT: build123dResourceRoot, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
-      TAU_PICOGK_RESOURCE_ROOT: picogkResourceRoot, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
     forkEnvAllowlist: [...kernelForkEnvAllowlist],
     /* A fork-loop guard, not a concurrency policy: a live project costs one to
@@ -682,6 +676,23 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * for it: the fork and its module graph are ~176 ms the person would
    * otherwise wait for with a project already on screen (W-L03-4). */
   runtimeMain.prewarm();
+  /* W6 (D10, D24): seed the shared payload store from the closures this app ships, then tell the kernel utilities
+   * which sealed closure each native kernel runs from; a utility composes its runtime once that frame arrives. The
+   * staging channel keeps its own store beside its own config. Collected at startup (D21). */
+  const nativeStoreAbort = new AbortController();
+  const nativeStore = startNativeStore({
+    store: desktopChannel === 'staging' ? join(tauConfigDirectory, 'payloads') : defaultPayloadStore(),
+    bundle: app.isPackaged ? join(process.resourcesPath, 'payloads') : undefined,
+    hostPath: app.getPath('exe'),
+    environment: process.env,
+    post: (frame) => {
+      runtimeMain.post(frame);
+    },
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+    signal: nativeStoreAbort.signal,
+  });
 
   const geometry = createGeometryBroker({
     utilityEntry: geometryUtilityEntry,
@@ -1663,6 +1674,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
               log.log('error', 'main.shutdown', error);
             }
             zooProxyToken.dispose();
+            nativeStoreAbort.abort();
+            await nativeStore;
             try {
               runtimeMain.dispose();
             } catch (error) {

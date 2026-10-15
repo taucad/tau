@@ -137,17 +137,20 @@ jobs:
           It signs in to and works against https://taucad.dev, never production, and follows its isolated staging update feed. macOS is Developer ID signed without notarization. The channel feed advances only after a native OTA acceptance test.
           NOTES
           sed -i 's/^          //' "$RUNNER_TEMP/notes.md"
-          gh release create "$tag" --target "$TARGET" --title "Tau desktop staging ${version} (build ${RUN_NUMBER})" \
+          # A draft, because a published release is immutable (go-live DEL-20):
+          # release-build.yml attaches the archives and publishes it. The tag's
+          # push, not the draft, starts release-build.yml.
+          gh release create "$tag" --draft --target "$TARGET" --title "Tau desktop staging ${version} (build ${RUN_NUMBER})" \
             --notes-file "$RUNNER_TEMP/notes.md" --prerelease --latest=false
+          gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$TARGET" --silent
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         if: steps.selected.outputs.release == 'true'
         env:
           TAG: ${{ steps.release.outputs.tag }}
-          REPOSITORY: ${{ github.repository }}
         run: |
           {
-            echo "Created the prerelease [$TAG](https://github.com/$REPOSITORY/releases/tag/$(jq -rn --arg t "$TAG" '$t | @uri'))."
-            echo "**Release build** packages it and attaches the archives once main CI is green on this commit."
+            echo "Created the draft prerelease $TAG and its tag."
+            echo "**Release build** packages it, attaches the archives and publishes it once main CI is green on this commit."
           } >> "$GITHUB_STEP_SUMMARY"

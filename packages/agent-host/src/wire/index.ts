@@ -17,8 +17,16 @@ export {
 } from '#wire/admission.schema.js';
 export type { AgentChannelAdmissionConfig, AgentChannelModel } from '#wire/admission.schema.js';
 export { agentWireLimits } from '#wire/limits.js';
-export { providerPermissionSchema } from '#wire/provider-permission.schema.js';
-export type { ProviderPermission } from '#wire/provider-permission.schema.js';
+export {
+  providerPermissionSchema,
+  providerPermissionObservationSchema,
+  providerPermissionResolutionSchema,
+} from '#wire/provider-permission.schema.js';
+export type {
+  ProviderPermission,
+  ProviderPermissionObservation,
+  ProviderPermissionResolution,
+} from '#wire/provider-permission.schema.js';
 export { chatIdSchema, commandAnswerSchema, commandPayloads } from '#wire/commands.schema.js';
 export type {
   CommandAnswer,

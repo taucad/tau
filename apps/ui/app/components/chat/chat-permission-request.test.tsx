@@ -192,6 +192,176 @@ describe('compact permission requests', () => {
       expect(screen.queryByText(/response sent|permission saved/iu)).toBeNull();
     },
   );
+  it.each([
+    { stored: 'present', effective: 'allowed', reason: 'policy-observed', expected: 'Allowed in Codex settings' },
+    {
+      stored: 'present',
+      effective: 'unknown',
+      reason: 'policy-observed',
+      expected: 'Preference found · effective approval not confirmed',
+    },
+    {
+      stored: 'present',
+      effective: 'overridden',
+      reason: 'policy-overridden',
+      expected: 'Preference found · another Codex rule takes precedence',
+    },
+    {
+      stored: 'absent',
+      effective: 'unknown',
+      reason: 'policy-absent',
+      expected: 'Not found in Codex settings · future requests may ask again',
+    },
+    {
+      stored: 'unknown',
+      effective: 'unknown',
+      reason: 'config-read-failed',
+      expected: 'Response recorded · Codex saving could not be checked',
+    },
+  ] as const)(
+    'should render observed provider policy without claiming a new save: $stored/$effective',
+    ({ stored, effective, reason, expected }) => {
+      render(
+        <ChatPermissionRequest
+          approval={{
+            ...approval,
+            providerPermission: {
+              owner: 'provider',
+              persistence: 'unverified',
+              options: [{ optionId: 'allow_always', requestedScope: 'persistent' }],
+            },
+          }}
+          name='Codex'
+          outcome='approved'
+          resolution={{
+            outcome: 'approved',
+            optionId: 'allow_always',
+            observation: {
+              version: 1,
+              provider: 'codex',
+              optionId: 'allow_always',
+              toolCallId: 'call-1',
+              requestedScope: 'persistent',
+              stored,
+              effective,
+              preexisting: 'unknown',
+              observation: 'config-readback',
+              reason,
+            },
+          }}
+        />,
+      );
+      expect(screen.getByText(expected)).toBeInTheDocument();
+      expect(screen.queryByText(/successfully saved|saved permission/iu)).toBeNull();
+    },
+  );
+  it('should distinguish a stored Grok preference from effective approval', () => {
+    render(
+      <ChatPermissionRequest
+        approval={{
+          ...approval,
+          providerPermission: {
+            owner: 'provider',
+            persistence: 'unverified',
+            readback: 'permission-file',
+            options: [{ optionId: 'always-allow', requestedScope: 'persistent' }],
+          },
+        }}
+        name='Grok'
+        resolution={{
+          outcome: 'approved',
+          optionId: 'always-allow',
+          observation: {
+            version: 1,
+            provider: 'grok',
+            optionId: 'always-allow',
+            toolCallId: 'call-grok',
+            requestedScope: 'persistent',
+            stored: 'present',
+            effective: 'unknown',
+            preexisting: false,
+            observation: 'permission-file-readback',
+            layerKind: 'project',
+            reason: 'policy-observed',
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText('Preference found · effective approval not confirmed')).toBeInTheDocument();
+    expect(screen.queryByText(/Allowed in Grok settings|permission saved/iu)).toBeNull();
+  });
+  it('should retain the selected once scope after remount without suggesting a policy save', () => {
+    render(
+      <ChatPermissionRequest
+        approval={{
+          ...approval,
+          providerPermission: {
+            owner: 'provider',
+            persistence: 'unverified',
+            options: [{ optionId: 'once', requestedScope: 'once' }],
+          },
+        }}
+        name='Codex'
+        resolution={{ outcome: 'approved', optionId: 'once' }}
+      />,
+    );
+    expect(screen.getByText('Allowed once · response recorded')).toBeInTheDocument();
+    expect(screen.queryByText(/saving/iu)).toBeNull();
+  });
+  it('should explain unavailable persistent approval before selection', () => {
+    render(
+      <ChatPermissionRequest
+        approval={{
+          ...approval,
+          providerPermission: {
+            owner: 'provider',
+            persistence: 'unverified',
+            readback: 'unsupported',
+            unsupportedReason: 'unconfigured-mcp-server',
+            options: [],
+          },
+        }}
+        name='Codex'
+        onRespond={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText('This temporary connection supports approval for this request or session.'),
+    ).toBeInTheDocument();
+  });
+  it('should not apply an observation to a different selected option', () => {
+    render(
+      <ChatPermissionRequest
+        approval={{
+          ...approval,
+          providerPermission: {
+            owner: 'provider',
+            persistence: 'unverified',
+            options: [{ optionId: 'once', requestedScope: 'once' }],
+          },
+        }}
+        name='Codex'
+        resolution={{
+          outcome: 'approved',
+          optionId: 'once',
+          observation: {
+            version: 1,
+            provider: 'codex',
+            optionId: 'allow_always',
+            toolCallId: 'call-1',
+            requestedScope: 'persistent',
+            stored: 'present',
+            effective: 'allowed',
+            preexisting: false,
+            observation: 'config-readback',
+            reason: 'policy-observed',
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText('Allowed once · response recorded')).toBeInTheDocument();
+    expect(screen.queryByText('Allowed in Codex settings')).toBeNull();
+  });
   it.each(['approved', 'denied', 'cancelled'])(
     'retains a settled %s record without consent actions or diagnostics',
     (outcome) => {

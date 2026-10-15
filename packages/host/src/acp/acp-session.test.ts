@@ -13,6 +13,9 @@ import { provideAcpSession } from '#acp/acp-session-logic.js';
 import type { AcpLentSeams } from '#acp/acp-session-logic.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import { protocolVersion } from '#acp/session.js';
+import { createGrokPermissionReadback } from '#acp/grok-permission-readback.js';
+
+vi.mock('#acp/grok-permission-readback.js', () => ({ createGrokPermissionReadback: vi.fn(() => undefined) }));
 
 const adapter: AcpAdapter = {
   id: 'fake',
@@ -98,4 +101,84 @@ describe('provideAcpSession', () => {
     actor.stop();
     parent.stop();
   });
+});
+
+it('should not present a stale approval when cancelled while preparing settings readback', async () => {
+  const preparing = Promise.withResolvers<undefined>();
+  const prepare = vi.fn(async () => preparing.promise);
+  vi.mocked(createGrokPermissionReadback).mockReturnValueOnce({ prepare });
+  const controller = new AbortController();
+  const approve = vi.fn<AcpLentSeams['approve']>(async () => ({
+    interruptId: 'stale',
+    outcome: 'approved',
+    optionId: 'always-allow',
+  }));
+  const seams: AcpLentSeams = { append: async () => undefined, approve, signal: controller.signal };
+  const fakes = createFakeCallbackActors();
+  const parent = createFakeParent();
+  const machine = provideAcpSession({
+    createId: () => crypto.randomUUID(),
+    seams: () => seams,
+    publishSkills: async () => [],
+  }).provide({ actors: { adapterConnection: fakes.actor('connection') } });
+  const actor = createActor(machine, {
+    input: {
+      key: 'fake:chat-1',
+      opening: {
+        adapter,
+        cwd: '/work',
+        mcpServers: [],
+        sessionMessageId: 'session-message',
+        sessionCommitted: false,
+        notices: false,
+      },
+      lend: { requestId: 'run-1:0', prompt: { fresh: [{ type: 'text', text: 'hi' }] } },
+      parentRef: parent.ref,
+    },
+  });
+  const answer = (result: unknown): void => {
+    const call = fakes.deliveries
+      .filter((delivery) => delivery.name === 'connection')
+      .map((delivery) => delivery.event)
+      .findLast((event) => event.type === 'call');
+    fakes.sendBack('connection', {
+      type: 'callSettled',
+      id: String(call?.['id']),
+      at: 0,
+      answer: { method: String(call?.['method']), result },
+    });
+  };
+  actor.start();
+  try {
+    await flush();
+    answer({ protocolVersion, agentCapabilities: {} });
+    answer({ sessionId: 'acp-1' });
+    await flush();
+    await flush();
+    fakes.sendBack('connection', {
+      type: 'vendorRequest',
+      id: 'permission-1',
+      request: {
+        method: 'session/request_permission',
+        params: {
+          sessionId: 'acp-1',
+          toolCall: { toolCallId: 'call-1', title: 'MCP tool' },
+          options: [{ optionId: 'always-allow', name: 'Always', kind: 'allow_always' }],
+        },
+      },
+    });
+    await vi.waitFor(() => {
+      expect(prepare).toHaveBeenCalledOnce();
+    });
+    controller.abort();
+    actor.send({ type: 'cancel' });
+    preparing.resolve(undefined);
+    await flush();
+    await flush();
+    expect(approve).not.toHaveBeenCalled();
+  } finally {
+    preparing.resolve(undefined);
+    actor.stop();
+    parent.stop();
+  }
 });

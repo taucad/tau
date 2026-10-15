@@ -3,7 +3,11 @@ import { z } from 'zod';
 import type { ProviderMetadata, UIMessageChunk } from 'ai';
 import type { AgentLiveEvent, AgentLogEvent, KnownProjectionEvent, ProviderMessageMetadata } from '@taucad/agent-host';
 import { userProviderMessageSchema } from '@taucad/agent-host';
-import { externalAgentStopSchema, providerPermissionSchema } from '@taucad/agent-host/wire';
+import {
+  externalAgentStopSchema,
+  providerPermissionSchema,
+  providerPermissionResolutionSchema,
+} from '@taucad/agent-host/wire';
 import type { ProviderPermission } from '@taucad/agent-host/wire';
 import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
 import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/chat';
@@ -409,6 +413,16 @@ const assistantChunks = (
         title: embedded['uri'],
         filename: embedded['uri'],
       });
+      continue;
+    }
+    if (
+      value['type'] === 'provider-permission-observation' &&
+      tauInternal?.['kind'] === 'provider-permission-observation'
+    ) {
+      const parsed = providerPermissionResolutionSchema.safeParse(value['resolution']);
+      if (parsed.success && typeof value['interruptId'] === 'string' && value['interruptId'] !== '') {
+        chunks.push({ type: 'tool-output-available', toolCallId: value['interruptId'], output: parsed.data });
+      }
       continue;
     }
     if (value['type'] === 'acp-session') {
@@ -1197,6 +1211,7 @@ const loginOf = (payload: unknown): AgentHostLogin | undefined => {
 
 const interruptResolutionSchema = z.looseObject({
   outcome: z.enum(['approved', 'denied', 'cancelled']).optional(),
+  optionId: z.string().min(1).max(512).optional(),
 });
 
 const agentHostApprovalSchema = z.object({
@@ -1229,8 +1244,15 @@ const approvalChunks = (
 ): readonly UIMessageChunk[] => {
   if (event.phase === 'resolved') {
     // `reason` carries the outcome verbatim on every host that writes one.
-    const outcome = interruptResolutionSchema.safeParse(event.payload).data?.outcome ?? event.reason;
-    return [{ type: 'tool-output-available', toolCallId: event.interruptId, output: { outcome } }];
+    const resolution = interruptResolutionSchema.safeParse(event.payload).data;
+    const outcome = resolution?.outcome ?? event.reason;
+    return [
+      {
+        type: 'tool-output-available',
+        toolCallId: event.interruptId,
+        output: { outcome, ...(resolution?.optionId === undefined ? {} : { optionId: resolution.optionId }) },
+      },
+    ];
   }
   const request = interruptRequestSchema.safeParse(event.payload).data;
   const providerPermission = providerPermissionSchema.safeParse(request?.context?.providerPermission).data;

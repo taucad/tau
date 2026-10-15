@@ -136,3 +136,48 @@ it.each(['', 'dark', 'dark black', 'dark high-contrast'])(
     expect(group.scrollWidth).toBeLessThanOrEqual(group.clientWidth);
   },
 );
+
+it('should wrap provider readback status at 320px with enlarged text', async () => {
+  await page.viewport(1000, 900);
+  document.documentElement.className = 'dark';
+  document.documentElement.style.fontSize = '200%';
+  render(
+    <div style={{ width: 320 }}>
+      <ChatPermissionRequest
+        approval={{
+          interruptId: 'readback-1',
+          kind: 'approval',
+          prompt: 'Inspect the Tau model view',
+          options: [],
+          providerPermission: {
+            owner: 'provider',
+            persistence: 'unverified',
+            options: [{ optionId: 'allow_always', requestedScope: 'persistent' }],
+          },
+        }}
+        name='Codex'
+        resolution={{
+          outcome: 'approved',
+          optionId: 'allow_always',
+          observation: {
+            version: 1,
+            provider: 'codex',
+            optionId: 'allow_always',
+            toolCallId: 'call-1',
+            requestedScope: 'persistent',
+            stored: 'present',
+            effective: 'overridden',
+            preexisting: false,
+            observation: 'config-readback',
+            reason: 'policy-overridden',
+          },
+        }}
+      />
+    </div>,
+  );
+  const region = screen.getByRole('region');
+  expect(region.scrollWidth).toBeLessThanOrEqual(region.clientWidth);
+  expect(screen.getByText('Preference found · another Codex rule takes precedence')).toBeVisible();
+  expect(screen.queryByRole('button')).toBeNull();
+  await page.screenshot({ path: '../../../../../out/test-results/message-queue/provider-readback-enlarged.png' });
+});

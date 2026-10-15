@@ -335,6 +335,7 @@ catalog:
   '@swc/core': 1.15.8
   '@better-auth-ui/core': 1.7.29
   '@better-auth-ui/react': 1.7.29
+  smol-toml: 1.9.1
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

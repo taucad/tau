@@ -5,6 +5,7 @@ import { isRecord } from '@taucad/utils/schema';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import type { ProviderPermissionResolution } from '@taucad/agent-host/wire';
 import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
 import { useFeature } from '#flags/use-feature.js';
 
@@ -53,10 +54,62 @@ export function permissionContent(approval: AgentHostApproval): {
   };
 }
 
+/** Read-back describes observed provider settings, not proof of a newly durable write. */
+const permissionStatus = ({
+  approval,
+  outcome,
+  resolution,
+  name,
+}: {
+  readonly approval: AgentHostApproval;
+  readonly outcome: string | undefined;
+  readonly resolution: ProviderPermissionResolution | undefined;
+  readonly name: string;
+}): string => {
+  if (approval.providerPermission && (outcome === 'approved' || outcome === 'denied')) {
+    const selected = approval.providerPermission.options.find((option) => option.optionId === resolution?.optionId);
+    if (outcome === 'approved') {
+      const observation = resolution?.observation;
+      if (selected?.requestedScope === 'persistent' && observation?.optionId === selected.optionId) {
+        if (observation.stored === 'present' && observation.effective === 'allowed') {
+          return `Allowed in ${name} settings`;
+        }
+        if (observation.stored === 'present' && observation.effective === 'overridden') {
+          return `Preference found · another ${name} rule takes precedence`;
+        }
+        if (observation.stored === 'present') {
+          return 'Preference found · effective approval not confirmed';
+        }
+        if (observation.stored === 'absent') {
+          return `Not found in ${name} settings · future requests may ask again`;
+        }
+        return `Response recorded · ${name} saving could not be checked`;
+      }
+      if (selected?.requestedScope === 'once') {
+        return 'Allowed once · response recorded';
+      }
+      if (selected?.requestedScope === 'session') {
+        return 'Session approval requested · response recorded';
+      }
+    } else if (selected?.requestedScope === 'once') {
+      return 'Denied · response recorded';
+    }
+    return 'Response recorded · provider saving unverified';
+  }
+  return outcome === 'approved'
+    ? 'Request allowed'
+    : outcome === 'denied'
+      ? 'Request denied'
+      : outcome === 'cancelled'
+        ? 'Request cancelled'
+        : 'Request closed';
+};
+
 type ChatPermissionRequestProps = {
   readonly approval: AgentHostApproval;
   readonly name: string;
   readonly outcome?: string | undefined;
+  readonly resolution?: ProviderPermissionResolution | undefined;
   readonly onReview?: (() => void) | undefined;
   readonly onRespond?: ((approved: boolean, optionId?: string) => Promise<void>) | undefined;
 };
@@ -69,10 +122,12 @@ export function ChatPermissionRequest(props: ChatPermissionRequestProps): React.
 function PermissionRequest({
   approval,
   name,
-  outcome,
+  outcome: legacyOutcome,
+  resolution,
   onRespond,
   onReview,
 }: ChatPermissionRequestProps): React.JSX.Element {
+  const outcome = resolution?.outcome ?? legacyOutcome;
   const isDebug = useFeature('tauDebug');
   const machinesEnabled = useFeature('machines');
   const machineDisabled = !machinesEnabled && approval.context?.machineId !== undefined;
@@ -99,16 +154,7 @@ function PermissionRequest({
     }
   };
   const isSettled = outcome !== undefined;
-  const status =
-    approval.providerPermission && (outcome === 'approved' || outcome === 'denied')
-      ? 'Response recorded · provider saving unverified'
-      : outcome === 'approved'
-        ? 'Request allowed'
-        : outcome === 'denied'
-          ? 'Request denied'
-          : outcome === 'cancelled'
-            ? 'Request cancelled'
-            : 'Request closed';
+  const status = permissionStatus({ approval, outcome, resolution, name });
   const StatusIcon = outcome === 'approved' ? Check : CircleX;
   return (
     <section
@@ -126,6 +172,11 @@ function PermissionRequest({
         </p>
       ) : null}
       <p className='text-sm/5 font-medium [overflow-wrap:anywhere] wrap-break-word'>{content.title}</p>
+      {!isSettled && approval.providerPermission?.unsupportedReason === 'unconfigured-mcp-server' ? (
+        <p className='text-xs/5 text-muted-foreground'>
+          This temporary connection supports approval for this request or session.
+        </p>
+      ) : null}
       {!isSettled && (machineDisabled || content.consequence) ? (
         <p className='flex items-start gap-2 text-xs/5'>
           <TriangleAlert aria-hidden className='size-4 shrink-0 text-warning' />

@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 import type { JsonValue } from '@taucad/agent-host';
-import type { ProviderPermission } from '@taucad/agent-host/wire';
+import { providerPermissionObservationSchema } from '@taucad/agent-host/wire';
+import type { ProviderPermission, ProviderPermissionObservation } from '@taucad/agent-host/wire';
 import type { AcpAdapter } from '#acp/registry.js';
 
 const credentialKeys = new Set([
@@ -17,6 +18,7 @@ const credentialKeys = new Set([
   'refreshtoken',
   'idtoken',
   'apikey',
+  'xapikey',
   'credentials',
   'privatekey',
 ]);
@@ -35,6 +37,9 @@ export const redactPermissionMetadata = (value: JsonValue): JsonValue => {
   if (value === null || typeof value !== 'object') {
     return value;
   }
+  const headerName = 'name' in value ? value.name : undefined;
+  const credentialHeader =
+    typeof headerName === 'string' && credentialKeys.has(headerName.replaceAll(/[_-]/gu, '').toLowerCase());
   return Object.fromEntries(
     Object.entries(value).flatMap(([key, item]) => {
       if (key === '_meta') {
@@ -43,7 +48,7 @@ export const redactPermissionMetadata = (value: JsonValue): JsonValue => {
       return [
         [
           key,
-          credentialKeys.has(key.replaceAll(/[_-]/gu, '').toLowerCase())
+          (credentialHeader && key === 'value') || credentialKeys.has(key.replaceAll(/[_-]/gu, '').toLowerCase())
             ? '[redacted]'
             : redactPermissionMetadata(item),
         ],
@@ -57,11 +62,13 @@ export const redactPermissionMetadata = (value: JsonValue): JsonValue => {
  * @internal
  * @param request - Permission request from the current connection.
  * @param adapter - Host-resolved adapter identity, never request-supplied identity.
+ * @param readback - Connection-negotiated or host-qualified settings reader facts for this exact request.
  * @returns Safe permission presentation facts for the durable interrupt.
  */
 export const providerPermissionPayload = (
   request: RequestPermissionRequest,
   adapter: Pick<AcpAdapter, 'id' | 'package' | 'version'>,
+  readback: { readonly negotiated?: boolean | undefined; readonly localPrepared?: boolean | undefined } = {},
 ): JsonValue => {
   // Codex ACP v1.7.0 permissions/mcp.ts: both session and always use ACP allow_always.
   const codexMcp =
@@ -69,9 +76,23 @@ export const providerPermissionPayload = (
     adapter.package === '@agentclientprotocol/codex-acp' &&
     adapter.version === '1.7.0' &&
     request._meta?.['is_mcp_tool_approval'] === true;
+  const unsupported =
+    codexMcp &&
+    readback.negotiated &&
+    z
+      .object({
+        version: z.literal(1),
+        support: z.literal('unsupported'),
+        reason: z.literal('unconfigured-mcp-server'),
+      })
+      .safeParse(request.toolCall._meta?.['tau/permissionPersistence']).success;
+  const grokMcp = adapter.id === 'grok' && readback.localPrepared;
   const providerPermission: ProviderPermission = {
     owner: 'provider',
     persistence: 'unverified',
+    ...(codexMcp && readback.negotiated ? { readback: unsupported ? 'unsupported' : 'config-layers' } : {}),
+    ...(grokMcp ? { readback: 'permission-file' } : {}),
+    ...(unsupported ? { unsupportedReason: 'unconfigured-mcp-server' } : {}),
     options: request.options.map((option) => ({
       optionId: option.optionId,
       requestedScope: codexMcp
@@ -82,7 +103,13 @@ export const providerPermissionPayload = (
             : option.kind === 'allow_always' && option.optionId === 'allow_always'
               ? 'persistent'
               : 'unspecified'
-        : 'unspecified',
+        : grokMcp
+          ? option.kind === 'allow_once' || option.kind === 'reject_once'
+            ? 'once'
+            : option.kind === 'allow_always' && option.optionId === 'always-allow'
+              ? 'persistent'
+              : 'unspecified'
+          : 'unspecified',
     })),
   };
   const { toolCall } = request;
@@ -102,3 +129,37 @@ export const providerPermissionPayload = (
     }),
   );
 };
+
+/** The optional readback extension advertised by a reviewed adapter. @internal */
+export const permissionReadbackCapability = { version: 1, readback: 'config-layers', families: ['mcp-tool'] } as const;
+
+/**
+ * Negotiate the reviewed extension without trusting request-supplied provider identities.
+ * @internal
+ * @param adapter - Host-resolved adapter.
+ * @param metadata - Initialize response extension value.
+ * @returns Whether this connection supports the reviewed narrow readback.
+ */
+export const supportsPermissionReadback = (
+  adapter: Pick<AcpAdapter, 'id' | 'package' | 'version'>,
+  metadata: unknown,
+): boolean =>
+  adapter.id === 'codex' &&
+  adapter.package === '@agentclientprotocol/codex-acp' &&
+  adapter.version === '1.7.0' &&
+  z
+    .object({
+      version: z.literal(1),
+      readback: z.literal('config-layers'),
+      families: z.array(z.string()).refine((families) => families.includes('mcp-tool')),
+    })
+    .safeParse(metadata).success;
+
+/**
+ * Read only the bounded extension fields; opaque provider metadata never becomes a receipt.
+ * @internal
+ * @param metadata - One tool-call update extension.
+ * @returns Parsed readback, or undefined for malformed or incompatible metadata.
+ */
+export const permissionObservationOf = (metadata: unknown): ProviderPermissionObservation | undefined =>
+  providerPermissionObservationSchema.safeParse(metadata).data;

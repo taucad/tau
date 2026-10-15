@@ -136,6 +136,7 @@ describe('cloudProjectStub', () => {
     expect(cloudProjectStub({ id: 'proj_bbbbbbbbbbbbbbbbbbbbb', name: 'Bracket Beta', role: 'owner' })).toEqual({
       id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
       chat: false,
+      deferInitialView: true,
       project: { name: 'Bracket Beta', description: '', tags: [], assets: { main: { entryPath: 'main.scad' } } },
       files: {},
     });

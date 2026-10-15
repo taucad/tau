@@ -10,7 +10,9 @@
  *   desktop:prepare-picogk-dotnet.
  * Usage: node --import @oxc-node/core/register scripts/spikes/native-deps/fetch-payloads.mts
  *   --python-tree <dir> --picogk-tree <dir> --cache <dir> --plan <plan.json> --layer-list <file> --layer-archive <file>
- *   [--out <summary.json>]
+ *   [--lock <requirements.lock>] [--out <summary.json>]
+ *   `--lock` names the lock the producer resolved the trees from (default: this checkout's lock); trees reused
+ *   from an earlier run must be checked against that run's lock, not a later one.
  * Exit codes: 0 when every payload matches its published digest; 1 otherwise.
  */
 
@@ -89,7 +91,16 @@ const parseLock = (body: string): Map<string, { version: string; hashes: Set<str
 };
 
 const main = async (): Promise<void> => {
-  const flags = parseFlags(['python-tree', 'picogk-tree', 'cache', 'plan', 'layer-list', 'layer-archive', 'out']);
+  const flags = parseFlags([
+    'python-tree',
+    'picogk-tree',
+    'cache',
+    'plan',
+    'layer-list',
+    'layer-archive',
+    'lock',
+    'out',
+  ]);
   const pythonTree = resolve(requiredFlag(flags, 'python-tree'));
   const picogkTree = resolve(requiredFlag(flags, 'picogk-tree'));
   const cache = resolve(requiredFlag(flags, 'cache'));
@@ -122,9 +133,10 @@ const main = async (): Promise<void> => {
   );
 
   // 2. The wheels the producer installed, chosen by lock digest and installed WHEEL tag.
-  const pins = parseLock(
-    readFileSync(resolve(repoRoot, 'packages/plugins/build123d/python/requirements.lock'), 'utf8'),
+  const lockPath = resolve(
+    flags.get('lock') ?? resolve(repoRoot, 'packages/plugins/build123d/python/requirements.lock'),
   );
+  const pins = parseLock(readFileSync(lockPath, 'utf8'));
   const sitePackagesRelative = 'lib/python3.13/site-packages';
   const sitePackages = join(pythonTree, sitePackagesRelative);
   const baseDistributions = new Set(['pip']);
@@ -148,7 +160,7 @@ const main = async (): Promise<void> => {
       continue;
     }
     if (!pin) {
-      throw new Error(`installed ${directory} is not pinned in requirements.lock`);
+      throw new Error(`installed ${directory} is not pinned in ${lockPath}`);
     }
     const installedTags = new Set(
       readFileSync(join(sitePackages, directory, 'WHEEL'), 'utf8')

@@ -463,14 +463,27 @@ jobs:
       - *download-trees
       - *unpack-trees
       - name: Fetch and digest-check the payloads (data only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TREES_RUN_ID: ${{ inputs.trees-run-id }}
         run: |
           exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
           spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
           payloads="$RUNNER_TEMP/payloads"
           mkdir -p "$payloads"
+          # Reused trees were resolved from the lock at their own run's commit; a later lock may pin newer versions.
+          lock_path=packages/plugins/build123d/python/requirements.lock
+          lock="$lock_path"
+          if [ -n "$TREES_RUN_ID" ]; then
+            trees_sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$TREES_RUN_ID" --jq .head_sha)
+            lock="$payloads/requirements.lock"
+            gh api -H 'Accept: application/vnd.github.raw' "repos/$GITHUB_REPOSITORY/contents/$lock_path?ref=$trees_sha" > "$lock"
+            echo "trees from run $TREES_RUN_ID at $trees_sha; lock diff against this checkout:"
+            diff "$lock_path" "$lock" || true
+          fi
           spike fetch-payloads --python-tree "$TREES/python/darwin-arm64" --picogk-tree "$TREES/picogk/darwin-arm64" \
             --cache "$payloads" --plan "$OUT/s13-plan.json" --layer-list "$payloads/layer.txt" \
-            --layer-archive "$payloads/tau-layer.tar.gz" --out "$OUT/s13-extra.json"
+            --layer-archive "$payloads/tau-layer.tar.gz" --lock "$lock" --out "$OUT/s13-extra.json"
           tar -czf "$payloads/tau-layer.tar.gz" -C "$TREES/picogk/darwin-arm64" -T "$payloads/layer.txt"
           ls -l "$payloads" | head -80
           jq -c '{wheelCount, wheelBytes, pythonBuildStandalone, dotnetRuntime, layerFiles}' "$OUT/s13-extra.json"

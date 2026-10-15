@@ -83,7 +83,7 @@ type ProjectContextType = {
   setEntriesRecord: (record: WorkbenchEntries | undefined) => void;
   registerEntryPathChange: (change: (operation: EntryPathChange) => Promise<boolean>) => () => void;
   changeEntryPaths: (operation: EntryPathChange) => Promise<boolean>;
-  registerWorkbenchRecordProducer: (flush: () => Promise<boolean>) => () => void;
+  registerWorkbenchRecordProducer: (flush: () => Promise<void>) => () => void;
   flushWorkbenchRecordProducers: () => Promise<void>;
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
@@ -421,18 +421,24 @@ export function ProjectProvider({
       }),
     [fileManager.parameterFiles, fileManager.contentService, fileSystemRoot, previewParameterService],
   );
-  const workbenchRecordProducers = useRef(new Set<() => Promise<boolean>>());
-  const registerWorkbenchRecordProducer = useCallback((flush: () => Promise<boolean>) => {
+  const workbenchRecordProducers = useRef(new Set<() => Promise<void>>());
+  const registerWorkbenchRecordProducer = useCallback((flush: () => Promise<void>) => {
     workbenchRecordProducers.current.add(flush);
     return () => {
       workbenchRecordProducers.current.delete(flush);
     };
   }, []);
   const flushWorkbenchRecordProducers = useCallback(async (): Promise<void> => {
-    for (const flush of workbenchRecordProducers.current) {
-      if (!(await flush())) {
-        throw new Error('Workbench records could not be saved.');
-      }
+    const outcomes = await Promise.allSettled([...workbenchRecordProducers.current].map(async (flush) => flush()));
+    const failures = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+    if (failures.length > 0) {
+      const reasons = failures.map((failure) => failure.reason as unknown);
+      throw new AggregateError(
+        reasons,
+        reasons
+          .map((reason) => (reason instanceof Error ? reason.message : 'Workbench records are not confirmed saved.'))
+          .join(' '),
+      );
     }
   }, []);
   /* A re-memoed service replaces the previous one; close the one it replaced. Never close on unmount:

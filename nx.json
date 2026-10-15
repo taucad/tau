@@ -214,7 +214,7 @@
       "pattern": "v{version}"
     },
     "git": {
-      "commitMessage": "chore(release): v{version}"
+      "commitMessage": "chore(root): Release the npm packages as v{version}"
     }
   },
   "analytics": true

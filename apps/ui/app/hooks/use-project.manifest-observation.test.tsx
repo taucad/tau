@@ -234,6 +234,57 @@ it('reloads the physical project manifest after held retry without accepting its
   }
 });
 
+it('should attempt every registered record and report every refusal on direct project close', async () => {
+  const project = projectToManifest({
+    id: 'proj_123456789012345678901',
+    name: 'Close records',
+    description: '',
+    tags: [],
+    assets: { main: { entryPath: 'main.ts' } },
+  });
+  Object.assign(fixture.actor.getSnapshot().context, { project });
+  fixture.readFile.mockResolvedValue(serializeProjectManifest(project));
+  let current: ReturnType<typeof useProject> | undefined;
+  function Probe(): undefined {
+    current = useProject();
+    return undefined;
+  }
+  const mounted = render(
+    <ProjectProvider projectId={project.id} profile='shared'>
+      <Probe />
+    </ProjectProvider>,
+  );
+  const first = new Error('Pane layout is not confirmed saved.');
+  const second = new Error('View settings for main.cs are not confirmed saved.');
+  const layout = vi.fn(async () => {
+    throw first;
+  });
+  const view = vi.fn(async () => {
+    throw second;
+  });
+  const unregisterLayout = current!.registerWorkbenchRecordProducer(layout);
+  const unregisterView = current!.registerWorkbenchRecordProducer(view);
+  try {
+    await expect(current!.flushWorkbenchRecordProducers()).rejects.toMatchObject({
+      message: `${first.message} ${second.message}`,
+      errors: [first, second],
+    });
+    expect(layout).toHaveBeenCalledTimes(1);
+    expect(view).toHaveBeenCalledTimes(1);
+    unregisterLayout();
+    await expect(current!.flushWorkbenchRecordProducers()).rejects.toMatchObject({
+      message: second.message,
+      errors: [second],
+    });
+    unregisterView();
+    await expect(current!.flushWorkbenchRecordProducers()).resolves.toBeUndefined();
+  } finally {
+    unregisterLayout();
+    unregisterView();
+    mounted.unmount();
+  }
+});
+
 it('should replay held temporary parameters after replacement CAD connection and document opening', async () => {
   const service = mock<ParameterSetService>();
   service.subscribeActors.mockReturnValue(() => undefined);

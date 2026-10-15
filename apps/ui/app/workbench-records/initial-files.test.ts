@@ -30,6 +30,16 @@ describe('project creation workbench files', () => {
     expect(new TextDecoder().decode(layoutBytes)).toBe(workbenchRecords.layout.serialize(layout.record));
   });
 
+  it('seeds an unbound view while the cloud manifest is unknown', () => {
+    const seeded = seedInitialWorkbenchFiles({}, undefined);
+    const viewPath = Object.keys(seeded).find((path) => path.startsWith('.tau/workbench/views/'));
+    expect(viewPath).toBeDefined();
+    expect(workbenchRecords.view.read(seeded[viewPath!]!.content)).toMatchObject({
+      status: 'current',
+      record: { entryPath: null },
+    });
+  });
+
   it('preserves imported or duplicated workbench bytes exactly', () => {
     const existing = {
       [workbenchPaths.layout]: { content: bytes('{"external":true}') },

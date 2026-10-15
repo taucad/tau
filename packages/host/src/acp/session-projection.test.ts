@@ -40,17 +40,34 @@ const stubTurn = (appended: ExternalAgentLogEvent[] = []): AcpPromptTurn => ({
 
 it.each(['grok', 'codex'])('should project every additional Tau MCP capability for %s', async (agentId) => {
   const cases = [
-    ['get_parameters', { targetFile: 'main.py' }],
-    ['apply_parameter_operation', { action: 'cancel', targetFile: 'main.py', requestId: 'request-1' }],
-    ['list_machines', {}],
-    ['get_machine', { machineId: 'fixture' }],
-    ['machine_action', { machineId: 'fixture', componentId: 'switch', action: 'switch.set' }],
-    ['stop_machine', { machineId: 'fixture' }],
-    ['get_print_profiles', { machineId: 'fixture' }],
-    ['request_job', { targetFile: 'main.py' }],
-    ['check_job', { targetFile: 'main.py' }],
+    ['get_parameters', { targetFile: 'main.py' }, { status: 'unresolved', diagnostics: [] }],
+    [
+      'apply_parameter_operation',
+      { action: 'cancel', targetFile: 'main.py', requestId: 'request-1' },
+      { outcome: { status: 'cancelled-before-apply', requestId: 'request-1' } },
+    ],
+    ['list_machines', {}, 'No machines bound.'],
+    ['get_machine', { machineId: 'fixture' }, 'Fixture simulator: idle.'],
+    [
+      'machine_action',
+      { machineId: 'fixture', componentId: 'switch', action: 'switch.set' },
+      { status: 'refused', message: 'Fixture only; no physical action.' },
+    ],
+    ['stop_machine', { machineId: 'fixture' }, { status: 'done', message: 'Fixture stopped.' }],
+    ['get_print_profiles', { machineId: 'fixture' }, { engine: 'reference' }],
+    [
+      'request_job',
+      { targetFile: 'main.py' },
+      {
+        job: { jobId: 'fixture-job', machineId: 'fixture', state: 'denied', program: { name: 'fixture' } },
+        approval: 'denied',
+        simulated: true,
+      },
+    ],
+    ['check_job', { targetFile: 'main.py' }, { status: 'blocked', message: 'Fixture only.', simulated: true }],
   ] as const;
-  for (const [name, input] of cases) {
+  for (const [name, input, output] of cases) {
+    const carrier = typeof output === 'string' ? { value: output } : output;
     // oxlint-disable-next-line no-await-in-loop -- Exercise each call's independent projection lifecycle.
     const messages = await project(
       [
@@ -67,6 +84,15 @@ it.each(['grok', 'codex'])('should project every additional Tau MCP capability f
               ? { 'x.ai/tool': { name: 'use_tool', namespace: 'grok_build' } }
               : { is_mcp_tool_call: true },
         },
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: name,
+          status: 'completed',
+          rawOutput:
+            agentId === 'grok'
+              ? { type: 'MCP', tool_name: name, server_name: 'tau', output: { OkayOutput: JSON.stringify(carrier) } }
+              : { result: { structuredContent: carrier, content: [] } },
+        },
       ],
       agentId,
       undefined,
@@ -78,41 +104,8 @@ it.each(['grok', 'codex'])('should project every additional Tau MCP capability f
       content: input,
       metadata: { tauInternal: { presentation: 'tau-mcp' } },
     });
+    expect(messages[1]).toMatchObject({ role: 'tool-output', toolName: name, content: output, isError: false });
   }
-});
-
-it.each(['list_machines', 'get_machine'])('should unwrap the MCP string carrier for %s', async (name) => {
-  const messages = await project(
-    [
-      {
-        sessionUpdate: 'tool_call',
-        toolCallId: name,
-        title: name,
-        rawInput: { tool_name: `tau__${name}`, tool_input: {} },
-        _meta: { 'x.ai/tool': { name: 'use_tool', namespace: 'grok_build' } },
-      },
-      {
-        sessionUpdate: 'tool_call_update',
-        toolCallId: name,
-        status: 'completed',
-        rawOutput: {
-          type: 'MCP',
-          tool_name: name,
-          server_name: 'tau',
-          output: { OkayOutput: '{"value":"No machines bound."}' },
-        },
-      },
-    ],
-    'grok',
-    undefined,
-    'tau',
-  );
-  expect(messages[1]).toMatchObject({
-    role: 'tool-output',
-    toolName: name,
-    content: 'No machines bound.',
-    isError: false,
-  });
 });
 
 it('should normalize a qualified Grok MCP call and its JSON output', async () => {

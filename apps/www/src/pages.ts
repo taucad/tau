@@ -1,3 +1,5 @@
+import { legalDocuments } from '#www/legal.js';
+
 /** Public route metadata, shared by SSR loaders and the sitemap. */
 export const pages: Array<{ path: string; title: string; description: string; error?: boolean }> = [
   {
@@ -70,6 +72,16 @@ export const pages: Array<{ path: string; title: string; description: string; er
     title: 'Privacy on this site · Tau',
     description: 'How the Tau marketing site handles optional analytics, browser storage and links to the Tau app.',
   },
+  {
+    path: '/legal/',
+    title: 'Legal · Tau',
+    description: 'Terms, privacy, cookies, acceptable use, sub-processors and open-source notices for Tau.',
+  },
+  ...legalDocuments.map(({ slug, title, description }) => ({
+    path: `/legal/${slug}/`,
+    title: `${title} · Tau`,
+    description,
+  })),
   {
     path: '/404.html',
     title: 'Page not found · Tau',

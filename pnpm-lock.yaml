@@ -2854,9 +2854,24 @@ importers:
       react-router:
         specifier: 'catalog:'
         version: 7.18.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      rehype-stringify:
+        specifier: 'catalog:'
+        version: 10.0.1
+      remark-gfm:
+        specifier: 'catalog:'
+        version: 4.0.1
+      remark-parse:
+        specifier: 'catalog:'
+        version: 11.0.0
+      remark-rehype:
+        specifier: 'catalog:'
+        version: 11.1.2
       three:
         specifier: 'catalog:'
         version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      unified:
+        specifier: 'catalog:'
+        version: 11.0.5
     devDependencies:
       '@netlify/vite-plugin-react-router':
         specifier: ^3.1.1

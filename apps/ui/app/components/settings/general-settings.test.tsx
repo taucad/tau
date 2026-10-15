@@ -194,7 +194,7 @@ describe('GeneralSettings', () => {
       const links = screen.getAllByRole('link', { name: 'Learn more' });
       expect(links.length).toBeGreaterThan(0);
       for (const link of links) {
-        expect(link).toHaveAttribute('href', '/legal/privacy#9.2.1');
+        expect(link).toHaveAttribute('href', '/legal/privacy#9.2.1-ai-service-improvement');
         expect(link).toHaveAttribute('target', '_blank');
       }
     },
@@ -216,7 +216,7 @@ describe('GeneralSettings', () => {
       const links = screen.getAllByRole('link', { name: 'Learn more' });
       expect(links.length).toBeGreaterThan(0);
       for (const link of links) {
-        expect(link).toHaveAttribute('href', 'https://taucad.dev/legal/privacy#9.2.1');
+        expect(link).toHaveAttribute('href', 'https://taucad.dev/legal/privacy#9.2.1-ai-service-improvement');
       }
     },
   );

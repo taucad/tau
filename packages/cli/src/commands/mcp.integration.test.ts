@@ -612,6 +612,19 @@ describe('tau mcp over stdio', () => {
     const { code, elapsed } = await exitWithin(served, 5000);
     await annotate(`exited ${String(Math.round(elapsed))} ms after the client closed`);
 
+    // An exited child can still have buffered diagnostics; never extend the running-process deadline.
+    if (typeof code === 'number' && code !== 0 && !served.child.stderr.closed) {
+      const drained = Promise.withResolvers<void>();
+      const onClose = (): void => {
+        drained.resolve();
+      };
+      served.child.stderr.once('close', onClose);
+      try {
+        await Promise.race([drained.promise, sleep(1000, undefined, { ref: false })]);
+      } finally {
+        served.child.stderr.off('close', onClose);
+      }
+    }
     if (code !== 0) {
       await annotate(
         served

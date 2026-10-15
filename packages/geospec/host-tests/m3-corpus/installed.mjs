@@ -2,19 +2,24 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from 'geospec/assertion-client';
 import { createGeoSpecVitestAdapter } from 'geospec/vitest';
 import { loadM3CorpusProfileV3 } from './profile-v3.mjs';
-import { loadCurrentM3Campaign, requireEvaluationEnvelope } from './corpus.mjs';
-import { fixturePath, readFixture } from '../fixtures/read-fixture.mjs';
+import {
+  loadCurrentM3Campaign,
+  nativeTargetOf,
+  requireDefinitionsInBinary,
+  requireEvaluationEnvelope,
+} from './corpus.mjs';
+import { fixturePath, locateFixture, readFixture } from '../fixtures/read-fixture.mjs';
 
 const backend = process.env.GEOSPEC_INSTALLED_BACKEND ?? 'native';
 assert.ok(backend === 'native' || backend === 'mixed');
-const backendSpecifier =
-  backend === 'mixed' ? '@taucad/geospec-engine-native/wasm' : '@taucad/geospec-engine-native/node';
+const backendSpecifier = backend === 'mixed' ? 'geospec-engine/wasm' : 'geospec-engine/node';
 const nativeModule = await import(backendSpecifier);
 if (backend === 'mixed') {
   await nativeModule.initialize();
@@ -233,7 +238,7 @@ const materializeCampaignBytes = (campaignPath, record, label) => {
   assert.equal(typeof record?.path, 'string', `${label}: path is required`);
   assert.equal(typeof record?.byteLength, 'number', `${label}: byteLength is required`);
   assert.equal(typeof record?.sha256, 'string', `${label}: sha256 is required`);
-  const bytes = readFileSync(resolve(dirname(campaignPath), record.path));
+  const bytes = readFileSync(locateFixture(resolve(dirname(campaignPath), record.path)));
   assert.equal(bytes.byteLength, record.byteLength, `${label}: byteLength`);
   assert.equal(sha256(bytes), record.sha256, `${label}: sha256`);
   return bytes;
@@ -263,8 +268,41 @@ const materializeCampaignRow = (campaignPath, row) => {
   };
 };
 
+/**
+ * The native binding the installed engine loads on this host: its platform package's `main`, which must be one
+ * of the engine's own optionalDependencies at the engine's version.
+ */
+const installedNativeBinding = () => {
+  const engineManifestPath = fileURLToPath(import.meta.resolve('geospec-engine/package.json'));
+  const engineManifest = JSON.parse(readFileSync(engineManifestPath, 'utf8'));
+  const name = `geospec-engine-${nativeTargetOf()}`;
+  assert.equal(
+    engineManifest.optionalDependencies?.[name],
+    engineManifest.version,
+    `${name} is not a platform package of geospec-engine ${engineManifest.version}`,
+  );
+  const platformManifestPath = createRequire(engineManifestPath).resolve(`${name}/package.json`);
+  const platformManifest = JSON.parse(readFileSync(platformManifestPath, 'utf8'));
+  assert.equal(platformManifest.version, engineManifest.version, `${name}: installed version`);
+  assert.match(platformManifest.main, /\.node$/u, `${name}: native binding entry`);
+  return resolve(dirname(platformManifestPath), platformManifest.main);
+};
+
 const loadDefaultInstalledCampaign = () => {
-  const campaign = loadCurrentM3Campaign(backend, requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'));
+  // The engine's Rust sources live in taucad/geospec: bind the pinned definitions to the bytes this host consumes,
+  // the installed engine's WASM and, for the native backend, its native binding.
+  const engineBinaries = [fileURLToPath(import.meta.resolve('geospec-engine/wasm-binary'))];
+  if (backend === 'native') {
+    engineBinaries.push(installedNativeBinding());
+  }
+  const campaign = loadCurrentM3Campaign(backend, requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'), {
+    requireDefinitions: (definitions) => {
+      for (const binary of engineBinaries) {
+        requireDefinitionsInBinary(definitions, readFileSync(binary), binary);
+      }
+    },
+    nativeTarget: backend === 'native' ? nativeTargetOf() : undefined,
+  });
   // The 18 held controls stay out of the installed campaign, as in the v4 selection.
   const ordinary = campaign.rows.filter((row) => row.authority.scope === 'ordinary');
   assert.equal(ordinary.length, 334);
@@ -1095,6 +1133,7 @@ const compareCampaigns = () => {
     schemaVersion: 1,
     taskId: campaign.taskId,
     sourceCorpusFingerprint: campaign.sourceCorpusFingerprint,
+    nativeTargetExpectations: campaign.nativeTargetExpectations ?? null,
     routeFiles: routePaths,
     summary: {
       rows: rows.length,

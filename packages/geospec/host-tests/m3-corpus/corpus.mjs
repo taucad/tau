@@ -1,13 +1,60 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- The input is hash-verified frozen JSON without a runtime schema package. */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 // oxlint-disable-next-line no-restricted-imports -- The standalone data harness reads its local fixture closure without workspace aliases.
 import { fixturePath, fixtureWorkspaceRoot, readFixture } from '../fixtures/read-fixture.mjs';
 
 const CURRENT_AUTHORITY = 'packages/geospec/host-tests/m3-corpus/current-authority-v5.json';
 const CURRENT_AUTHORITY_SHA256 = 'ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86';
+const NATIVE_TARGET_EXPECTATIONS = 'packages/geospec/host-tests/m3-corpus/native-target-expectations-v1.json';
+const NATIVE_TARGET_EXPECTATIONS_SHA256 = 'abe02dfd61b3cb4aa14aeb64bb180f8b93e092084595e64295b207bc0ee51bef';
+
+/** The NAPI platform suffix (`geospec-engine-<suffix>`) of a host, as the engine's platform packages name it. @internal */
+export function nativeTargetOf(platform = process.platform, arch = process.arch) {
+  return `${platform}-${arch}${platform === 'linux' ? '-gnu' : ''}`;
+}
+
+/**
+ * Select the reviewed per-target native expectations for one campaign. Only the native backend on a listed target
+ * receives any; every row must still carry the base status, claim payload, polarity and primary bytes it was ruled on,
+ * and its recorded operand must decide the new status under the claim's own tolerance-zero comparison.
+ * @internal
+ */
+export function selectNativeTargetExpectations(expectations, campaign, { backend, nativeTarget }) {
+  assert.equal(expectations.schemaVersion, 1);
+  assert.deepEqual(expectations.base, { path: CURRENT_AUTHORITY, sha256: CURRENT_AUTHORITY_SHA256 });
+  if (backend !== 'native') {
+    return new Map();
+  }
+  assert.equal(typeof nativeTarget, 'string', 'native campaign requires the running NAPI target');
+  const target = Object.hasOwn(expectations.targets, nativeTarget) ? expectations.targets[nativeTarget] : undefined;
+  if (!target) {
+    return new Map();
+  }
+  const statuses = new Map();
+  for (const entry of target.rows) {
+    const row = campaign.rows.find((candidate) => candidate.id === entry.id);
+    assert.ok(row, `${entry.id}: target expectation names no campaign row`);
+    assert.equal(row.expected.status, entry.from, `${entry.id}: base expectation changed`);
+    assert.equal(row.sourceRow.identity.subjectContentHash, entry.binding.primarySha256, `${entry.id}: primary bytes`);
+    const claim = JSON.parse(row.authoredRequestUtf8).plan.claims[0];
+    assert.equal(claim.polarity, entry.binding.polarity, `${entry.id}: polarity`);
+    assert.deepEqual(claim.payload, entry.binding.payload, `${entry.id}: claim payload`);
+    assert.equal(claim.payload.kind, 'centerOfMass', `${entry.id}: operand comparison`);
+    assert.equal(claim.payload.expected.tolerance, 0, `${entry.id}: operand comparison`);
+    const satisfied =
+      entry.operand.length === 3 &&
+      entry.operand.every((value, axis) => Object.is(value, claim.payload.expected.point[axis]));
+    assert.equal(
+      entry.to,
+      satisfied === (claim.polarity === 'positive') ? 'passed' : 'failed',
+      `${entry.id}: operand decides status`,
+    );
+    assert.ok(!statuses.has(entry.id), `${entry.id}: duplicate target expectation`);
+    statuses.set(entry.id, entry.to);
+  }
+  return statuses;
+}
 
 /** Project only the reviewed current identities after the original byte authority is verified. @internal */
 export function projectCurrentM3Campaign(campaign) {
@@ -48,9 +95,31 @@ export function projectCurrentM3Campaign(campaign) {
   };
 }
 
-/** Load current semantic expectations; binary provenance belongs to execution receipts. @internal */
-export function loadCurrentM3Campaign(backend, workspaceRoot = fixtureWorkspaceRoot) {
+/** Require the consumed engine binary to carry every pinned definition identity. @internal */
+export function requireDefinitionsInBinary(definitions, bytes, label) {
+  const binary = Buffer.from(bytes);
+  for (const [name, definition] of Object.entries(definitions)) {
+    assert.match(definition.sha256, /^[0-9a-f]{64}$/u, `${name}: pinned definition identity`);
+    assert.ok(
+      binary.includes(definition.sha256, 0, 'latin1'),
+      `${label} does not carry definition ${name} (${definition.sha256})`,
+    );
+  }
+}
+
+/**
+ * Load current semantic expectations; binary provenance belongs to execution receipts.
+ * `requireDefinitions` binds the pinned definition identities to the engine the caller consumes; `nativeTarget`
+ * names the running NAPI target, which selects any reviewed per-target native expectation.
+ * @internal
+ */
+export function loadCurrentM3Campaign(
+  backend,
+  workspaceRoot = fixtureWorkspaceRoot,
+  { requireDefinitions = undefined, nativeTarget = undefined } = {},
+) {
   assert.ok(backend === 'native' || backend === 'mixed', 'current campaign requires an explicit native/mixed profile');
+  assert.equal(typeof requireDefinitions, 'function', 'current campaign requires a definition guard');
   const bytes = readFixture(CURRENT_AUTHORITY, workspaceRoot);
   assert.equal(sha256(bytes), CURRENT_AUTHORITY_SHA256, 'current independent authority changed');
   const original = JSON.parse(bytes);
@@ -59,23 +128,32 @@ export function loadCurrentM3Campaign(backend, workspaceRoot = fixtureWorkspaceR
   assert.equal(campaign.registryVersion, 5);
   assert.equal(campaign.canonicalProfile, 'geospec-jcs-v1');
   assert.equal(campaign.numericProfile, 'geospec-demand-v6');
-  for (const definition of Object.values(campaign.definitions)) {
-    const source = readFileSync(resolve(workspaceRoot, definition.path), 'utf8');
-    assert.ok(source.includes(`"${definition.sha256}"`), `independent definition changed: ${definition.path}`);
-  }
+  requireDefinitions(campaign.definitions);
   assert.equal(campaign.rows.length, 352);
   assert.equal(new Set(campaign.rows.map((row) => row.id)).size, 352);
+  const expectationBytes = readFixture(NATIVE_TARGET_EXPECTATIONS, workspaceRoot);
+  assert.equal(sha256(expectationBytes), NATIVE_TARGET_EXPECTATIONS_SHA256, 'native target expectations changed');
+  const targetStatuses = selectNativeTargetExpectations(JSON.parse(expectationBytes), campaign, {
+    backend,
+    nativeTarget,
+  });
   return {
     ...campaign,
     backend,
     sourcePath: fixturePath(CURRENT_AUTHORITY, workspaceRoot),
     sourceCorpusFingerprint: CURRENT_AUTHORITY_SHA256,
+    nativeTargetExpectations:
+      targetStatuses.size === 0
+        ? null
+        : { target: nativeTarget, sha256: NATIVE_TARGET_EXPECTATIONS_SHA256, rows: [...targetStatuses.keys()] },
     rows: campaign.rows.map((row) => ({
       ...row,
       expected: {
         ...row.expected,
         status:
-          backend === 'mixed' ? (campaign.mixedStatusOverrides[row.id] ?? row.expected.status) : row.expected.status,
+          backend === 'mixed'
+            ? (campaign.mixedStatusOverrides[row.id] ?? row.expected.status)
+            : (targetStatuses.get(row.id) ?? row.expected.status),
       },
     })),
   };

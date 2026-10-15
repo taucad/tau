@@ -145,8 +145,6 @@ describe('Vitest Browser test-runner ownership', () => {
       // The agent plugin's host suite serves the viewer page in a sandboxed host frame and drives `tau mcp` over
       // stdio beside it, which Browser Mode cannot host.
       'packages/agent-plugin/e2e/viewer-page.hosts.test.ts',
-      'packages/geospec-engine-native/bindings/browser-conformance/qualify-mt-product.mjs',
-      'packages/geospec-engine-native/bindings/browser-conformance/run-browser-conformance.ts',
       'scripts/src/canvas-vite.config.test.ts',
       'scripts/src/check-pack-install.ts',
       // The README hero capture drives the Electron desktop app, which Browser Mode cannot host.

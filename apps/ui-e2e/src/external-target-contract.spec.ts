@@ -7,7 +7,7 @@ test('preserves native locator semantics and plain target evidence', async () =>
 
   const nameInput = selectors.getByCss('.container').getByLabelText('Project Name *').first();
   await target.expectVisible(selectors.getByRole('heading', { name: /create new project/i }));
-  await target.expectVisible(selectors.getByText('Create New Project', { exact: true }));
+  await target.expectVisible(selectors.getByRole('heading', { level: 1, name: 'New project', exact: true }));
   await target.focus(nameInput);
   await target.expectFocused(nameInput);
   await target.fill(nameInput, 'Selector Contract');

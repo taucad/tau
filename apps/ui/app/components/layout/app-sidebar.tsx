@@ -11,7 +11,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from '#components/ui/sidebar.js';
-import { TauWordmark } from '#components/icons/tau-wordmark.js';
+import { TauTextWordmark } from '#components/icons/tau-text-wordmark.js';
 import { NavChat } from '#components/nav/nav-chat.js';
 import { navRoutes } from '#constants/route.constants.js';
 import { useFeatureFlags } from '#flags/use-feature.js';
@@ -25,6 +25,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
   const { state, isMobile } = useSidebar();
   const flags = useFeatureFlags();
   const desktopTarget = isDesktopTarget();
+  const isCompact = desktopTarget && !isMobile;
   const isNonMobileCollapsed = !isMobile && state === 'collapsed';
   const navMainItems = React.useMemo(
     () =>
@@ -44,41 +45,44 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
       inert={isNonMobileCollapsed || undefined}
       variant='sidebar'
       collapsible={isMobile ? 'offcanvas' : 'none'}
-      className={cn('w-full border-r border-sidebar-border', properties.className)}
+      className={cn(
+        'w-full border-r border-sidebar-border',
+        isCompact && '[&_[data-slot=sidebar-group-label]]:text-muted-foreground',
+        properties.className,
+      )}
     >
       <SidebarHeader
         className={cn(
           'flex flex-row items-center gap-1',
           isMobile && 'p-1',
-          !isMobile && !desktopTarget && 'h-9 p-0',
-          !isMobile && desktopTarget && 'p-1 pt-9',
+          !isMobile && 'h-9 p-0',
           isMobile && desktopTarget && 'h-9 pl-(--desktop-titlebar-inset) [&_:is(a,button)]:[app-region:no-drag]',
         )}
       >
-        {isMobile || desktopTarget ? (
+        {isMobile ? <SidebarTrigger /> : null}
+        {isMobile ? (
           <SidebarMenuButton
             asChild
             tooltip='Home'
             className='min-w-0 flex-1 gap-0 p-1! group-data-[collapsible=icon]:p-0! [&>svg]:h-7 [&>svg]:w-auto'
           >
             <Link to='/'>
-              <TauWordmark className='py-1 text-primary' />
+              <TauTextWordmark className='py-1 text-primary' />
               <span className='sr-only'>Home</span>
             </Link>
           </SidebarMenuButton>
         ) : null}
-        {isMobile ? <SidebarTrigger /> : null}
       </SidebarHeader>
       <SidebarContent className='gap-0'>
         <div className='sticky top-0 z-10 space-y-1 bg-sidebar px-2 pb-1'>
           {/* Global search entries register when search opens. */}
           <Commands />
-          <NavChat />
+          <NavChat isCompact={isCompact} />
         </div>
         <div className='flex-1 overflow-y-auto'>
           <div className='flex flex-col justify-between'>
-            <ProjectNavigation />
-            <NavMain items={navMainItems} groupLabel='Platform' />
+            <ProjectNavigation className={isCompact ? 'py-1' : undefined} />
+            <NavMain items={navMainItems} groupLabel='Platform' className={isCompact ? 'py-1' : undefined} />
           </div>
         </div>
       </SidebarContent>

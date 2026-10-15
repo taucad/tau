@@ -116,14 +116,7 @@ describe('createServicesBroker', () => {
   it('keeps the rooted runtime filesystem concern main-only', () => {
     expect(servicesConcerns).toContain('runtimeFileSystem');
     expect(servicesConcerns).not.toContain('exactMeasurement');
-    expect(servicesConcerns).not.toContain('geospecPerformance');
-    expect(rendererServicesConcerns).toEqual([
-      'nodeFs',
-      'agentHost',
-      'geospecPerformance',
-      'exactMeasurement',
-      'machines',
-    ]);
+    expect(rendererServicesConcerns).toEqual(['nodeFs', 'agentHost', 'exactMeasurement', 'machines']);
   });
 
   it('grants geometry runner ports only for registered project roots', () => {
@@ -327,6 +320,79 @@ describe('createServicesBroker', () => {
       message: 'MACHINE_BINDING_UNKNOWN',
     });
     await expect(failed).rejects.toThrow('MACHINE_BINDING_UNKNOWN');
+
+    /* The host's typed code survives the relay beside its message. */
+    const refused = broker.completeMachineBinding({ ceremonyId: 'ceremony-3' }, 1000);
+    spawns[0]?.message({
+      type: 'machine-binding-complete-failed',
+      requestId: bindingFrames()[2]?.['requestId'],
+      message: 'Enter the access code shown on the machine.',
+      code: 'MACHINE_CREDENTIAL_REQUIRED',
+    });
+    await expect(refused).rejects.toMatchObject({
+      message: 'Enter the access code shown on the machine.',
+      code: 'MACHINE_CREDENTIAL_REQUIRED',
+    });
+  });
+
+  it('should ask a running utility which machines a program streams to, and answer none without one', async () => {
+    const { broker, spawns } = brokerHarness();
+    /* Asking never spawns a utility: one that is not running feeds nothing. */
+    await expect(broker.streamingMachines(1000, 'quit-1')).resolves.toEqual([]);
+    expect(spawns).toHaveLength(0);
+    broker.resumeMachineStarts('quit-1');
+
+    broker.connect('nodeFs');
+    const asked = broker.streamingMachines(1000, 'quit-1');
+    const question = (spawns[0]?.posted ?? []).find(
+      (message): message is Record<string, unknown> =>
+        typeof message === 'object' &&
+        message !== null &&
+        'type' in message &&
+        message['type'] === 'machines-streaming',
+    );
+    spawns[0]?.message({
+      type: 'machines-streaming-answered',
+      requestId: question?.['requestId'],
+      machines: [{ hostId: 'host', machineId: 'mill', name: 'LongMill' }],
+    });
+    await expect(asked).resolves.toEqual([{ hostId: 'host', machineId: 'mill', name: 'LongMill' }]);
+
+    /* Main calls the quit off: the running utility hears it once. */
+    broker.resumeMachineStarts('quit-1');
+    const resumes = (spawns[0]?.posted ?? []).filter(
+      (message) =>
+        typeof message === 'object' && message !== null && 'type' in message && message.type === 'machines-resume',
+    );
+    expect(resumes).toEqual([{ type: 'machines-resume', attemptId: 'quit-1' }]);
+  });
+
+  it('should peek at the streaming machines for keep-awake with a read-only question, never forking a utility', async () => {
+    const { broker, spawns } = brokerHarness();
+    await expect(broker.peekStreamingMachines(1000)).resolves.toEqual([]);
+    expect(spawns).toHaveLength(0);
+
+    broker.connect('nodeFs');
+    const peeked = broker.peekStreamingMachines(1000);
+    const types = (spawns[0]?.posted ?? []).map((message) =>
+      typeof message === 'object' && message !== null && 'type' in message ? message.type : undefined,
+    );
+    /* Never quit's question, which would hold the utility's starts. */
+    expect(types).toContain('machines-streaming-peek');
+    expect(types).not.toContain('machines-streaming');
+    const question = (spawns[0]?.posted ?? []).find(
+      (message): message is Record<string, unknown> =>
+        typeof message === 'object' &&
+        message !== null &&
+        'type' in message &&
+        message.type === 'machines-streaming-peek',
+    );
+    spawns[0]?.message({
+      type: 'machines-streaming-answered',
+      requestId: question?.['requestId'],
+      machines: [{ hostId: 'host', machineId: 'router', name: 'Router' }],
+    });
+    await expect(peeked).resolves.toEqual(['Router']);
   });
 
   it('should never replay or log an access code, and complete without one when none was typed', async () => {
@@ -861,6 +927,37 @@ describe('createServicesBroker — the quit hold (W19, D31)', () => {
     expect(utility.kill).not.toHaveBeenCalled();
   });
 
+  it('reports a refusal over a streamed run, serves again, and asks again on the next quit', async () => {
+    const { broker, spawns } = brokerHarness();
+    broker.connect('nodeFs');
+    const utility = spawns[0]!;
+
+    const refused = broker.quiesce(5000);
+    utility.message({
+      type: 'quiesce-refused',
+      reason: 'streaming',
+      machines: [{ hostId: 'host', machineId: 'mill', name: 'LongMill' }],
+    });
+    await expect(refused).resolves.toEqual({
+      status: 'streaming',
+      machines: [{ hostId: 'host', machineId: 'mill', name: 'LongMill' }],
+    });
+    expect(() => broker.connect('nodeFs')).not.toThrow();
+
+    const unknown = broker.quiesce(5000);
+    expect(unknown).not.toBe(refused);
+    utility.message({ type: 'quiesce-refused', reason: 'streaming-unknown', message: 'The store is busy.' });
+    await expect(unknown).resolves.toEqual({ status: 'streaming-unknown', message: 'The store is busy.' });
+
+    const assessment = broker.streamingMachines(1000, 'quit-1');
+    utility.message({ type: 'machines-streaming-answered', requestId: 'quit-1', machines: [] });
+    await assessment;
+    const anyway = broker.quiesce(5000, { attemptId: 'quit-1', forceMachines: true });
+    expect(utility.postMessage).toHaveBeenLastCalledWith({ type: 'quiesce', attemptId: 'quit-1', forceMachines: true });
+    utility.message({ type: 'quiesced' });
+    await expect(anyway).resolves.toEqual({ status: 'quiesced' });
+  });
+
   it('cuts at the bound when the utility never answers, so quit is never held open', async () => {
     vi.useFakeTimers();
     try {
@@ -928,5 +1025,129 @@ describe('createServicesBroker — the quit hold (W19, D31)', () => {
     current.message({ type: 'quiesce-failed', message: 'current utility failed' });
 
     await expect(quiescing).resolves.toEqual({ status: 'failed', message: 'current utility failed' });
+  });
+});
+
+describe('attempt-bound machine quit recovery', () => {
+  it('does not kill a live machine utility when teardown was refused', async () => {
+    const { broker, spawns } = brokerHarness();
+    broker.connect('nodeFs');
+    const utility = spawns[0]!;
+    const assessment = broker.streamingMachines(1000, 'review');
+    utility.message({ type: 'machines-streaming-answered', requestId: 'review', machines: [] });
+    await assessment;
+    const settling = broker.quiesce(1000, { attemptId: 'review', forceMachines: false });
+    utility.message({
+      type: 'quiesce-refused',
+      reason: 'streaming',
+      machines: [{ hostId: 'host', machineId: 'mill', name: 'Mill' }],
+    });
+    await expect(settling).resolves.toMatchObject({ status: 'streaming' });
+    await broker.recover('review', 1000);
+    expect(utility.kill).not.toHaveBeenCalled();
+    expect(utility.postMessage).toHaveBeenCalledWith({ type: 'machines-resume', attemptId: 'review' });
+    expect(() => broker.connect('nodeFs')).not.toThrow();
+  });
+  it('waits for a retried teardown after an earlier streaming refusal', async () => {
+    vi.useFakeTimers();
+    try {
+      const { broker, spawns } = brokerHarness();
+      broker.connect('nodeFs');
+      const utility = spawns[0]!;
+      const assessment = broker.streamingMachines(1000, 'review');
+      utility.message({ type: 'machines-streaming-answered', requestId: 'review', machines: [] });
+      await assessment;
+      const first = broker.quiesce(1000, { attemptId: 'review', forceMachines: false });
+      utility.message({
+        type: 'quiesce-refused',
+        reason: 'streaming',
+        machines: [{ hostId: 'host', machineId: 'mill', name: 'Mill' }],
+      });
+      await first;
+      const retry = broker.quiesce(10, { attemptId: 'review', forceMachines: false });
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(retry).resolves.toMatchObject({ status: 'timeout' });
+      const recovery = expect(broker.recover('review', 20)).rejects.toThrow('still settling');
+      await vi.advanceTimersByTimeAsync(20);
+      await recovery;
+      expect(utility.kill).not.toHaveBeenCalled();
+      utility.message({ type: 'quiesced' });
+      await broker.recover('review', 20);
+      expect(utility.kill).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('ignores the replaced utility exit while a new utility is still saving', async () => {
+    vi.useFakeTimers();
+    try {
+      const { broker, spawns } = brokerHarness();
+      broker.connect('nodeFs');
+      const old = spawns[0]!;
+      const first = broker.streamingMachines(1000, 'first');
+      old.message({ type: 'machines-streaming-answered', requestId: 'first', machines: [] });
+      await first;
+      const closed = broker.quiesce(1000, { attemptId: 'first', forceMachines: false });
+      old.message({ type: 'quiesced' });
+      await closed;
+      await broker.recover('first', 1000);
+      broker.connect('nodeFs');
+      const current = spawns[1]!;
+      const second = broker.streamingMachines(1000, 'second');
+      current.message({ type: 'machines-streaming-answered', requestId: 'second', machines: [] });
+      await second;
+      const saving = broker.quiesce(10, { attemptId: 'second', forceMachines: false });
+      old.exit();
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(saving).resolves.toMatchObject({ status: 'timeout' });
+      const recovery = expect(broker.recover('second', 20)).rejects.toThrow('still settling');
+      await vi.advanceTimersByTimeAsync(20);
+      await recovery;
+      expect(current.kill).not.toHaveBeenCalled();
+      current.message({ type: 'quiesced' });
+      await broker.recover('second', 20);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('refuses malformed assessments and stale force consent after utility exit', async () => {
+    const { broker, spawns } = brokerHarness();
+    broker.connect('nodeFs');
+    const utility = spawns[0]!;
+    const assessment = broker.streamingMachines(1000, 'review');
+    utility.message({ type: 'machines-streaming-answered', requestId: 'review', machines: ['not an identity'] });
+    await expect(assessment).rejects.toThrow('invalid streaming assessment');
+    utility.exit();
+    await expect(broker.quiesce(1000, { attemptId: 'review', forceMachines: true })).resolves.toMatchObject({
+      status: 'streaming-unknown',
+    });
+    expect(() => broker.connect('nodeFs')).toThrow();
+    broker.resumeMachineStarts('review');
+    expect(() => broker.connect('nodeFs')).not.toThrow();
+  });
+  it('never kills a still-settling save on recovery timeout, then restores service after the actual reply', async () => {
+    vi.useFakeTimers();
+    try {
+      const { broker, spawns } = brokerHarness();
+      broker.connect('nodeFs');
+      const utility = spawns[0]!;
+      const assessment = broker.streamingMachines(1000, 'review');
+      utility.message({ type: 'machines-streaming-answered', requestId: 'review', machines: [] });
+      await assessment;
+      const settling = broker.quiesce(10, { attemptId: 'review', forceMachines: false });
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(settling).resolves.toMatchObject({ status: 'timeout' });
+      const recovery = broker.recover('review', 20);
+      const rejected = expect(recovery).rejects.toThrow('still settling');
+      await vi.advanceTimersByTimeAsync(20);
+      await rejected;
+      expect(utility.kill).not.toHaveBeenCalled();
+      utility.message({ type: 'quiesced' });
+      await broker.recover('review', 20);
+      expect(utility.kill).toHaveBeenCalledOnce();
+      expect(() => broker.connect('nodeFs')).not.toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

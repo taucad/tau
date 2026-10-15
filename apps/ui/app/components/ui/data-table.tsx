@@ -29,6 +29,7 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { toTitleCase } from '@taucad/ui/utils/label';
 import { SearchInput } from '@taucad/ui/components/search-input';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
 
 // =============================================================================
@@ -36,6 +37,7 @@ import { cn } from '@taucad/ui/utils/cn';
 // =============================================================================
 
 type DataTableProps<Data> = {
+  readonly isLoading?: boolean;
   readonly table: TanstackTable<Data>;
   readonly columns: Array<ColumnDef<Data>>;
   readonly emptyMessage?: string;
@@ -43,6 +45,7 @@ type DataTableProps<Data> = {
 };
 
 export function DataTable<Data>({
+  isLoading = false,
   table,
   columns,
   emptyMessage = 'No results.',
@@ -51,7 +54,7 @@ export function DataTable<Data>({
   // TanStack keeps its state on a stable `table` object, so the React Compiler would cache these reads forever.
   'use no memo';
   return (
-    <Table>
+    <Table aria-busy={isLoading || undefined}>
       <TableHeader>
         {table.getHeaderGroups().map((headerGroup) => (
           <TableRow key={headerGroup.id}>
@@ -64,7 +67,17 @@ export function DataTable<Data>({
         ))}
       </TableHeader>
       <TableBody>
-        {table.getRowModel().rows.length > 0 ? (
+        {isLoading ? (
+          Array.from({ length: 8 }, (_, index) => (
+            <TableRow key={index}>
+              {table.getVisibleLeafColumns().map((column) => (
+                <TableCell key={column.id}>
+                  <Skeleton className='h-8 w-full' />
+                </TableCell>
+              ))}
+            </TableRow>
+          ))
+        ) : table.getRowModel().rows.length > 0 ? (
           table.getRowModel().rows.map((row) => (
             <TableRow
               key={row.id}
@@ -256,6 +269,7 @@ export function DataTableSearch<Data>({
 
   return (
     <SearchInput
+      aria-label={placeholder.replace('…', '')}
       autoComplete='off'
       className={cn('h-8', className)}
       placeholder={placeholder}
@@ -498,7 +512,7 @@ export function DataTableSortingDropdown<Data>({ table }: DataTableSortingDropdo
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant='outline' size='icon'>
+        <Button variant='outline' size='icon' aria-label='Sort'>
           <ArrowUpDown className='size-4' />
         </Button>
       </DropdownMenuTrigger>
@@ -541,7 +555,7 @@ export function DataTableColumnVisibilityDropdown<Data>({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant='outline' size='icon'>
+        <Button variant='outline' size='icon' aria-label='Toggle columns'>
           <List className='size-4' />
         </Button>
       </DropdownMenuTrigger>

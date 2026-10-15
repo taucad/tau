@@ -142,9 +142,10 @@ describe('node filesystem client/host round trip', () => {
 
     const whole = await read();
     expect(whole.map((chunk) => chunk.byteLength)).toEqual([streamChunkSize, streamChunkSize, 17]);
-    expect(new Uint8Array(Buffer.concat(whole))).toEqual(bytes);
+    // Buffer.equals compares in native code; toEqual walks 512 KiB element by element.
+    expect(Buffer.concat(whole).equals(bytes)).toBe(true);
     const range = await read({ position: 11, length: streamChunkSize + 5 });
-    expect(new Uint8Array(Buffer.concat(range))).toEqual(bytes.slice(11, 11 + streamChunkSize + 5));
+    expect(Buffer.concat(range).equals(bytes.subarray(11, 11 + streamChunkSize + 5))).toBe(true);
     expect(await read({ length: 0 })).toEqual([]);
     expect(await read({ position: bytes.byteLength + 20 })).toEqual([]);
     await expect(read({ position: -1 })).rejects.toThrow();
@@ -152,7 +153,7 @@ describe('node filesystem client/host round trip', () => {
     const reader = provider.readFileStream('large.bin').getReader();
     await reader.read();
     await reader.cancel();
-    await expect(provider.readFile('large.bin')).resolves.toEqual(bytes);
+    expect(Buffer.from(await provider.readFile('large.bin')).equals(bytes)).toBe(true);
   });
 
   it('keeps exact and head wire validators distinct', () => {

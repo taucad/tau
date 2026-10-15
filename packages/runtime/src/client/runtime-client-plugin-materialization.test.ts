@@ -59,34 +59,46 @@ describe('RuntimeClient TransportPlugin materialization', () => {
       async removeBinding() {
         throw new Error('Unused fixture operation');
       },
-      async preparePrint() {
+      async checkJob() {
         throw new Error('Unused fixture operation');
       },
-      async uploadPrint() {
+      async requestJob() {
         throw new Error('Unused fixture operation');
       },
-      async requestPrint() {
+      async listJobs() {
         throw new Error('Unused fixture operation');
       },
-      async listPrintRequests() {
-        throw new Error('Unused fixture operation');
-      },
-      async *watchPrintRequests() {
+      async *watchJobs() {
         yield* [];
       },
-      async resolvePrintRequest() {
+      async resolveJob() {
         throw new Error('Unused fixture operation');
       },
-      async withdrawPrintRequest() {
+      async withdrawJob() {
         throw new Error('Unused fixture operation');
       },
-      async startPrint() {
+      async applyAction() {
+        throw new Error('Unused fixture operation');
+      },
+      async approveAction() {
+        throw new Error('Unused fixture operation');
+      },
+      async stop() {
+        throw new Error('Unused fixture operation');
+      },
+      async beginHold() {
+        throw new Error('Unused fixture operation');
+      },
+      async renewHold() {
+        throw new Error('Unused fixture operation');
+      },
+      async endHold() {
         throw new Error('Unused fixture operation');
       },
       async reconcileOperation() {
         throw new Error('Unused fixture operation');
       },
-      async controlRun() {
+      async setTesting() {
         throw new Error('Unused fixture operation');
       },
       async captureStill() {

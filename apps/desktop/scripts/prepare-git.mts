@@ -4,7 +4,7 @@
  * Purpose: Assemble the pinned, relocatable `git` + `git-lfs` payload the desktop records revisions with.
  * Why: A Finder-launched app has no Homebrew PATH, so a machine without git and git-lfs cannot back a project up (OQ3, X2).
  * Environment: Node 24+, make, a C compiler (Xcode Command Line Tools on macOS), tar, unzip, network access, on the target.
- * Usage: node --import @oxc-node/core/register apps/desktop/scripts/prepare-git.mts [--target darwin-arm64|linux-x64]
+ * Usage: node --import @oxc-node/core/register apps/desktop/scripts/prepare-git.mts [--target darwin-arm64|darwin-x64|linux-x64]
  * Exit codes: 0 for an integrity-verified payload; non-zero for unsupported targets or download/build/probe failure.
  */
 
@@ -25,7 +25,7 @@ const parseTargets = (): string[] => {
   const selected: string[] = [];
   for (let index = 0; index < arguments_.length; index += 1) {
     if (arguments_[index] !== '--target' || !arguments_[index + 1]) {
-      throw new TypeError('Usage: prepare-git.mts [--target darwin-arm64|linux-x64]');
+      throw new TypeError('Usage: prepare-git.mts [--target darwin-arm64|darwin-x64|linux-x64]');
     }
     selected.push(arguments_[index + 1]!);
     index += 1;

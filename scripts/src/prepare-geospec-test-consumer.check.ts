@@ -16,7 +16,7 @@ import * as ts from 'typescript';
 import { load } from 'js-yaml';
 import { publishableClosure, workspace } from '@taucad/nx';
 
-void test('should declare the complete normal consumer build closure except the assembled native package', async () => {
+void test('should declare the complete normal consumer build closure', async () => {
   const project = JSON.parse(readFileSync(new URL('../project.json', import.meta.url), 'utf8')) as {
     targets: { 'prepare-geospec-test-consumer': { dependsOn: Array<{ target: string; projects: string[] }> } };
   };
@@ -27,11 +27,21 @@ void test('should declare the complete normal consumer build closure except the 
   );
   const closure = publishableClosure(await workspace({ fresh: true }), ['geospec', 'geospec-engine']);
   assert.deepEqual(
-    closure.filter((name) => name !== 'geospec-engine-native' && !roots.has(name)),
+    closure.filter((name) => !roots.has(name)),
     [],
     'Normal consumer target omits publishable build prerequisites',
   );
-  assert.ok(!roots.has('geospec-engine-native'), 'Native production must remain separately assembled');
+});
+
+void test('should prepare the consumer before the installed GeoSpec suites read its receipt', () => {
+  const project = JSON.parse(readFileSync(new URL('../../packages/geospec/project.json', import.meta.url), 'utf8')) as {
+    targets: Record<string, { dependsOn?: unknown[]; options: { command: string } }>;
+  };
+  const installed = project.targets['test-installed-vitest'];
+  assert.ok(installed);
+  assert.deepEqual(installed.dependsOn, [{ projects: ['scripts'], target: 'prepare-geospec-test-consumer' }]);
+  assert.match(installed.options.command, /out\/artifacts\/geospec-test-consumer\/receipt\.json/);
+  assert.doesNotMatch(installed.options.command, /GEOSPEC_INSTALLED_CONSUMER_ROOT/);
 });
 
 type Manifest = {
@@ -46,6 +56,7 @@ type CommandOptions = { cwd: string; env: Record<string, string> };
 type RecordedCommand = { command: string; args: string[]; options: CommandOptions };
 type Receipt = {
   consumerRoot: string;
+  engine: { name: string; version: string; resolved: string; integrity: string };
   installed: Array<{ name: string }>;
   packages: unknown[];
   source: { revision: string };
@@ -58,7 +69,14 @@ type Receipt = {
   };
   harness: Array<{ source: { path: string; sha256: string }; staged: { path: string; sha256: string } }>;
 };
-type Fault = 'missing-build' | 'missing-wasm' | 'registry' | 'stale-assembly';
+type Fault =
+  | 'missing-build'
+  | 'missing-wasm'
+  | 'registry'
+  | 'stale-build'
+  | 'engine-pin'
+  | 'engine-integrity'
+  | 'engine-tarball';
 
 const source = readFileSync(new URL('prepare-geospec-test-consumer.ts', import.meta.url), 'utf8');
 const cliStart = source.lastIndexOf('\nif (process.argv');
@@ -84,12 +102,15 @@ const compiled = ts
     },
   )
   .outputText.replace(/export {};?\s*$/, '');
-const native = '@taucad/geospec-engine-native';
-const platform = `${native}-darwin-arm64`;
-const nativePayload = [
+const engine = 'geospec-engine';
+const enginePin = '0.1.0-next.19';
+const engineIntegrity = `sha512-${createHash('sha512').update('inert engine registry tarball').digest('base64')}`;
+const enginePayload = [
+  'dist/node.mjs',
   'dist/native/index.js',
   'dist/bindings/mixed-wasm/geospec_engine_native.mjs',
   'dist/bindings/mixed-wasm/geospec_engine_native.wasm',
+  'licenses/SOURCE-RELINK.json',
 ];
 const manifest = (name: string): Manifest => ({ name, version: '0.1.0', exports: { '.': './dist/index.mjs' } });
 const harnessPaths = [
@@ -107,7 +128,7 @@ const harnessPaths = [
 
 const prepare = async (fault?: Fault) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
-  const directories = new Set(['/repo', '/assembly', '/assembly/tarballs', '/tmp']);
+  const directories = new Set(['/repo', '/tmp']);
   const commands: RecordedCommand[] = [];
   const archives = new Map<string, Manifest>();
   const add = (name: string, value: unknown): void => {
@@ -129,33 +150,29 @@ const prepare = async (fault?: Fault) => {
     {
       name: 'geospec-engine',
       root: 'packages/geospec-engine',
-      manifest: { ...manifest('@taucad/geospec-engine'), dependencies: { geospec: '0.1.0' } },
+      manifest: {
+        ...manifest('@taucad/geospec-engine'),
+        dependencies: { geospec: '0.1.0', [engine]: fault === 'engine-pin' ? '0.1.0-next.18' : enginePin },
+      },
     },
   ];
-  const nativeManifest = { ...manifest(native), optionalDependencies: { [platform]: '0.1.0' } };
-  const platformManifest = { name: platform, version: '0.1.0', main: 'geospec-engine-native.darwin-arm64.node' };
-  for (const project of [...projects, { root: 'packages/geospec-engine-native', manifest: nativeManifest }]) {
+  for (const project of projects) {
     add(`/repo/${project.root}/package.json`, project.manifest);
     add(`/repo/${project.root}/dist/index.mjs`, 'inert built bytes');
   }
-  for (const entry of nativePayload) {
-    add(`/repo/packages/geospec-engine-native/${entry}`, 'inert payload bytes');
-  }
   add('/repo/scripts/src/prepare-geospec-test-consumer.ts', source);
-  add('/repo/pnpm-workspace.yaml', 'catalog:\n  vitest: 4.1.11\n');
+  add('/repo/pnpm-workspace.yaml', `catalog:\n  vitest: 4.1.11\n  ${engine}: ${enginePin}\n`);
+  add(
+    '/repo/pnpm-lock.yaml',
+    `packages:\n  ${engine}@${enginePin}:\n    resolution: {integrity: ${engineIntegrity}}\n`,
+  );
   for (const name of harnessPaths) {
     add(`/repo/packages/geospec/host-tests/${name}`, `inert harness ${name}`);
   }
-  add(`/repo/packages/geospec-engine-native/bindings/node/generated/${platformManifest.main}`, 'inert addon bytes');
   const archive = (name: string, metadata: Manifest): void => {
     add(name, `inert tarball ${metadata.name}`);
     archives.set(name, metadata);
   };
-  archive('/assembly/tarballs/root.tgz', nativeManifest);
-  archive('/assembly/tarballs/darwin-arm64.tgz', platformManifest);
-  if (fault === 'missing-wasm') {
-    files.delete(`/repo/packages/geospec-engine-native/${nativePayload[2]}`);
-  }
   if (fault === 'missing-build') {
     files.delete('/repo/packages/geospec/dist/index.mjs');
   }
@@ -171,10 +188,10 @@ const prepare = async (fault?: Fault) => {
     ...url,
     ...path,
     process: {
-      argv: ['node', 'inert-driver', '/assembly', '/out/receipt.json'],
+      argv: ['node', 'inert-driver', '/out/receipt.json'],
       env: {},
-      platform: 'darwin',
-      arch: 'arm64',
+      platform: 'linux',
+      arch: 'x64',
     },
     console: {
       log() {
@@ -228,9 +245,10 @@ const prepare = async (fault?: Fault) => {
         }
         case 'pnpm': {
           assert.equal(args[0], 'pack');
+          const packed = JSON.parse(new TextDecoder().decode(read(path.join(options.cwd, 'package.json')))) as Manifest;
           archive(
             path.join(args[2]!, 'packed.tgz'),
-            JSON.parse(new TextDecoder().decode(read(path.join(options.cwd, 'package.json')))) as Manifest,
+            fault === 'engine-tarball' && packed.name === 'geospec' ? { ...packed, name: engine } : packed,
           );
           break;
         }
@@ -253,25 +271,29 @@ const prepare = async (fault?: Fault) => {
             break;
           }
           const packages: Record<string, { version: string; resolved: string; integrity: string }> = {};
-          for (const name of args.slice(4)) {
+          const requested = commandArguments.slice(4);
+          assert.equal(requested.at(-1), `${engine}@${enginePin}`, 'The engine installs at exactly the catalog pin');
+          const engineRoot = path.join(options.cwd, 'node_modules', engine);
+          add(path.join(engineRoot, 'package.json'), { name: engine, version: enginePin });
+          for (const entry of enginePayload) {
+            if (fault !== 'missing-wasm' || entry !== enginePayload[3]) {
+              add(path.join(engineRoot, entry), 'inert registry payload bytes');
+            }
+          }
+          packages[`node_modules/${engine}`] = {
+            version: fault === 'engine-pin' ? '0.1.0-next.18' : enginePin,
+            resolved: `https://registry.npmjs.org/${engine}/-/${engine}-${enginePin}.tgz`,
+            integrity: fault === 'engine-integrity' ? 'sha512-substituted' : engineIntegrity,
+          };
+          for (const name of requested.slice(0, -1)) {
             const metadata = archives.get(name);
             assert.ok(metadata, `Missing inert archive ${name}`);
             const root = path.join(options.cwd, 'node_modules', metadata.name);
             add(path.join(root, 'package.json'), metadata);
-            if (metadata.name === native) {
-              for (const entry of nativePayload) {
-                add(path.join(root, entry), 'inert payload bytes');
-              }
-            }
-            if (metadata.name === platform) {
-              assert.ok(metadata.main);
-              add(path.join(root, metadata.main), 'inert addon bytes');
-            } else {
-              add(
-                path.join(root, 'dist/index.mjs'),
-                fault === 'stale-assembly' && metadata.name === native ? 'stale bytes' : 'inert built bytes',
-              );
-            }
+            add(
+              path.join(root, 'dist/index.mjs'),
+              fault === 'stale-build' && metadata.name === 'geospec' ? 'stale bytes' : 'inert built bytes',
+            );
             packages[`node_modules/${metadata.name}`] = {
               version: metadata.version,
               resolved:
@@ -308,18 +330,24 @@ const prepare = async (fault?: Fault) => {
   };
 };
 
-void test('should prepare one local-tarball closure and record source, payload and installed bytes without probes', async () => {
+void test('should prepare one local-tarball closure with the pinned registry engine on any host without probes', async () => {
   const result = await prepare();
   assert.ifError(result.error);
   assert.equal(result.commands.filter((command) => command.command === 'npm').length, 2);
   assert.equal(result.commands.filter((command) => command.command === 'pnpm').length, 3);
   assert.ok(result.receipt);
-  assert.equal(result.receipt.installed.length, 5);
+  assert.equal(result.receipt.installed.length, 4);
+  assert.deepEqual(result.receipt.engine, {
+    name: engine,
+    version: enginePin,
+    resolved: `https://registry.npmjs.org/${engine}/-/${engine}-${enginePin}.tgz`,
+    integrity: engineIntegrity,
+  });
   assert.equal(result.receipt.source.revision, 'inert-revision');
   assert.ok(result.receipt.consumerRoot.startsWith('/tmp/'));
-  assert.equal(result.receipt.packages.length, 5);
+  assert.equal(result.receipt.packages.length, 3);
   assert.equal(result.receipt.frameworkSuccessor.version, '4.1.11');
-  assert.equal(result.receipt.frameworkSuccessor.unchangedPackages.length, 5);
+  assert.equal(result.receipt.frameworkSuccessor.unchangedPackages.length, 4);
   assert.equal(result.receipt.lock.sha256, result.receipt.frameworkSuccessor.lock.sha256);
   assert.notEqual(result.receipt.lock.sha256, result.receipt.frameworkSuccessor.initialLock.sha256);
   assert.deepEqual(
@@ -343,22 +371,23 @@ void test('should install the current CLI package through the same local tarball
   assert.ifError(result.error);
   assert.ok(result.receipt?.installed.some((entry) => entry.name === '@taucad/geospec-engine'));
 });
-for (const fault of ['missing-build', 'missing-wasm', 'registry', 'stale-assembly'] as const) {
+const faultMessages: Record<Fault, RegExp> = {
+  'missing-build': /Missing .*geospec\/dist\/index\.mjs/,
+  'missing-wasm': /Missing .*geospec-engine\/dist\/bindings\/mixed-wasm\/geospec_engine_native\.wasm/,
+  registry: /did not install from a tarball/,
+  'stale-build': /differs from current built bytes/,
+  'engine-pin': /pins another geospec-engine/,
+  'engine-integrity': /integrity differs from pnpm-lock\.yaml/,
+  'engine-tarball': /must come from the registry/,
+};
+for (const fault of Object.keys(faultMessages) as Fault[]) {
   void test(`should reject ${fault} without a successful receipt`, async () => {
     const result = await prepare(fault);
     assert.ok(result.error instanceof assert.AssertionError);
     assert.equal(result.receipt, undefined);
-    if (fault === 'missing-build' || fault === 'missing-wasm') {
+    if (fault === 'missing-build') {
       assert.equal(result.commands.length, 0);
-      assert.match(
-        result.error.message,
-        fault === 'missing-build' ? /Missing .*geospec\/dist\/index\.mjs/ : /Missing .*geospec_engine_native\.wasm/,
-      );
-    } else {
-      assert.match(
-        result.error.message,
-        fault === 'registry' ? /did not install from a tarball/ : /differs from current built bytes/,
-      );
     }
+    assert.match(result.error.message, faultMessages[fault]);
   });
 }

@@ -15,7 +15,7 @@ description: Adds a new TextMate-based language to the Monaco editor and Shiki h
 
 - **Grammar**: Prefer MIT/BSD-licenced VS Code extensions on GitHub (search `extension:tmLanguage.json <keyword>`). Evaluate richness: keyword-only regex blobs vs structured rules (strings, numbers, operators, type capture groups).
 
-- **Fork tooling**: Grammar precompilation lives in the Tau `taucad/shiki` fork under `repos/shiki/precompiled/` (clone via `pnpm repos clone shiki` after `repos.yaml` lists it). The script is `precompiled/precompile-grammar.ts`; see `repos/shiki/precompiled/README.md`.
+- **Fork tooling**: Grammar precompilation lives in the Tau `taucad/shiki` fork under `repos/shiki/precompiled/` (clone via `pnpm repos clone shiki` after `tools/repositories/catalog.yaml` lists it). The script is `precompiled/precompile-grammar.ts`; see `repos/shiki/precompiled/README.md`.
 
 ## Workflow (SysML v2 example)
 

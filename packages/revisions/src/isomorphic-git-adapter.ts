@@ -99,6 +99,7 @@ import type {
   RevisionReceipt,
   RevisionRecord,
   RemoteRef,
+  RevisionRemoteAddress,
   RevisionFetchInput,
   RevisionFetchResult,
   RevisionPushInput,
@@ -1114,18 +1115,19 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * A fetch reads its own advertisement, which carries the capabilities and
    * the fetch's own deadline (P36); this one is `listRemoteRefs`'.
    *
-   * @param remote - The remote's name in git's config.
+   * @param remote - The remote's name in git's config, or an address not recorded yet (R2).
    * @returns Every advertised ref, `HEAD` and peeled tags dropped.
    */
-  const advertisedReferences = async (remote: string): Promise<readonly RemoteRef[]> => {
-    const url = await remoteUrl(remote);
+  const advertisedReferences = async (remote: string | RevisionRemoteAddress): Promise<readonly RemoteRef[]> => {
+    const url = typeof remote === 'string' ? await remoteUrl(remote) : remote.url;
+    const name = typeof remote === 'string' ? remote : remote.name;
     const http = boundBy(requireHttp());
     /* Seam 1 of 3 (N1). The advertisement is the *first* thing every remote
      * verb does, so it is where a 401, a `403 GIT_SYNC_NOT_ENTITLED` and a 404
      * arrive — and until this catch existed the library's own
      * `HTTP Error: 403 Forbidden` escaped verbatim into a `role='alert'`. */
     const advertised = await listServerRefs({ http, url }).catch((error: unknown) => {
-      throw http.refused(error, remote);
+      throw http.refused(error, name);
     });
     return Object.freeze(
       advertised
@@ -1657,7 +1659,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       );
     },
 
-    listRemoteRefs: async (remote: string): Promise<readonly RemoteRef[]> => advertisedReferences(remote),
+    listRemoteRefs: async (remote: string | RevisionRemoteAddress): Promise<readonly RemoteRef[]> =>
+      advertisedReferences(remote),
 
     /**
      * Bring the remote's refs into `refs/remotes/<remote>/…`.

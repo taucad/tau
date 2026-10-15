@@ -117,7 +117,6 @@ const renderRegion = (
   cancel: ReturnType<typeof vi.fn>;
   syncNow: ReturnType<typeof vi.fn>;
   setSyncChats: ReturnType<typeof vi.fn>;
-  setSyncLargeExports: ReturnType<typeof vi.fn>;
   upgrade: ReturnType<typeof vi.fn>;
   /** Re-render the same mount with a moved facet, which is where C9 lived. */
   show: (next: RemoteFacet, nextSync?: SyncFacet) => void;
@@ -127,7 +126,6 @@ const renderRegion = (
   const cancel = vi.fn();
   const syncNow = vi.fn();
   const setSyncChats = vi.fn();
-  const setSyncLargeExports = vi.fn();
   const upgrade = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const element = (nextRemote: RemoteFacet, nextSync: SyncFacet): React.JSX.Element => (
@@ -143,8 +141,6 @@ const renderRegion = (
             onSync={syncNow}
             syncChats
             onSyncChatsChange={setSyncChats}
-            syncLargeExports={false}
-            onSyncLargeExportsChange={setSyncLargeExports}
             onUpgrade={upgrade}
             signInHref='/auth/sign-in'
             {...overrides}
@@ -160,7 +156,6 @@ const renderRegion = (
     cancel,
     syncNow,
     setSyncChats,
-    setSyncLargeExports,
     upgrade,
     show: (next, nextSync = sync) => {
       rerender(element(next, nextSync));
@@ -331,6 +326,146 @@ describe('RevisionSyncRegion', () => {
         expect.objectContaining({ provider: 'github', repositoryId: '99' }),
       );
     });
+  });
+
+  /* R2: the platform probes the new remote first; a refusal leaves the old one, and says so. */
+  it('should keep the current backup in view with the new repository’s refusal and one way back (R2)', async () => {
+    const user = userEvent.setup();
+    renderRegion(
+      facet({
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://github.com/o/design.git',
+        provider: 'github',
+        refusedReplacement: {
+          kind: 'git',
+          url: 'https://github.com/o/r.git',
+          error: 'This remote has no repository at this address for your account.',
+          reason: 'notFound',
+          attempt: 1,
+        },
+      }),
+      syncFacet({ state: 'backedUp' }),
+    );
+
+    const alert = screen.getByRole('alert', { name: 'Backup change refused' });
+    expect(alert).toHaveTextContent(
+      'This remote has no repository at this address for your account. o/design is still this project’s backup.',
+    );
+    /* One action: picking a backup again, not the kept repository's *Reconnect GitHub*. */
+    expect(within(alert).getAllByRole('button')).toHaveLength(1);
+    await user.click(within(alert).getByRole('button', { name: 'Retry' }));
+    expect(screen.getByRole('button', { name: 'Pick GitHub repository' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert', { name: 'Backup change refused' })).not.toBeInTheDocument();
+  });
+
+  it('should offer the plan when Tau Cloud refuses to replace a Git backup on the owner’s plan (R2)', async () => {
+    const user = userEvent.setup();
+    const { upgrade } = renderRegion(
+      facet({
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://gitlab.example.com/o/r.git',
+        refusedReplacement: {
+          kind: 'tau',
+          error: 'Syncing files to Tau Cloud is a paid plan feature.',
+          reason: 'notEntitled',
+          attempt: 1,
+        },
+      }),
+      syncFacet({ state: 'backedUp' }),
+    );
+
+    const alert = screen.getByRole('alert', { name: 'Backup change refused' });
+    expect(alert).toHaveTextContent(
+      'Syncing files to Tau Cloud is a paid plan feature. gitlab.example.com/o/r is still this project’s backup.',
+    );
+    expect(within(alert).getAllByRole('button')).toHaveLength(1);
+    expect(within(alert).queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    await user.click(within(alert).getByRole('button'));
+    expect(upgrade).toHaveBeenCalledTimes(1);
+  });
+
+  /*
+   * R2: the binding and credential across a replacement's answer belong to the
+   * hook's `connectRemote` (`use-revision-status.github-credential.test.tsx`,
+   * "replacing a backup with another remote"), which outlives this region. The
+   * region sends the pick once and never rebinds the kept repository itself.
+   */
+  it('should send a refused replacement once and leave the kept binding to the hook (R2)', async () => {
+    const user = userEvent.setup();
+    const kept = {
+      connectionId: '00000000-0000-4000-8000-000000000002',
+      repositoryId: 12,
+      repositoryUrl: 'https://github.com/o/design.git',
+      generation: 2,
+    } as const;
+    githubProjectBinding.set('p1', kept);
+    onTestFinished(() => {
+      githubProjectBinding.remove('p1');
+    });
+    const remote = facet({
+      kind: 'git',
+      phase: 'connected',
+      url: kept.repositoryUrl,
+      provider: 'github',
+      repositoryId: '12',
+    });
+    const { connect, show } = renderRegion(remote, syncFacet({ state: 'backedUp' }), { projectId: 'p1' });
+
+    await chooseChangeBackup(user);
+    await user.click(screen.getByRole('button', { name: 'Pick GitHub repository' }));
+    await user.click(screen.getByRole('button', { name: 'Replace backup' }));
+    await waitFor(() => {
+      expect(connect).toHaveBeenCalledTimes(1);
+    });
+    expect(connect).toHaveBeenLastCalledWith(
+      'git',
+      'https://github.com/o/r.git',
+      expect.objectContaining({ provider: 'github', repositoryId: '99' }),
+    );
+
+    show({
+      ...remote,
+      refusedReplacement: {
+        kind: 'git',
+        url: 'https://github.com/o/r.git',
+        error: 'Repository not found.',
+        reason: 'notFound',
+        attempt: 1,
+      },
+    });
+
+    expect(await screen.findByRole('alert', { name: 'Backup change refused' })).toHaveTextContent(
+      'Repository not found. o/design is still this project’s backup.',
+    );
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(githubToken).not.toHaveBeenCalledWith(kept.connectionId);
+    expect(githubProjectBinding.get('p1')).toStrictEqual(kept);
+  });
+
+  /* R3: the confirmation names the repository on both sides, never the bare host. */
+  it.each([
+    { from: 'https://github.com/o/old.git', to: 'https://github.com/o/new.git', names: 'o/old with o/new' },
+    {
+      from: 'https://gitlab.example.com/o/old.git',
+      to: 'https://gitlab.example.com/o/new.git',
+      names: 'gitlab.example.com/o/old with gitlab.example.com/o/new',
+    },
+  ])('should name both repositories when an address replaces $from (R3)', async ({ from, to, names }) => {
+    const user = userEvent.setup();
+    const { connect } = renderRegion(facet({ kind: 'git', phase: 'connected', url: from }));
+
+    await chooseChangeBackup(user);
+    await user.click(screen.getByText('Advanced HTTPS remote'));
+    const address = screen.getByRole('textbox', { name: 'Repository address' });
+    await user.clear(address);
+    await user.type(address, to);
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+
+    expect(screen.getByText(`Replace ${names}? Every revision stays on this device.`)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Replace backup' }));
+    expect(connect).toHaveBeenCalledWith('git', to);
   });
 
   it('asks before disconnecting, and says what disconnecting costs', async () => {
@@ -704,14 +839,15 @@ describe('RevisionSyncRegion', () => {
   });
 
   /* D18: a host that is not GitHub is offered neither GitHub nor Tau copy.
-   * D94: and, being anonymous, is never told it had saved credentials. */
+   * D94: and, being anonymous, is never told it had saved credentials.
+   * R11: nor is the alert named for credentials it does not hold. */
   it('should say the remote asked for a sign-in Tau does not have, and retry, for a host that is not GitHub', async () => {
     const user = userEvent.setup();
     const region = renderRegion(
       facet({ kind: 'git', phase: 'reconnectRequired', url: 'https://gitlab.example.com/o/r.git' }),
     );
 
-    const alert = screen.getByRole('alert', { name: 'Remote credentials' });
+    const alert = screen.getByRole('alert', { name: 'Remote sign-in' });
     expect(alert).toHaveTextContent(
       'This remote asked for a sign-in Tau does not have, or has no repository at this address.',
     );
@@ -1291,34 +1427,29 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     });
   });
 
-  it('offers Sync exports beside Sync chats on a connected project (C14, EQ7)', async () => {
+  it('should offer only Sync chats in connected backup settings', async () => {
     const user = userEvent.setup();
     const region = renderRegion(connected);
 
     await user.click(screen.getByRole('button', { name: 'Backup settings' }));
-    expect(within(screen.getByRole('menuitem', { name: /^Sync chats/u })).getByRole('switch')).toBeChecked();
-    await user.click(screen.getByRole('menuitem', { name: /^Sync exports/u }));
-    expect(region.setSyncLargeExports).toHaveBeenCalledWith(true);
+    const menu = screen.getByRole('menu');
+    const chats = within(menu).getByRole('menuitem', { name: /^Sync chats/u });
+    expect(within(menu).getAllByRole('switch')).toHaveLength(1);
+    expect(within(chats).getByRole('switch')).toBeChecked();
+    expect(menu).not.toHaveTextContent(/Sync exports|GeoSpec/u);
+    await user.click(chats);
+    expect(region.setSyncChats).toHaveBeenCalledWith(false);
   });
 
-  it('keeps candidate consent off until a browser device explicitly opts in', async () => {
+  it('should omit export and candidate sharing options from Git backup settings', async () => {
     const user = userEvent.setup();
-    const change = vi.fn();
-    const label = /Share derived GeoSpec geometry candidates separately from project files \(this device\)/u;
-    renderRegion(connected, undefined, { isSyncGeoSpecCandidates: false, onSyncGeoSpecCandidatesChange: change });
-    await user.click(screen.getByRole('button', { name: 'Backup settings' }));
-    const item = screen.getByRole('menuitem', { name: label });
-    expect(within(item).getByRole('switch')).not.toBeChecked();
-    await user.click(item);
-    expect(change).toHaveBeenCalledWith(true);
-  });
+    renderRegion(facet({ kind: 'git', phase: 'connected', url: 'https://example.test/model.git' }));
 
-  it('explains desktop candidate sharing is unavailable rather than offering a switch', async () => {
-    const user = userEvent.setup();
-    renderRegion(connected, undefined, { isGeoSpecCandidateSharingUnavailable: true });
     await user.click(screen.getByRole('button', { name: 'Backup settings' }));
-    expect(screen.getByText('GeoSpec candidate sharing is available in the browser only.')).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: /Share derived GeoSpec/u })).not.toBeInTheDocument();
+    const menu = screen.getByRole('menu');
+    expect(within(menu).queryByRole('switch')).not.toBeInTheDocument();
+    expect(menu).not.toHaveTextContent(/Sync exports|GeoSpec/u);
+    expect(within(menu).getByRole('menuitem', { name: /Change backup/u })).toBeInTheDocument();
   });
 });
 

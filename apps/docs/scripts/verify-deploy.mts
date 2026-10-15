@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { load } from 'cheerio';
-import { oramaStaticClient } from 'fumadocs-core/search/client/orama-static';
+import { staticClient } from 'fumadocs-core/search/client/orama-static';
 
 const root = resolve(import.meta.dirname, '../../..');
 const output = join(root, 'apps/docs/build/client');
@@ -82,7 +82,7 @@ const main = async (): Promise<void> => {
   }
 
   const searchIndex = await readFile(join(output, 'build/docs-search-index.json'), 'utf8');
-  const search = oramaStaticClient({
+  const search = staticClient({
     from: `data:application/json;base64,${Buffer.from(searchIndex).toString('base64')}`,
   });
   const results = await search.search('Replicad');

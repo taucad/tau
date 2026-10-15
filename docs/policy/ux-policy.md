@@ -116,8 +116,8 @@ For low-stakes deletions in dense lists (e.g., deleting a parameter set where "d
 
 ### 5. Progressive Disclosure in Dense Panels
 
-Follow [DESIGN.md — People and progressive disclosure](../../DESIGN.md#people-and-progressive-disclosure)
-and [Composition and visible affordances](../../DESIGN.md#composition-and-visible-affordances).
+Follow [docs/policy/design-policy.md — People and progressive disclosure](../../docs/policy/design-policy.md#people-and-progressive-disclosure)
+and [Composition and visible affordances](../../docs/policy/design-policy.md#composition-and-visible-affordances).
 Primary contextual actions remain visible; infrequent row actions may use a
 persistently reachable named overflow menu. Hover shortcuts require an equivalent
 visible route plus keyboard and coarse-pointer access.

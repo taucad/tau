@@ -30,8 +30,8 @@ import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { cn } from '@taucad/ui/utils/cn';
-import { gitRemoteUrlProblem, isCeilingRefusal } from '@taucad/revisions';
-import type { RemoteFacet, SyncFacet, SyncFailureReason } from '@taucad/revisions';
+import { gitRemoteUrlProblem, isCeilingRefusal, isGithubRemoteUrl } from '@taucad/revisions';
+import type { RemoteFacet, RemoteRefusedReplacement, SyncFacet, SyncFailureReason } from '@taucad/revisions';
 /* The machine's own subpath: `SyncFailureReason` is not on the package barrel,
    and a second copy of the union here would be exactly the dual vocabulary the
    contract forbids (§3). */
@@ -102,15 +102,6 @@ export type RevisionSyncRegionProps = {
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the persisted project manifest field `syncChats`.
   readonly syncChats: boolean;
   readonly onSyncChatsChange: (enabled: boolean) => void;
-  /** EQ7/D16: generated evidence is opt-in, per project, beside *Sync chats*. */
-  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the persisted project manifest field `syncLargeExports`.
-  readonly syncLargeExports: boolean;
-  readonly onSyncLargeExportsChange: (enabled: boolean) => void;
-  /** Device-local, per-project consent. Never read from tau.json. */
-  readonly isSyncGeoSpecCandidates?: boolean;
-  readonly onSyncGeoSpecCandidatesChange?: (enabled: boolean) => void;
-  /** Desktop cannot enforce the browser candidate transfer ceiling. */
-  readonly isGeoSpecCandidateSharingUnavailable?: boolean;
   /**
    * Whether this account may back a project up at all (N4).
    *
@@ -244,6 +235,25 @@ const syncFailureAction = (
   }
 };
 
+/**
+ * The one action a refused replacement implies (R2, rule 19).
+ *
+ * The refusal is the new remote's, so the kept remote's own fixes (*Reconnect
+ * GitHub*, *Sync now*) do not apply: a plan refusal is the plan's action, and
+ * anything else is picking a backup again.
+ *
+ * @param refusal - What the new remote answered.
+ * @param remote - The connection that stayed.
+ * @param viewer - The viewer's relationship to the project, which decides whether a plan action is theirs.
+ * @returns Which action to render, or `undefined` when there is nothing to do.
+ */
+const refusedReplacementAction = (
+  refusal: RemoteRefusedReplacement,
+  remote: RemoteFacet,
+  viewer: Pick<RevisionWhere, 'role' | 'isSignedOut'>,
+): ReturnType<typeof syncFailureAction> =>
+  refusal.reason === 'notEntitled' || refusal.reason === 'quota' ? syncFailureAction(refusal, remote, viewer) : 'retry';
+
 const connectingCopy = (remote: RemoteFacet): string =>
   remote.phase === 'disconnecting'
     ? 'Disconnecting…'
@@ -251,6 +261,17 @@ const connectingCopy = (remote: RemoteFacet): string =>
       ? 'Connecting to Tau Cloud…'
       : 'Connecting…';
 
+/**
+ * The most specific true name for a Git remote (R3).
+ *
+ * A GitHub repository is its `owner/name`; any other host is named with its
+ * path too (`gitlab.example.com/o/r`), because two repositories on one host
+ * would otherwise read as the same backup in a *Replace* confirmation.
+ *
+ * @param url - The remote's address.
+ * @param github - Whether the address is a GitHub repository.
+ * @returns The name to show.
+ */
 const gitRemoteLabel = (url: string | undefined, github = false): string => {
   if (url === undefined) {
     return github ? 'GitHub repository' : 'Git remote';
@@ -258,7 +279,7 @@ const gitRemoteLabel = (url: string | undefined, github = false): string => {
   try {
     const parsed = new URL(url);
     const path = parsed.pathname.replaceAll(/^\/+|\/+$/gu, '').replace(/\.git$/u, '');
-    return github && path !== '' ? path : parsed.host;
+    return path === '' ? parsed.host : github ? path : `${parsed.host}/${path}`;
   } catch {
     return github ? 'GitHub repository' : 'Git remote';
   }
@@ -492,11 +513,6 @@ export function RevisionSyncRegion({
   onSync,
   syncChats,
   onSyncChatsChange,
-  syncLargeExports,
-  isSyncGeoSpecCandidates = false,
-  onSyncGeoSpecCandidatesChange,
-  isGeoSpecCandidateSharingUnavailable = false,
-  onSyncLargeExportsChange,
   canSyncFiles = true,
   onUpgrade,
   storageLimitBytes,
@@ -526,6 +542,8 @@ export function RevisionSyncRegion({
   const [pendingConnection, setPendingConnection] = useState<PendingConnection>();
   const [changingBackup, setChangingBackup] = useState(remote.phase !== 'connected');
   const [reconnecting, setReconnecting] = useState(false);
+  /* A connect in flight from this region: *Replace backup* waits for it. */
+  const [committing, setCommitting] = useState(false);
   const [shouldConnect, setShouldConnect] = useState(false);
   const handleConnectRequest = (): void => {
     setShouldConnect(false);
@@ -618,18 +636,36 @@ export function RevisionSyncRegion({
           .split('/')
           .map((segment) => encodeURIComponent(segment))
           .join('/')}`;
-  const connectedLabel = remote.kind === 'tau' ? 'Tau Cloud' : gitRemoteLabel(remote.url, remote.provider === 'github');
-  const pendingLabel =
-    pendingConnection?.kind === 'tau'
+  const connectedLabel = remote.kind === 'tau' ? 'Tau Cloud' : gitRemoteLabel(remote.url, isGithubRemote(remote));
+  const labelOf = (pending: PendingConnection): string =>
+    pending.kind === 'tau'
       ? 'Tau Cloud'
-      : pendingConnection?.kind === 'github'
-        ? pendingConnection.repository.fullName
-        : pendingConnection?.kind === 'git'
-          ? gitRemoteLabel(pendingConnection.url)
-          : undefined;
+      : pending.kind === 'github'
+        ? pending.repository.fullName
+        : gitRemoteLabel(pending.url, isGithubRemoteUrl(pending.url));
+  const pendingLabel = pendingConnection === undefined ? undefined : labelOf(pendingConnection);
 
+  /* D11: a moved repository keeps its id, so the address decides sameness too. */
+  const isSameDestination = (pending: PendingConnection): boolean =>
+    pending.kind === 'tau'
+      ? remote.kind === 'tau'
+      : pending.kind === 'github'
+        ? remote.kind === 'git' &&
+          remote.provider === 'github' &&
+          remote.repositoryId === String(pending.repository.id) &&
+          remote.url === pending.repository.cloneUrl
+        : remote.kind === 'git' && remote.provider === undefined && remote.url === pending.url;
+
+  /*
+   * R2: the platform asks a replacing remote for its advertisement before it
+   * records it, and a refusal leaves the old remote recorded and backing the
+   * project up (`remote.refusedReplacement`). The hook's `connectRemote` owns
+   * the binding and credential across that answer, so it survives this region
+   * unmounting mid-probe; the region only sends the pick.
+   */
   const commitConnection = async (pending: PendingConnection): Promise<void> => {
     setConnectionError(undefined);
+    setCommitting(true);
     try {
       if (pending.kind === 'tau') {
         await onConnect('tau');
@@ -654,6 +690,8 @@ export function RevisionSyncRegion({
       setChoice(undefined);
     } catch (error) {
       setConnectionError(error instanceof Error ? error.message : 'The backup could not be connected.');
+    } finally {
+      setCommitting(false);
     }
   };
 
@@ -665,16 +703,7 @@ export function RevisionSyncRegion({
       onUpgrade?.();
       return;
     }
-    /* D11: a moved repository keeps its id, so the address decides sameness too. */
-    const same =
-      pending.kind === 'tau'
-        ? remote.kind === 'tau'
-        : pending.kind === 'github'
-          ? remote.kind === 'git' &&
-            remote.provider === 'github' &&
-            remote.repositoryId === String(pending.repository.id) &&
-            remote.url === pending.repository.cloneUrl
-          : remote.kind === 'git' && remote.provider === undefined && remote.url === pending.url;
+    const same = isSameDestination(pending);
     /* R-U6: the same repository with changed access is re-sent with it. */
     const accessChanged = pending.kind === 'github' && remote.fetchOnly !== (pending.repository.access !== 'write');
     /* D3: the same remote picked while its credential is refused is the
@@ -775,12 +804,7 @@ export function RevisionSyncRegion({
   const glyphTone =
     GlyphIcon === CircleAlert ? 'text-feature' : GlyphIcon === CloudAlert ? 'text-warning' : 'text-muted-foreground';
   const glyph = <GlyphIcon aria-hidden className={cn('size-4 shrink-0', glyphTone)} />;
-  const includes = [
-    'Files',
-    'history',
-    ...(remote.kind === 'tau' && syncChats ? ['chats'] : []),
-    ...(remote.kind === 'tau' && syncLargeExports ? ['exports'] : []),
-  ];
+  const includes = ['Files', 'history', ...(remote.kind === 'tau' && syncChats ? ['chats'] : [])];
   const facts: ReadonlyArray<readonly [string, ReactNode]> = [
     [
       'Backup',
@@ -934,31 +958,9 @@ export function RevisionSyncRegion({
                           </DropdownMenuItem>
                         ) : null}
                         {remote.kind === 'tau' && canManage ? (
-                          <>
-                            {/* EQ7/D16: the project's own transfer choices, beside each other. */}
-                            <DropdownMenuSwitchItem isChecked={syncChats} onIsCheckedChange={onSyncChatsChange}>
-                              Sync chats
-                            </DropdownMenuSwitchItem>
-                            <DropdownMenuSwitchItem
-                              isChecked={syncLargeExports}
-                              onIsCheckedChange={onSyncLargeExportsChange}
-                            >
-                              Sync exports
-                            </DropdownMenuSwitchItem>
-                          </>
-                        ) : null}
-                        {remote.kind !== 'none' && canManage && onSyncGeoSpecCandidatesChange ? (
-                          <DropdownMenuSwitchItem
-                            isChecked={isSyncGeoSpecCandidates}
-                            onIsCheckedChange={onSyncGeoSpecCandidatesChange}
-                          >
-                            Share derived GeoSpec geometry candidates separately from project files (this device)
+                          <DropdownMenuSwitchItem isChecked={syncChats} onIsCheckedChange={onSyncChatsChange}>
+                            Sync chats
                           </DropdownMenuSwitchItem>
-                        ) : null}
-                        {remote.kind !== 'none' && canManage && isGeoSpecCandidateSharingUnavailable ? (
-                          <DropdownMenuLabel>
-                            GeoSpec candidate sharing is available in the browser only.
-                          </DropdownMenuLabel>
                         ) : null}
                         {canManage ? (
                           <>
@@ -1197,6 +1199,7 @@ export function RevisionSyncRegion({
             <Button
               autoFocus
               size='sm'
+              disabled={committing}
               onClick={() => {
                 void commitConnection(pendingConnection);
               }}
@@ -1226,7 +1229,8 @@ export function RevisionSyncRegion({
         <div className='flex flex-col gap-2'>
           <p
             role='alert'
-            aria-label={isGithubRemote(remote) ? 'GitHub connection' : 'Remote credentials'}
+            /* R11: named by what it asks for. An anonymous remote holds no credentials (D94). */
+            aria-label={isGithubRemote(remote) ? 'GitHub connection' : 'Remote sign-in'}
             className='flex items-center gap-2 text-sm'
           >
             <CloudAlert aria-hidden className='size-4 shrink-0 text-warning' />
@@ -1259,6 +1263,25 @@ export function RevisionSyncRegion({
           )}
         </div>
       ) : undefined}
+
+      {/*
+        R2: the new remote refused, so nothing was replaced. Its own sentence,
+        the backup that stays, and one action: *Upgrade* for a plan refusal,
+        otherwise reopening the choice.
+      */}
+      {remote.refusedReplacement === undefined || busy || changingBackup ? undefined : (
+        <div role='alert' aria-label='Backup change refused' className='flex flex-wrap items-center gap-2 text-sm'>
+          <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
+          <span className='min-w-0 flex-1'>
+            {`${remote.refusedReplacement.error} ${connectedLabel} is still this project’s backup.`}
+          </span>
+          {renderFailureAction(refusedReplacementAction(remote.refusedReplacement, remote, viewer), () => {
+            setPendingConnection(undefined);
+            setChoice(remote.kind);
+            setChangingBackup(true);
+          })}
+        </div>
+      )}
 
       {connectionError === undefined ? undefined : (
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>

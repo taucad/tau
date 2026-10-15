@@ -87,8 +87,8 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
           if (!item) {
             return null;
           }
-          /* `range.to` is the caret: the typed space is not in the document yet. */
-          const from = range.to - token.length;
+          /* Input rules include the typed space; preserve any leading whitespace before the token. */
+          const from = range.from + match[0].indexOf(token);
           chain()
             .deleteRange({ from, to: range.to })
             .insertContentAt(from, [invocationChip(item), { type: 'text', text: ' ' }])

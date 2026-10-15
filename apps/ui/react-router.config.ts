@@ -1,5 +1,5 @@
 import type { Config } from '@react-router/dev/config';
-import { resolveTauCloudBuildEnabled } from './build-environment';
+import { resolveTauCloudBuildEnabled } from './build-environment.ts';
 
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 

@@ -1,6 +1,5 @@
 [![Apache 2.0 License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](license)
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-7289da?logo=discord&logoColor=white)](https://discord.gg/6pfSAN3t7A)
-[![XO code style](https://shields.io/badge/code_style-5ed9c7?logo=xo&labelColor=gray&logoSize=auto)](https://github.com/xojs/xo)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen?logo=node.js&logoColor=white)](https://nodejs.org)
 
 # Tau
@@ -15,11 +14,9 @@ The AI-native CAD platform — open-source, browser-based, and kernel-agnostic. 
   <img alt="Tau Desktop View" src="docs/assets/tau-desktop-light.webp">
 </picture>
 
-> 🚧 **Tau is currently under heavy development.** APIs and interfaces may change as we add new features and improvements.
-
 ## Features
 
-- **Open Source** — Apache-2.0 across the complete Tau codebase (see [LICENSING.md](LICENSING.md))
+- **Open Source** — Apache-2.0 across the complete Tau codebase (see [Licensing](docs/licensing/overview.md))
 - **Browser-Based** — Run CAD on mobile or desktop, no **installation** required
 - **Code-Based CAD** — Precise, version-controlled designs through code
 - **AI-Powered** — Natural language interface for design creation and modification
@@ -60,15 +57,15 @@ Convert between **39 input formats** and **14 output formats** including STL, ST
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guide](contributing.md) for development setup and guidelines.
+We welcome contributions! Please see our [Contributing Guide](.github/CONTRIBUTING.md) for development setup and guidelines.
 
 ## Security
 
-For security concerns, please review our [Security Policy](security.md).
+For security concerns, please review our [Security Policy](.github/SECURITY.md).
 
 ## Code of Conduct
 
-Please read our [Code of Conduct](code_of_conduct.md) before participating.
+Please read our [Code of Conduct](.github/CODE_OF_CONDUCT.md) before participating.
 
 ## Built With
 
@@ -95,6 +92,6 @@ All Tau-authored code is **[Apache-2.0](license)**, including the applications, 
 published packages, and the GeoSpec engine. It may be forked, modified, embedded, hosted, and redistributed, including
 commercially, subject to the Apache licence and notice requirements.
 
-See **[LICENSING.md](LICENSING.md)** for repository-wide details, previous-release treatment, and third-party notices.
+See **[Licensing](docs/licensing/overview.md)** for repository-wide details, previous-release treatment, and third-party notices.
 
-Full third-party license inventory: [license-deps](license-deps).
+Full third-party license inventory: [third-party licenses](docs/licensing/third-party-licenses.md).

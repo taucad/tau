@@ -2,7 +2,7 @@
  * The per-user machine store for a host that runs beside project folders: `tau serve --machines` and
  * `tau mcp --machines` (agent plugin UI blueprint W11, G24).
  *
- * Every Tau host on a computer shares `<config>/machines`: the bindings, the print ledger and the host's secret vault
+ * Every Tau host on a computer shares `<config>/machines`: the bindings, the job journal and the host's secret vault
  * for access codes. One writer holds it at a time; a second host serves without machines and says why, rather than
  * failing.
  *
@@ -14,7 +14,7 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
-import type { HostSessionHandle } from '@taucad/runtime/host';
+import type { HostAdmissionAuthority, HostSessionHandle } from '@taucad/runtime/host';
 import { createNodeMachineHost } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
 import type { MachineClient } from '@taucad/runtime/machine';
@@ -25,6 +25,7 @@ import {
   createMachineSecretStore,
   createNodeMachineRuntime,
   localMachineFacet,
+  machineAgentGrants,
   machineRouteGrants,
   openMachineHostIdentity,
   readProjectId,
@@ -32,14 +33,21 @@ import {
 import type { CreateNodeMachineRuntimeOptions } from '#machine-host.js';
 import { openSecretVault } from '#secret-vault.js';
 
-/** A machine host over the shared store, with the one session its route and tools use. @public */
-export type SharedMachineHost = Readonly<{ host: NodeMachineHost; session: HostSessionHandle }>;
+/**
+ * A machine host over the shared store, with the person's session its route uses and the admission authority that
+ * issues and revokes sessions. @public
+ */
+export type SharedMachineHost = Readonly<{
+  host: NodeMachineHost;
+  admission: HostAdmissionAuthority;
+  session: HostSessionHandle;
+}>;
 
 /** Options for {@link openSharedMachineHost}. @public */
 export type OpenSharedMachineHostOptions = Readonly<{
   /** The machine providers the host admits. */
   providers: CreateNodeMachineHostInput['providers'];
-  /** Finds a print request's file. */
+  /** Finds a job's file. */
   readArtifact: CreateNodeMachineRuntimeOptions['readArtifact'];
   /** Told a provider's warnings and errors, and the host's own failures, in words. */
   onWarning: (warning: Readonly<{ code: 'MACHINE_PROVIDER' | 'MACHINE_HOST'; message: string }>) => void;
@@ -65,12 +73,13 @@ export const openSharedMachineHost = async (
 ): Promise<SharedMachineHost | undefined> => {
   const storeRoot = options.storeRoot ?? join(defaultConfigDirectory(), 'machines');
   const identity = await openMachineHostIdentity(storeRoot);
+  const admission = createHostAdmissionAuthority({ hostId: identity.hostId });
   let host: NodeMachineHost;
   try {
     host = await createNodeMachineHost({
       storeRoot,
       ...identity,
-      admission: createHostAdmissionAuthority({ hostId: identity.hostId }),
+      admission,
       providers: options.providers,
       runtime: createNodeMachineRuntime({
         secrets: createMachineSecretStore({
@@ -96,21 +105,45 @@ export const openSharedMachineHost = async (
   }
   return {
     host,
+    admission,
     session: host.issueSession({ actor: { kind: 'user', id: options.actorId }, grants: machineRouteGrants }),
   };
 };
+
+/**
+ * The facet an agent's machine tools use: each channel rides an agent session of its own, so the host applies the
+ * agent rules whatever a call claims (agents cannot approve or resolve), and the session lives only as long as its
+ * channel.
+ *
+ * @param shared - The open host.
+ * @param agentId - Who the agent session acts for.
+ * @returns The facet.
+ * @public
+ */
+export const agentMachineFacet = (
+  shared: SharedMachineHost,
+  agentId: string,
+): RuntimeTransportFacet<MachineClient> & Readonly<{ close(): void }> =>
+  localMachineFacet((port) => {
+    const session = shared.host.issueSession({ actor: { kind: 'agent', id: agentId }, grants: machineAgentGrants });
+    const channel = shared.host.serve({ port, session });
+    channel.onClose(() => {
+      shared.admission.revoke(session);
+    });
+    return channel;
+  });
 
 /** The machines a host beside its project folders offers its tools. @public */
 export type LocalMachines = Readonly<{
   /** The facet the tool registry's machine tools use. */
   facet: RuntimeTransportFacet<MachineClient>;
   /**
-   * Name the project a folder holds by its `tau.json` id, and admit the folder for the files print requests name.
+   * Name the project a folder holds by its `tau.json` id, and admit the folder for the files jobs name.
    *
    * Read on each call, so a folder that gains a `tau.json` prints from then on and one that loses it stops.
    *
    * @param folder - An absolute folder a call works in.
-   * @returns The id, or `undefined` when the folder holds no project, which nothing in it can then be printed from.
+   * @returns The id, or `undefined` when the folder holds no project, which no job can then run from.
    */
   projectOf(folder: string): Promise<string | undefined>;
   /** Retire the session and release the store. */
@@ -183,7 +216,7 @@ const projectIdIn = async (root: string): Promise<string | undefined> =>
  * Open the shared machine store for a host beside project folders, such as `tau mcp --machines`, whose calls may
  * each name their own folder (Codex names the thread's folder per call).
  *
- * A print request's file is read only from a folder {@link LocalMachines.projectOf} named with the id the request
+ * A job's file is read only from a folder {@link LocalMachines.projectOf} named with the id the job
  * carries, and only when its digest matches; a path that leaves the folder is refused.
  *
  * @param options - The start folder, providers, warning sink and actor.
@@ -220,7 +253,7 @@ export const openLocalMachines = async (
   if (host === undefined) {
     return { refused: 'in-use' };
   }
-  const facet = localMachineFacet((port) => host.host.serve({ port, session: host.session }));
+  const facet = agentMachineFacet(host, options.actorId);
   return {
     facet,
     projectOf: async (folder) => {

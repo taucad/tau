@@ -6,6 +6,7 @@ import {
   admitParameterManifest,
   admitParameterValues,
   compileParameterManifest,
+  isParameterManifestShape,
   parameterManifestProfile,
   projectJsonSchemaToParameterDeclaration,
   projectParameterSchema,
@@ -100,6 +101,28 @@ const compile = async (
     resolution,
     sourceFiles,
   });
+
+it.each([
+  { count: 10_001, prefix: 'data/' },
+  { count: 2000, prefix: `data/${'nested/'.repeat(80)}` },
+])('admits complete source identity for a large workspace ($count files)', async ({ count, prefix }) => {
+  const sourceFiles = Object.fromEntries(
+    Array.from({ length: count }, (_, index) => [`${prefix}${String(index)}.bin`, digest]),
+  );
+  const manifest = await compile(declaration(), {}, sourceFiles);
+  expect(manifest.identity.sourceFiles).toEqual(sourceFiles);
+  expect(isParameterManifestShape(manifest)).toBe(true);
+  await expect(admitParameterManifest(structuredClone(manifest))).resolves.toEqual(manifest);
+  await expect(
+    admitParameterManifest({
+      ...manifest,
+      identity: { ...manifest.identity, sourceFiles: { ...sourceFiles, 'changed.bin': middlewareDigest } },
+    }),
+  ).rejects.toThrow(ParameterAdmissionError);
+  const oversizedMetadata = { ...manifest, defaults: { payload: 'x'.repeat(1_000_001) } };
+  expect(isParameterManifestShape(oversizedMetadata)).toBe(false);
+  await expect(admitParameterManifest(oversizedMetadata)).rejects.toThrow('PARAMETER_MANIFEST_STRING_LIMIT');
+});
 
 it('admits nested partial values without requiring untouched siblings', async () => {
   const manifest = await compile({

@@ -1,3 +1,4 @@
+import { projectMachineDirectoryFrame } from '#machines/machine-directory-projection.js';
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -9,12 +10,12 @@ import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import {
   createMachinesFacet,
   printersInUseElsewhere,
-  projectMachineDirectoryFrame,
   useMachineDirectory,
   useMachinesFacet,
 } from '#hooks/use-machines.js';
 
-const state = vi.hoisted(() => ({ bridge: undefined as unknown }));
+const state = vi.hoisted(() => ({ bridge: undefined as unknown, enabled: true }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: () => state.enabled }));
 vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => state.bridge }));
 
 const snapshot: MachineDirectorySnapshot = {
@@ -88,21 +89,25 @@ describe('createMachinesFacet', () => {
     expect(dial).toHaveBeenCalledTimes(2);
   });
 
-  it('should word a store held by another app, from either code, and pass every other failure through', async () => {
+  it('should word a store held by another app, from either typed code, and pass every other failure through', async () => {
     const { port, client } = openChannel();
     const facet = available(createMachinesFacet({ dial: async () => port, connect: async () => client }));
-    const owned = new Error('MACHINE_STORE_OWNED_ELSEWHERE');
-    client.list.mockRejectedValueOnce(owned).mockRejectedValueOnce(new Error('AUTHORITY_ALREADY_OWNED'));
-    const other = new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
-    client.get.mockRejectedValueOnce(other);
+    const coded = (code: string): Error => Object.assign(new Error(code), { code });
+    const owned = coded('MACHINE_STORE_OWNED_ELSEWHERE');
+    client.list.mockRejectedValueOnce(owned).mockRejectedValueOnce(coded('AUTHORITY_ALREADY_OWNED'));
+    const other = coded('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
+    // A code only named in a message is not the host's typed answer: the message is never searched.
+    const worded = new Error('Saw MACHINE_STORE_OWNED_ELSEWHERE in a log line.');
+    client.get.mockRejectedValueOnce(other).mockRejectedValueOnce(worded);
     // oxlint-disable-next-line require-yield -- a watch that fails before its first frame.
     client.watch.mockImplementation(async function* () {
-      throw new Error('AUTHORITY_ALREADY_OWNED');
+      throw coded('AUTHORITY_ALREADY_OWNED');
     });
 
     await expect(facet.list({})).rejects.toMatchObject({ message: printersInUseElsewhere, cause: owned });
     await expect(facet.list({})).rejects.toThrow(printersInUseElsewhere);
     await expect(facet.get({ machineId: 'workshop-x1c' })).rejects.toBe(other);
+    await expect(facet.get({ machineId: 'workshop-x1c' })).rejects.toBe(worded);
     const frames = async (): Promise<void> => {
       for await (const _frame of facet.watch({})) {
         // A failing watch yields nothing.
@@ -151,6 +156,16 @@ describe('useMachineDirectory', () => {
 });
 
 describe('useMachinesFacet', () => {
+  it('never dials a desktop machine service while the feature is disabled', () => {
+    state.enabled = false;
+    const connect = vi.fn();
+    state.bridge = { machines: { connect } };
+    const view = renderHook(() => useMachinesFacet());
+    expect(view.result.current.available).toBe(false);
+    expect(connect).not.toHaveBeenCalled();
+    view.unmount();
+    state.enabled = true;
+  });
   it('should be unsupported on the web, and one facet per document on the desktop, whether or not a project is open', () => {
     state.bridge = undefined;
     const web = renderHook(() => useMachinesFacet());
@@ -203,6 +218,23 @@ describe('machine identity across telemetry', () => {
         },
       }).entries.map((candidate) => candidate.machineId),
     ).toEqual(['x1', 'mini', 'third']);
+  });
+
+  it('folds an observed frame into its machine without moving the cursor', () => {
+    const x1 = entry({ machineId: 'x1' });
+    const mini = entry({ machineId: 'mini' });
+    const [first, ...rest] = x1.snapshot.components;
+    const moved = { ...first!, receivedAt: '2026-09-24T02:00:09.000Z' };
+    const directory = projectMachineDirectoryFrame(
+      { ...snapshot, entries: [x1, mini] },
+      { type: 'observed', machineId: 'x1', observedAt: '2026-09-24T02:00:09.000Z', components: [moved] },
+    );
+    expect(directory.cursor).toBe(snapshot.cursor);
+    const [folded, untouched] = directory.entries;
+    expect(folded?.snapshot.observedAt).toBe('2026-09-24T02:00:09.000Z');
+    expect(folded?.snapshot.components).toEqual(expect.arrayContaining([moved, ...rest]));
+    expect(folded?.snapshot.components).toHaveLength(x1.snapshot.components.length);
+    expect(untouched).toBe(mini);
   });
 
   it('shares an explicit selection between mounted panes within one project only', () => {

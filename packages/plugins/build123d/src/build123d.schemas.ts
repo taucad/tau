@@ -23,12 +23,15 @@ export const build123dOptionsSchema = z.object({
         context.addIssue({ code: 'custom', message: 'Support files must contain analyzer.py and glb.py' });
       }
     }),
-  requestTimeout: z.number().int().positive().default(120_000),
-  maxArtifactBytes: z
-    .number()
-    .int()
-    .positive()
-    .default(512 * 1024 * 1024),
+  /**
+   * The closure root the sandbox may read, when the interpreter and the worker scripts share one (a closure the
+   * preparation host sealed). Absent, it is the interpreter's prefix, which must then hold the worker too.
+   */
+  runtimePath: absolutePath.optional(),
+  /** Milliseconds. Zero waits for completion or cancellation. */
+  requestTimeout: z.number().int().nonnegative().default(0),
+  /** Optional host policy; by default only the representable byte length is bounded. */
+  maxArtifactBytes: z.number().int().positive().default(Number.MAX_SAFE_INTEGER),
 });
 
 const tessellation = z

@@ -977,27 +977,7 @@ function RevisionAlerts(): React.JSX.Element | undefined {
 export function RevisionsPanelBody(): React.JSX.Element {
   const { projectId, projectRef } = useProject();
   const project = useSelector(projectRef, (snapshot) => snapshot.context.project);
-  const { updateProject, getProjectLibraryState, setGeoSpecCandidateConsent } = useProjectManager();
-  const [candidateConsent, setCandidateConsent] = useState<Readonly<{ projectId: string; enabled: boolean }>>();
-  const consentRequest = useRef({ projectId, generation: 0 });
-  const syncGeoSpecCandidates = candidateConsent?.projectId === projectId && candidateConsent.enabled;
-  useEffect(() => {
-    if (consentRequest.current.projectId !== projectId) {
-      consentRequest.current = { projectId, generation: 0 };
-    }
-    const generation = ++consentRequest.current.generation;
-    const loadConsent = async (): Promise<void> => {
-      try {
-        const state = await getProjectLibraryState(projectId);
-        if (consentRequest.current.projectId === projectId && consentRequest.current.generation === generation) {
-          setCandidateConsent({ projectId, enabled: state?.syncGeoSpecCandidates === true });
-        }
-      } catch (error) {
-        reportSyncSettingError(error);
-      }
-    };
-    void loadConsent();
-  }, [getProjectLibraryState, projectId]);
+  const { updateProject } = useProjectManager();
   const { revisions, line, branchFacts = new Map(), isLoading } = useRevisions();
   const status = useRevisionStatus();
   const commands = useRevisionCommands();
@@ -1120,32 +1100,6 @@ export function RevisionsPanelBody(): React.JSX.Element {
               // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
               void updateProject(projectId, { syncChats: enabled }).catch(reportSyncSettingError);
             }}
-            /* Generated evidence is default-off (policy Rule 13). */
-            syncLargeExports={project?.syncLargeExports === true}
-            onSyncLargeExportsChange={(enabled) => {
-              // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
-              void updateProject(projectId, { syncLargeExports: enabled }).catch(reportSyncSettingError);
-            }}
-            isSyncGeoSpecCandidates={syncGeoSpecCandidates && !isDesktopTarget()}
-            isGeoSpecCandidateSharingUnavailable={isDesktopTarget()}
-            onSyncGeoSpecCandidatesChange={
-              isDesktopTarget()
-                ? undefined
-                : async (enabled) => {
-                    const generation = ++consentRequest.current.generation;
-                    try {
-                      const state = await setGeoSpecCandidateConsent(projectId, enabled);
-                      if (
-                        consentRequest.current.projectId === projectId &&
-                        consentRequest.current.generation === generation
-                      ) {
-                        setCandidateConsent({ projectId, enabled: state?.syncGeoSpecCandidates === true });
-                      }
-                    } catch (error) {
-                      reportSyncSettingError(error);
-                    }
-                  }
-            }
             canSyncFiles={canSyncFiles}
             onUpgrade={canUpgradePlan ? requestUpgrade : undefined}
             storageLimitBytes={storageLimitBytes}

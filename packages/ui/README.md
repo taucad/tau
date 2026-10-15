@@ -91,6 +91,6 @@ Apache-2.0. See [LICENSE](./LICENSE).
 ## Links
 
 - [Documentation](https://docs.tau.new)
-- [Design system guide](https://github.com/taucad/tau/blob/main/DESIGN.md)
+- [Design system guide](https://github.com/taucad/tau/blob/main/docs/policy/design-policy.md)
 - [Source](https://github.com/taucad/tau/tree/main/packages/ui)
 - [Issues](https://github.com/taucad/tau/issues)

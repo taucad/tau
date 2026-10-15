@@ -15,7 +15,10 @@ const sandbox = vi.hoisted(() => ({
   initialize: vi.fn(async () => undefined),
   wrap: vi.fn<(command: string, ...rest: unknown[]) => void>(),
   wrapFailure: undefined as unknown,
+  /* What the double's wrapped command looks like; `undefined` is the runtime's own shape for this platform. */
+  wrapped: undefined as ((command: string) => string) | undefined,
 }));
+const shellQuote = (value: string): string => `'${value.replaceAll("'", `'"'"'`)}'`;
 vi.mock('@anthropic-ai/sandbox-runtime', async (importActual) => ({
   // The default write roots stay real: the profile's deny list is derived from them.
   ...(await importActual<{ getDefaultWritePaths: typeof getDefaultWritePaths }>()),
@@ -30,7 +33,12 @@ vi.mock('@anthropic-ai/sandbox-runtime', async (importActual) => ({
         // oxlint-disable-next-line typescript/only-throw-error -- launchers can reject with bare strings.
         throw sandbox.wrapFailure;
       }
-      return { argv: ['/bin/sh', '-c', command], env: process.env };
+      const wrapped =
+        sandbox.wrapped?.(command) ??
+        (process.platform === 'darwin'
+          ? `env /usr/bin/sandbox-exec -p ${shellQuote('(version 1)\n(deny default)')} /bin/sh -c ${shellQuote(command)}`
+          : `bwrap --unshare-net -- /bin/sh -c ${shellQuote(command)}`);
+      return { argv: ['/bin/sh', '-c', wrapped], env: process.env };
     },
   },
 }));
@@ -50,7 +58,9 @@ afterEach(() => {
   sandbox.supported = true;
   sandbox.dependencyErrors = [];
   sandbox.wrapFailure = undefined;
+  sandbox.wrapped = undefined;
   sandbox.wrap.mockClear();
+  Object.defineProperty(process, 'platform', platformDescriptor);
 });
 
 describe('launchInNativeSandbox', () => {
@@ -123,17 +133,51 @@ describe('launchInNativeSandbox', () => {
   });
 
   it('should quote only the host-owned vector and pass the fixed per-launch profile', async () => {
-    await expect(launchInNativeSandbox(launch)).resolves.toEqual([
-      '/bin/sh',
-      '-c',
+    await launchInNativeSandbox(launch);
+    const [command, shell, policy, signal, workingDirectory, attribution] = sandbox.wrap.mock.calls[0]!;
+    expect(command).toBe(
       String.raw`TMPDIR='/private/artifacts' TEMP='/private/artifacts' TMP='/private/artifacts' exec '/opt/it'\''s here/python' '--flag' 'a b'`,
-    ]);
-    const [, shell, policy, signal, workingDirectory, attribution] = sandbox.wrap.mock.calls[0]!;
+    );
     expect(shell).toBe('/bin/sh');
     expect(signal).toBeUndefined();
     expect(workingDirectory).toBe('/private/workspace');
     expect(attribution).toEqual({ commandId: 'probe#1' });
     expect(policy).toEqual(nativeSandboxPolicy(launch));
+  });
+});
+
+describe('the link refusal every launch carries', () => {
+  const asPlatform = (platform: NodeJS.Platform): void => {
+    Object.defineProperty(process, 'platform', { ...platformDescriptor, value: platform });
+  };
+
+  it('should hand bwrap the seccomp program on descriptor 3 on Linux, and refuse a vector that does not start bwrap', async () => {
+    asPlatform('linux');
+    sandbox.wrapped = (command) => `bwrap --unshare-net -- /bin/sh -c ${shellQuote(command)}`;
+    const [shell, flag, wrapped] = await launchInNativeSandbox(launch);
+    expect([shell, flag]).toEqual(['/bin/sh', '-c']);
+    expect(wrapped).toMatch(/^bwrap --seccomp 3 --unshare-net -- \/bin\/sh -c '/u);
+
+    sandbox.wrapped = (command) => `/usr/local/bin/bwrap --unshare-net -- /bin/sh -c ${shellQuote(command)}`;
+    await expect(launchInNativeSandbox(launch)).rejects.toThrow(
+      /the sandbox runtime did not start bwrap, so links cannot be refused/u,
+    );
+  });
+
+  it('should append the Seatbelt rules inside the one profile on macOS, past every quote it holds', async () => {
+    asPlatform('darwin');
+    const profile = '(version 1)\n(deny default)\n(allow file-read* (subpath "/Users/o\'brien"))';
+    sandbox.wrapped = (command) =>
+      `env /usr/bin/sandbox-exec -p ${shellQuote(profile)} /bin/sh -c ${shellQuote(command)}`;
+    const vector = await launchInNativeSandbox(launch);
+    const wrapped = vector.at(2);
+    const rules = '\n; Tau: no symbolic or hard link\n(deny file-write-create (vnode-type SYMLINK))\n(deny file-link)';
+    expect(wrapped).toBe(
+      `env /usr/bin/sandbox-exec -p ${shellQuote(`${profile}${rules}`)} /bin/sh -c ${shellQuote(sandbox.wrap.mock.calls[0]![0])}`,
+    );
+
+    sandbox.wrapped = (command) => `/bin/sh -c ${shellQuote(command)}`;
+    await expect(launchInNativeSandbox(launch)).rejects.toThrow(/did not pass one Seatbelt profile/u);
   });
 });
 

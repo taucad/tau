@@ -1,0 +1,52 @@
+{
+  "//": "PicoGK runtime closure (D6, R2 Variant B): Microsoft's .NET runtime archive verbatim, pinned by the sha512 releases.json publishes, plus the Tau framework-dependent layer (ReadyToRun worker, patched PicoGK.dll, Roslyn, SkiaSharp, the Tau-built engine) that the macOS release job builds, ad-hoc signs, digests and uploads to cdn.tau.new blobs/ and an immutable GitHub Release. `dotnet/` and `tau-worker/` are siblings under the closure root. The worker pin is rewritten from a published layer's record (tau-layer.json on its picogk-layer-<16 hex> release) by scripts/compose-tau-plugin.mts, never by hand; publish.yml proves both URLs serve the pinned bytes.",
+  "schemaVersion": 1,
+  "kernels": {
+    "picogk": {
+      "requires": ["runtime"],
+      "extensions": ["cs"]
+    }
+  },
+  "dependencies": {
+    "runtime": [
+      {
+        "target": {
+          "runtime": "native",
+          "os": "darwin",
+          "arch": "arm64",
+          "minimumOsVersion": "14.0"
+        },
+        "payloads": [
+          {
+            "name": "dotnet",
+            "integrity": "sha512-6WqKgQjVo7cOgnVnskk+3lQPNwXBIJ5/NHNrpqo5jdTQ0V8x62Z8nMo9vNMK2DsxWobV6aE/0sNw4vwM7OckNg==",
+            "byteLength": 33246120,
+            "format": "tar.gz",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.11/dotnet-runtime-10.0.11-osx-arm64.tar.gz"
+              ]
+            },
+            "destination": "dotnet"
+          },
+          {
+            "name": "worker",
+            "integrity": "sha256-zV/fZmm47gheQJE5DSI3hpW8wF/YohtN5JLSGjz89vE=",
+            "byteLength": 24431764,
+            "format": "tar.gz",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://cdn.tau.new/blobs/sha256/cd5fdf6669b8ee085e4091390d22378695bcc05fd8a21b4de492d21a3cfcf6f1",
+                "https://github.com/taucad/tau/releases/download/picogk-layer-cd5fdf6669b8ee08/tau-picogk-layer-darwin-arm64.tar.gz"
+              ]
+            },
+            "destination": "tau-worker",
+            "unpackedByteLength": 66910071
+          }
+        ]
+      }
+    ]
+  }
+}

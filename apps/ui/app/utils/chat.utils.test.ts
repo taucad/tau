@@ -355,6 +355,23 @@ describe('serializeMessage', () => {
     });
   });
 
+  describe('machine tool parts', () => {
+    it("keeps an old chat's object answer from get_machine readable", () => {
+      const message = baseMessage([
+        {
+          type: 'tool-get_machine',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { machineId: 'workshop-x1c' },
+          // An answer recorded before get_machine answered in text.
+          output: { name: 'Workshop X1C' } as unknown as string,
+        },
+      ]);
+      expect(serializeMessage(message)).toContain('"name": "Workshop X1C"');
+      expect(serializeMessage(message)).not.toContain('[object Object]');
+    });
+  });
+
   describe('dynamic-tool parts', () => {
     it('serializes input-streaming state', () => {
       const message = baseMessage([
@@ -421,6 +438,25 @@ describe('serializeMessage', () => {
       ]);
       expect(serializeMessage(message)).toBe(
         '<tool_call name="arrange_workbench">\narrange_workbench(open, lanes)\n</tool_call>\n<tool_result>\n-> .tau/workbench/layout.json\n</tool_result>',
+      );
+    });
+    it('serializes the requested package edits and what was locked or refused', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-install_packages',
+          toolCallId: 'install-1',
+          state: 'output-available',
+          input: { add: { alea: '^1.0.1', 'simplex-noise': '^9.0.0' }, remove: ['lodash'] },
+          output: {
+            manifestChanged: false,
+            lockChanged: false,
+            packages: [{ name: 'alea', version: '1.0.1', path: 'node_modules/alea' }],
+            issues: [{ code: 'no-matching-version', name: 'simplex-noise', message: 'No published version matches.' }],
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="install_packages">\nadd: alea@^1.0.1\nadd: simplex-noise@^9.0.0\nremove: lodash\n</tool_call>\n<tool_result>\nalea@1.0.1\nno-matching-version: No published version matches.\n</tool_result>',
       );
     });
     it('serializes the questions with lettered options and the answers with their source', () => {
@@ -504,6 +540,51 @@ describe('serializeMessage', () => {
       expect(serializeMessage(message)).toBe(
         '<tool_call name="read_file">\ntargetFile: readme.md\n</tool_call>\n<tool_result>\nL1-L1\n```\nHello\n```\n</tool_result>',
       );
+    });
+
+    it('serializes a request_job for a finished program by its artifact', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-request_job',
+          toolCallId: 'c1',
+          state: 'output-error',
+          input: { artifact: 'out/bracket.gcode', machineId: 'router' },
+          errorText: 'No machine',
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="request_job">\nartifact: out/bracket.gcode\nmachineId: router\n</tool_call>\n<tool_result>\n[Error: No machine]\n</tool_result>',
+      );
+    });
+
+    it.each([
+      { simulated: true, mark: ' (simulated)' },
+      { simulated: false, mark: '' },
+    ])('marks a request_job and check_job on a simulator: simulated $simulated', ({ simulated, mark }) => {
+      const program = { name: 'part' };
+      const message = baseMessage([
+        {
+          type: 'tool-request_job',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { artifact: 'out/part.gcode.3mf' },
+          output: {
+            job: { jobId: 'job-1', machineId: 'x1c', state: 'started', program },
+            machineName: 'Workshop X1C',
+            simulated,
+          },
+        },
+        {
+          type: 'tool-check_job',
+          toolCallId: 'c2',
+          state: 'output-available',
+          input: { artifact: 'out/part.gcode.3mf' },
+          output: { status: 'ready', simulated, program },
+        },
+      ]);
+      const text = serializeMessage(message);
+      expect(text).toContain(`<tool_result>\npart on Workshop X1C${mark}: started\n</tool_result>`);
+      expect(text).toContain(`<tool_result>\nready${mark}: part\n</tool_result>`);
     });
 
     it('serializes tool with output-error state', () => {

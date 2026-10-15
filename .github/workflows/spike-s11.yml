@@ -1,0 +1,53 @@
+# Spike S11 (native-dependency-resolution charter, wave 0): tau check prototype over every libs/tau-examples fixture (W17)
+# Spike code under scripts/spikes/native-deps/linux/s11; the run's evidence is the uploaded artifact
+# and the job summary. Downloaded bytes are inspected as data and never executed.
+name: Spike S11 (tau check)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-s11-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s11:
+    name: S11 tau check over the example fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Check every fixture (one process per file, exit codes 0/1/3)
+        env:
+          S11_CONCURRENCY: '2'
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          set +e
+          S11_OUT="$RUNNER_TEMP/evidence/s11-records.json" node --test-reporter=spec --test scripts/spikes/native-deps/linux/s11/fixtures-check.ts 2>&1 | grep -v '^\[kernel-worker\]' | tee "$RUNNER_TEMP/evidence/s11-run.txt"
+          status=${PIPESTATUS[0]}
+          set -e
+          { echo '```'; grep -E '^[0-9] |^summary|^ℹ' "$RUNNER_TEMP/evidence/s11-run.txt" | grep -v '^0 ok' ; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: Collect the summary
+        if: always()
+        run: |
+          { grep -E '^[0-9] |^summary|^ℹ (tests|pass|fail|duration)' "$RUNNER_TEMP/evidence/s11-run.txt" | grep -v '^0 ok'; grep -E '^\s+(AssertionError|Error|actual|expected)' "$RUNNER_TEMP/evidence/s11-run.txt" | head -20; echo "ok fixtures: $(grep -c '^0 ok' "$RUNNER_TEMP/evidence/s11-run.txt")"; } > "$RUNNER_TEMP/evidence/s11-summary.txt" || true
+      - name: Publish the numbers as annotations
+        if: always()
+        run: scripts/spikes/native-deps/linux/annotate.sh 'S11' "$RUNNER_TEMP/evidence/s11-summary.txt"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-s11-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 30

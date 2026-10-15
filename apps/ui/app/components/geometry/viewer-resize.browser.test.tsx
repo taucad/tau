@@ -6,7 +6,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { StrictMode, useLayoutEffect, useState } from 'react';
 import { createActor, createAsyncLogic } from 'xstate';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, inject, it, vi } from 'vitest';
 import { page, commands, userEvent } from 'vitest/browser';
 import { Allotment } from '#components/panes/allotment.js';
 import { Dockview } from '#components/panes/dockview.js';
@@ -15,6 +15,64 @@ import { flushSync } from 'react-dom';
 import { GraphicsProvider, useCameraRig } from '@taucad/viewer/hooks/use-graphics';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { ThreeCanvasInstance } from '@taucad/viewer/graphics/three/three-canvas-instance';
+import type * as RendererModule from '@taucad/viewer/graphics/three/renderer';
+import type { RendererInstance } from '@taucad/viewer/graphics/three/renderer';
+import {
+  captureRendererOutput,
+  createRendererOutputCanvas,
+  disposeRendererOutput,
+  installRendererOutput,
+} from '@taucad/runtime-testing/browser/three-renderer-output';
+import type { RendererOutputProfile } from '@taucad/runtime-testing/browser/three-renderer-output';
+
+declare module 'vitest' {
+  // oxlint-disable-next-line typescript/consistent-type-definitions -- Augment the browser fixture's injected profile.
+  interface ProvidedContext {
+    webGpuProfile: RendererOutputProfile;
+  }
+}
+
+const renderers = vi.hoisted(() => new Map<HTMLCanvasElement, RendererInstance>());
+vi.mock('@taucad/viewer/graphics/three/renderer', async (importOriginal) => {
+  const original = await importOriginal<typeof RendererModule>();
+  return {
+    ...original,
+    createRenderer: async (...args: Parameters<typeof original.createRenderer>) => {
+      const renderer = await original.createRenderer(...args);
+      installRendererOutput(renderer, inject('webGpuProfile'));
+      renderers.set(renderer.domElement, renderer);
+      return renderer;
+    },
+  };
+});
+
+/** Preserve UI framing while showing completed final GPU output in the explicit software lane. */
+const capture = async (canvas: HTMLCanvasElement, backend: string, label: string): Promise<void> => {
+  const renderer = renderers.get(canvas);
+  if (!renderer) {
+    throw new Error('Resize fixture renderer is unavailable');
+  }
+  const isTargetReadback = backend === 'webgpu' && inject('webGpuProfile') === 'software';
+  let snapshot: HTMLCanvasElement | undefined;
+  try {
+    if (isTargetReadback) {
+      const pixels = await captureRendererOutput(renderer);
+      expect(pixels).toHaveLength(canvas.width * canvas.height * 4);
+      expect(
+        pixels.some((value) => value !== 0),
+        'the real final viewport has visible pixels',
+      ).toBe(true);
+      snapshot = createRendererOutputCanvas({ renderer, pixels });
+      snapshot.style.zIndex = 'auto';
+      canvas.after(snapshot);
+    }
+    await page.screenshot({
+      path: `../../../../../out/test-results/vitest-browser/viewer-resize/${isTargetReadback ? 'target-readback-' : ''}${backend}-${label}.png`,
+    });
+  } finally {
+    snapshot?.remove();
+  }
+};
 
 declare module 'vitest/internal/browser' {
   // oxlint-disable-next-line typescript/consistent-type-definitions -- Augment Vitest's command interface.
@@ -30,7 +88,9 @@ const frame = async (): Promise<void> =>
     });
   });
 const actors: Array<{ stop: () => void }> = [];
-afterEach(() => {
+afterEach(async () => {
+  await Promise.all(Array.from(renderers.values(), async (renderer) => disposeRendererOutput(renderer)));
+  renderers.clear();
   vi.restoreAllMocks();
   cleanup();
   for (const actor of actors.splice(0)) {
@@ -131,6 +191,9 @@ describe('rendered viewer resize', () => {
         JSON.stringify(
           {
             backend,
+            webGpuProfile: inject('webGpuProfile'),
+            output:
+              backend === 'webgpu' && inject('webGpuProfile') === 'software' ? 'target readback' : 'presented canvas',
             userAgent: navigator.userAgent,
             dpr: renderer.getPixelRatio(),
             samples,
@@ -157,9 +220,7 @@ describe('rendered viewer resize', () => {
       await frame();
       expect(renderedWidth).toBe(700);
       expect(view.container.querySelector('canvas')).toBe(renderer.domElement);
-      await page.screenshot({
-        path: `../../../../../../../out/test-results/vitest-browser/viewer-resize/${backend}-resized.png`,
-      });
+      await capture(renderer.domElement, backend, 'resized');
       sizeSpy.mockRestore();
     },
   );
@@ -291,9 +352,7 @@ describe('rendered viewer resize', () => {
         expect(renderedWidth).not.toBe(before);
       }
       /* oxlint-enable eslint/no-await-in-loop */
-      await page.screenshot({
-        path: `../../../../../../../out/test-results/vitest-browser/viewer-resize/${backend}-panes.png`,
-      });
+      await capture(canvas, backend, 'panes');
     },
   );
 });

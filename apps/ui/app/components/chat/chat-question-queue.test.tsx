@@ -98,7 +98,7 @@ describe('ChatQuestionQueue', () => {
     expect(screen.queryByRole('button', { name: /question/u })).not.toBeInTheDocument();
   });
 
-  it('opens by itself for a question waiting off screen and answers it in place', () => {
+  it('opens by itself for a question waiting off screen and answers it in place', async () => {
     asks = [askOf('ask_form', 'Form', 120)];
     render(<ChatQuestionQueue />);
     settle();
@@ -106,9 +106,33 @@ describe('ChatQuestionQueue', () => {
     const trigger = screen.getByRole('button', { name: '1 question waiting · Form' });
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     const list = screen.getByRole('list', { name: 'Questions' });
-    fireEvent.click(within(list).getByRole('button', { name: /^B, Form two/u }));
+    await act(async () => {
+      fireEvent.click(within(list).getByRole('button', { name: /^B, Form two/u }));
+    });
 
     expect(answer).toHaveBeenCalledWith('ask_form', 'q', { choice: 'Form two' });
+  });
+
+  it('should keep an unsuccessful answer available for retry', async () => {
+    asks = [askOf('ask_retry', 'Form', 120)];
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    answer.mockRejectedValueOnce(new Error('write failed'));
+    try {
+      render(<ChatQuestionQueue />);
+      settle();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /^B, Form two/u }));
+      });
+      expect(screen.getByRole('alert')).toHaveTextContent('Your response was not saved. Try again.');
+      expect(screen.getByRole('button', { name: /^B, Form two/u })).not.toBeDisabled();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /^B, Form two/u }));
+      });
+      expect(answer).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole('alert')).toBeNull();
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('should omit answered asks while another question waits', () => {

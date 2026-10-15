@@ -477,7 +477,7 @@ Rules that follow from the table:
 - Moving Tau-authored code between the editor, API, `apps/libs`, `libs`, ordinary packages, the GeoSpec substrate, and
   the GeoSpec engine keeps Apache-2.0 unchanged. Review third-party code separately.
 
-Routing prose for consumers lives in `LICENSING.md` at the repository root. The current decision record is
+Routing prose for consumers lives in [`docs/licensing/overview.md`](../licensing/overview.md). The current decision record is
 `docs/research/apache-default-relicensing-blueprint.md`; older licensing comparisons remain historical evidence.
 
 **Why**: the tarball is the unit of distribution, so the SPDX field and licence text must travel with each package

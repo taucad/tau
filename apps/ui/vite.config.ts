@@ -65,14 +65,9 @@ const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undef
  * packages bundle into the SSR output.
  *
  * Audit first-party sources: rg -n "new URL\(['\"]\.\..*\.(?:js|ts)['\"], import\.meta\.url\)" packages/
- *
- * `noExternal`: `@rjsf/*` ships bundled CJS whose named exports node's
- * cjs-module-lexer cannot see, so an external SSR import of
- * `customizeValidator` (and the `@rjsf/utils` names it re-imports) crashes the
- * server at boot.
  */
 export const uiSsrOptions = {
-  noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js', /^@rjsf\//u],
+  noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js'],
   external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
 } as const satisfies UserConfig['ssr'];
 
@@ -378,9 +373,23 @@ export const createUiReactCompilerPlugin = (): Plugin => {
   if (compilerPlugins.length !== 1 || compilerPlugin === undefined) {
     throw new Error(`Expected one ${uiReactCompilerPluginName} plugin, received ${compilerPlugins.length}.`);
   }
+  const compilerTransform = compilerPlugin.transform;
+  if (compilerTransform === undefined || typeof compilerTransform === 'function') {
+    throw new Error(`Expected a filtered ${uiReactCompilerPluginName} transform.`);
+  }
 
   return {
     ...compilerPlugin,
+    transform: {
+      ...compilerTransform,
+      filter: {
+        ...compilerTransform.filter,
+        // Oxc 0.148's React compiler emits undefined for BigInt literals, breaking
+        // credit arithmetic. Leave these modules to Vite's ordinary TSX transform.
+        // A match inside a comment/string only forgoes optional memoization.
+        code: { exclude: /\b(?:0[xX][\dA-Fa-f_]+|0[oO][0-7_]+|0[bB][01_]+|[\d_]+)n\b/u },
+      },
+    },
     applyToEnvironment: (environment) => environment.config.consumer === 'client',
   };
 };
@@ -516,6 +525,8 @@ export default defineConfig(({ mode }) => {
     test: {
       globals: true, // Required by @testing-library/jest-dom, which uses `expect` implicitly
       environment: 'jsdom',
+      // Keep mock library matchers on this runner's Vitest instance; externalizing it can load a second peer instance.
+      server: { deps: { inline: ['vitest-mock-extended'] } },
       // *.browser.test.ts(x) files need a real browser (OPFS, Web Locks, WebGL) and run
       // under their own vitest browser configs, not the jsdom sweep.
       exclude: ['**/node_modules/**', '**/dist/**', '**/*.browser.test.ts', '**/*.browser.test.tsx'],

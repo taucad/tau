@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Registry fixture surfaces use package export keys. */
-import { readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 import {
+  collectModuleExportNames,
   collectArtifactImportRequirements,
   findOverrideIssues,
   findRegistryDependencyIssues,
@@ -184,5 +186,31 @@ describe('findUnavailableDependencies', () => {
         }),
       ).resolves.toEqual(['@fixture/private-sibling@0.2.0']);
     });
+  });
+});
+
+describe('collectModuleExportNames', () => {
+  it('reads CommonJS object-literal exports and relative module.exports re-exports', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'tau-cjs-exports-'));
+    try {
+      await mkdir(join(directory, 'cjs'));
+      await writeFile(
+        join(directory, 'index.js'),
+        "if (process.env.NODE_ENV === 'production') {\n  module.exports = require('./cjs/prod.js');\n} else {\n  module.exports = require('./cjs/prod');\n}\n",
+      );
+      await writeFile(
+        join(directory, 'cjs/prod.js'),
+        'exports.useState = () => {};\nexports.createElement = () => {};\n',
+      );
+      await writeFile(
+        join(directory, 'semver.js'),
+        "const satisfies = () => true;\nmodule.exports = { satisfies, 'valid': satisfies, parse: () => {} };\n",
+      );
+
+      expect(collectModuleExportNames(join(directory, 'index.js'))).toEqual(['createElement', 'useState']);
+      expect(collectModuleExportNames(join(directory, 'semver.js'))).toEqual(['parse', 'satisfies', 'valid']);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

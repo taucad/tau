@@ -239,59 +239,133 @@ const printFixture = () => {
   }));
   const runtimeClient = async () => fakeRuntime({ open: vi.fn(() => fakeDocument({ export: slice })) });
   const projectId = 'proj_000000000000000000001';
+  const toolhead = {
+    id: 'tool-0',
+    label: 'Toolhead',
+    kind: 'toolhead',
+    nozzles: [
+      {
+        id: 'nozzle-0.4',
+        diameter: { value: 0.4, unit: 'mm' },
+        maximumTemperature: { value: 300, unit: 'Cel' },
+        material: 'hardened',
+      },
+    ],
+  } as const;
+  const filament = {
+    id: 'filament',
+    label: 'Filament',
+    kind: 'material-system',
+    units: [{ id: 'ams-a', label: 'AMS', kind: 'feeder', slots: [{ id: 'a1', label: 'A1' }] }],
+    routes: [{ unitId: 'ams-a', toolheadIds: ['tool-0'] }],
+  } as const;
   const entry = {
     machineId: 'machine-1',
+    name: 'Workshop X1C',
     providerId: 'bambu',
     descriptor: {
       id: 'physical-1',
-      name: 'Workshop X1C',
+      name: 'X1C',
       model: 'X1C',
-      accepts: [
-        {
-          contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
-          mediaType: 'application/vnd.bambulab.gcode-3mf',
-          requiredMembers: ['Metadata/plate_1.gcode'],
-          payloadSelection: 'plate',
-          technology: 'additive.fff',
+      capabilities: {
+        components: [toolhead, filament],
+        /* Stamped by the host from the provider's manifest; none here, so a real (not simulated) printer. */
+        qualifications: [],
+        jobs: {
+          type: 'supported',
+          accepts: [
+            {
+              contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
+              mediaType: 'application/vnd.bambulab.gcode-3mf',
+              requiredMembers: ['Metadata/plate_1.gcode'],
+              payloadSelection: 'plate',
+              technology: 'additive.fff',
+            },
+          ],
+          attestations: [],
+          safety: { authority: 'approved-agent', attended: false, interlocks: [] },
         },
-      ],
+      },
     },
     snapshot: {
       connection: 'connected',
-      readiness: 'idle',
       observedAt: timestamp,
-      setup: { bedType: 'textured-pei', materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }] },
+      state: { status: 'ready' },
+      components: [
+        {
+          componentId: 'bed',
+          group: 'temperature',
+          receivedAt: timestamp,
+          knowledge: 'known',
+          value: { kind: 'readings', values: [{ id: 'plate', label: 'Build plate', value: 'textured-pei' }] },
+        },
+        {
+          componentId: 'filament',
+          group: 'material',
+          receivedAt: timestamp,
+          knowledge: 'known',
+          value: {
+            kind: 'material-system',
+            slots: [
+              {
+                slot: { unitId: 'ams-a', slotId: 'a1' },
+                state: 'loaded',
+                identifiedBy: 'tag',
+                material: {
+                  materialType: 'PLA',
+                  color: '#FFFFFFFF',
+                  preset: { profileId: 'GFA00', settingId: '' },
+                  calibration: { type: 'default' },
+                },
+                editing: { allowed: true, duringRun: false },
+              },
+            ],
+            routes: [],
+          },
+        },
+      ],
+      activities: [],
+      checks: [],
+      availability: [],
+      alerts: [],
+      operations: [],
     },
     freshness: 'current',
   } as unknown as MachineDirectoryEntry;
+  /* No vendor: the reference engine slices, and no host Bambu Studio is looked for. */
   const provider = {
     id: 'bambu',
     name: 'Bambu Lab',
     manifest: {
-      schemaVersion: 2,
-      identity: { typeId: 'bambu.x1c', vendor: 'Bambu Lab', model: 'X1C' },
-      toolhead: {
-        filamentDiameter: { value: 1.75, unit: 'mm' },
-        nozzles: [{ diameter: { value: 0.4, unit: 'mm' } }],
-      },
-      bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
-      slicing: {
-        recommended: { nozzleTemperature: { value: 220, unit: 'Cel' }, bedTemperature: { value: 55, unit: 'Cel' } },
-      },
+      version: 3,
+      identity: { typeId: 'bambu.x1c', vendor: 'Bambu Lab', model: 'x1c', displayName: 'Bambu Lab X1C' },
+      components: [toolhead, filament],
+      processes: [
+        {
+          type: 'fff',
+          filamentDiameter: { value: 1.75, unit: 'mm' },
+          bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
+          slicing: {
+            recommended: { nozzleTemperature: { value: 220, unit: 'Cel' }, bedTemperature: { value: 55, unit: 'Cel' } },
+          },
+        },
+      ],
     },
   } as unknown as MachineProvider;
-  const requestPrint = vi.fn<MachineClient['requestPrint']>(async (input) => ({
-    requestId: input.requestId,
+  const requestJob = vi.fn<MachineClient['requestJob']>(async (input) => ({
+    version: 1,
+    jobId: input.jobId,
     machineId: input.machineId,
     artifact: input.artifact,
     configuration: input.configuration,
     requestedBy: input.requestedBy,
-    summary: input.summary ?? { fileName: 'main.gcode.3mf' },
     state: 'awaiting-approval',
     createdAt: timestamp,
     updatedAt: timestamp,
+    program: { facts: { process: 'fff' }, ...input.program, name: input.program?.name ?? 'main.gcode.3mf' },
+    checks: [],
   }));
-  const withdrawPrintRequest = vi.fn<MachineClient['withdrawPrintRequest']>();
+  const withdrawJob = vi.fn<MachineClient['withdrawJob']>();
   const machines = {
     available: true,
     list: async () => ({
@@ -299,15 +373,27 @@ const printFixture = () => {
       entries: [entry],
     }),
     listProviders: async () => [provider],
-    requestPrint,
-    listPrintRequests: async () =>
+    /* The provider finds the program ready and completes what the call chose from the program, as R5 says. */
+    checkJob: vi.fn<MachineClient['checkJob']>(async () => ({
+      status: 'ready',
+      program: { name: 'main.gcode.3mf', facts: { process: 'fff' } },
+      checks: [],
+      configuration: {
+        amsMapping: [0],
+        expectedBedType: 'textured-pei',
+        expectedModel: 'X1C',
+        expectedMaterials: [{ slot: 0, materialId: 'PLA' }],
+      },
+    })),
+    requestJob,
+    listJobs: async () =>
       Promise.all(
-        requestPrint.mock.results.map(async (result) => result.value as ReturnType<MachineClient['requestPrint']>),
+        requestJob.mock.results.map(async (result) => result.value as ReturnType<MachineClient['requestJob']>),
       ),
-    withdrawPrintRequest,
+    withdrawJob,
   } as unknown as NonNullable<HostToolRegistryOptions['machines']>;
 
-  return { timestamp, sliced, slice, runtimeClient, projectId, requestPrint, withdrawPrintRequest, machines };
+  return { timestamp, sliced, slice, runtimeClient, projectId, requestJob, withdrawJob, machines };
 };
 
 describe('createHostToolRegistry', () => {
@@ -622,28 +708,38 @@ describe('createHostToolRegistry', () => {
     expect(names).toContain('export_model');
   });
 
-  it('offers request_print only with a runtime, a project id and a machine, and slices at the requested quality through its own export route', async () => {
+  it('offers request_job with a project id and a machine, slices only with a runtime, at the requested quality through its own export route', async () => {
     const workspaceRoot = await makeWorkspace();
-    const { sliced, slice, runtimeClient, projectId, requestPrint, withdrawPrintRequest, machines } = printFixture();
+    const { sliced, slice, runtimeClient, projectId, requestJob, withdrawJob, machines } = printFixture();
     const names = (options: Partial<HostToolRegistryOptions>) =>
       createHostToolRegistry({ workspaceRoot, ...options })
         .list()
         .map((tool) => tool.name);
-    expect(names({ runtimeClient, projectId })).not.toContain('request_print');
-    expect(names({ runtimeClient, machines })).not.toContain('request_print');
-    expect(names({ projectId, machines })).not.toContain('request_print');
+    expect(names({ runtimeClient, projectId })).not.toContain('request_job');
+    expect(names({ runtimeClient, machines })).not.toContain('request_job');
+    /* Without a runtime there is no export route: finished programs only, and a CAD source refuses (U3-5). */
+    const programsOnly = createHostToolRegistry({ workspaceRoot, projectId, machines });
+    expect(programsOnly.list().map((tool) => tool.name)).toContain('request_job');
+    await expect(invoke(programsOnly, 'request_job', { targetFile: 'main.ts' })).resolves.toEqual({
+      isError: true,
+      content: {
+        errorCode: 'MACHINE_TOOL_ERROR',
+        message: 'This host cannot slice; name a finished program with artifact.',
+      },
+    });
+    expect(requestJob).not.toHaveBeenCalled();
     /* No revision history: a print names its project, not a revision. */
     const registry = createHostToolRegistry({ workspaceRoot, runtimeClient, projectId, machines });
-    expect(registry.list().map((tool) => tool.name)).toContain('request_print');
+    expect(registry.list().map((tool) => tool.name)).toContain('request_job');
 
-    const result = await invoke(registry, 'request_print', {
+    const result = await invoke(registry, 'request_job', {
       targetFile: 'main.ts',
       preset: 'fine',
       options: { walls: 3 },
     });
     expect(result).toMatchObject({
       isError: false,
-      content: { request: { requestId: 'call-1', machineId: 'machine-1', state: 'awaiting-approval' } },
+      content: { job: { jobId: 'call-1', machineId: 'machine-1', state: 'awaiting-approval' } },
     });
     /* The quality the agent asked for is what the slicer receives, over the machine's own options. */
     expect(slice).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
@@ -652,13 +748,14 @@ describe('createHostToolRegistry', () => {
         plate: 'textured-pei',
         nozzleDiameter: 0.4,
         filamentDiameter: 1.75,
+        filamentType: 'PLA',
         nozzleTemperature: 220,
         bedTemperature: 55,
         walls: 3,
         preset: 'fine',
       },
     });
-    const request = requestPrint.mock.calls[0]![0];
+    const request = requestJob.mock.calls[0]![0];
     expect(request.artifact).not.toHaveProperty('revision');
     expect(request.artifact).toMatchObject({
       projectId,
@@ -674,34 +771,34 @@ describe('createHostToolRegistry', () => {
       expectedMaterials: [{ slot: 0, materialId: 'PLA' }],
       amsMapping: [0],
     });
-    expect(request.summary).toEqual({ fileName: 'main.gcode.3mf' });
+    expect(request.program).toMatchObject({ name: 'main.gcode.3mf' });
     /* The slice the machine host will read is the one the runtime produced, recorded in the project. */
     expect(new Uint8Array(await readFile(join(workspaceRoot, request.artifact.path)))).toEqual(sliced);
 
     /* The same registry serves MCP: a slicer key the agent may not choose refuses before slicing. */
-    const refused = await invoke(registry, 'request_print', { targetFile: 'main.ts', options: { engine: 'service' } });
+    const refused = await invoke(registry, 'request_job', { targetFile: 'main.ts', options: { engine: 'service' } });
     expect(refused).toMatchObject({
       isError: true,
       content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED', message: expect.stringContaining('"engine"') as string },
     });
     expect(slice).toHaveBeenCalledOnce();
-    expect(requestPrint).toHaveBeenCalledOnce();
+    expect(requestJob).toHaveBeenCalledOnce();
 
-    /* A chat's answer to the request reaches the registry that asked, whichever root the run used (D5, GM.r1 H2). */
+    /* A chat's answer to the job reaches the registry that asked, whichever root the run used (D5, GM.r1 H2). */
     await registry.answerApproval?.({
-      toolName: 'request_print',
-      payload: { kind: 'print-request', requestId: 'call-1' },
+      toolName: 'request_job',
+      payload: { kind: 'job', jobId: 'call-1', machineId: 'machine-1' },
       resolution: { interruptId: 'interrupt-1', outcome: 'cancelled' },
     });
-    expect(withdrawPrintRequest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: 'call-1' }));
+    expect(withdrawJob).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ jobId: 'call-1' }));
   });
 
-  it('names the project of the root each print is called in, when the host resolves projects per call', async () => {
+  it('names the project of the root each job is called in, when the host resolves projects per call', async () => {
     /* `tau mcp` under Codex: started in a folder with no project, each call naming the thread's folder. */
     const startFolder = await makeWorkspace();
     const project = await makeWorkspace();
     const unnamed = await makeWorkspace();
-    const { runtimeClient, requestPrint, machines } = printFixture();
+    const { runtimeClient, requestJob, machines } = printFixture();
     const projectId = 'proj_000000000000000000002';
     const projectIdOf = vi.fn(async (root: string) => (root === project ? projectId : undefined));
     const checkouts = new Map([
@@ -715,24 +812,24 @@ describe('createHostToolRegistry', () => {
       checkouts,
       projectIdOf,
     });
-    expect(registry.list().map((tool) => tool.name)).toContain('request_print');
+    expect(registry.list().map((tool) => tool.name)).toContain('request_job');
 
-    const printed = await registry.invoke({
+    const requested = await registry.invoke({
       toolCallId: 'call-1',
-      toolName: 'request_print',
+      toolName: 'request_job',
       input: { targetFile: 'main.ts' },
       runId: 'mcp:project',
       signal: new AbortController().signal,
     });
-    expect(printed).toMatchObject({ isError: false, content: { request: { state: 'awaiting-approval' } } });
-    const { artifact } = requestPrint.mock.calls[0]![0];
+    expect(requested).toMatchObject({ isError: false, content: { job: { state: 'awaiting-approval' } } });
+    const { artifact } = requestJob.mock.calls[0]![0];
     expect(artifact.projectId).toBe(projectId);
     /* The slice lands in the calling root, where the machine host reads it by that root's id. */
     await expect(readFile(join(project, artifact.path))).resolves.toBeDefined();
 
     const refused = await registry.invoke({
       toolCallId: 'call-2',
-      toolName: 'request_print',
+      toolName: 'request_job',
       input: { targetFile: 'main.ts' },
       runId: 'mcp:unnamed',
       signal: new AbortController().signal,
@@ -741,11 +838,11 @@ describe('createHostToolRegistry', () => {
       isError: true,
       content: { errorCode: 'PROJECT_NOT_NAMED', message: expect.stringContaining(unnamed) as string },
     });
-    expect(requestPrint).toHaveBeenCalledOnce();
-    /* Only a print asks which project a root is. */
+    expect(requestJob).toHaveBeenCalledOnce();
+    /* Only a job tool asks which project a root is. */
     await registry.invoke({
       toolCallId: 'call-3',
-      toolName: 'list_print_requests',
+      toolName: 'list_machines',
       input: {},
       runId: 'mcp:unnamed',
       signal: new AbortController().signal,
@@ -778,7 +875,7 @@ describe('createHostToolRegistry', () => {
     const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (root) => root === workspaceRoot });
     const channel = new NodeFsChannel(port1);
     try {
-      const { runtimeClient, projectId, requestPrint, machines } = printFixture();
+      const { runtimeClient, projectId, requestJob, machines } = printFixture();
       const registry = createHostToolRegistry({
         workspaceRoot,
         runtimeClient,
@@ -787,11 +884,11 @@ describe('createHostToolRegistry', () => {
         filesystem: (root) => new NodeFsProviderClient(channel, root),
       });
 
-      const result = await invoke(registry, 'request_print', { targetFile: 'main.ts' });
+      const result = await invoke(registry, 'request_job', { targetFile: 'main.ts' });
 
-      expect(result).toMatchObject({ isError: false, content: { request: { state: 'awaiting-approval' } } });
-      /* The project's saved choices, not the printer's defaults, prepared the request. */
-      expect(requestPrint.mock.calls[0]![0].summary).toMatchObject({
+      expect(result).toMatchObject({ isError: false, content: { job: { state: 'awaiting-approval' } } });
+      /* The project's saved choices, not the printer's defaults, prepared the job. */
+      expect(requestJob.mock.calls[0]![0].program).toMatchObject({
         preferences: { scope: 'project', typeId: 'bambu.x1c', profileId: 'default' },
       });
     } finally {

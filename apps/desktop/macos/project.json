@@ -37,7 +37,7 @@
         "{projectRoot}/scripts/**/*",
         "{projectRoot}/quick-look-formats.json",
         "{workspaceRoot}/apps/desktop/src/shared/quick-look.ts",
-        "{workspaceRoot}/tsconfig.base.json",
+        "{workspaceRoot}/tools/typescript/base.json",
         "^production"
       ],
       "options": {

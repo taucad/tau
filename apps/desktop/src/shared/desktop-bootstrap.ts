@@ -20,8 +20,14 @@ export const agentHostSessionChannels = {
   release: 'tau:agent-host:release',
 } as const;
 
+/** Open a granted directory in the operating system's file manager. */
+export const openDirectoryChannel = 'tau:open-directory';
+
 /** Theme notification shared by main and preload for the native app icon. */
 export const appIconThemeChannel = 'tau:app-icon-theme';
+
+/** Main's native window fullscreen state, sent on transitions and renderer loads. */
+export const windowFullscreenChannel = 'tau:window-fullscreen';
 
 /**
  * The renderer's half of the quit hold (D31, P49).
@@ -33,6 +39,7 @@ export const appIconThemeChannel = 'tau:app-icon-theme';
  */
 export const quitChannels = {
   ask: 'tau:quit:ask',
+  navigate: 'tau:machines:navigate',
   quiesced: 'tau:quit:quiesced',
 } as const;
 
@@ -58,6 +65,13 @@ export const externalAgentsChannel = 'tau:external-agents';
 export const machinesChannels = {
   completeBinding: 'tau:machines:complete-binding',
 } as const;
+
+/**
+ * What `completeBinding` resolves when the ceremony fails: the host's typed `code`, when it has one, beside its
+ * message. A failure resolves as data rather than rejecting, because an error crossing the context bridge keeps only
+ * its message.
+ */
+export type DesktopMachineBindingFailure = Readonly<{ status: 'failed'; code?: string; message: string }>;
 
 /**
  * Read-only Bambu Studio presets and settings for the Print pane (blueprint D12).

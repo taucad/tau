@@ -14,7 +14,7 @@ export default defineConfig({
       provider: 'v8',
       reportsDirectory: '../../../out/reports/coverage/packages/plugins/picogk',
       include: ['src/**/*'],
-      exclude: ['src/**/*.{test,spec,test-d}.ts'],
+      exclude: ['src/**/*.{test,spec,test-d}.ts', 'src/**/*.fixture.ts'],
       thresholds: { statements: 100, branches: 100, functions: 100, lines: 100 },
     },
   },

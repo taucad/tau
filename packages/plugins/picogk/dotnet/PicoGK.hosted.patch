@@ -5808,3 +5808,13 @@
      <ImplicitUsings>enable</ImplicitUsings>
      <Nullable>enable</Nullable>
      <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+@@ -53,7 +54,7 @@
+   <ItemGroup>
+     <None Include="README.md" Pack="true" PackagePath="\"/>
+-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
++    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.400" PrivateAssets="All" />
+     <PackageReference Include="SkiaSharp" Version="3.119.0" />
+   </ItemGroup>
+ 
+ </Project>
+\ No newline at end of file

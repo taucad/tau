@@ -1,20 +1,9 @@
-import { Link } from 'react-router';
 import acceptableUsePolicy from '#routes/legal.acceptable-use/acceptable-use-policy.txt?raw';
-import { Button } from '@taucad/ui/components/button';
-import { markdownHeaderAnchorComponents } from '#components/markdown/markdown-header-anchor.js';
-import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
-import type { Handle } from '#types/matches.types.js';
+import { LegalDocument } from '#routes/legal/legal-document.js';
+import type { MetaFunction } from 'react-router';
 
-export const handle: Handle = {
-  breadcrumb() {
-    return (
-      <Button asChild variant='ghost'>
-        <Link to='/legal/acceptable-use'>Acceptable Use Policy</Link>
-      </Button>
-    );
-  },
-};
+export const meta: MetaFunction = () => [{ title: 'Acceptable Use Policy · Tau' }];
 
 export default function AcceptableUse(): React.JSX.Element {
-  return <MarkdownViewer components={markdownHeaderAnchorComponents}>{acceptableUsePolicy}</MarkdownViewer>;
+  return <LegalDocument>{acceptableUsePolicy}</LegalDocument>;
 }

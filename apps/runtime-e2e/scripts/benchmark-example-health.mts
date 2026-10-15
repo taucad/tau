@@ -26,12 +26,13 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { availableParallelism, cpus, freemem, hostname, platform, release, totalmem } from 'node:os';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import process from 'node:process';
 import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
-import { Engine } from '@taucad/geospec-engine-native/node';
+import { Engine } from 'geospec-engine/node';
 import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
 import { createGeoSpecNativeModelLoader, createNativeGeoSpecRunner } from 'geospec/runner/native';
 import type { GeoSpecNativeLoadModelOptions, ManagedGeoSpecNativeModelLoader } from 'geospec/runner/native';
@@ -323,7 +324,7 @@ const main = async (): Promise<void> => {
       packageHashes: {
         geospec: await digest(resolve(repoRoot, 'packages/geospec/package.json')),
         geospecEngine: await digest(resolve(repoRoot, 'packages/geospec-engine/package.json')),
-        geospecEngineNative: await digest(resolve(repoRoot, 'packages/geospec-engine-native/package.json')),
+        geospecEngineNative: await digest(createRequire(import.meta.url).resolve('geospec-engine/package.json')),
         runtime: await digest(resolve(repoRoot, 'packages/runtime/package.json')),
       },
     },

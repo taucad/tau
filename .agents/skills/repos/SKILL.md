@@ -7,7 +7,7 @@ description: Investigate dependency source code and manage external repos via Ta
 
 Tau tracks optional external source checkouts with one public CLI and up to two fixed local catalogs:
 
-- `<tau-root>/repos.yaml` contains OSS maintenance sources.
+- `<tau-root>/tools/repositories/catalog.yaml` contains OSS maintenance sources.
 - `<tau-root>/repos/tau-brain/repos.yaml` is the optional private overlay for authorized team research.
 - Every checkout lives under `<tau-root>/repos`, regardless of which catalog owns it.
 

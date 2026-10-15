@@ -223,7 +223,7 @@ it.skipIf(process.env['GEOSPEC_TURBOFAN_NATIVE'] !== '1')(
   async () => {
     const started = performance.now();
     const runtime = await createExampleRuntimeClient(projectPath);
-    const engineModule = await import('@taucad/geospec-engine-native/node');
+    const engineModule = await import('geospec-engine/node');
     const engine = new engineModule.Engine();
     const loader = createGeoSpecNativeModelLoader({ engine });
     let document: ReturnType<typeof runtime.open> | undefined;

@@ -1,19 +1,17 @@
-import { randomUUID } from 'node:crypto';
-
-import { canonicalizeCacheValue, digestContent } from '@taucad/cache-core';
-import type { ContentDigest } from '@taucad/cache-core';
+import { canonicalizeCacheValue } from '@taucad/cache-core';
+import type { CacheValue } from '@taucad/cache-core';
 import { Topic } from '@taucad/events';
 import { ResourceQueue } from '@taucad/filesystem';
 
-import { cloneBoundedJson } from '@taucad/parameters/json';
 import type {
-  AdmittedHostOperation,
   AdmittedHostRoute,
   HostActor,
   HostAdmissionAuthority,
   HostRouteGrant,
   HostSessionHandle,
 } from '#host/host-admission.js';
+import { createNodeMachineOperations } from '#host/node-machine-actions.js';
+import type { NodeMachineOperations } from '#host/node-machine-actions.js';
 import { createNodeMachineBindings } from '#host/node-machine-bindings.js';
 import { identity } from '#host/node-machine-context.js';
 import type {
@@ -26,35 +24,35 @@ import type {
   RemoveNodeMachineBindingInput as ContextRemoveBindingInput,
 } from '#host/node-machine-context.js';
 import type { MachineEventLog } from '#host/node-machine-event-log.js';
+import { advanceJob, createNodeMachineJobs, terminalJobStates } from '#host/node-machine-jobs.js';
 import {
-  effectIntentSchema,
-  effectResultSchema,
-  effectSnapshot,
-  parseOperationEvent,
-  publicOperationReceipt,
-  replayOperations,
+  applyOperationResult,
+  journalVersion,
+  parseJournalEvent,
+  replayJournal,
 } from '#host/node-machine-operations.js';
+import type { NodeMachineJournalEvent, NodeMachineOperationState } from '#host/node-machine-operations.js';
+import { createNodeMachineSerial as createSerial } from '#host/node-machine-serial.js';
 import type {
-  NodeMachineEffectEvent,
-  NodeMachineEffectIntentEvent,
-  NodeMachineEffectResultEvent,
-  NodeMachineEffectState,
-} from '#host/node-machine-operations.js';
-import {
-  advancePrintRequest,
-  createNodeMachinePrintRequestOperations,
-  escalateUnconfirmedStart,
-  terminalRequestStates,
-} from '#host/node-machine-print-requests.js';
+  NodeMachineSerialDriver as SerialDriver,
+  NodeMachineSerialPortInfo as SerialPortInfo,
+} from '#host/node-machine-serial.js';
 import { openNodeMachineStore } from '#host/node-machine-store.js';
 import type { MachineBindingRecord, MachinePreparationRecord } from '#host/node-machine-store.js';
 import { createNodeMachineSupervision } from '#host/node-machine-supervision.js';
-import { exposeMachineChannel, machineAdmissionScope } from '#machines/machine-channel.js';
+import {
+  exposeMachineChannel,
+  machineAdmissionScope,
+  parseMachineOperationReceipt,
+} from '#machines/machine-channel.js';
 import type { MachineChannelEndpoint, MachineChannelHostOperations } from '#machines/machine-channel.js';
-import type { MachineBindingRemoval, MachineOperationReceipt, MachinePreparedPrint } from '#machines/machine-client.js';
-import type { PrintRequest } from '#machines/print-request.js';
+import type { MachineBindingRemoval } from '#machines/machine-client.js';
 import { createMachineDirectory } from '#machines/machine-directory.js';
+import { machineStartWaitMilliseconds } from '#machines/machine-jobs.js';
 import type { MachineDirectory, MachineDirectoryEntry } from '#machines/machine-directory.js';
+import type { MachineJob } from '#machines/machine-jobs.js';
+import type { MachineAlert, MachineRun } from '#machines/machine-observation.js';
+import { isSimulatedMachine } from '#machines/machine-manifest.js';
 import { parseMachineProvider } from '#machines/machine.js';
 import type {
   MachineCandidate,
@@ -62,40 +60,22 @@ import type {
   MachineDescriptor,
   MachineProvider,
   MachineSession,
-  MachineSubmissionReceipt,
-  MachineTransferReceipt,
 } from '#machines/machine.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 
-const encoder = new TextEncoder();
-
-const digestMachineSetup = async (entry: MachineDirectoryEntry): Promise<ContentDigest> =>
-  digestContent({
-    bytes: encoder.encode(
-      canonicalizeCacheValue({
-        value: cloneBoundedJson(
-          {
-            descriptor: {
-              firmware: entry.descriptor.firmware,
-              id: entry.descriptor.id,
-              model: entry.descriptor.model,
-            },
-            setup: entry.snapshot.setup,
-          },
-          {
-            code: 'NODE_MACHINE_PREPARATION_SETUP',
-            maximumDepth: 12,
-            maximumNodes: 1024,
-            maximumCharacters: 65_536,
-          },
-        ),
-      }),
-    ),
-  });
-
 /** Host-owned network and secret capabilities used by generated machine providers. @public */
 export type NodeMachineRuntime = ContextMachineRuntime;
+/** The native serial driver a host application supplies. @public */
+export type NodeMachineSerialDriver = SerialDriver;
+/** One serial port as a driver lists it. @public */
+export type NodeMachineSerialPortInfo = SerialPortInfo;
+/**
+ * Serial access for providers over a host-supplied native driver: `listSerialPorts` for discovery and `openSerial`
+ * for connections. @public
+ */
+// oxlint-disable-next-line unicorn-js/prefer-export-from -- The host/node entry keeps one value path; a barrel export is forbidden.
+export const createNodeMachineSerial = createSerial;
 /** Trusted native completion of a browser-initiated, non-secret binding ceremony. @public */
 export type CompleteNodeMachineBindingInput = ContextCompleteBindingInput;
 /** Trusted native removal of one committed binding, e.g. to roll back a binding whose credential could not be saved. @public */
@@ -151,8 +131,60 @@ export type NodeMachineHost = Readonly<{
   /** The provider and candidate a pending ceremony will bind, or `undefined` for an unknown ceremony; never a secret. */
   describeBinding(ceremonyId: string): Readonly<{ providerId: string; candidate: MachineCandidate }> | undefined;
   removeBinding(input: RemoveNodeMachineBindingInput): Promise<MachineBindingRemoval>;
+  /**
+   * Begin quiescing: from this call until the returned `resume` is called (or the host closes), approving a job and
+   * the start of any job, stored or streamed, are refused `MACHINE_HOST_CLOSING`; a job refused at its start fails
+   * with that code and is requested again. Reads, stops, holds and actions carry on, and a run already started keeps
+   * running. The promise settles once every start already past its check has settled, so its run, if any, is on its
+   * job (and, for a streamed start, in the machine's report). A launcher awaits this before it checks whether a
+   * streamed run is feeding a machine and then closes, so none begins in between; when it keeps running after all, it
+   * calls `resume`.
+   * @param input - `startTimeout`: how long to wait for starts in flight, in milliseconds (default
+   * `machineStartWaitMilliseconds`).
+   * @returns `resume`: admit starts again. Calling it more than once does nothing.
+   * @throws {@link MachineHostStartInFlightError} when a start is still in flight after `startTimeout`. The gate stays
+   * up: a launcher that closes anyway just closes, and one that calls its close off calls the error's `resume`.
+   */
+  quiesce(input?: Readonly<{ /** Milliseconds. */ startTimeout?: number }>): Promise<() => void>;
+  /**
+   * The machines a streamed run is feeding now. This host feeds a streamed program line by line for its whole run, so
+   * a launcher keeps the computer awake while any is listed and refuses to close under one (Q-streamed-host). A run
+   * the machine reports as starting, running, paused or finishing counts, and so does a streamed start recorded on its
+   * job as running, so a provider that answers before its report shows the run is never read as idle; a run the host
+   * marked `interrupted` (its session was lost, or the host restarted) does not. Reads only: nothing is sent to a
+   * machine, so a launcher may ask on a timer.
+   * @returns Each machine's id and name; none once the host is closed.
+   */
+  streamingMachines(): Promise<ReadonlyArray<Readonly<{ machineId: string; name: string }>>>;
   close(): Promise<void>;
 }>;
+
+/** The reported run states in which a streamed program still has lines to send or in flight. */
+const streamingRunStates: ReadonlySet<MachineRun['state']> = new Set(['starting', 'running', 'paused', 'finishing']);
+
+/**
+ * `quiesce()` waited `startTimeout` and a start was still in flight, so the launcher cannot know whether a run is
+ * beginning. Starts stay refused until `resume` is called.
+ * @public
+ */
+export class MachineHostStartInFlightError extends Error {
+  /** Admit starts again, for a launcher that calls its close off. Calling it more than once does nothing. */
+  public readonly resume: () => void;
+
+  public constructor(resume: () => void) {
+    super('MACHINE_HOST_START_IN_FLIGHT');
+    this.name = 'MachineHostStartInFlightError';
+    this.resume = resume;
+  }
+
+  /**
+   * The failure code, beside the message.
+   * @returns `MACHINE_HOST_START_IN_FLIGHT`.
+   */
+  public get code(): 'MACHINE_HOST_START_IN_FLIGHT' {
+    return 'MACHINE_HOST_START_IN_FLIGHT';
+  }
+}
 
 const closeOwned = async (operations: ReadonlyArray<() => void | Promise<void>>): Promise<void> => {
   const errors: unknown[] = [];
@@ -172,60 +204,118 @@ const closeOwned = async (operations: ReadonlyArray<() => void | Promise<void>>)
   }
 };
 
-const sameDescriptor = (left: MachineDescriptor, right: MachineDescriptor): boolean =>
-  canonicalizeCacheValue({ value: left }) === canonicalizeCacheValue({ value: right });
+/** Why a host without serial access lists a serial provider unavailable. */
+const serialUnavailable = Object.freeze({
+  reason: 'This Tau cannot reach serial ports yet, so it cannot find or connect a machine on one.',
+});
 
-// A placeholder has no envelope; the smallest positive one keeps any fit check refusing it.
-const unreportedEnvelope: MachineDescriptor['ratedEnvelope'] = {
-  width: Number.MIN_VALUE,
-  depth: Number.MIN_VALUE,
-  height: Number.MIN_VALUE,
-  unit: 'm',
+/**
+ * What a binding whose provider this host lists unavailable is listed with; it is neither connected nor retried.
+ * ponytail: serial access is the only unavailability this host derives, so the remedy names it; a second kind would
+ * carry its own remedy beside its reason.
+ * @param reason - The host's reason the provider is unavailable.
+ * @returns The alert.
+ */
+const providerUnavailableAlert = (reason: string): MachineAlert => ({
+  code: 'MACHINE_PROVIDER_UNAVAILABLE',
+  severity: 'serious',
+  message: reason,
+  blocks: 'everything',
+  remedies: [
+    {
+      type: 'person',
+      instruction: 'Open this machine in a Tau with serial support installed and enabled, or remove it here.',
+    },
+  ],
+});
+
+/** What a binding whose provider this host does not serve is listed with: nothing works until a person acts. */
+const providerUnservedAlert: MachineAlert = {
+  code: 'MACHINE_PROVIDER_UNAVAILABLE',
+  severity: 'serious',
+  message: 'This Tau does not serve the provider this machine was bound with.',
+  blocks: 'everything',
+  remedies: [{ type: 'person', instruction: 'Update Tau, or remove this machine and bind it again.' }],
+};
+
+// Two descriptors name the same installation when they differ only in incarnation.
+const sameDescriptor = (left: MachineDescriptor, right: MachineDescriptor): boolean => {
+  const comparable = (descriptor: MachineDescriptor): string =>
+    // SAFETY: descriptors are strictly parsed bounded JSON.
+    canonicalizeCacheValue({
+      value: { ...descriptor, capabilities: { ...descriptor.capabilities, incarnation: '' } } as unknown as CacheValue,
+    });
+  return comparable(left) === comparable(right);
 };
 
 /**
- * What a binding whose printer has never reported is listed with (one migrated without a usable directory entry), so
- * it can be seen and removed: its own identity, unknown facts and no operations, stale until the printer connects.
+ * What a binding whose machine has never reported is listed with (one migrated without a usable last-known entry, or
+ * whose cache an older host wrote in another shape), so it can be seen and removed: its own identity, the provider's
+ * manifest as the installed capabilities, and no observations, stale until the machine connects.
  *
  * @param record - The binding.
- * @param vendor - The provider's vendor name.
+ * @param provider - The binding's provider, when this host serves it.
  * @returns A placeholder descriptor and snapshot.
  */
 const unreportedIdentity = (
   record: MachineBindingRecord,
-  vendor: string,
-): Pick<MachineDirectoryEntry, 'descriptor' | 'snapshot'> => ({
-  descriptor: {
-    id: record.physicalId,
-    name: record.candidate.name,
-    vendor,
-    model: record.candidate.claimedIdentity.model ?? 'unknown',
-    technology: 'unknown',
-    firmware: 'unknown',
-    accepts: [],
-    operations: [],
-    ratedEnvelope: unreportedEnvelope,
-    printableEnvelope: unreportedEnvelope,
-    tools: [],
-    materialSystem: { kind: 'unknown', slotCount: 0 },
-    bedTypes: [],
-  },
-  snapshot: {
-    connection: 'disconnected',
-    readiness: 'unknown',
-    observedAt: record.boundAt,
-    setup: { materials: [] },
-  },
-});
+  provider: MachineProvider | undefined,
+): Pick<MachineDirectoryEntry, 'descriptor' | 'snapshot'> => {
+  const manifest = provider?.manifest;
+  return {
+    descriptor: {
+      id: record.physicalId,
+      name: record.candidate.name,
+      vendor: provider?.vendor ?? record.providerId,
+      model: record.candidate.claimedIdentity.model ?? 'unknown',
+      firmware: 'unknown',
+      capabilities: {
+        connection: manifest?.connection ?? {
+          transport: 'network',
+          exclusive: false,
+          opening: 'nothing',
+          identity: 'authenticated',
+        },
+        axes: manifest?.axes ?? [],
+        components: manifest?.components ?? [{ id: 'controller', label: 'Controller', kind: 'controller' }],
+        processes: manifest?.processes ?? [],
+        actions: manifest?.actions ?? [],
+        holds: manifest?.holds ?? [],
+        jobs: manifest?.jobs ?? { type: 'unsupported' },
+        stop: manifest?.stop ?? {
+          motion: 'halts',
+          spindle: 'none',
+          heaters: 'none',
+          position: 'may-be-lost',
+          recovery: [],
+        },
+        revision: 'unreported',
+        incarnation: 'unreported',
+        qualifications: manifest?.qualifications ?? [],
+      },
+    },
+    snapshot: {
+      connection: 'disconnected',
+      observedAt: record.boundAt,
+      state: { status: 'unknown' },
+      components: [],
+      activities: [],
+      checks: [],
+      availability: [],
+      alerts: [],
+      operations: [],
+    },
+  };
+};
 
 /**
  * Open the machine store and serve its machine directory.
  *
  * Recovery follows the store's order: take the lock, migrate a legacy journal once, load every `machine.json` and
- * unexpired preparation, replay each machine's operations log and record every possible send as `unknown`, settle
- * the print requests, list each machine stale from its last-known identity (a placeholder for one whose printer never
- * reported), then reconnect. A machine whose operations log is unreadable, or cannot take its recovery record, stays
- * listed but unavailable; every other machine works.
+ * unexpired preparation, replay each machine's journal and record every possible send as unknown (`confirming`),
+ * settle the jobs, list each machine stale from its last-known identity (a placeholder for one that never reported),
+ * then reconnect. A machine whose journal is unreadable, or cannot take its recovery record, stays listed but
+ * unavailable; every other machine works.
  *
  * @param input - Trusted host identity, store root, providers and operation owner.
  * @returns The owning host service and authenticated channel attachment point.
@@ -243,33 +333,63 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   if ((input.runtime === undefined) === (input.operations === undefined)) {
     throw new TypeError('NODE_MACHINE_HOST_REQUIRES_ONE_OPERATION_OWNER');
   }
-  const providerSources = new Map(input.providers.map((provider) => [provider.id, provider]));
-  if (providerSources.size !== input.providers.length) {
+  if (new Set(input.providers.map((provider) => provider.id)).size !== input.providers.length) {
     throw new TypeError('NODE_MACHINE_HOST_DUPLICATE_PROVIDER');
   }
-  const providers = Object.freeze(input.providers.map(parseMachineProvider));
+  // One provider this host cannot read (a newer manifest or protocol version) is refused alone: its bindings are
+  // listed stale with a remedy, and every other provider is served.
+  // A serial provider needs the host's serial access, unless it only simulates its machine; a host given custom
+  // operations owns that decision itself.
+  const unreachable = (manifest: MachineProvider['manifest']): boolean =>
+    input.runtime !== undefined &&
+    input.runtime.discovery.listSerialPorts === undefined &&
+    manifest.connection.transport === 'serial' &&
+    !isSimulatedMachine(manifest);
+  const providers: readonly MachineProvider[] = Object.freeze(
+    input.providers.flatMap((provider): MachineProvider[] => {
+      try {
+        // `unavailable` is the host's to say; a provider that claims it is reported and not believed.
+        const { unavailable: claimed, ...parsed } = parseMachineProvider(provider);
+        if (claimed !== undefined) {
+          report(Object.assign(new Error('MACHINE_PROVIDER_UNAVAILABLE_CLAIMED'), { providerId: parsed.id }));
+        }
+        return [Object.freeze(unreachable(parsed.manifest) ? { ...parsed, unavailable: serialUnavailable } : parsed)];
+      } catch (error) {
+        report(
+          Object.assign(new Error('MACHINE_PROVIDER_REFUSED', { cause: error }), { providerId: String(provider.id) }),
+        );
+        return [];
+      }
+    }),
+  );
+  const providerSources = new Map(
+    input.providers
+      .filter((provider) => providers.some((served) => served.id === provider.id))
+      .map((provider) => [provider.id, provider]),
+  );
   const definitions = new Map<string, Promise<ExecutableMachineDefinition>>();
   const resolveDefinition = async (
     source: MachineProvider & RuntimePluginDefinitionCarrier<unknown>,
   ): Promise<ExecutableMachineDefinition> => {
     const candidate = await resolveRuntimePluginDefinition('machine', source);
+    const hasSchema = (key: string, optional = false): boolean => {
+      const value: unknown =
+        candidate !== null && typeof candidate === 'object' ? Reflect.get(candidate, key) : undefined;
+      return (optional && value === undefined) || (value !== null && typeof value === 'object' && 'schema' in value);
+    };
+    const fields: Readonly<Record<string, unknown>> =
+      candidate !== null && typeof candidate === 'object' ? (candidate as Readonly<Record<string, unknown>>) : {};
+    const manifest: unknown = Reflect.get(fields, 'manifest');
     if (
-      candidate === null ||
-      typeof candidate !== 'object' ||
-      !('bindingConfiguration' in candidate) ||
-      candidate.bindingConfiguration === null ||
-      typeof candidate.bindingConfiguration !== 'object' ||
-      !('schema' in candidate.bindingConfiguration) ||
-      !('submissionConfiguration' in candidate) ||
-      candidate.submissionConfiguration === null ||
-      typeof candidate.submissionConfiguration !== 'object' ||
-      !('schema' in candidate.submissionConfiguration) ||
-      ('settingsConfiguration' in candidate &&
-        (candidate.settingsConfiguration === null ||
-          typeof candidate.settingsConfiguration !== 'object' ||
-          !('schema' in candidate.settingsConfiguration))) ||
-      typeof Reflect.get(candidate, 'discover') !== 'function' ||
-      typeof Reflect.get(candidate, 'connect') !== 'function'
+      !hasSchema('bindingConfiguration') ||
+      !hasSchema('submissionConfiguration') ||
+      !hasSchema('settingsConfiguration', true) ||
+      manifest === null ||
+      typeof manifest !== 'object' ||
+      !Array.isArray(Reflect.get(manifest, 'actions')) ||
+      !Array.isArray(Reflect.get(manifest, 'holds')) ||
+      typeof Reflect.get(fields, 'discover') !== 'function' ||
+      typeof Reflect.get(fields, 'connect') !== 'function'
     ) {
       throw new Error('MACHINE_PROVIDER_DEFINITION_INVALID');
     }
@@ -289,111 +409,73 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     return pending;
   };
   const now = (): string => input.runtime?.discovery.clock.now() ?? new Date().toISOString();
-  const store = await openNodeMachineStore<NodeMachineEffectEvent>({
+  // A binding stored before endpoints named their transport reads as a network one (the store cannot know); for a
+  // provider that connects over serial it was a device path. Written in the new shape the next time it is written.
+  const storedTransport = (record: MachineBindingRecord): MachineBindingRecord => {
+    const { endpoint } = record.candidate;
+    const transport = providers.find(({ id }) => id === record.providerId)?.manifest.connection.transport;
+    return endpoint.transport === 'network' && transport === 'serial'
+      ? { ...record, candidate: { ...record.candidate, endpoint: { transport: 'serial', path: endpoint.address } } }
+      : record;
+  };
+  const store = await openNodeMachineStore<NodeMachineJournalEvent>({
     storeRoot: input.storeRoot,
     legacyStoreRoots: input.legacyStoreRoots ?? [],
-    parseOperation: parseOperationEvent,
+    parseOperation: parseJournalEvent,
     now,
     onError: report,
   });
   /** Every bound machine, by machine id. */
   const machines = new Map<string, BoundMachine>();
   const preparations = new Map<string, MachinePreparationRecord>();
-  /** Every recorded effect of a machine with a readable log, by operation id. */
-  const effects = new Map<string, NodeMachineEffectState>();
-  /** Every print request of a bound machine, by request id. */
-  const requests = new Map<string, PrintRequest>();
+  /** Every recorded operation of a machine with a readable journal, by operation id. */
+  const operations = new Map<string, NodeMachineOperationState>();
+  /** Every job of a bound machine, by job id. */
+  const jobs = new Map<string, MachineJob>();
   const stillCaptureTimes = new Map<string, number>();
   const effectQueue = new ResourceQueue();
   const connectedSessions = new Map<string, MachineSession>();
   /** One reconnect loop per supervised machine; aborting `stop` ends it. */
   const supervisors = new Map<string, NodeMachineSupervisor>();
   let closed = false;
+  /** Quiescers that have not resumed; any one of them refuses starts. */
+  let quiescers = 0;
+  const startsInFlight = new Set<Promise<unknown>>();
   let directory: MachineDirectory | undefined;
-  const commits = new Topic<void>({
-    name: 'node-machine-directory-commits',
-    onError,
-  });
-  const requestCommits = new Topic<PrintRequest>({
-    name: 'node-machine-print-requests',
-    onError,
-  });
-  // The machine an effect is recorded against, refusing an unbound machine with `missing` and an unreadable log.
+  const commits = new Topic<void>({ name: 'node-machine-directory-commits', onError });
+  const jobCommits = new Topic<MachineJob>({ name: 'node-machine-jobs', onError });
+  const sessionLost = new Topic<string>({ name: 'node-machine-session-lost', onError });
+  // The machine an operation is recorded against, refusing an unbound machine with `missing` and an unreadable journal.
   const usableMachine = (
     machineId: string,
     missing: string,
-  ): Readonly<{
-    record: MachineBindingRecord;
-    log: MachineEventLog<NodeMachineEffectEvent>;
-  }> => {
+  ): Readonly<{ record: MachineBindingRecord; log: MachineEventLog<NodeMachineJournalEvent> }> => {
     const machine = machines.get(machineId);
     if (!machine) {
       throw new Error(missing);
     }
     if (machine.operations.status !== 'open') {
-      throw new Error('MACHINE_OPERATIONS_LOG_CORRUPT', {
-        cause: machine.operations.error,
-      });
+      throw new Error('MACHINE_OPERATIONS_LOG_CORRUPT', { cause: machine.operations.error });
     }
     return { record: machine.record, log: machine.operations.log };
   };
-  const commitRequest = async (record: PrintRequest): Promise<PrintRequest> => {
-    const committed = await store.writeRequest({ ...record, updatedAt: now() });
-    requests.set(committed.requestId, committed);
-    requestCommits.emit(committed);
+  const commitJob = async (job: MachineJob): Promise<MachineJob> => {
+    const committed = await store.writeJob({ ...job, updatedAt: now() });
+    jobs.set(committed.jobId, committed);
+    jobCommits.emit(committed);
     return committed;
   };
-  const syncRequests = async (operationId: string): Promise<void> => {
-    for (const request of requests.values()) {
-      if (request.uploadOperationId !== operationId && request.startOperationId !== operationId) {
-        continue;
-      }
-      const next = advancePrintRequest(request, effects);
-      if (next) {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- request transitions follow the effect ledger in order.
-        await commitRequest(next);
-      }
-    }
-  };
-  const recordEffectResult = async (
-    state: NodeMachineEffectState,
-    receipt: MachineOperationReceipt,
-    source: NodeMachineEffectResultEvent['source'],
-  ): Promise<void> => {
-    const { log } = usableMachine(state.intent.machineId, 'MACHINE_OPERATION_UNAVAILABLE');
-    await log.append(
-      Object.freeze(
-        effectResultSchema.parse({
-          type: 'machine-effect-result',
-          operationId: state.intent.operationId,
-          source,
-          receipt,
-        }),
-      ),
-    );
-    state.status = receipt.status;
-    state.updatedAt = receipt.observedAt;
-    state.receipt = receipt;
-  };
-  const appendEffectResult = async (
-    state: NodeMachineEffectState,
-    receipt: MachineOperationReceipt,
-    source: NodeMachineEffectResultEvent['source'],
-  ): Promise<void> => {
-    await recordEffectResult(state, receipt, source);
-    await syncRequests(state.intent.operationId);
-  };
-  // Take one machine out of service for this run: its log cannot be trusted or written, so none of its effects is sent
-  // or settled again. Every other machine is untouched.
+  // Take one machine out of service for this run: its journal cannot be trusted or written, so none of its operations
+  // is sent or settled again. Every other machine is untouched.
   const markCorrupt = (machineId: string, cause: unknown): void => {
     const error = new Error('MACHINE_OPERATIONS_LOG_CORRUPT', { cause });
     const machine = machines.get(machineId);
     if (machine) {
       machine.operations = { status: 'corrupt', error };
     }
-    for (const [operationId, state] of effects) {
-      if (state.intent.machineId === machineId) {
-        effects.delete(operationId);
+    for (const [operationId, operation] of operations) {
+      if (operation.planned.machineId === machineId) {
+        operations.delete(operationId);
       }
     }
     report(error);
@@ -407,19 +489,49 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     }
     machine.record = await store.writeMachine({
       ...machine.record,
-      last: {
-        descriptor: entry.descriptor,
-        snapshot: entry.snapshot,
-        observedAt: now(),
-      },
+      last: { descriptor: entry.descriptor, snapshot: entry.snapshot, observedAt: now() },
     });
+  };
+  // Settle at restart: a possible send is unknown, a held control ended with the host.
+  const recover = async (operation: NodeMachineOperationState): Promise<void> => {
+    const { planned } = operation;
+    const { log } = usableMachine(planned.machineId, 'MACHINE_UNAVAILABLE');
+    const base = {
+      operationId: planned.operationId,
+      machineId: planned.machineId,
+      kind: planned.kind,
+      observedAt: now(),
+    };
+    const held = planned.kind === 'hold';
+    const event = parseJournalEvent({
+      version: journalVersion,
+      type: 'machine-operation-result',
+      operationId: planned.operationId,
+      source: 'recovery',
+      state: held ? 'rejected' : 'confirming',
+      receipt: parseMachineOperationReceipt(
+        held
+          ? {
+              ...base,
+              status: 'rejected',
+              code: 'MACHINE_HOLD_ENDED',
+              message: 'Tau restarted while the control was held; the machine stops by itself within its bound.',
+            }
+          : { ...base, status: 'unknown', reason: 'Tau restarted after the command may have been sent.' },
+      ),
+      observedAt: now(),
+    });
+    if (event.type !== 'machine-operation-result') {
+      return;
+    }
+    const next = { ...operation };
+    applyOperationResult(next, event);
+    await log.append(event);
+    Object.assign(operation, next);
   };
   try {
     for (const loaded of store.machines) {
-      machines.set(loaded.record.id, {
-        record: loaded.record,
-        operations: loaded.operations,
-      });
+      machines.set(loaded.record.id, { record: storedTransport(loaded.record), operations: loaded.operations });
       for (const preparation of loaded.preparations) {
         preparations.set(preparation.prepared.preparedId, preparation);
       }
@@ -430,90 +542,101 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         continue;
       }
       try {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- each machine's log folds before the next.
-        const replayed = await replayOperations(machineId, machine.operations.log);
-        if ([...replayed.keys()].some((operationId) => effects.has(operationId))) {
-          throw new Error('NODE_MACHINE_EFFECT_DUPLICATE_INTENT');
+        // oxlint-disable-next-line eslint/no-await-in-loop -- each machine's journal folds before the next.
+        const replayed = await replayJournal(machineId, machine.operations.log);
+        if ([...replayed.keys()].some((operationId) => operations.has(operationId))) {
+          throw new Error('NODE_MACHINE_OPERATION_DUPLICATE');
         }
-        for (const [operationId, state] of replayed) {
-          effects.set(operationId, state);
+        for (const [operationId, operation] of replayed) {
+          operations.set(operationId, operation);
         }
       } catch (error) {
         markCorrupt(machineId, error);
       }
     }
-    for (const state of effects.values()) {
-      if (state.status !== 'sending') {
+    for (const operation of operations.values()) {
+      if (operation.state !== 'sending') {
         continue;
       }
       try {
         // oxlint-disable-next-line eslint/no-await-in-loop -- recovery must durably classify each possible send.
-        await recordEffectResult(
-          state,
-          {
-            operationId: state.intent.operationId,
-            machineId: state.intent.machineId,
-            kind: state.intent.intent.kind,
-            status: 'unknown',
-            reason: 'host-restarted-after-possible-send',
-            observedAt: now(),
-          },
-          'recovery',
-        );
+        await recover(operation);
       } catch (error) {
-        // A log that cannot take the durable `unknown` (a full log, a failing disk) takes only its machine down.
-        markCorrupt(state.intent.machineId, error);
+        // A journal that cannot take the durable record (a full disk, a failing disk) takes only its machine down.
+        markCorrupt(operation.planned.machineId, error);
       }
     }
     for (const loaded of store.machines) {
-      for (const request of loaded.requests) {
-        requests.set(request.requestId, request);
+      for (const job of loaded.jobs) {
+        jobs.set(job.jobId, job);
       }
     }
-    for (const request of requests.values()) {
-      if (terminalRequestStates.has(request.state)) {
-        continue;
+    // Whether a job's pending transfer or start was ever sent; one still `planned` (or never journaled) was not.
+    const wasSent = (job: MachineJob): boolean => {
+      const operationId = job.state === 'transferring' ? job.transferOperationId : job.startOperationId;
+      const operation = operationId === undefined ? undefined : operations.get(operationId);
+      return operation !== undefined && operation.state !== 'planned';
+    };
+    for (const job of jobs.values()) {
+      const machine = machines.get(job.machineId);
+      const delivery = machine?.record.last?.descriptor.capabilities.jobs;
+      let next: MachineJob | undefined;
+      if (
+        job.state === 'preparing' ||
+        job.state === 'approved' ||
+        ((job.state === 'transferring' || job.state === 'starting') &&
+          machine?.operations.status === 'open' &&
+          !wasSent(job))
+      ) {
+        next = {
+          ...job,
+          state: 'failed',
+          failure: { code: 'HOST_RESTARTED', message: 'Tau restarted before this job reached the machine.' },
+        };
+      } else if (
+        job.state === 'started' &&
+        job.run?.outcome === 'running' &&
+        delivery?.type === 'supported' &&
+        delivery.delivery === 'streamed'
+      ) {
+        // A streamed run needs this host feeding it; a restart lost it, and the next start needs a person.
+        next = { ...job, run: { ...job.run, outcome: 'interrupted', endedAt: now() } };
+      } else if (!terminalJobStates.has(job.state) && machine?.operations.status === 'open') {
+        // A job of a machine whose journal is unreadable keeps its state: its receipts cannot be read.
+        next = advanceJob(job, operations);
       }
-      // A request of a machine whose log is unreadable keeps its state: its receipts cannot be read.
-      const next: PrintRequest | undefined =
-        request.state === 'preparing'
-          ? {
-              ...request,
-              state: 'failed',
-              failure: {
-                code: 'HOST_RESTARTED',
-                message: 'The host restarted before preparation completed.',
-              },
-            }
-          : machines.get(request.machineId)?.operations.status === 'open'
-            ? advancePrintRequest(request, effects)
-            : undefined;
-      // A start that went unproven for the whole window while the host was down is a person's to check.
-      const settled = next ?? request;
-      const lapsed = escalateUnconfirmedStart(settled, effects, now()) ?? next;
-      if (lapsed) {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- recovered requests settle one at a time.
-        await commitRequest(lapsed);
+      if (next) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- recovered jobs settle one at a time.
+        await commitJob(next);
       }
     }
     directory = createMachineDirectory({
       hostId,
       authorityId,
-      // Every binding is listed, stale until its printer reports; one that never has shows a placeholder.
+      // Every binding is listed, stale until its machine reports; one that never has shows a placeholder.
       recovered: [...machines.values()].map(({ record }): MachineDirectoryEntry => {
-        const { descriptor, snapshot } =
-          record.last ??
-          unreportedIdentity(
-            record,
-            providers.find((provider) => provider.id === record.providerId)?.vendor ?? record.providerId,
-          );
+        const provider = providers.find((candidate) => candidate.id === record.providerId);
+        const { descriptor, snapshot } = record.last ?? unreportedIdentity(record, provider);
         return {
           machineId: record.id,
           name: record.name,
           providerId: record.providerId,
-          descriptor,
-          snapshot,
+          // Qualifications are the served provider's, never a stored copy's.
+          descriptor: {
+            ...descriptor,
+            capabilities: { ...descriptor.capabilities, qualifications: provider?.manifest.qualifications ?? [] },
+          },
+          snapshot: {
+            ...snapshot,
+            operations: [],
+            ...(provider === undefined
+              ? { alerts: [...snapshot.alerts, providerUnservedAlert] }
+              : provider.unavailable
+                ? { alerts: [...snapshot.alerts, providerUnavailableAlert(provider.unavailable.reason)] }
+                : {}),
+          },
           freshness: 'stale',
+          ...(record.testing === true ? { testing: true } : {}),
         };
       }),
       persist: persistMachine,
@@ -528,7 +651,8 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         ...(failedDirectory ? [async () => failedDirectory.close()] : []),
         () => {
           commits.dispose();
-          requestCommits.dispose();
+          jobCommits.dispose();
+          sessionLost.dispose();
         },
         async () => store.close(),
       ]);
@@ -544,623 +668,139 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   const context: NodeMachineHostContext = {
     runtime: input.runtime,
     providerSources,
+    unavailableProviders: new Set(providers.filter(({ unavailable }) => unavailable).map(({ id }) => id)),
     store,
     directory: ownedDirectory,
     effectQueue,
     machines,
     preparations,
-    effects,
-    requests,
-    requestCommits,
+    operations,
+    jobs,
+    jobCommits,
+    commits,
+    sessionLost,
     stillCaptureTimes,
     connectedSessions,
     supervisors,
     isClosed: () => closed,
+    isQuiescing: () => closed || quiescers > 0,
+    startsInFlight,
     now,
     report,
     definitionOf,
     usableMachine,
-    commitRequest,
+    async currentEntry(machineId) {
+      const listed = await ownedDirectory.snapshot();
+      const entry = listed.entries.find((candidate) => candidate.machineId === machineId);
+      return entry?.freshness === 'current' ? entry : undefined;
+    },
+    commitJob,
   };
+  // The journal tells the ledger about every transfer and start result; the ledger is built after the journal.
+  const built: { ledger?: ReturnType<typeof createNodeMachineJobs> } = {};
+  const journal: NodeMachineOperations = createNodeMachineOperations(context, async (operation) =>
+    built.ledger?.sync(operation),
+  );
+  const ledger = createNodeMachineJobs(context, journal);
+  built.ledger = ledger;
+  await Promise.all([...machines.keys()].map(async (machineId) => journal.publish(machineId)));
+  // Every report may show a job's run; observations already settle operations through the same topic. One pass at a
+  // time, and reports that arrive during it fold into one more pass, so a slow pass never queues one per report.
+  let isObserving = false;
+  let isObserveWanted = false;
+  let observing = Promise.resolve();
+  const stopObservingRuns = commits.subscribe(() => {
+    isObserveWanted = true;
+    if (isObserving) {
+      return;
+    }
+    isObserving = true;
+    observing = (async (): Promise<void> => {
+      while (isObserveWanted) {
+        isObserveWanted = false;
+        try {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- one pass at a time, over the latest reports.
+          await ledger.observe();
+        } catch (error) {
+          report(error);
+        }
+      }
+      isObserving = false;
+    })();
+  });
+  // A lost session ends what only it could carry: every hold on the machine, and every streamed run it was feeding.
+  let losing = Promise.resolve();
+  const stopLossHandling = sessionLost.subscribe((machineId) => {
+    const previous = losing;
+    losing = (async (): Promise<void> => {
+      await previous;
+      try {
+        await journal.releaseHolds(machineId);
+        await ledger.interrupt(machineId);
+      } catch (error) {
+        report(error);
+      }
+    })();
+  });
   const supervision = createNodeMachineSupervision(context);
   const bindings = createNodeMachineBindings(context, supervision.supervise);
   await supervision.resume();
-  const executeEffect = async (
-    effectInput: Readonly<{
-      admitted: AdmittedHostOperation;
-      signal: AbortSignal;
-      operationId: string;
-      machineId: string;
-      providerId: string;
-      physicalMachineId: string;
-      intent: NodeMachineEffectIntentEvent['intent'];
-      preflight(): Promise<void>;
-      send(): Promise<MachineSubmissionReceipt | MachineTransferReceipt>;
-    }>,
-  ): Promise<MachineOperationReceipt> => {
+  const captureStill: MachineChannelHostOperations['captureStill'] = async (operationInput) => {
     const { runtime } = input;
     if (!runtime) {
       throw new Error('MACHINE_OPERATION_UNAVAILABLE');
     }
-    const operationId = identity.parse(effectInput.operationId);
-    const { log } = usableMachine(effectInput.machineId, 'MACHINE_OPERATION_UNAVAILABLE');
-    const inputDigest = await digestContent({
-      bytes: encoder.encode(
-        canonicalizeCacheValue({
-          value: cloneBoundedJson(
-            {
-              machineId: effectInput.machineId,
-              physicalMachineId: effectInput.physicalMachineId,
-              providerId: effectInput.providerId,
-              intent: effectInput.intent,
-            },
-            {
-              code: 'NODE_MACHINE_EFFECT_INPUT',
-              maximumDepth: 12,
-              maximumNodes: 1024,
-              maximumCharacters: 65_536,
-            },
-          ),
-        }),
-      ),
-    });
-    let state = effects.get(operationId);
-    if (state) {
-      if (state.intent.inputDigest !== inputDigest || state.intent.machineId !== effectInput.machineId) {
-        throw new Error('MACHINE_OPERATION_ID_CONFLICT');
-      }
-      if (state.receipt) {
-        return state.receipt;
-      }
-      if (state.status !== 'planned') {
-        throw new Error('MACHINE_OPERATION_UNRESOLVED');
-      }
-    } else {
-      const plannedAt = runtime.discovery.clock.now();
-      const intent = Object.freeze(
-        effectIntentSchema.parse({
-          type: 'machine-effect-intent',
-          machineId: effectInput.machineId,
-          providerId: effectInput.providerId,
-          physicalMachineId: effectInput.physicalMachineId,
-          operationId,
-          inputDigest,
-          intent: effectInput.intent,
-          plannedAt,
-        }),
-      );
-      await log.append(intent);
-      state = { intent, status: 'planned', updatedAt: plannedAt };
-      effects.set(operationId, state);
-    }
-    effectInput.signal.throwIfAborted();
-    effectInput.admitted.assertCurrent();
-    await effectInput.preflight();
-    effectInput.signal.throwIfAborted();
-    effectInput.admitted.assertCurrent();
-    const sendingAt = runtime.discovery.clock.now();
-    await log.append({
-      type: 'machine-effect-sending',
-      operationId,
-      observedAt: sendingAt,
-    });
-    state.status = 'sending';
-    state.updatedAt = sendingAt;
-    let receipt: MachineOperationReceipt;
-    try {
-      receipt = publicOperationReceipt({
-        operationId,
-        machineId: effectInput.machineId,
-        intent: effectInput.intent,
-        receipt: await effectInput.send(),
-      });
-    } catch {
-      receipt = {
-        operationId,
-        machineId: effectInput.machineId,
-        kind: effectInput.intent.kind,
-        status: 'unknown',
-        reason: 'provider-result-unavailable-after-possible-send',
-        observedAt: runtime.discovery.clock.now(),
-      };
-    }
-    await appendEffectResult(state, receipt, 'attempt');
-    return receipt;
-  };
-  // Ask the connected session whether an unknown effect happened, from what the printer has already reported, and record
-  // a settled answer. Callers hold the effect's queue slot. Nothing is sent to the printer.
-  const reconcileUnknown = async (state: NodeMachineEffectState, signal: AbortSignal): Promise<void> => {
-    const { machineId, operationId, intent } = state.intent;
+    const machineId = identity.parse(operationInput.machineId);
     const session = connectedSessions.get(machineId);
-    if (state.status !== 'unknown' || !session) {
-      return;
+    if (!machines.has(machineId) || session?.stillCapture.type !== 'supported') {
+      throw new Error('MACHINE_STILL_UNAVAILABLE');
     }
-    const command =
-      intent.kind === 'start'
-        ? 'project_file'
-        : intent.kind === 'cancel' || intent.kind === 'urgent-stop'
-          ? 'stop'
-          : intent.kind;
-    let providerReceipt: MachineSubmissionReceipt;
-    try {
-      providerReceipt = await session.reconcile({
-        operationId,
-        command,
-        ...(intent.kind === 'start' ? { transferId: intent.transferId } : {}),
-        signal,
-      });
-    } catch {
-      return;
+    const requestedAt = Date.parse(runtime.discovery.clock.now());
+    if (!Number.isFinite(requestedAt)) {
+      throw new TypeError('MACHINE_CLOCK_INVALID');
     }
-    if (providerReceipt.status === 'unknown') {
-      return;
+    const previous = stillCaptureTimes.get(machineId);
+    if (previous !== undefined && requestedAt - previous < 5000) {
+      throw new Error('MACHINE_STILL_RATE_LIMITED');
     }
-    let receipt: MachineOperationReceipt;
-    try {
-      receipt = publicOperationReceipt({ operationId, machineId, intent, receipt: providerReceipt });
-    } catch {
-      return;
+    operationInput.signal.throwIfAborted();
+    operationInput.admitted.assertCurrent();
+    stillCaptureTimes.set(machineId, requestedAt);
+    const still = await session.stillCapture.capture({ signal: operationInput.signal });
+    operationInput.signal.throwIfAborted();
+    operationInput.admitted.assertCurrent();
+    const capturedAt = Date.parse(still.capturedAt);
+    const expiresAt = Date.parse(still.expiresAt);
+    const observedAt = Date.parse(runtime.discovery.clock.now());
+    const mediaType: unknown = still.mediaType;
+    if (
+      !(still.bytes instanceof Uint8Array) ||
+      still.bytes.byteLength < 4 ||
+      still.bytes.byteLength > 4 * 1024 * 1024 ||
+      still.bytes[0] !== 0xff ||
+      still.bytes[1] !== 0xd8 ||
+      still.bytes.at(-2) !== 0xff ||
+      still.bytes.at(-1) !== 0xd9 ||
+      mediaType !== 'image/jpeg' ||
+      !Number.isFinite(capturedAt) ||
+      !Number.isFinite(expiresAt) ||
+      !Number.isFinite(observedAt) ||
+      capturedAt > observedAt + 5000 ||
+      expiresAt <= capturedAt ||
+      expiresAt <= observedAt ||
+      expiresAt - capturedAt > 30_000
+    ) {
+      throw new Error('MACHINE_STILL_INVALID');
     }
-    await appendEffectResult(state, receipt, 'reconciliation');
-  };
-  // A sent start is settled by evidence, not by a person (blueprint x1c-start-confirmation R1, R3): every printer report
-  // re-runs the same check as Reconcile for each unknown run effect of a connected machine, then escalates a start left
-  // unproven for the confirmation window. ponytail: scans every effect on each report (~1 Hz per printer); index the
-  // unknown ones if a store ever holds thousands.
-  /** The check running for each effect; one at a time per effect. */
-  const settling = new Map<string, Promise<void>>();
-  /** Effects a report reached while their check was running; each is checked once more when it finishes. */
-  const reportedWhileSettling = new Set<string>();
-  const settlement = new AbortController();
-  const settle = async (operationId: string, state: NodeMachineEffectState): Promise<void> => {
-    try {
-      await effectQueue.queueFor(`effect:${operationId}`, async () => {
-        await reconcileUnknown(state, settlement.signal);
-        const request = [...requests.values()].find((candidate) => candidate.startOperationId === operationId);
-        const lapsed = request ? escalateUnconfirmedStart(request, effects, now()) : undefined;
-        if (lapsed) {
-          await commitRequest(lapsed);
-        }
-      });
-    } catch (error) {
-      report(error);
-    } finally {
-      settling.delete(operationId);
-      if (reportedWhileSettling.delete(operationId)) {
-        settleFromEvidence();
-      }
-    }
-  };
-  function settleFromEvidence(): void {
-    for (const [operationId, state] of effects) {
-      if (
-        closed ||
-        state.status !== 'unknown' ||
-        state.intent.intent.kind === 'upload' ||
-        !connectedSessions.has(state.intent.machineId)
-      ) {
-        continue;
-      }
-      if (settling.has(operationId)) {
-        reportedWhileSettling.add(operationId);
-        continue;
-      }
-      settling.set(operationId, settle(operationId, state));
-    }
-  }
-  const stopSettling = commits.subscribe(settleFromEvidence);
-  const deviceOperations: Pick<
-    MachineChannelHostOperations,
-    'preparePrint' | 'uploadPrint' | 'startPrint' | 'controlRun' | 'captureStill' | 'reconcileOperation'
-  > = {
-    async preparePrint(operationInput) {
-      if (!input.runtime) {
-        throw new Error('MACHINE_OPERATION_UNAVAILABLE');
-      }
-      const machineId = identity.parse(operationInput.machineId);
-      const { record } = usableMachine(machineId, 'MACHINE_PREPARATION_UNAVAILABLE');
-      const session = connectedSessions.get(machineId);
-      if (!session) {
-        throw new Error('MACHINE_PREPARATION_UNAVAILABLE');
-      }
-      const listed = await ownedDirectory.snapshot();
-      const entry = listed.entries.find((candidate) => candidate.machineId === machineId);
-      if (entry?.freshness !== 'current' || entry.snapshot.connection !== 'connected') {
-        throw new Error('MACHINE_PREPARATION_STALE_MACHINE');
-      }
-      if (entry.snapshot.readiness !== 'idle') {
-        throw new Error('MACHINE_PREPARATION_MACHINE_NOT_IDLE');
-      }
-      const acceptsArtifact = entry.descriptor.accepts.some(
-        (accepted) =>
-          accepted.contract.id === operationInput.artifact.contract.id &&
-          accepted.contract.version === operationInput.artifact.contract.version &&
-          accepted.mediaType === operationInput.artifact.mediaType &&
-          accepted.requiredMembers.includes(operationInput.artifact.selectedMember),
-      );
-      if (!acceptsArtifact) {
-        throw new Error('MACHINE_ARTIFACT_INCOMPATIBLE');
-      }
-      const definition = await definitionOf(record.providerId);
-      const validated = await definition.submissionConfiguration.schema['~standard'].validate(
-        operationInput.configuration,
-      );
-      if (validated.issues) {
-        throw new Error('MACHINE_SUBMISSION_CONFIGURATION_INVALID');
-      }
-      const configuration = cloneBoundedJson(validated.value, {
-        code: 'NODE_MACHINE_PREPARATION_CONFIGURATION',
-        maximumDepth: 20,
-        maximumNodes: 2048,
-        maximumCharacters: 65_536,
-      });
-      const configurationDigest = await digestContent({
-        bytes: encoder.encode(canonicalizeCacheValue({ value: configuration })),
-      });
-      const setupDigest = await digestMachineSetup(entry);
-      const preparedId = randomUUID();
-      let receipt;
-      try {
-        receipt = await session.preparePrint({
-          operationId: preparedId,
-          expectedMachineId: record.physicalId,
-          artifact: operationInput.artifact,
-          configuration: validated.value,
-          signal: operationInput.signal,
-        });
-      } catch {
-        throw new Error('MACHINE_PREPARATION_FAILED');
-      }
-      if (receipt.status === 'rejected') {
-        throw new Error('MACHINE_PREPARATION_REJECTED', { cause: receipt });
-      }
-      if (receipt.digest !== operationInput.artifact.digest || receipt.length !== operationInput.artifact.length) {
-        throw new Error('MACHINE_ARTIFACT_MISMATCH');
-      }
-      const preparedAt = input.runtime.discovery.clock.now();
-      const providerData = cloneBoundedJson(receipt.providerData, {
-        code: 'NODE_MACHINE_PROVIDER_PREPARATION',
-        maximumDepth: 12,
-        maximumNodes: 1024,
-        maximumCharacters: 65_536,
-      });
-      const providerDataDigest = await digestContent({
-        bytes: encoder.encode(canonicalizeCacheValue({ value: providerData })),
-      });
-      const body = Object.freeze({
-        preparedId,
-        machineId,
-        physicalMachineId: record.physicalId,
-        artifact: operationInput.artifact,
-        remoteName: identity.parse(receipt.remoteName),
-        parser: receipt.parser,
-        configurationDigest,
-        providerDataDigest,
-        setupDigest,
-        preparedAt,
-        expiresAt: new Date(Date.parse(preparedAt) + 10 * 60_000).toISOString(),
-      });
-      const preparedDigest = await digestContent({
-        bytes: encoder.encode(
-          canonicalizeCacheValue({
-            value: cloneBoundedJson(body, {
-              code: 'NODE_MACHINE_PREPARED_PRINT',
-              maximumDepth: 20,
-              maximumNodes: 2048,
-              maximumCharacters: 131_072,
-            }),
-          }),
-        ),
-      });
-      const prepared: MachinePreparedPrint = Object.freeze({
-        ...body,
-        preparedDigest,
-      });
-      const preparation = await store.writePreparation({
-        version: 1,
-        prepared,
-        providerId: record.providerId,
-        configuration,
-        providerData,
-      });
-      preparations.set(preparedId, preparation);
-      return preparation.prepared;
-    },
-    async uploadPrint(operationInput) {
-      const { runtime } = input;
-      if (!runtime) {
-        throw new Error('MACHINE_OPERATION_UNAVAILABLE');
-      }
-      const machineId = identity.parse(operationInput.machineId);
-      const operationId = identity.parse(operationInput.operationId);
-      return effectQueue.queueForMany([`effect:${operationId}`, `machine:${machineId}`], async () => {
-        operationInput.signal.throwIfAborted();
-        operationInput.admitted.assertCurrent();
-        const preparation = preparations.get(identity.parse(operationInput.preparedId));
-        if (
-          !preparation ||
-          preparation.prepared.machineId !== machineId ||
-          preparation.prepared.preparedDigest !== operationInput.preparedDigest
-        ) {
-          throw new Error('MACHINE_PREPARATION_MISMATCH');
-        }
-        const { record } = usableMachine(machineId, 'MACHINE_OPERATION_UNAVAILABLE');
-        return executeEffect({
-          admitted: operationInput.admitted,
-          signal: operationInput.signal,
-          operationId,
-          machineId,
-          providerId: record.providerId,
-          physicalMachineId: record.physicalId,
-          intent: {
-            kind: 'upload',
-            preparedId: preparation.prepared.preparedId,
-            preparedDigest: preparation.prepared.preparedDigest,
-          },
-          async preflight() {
-            if (Date.parse(preparation.prepared.expiresAt) <= Date.parse(runtime.discovery.clock.now())) {
-              throw new Error('MACHINE_PREPARATION_EXPIRED');
-            }
-            const listed = await ownedDirectory.snapshot();
-            const entry = listed.entries.find((candidate) => candidate.machineId === machineId);
-            if (entry?.freshness !== 'current' || entry.snapshot.connection !== 'connected') {
-              throw new Error('MACHINE_UPLOAD_STALE_MACHINE');
-            }
-            if (!connectedSessions.has(machineId)) {
-              throw new Error('MACHINE_OPERATION_UNAVAILABLE');
-            }
-          },
-          async send() {
-            const session = connectedSessions.get(machineId);
-            if (!session) {
-              throw new Error('MACHINE_OPERATION_UNAVAILABLE');
-            }
-            const transfer = await session.uploadPrint({
-              operationId,
-              expectedMachineId: record.physicalId,
-              artifact: preparation.prepared.artifact,
-              remoteName: preparation.prepared.remoteName,
-              providerData: preparation.providerData,
-              configuration: preparation.configuration,
-              signal: operationInput.signal,
-            });
-            if (
-              transfer.status === 'transferred' &&
-              (transfer.digest !== preparation.prepared.artifact.digest ||
-                transfer.length !== preparation.prepared.artifact.length)
-            ) {
-              return {
-                status: 'rejected',
-                code: 'TRANSFER_MISMATCH',
-                message: 'The transferred object does not match the prepared artifact.',
-                observedAt: transfer.observedAt,
-              };
-            }
-            return transfer;
-          },
-        });
-      });
-    },
-    async startPrint(operationInput) {
-      const { runtime } = input;
-      if (!runtime) {
-        throw new Error('MACHINE_OPERATION_UNAVAILABLE');
-      }
-      const machineId = identity.parse(operationInput.machineId);
-      const operationId = identity.parse(operationInput.operationId);
-      const transferId = identity.parse(operationInput.transferId);
-      return effectQueue.queueForMany([`effect:${operationId}`, `machine:${machineId}`], async () => {
-        operationInput.signal.throwIfAborted();
-        operationInput.admitted.assertCurrent();
-        const preparation = preparations.get(identity.parse(operationInput.preparedId));
-        if (
-          !preparation ||
-          preparation.prepared.machineId !== machineId ||
-          preparation.prepared.preparedDigest !== operationInput.preparedDigest ||
-          preparation.prepared.setupDigest !== operationInput.expectedSetupDigest
-        ) {
-          throw new Error('MACHINE_PREPARATION_MISMATCH');
-        }
-        const transferred = [...effects.values()].some(
-          (state) =>
-            state.intent.intent.kind === 'upload' &&
-            state.intent.intent.preparedId === preparation.prepared.preparedId &&
-            state.receipt?.status === 'accepted' &&
-            state.receipt.kind === 'upload' &&
-            state.receipt.evidence.transferId === transferId,
-        );
-        if (!transferred) {
-          throw new Error('MACHINE_TRANSFER_MISMATCH');
-        }
-        const { record } = usableMachine(machineId, 'MACHINE_OPERATION_UNAVAILABLE');
-        return executeEffect({
-          admitted: operationInput.admitted,
-          signal: operationInput.signal,
-          operationId,
-          machineId,
-          providerId: record.providerId,
-          physicalMachineId: record.physicalId,
-          intent: {
-            kind: 'start',
-            preparedId: preparation.prepared.preparedId,
-            preparedDigest: preparation.prepared.preparedDigest,
-            transferId,
-            expectedSetupDigest: operationInput.expectedSetupDigest,
-          },
-          async preflight() {
-            if (Date.parse(preparation.prepared.expiresAt) <= Date.parse(runtime.discovery.clock.now())) {
-              throw new Error('MACHINE_PREPARATION_EXPIRED');
-            }
-            const listed = await ownedDirectory.snapshot();
-            const entry = listed.entries.find((candidate) => candidate.machineId === machineId);
-            if (
-              entry?.freshness !== 'current' ||
-              entry.snapshot.connection !== 'connected' ||
-              entry.snapshot.readiness !== 'idle' ||
-              entry.snapshot.activeRunId !== undefined
-            ) {
-              throw new Error('MACHINE_START_STALE_OR_BUSY');
-            }
-            if ((await digestMachineSetup(entry)) !== preparation.prepared.setupDigest) {
-              throw new Error('MACHINE_START_SETUP_CHANGED');
-            }
-            if (!connectedSessions.has(machineId)) {
-              throw new Error('MACHINE_START_UNAVAILABLE');
-            }
-          },
-          async send() {
-            const session = connectedSessions.get(machineId);
-            if (!session) {
-              throw new Error('MACHINE_START_UNAVAILABLE');
-            }
-            return session.submit({
-              operationId,
-              expectedMachineId: record.physicalId,
-              artifact: preparation.prepared.artifact,
-              remoteName: preparation.prepared.remoteName,
-              transferId,
-              providerData: preparation.providerData,
-              configuration: preparation.configuration,
-              signal: operationInput.signal,
-            });
-          },
-        });
-      });
-    },
-    async controlRun(operationInput) {
-      if (!input.runtime) {
-        throw new Error('MACHINE_OPERATION_UNAVAILABLE');
-      }
-      const machineId = identity.parse(operationInput.machineId);
-      const operationId = identity.parse(operationInput.operationId);
-      return effectQueue.queueForMany([`effect:${operationId}`, `machine:${machineId}`], async () => {
-        operationInput.signal.throwIfAborted();
-        operationInput.admitted.assertCurrent();
-        const { record } = usableMachine(machineId, 'MACHINE_CONTROL_UNAVAILABLE');
-        return executeEffect({
-          admitted: operationInput.admitted,
-          signal: operationInput.signal,
-          operationId,
-          machineId,
-          providerId: record.providerId,
-          physicalMachineId: record.physicalId,
-          intent: {
-            kind: operationInput.command,
-            expectedProviderRunId: operationInput.expectedProviderRunId,
-          },
-          async preflight() {
-            const listed = await ownedDirectory.snapshot();
-            const entry = listed.entries.find((candidate) => candidate.machineId === machineId);
-            if (
-              entry?.freshness !== 'current' ||
-              entry.snapshot.connection !== 'connected' ||
-              entry.snapshot.activeRunId !== operationInput.expectedProviderRunId
-            ) {
-              throw new Error('MACHINE_CONTROL_STALE_RUN');
-            }
-            if (!connectedSessions.has(machineId)) {
-              throw new Error('MACHINE_CONTROL_UNAVAILABLE');
-            }
-          },
-          async send() {
-            const session = connectedSessions.get(machineId);
-            if (!session) {
-              throw new Error('MACHINE_CONTROL_UNAVAILABLE');
-            }
-            return session.control({
-              command: operationInput.command,
-              operationId,
-              expectedProviderRunId: operationInput.expectedProviderRunId,
-              signal: operationInput.signal,
-            });
-          },
-        });
-      });
-    },
-    async captureStill(operationInput) {
-      const { runtime } = input;
-      if (!runtime) {
-        throw new Error('MACHINE_OPERATION_UNAVAILABLE');
-      }
-      const machineId = identity.parse(operationInput.machineId);
-      const session = connectedSessions.get(machineId);
-      if (!machines.has(machineId) || session?.stillCapture.type !== 'supported') {
-        throw new Error('MACHINE_STILL_UNAVAILABLE');
-      }
-      const requestedAt = Date.parse(runtime.discovery.clock.now());
-      if (!Number.isFinite(requestedAt)) {
-        throw new TypeError('MACHINE_CLOCK_INVALID');
-      }
-      const previous = stillCaptureTimes.get(machineId);
-      if (previous !== undefined && requestedAt - previous < 5000) {
-        throw new Error('MACHINE_STILL_RATE_LIMITED');
-      }
-      operationInput.signal.throwIfAborted();
-      operationInput.admitted.assertCurrent();
-      stillCaptureTimes.set(machineId, requestedAt);
-      const still = await session.stillCapture.capture({
-        signal: operationInput.signal,
-      });
-      operationInput.signal.throwIfAborted();
-      operationInput.admitted.assertCurrent();
-      const capturedAt = Date.parse(still.capturedAt);
-      const expiresAt = Date.parse(still.expiresAt);
-      const observedAt = Date.parse(runtime.discovery.clock.now());
-      const mediaType: unknown = still.mediaType;
-      if (
-        !(still.bytes instanceof Uint8Array) ||
-        still.bytes.byteLength < 4 ||
-        still.bytes.byteLength > 4 * 1024 * 1024 ||
-        still.bytes[0] !== 0xff ||
-        still.bytes[1] !== 0xd8 ||
-        still.bytes.at(-2) !== 0xff ||
-        still.bytes.at(-1) !== 0xd9 ||
-        mediaType !== 'image/jpeg' ||
-        !Number.isFinite(capturedAt) ||
-        !Number.isFinite(expiresAt) ||
-        !Number.isFinite(observedAt) ||
-        capturedAt > observedAt + 5000 ||
-        expiresAt <= capturedAt ||
-        expiresAt <= observedAt ||
-        expiresAt - capturedAt > 30_000
-      ) {
-        throw new Error('MACHINE_STILL_INVALID');
-      }
-      return Object.freeze({ ...still, bytes: Uint8Array.from(still.bytes) });
-    },
-    async reconcileOperation(operationInput) {
-      if (!input.runtime) {
-        throw new Error('MACHINE_OPERATION_UNAVAILABLE');
-      }
-      const machineId = identity.parse(operationInput.machineId);
-      const operationId = identity.parse(operationInput.operationId);
-      return effectQueue.queueFor(`effect:${operationId}`, async () => {
-        operationInput.signal.throwIfAborted();
-        operationInput.admitted.assertCurrent();
-        const machine = machines.get(machineId);
-        if (machine?.operations.status === 'corrupt') {
-          throw new Error('MACHINE_OPERATIONS_LOG_CORRUPT', {
-            cause: machine.operations.error,
-          });
-        }
-        const state = effects.get(operationId);
-        if (state?.intent.machineId !== machineId) {
-          throw new Error('MACHINE_OPERATION_UNKNOWN');
-        }
-        if (state.status !== 'unknown') {
-          return effectSnapshot(state);
-        }
-        await reconcileUnknown(state, operationInput.signal);
-        return effectSnapshot(state);
-      });
-    },
+    return Object.freeze({ ...still, bytes: Uint8Array.from(still.bytes) });
   };
   const hostOperations: MachineChannelHostOperations =
     input.operations ??
     Object.freeze({
       ...bindings.operations,
-      ...deviceOperations,
-      ...createNodeMachinePrintRequestOperations(context, deviceOperations),
+      ...journal.operations,
+      ...ledger.operations,
+      captureStill,
     });
   const channels = new Set<NodeMachineChannelHandle>();
   let closing: Promise<void> | undefined;
@@ -1232,13 +872,57 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     completeBinding: bindings.completeBinding,
     describeBinding: bindings.describeBinding,
     removeBinding: bindings.removeBinding,
+    async quiesce({ startTimeout = machineStartWaitMilliseconds } = {}) {
+      quiescers += 1;
+      let resumed = false;
+      const resume = (): void => {
+        if (!resumed) {
+          resumed = true;
+          quiescers -= 1;
+        }
+      };
+      // A start registered after the gate went up is refused by it; only those already past it are waited for.
+      const inFlight = Promise.allSettled(startsInFlight);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = new Promise<boolean>((resolve) => {
+        timer = setTimeout(resolve, startTimeout, true);
+      });
+      try {
+        if (await Promise.race([inFlight.then(() => false), timedOut])) {
+          throw new MachineHostStartInFlightError(resume);
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+      return resume;
+    },
+    async streamingMachines() {
+      if (closed) {
+        return [];
+      }
+      const { entries } = await ownedDirectory.snapshot();
+      const running = new Set(
+        [...jobs.values()]
+          .filter(({ state, run }) => state === 'started' && run?.outcome === 'running')
+          .map(({ machineId }) => machineId),
+      );
+      return entries
+        .filter(({ machineId, descriptor, snapshot: { run } }) => {
+          if (run?.delivery === 'streamed' && streamingRunStates.has(run.state)) {
+            return true;
+          }
+          const facts = running.has(machineId) ? descriptor.capabilities.jobs : undefined;
+          return facts?.type === 'supported' && facts.delivery === 'streamed';
+        })
+        .map(({ machineId, name }) => ({ machineId, name }));
+    },
     async close() {
       if (closing) {
         return closing;
       }
       closed = true;
-      stopSettling();
-      settlement.abort();
+      stopObservingRuns();
+      stopLossHandling();
       // No reconnect starts from here on: pending retries are cancelled and attempts in flight abandoned.
       const supervised = [...supervisors.values()];
       supervisors.clear();
@@ -1254,10 +938,16 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           await Promise.allSettled(active.map(async (channel) => channel.closed));
           channels.clear();
         },
+        async () => journal.releaseHolds(),
+        () => {
+          journal.close();
+        },
         async () => {
           await Promise.allSettled(supervised.map(async ({ done }) => done));
         },
         async () => effectQueue.whenDrained(),
+        async () => observing,
+        async () => losing,
         async () => ownedDirectory.close(),
         () => {
           connectedSessions.clear();
@@ -1265,7 +955,8 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         },
         () => {
           commits.dispose();
-          requestCommits.dispose();
+          jobCommits.dispose();
+          sessionLost.dispose();
         },
         async () => store.close(),
       ]);

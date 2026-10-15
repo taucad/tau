@@ -98,7 +98,7 @@ The operator-selected reference is `out/research/agent-ux-exact/tau-agent-activi
 Its durable source/review lives in
 `docs/research/artifacts/agent-streaming-fidelity-restoration/ux-closeout/canvas/exact/`.
 Treat the rendered canvas body as a composition reference. Canonical requirements
-live in [DESIGN.md](../../../DESIGN.md#design-and-critique-workflow).
+live in [docs/policy/design-policy.md](../../../docs/policy/design-policy.md#design-and-critique-workflow).
 Read its `main.tsx`, `frames.tsx` and `style.css` when available;
 the disposable HTML bundle is not a dependency of new scenes. If it cannot be
 opened, use the supplied screenshot and source; record that limitation.
@@ -117,4 +117,4 @@ the narrow layout, fonts, themes and state consistency. A build alone is not a
 design review; an axe pass alone is not WCAG certification.
 
 The revision-story successor remains an interaction/reuse example. Both examples
-are evaluated against current DESIGN.md when edited.
+are evaluated against current docs/policy/design-policy.md when edited.

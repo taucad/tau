@@ -86,15 +86,52 @@ public static class Params
 
 Parameter discovery uses Roslyn symbols only; it does not execute model code. Defaults must be finite, non-null compile-time constants, and the opt-in class cannot define an explicit static constructor. Supplied values are type/range checked before the collectible assembly is loaded, then applied before the ordinary console entry point runs. Programs without the exact opt-in class keep the empty schema and upstream behavior.
 
+## Native runtime
+
+The kernel runs a sandboxed .NET worker that the package does not carry. `tau-plugin.json` pins its
+closure for macOS 14+ on Apple silicon: Microsoft's .NET runtime archive, byte-for-byte from
+`builds.dotnet.microsoft.com`, and the Tau PicoGK layer (the ReadyToRun worker, patched `PicoGK.dll`,
+Roslyn, SkiaSharp and the Tau-built engine) from `cdn.tau.new` with its GitHub Release as fallback.
+`tau prepare picogk` downloads, verifies and seals both in the payload store; a host then composes the
+kernel from the closure's receipt:
+
+```typescript
+import { picogkKernel, picogkOptionsFromClosure } from '@taucad/picogk';
+
+const preparation = await host.inspect({ package: '@taucad/picogk' });
+if (preparation.state.status === 'ready') {
+  const kernel = picogkKernel(picogkOptionsFromClosure(preparation.state.receipts['runtime']!));
+}
+```
+
+The worker launches as Microsoft's `dotnet` muxer running the worker assembly, with the closure root as
+its only readable runtime path. Each launch hashes the muxer and a named set of runtime and engine
+files against the receipt; `tau prepare picogk --verify` re-checks the whole closure. Linux and Windows
+have no closure until a Linux engine builder exists, so preparation reports the host as unsupported.
+
 ## API
 
-| Export         | Kind            | Use                                                                           |
-| -------------- | --------------- | ----------------------------------------------------------------------------- |
-| `picogk`       | toolkit factory | package-named authoring factory; presets select capabilities                  |
-| `plugin`       | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
-| `picogkKernel` | kernel factory  | direct `kernels` composition, with options                                    |
+| Export                     | Kind            | Use                                                                           |
+| -------------------------- | --------------- | ----------------------------------------------------------------------------- |
+| `picogk`                   | toolkit factory | package-named authoring factory; presets select capabilities                  |
+| `plugin`                   | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
+| `picogkKernel`             | kernel factory  | direct `kernels` composition, with options                                    |
+| `picogkOptionsFromClosure` | function        | kernel options from a prepared closure's receipt                              |
 
 One preset, `default`, selecting `kernels.default`.
+
+## Project files
+
+`@taucad/picogk/project/*` holds the files a new PicoGK project carries, so it runs outside Tau with the .NET 10 SDK on macOS arm64 or Windows x64 (`dotnet restore --locked-mode`, then `dotnet run`, which opens PicoGK's viewer): `project.csproj`, which Tau writes as `<Name>.csproj` and which references upstream PicoGK 2.3.0 from NuGet, and its `packages.lock.json`. The project's `main.cs` is the program, so no separate entry file is needed. When a root `.csproj` references PicoGK at another version, evaluation succeeds with a `LIBRARY_VERSION_MISMATCH` warning located at the reference.
+
+## Large models
+
+Mechanism serialization retains large payloads without a fixed byte or value-count ceiling. Cancellation, cycle detection and JSON nesting validation still apply.
+
+Native requests run until completion or cancellation by default (`requestTimeout: 0`). Hosts may
+set a positive deadline in milliseconds or a `maxArtifactBytes` policy under `kernels.default`.
+The default artifact allowance is `Number.MAX_SAFE_INTEGER`; actual allocation and filesystem
+limits still apply. Workspace mirroring has no fixed byte, file-count or directory-depth quota.
 
 ## Environment
 

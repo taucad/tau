@@ -1,9 +1,11 @@
 import { parseArgs } from 'node:util';
 
-import { serveHostRuntime } from '@taucad/host/runtime-host';
+import { createRuntimeChildWorkerLauncher, serveHostRuntime } from '@taucad/host/runtime-host';
 import type { HostRuntimeHandle } from '@taucad/host/runtime-host';
+import { installNativeWorkerLauncher } from '@taucad/native-process-core';
 import { installZooProxyCredential, zooProxyCredentialFrameType } from '@taucad/zoo/proxy';
 
+import type { NativeComposition } from '#native-kernels.js';
 import { loadCliRuntime } from '#runtime-options.js';
 import { installSandboxModuleHooks } from '#sandbox-modules.js';
 
@@ -33,7 +35,11 @@ const handleMessage = async (message: unknown): Promise<void> => {
   if (typeof message !== 'object' || message === null || !('type' in message)) {
     throw new TypeError('Tau Host runtime child received an invalid IPC message.');
   }
-  if (message.type === zooProxyCredentialFrameType) {
+  /* Credential frames and native worker frames have listeners of their own. */
+  if (
+    message.type === zooProxyCredentialFrameType ||
+    (typeof message.type === 'string' && message.type.startsWith('native-worker:'))
+  ) {
     return;
   }
   if (message.type === 'close') {
@@ -54,11 +60,23 @@ const handleMessage = async (message: unknown): Promise<void> => {
   if (host) {
     throw new Error('Tau Host runtime child was started more than once.');
   }
+  /* The daemon composed the native kernels from the payload store, which this child never reads, and starts their
+   * workers on its behalf: this child may not spawn (D37, North Star S2). */
+  const native =
+    'native' in message && typeof message.native === 'object' && message.native !== null
+      ? (message.native as NativeComposition)
+      : undefined;
+  if (native !== undefined) {
+    installNativeWorkerLauncher(createRuntimeChildWorkerLauncher());
+  }
   const runtime = await loadCliRuntime({
     projectRoot: process.cwd(),
     plugin: values.plugin,
     config: values.config,
     ...(values['zoo-proxy-url'] ? { zooProxyUrl: values['zoo-proxy-url'] } : {}),
+    ...(native?.build123d === undefined ? {} : { build123d: native.build123d }),
+    ...(native?.picogk === undefined ? {} : { picogk: native.picogk }),
+    ...(native === undefined ? {} : { unavailableKernels: native.unavailable }),
   });
   host = await serveHostRuntime({ runtime, authorizationToken: message.authorizationToken });
   process.send?.({ type: 'ready', url: host.url.href, runtimeVersion: host.runtimeVersion });

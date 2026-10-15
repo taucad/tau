@@ -1,6 +1,10 @@
+import type { MetaFunction } from 'react-router';
+import { PageHeader } from '#components/layout/page-header.js';
 import { ArrowRight } from 'lucide-react';
 import { Link } from 'react-router';
 import { Card, CardDescription, CardTitle } from '@taucad/ui/components/card';
+
+export const meta: MetaFunction = () => [{ title: 'Legal · Tau' }];
 
 const legalPages = [
   {
@@ -37,32 +41,23 @@ const legalPages = [
 
 export default function LegalIndex(): React.JSX.Element {
   return (
-    <div className='flex min-h-full flex-col items-center px-6 py-16 md:py-24'>
-      <div className='mx-auto w-full max-w-4xl'>
-        {/* Header */}
-        <div className='mb-16 text-center'>
-          <h1 className='font-serif text-5xl tracking-tight text-foreground italic md:text-6xl'>Legal</h1>
-          <p className='mt-4 text-lg text-muted-foreground'>
-            Review our terms of service and other important legal documents.
-          </p>
-        </div>
-
-        {/* Cards Grid */}
-        <div className='grid gap-4 md:grid-cols-3'>
-          {legalPages.map((page) => (
-            <Link key={page.href} to={page.href} className='group'>
-              <Card className='flex h-full flex-col justify-between bg-card/50 p-5 transition-colors hover:border-primary hover:bg-card'>
-                <div className='space-y-2'>
-                  <CardTitle className='text-base'>{page.title}</CardTitle>
-                  <CardDescription className='text-sm'>{page.description}</CardDescription>
-                </div>
-                <div className='mt-6 flex justify-end'>
-                  <ArrowRight className='size-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1' />
-                </div>
-              </Card>
-            </Link>
-          ))}
-        </div>
+    <div className='space-y-6'>
+      <PageHeader title='Legal' />
+      {/* Cards Grid */}
+      <div className='grid gap-4 md:grid-cols-3'>
+        {legalPages.map((page) => (
+          <Link key={page.href} to={page.href} className='group rounded-xl outline-none focus-visible:focus-outline'>
+            <Card className='flex h-full flex-col justify-between bg-card/50 p-5 transition-colors hover:bg-muted'>
+              <div className='space-y-2'>
+                <CardTitle className='text-base'>{page.title}</CardTitle>
+                <CardDescription className='text-sm'>{page.description}</CardDescription>
+              </div>
+              <div className='mt-6 flex justify-end'>
+                <ArrowRight className='size-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1' />
+              </div>
+            </Card>
+          </Link>
+        ))}
       </div>
     </div>
   );

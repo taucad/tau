@@ -1,3 +1,4 @@
+import { BrowserSettingsPanel } from '#components/browser/browser-settings.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefCallback } from 'react';
 import { ArrowLeft } from 'lucide-react';
@@ -36,6 +37,13 @@ import { SettingsItem } from '#components/settings/settings-item.js';
 /** Keep authenticated sections behind their existing gate and mount only the active section. */
 function SettingsContent({ section }: { readonly section: SettingsSection }): React.JSX.Element {
   switch (section) {
+    case 'browser': {
+      return (
+        <SettingsItem settingId='web-browser'>
+          <BrowserSettingsPanel />
+        </SettingsItem>
+      );
+    }
     case 'general': {
       return <GeneralSettings />;
     }
@@ -118,7 +126,11 @@ export function SettingsDialog(): React.JSX.Element {
   );
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      {isOpen ? <SettingsSurface activeSection={activeSection} /> : null}
+      {isOpen ? (
+        <SettingsSurface
+          activeSection={settingsSections.some(({ id }) => id === activeSection) ? activeSection : 'general'}
+        />
+      ) : null}
     </Dialog>
   );
 }
@@ -205,7 +217,7 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
 
   return (
     <DialogContent
-      className='h-[90dvh] max-w-[calc(100%-2rem)] grid-rows-[1fr] gap-0 overflow-hidden p-0 sm:max-w-6xl'
+      className='h-[90dvh] max-w-[calc(100%-2rem)] grid-rows-[1fr] gap-0 overflow-hidden p-0 sm:max-w-6xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input]]:bg-card [&_[data-slot=select-trigger]]:bg-card [&_[data-slot=slider-input]]:bg-card [&_[data-slot=textarea]]:bg-card'
       onOpenAutoFocus={(event) => {
         // A deep link owns focus: its reveal moves it to the content, not the dialog's first button.
         if (linkedDestination) {
@@ -243,7 +255,6 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
               aria-label='Search settings'
               placeholder='Search settings…'
               value={query}
-              variant='transparent'
               onClear={clearSearch}
               onChange={(event) => {
                 setQuery(event.target.value);

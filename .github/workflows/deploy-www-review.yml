@@ -72,23 +72,20 @@ jobs:
           job-name: Deploy marketing review site
           github-token: ${{ github.token }}
 
-      - name: Build the marketing site
-        if: steps.superseded.outputs.superseded != 'true'
-        env:
-          WWW_LAUNCH: 'true'
-          WWW_ORIGIN: https://tau.new
-        run: node apps/www/scripts/build.mjs
+      # Match the established UI adapter/CLI path workaround: both the build and
+      # deploy resolve the same function directory without omitting the server build.
+      - name: Point the Netlify CLI package path at the marketing functions
+        working-directory: apps/www
+        run: mkdir -p apps/www && ln -sfn ../../.netlify apps/www/.netlify
 
-      # From the repository root the CLI finds every workspace package and stops
-      # unless `--filter` names the one being deployed.
-      - name: Deploy with the Netlify CLI
+      - name: Build and deploy with the Netlify CLI
         if: steps.superseded.outputs.superseded != 'true'
+        working-directory: apps/www
         env:
           MESSAGE: ${{ github.workflow }} ${{ github.sha }}
         run: |
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
-            --prod --no-build --filter @taucad/www \
-            --dir "$GITHUB_WORKSPACE/apps/www/dist" \
+            --prod --context production --filter @taucad/www \
             --site "$SITE_ID" --message "$MESSAGE"
 
       # The plan of the next push to `main` diffs `www` against this commit.

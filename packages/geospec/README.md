@@ -7,7 +7,7 @@ This package is the **matcher-API substrate** (Apache-2.0): the authoring DSL,
 the selector language, the diagnostics and evidence schemas, the matcher
 registry, and host integration. It executes no geometry on its own: every claim
 is evaluated by the compiled
-[`@taucad/geospec-engine-native`](../geospec-engine-native/README.md) core that
+[`geospec-engine`](https://github.com/taucad/geospec/tree/main/packages/geospec-engine) core that
 the host passes to the runner. Tau's desktop/browser composition and the
 [`geospec` CLI](../geospec-engine/README.md) supply that engine. Authored tests
 do not import or select an engine, and nothing registers one globally.
@@ -54,7 +54,7 @@ and the existing host integration; `geospec/vitest` supplies the framework
 adapter. Vitest's `describe`/`it` come from Vitest, while the helpers imported
 from `geospec` above belong to GeoSpec's VM runner. Ordinary assertions remain
 `expectGeo`; the optional Vitest `expect` extension has its own asynchronous
-settlement contract. See the [host binding documentation](../geospec-engine-native/README.md).
+settlement contract. See the [host binding documentation](https://github.com/taucad/geospec/tree/main/packages/geospec-engine#readme).
 
 Python uses `load_model`/`expect_geo` from `geospec`, with the wheel's pytest
 plugin scope or a standalone `GeoSpecEngine` context. Tau `test_model` discovers
@@ -240,5 +240,5 @@ describe('parameter variants', () => {
 
 **Apache-2.0.** This package is the permissive perimeter: your specs, your
 models and your verdicts do not inherit this package's license. See
-[LICENSING.md](../../LICENSING.md) at the repository root for the routing map
+[Licensing](../../docs/licensing/overview.md) for the routing map
 and the internal-use FAQ.

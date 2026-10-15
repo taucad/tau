@@ -159,6 +159,7 @@ export function fromDockview<L extends Lane>(
     throw new Error('Floating, popout and edge groups cannot be represented in a workbench record.');
   }
   const used = new Set<string>();
+  let hasBrowserPane = false;
   function read(current: GridNode, orientation: Orientation): WorkbenchNode {
     if (current.type === 'branch') {
       if (!Array.isArray(current.data)) {
@@ -198,7 +199,14 @@ export function fromDockview<L extends Lane>(
       if (component === 'newTab' || (lane === 'workbench' && id === 'workbench:files')) {
         continue;
       }
-      if (lane === 'viewer' && component === 'viewer') {
+      // Browser URLs and native page ids are window-local; retain only the launcher in a shared layout.
+      if (lane === 'workbench' && component === 'browser') {
+        if (hasBrowserPane) {
+          continue;
+        }
+        hasBrowserPane = true;
+        tabs.push({ kind: 'pane', pane: 'browser' });
+      } else if (lane === 'viewer' && component === 'viewer') {
         const view: unknown = params?.['viewId'];
         if (typeof view !== 'string') {
           throw new TypeError(`Missing view id: ${id}`);

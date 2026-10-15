@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import type { Server } from 'node:http';
 import { release } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
@@ -726,12 +727,7 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
         delete headers['transfer-encoding'];
         headers['content-length'] = String(bytes.byteLength);
         await route.fulfill({ status: response.status(), headers, body: bytes });
-        const sourceBytes = await readFile(
-          resolve(
-            import.meta.dirname,
-            '../../../../packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm',
-          ),
-        );
+        const sourceBytes = await readFile(createRequire(import.meta.url).resolve('geospec-engine/wasm-binary'));
         return {
           url: response.url(),
           status: response.status(),
@@ -2882,7 +2878,7 @@ export const uiWriteArtifactChunk: BrowserCommand<
   if (bytes.length > 65_536) {
     throw new Error('Fixture artifact chunk exceeds bound.');
   }
-  await mkdir(outputRoot, { recursive: true });
+  await mkdir(resolve(destination, '..'), { recursive: true });
   const file = await open(destination, offset === 0 ? 'w' : 'r+');
   try {
     const stat = await file.stat();

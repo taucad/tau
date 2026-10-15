@@ -34,7 +34,7 @@ import type { MachineTypeId } from '@taucad/types';
 import { MachineSettingsOwner } from '@taucad/runtime/host';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
-import { rpcClientErrorCode } from '@taucad/chat';
+import { rpcClientErrorCode } from '@taucad/chat/schemas/rpc';
 import { toolName } from '@taucad/chat/constants';
 import { toRpcError } from '@taucad/chat/rpc';
 import type { RpcGeoSpecClient, RpcSkillResolver } from '@taucad/chat/rpc';
@@ -51,7 +51,7 @@ import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@t
 import { runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
-import type { Engine as NativeGeoSpecEngine } from '@taucad/geospec-engine-native/node';
+import type { Engine as NativeGeoSpecEngine } from 'geospec-engine/node';
 import { assertRootedPath } from '@taucad/utils/path';
 
 /* Not `@taucad/types`: that barrel is an `export type *` the dts bundler cannot
@@ -65,9 +65,10 @@ import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { ActorRefFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 
-import type { ToolRegistry } from '@taucad/agent-host';
+import type { JsonObject, ToolRegistry } from '@taucad/agent-host';
 
 import type { ProjectRevisions } from '#revisions.js';
+import { prepareKernelDescription, prepareKernelInputSchema, prepareKernelToolName } from '#prepare-kernel-tool.js';
 
 type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
 
@@ -195,7 +196,7 @@ const geoSpecEngineResolves = (): boolean => {
     /* The modules the runner imports, all this host's own declared
      * dependencies, so its own module is the correct base — unlike the kernel
      * plugins next door. */
-    import.meta.resolve('@taucad/geospec-engine-native/node');
+    import.meta.resolve('geospec-engine/node');
     import.meta.resolve('geospec/runner/native');
     import.meta.resolve('@taucad/geospec-engine/node-filesystem');
     return true;
@@ -224,7 +225,7 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
   previous?.carried.clear();
   previous?.engine.close();
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the native package's constructor export.
-  const { Engine } = await import('@taucad/geospec-engine-native/node');
+  const { Engine } = await import('geospec-engine/node');
   const cacheRoot = join(homedir() || tmpdir(), '.cache', 'geospec', 'evidence');
   let engine: NativeGeoSpecEngine;
   try {
@@ -312,6 +313,23 @@ export const createHostGeoSpecRunner = async (
   }
 };
 
+/** One progress report: bytes done of the total, strictly increasing within a call. @public */
+export type HostPrepareKernelProgress = Readonly<{ progress: number; total: number; message: string }>;
+
+/**
+ * The host's preparation behind `prepare_kernel`.
+ *
+ * Resolves with the outcome (`ready`, `blocked`, `cancelled` or `failed`, each naming the kernel); rejects for a
+ * kernel no installed package declares, with an `UNKNOWN_KERNEL` code and a message naming the kernels that can be
+ * prepared. A `ready` outcome is reported only once the host composes the kernel on its next call.
+ *
+ * @public
+ */
+export type HostPrepareKernel = (
+  input: Readonly<{ kernel: string }>,
+  context: Readonly<{ signal: AbortSignal; onProgress: (progress: HostPrepareKernelProgress) => void }>,
+) => Promise<JsonObject & Readonly<{ status: string }>>;
+
 /** Options for {@link createHostToolRegistry}. @public */
 export type HostToolRegistryOptions = {
   /** Absolute workspace root every file tool is confined to. */
@@ -380,24 +398,73 @@ export type HostToolRegistryOptions = {
   readonly machines?: RuntimeTransportFacet<MachineClient> | undefined;
   /**
    * The `tau.json` id of the project `workspaceRoot` holds: the desktop's
-   * attached project, or the daemon's served root. Every artifact `request_print`
+   * attached project, or the daemon's served root. Every artifact `request_job`
    * slices names it, which is how a machine host finds the file again. Omit it
-   * and `request_print` is not offered: a host that cannot name its project
+   * and the job tools are not offered: a host that cannot name its project
    * never guesses one.
    */
   readonly projectId?: string | undefined;
   /**
    * Names the project each root holds, for a host whose calls name their own folder: `tau mcp`, where Codex names
-   * the thread's folder per call and the folder the server started in may hold no project. Asked when a print tool
+   * the thread's folder per call and the folder the server started in may hold no project. Asked when a job tool
    * is called, so the slice lands in the calling root and names that root's project, which the machine host then
-   * reads it from. With it `request_print` is offered whatever `workspaceRoot` holds, a root that names no project
-   * refuses the print, and `projectId` is not used.
+   * reads it from. With it `request_job` is offered whatever `workspaceRoot` holds, a root that names no project
+   * refuses the job, and `projectId` is not used.
    */
   readonly projectIdOf?: ((workspaceRoot: string) => Promise<string | undefined>) | undefined;
+  /**
+   * The native kernel preparation this host offers as `prepare_kernel` (D7): `tau mcp` and the daemon, which prepare
+   * in their own process. Omit it and the tool is not offered, and an unprepared kernel's refusal names `tau prepare`.
+   */
+  readonly prepareKernel?: HostPrepareKernel | undefined;
 };
 
-/** The tools that name the project a print artifact belongs to. */
-const projectPrintTools: ReadonlySet<string> = new Set([toolName.requestPrint, 'prepare_machine_print']);
+/**
+ * One `prepare_kernel` call: the outcome as content, an error unless it is `ready`, and each progress report as a
+ * partial result the MCP projection forwards as `notifications/progress`.
+ *
+ * @param prepareKernel - The host's preparation.
+ * @param invocation - The call.
+ * @returns Its result.
+ */
+const invokePrepareKernel = async (
+  prepareKernel: HostPrepareKernel,
+  invocation: Parameters<ToolRegistry['invoke']>[0],
+): Promise<Awaited<ReturnType<ToolRegistry['invoke']>>> => {
+  const { input } = invocation;
+  const named: unknown = typeof input === 'object' && input !== null ? Reflect.get(input, 'kernel') : undefined;
+  const kernel = typeof named === 'string' ? named : '';
+  if (kernel === '') {
+    return {
+      content: { errorCode: 'INVALID_INPUT', message: 'prepare_kernel needs { "kernel": "<name>" }.' },
+      isError: true,
+    };
+  }
+  try {
+    const outcome = await prepareKernel(
+      { kernel },
+      {
+        signal: invocation.signal,
+        onProgress: (progress) => {
+          invocation.onUpdate?.({ content: { ...progress }, isError: false });
+        },
+      },
+    );
+    return { content: outcome, isError: outcome.status !== 'ready' };
+  } catch (error) {
+    const code = error instanceof Error ? (error as Error & { readonly code?: unknown }).code : undefined;
+    return {
+      content: {
+        errorCode: typeof code === 'string' ? code : 'PREPARE_KERNEL_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+      },
+      isError: true,
+    };
+  }
+};
+
+/** The tools that name the project a job's artifact belongs to. */
+const projectPrintTools: ReadonlySet<string> = new Set([toolName.requestJob, toolName.checkJob]);
 
 /**
  * Build the daemon's tool registry.
@@ -594,7 +661,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     };
 
-    /* `request_print` needs every leg of the print path: the project id here
+    /* `request_job` needs every leg of the print path: the project id here
      * names the artifact's project, and the registry offers the tool only when
      * a runtime to slice with and a machine to ask are attached too. A
      * candidate turn's slice lands in its checkout, which the machine host
@@ -676,14 +743,30 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
     projectIdOf === undefined
       ? rootedRegistry(options.workspaceRoot, options.projectId)
       : registryFor(options.workspaceRoot, 'proj_listed-only').registry;
+  const { prepareKernel } = options;
   return {
     /* The tool *list* is the host's, not the turn's: every root serves the same
      * names, descriptions and schemas, and the list is read before any run
      * exists. */
-    list: () => live.list(),
+    list: () =>
+      prepareKernel === undefined
+        ? live.list()
+        : [
+            ...live.list(),
+            {
+              name: prepareKernelToolName,
+              description: prepareKernelDescription,
+              inputSchema: prepareKernelInputSchema,
+              /* It writes the shared store, outside every workspace. */
+              executionMode: 'sequential',
+            },
+          ],
     /* An answer names no checkout: every root's registry settles it through the same machine client (D5). */
     answerApproval: async (answer) => live.answerApproval?.(answer),
     invoke: async (invocation) => {
+      if (prepareKernel !== undefined && invocation.toolName === prepareKernelToolName) {
+        return invokePrepareKernel(prepareKernel, invocation);
+      }
       const root =
         (invocation.runId === undefined ? undefined : options.checkouts?.get(invocation.runId)?.cwd) ??
         options.workspaceRoot;
@@ -699,7 +782,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
         return {
           content: {
             errorCode: 'PROJECT_NOT_NAMED',
-            message: `${root} holds no tau.json, so nothing in it can be printed. Print from a Tau project folder.`,
+            message: `${root} holds no tau.json, so nothing in it can run on a machine. Request jobs from a Tau project folder.`,
           },
           isError: true,
         };

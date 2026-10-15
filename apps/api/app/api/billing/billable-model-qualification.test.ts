@@ -52,8 +52,8 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(25);
-    expect(new Set(billableModelRouteIds).size).toBe(25);
+    expect(billableModelRouteIds).toHaveLength(26);
+    expect(new Set(billableModelRouteIds).size).toBe(26);
     expect(billableModelRouteIds).toContain('anthropic-claude-sonnet-5.5');
     expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
     expect(billableModelRouteIds).toContain('morph-minimax-m2.7');
@@ -488,6 +488,18 @@ const qualifyRoute = (routeId: string): QualifiedBillableInvocation => {
 };
 
 describe('catalog route vocabulary', () => {
+  it('should pin Argon introductory pricing with an expiry and no explicit cache-write meter', () => {
+    const result = qualifyRoute('google-gemini-4-argon');
+
+    expect(result.normalizedRequest.body).toMatchObject({ model: 'google/gemini-4-argon' });
+    expect(result.invocation.supplierRatesValidUntil).toBe('2026-11-30T23:59:59.999Z');
+    expect(result.invocation.supplierRates).toEqual([
+      { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '2000000000000', denominatorUnits: '1000000' },
+      { dimension: 'cache_read', tier: null, numeratorPicoUsd: '100000000000', denominatorUnits: '1000000' },
+      { dimension: 'output', tier: null, numeratorPicoUsd: '10000000000000', denominatorUnits: '1000000' },
+    ]);
+  });
+
   it('should resolve every funded route id and forward the supplier model id', () => {
     for (const routeId of billableModelRouteIds) {
       const resolved = qualifyRoute(routeId);

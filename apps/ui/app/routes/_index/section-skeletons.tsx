@@ -1,4 +1,4 @@
-import { projectGridClassName } from '#components/project-grid.js';
+import { projectGridClassName } from '#components/project-grid-layout.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 
 function CardSkeleton(): React.JSX.Element {

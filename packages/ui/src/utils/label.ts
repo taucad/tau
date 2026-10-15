@@ -49,3 +49,22 @@ export const toTitleCase = (string_: string): string => {
  * ```
  */
 export const formatDisplayLabel = (label: string): string => toTitleCase(label);
+
+/**
+ * Format a form field's label: a title its schema authors shows as written; a label made from a property key reads
+ * as a display label.
+ *
+ * @param label - The label the form shows: the schema's title when it has one, else the property key.
+ * @param title - The schema's own title, if any.
+ * @returns The label as shown.
+ * @public
+ * @example <caption>Keep an authored title and format a property key</caption>
+ * ```typescript
+ * import { formatFieldLabel } from '@taucad/ui/utils/label';
+ *
+ * formatFieldLabel('Command forms (testing)', 'Command forms (testing)'); // 'Command forms (testing)'
+ * formatFieldLabel('nozzleDiameter', undefined); // 'Nozzle Diameter'
+ * ```
+ */
+export const formatFieldLabel = (label: string, title: unknown): string =>
+  title === label ? label : formatDisplayLabel(label);

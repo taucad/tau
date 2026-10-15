@@ -50,10 +50,14 @@ vi.mock('#chat-clients/_internal/shared-chat-transport.js', async (importOrigina
 });
 
 /** The real SDK rejects this causally invalid presentation, while its request promise resolves. */
-const poisonedStream = (): ReadableStream<UIMessageChunk> =>
+const poisonedStream = (status: 'submitted' | 'streaming' = 'submitted'): ReadableStream<UIMessageChunk> =>
   new ReadableStream({
     start(controller) {
       controller.enqueue({ type: 'start', messageId: 'poisoned' });
+      if (status === 'streaming') {
+        controller.enqueue({ type: 'text-start', id: 'partial' });
+        controller.enqueue({ type: 'text-delta', id: 'partial', delta: 'Partial response' });
+      }
       controller.enqueue({ type: 'tool-output-available', toolCallId: 'missing-input', output: 'private payload' });
       controller.close();
     },
@@ -118,84 +122,87 @@ afterEach(async () => {
 });
 
 describe('ChatSessionStore real SDK presentation recovery', () => {
-  it('should recover an active failed request through a read-only watch and converge at terminal', async () => {
-    const hostCommand = vi.spyOn(HostCommands, 'sendHostCommand');
-    const diagnostic = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const reconnect = vi
-      .spyOn(BrowserPlacementChatTransport.prototype, 'reconnectToStream')
-      .mockImplementationOnce(async () => poisonedStream());
-    const { store, chat, deps } = acquire();
-    stores.push(store);
-    const resolved: ChatStatus[] = [];
-    const resume = chat.resumeStream;
-    vi.spyOn(chat, 'resumeStream').mockImplementation(async () => {
-      await resume();
-      resolved.push(chat.status);
-    });
-    publishLogRows(store, 'chat_1', runningRows());
-    await vi.waitFor(() => {
-      expect(reconnect).toHaveBeenCalledTimes(2);
-    });
-    expect(harness.errorStatuses).toEqual(['streaming']);
-    expect(resolved).toContain('ready');
-    publishLogRows(store, 'chat_1', [replyRow(2, 'Recovered edit')], 2);
-    await vi.waitFor(() => {
-      expect(chat.messages.at(-1)?.parts).toContainEqual({ type: 'text', text: 'Recovered edit', state: 'done' });
-    });
-    publishLogRows(
-      store,
-      'chat_1',
-      [
-        logRow(3, {
-          type: 'message.appended',
-          message: {
-            id: 'edit-input',
-            role: 'tool-input',
-            toolCallId: 'edit-1',
-            toolName: 'edit_file',
-            content: { targetFile: 'main.cs', codeEdit: 'after' },
-          },
-        }),
-        logRow(4, {
-          type: 'message.appended',
-          message: {
-            id: 'edit-output',
-            role: 'tool-output',
-            toolCallId: 'edit-1',
-            toolName: 'edit_file',
-            content: {
-              diffStats: { linesAdded: 1, linesRemoved: 1, originalContent: 'before', modifiedContent: 'after' },
+  it.each(['submitted', 'streaming'] as const)(
+    'should recover a failed %s request through a read-only watch and converge at terminal',
+    async (status) => {
+      const hostCommand = vi.spyOn(HostCommands, 'sendHostCommand');
+      const diagnostic = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const reconnect = vi
+        .spyOn(BrowserPlacementChatTransport.prototype, 'reconnectToStream')
+        .mockImplementationOnce(async () => poisonedStream(status));
+      const { store, chat, deps } = acquire();
+      stores.push(store);
+      const resolved: ChatStatus[] = [];
+      const resume = chat.resumeStream;
+      vi.spyOn(chat, 'resumeStream').mockImplementation(async () => {
+        await resume();
+        resolved.push(chat.status);
+      });
+      publishLogRows(store, 'chat_1', runningRows());
+      await vi.waitFor(() => {
+        expect(reconnect).toHaveBeenCalledTimes(2);
+      });
+      expect(harness.errorStatuses).toEqual([status]);
+      expect(resolved).toContain('ready');
+      publishLogRows(store, 'chat_1', [replyRow(2, 'Recovered edit')], 2);
+      await vi.waitFor(() => {
+        expect(chat.messages.at(-1)?.parts).toContainEqual({ type: 'text', text: 'Recovered edit', state: 'done' });
+      });
+      publishLogRows(
+        store,
+        'chat_1',
+        [
+          logRow(3, {
+            type: 'message.appended',
+            message: {
+              id: 'edit-input',
+              role: 'tool-input',
+              toolCallId: 'edit-1',
+              toolName: 'edit_file',
+              content: { targetFile: 'main.cs', codeEdit: 'after' },
             },
-            isError: false,
-          },
-        }),
-        lifecycleRow(5, 'completed'),
-      ],
-      3,
-    );
-    await vi.waitFor(() => {
-      expect(chat.status).toBe('ready');
-    });
-    expect(chat.error).toBeUndefined();
-    const exported = serializeTranscript(chat.messages, 'Recovered fixture');
-    expect(exported).toContain('targetFile: main.cs');
-    expect(exported).toContain('+1/-1 lines');
-    expect(exported).toContain('after');
-    expect(deps.patchChat).not.toHaveBeenCalled();
-    expect(hostCommand).not.toHaveBeenCalled();
-    expect(diagnostic).toHaveBeenCalledWith('[ChatSessionStore] presentation recovery', {
-      chatId: 'chat_1',
-      runId: 'run_1',
-      status: 'error',
-      errorName: 'AI_UIMessageStreamError',
-      chunkId: 'missing-input',
-      chunkType: 'tool-invocation',
-      cursor: 2,
-      mode: 'retry-watch',
-      phase: 'running',
-    });
-    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain('private payload');
-  });
+          }),
+          logRow(4, {
+            type: 'message.appended',
+            message: {
+              id: 'edit-output',
+              role: 'tool-output',
+              toolCallId: 'edit-1',
+              toolName: 'edit_file',
+              content: {
+                diffStats: { linesAdded: 1, linesRemoved: 1, originalContent: 'before', modifiedContent: 'after' },
+              },
+              isError: false,
+            },
+          }),
+          lifecycleRow(5, 'completed'),
+        ],
+        3,
+      );
+      await vi.waitFor(() => {
+        expect(chat.status).toBe('ready');
+      });
+      expect(chat.error).toBeUndefined();
+      const exported = serializeTranscript(chat.messages, 'Recovered fixture');
+      expect(exported).toContain('targetFile: main.cs');
+      expect(exported).toContain('+1/-1 lines');
+      expect(exported).toContain('after');
+      expect(deps.patchChat).not.toHaveBeenCalled();
+      expect(hostCommand).not.toHaveBeenCalled();
+      expect(diagnostic).toHaveBeenCalledWith('[ChatSessionStore] presentation recovery', {
+        chatId: 'chat_1',
+        runId: 'run_1',
+        status: 'error',
+        errorName: 'AI_UIMessageStreamError',
+        chunkId: 'missing-input',
+        chunkType: 'tool-invocation',
+        cursor: 2,
+        mode: 'retry-watch',
+        phase: 'running',
+      });
+      expect(JSON.stringify(diagnostic.mock.calls)).not.toContain('private payload');
+    },
+  );
 
   it('should bound repeated failures while continuing to materialize active durable history', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);

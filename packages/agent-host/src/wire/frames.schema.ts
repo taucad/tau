@@ -135,22 +135,32 @@ export type CatchUpFrame = z.infer<typeof catchUpFrameSchema>;
 
 /** One ephemeral model delta (`liveEvents`); `offset` is optional on both legs and only ACP produces it (drift 8). @public */
 export const agentLiveEventSchema = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('text-start'), ...liveEventBase }),
+  z.strictObject({ type: z.literal('text-start'), ...liveEventBase, phase: z.string().optional() }),
   z.strictObject({
     type: z.literal('thinking-start'),
     ...liveEventBase,
+    reasoningSummary: z.string().optional(),
     timestamp: z.number().int().nonnegative().optional(),
   }),
   z.strictObject({
-    type: z.enum(['text-delta', 'thinking-delta']),
+    type: z.literal('text-delta'),
     ...liveEventBase,
+    phase: z.string().optional(),
     delta: z.string(),
     offset: z.number().int().nonnegative().optional(),
   }),
-  z.strictObject({ type: z.literal('text-end'), ...liveEventBase, content: z.string() }),
+  z.strictObject({
+    type: z.literal('thinking-delta'),
+    ...liveEventBase,
+    delta: z.string(),
+    offset: z.number().int().nonnegative().optional(),
+    reasoningSummary: z.string().optional(),
+  }),
+  z.strictObject({ type: z.literal('text-end'), ...liveEventBase, content: z.string(), phase: z.string().optional() }),
   z.strictObject({
     type: z.literal('thinking-end'),
     ...liveEventBase,
+    reasoningSummary: z.string().optional(),
     content: z.string(),
     timestamp: z.number().int().nonnegative().optional(),
   }),

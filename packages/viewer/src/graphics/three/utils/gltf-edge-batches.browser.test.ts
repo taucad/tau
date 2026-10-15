@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterAll } from 'vitest';
+import { describe, it, expect, vi, afterEach, inject } from 'vitest';
 import {
   Matrix4,
   BoxGeometry,
@@ -39,6 +39,11 @@ import {
 } from '#graphics/three/materials/gltf-edges.js';
 import { createEdgeBatch, writeEdgePlacement } from '#graphics/three/utils/gltf-edge-batches.js';
 import { createSectionClip, installSectionClip, writeSectionClip } from '#graphics/three/materials/section-clip.js';
+import {
+  installRendererOutput,
+  captureRendererOutput,
+  disposeRendererOutput,
+} from '@taucad/runtime-testing/browser/three-renderer-output';
 
 import {
   createGltfSurfaceBatches,
@@ -49,6 +54,7 @@ import {
 
 /** Narrow native test surface missing from the installed Three backend declarations. */
 type NativeGpuDevice = {
+  queue: { onSubmittedWorkDone: () => Promise<void> };
   createBuffer: (
     descriptor: Readonly<{ label?: string; size: number; usage: number; mappedAtCreation?: boolean }>,
   ) => GPUBuffer;
@@ -104,10 +110,16 @@ function edgeBatch(object: Object3D | undefined): ReturnType<typeof createEdgeBa
   return mesh as ReturnType<typeof createEdgeBatch>;
 }
 
-const renderers: Array<{ dispose(): void }> = [];
-afterAll(() => {
-  for (const r of renderers) {
-    r.dispose();
+const webGpuProfile = inject('webGpuProfile');
+const renderers: RendererInstance[] = [];
+afterEach(async () => {
+  for (const renderer of renderers.splice(0)) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- each renderer drains its owned output before teardown.
+      await disposeRendererOutput(renderer);
+    } finally {
+      renderer.dispose();
+    }
   }
 });
 
@@ -115,6 +127,7 @@ describe.each(['webgl', 'webgpu'] as const)('edge prototype occurrence %s', (bac
   it('should replace the initial lines-off owner once and reuse off/on cohorts', async () => {
     const renderer = await createRenderer('viewport', backend, document.createElement('canvas'));
     renderers.push(renderer);
+    installRendererOutput(renderer, webGpuProfile);
     const root = new Group();
     const scene = new Scene();
     scene.add(root);
@@ -142,6 +155,7 @@ describe.each(['webgl', 'webgpu'] as const)('edge prototype occurrence %s', (bac
     let owner = createGltfSurfaceBatches(root, surfaces);
     const allocations = backend === 'webgpu' ? vi.spyOn(nativeDevice(renderer), 'createBuffer') : undefined;
     const destroys = backend === 'webgpu' ? vi.spyOn(GPUBuffer.prototype, 'destroy') : undefined;
+    const fatLines: Array<Mesh<BufferGeometry, GltfFatLineMaterial>> = [];
 
     try {
       owner.sync();
@@ -157,12 +171,14 @@ describe.each(['webgl', 'webgpu'] as const)('edge prototype occurrence %s', (bac
         line.visible = true;
       }
       applyFatLineSegments({ scene: root }, { backend, resolution, preserveSourceNodes: true });
-      const fatLines: Array<Mesh<BufferGeometry, GltfFatLineMaterial>> = [];
       root.traverse((node) => {
         if (node.type === 'LineSegments2') {
           fatLines.push(fatLine(node));
         }
       });
+      if (backend === 'webgpu') {
+        await nativeDevice(renderer).queue.onSubmittedWorkDone();
+      }
       old.dispose();
       old.dispose();
       expect(oldGeometryDispose).toHaveBeenCalledTimes(1);
@@ -203,22 +219,33 @@ describe.each(['webgl', 'webgpu'] as const)('edge prototype occurrence %s', (bac
       renderer.render(scene, camera);
       expect(edgeGroup.children[0]).toBe(initialEdgeBatch);
       expect(initialEdgeBatch.visible).toBe(true);
+      if (backend === 'webgpu') {
+        await captureRendererOutput(renderer);
+      }
       owner.dispose();
       owner.dispose();
       expect(surfaces.every((s) => s.layers.mask === 1)).toBe(true);
       expect(fatLines.every((s) => s.layers.mask === 1)).toBe(true);
-      fatLines[0]!.geometry.dispose();
-      for (const m of new Set(fatLines.flatMap((line) => collectGltfFatLineMaterials(line)))) {
-        m.dispose();
-      }
     } finally {
-      owner.dispose();
-      allocations?.mockRestore();
-      destroys?.mockRestore();
-      surfaceGeometry.dispose();
-      surfaceMaterial.dispose();
-      edgeGeometry.dispose();
-      edgeMaterial.dispose();
+      try {
+        if (backend === 'webgpu') {
+          await nativeDevice(renderer).queue.onSubmittedWorkDone();
+        }
+      } finally {
+        owner.dispose();
+        for (const geometry of new Set(fatLines.map((line) => line.geometry))) {
+          geometry.dispose();
+        }
+        for (const material of new Set(fatLines.flatMap((line) => collectGltfFatLineMaterials(line)))) {
+          material.dispose();
+        }
+        allocations?.mockRestore();
+        destroys?.mockRestore();
+        surfaceGeometry.dispose();
+        surfaceMaterial.dispose();
+        edgeGeometry.dispose();
+        edgeMaterial.dispose();
+      }
     }
   });
 
@@ -228,6 +255,7 @@ describe.each(['webgl', 'webgpu'] as const)('edge prototype occurrence %s', (bac
     canvas.height = 128;
     const renderer = await createRenderer('viewport', backend, canvas);
     renderers.push(renderer);
+    installRendererOutput(renderer, webGpuProfile);
     if (backend === 'webgpu') {
       expect(nativeDevice(renderer).createBuffer).toBeTypeOf('function');
     }
@@ -357,6 +385,9 @@ describe.each(['webgl', 'webgpu'] as const)('edge prototype occurrence %s', (bac
       expect(replacement).not.toBe(first);
       expect(replacement.geometry.getAttribute('instanceStart').array[0]).toBeCloseTo(-0.4);
       renderer.render(scene, camera);
+      if (backend === 'webgpu') {
+        await captureRendererOutput(renderer);
+      }
       owner.dispose();
       if (backend === 'webgpu') {
         expect(lifetime()).toEqual({ allocated: 36, destroyed: 36 });
@@ -366,16 +397,22 @@ describe.each(['webgl', 'webgpu'] as const)('edge prototype occurrence %s', (bac
       expect(owner.group.parent).toBeNull();
       expect(errors.mock.calls).toEqual([]);
     } finally {
-      owner.dispose();
-      sources[0]!.geometry.dispose();
-      const materials = new Set(sources.flatMap((s) => collectGltfFatLineMaterials(s)));
-      for (const m of materials) {
-        m.dispose();
+      try {
+        if (backend === 'webgpu') {
+          await nativeDevice(renderer).queue.onSubmittedWorkDone();
+        }
+      } finally {
+        owner.dispose();
+        sources[0]!.geometry.dispose();
+        const materials = new Set(sources.flatMap((s) => collectGltfFatLineMaterials(s)));
+        for (const m of materials) {
+          m.dispose();
+        }
+        geometry.dispose();
+        originalMaterial.dispose();
+        restoreLifetime();
+        errors.mockRestore();
       }
-      geometry.dispose();
-      originalMaterial.dispose();
-      restoreLifetime();
-      errors.mockRestore();
     }
   });
 

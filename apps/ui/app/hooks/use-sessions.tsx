@@ -8,7 +8,7 @@
  * project.
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
@@ -95,11 +95,14 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
   const flushProducers = useFlushProducers();
   const [held, setHeld] = useState(false);
   const [flushError, setFlushError] = useState<string>();
+  const attempt = useRef<string | undefined>(undefined);
   const pending = useSelector(actor, (state) => sessionsPendingRevisions(state.context));
 
   useEffect(() => {
     const subscription = actor.on('quiesced', (event) => {
-      reportDesktopQuiesced(event.forced);
+      if (attempt.current !== undefined) {
+        reportDesktopQuiesced(attempt.current, event.forced);
+      }
       setHeld(false);
     });
     return () => {
@@ -112,8 +115,15 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
      * draft still in its debounce writes through the services utility main
      * disposes once this answers, and `hidden` only fires at window teardown
      * — after that. Main's bound covers a producer that never settles. */
+    const requestId = attempt.current;
+    if (requestId === undefined) {
+      return;
+    }
     try {
       await flushProducers();
+      if (attempt.current !== requestId) {
+        return;
+      }
     } catch (error) {
       setFlushError(error instanceof Error ? error.message : 'Pending changes could not be saved.');
       setHeld(true);
@@ -121,7 +131,7 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
     }
     setFlushError(undefined);
     if (actor.getSnapshot().status === 'done') {
-      reportDesktopQuiesced(false);
+      reportDesktopQuiesced(requestId, actor.getSnapshot().matches('forced'));
       return;
     }
     setHeld(true);
@@ -130,7 +140,8 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
 
   useEffect(
     () =>
-      onDesktopQuitRequested(() => {
+      onDesktopQuitRequested((attemptId) => {
+        attempt.current = attemptId;
         void requestQuit();
       }),
     [requestQuit],

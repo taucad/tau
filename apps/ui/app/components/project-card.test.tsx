@@ -92,7 +92,11 @@ describe('ProjectCardMedia', () => {
     const onPreviewVisibilityChange = vi.fn();
     const { rerender } = render(
       <TooltipProvider>
-        <ProjectCardMedia isPreviewVisible={false} onPreviewVisibilityChange={onPreviewVisibilityChange}>
+        <ProjectCardMedia
+          thumbnailSource='/thumbnail.png'
+          isPreviewVisible={false}
+          onPreviewVisibilityChange={onPreviewVisibilityChange}
+        >
           <div data-testid='preview'>Preview</div>
         </ProjectCardMedia>
       </TooltipProvider>,
@@ -101,7 +105,7 @@ describe('ProjectCardMedia', () => {
     // The card link names the card, so the thumbnail is decorative.
     const thumbnail = screen.getByRole('presentation');
     expect(thumbnail).toHaveAttribute('alt', '');
-    expect(thumbnail).toHaveAttribute('src', '/placeholder.svg');
+    expect(thumbnail).toHaveAttribute('src', '/thumbnail.png');
     expect(thumbnail).toHaveAttribute('loading', 'lazy');
     expect(thumbnail.parentElement).toHaveClass('aspect-4/3');
     expect(screen.queryByTestId('preview')).not.toBeInTheDocument();

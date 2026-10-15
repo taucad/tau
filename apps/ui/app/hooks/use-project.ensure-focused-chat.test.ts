@@ -14,6 +14,19 @@ const makeChat = (overrides: Partial<Chat> & { id: string }): Chat => ({
 });
 
 describe('ensureFocusedChatForProject', () => {
+  it('does not repair an empty chat list until cloud discovery authorizes creation', async () => {
+    const createNavigationRepairChat = vi.fn<ChatStorage['createNavigationRepairChat']>();
+    const result = await ensureFocusedChatForProject({
+      projectId: 'project_test',
+      requestedChatId: undefined,
+      persistedChatId: undefined,
+      worker: { getChatRecordsForResource: async () => [], createNavigationRepairChat },
+      canCreateChat: () => false,
+    });
+    expect(result).toEqual({ type: 'focusedChatDeferred' });
+    expect(createNavigationRepairChat).not.toHaveBeenCalled();
+  });
+
   it('should create a missing empty chat without bumping parent project recency', async () => {
     const getChatRecordsForResource = vi.fn<ChatStorage['getChatRecordsForResource']>().mockResolvedValue([]);
     const createNavigationRepairChat = vi.fn<ChatStorage['createNavigationRepairChat']>().mockResolvedValue(

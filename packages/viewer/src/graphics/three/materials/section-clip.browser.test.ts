@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
-import { MeshMatcapNodeMaterial } from 'three/webgpu';
+import { MeshMatcapNodeMaterial, WebGPUBackend } from 'three/webgpu';
 import type { Backend } from 'three/webgpu';
 import { fromRenderPoint, toRenderPoint } from '@taucad/spatial';
 import type { RenderFrame } from '@taucad/spatial';
@@ -384,7 +384,7 @@ const createFrameReader = (
     };
   }
   // A WebGPU renderer falls back to WebGL 2 without an adapter; that would not be WebGPU evidence.
-  if (!('isWebGPUBackend' in renderer.backend) || !hasPipelineBuilds(renderer.backend)) {
+  if (!(renderer.backend instanceof WebGPUBackend) || !hasPipelineBuilds(renderer.backend)) {
     throw new Error(
       'No WebGPU adapter, so three fell back to WebGL 2. Launch Chromium with one, for example --use-webgpu-adapter=swiftshader.',
     );

@@ -176,6 +176,7 @@ type EditorStateEvent =
   // Emitted by `ensureFocusedChatActor` when the focused-chat invariant
   // has been re-established.
   | { type: 'focusedChatEnsured'; focusedChatId: string }
+  | { type: 'focusedChatDeferred'; focusedChatId?: undefined }
   // User-initiated retry from `<FocusedChatErrorPanel>` after
   // `ensureFocusedChatActor` rejected.
   | { type: 'retryEnsureFocusedChat' };
@@ -236,7 +237,7 @@ const materialiseOpenFileActor = fromSafeAsync<void, { path: string; materialise
  * XState's `isErrorActorEvent` macrostep.
  */
 const ensureFocusedChatActor = fromSafeAsync<
-  { type: 'focusedChatEnsured'; focusedChatId: string },
+  { type: 'focusedChatEnsured'; focusedChatId: string } | { type: 'focusedChatDeferred'; focusedChatId?: undefined },
   { projectId: string; requestedChatId: string | undefined; persistedChatId: string | undefined }
 >(async () => {
   throw new Error('Not implemented. Please supply via provide.');
@@ -442,6 +443,10 @@ export const editorMachine = setup({
           },
           on: {
             focusedChatEnsured: focusedChatEnsured('#editor.ready'),
+            focusedChatDeferred: {
+              target: '#editor.ready.operation.focusedChatDeferred',
+              context: { isLoading: false },
+            },
           },
         },
       },
@@ -507,8 +512,10 @@ export const editorMachine = setup({
               },
               on: {
                 focusedChatEnsured: focusedChatEnsured('idle'),
+                focusedChatDeferred: { target: 'focusedChatDeferred' },
               },
             },
+            focusedChatDeferred: {},
             focusedChatUnresolved: {
               on: {
                 retryEnsureFocusedChat: { target: 'ensuringFocusedChat' },
@@ -516,6 +523,7 @@ export const editorMachine = setup({
             },
           },
           on: {
+            retryEnsureFocusedChat: { target: '.ensuringFocusedChat' },
             focusKnownChat: ({ event }, enq) => {
               enq.raise({ type: 'setFocusedChatId', chatId: event.chatId });
               return {

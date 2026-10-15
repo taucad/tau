@@ -15,11 +15,8 @@ type RunFrame = Readonly<{
   type: 'geometry-run';
   generation: number;
   requestId: number;
-  kind: 'measurement' | 'suite' | 'performance';
-  input:
-    | MeasurementRequest
-    | Readonly<{ type: 'run'; options: GeoSpecRunnerRunOptions }>
-    | Readonly<{ type: 'run'; id: number; input: unknown }>;
+  kind: 'measurement' | 'suite';
+  input: MeasurementRequest | Readonly<{ type: 'run'; options: GeoSpecRunnerRunOptions }>;
   root?: string;
   runtimeConfig?: Readonly<{ tauApiUrl: string; tauWebSocketUrl: string }>;
 }>;
@@ -28,7 +25,6 @@ type RunFrame = Readonly<{
 export type GeometryHostOptions = {
   readonly post: Reply;
   readonly measure: (input: MeasurementRequest) => Promise<unknown>;
-  readonly performance: (input: unknown) => Promise<unknown>;
   readonly createRunner: (
     input: Readonly<{
       root: string;
@@ -82,9 +78,6 @@ export const createGeometryHost = (options: GeometryHostOptions): Readonly<{ han
       try {
         if (run.kind === 'measurement') {
           value = await options.measure(run.input as MeasurementRequest);
-        } else if (run.kind === 'performance') {
-          const diagnostic = run.input as Readonly<{ type: 'run'; id: number; input: unknown }>;
-          value = { id: diagnostic.id, type: 'result', result: await options.performance(diagnostic.input) };
         } else {
           const [runtimePort] = message.ports;
           if (!runtimePort || !run.root || !run.runtimeConfig || !('options' in run.input)) {
@@ -141,13 +134,7 @@ export const createGeometryHost = (options: GeometryHostOptions): Readonly<{ han
                   message: error instanceof Error ? error.message : String(error),
                 },
               }
-            : run.kind === 'performance'
-              ? {
-                  id: (run.input as { id: number }).id,
-                  type: 'error',
-                  message: error instanceof Error ? error.message : String(error),
-                }
-              : { type: 'error', message: error instanceof Error ? error.message : String(error) };
+            : { type: 'error', message: error instanceof Error ? error.message : String(error) };
       } finally {
         for (const port of message.ports) {
           port.close();

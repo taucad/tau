@@ -213,7 +213,7 @@ const createTsgoTarget = (
 
   const inputs: Array<string | InputDefinition> = [
     '{projectRoot}/package.json',
-    '{workspaceRoot}/tsconfig.base.json',
+    '{workspaceRoot}/tools/typescript/base.json',
     '{workspaceRoot}/scripts/src/typecheck-projects.ts',
     ...tsConfigInputs,
     ...sourcePatterns,

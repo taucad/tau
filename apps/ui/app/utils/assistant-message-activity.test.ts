@@ -119,6 +119,8 @@ describe('assistant message activity', () => {
   it('uses the same semantic families for Tau-native and qualified ACP tools', () => {
     expect(activityFamily(tool('tool-arrange_workbench'))).toBe('edit');
     expect(activityFamily(dynamic({ nativeName: 'arrange_workbench' }))).toBe('edit');
+    expect(activityFamily(tool('tool-install_packages'))).toBe('edit');
+    expect(activityFamily(dynamic({ nativeName: 'install_packages' }))).toBe('edit');
     expect(activityFamily(tool('tool-evaluate_model'))).toBe('render');
     expect(activityFamily(dynamic({ nativeName: 'evaluate_model' }))).toBe('render');
     expect(activityFamily(dynamic({ nativeName: 'screenshot' }))).toBe('screenshot');

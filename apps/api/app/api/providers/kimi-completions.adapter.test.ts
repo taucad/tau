@@ -189,7 +189,8 @@ describe('TauChatKimiCompletions', () => {
     expect(model.requests[0]?.messages).toEqual([
       {
         role: 'assistant',
-        content: [],
+        // Tool-only assistant turns use the upstream OpenAI-compatible null sentinel.
+        content: null,
         reasoning_content: 'I should inspect the file.',
         tool_calls: [
           { id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"targetFile":"main.ts"}' } },
@@ -218,7 +219,8 @@ describe('TauChatKimiCompletions', () => {
     expect(model.requests[0]?.messages).toEqual([
       {
         role: 'assistant',
-        content: [],
+        // Tool-only assistant turns use the upstream OpenAI-compatible null sentinel.
+        content: null,
         reasoning: 'Inspect the current file.',
         tool_calls: [
           { id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"targetFile":"main.ts"}' } },

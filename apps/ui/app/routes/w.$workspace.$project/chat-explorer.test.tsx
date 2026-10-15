@@ -32,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   openPartGallery: undefined as undefined | ReturnType<typeof vi.fn>,
 }));
 
+vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+
 vi.mock('#components/geometry/cad/part-gallery.js', async (importOriginal) => ({
   ...(await importOriginal<typeof PartGalleryModule>()),
   useOpenPartGallery: () => mocks.openPartGallery,

@@ -20,11 +20,13 @@ const bundledWorkspaceDependencies = [
   '@taucad/bambu',
   '@taucad/brep',
   '@taucad/build123d',
+  '@taucad/carvera',
   '@taucad/esbuild',
   '@taucad/events',
   '@taucad/filesystem',
   '@taucad/geospec-engine',
   '@taucad/gltf',
+  '@taucad/grbl',
   '@taucad/host',
   '@taucad/image',
   '@taucad/jscad',
@@ -41,6 +43,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/skills',
   '@taucad/slicer',
   '@taucad/tscircuit',
+  '@taucad/types',
   '@taucad/zoo',
   'pino-pretty',
   'zod',
@@ -71,8 +74,8 @@ export const desktopExternalizedDependencies = [
   /* Resolves its vendored seccomp/srt-win helpers relative to its own module file. */
   '@anthropic-ai/sandbox-runtime',
   '@taulabs/openrscad-engine',
-  '@taucad/geospec-engine-native',
   'esbuild',
+  'geospec-engine',
   'libassimp',
   'nanoraster',
 ] as const;
@@ -105,6 +108,7 @@ export default defineConfig(
       define,
       build: {
         outDir: 'dist/preload',
+        externalizeDeps: { exclude: ['@taucad/types', 'zod'] },
         lib: {
           entry: resolve(import.meta.dirname, 'src/preload/preload.ts'),
           formats: ['es'],

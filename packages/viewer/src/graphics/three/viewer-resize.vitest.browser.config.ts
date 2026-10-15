@@ -3,6 +3,11 @@ import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
 
+const webGpuProfile = process.env['TAU_E2E_WEBGPU_PROFILE'] ?? 'hardware';
+if (webGpuProfile !== 'hardware' && webGpuProfile !== 'software') {
+  throw new TypeError(`Unsupported TAU_E2E_WEBGPU_PROFILE: ${webGpuProfile}`);
+}
+
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
   plugins: [tailwindcss()],
@@ -27,6 +32,7 @@ export default defineConfig({
     },
   },
   test: {
+    provide: { webGpuProfile },
     include: [
       'src/graphics/three/empty-viewer.browser.test.tsx',
       'src/graphics/three/post-processing-antialias.browser.test.tsx',
@@ -42,7 +48,7 @@ export default defineConfig({
         launchOptions: {
           channel: 'chromium',
           args:
-            process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software'
+            webGpuProfile === 'software'
               ? ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader']
               : ['--enable-unsafe-webgpu'],
         },

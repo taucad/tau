@@ -1,13 +1,33 @@
 import '#test/browser.css';
 import { cleanup, render } from '@testing-library/react';
 import { useFrame } from '@react-three/fiber';
+import type { RootState } from '@react-three/fiber';
 import { DataTexture, NearestFilter, RGBAFormat } from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, inject, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { GraphicsProvider } from '#hooks/use-graphics.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
+import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
+import type * as rendererModule from '#graphics/three/renderer.js';
+import {
+  captureRendererOutput,
+  disposeRendererOutput,
+  installRendererOutput,
+} from '@taucad/runtime-testing/browser/three-renderer-output';
+
+vi.mock('#graphics/three/renderer.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof rendererModule>();
+  return {
+    ...actual,
+    createRenderer: async (...args: Parameters<typeof actual.createRenderer>) => {
+      const renderer = await actual.createRenderer(...args);
+      installRendererOutput(renderer, inject('webGpuProfile'));
+      return renderer;
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
@@ -36,14 +56,13 @@ it.each(['webgl', 'webgpu'] as const)('should smooth shader edges in the final %
   let smoothed = 0;
   let dark = 0;
   let bright = 0;
-  const Probe = (): undefined => {
-    useFrame(({ gl }) => {
-      const copy = document.createElement('canvas');
-      copy.width = gl.domElement.width;
-      copy.height = gl.domElement.height;
-      const context = copy.getContext('2d')!;
-      context.drawImage(gl.domElement, 0, 0);
-      const { data } = context.getImageData(0, 0, copy.width, copy.height);
+  let state: RootState | undefined;
+  let pending: Promise<void> | undefined;
+  let retired = false;
+  let captureError: Error | undefined;
+  const measure = async (current: RootState): Promise<void> => {
+    try {
+      const data = await captureRendererOutput(current.gl);
       smoothed = 0;
       dark = 0;
       bright = 0;
@@ -59,6 +78,18 @@ it.each(['webgl', 'webgpu'] as const)('should smooth shader edges in the final %
         } else if (value > 230) {
           bright += 1;
         }
+      }
+    } catch (error) {
+      captureError = error instanceof Error ? error : new Error(String(error));
+    } finally {
+      pending = undefined;
+    }
+  };
+  const Probe = (): undefined => {
+    useFrame((current) => {
+      state = current;
+      if (!pending && !retired) {
+        pending = measure(current);
       }
     }, 4);
     return undefined;
@@ -98,15 +129,33 @@ it.each(['webgl', 'webgpu'] as const)('should smooth shader edges in the final %
     );
     await vi.waitFor(
       () => {
+        state?.invalidate();
+        if (captureError) {
+          throw captureError;
+        }
         expect(smoothed, JSON.stringify({ smoothed, dark, bright })).toBeGreaterThan(32);
         expect(dark).toBeGreaterThan(1000);
         expect(bright).toBeGreaterThan(1000);
       },
       { timeout: 45_000 },
     );
+    expect(isViewportWebGpu(state!.gl)).toBe(backend === 'webgpu');
+    if (isViewportWebGpu(state!.gl)) {
+      expect('isWebGPUBackend' in state!.gl.backend && state!.gl.backend.isWebGPUBackend).toBe(true);
+      expect(state!.gl.samples).toBe(4);
+      expect(state!.gl.reversedDepthBuffer).toBe(true);
+    }
   } finally {
+    retired = true;
+    await pending;
+    if (state) {
+      await disposeRendererOutput(state.gl);
+    }
     cleanup();
     actor.stop();
     texture.dispose();
+  }
+  if (captureError) {
+    throw captureError;
   }
 });

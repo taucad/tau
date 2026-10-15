@@ -143,7 +143,6 @@ export function ParametersPanel({ values, schema, onChange }: ParametersPanelPro
     <Form<ParameterRecord>
       className='grid gap-3 p-3.5'
       formData={values}
-      liveValidate={false}
       noHtml5Validate
       schema={effectiveSchema}
       showErrorList={false}

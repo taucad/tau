@@ -440,6 +440,18 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='
     await spawnError.session.cleanup();
   }, 30_000);
 
+  it('lets the worker read the runtime root a sealed closure names', async () => {
+    const { options, root } = fixture(
+      respondingWorker(
+        `{protocolVersion:1,requestId:request.requestId,result:request.method==='shutdown'?{shutdown:true}:{defaultParameters:{},jsonSchema:{type:'object'},resolved:['main.py'],unresolved:[]}}`,
+      ),
+    );
+    const session = new PythonSession({ ...options, runtimePath: join(root, 'runtime') });
+    const analysis = await request(session, { method: 'analyze', schema: build123dAnalysisSchema });
+    expect(analysis.resolved).toEqual(['main.py']);
+    await session.cleanup();
+  });
+
   it('confines, validates, reads, and removes artifacts', async () => {
     const { artifactPath, root, session } = fixture();
     await expect(session.readArtifact({ artifactPath: join(root, 'outside.glb'), byteLength: 0 })).rejects.toThrow(

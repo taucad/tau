@@ -19,8 +19,7 @@
 import { createChannelClient, wrapMessagePort, wrapWebSocket } from '@taucad/rpc';
 import type { Channel, Port, WebSocketLike } from '@taucad/rpc';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
-import type { MachineChannelClient } from '#machines/machine-channel.js';
-import type { MachineClient } from '#machines/machine-client.js';
+import { createLazyMachineFacet } from '#transport/_internal/machine-facet.js';
 
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
@@ -30,7 +29,6 @@ import type {
   RuntimeInitializePayload,
   RuntimeTransportClient,
   RuntimeTransportCloseResult,
-  RuntimeTransportFacet,
   TransportClientReady,
 } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
@@ -117,37 +115,8 @@ export const webSocketClient = (
   /* A socket that dies before hello is a host that failed to start; after it,
    * a mid-session death. Readiness is the only thing that separates them. */
   let phase: 'boot' | 'session' = 'boot';
-  let machineChannel: MachineChannelClient | undefined;
-  const getMachineChannel = (): MachineChannelClient => {
-    if (!options.machines?.available) {
-      throw new Error('webSocketTransport: machines route is unavailable');
-    }
-    machineChannel ??= options.machines.connect();
-    return machineChannel;
-  };
-  const machines: RuntimeTransportFacet<MachineClient> = options.machines?.available
-    ? {
-        available: true,
-        listProviders: async (input) => getMachineChannel().listProviders(input),
-        discover: (input) => getMachineChannel().discover(input),
-        beginBinding: async (input) => getMachineChannel().beginBinding(input),
-        removeBinding: async (input) => getMachineChannel().removeBinding(input),
-        preparePrint: async (input) => getMachineChannel().preparePrint(input),
-        uploadPrint: async (input) => getMachineChannel().uploadPrint(input),
-        startPrint: async (input) => getMachineChannel().startPrint(input),
-        reconcileOperation: async (input) => getMachineChannel().reconcileOperation(input),
-        controlRun: async (input) => getMachineChannel().controlRun(input),
-        captureStill: async (input) => getMachineChannel().captureStill(input),
-        requestPrint: async (input) => getMachineChannel().requestPrint(input),
-        listPrintRequests: async (input) => getMachineChannel().listPrintRequests(input),
-        watchPrintRequests: (input) => getMachineChannel().watchPrintRequests(input),
-        resolvePrintRequest: async (input) => getMachineChannel().resolvePrintRequest(input),
-        withdrawPrintRequest: async (input) => getMachineChannel().withdrawPrintRequest(input),
-        list: async (input) => getMachineChannel().list(input),
-        get: async (input) => getMachineChannel().get(input),
-        watch: (input) => getMachineChannel().watch(input),
-      }
-    : (options.machines ?? { available: false, reason: 'unsupported' });
+  const lazyMachines = createLazyMachineFacet(options.machines, 'webSocketTransport');
+  const machines = lazyMachines.facet;
 
   let resolveClosed: ((result: RuntimeTransportCloseResult) => void) | undefined;
   const closed = new Promise<RuntimeTransportCloseResult>((resolve) => {
@@ -164,7 +133,7 @@ export const webSocketClient = (
     } catch {
       /* Best-effort */
     }
-    machineChannel?.close();
+    lazyMachines.close();
     disposeFileSystemRelay?.();
     disposeFileSystemRelay = undefined;
     disposeComputeRelay?.();

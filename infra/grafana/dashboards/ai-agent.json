@@ -8,6 +8,15 @@
   "templating": {
     "list": [
       {
+        "name": "app",
+        "label": "Application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": { "text": ".*", "value": ".*" },
+        "hide": 2
+      },
+      {
         "name": "service",
         "label": "Service",
         "type": "custom",
@@ -20,8 +29,8 @@
       {
         "name": "instance",
         "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(process_uptime{service_name=\"$service\"}, instance)",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(process_uptime{app=~\"$app\",service_name=\"$service\"}, instance)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",
@@ -36,11 +45,14 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "targets": [
         {
-          "expr": "sum(rate(gen_ai_client_token_usage_sum{service_name=~\"$service\"}[5m])) by (gen_ai_token_type, gen_ai_request_model)",
+          "expr": "sum(rate(gen_ai_client_token_usage_sum{app=~\"$app\",service_name=~\"$service\"}[5m])) by (gen_ai_token_type, gen_ai_request_model)",
           "legendFormat": "{{gen_ai_request_model}} {{gen_ai_token_type}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "id": 1
     },
     {
       "title": "Prompt cache hit rate",
@@ -49,7 +61,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
       "targets": [
         {
-          "expr": "sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=\"cache_read\", service_name=~\"$service\"}[5m]))\n/\n(\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=\"cache_read\", service_name=~\"$service\"}[5m]))\n  +\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=~\"input|cache_write\", service_name=~\"$service\"}[5m]))\n)",
+          "expr": "sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{app=~\"$app\",gen_ai_token_type=\"cache_read\", service_name=~\"$service\"}[5m]))\n/\n(\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{app=~\"$app\",gen_ai_token_type=\"cache_read\", service_name=~\"$service\"}[5m]))\n  +\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{app=~\"$app\",gen_ai_token_type=~\"input|cache_write\", service_name=~\"$service\"}[5m]))\n)",
           "legendFormat": "{{gen_ai_provider_name}}/{{gen_ai_request_model}}"
         }
       ],
@@ -67,7 +79,8 @@
             ]
           }
         }
-      }
+      },
+      "id": 2
     },
     {
       "title": "User-Charged LLM Spend (USD/h)",
@@ -76,7 +89,7 @@
       "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
       "targets": [
         {
-          "expr": "sum(rate(gen_ai_client_cost_total{service_name=~\"$service\"}[1h]))",
+          "expr": "sum(rate(gen_ai_client_cost_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
           "legendFormat": "$/hr"
         }
       ],
@@ -91,7 +104,8 @@
             ]
           }
         }
-      }
+      },
+      "id": 3
     },
     {
       "title": "Model Usage Distribution",
@@ -99,10 +113,11 @@
       "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
       "targets": [
         {
-          "expr": "sum(gen_ai_client_token_usage_sum{service_name=~\"$service\"}) by (gen_ai_request_model)",
+          "expr": "sum(gen_ai_client_token_usage_sum{app=~\"$app\",service_name=~\"$service\"}) by (gen_ai_request_model)",
           "legendFormat": "{{gen_ai_request_model}}"
         }
-      ]
+      ],
+      "id": 4
     },
     {
       "title": "Operation Duration (p50 / p95)",
@@ -110,15 +125,18 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(gen_ai_client_operation_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(gen_ai_client_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le))",
           "legendFormat": "p50"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(gen_ai_client_operation_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(gen_ai_client_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le))",
           "legendFormat": "p95"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "id": 5
     },
     {
       "title": "Tool Invocations",
@@ -126,10 +144,11 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "targets": [
         {
-          "expr": "sum by (agent_id, tool_kind) (rate(tau_agent_tool_calls_total{service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (agent_id, tool_kind) (rate(tau_agent_tool_calls_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
           "legendFormat": "{{agent_id}} {{tool_kind}}"
         }
-      ]
+      ],
+      "id": 6
     },
     {
       "title": "TTFT (p50 / p95)",
@@ -137,15 +156,18 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(gen_ai_client_time_to_first_token_bucket{service_name=~\"$service\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(gen_ai_client_time_to_first_token_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le))",
           "legendFormat": "p50"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(gen_ai_client_time_to_first_token_bucket{service_name=~\"$service\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(gen_ai_client_time_to_first_token_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le))",
           "legendFormat": "p95"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "id": 7
     },
     {
       "title": "Agent Turns by Agent and Outcome",
@@ -153,18 +175,26 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
       "targets": [
         {
-          "expr": "sum by (agent_id, outcome) (rate(tau_agent_turns_total{service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (agent_id, outcome) (rate(tau_agent_turns_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
           "legendFormat": "{{agent_id}} {{outcome}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "id": 8
     },
     {
       "title": "Error Logs",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
+      "targets": [
+        {
+          "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"",
+          "refId": "A"
+        }
+      ],
       "options": {
         "showTime": true,
         "showLabels": true,
@@ -173,14 +203,22 @@
         "prettifyLogMessage": false,
         "enableLogDetails": true,
         "sortOrder": "Descending"
-      }
+      },
+      "id": 9
     },
     {
       "title": "Recent Traces",
       "type": "traces",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 108 },
       "datasource": { "type": "tempo", "uid": "tempo" },
-      "targets": [{ "query": "{resource.service.name=~\"$service\"}", "refId": "A", "queryType": "traceqlSearch" }]
+      "targets": [
+        {
+          "query": "{resource.service.name=~\"$service\"}",
+          "refId": "A",
+          "queryType": "traceqlSearch"
+        }
+      ],
+      "id": 10
     }
   ],
   "schemaVersion": 39

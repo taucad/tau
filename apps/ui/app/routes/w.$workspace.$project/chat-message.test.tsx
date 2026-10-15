@@ -98,16 +98,6 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   }),
 }));
 
-vi.mock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({
-  ChatMessagePlanning({ messageId, className }: { readonly messageId: string; readonly className?: string }) {
-    return (
-      <div data-testid='chat-message-planning' data-message-id={messageId} className={className}>
-        Planning next moves...
-      </div>
-    );
-  },
-}));
-
 vi.mock('#routes/w.$workspace.$project/chat-message-reasoning.js', () => ({
   ChatMessageReasoning({ parts }: { readonly parts: ReadonlyArray<{ readonly text: string }> }) {
     return <div data-testid='chat-message-reasoning'>{parts.map((part) => part.text).join('|')}</div>;
@@ -194,9 +184,9 @@ vi.mock('#routes/w.$workspace.$project/chat-message-tool-screenshot.js', () => (
 vi.mock('#routes/w.$workspace.$project/chat-message-tool-unknown.js', () => ({
   ChatMessagePartUnknown: () => <div data-testid='tool-unknown' />,
 }));
-vi.mock('#routes/w.$workspace.$project/chat-message-tool-request-print.js', () => ({
-  ChatMessageToolRequestPrint: ({ part }: { readonly part: { readonly state: string } }) => (
-    <div data-testid='tool-request-print' data-state={part.state} />
+vi.mock('#routes/w.$workspace.$project/chat-message-tool-request-job.js', () => ({
+  ChatMessageToolRequestJob: ({ part }: { readonly part: { readonly state: string } }) => (
+    <div data-testid='tool-request-job' data-state={part.state} />
   ),
 }));
 
@@ -368,37 +358,13 @@ describe('ChatMessage column wrapper layout', () => {
     expect(wrapper.className).toContain('mx-4');
   });
 
-  it('attaches the footer to the user bubble and puts the indicator below both', () => {
+  it('attaches the revision footer to the user bubble without a message activity row', () => {
     setMessages([userMessage('msg-1', 'go')]);
-
     render(<ChatMessage messageId='msg-1' footer={<div data-testid='revision-footer'>marker</div>} />);
-
-    const wrapper = getColumnWrapper();
-    const planning = screen.getByTestId('chat-message-planning');
     const footer = screen.getByTestId('revision-footer');
     const bubble = screen.getByRole('button', { name: 'go' });
-    /* Bubble and card share one gapless surface; the indicator is the column's last row (R2, R11). */
     expect(footer.parentElement).toBe(bubble.parentElement);
-    expect(bubble.className).toContain('z-10');
-    expect(bubble.className).toContain('rounded-lg');
-    expect(planning.parentElement).toBe(wrapper);
-    expect(wrapper.lastElementChild).toBe(planning);
-    expect(planning.dataset['messageId']).toBe('msg-1');
-  });
-
-  it('renders the assistant indicator flush after its parts and before the action row', () => {
-    setMessages([assistantMessage('msg-1', 'Hello there')]);
-
-    render(<ChatMessage messageId='msg-1' />);
-
-    const planning = screen.getByTestId('chat-message-planning');
-    const text = screen.getByText('Hello there');
-    const copyButton = screen.getByTestId('copy-button');
-
-    expect(text.compareDocumentPosition(planning)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(planning.compareDocumentPosition(copyButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(planning.parentElement?.className).toContain('gap-0');
-    expect(planning.className).toBe('');
+    expect(screen.queryByRole('status', { name: 'Current activity' })).toBeNull();
   });
 
   it('should cap collapsed long user bubbles at max-h-60.5 for parity with focused ChatTextarea, without nested Virtuoso scroll', () => {
@@ -420,9 +386,23 @@ describe('ChatMessage column wrapper layout', () => {
     expect(wrapper.className).not.toContain('overflow-y-auto');
     expect(wrapper.className).not.toContain('overflow-y-scroll');
 
-    const rowsWrap = innerBubble.querySelector('.flex.flex-col.gap-1');
+    const rowsWrap = innerBubble.firstElementChild;
     expect(rowsWrap).not.toBeNull();
     expect(rowsWrap!.querySelectorAll('p').length).toBeGreaterThan(0);
+  });
+
+  it('should preserve authored line breaks and literal text when opening a user message', () => {
+    const text = `**Keep these words literal** ${'with natural wrapping '.repeat(30)}\n\nLast line`;
+    setMessages([userMessage('msg-1', text)]);
+    render(<ChatMessage messageId='msg-1' />);
+
+    const bubble = getColumnWrapper().firstElementChild?.firstElementChild;
+    if (!(bubble instanceof HTMLElement)) {
+      throw new Error('User bubble missing');
+    }
+    expect([...bubble.querySelectorAll('p')].map((paragraph) => paragraph.textContent).join('\n')).toBe(text);
+    fireEvent.click(bubble);
+    expect(mockStartEditingMessage).toHaveBeenCalledWith('msg-1');
   });
 
   it.each([
@@ -1051,15 +1031,15 @@ describe('ChatMessage article wrapper — no sticky positioning (regression guar
   });
 });
 
-describe('ChatMessage print tools', () => {
-  it('should render request_print on its own card, never as an unknown part', () => {
+describe('ChatMessage machine tools', () => {
+  it('should render request_job on its own card, never as an unknown part', () => {
     const message: MyUIMessage = {
-      id: 'msg-request-print',
+      id: 'msg-request-job',
       role: 'assistant',
       parts: [
         {
-          type: 'tool-request_print',
-          toolCallId: 'call-print',
+          type: 'tool-request_job',
+          toolCallId: 'call-job',
           state: 'input-available',
           input: { targetFile: 'main.scad' },
         },
@@ -1069,28 +1049,29 @@ describe('ChatMessage print tools', () => {
 
     render(<ChatMessage messageId={message.id} />);
 
-    expect(screen.getByTestId('tool-request-print')).toHaveAttribute('data-state', 'input-available');
+    expect(screen.getByTestId('tool-request-job')).toHaveAttribute('data-state', 'input-available');
     expect(screen.queryByTestId('tool-unknown')).toBeNull();
   });
 
-  it('should render the other print tools on the generic card under their own names', () => {
+  it('should render the other machine tools on the generic card under their own names', () => {
     const message: MyUIMessage = {
-      id: 'msg-print-reads',
+      id: 'msg-machine-tools',
       role: 'assistant',
       parts: [
+        { type: 'tool-list_machines', toolCallId: 'call-list', state: 'input-available', input: {} },
         { type: 'tool-get_machine', toolCallId: 'call-machine', state: 'input-available', input: {} },
         {
-          type: 'tool-get_print_request',
-          toolCallId: 'call-read',
+          type: 'tool-machine_action',
+          toolCallId: 'call-action',
           state: 'input-available',
-          input: { requestId: 'call-print' },
+          input: { componentId: 'chamber-light', action: 'switch.set', parameters: { on: true } },
         },
-        { type: 'tool-list_print_requests', toolCallId: 'call-list', state: 'input-available', input: {} },
+        { type: 'tool-stop_machine', toolCallId: 'call-stop', state: 'input-available', input: {} },
         {
-          type: 'tool-cancel_print',
-          toolCallId: 'call-cancel',
+          type: 'tool-check_job',
+          toolCallId: 'call-check',
           state: 'input-available',
-          input: { requestId: 'call-print' },
+          input: { targetFile: 'main.scad' },
         },
       ],
     };
@@ -1098,21 +1079,21 @@ describe('ChatMessage print tools', () => {
 
     render(<ChatMessage messageId={message.id} />);
 
-    for (const name of ['get_machine', 'get_print_request', 'list_print_requests', 'cancel_print']) {
+    for (const name of ['list_machines', 'get_machine', 'machine_action', 'stop_machine', 'check_job']) {
       expect(screen.getByText(name)).toBeInTheDocument();
     }
     expect(screen.queryByTestId('tool-unknown')).toBeNull();
   });
 });
 
-it('shows generic diagnostics for an unsupported historical static tool', () => {
+it('shows a retired tool from an old chat on the generic card under its own name, never as an unknown part', () => {
   const message: MyUIMessage = {
     id: 'msg-unknown',
     role: 'assistant',
     parts: [
       {
-        type: 'tool-unregistered_operation',
-        toolCallId: 'unknown',
+        type: 'tool-request_print',
+        toolCallId: 'old-print',
         state: 'output-available',
         input: {},
         output: 'Old result',
@@ -1121,6 +1102,18 @@ it('shows generic diagnostics for an unsupported historical static tool', () => 
   };
   setMessages([message]);
   render(<ChatMessage messageId='msg-unknown' />);
+  expect(screen.getByText('request_print')).toBeInTheDocument();
+  expect(screen.queryByTestId('tool-unknown')).toBeNull();
+});
+
+it('shows generic diagnostics for a part that is not a tool part at all', () => {
+  const message: MyUIMessage = {
+    id: 'msg-unknown-data',
+    role: 'assistant',
+    parts: [{ type: 'data-retired', data: {} } as unknown as MyUIMessage['parts'][number]],
+  };
+  setMessages([message]);
+  render(<ChatMessage messageId='msg-unknown-data' />);
   expect(screen.getByTestId('tool-unknown')).toBeInTheDocument();
 });
 

@@ -4,15 +4,16 @@ import { remarkAutoTypeTable, createGenerator } from 'fumadocs-typescript';
 import { remarkMdxMermaid } from 'fumadocs-core/mdx-plugins';
 import { tauCustomShikiLanguages } from '@taucad/grammars';
 import { z } from 'zod';
-import { llmStringifyMdx } from './llm-stringify-mdx.js';
+import { remarkLlmStringifyMdx } from './llm-stringify-mdx.js';
 import { remarkResolveRelativeLinks } from './remark-resolve-relative-links.js';
 
 const generator = createGenerator({
-  tsconfigPath: '../../tsconfig.docs.json',
+  tsconfigPath: './tsconfig.api-docs.json',
 });
 
 // oxlint-disable-next-line typescript/no-deprecated -- the suggested pageSchema replacement breaks fumadocs-mdx 15.4 collection output (every page 404s at prerender); re-evaluate on the next fumadocs-mdx major.
 const docsFrontmatterSchema = frontmatterSchema.extend({
+  title: z.string(),
   docType: z.enum(['tutorial', 'how-to', 'reference', 'explanation']),
   wordBudgetOverride: z.number().int().positive().optional(),
 });
@@ -22,22 +23,26 @@ export const docs = defineDocs({
   docs: {
     schema: docsFrontmatterSchema,
     postprocess: {
-      includeProcessedMarkdown: {
-        stringify: (...stringifyArguments) => llmStringifyMdx(...stringifyArguments),
-      },
+      includeProcessedMarkdown: true,
     },
   },
 });
 
 export default defineConfig({
   mdxOptions: {
-    remarkPlugins: [[remarkAutoTypeTable, { generator }], remarkMdxMermaid, remarkResolveRelativeLinks],
+    remarkPlugins: [
+      [remarkAutoTypeTable, { generator }],
+      remarkMdxMermaid,
+      remarkResolveRelativeLinks,
+      remarkLlmStringifyMdx,
+    ],
     remarkCodeTabOptions: {
       parseMdx: true,
     },
     rehypeCodeOptions: {
       themes: {
-        light: 'github-light',
+        // The standard light palette's parameter orange fails AA on the docs code surface.
+        light: 'github-light-high-contrast',
         dark: 'github-dark',
         'high-contrast-light': 'github-light-high-contrast',
         'high-contrast-dark': 'github-dark-high-contrast',

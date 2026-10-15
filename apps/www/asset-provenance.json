@@ -8,10 +8,10 @@
   "assemblyParts": 34,
   "illustrationOnly": true,
   "freshGeospecRun": true,
-  "renderRecipe": "scripts/capture-stills.mjs",
-  "responsiveAndSocialRecipe": "scripts/optimize-assets.mjs",
+  "renderRecipe": "scripts/capture-stills.ts",
+  "responsiveAndSocialRecipe": "scripts/optimize-assets.ts",
   "firstPartySourceLicense": "Apache-2.0",
-  "notes": "Hero poster and story stills are captured from the shipped scene module (scripts/capture-stills.mjs) so static and live views match. The faceWidth 18 variant stores per-vertex axial offsets exported from the authored model with the same tessellation; XY is unchanged and the committed base mesh is verified identical before export. The GeoSpec evidence is a recorded local run of the example's own spec (3 passed, 0 failed, 7 inconclusive); it is displayed as recorded, not re-run by visitors. Agent lanes and print preparation are illustrations; rigid kinematics are prescribed, not physics. The metal Escher star remains Tau's own metal-morph capture.",
+  "notes": "Hero poster and story stills are captured from the shipped scene module (scripts/capture-stills.ts) so static and live views match. The faceWidth 18 variant stores per-vertex axial offsets exported from the authored model with the same tessellation; XY is unchanged and the committed base mesh is verified identical before export. The GeoSpec evidence is a recorded local run of the example's own spec (3 passed, 0 failed, 7 inconclusive); it is displayed as recorded, not re-run by visitors. Agent lanes and print preparation are illustrations; rigid kinematics are prescribed, not physics. The metal Escher star remains Tau's own metal-morph capture.",
   "refreshedAssets": [
     {
       "path": "apps/www/public/metal-hero.webp",
@@ -35,8 +35,8 @@
     },
     {
       "path": "apps/www/public/social.png",
-      "bytes": 151747,
-      "sha256": "e9ddf0e76126e28581f52121c56309f65e18fe8dd43527e362e0870b0840c930"
+      "bytes": 141634,
+      "sha256": "52df3fbe02d4d57df6978669a8561d8cc4a27fe43084b59750d6126496393180"
     }
   ],
   "metalHero": {
@@ -127,5 +127,28 @@
       "bytes": 2225,
       "sha256": "52ee23b6d9cf33bad1b2661291732d062f17bce7fddb93e0010f4f18ce92906a"
     }
-  ]
+  ],
+  "fontSubsets": {
+    "recipe": "README.md#develop-and-verify",
+    "sourceLicense": "SIL OFL-1.1",
+    "tool": "fonttools 4.60.1; Brotli 1.2.0",
+    "assets": [
+      {
+        "path": "apps/www/public/geist-latin.woff2",
+        "bytes": 23180,
+        "sha256": "9dda7918ccc49ae7dd6e612b9185f1386fb6c94427642154103d30a8d3c04e62",
+        "source": "apps/www/public/geist.woff2",
+        "sourceSha256": "a369fcf5628ea2aa4e1b9e2ec6a5b3624e365bda588e1f0f2f12b564f728fbb8",
+        "weightRange": "400:600"
+      },
+      {
+        "path": "apps/www/public/geist-mono-latin.woff2",
+        "bytes": 23392,
+        "sha256": "af6693414abbbed870d33ef5c390707b3ae88371b452bb16e142727ebf4f1560",
+        "source": "apps/www/public/geist-mono.woff2",
+        "sourceSha256": "fba8f577f38a2bbcbe818efa6348dd58f36303a10b8737c42fefad275be563ab",
+        "weightRange": "400:500"
+      }
+    ]
+  }
 }

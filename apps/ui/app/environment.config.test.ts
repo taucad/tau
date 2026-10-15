@@ -297,6 +297,7 @@ describe('getClientEnvironment', () => {
       'TAU_DEBUG',
       'TAU_FRONTEND_URL',
       'TAU_GIT_REMOTE_ALLOW_PRIVATE',
+      'TAU_MACHINES_ENABLED',
       'TAU_WEBSOCKET_URL',
     ]);
   });
@@ -325,6 +326,7 @@ describe('window.ENV host contract', () => {
       TAU_WEBSOCKET_URL: 'wss://socket.host.test',
       TAU_FRONTEND_URL: 'https://host.test',
       TAU_DEBUG: true,
+      TAU_MACHINES_ENABLED: false,
       TAU_GIT_REMOTE_ALLOW_PRIVATE: false,
       TAU_BILLING_ENVIRONMENT: 'staging',
       NODE_ENV: 'production',

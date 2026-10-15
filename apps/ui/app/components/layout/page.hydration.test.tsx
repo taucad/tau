@@ -28,7 +28,10 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
     }),
 }));
 vi.mock('#components/layout/app-sidebar.js', () => ({ AppSidebar: () => <aside>Hydrated sidebar</aside> }));
-vi.mock('#components/layout/desktop-titlebar-controls.js', () => ({ DesktopTitlebarControls: () => null }));
+vi.mock('#components/layout/desktop-titlebar-controls.js', () => ({
+  DesktopTitlebarControls: () => null,
+  TitlebarNavigation: () => null,
+}));
 vi.mock('#components/ui/sidebar.js', () => ({
   SidebarProvider: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   SidebarInset: ({ children }: { readonly children: ReactNode }) => <main>{children}</main>,

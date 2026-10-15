@@ -7,15 +7,20 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { bambuSimulatorMachine } from '@taucad/bambu';
-
+import { defaultMachineProviders } from '#machine-host.js';
 import { openLocalMachines } from '#local-machines.js';
 import type { LocalMachines } from '#local-machines.js';
 
 describe('openLocalMachines', () => {
+  let providers: Awaited<ReturnType<typeof defaultMachineProviders>> = [];
   let scratch: string;
+
+  beforeAll(async () => {
+    const served = await defaultMachineProviders();
+    providers = served.filter(({ id }) => id === 'bambu-simulator');
+  });
   let project: string;
   let storeRoot: string;
 
@@ -34,7 +39,7 @@ describe('openLocalMachines', () => {
     openLocalMachines({
       workspaceRoot: project,
       requireProject,
-      providers: [bambuSimulatorMachine()],
+      providers,
       actorId: 'test',
       storeRoot,
       onWarning: () => undefined,

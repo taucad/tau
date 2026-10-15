@@ -10,6 +10,7 @@
   },
   "include": [
     "vitest.config.ts",
+    "vitest.browser.config.ts",
     "vitest.setup.ts",
     "tsdown.config.ts",
     "src/**/*.test.ts",

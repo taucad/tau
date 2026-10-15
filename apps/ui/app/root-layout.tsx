@@ -1,5 +1,6 @@
+import { onDesktopMachineNavigation } from '#filesystem/desktop-bridge.js';
 import type { ComponentType, ReactNode } from 'react';
-import { Links, Meta, Scripts, ScrollRestoration, useMatch, useRouteLoaderData } from 'react-router';
+import { Links, Meta, Scripts, ScrollRestoration, useMatch, useNavigate, useRouteLoaderData } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
 import { Fragment, useEffect, useMemo } from 'react';
@@ -33,7 +34,6 @@ import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
 import { authErrorMessage, betterFetchErrorBodyMessage } from '#utils/auth-error.utils.js';
 import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
-import { usePersistentStorageWarning } from '#filesystem/use-persistent-storage-warning.js';
 
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
@@ -254,8 +254,15 @@ function LayoutDocument({
 }
 
 export function ProductApp(): React.JSX.Element {
+  const navigate = useNavigate();
+  useEffect(
+    () =>
+      onDesktopMachineNavigation((route) => {
+        void navigate(route);
+      }),
+    [navigate],
+  );
   useCloudPaymentActionReturn();
-  usePersistentStorageWarning();
   const data = useRouteLoaderData<RootLoaderData>('root');
   const page = <Page />;
   return data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (

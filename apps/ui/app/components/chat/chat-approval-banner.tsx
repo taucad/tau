@@ -1,15 +1,19 @@
-import { ShieldQuestion } from 'lucide-react';
 import { getToolPartName, isAnyToolPart } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
-import { Button } from '@taucad/ui/components/button';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { agentApprovalToolName, parseAgentHostApproval } from '#services/agent-host-event-projection.js';
-import type { AgentHostApproval, AgentHostApprovalOption } from '#services/agent-host-event-projection.js';
-import { toast } from '#components/ui/sonner.js';
+import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
+import { ChatPermissionRequest } from '#components/chat/chat-permission-request.js';
 import { ChatLoginAffordance } from '#components/chat/chat-login-affordance.js';
+import { answerDeny, pendingMachineActionOf, recordMachineAction } from '#components/print/machine-action-approval.js';
+import { useMachinesFacet } from '#hooks/use-machines.js';
+import { operator } from '#hooks/use-machine-control.js';
+import type { MachineClient } from '@taucad/runtime/machine';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 
 /** One unresolved interrupt, located in the transcript that projected it. @public */
 export type PendingAgentHostApproval = AgentHostApproval & {
@@ -59,17 +63,22 @@ export const pendingAgentHostApprovals = (messages: readonly MyUIMessage[]): rea
       part.type === 'dynamic-tool' && part.toolName === agentApprovalToolName
         ? parseAgentHostApproval(part.input)
         : undefined;
-    pending.push({
-      messageId: message.id,
-      approvalId: part.approval.id,
-      interruptId: projected?.interruptId ?? part.approval.id,
-      kind: projected?.kind ?? 'approval',
-      prompt: projected?.prompt ?? getToolPartName(part),
-      options: projected?.options ?? [],
-      ...(projected?.agentId === undefined ? {} : { agentId: projected.agentId }),
-      ...(projected?.login === undefined ? {} : { login: projected.login }),
-      ...(projected === undefined ? { tauTool: true } : {}),
-    });
+    // A projected interrupt keeps all it carries, its ledger correlation (`context`) included: the Print pane finds a
+    // job's or a machine action's interrupt by it.
+    pending.push(
+      projected === undefined
+        ? {
+            messageId: message.id,
+            approvalId: part.approval.id,
+            interruptId: part.approval.id,
+            kind: 'approval',
+            prompt: getToolPartName(part),
+            options: [],
+            tauTool: true,
+            request: { input: part.input },
+          }
+        : { ...projected, messageId: message.id, approvalId: part.approval.id },
+    );
   }
   return pending;
 };
@@ -131,32 +140,70 @@ const requesterName = (agentId: string | undefined, execution: CadAgentExecution
   }
 };
 
-/**
- * The option a keyboard lands on, and the one a bare Approve would have meant.
- *
- * `allow_once` is one turn's consent; `allow_always` is a standing grant the
- * user has to *choose* rather than fall onto (EQ5). The host already resolves a
- * bare approval the same way, so this is the presentation half of one ruling,
- * not a second default.
- *
- * @param options - Options the agent offered, in its own order.
- * @returns The option focus lands on, or `undefined` when none is an allowance.
- */
-const defaultOption = (options: readonly AgentHostApprovalOption[]): AgentHostApprovalOption | undefined =>
-  options.find((option) => option.kind === 'allow_once') ?? options.find((option) => option.kind?.startsWith('allow'));
+const unreachable = 'This computer cannot reach its machines, so Tau cannot record your answer.';
+
+type AgentJob = Readonly<{ jobId: string; machineId: string }>;
+
+/** The job, when it still waits on the person; one already settled elsewhere is left alone. */
+const isAwaiting = async (client: MachineClient, { jobId, machineId }: AgentJob): Promise<boolean> => {
+  const jobs = await client.listJobs({ machineId });
+  return jobs.some((listed) => listed.jobId === jobId && listed.state === 'awaiting-approval');
+};
 
 /**
- * What approving actually buys, per placement.
+ * Answer one interrupt. An agent's machine action or job is recorded on the host through the person's own machines
+ * session first (R15, R16), so the paused tool finds the person's decision; any other interrupt is answered directly.
+ * A deny is always answered, recorded or not ({@link answerDeny}). A job is approved only in the Print pane, which
+ * takes the attestations every job asks for (`work-area-clear` at least), so approving one here leaves it unanswered.
  *
- * SP-4 Result 3 bounds both halves: an external agent inherits its own CLI's
- * approval policy, so Tau gates nothing inside the run and the only real
- * boundary is the materialized branch. A Tau turn has no branch of its own
- * unless the user chose one, so it must not claim one.
+ * @param input - The interrupt, the decision, this computer's machines and how the chat is answered.
+ * @returns `print-pane` when the approval must be given there; the interrupt is then still open.
+ * @throws When an approval cannot be recorded (the interrupt stays open), or after answering a deny whose record failed.
  */
-const continuationNote = (execution: CadAgentExecution | undefined, name: string): string =>
-  execution?.kind === 'acp'
-    ? `Approving lets ${name} keep working in this chat's tree; Tau does not gate each action it takes there.`
-    : `Approving lets ${name} continue this turn; Tau does not ask again for each action it takes.`;
+const answerInterrupt = async ({
+  approval,
+  approved,
+  machines,
+  answer,
+}: Readonly<{
+  approval: PendingAgentHostApproval;
+  approved: boolean;
+  machines: RuntimeTransportFacet<MachineClient>;
+  answer: (approvalId: string, approved: boolean) => Promise<void>;
+}>): Promise<'answered' | 'print-pane'> => {
+  const action = pendingMachineActionOf(approval);
+  const { jobId, machineId } = approval.context ?? {};
+  const job = jobId === undefined || machineId === undefined ? undefined : { jobId, machineId };
+  const respond = async (): Promise<void> => answer(approval.approvalId, approved);
+  if (action === undefined && job === undefined) {
+    await respond();
+    return 'answered';
+  }
+  if (action === undefined && approved) {
+    return 'print-pane';
+  }
+  const reachable = (): MachineClient => {
+    if (!machines.available) {
+      throw new Error(unreachable);
+    }
+    return machines;
+  };
+  const record = async (): Promise<void> => {
+    const client = reachable();
+    if (action !== undefined) {
+      await recordMachineAction(client, action, approved);
+    } else if (job !== undefined && (await isAwaiting(client, job))) {
+      await client.resolveJob({ jobId: job.jobId, decision: 'deny', resolvedBy: operator });
+    }
+  };
+  if (!approved) {
+    await answerDeny(record, respond);
+    return 'answered';
+  }
+  await record();
+  await respond();
+  return 'answered';
+};
 
 /**
  * The one presenter for a paused run's interrupt, wherever the run is placed.
@@ -172,94 +219,37 @@ const continuationNote = (execution: CadAgentExecution | undefined, name: string
  */
 export function ChatApprovalBanner(): React.JSX.Element | undefined {
   const { respondToToolApproval } = useCadChatClient();
+  const machines = useMachinesFacet();
+  const workspace = useProjectWorkspace({ enableNoContext: true });
   const activeExecution = useChatSelector((state) => state.activeExecution);
   const messages = useChatSelector((state) => state.messages);
+  // A paused run has exactly one unresolved interrupt: it stopped on it.
+  const approval = pendingAgentHostApprovals(messages)[0];
   const login = currentRunLogin(messages);
   if (login) {
     /* Not a decision: nothing here is approved or denied, so the banner hands
      * over to the affordance that says what the *user* has to do (V11). */
     return <ChatLoginAffordance login={login} />;
   }
-  // A paused run has exactly one unresolved interrupt: it stopped on it.
-  const approval = pendingAgentHostApprovals(messages)[0];
   if (!approval) {
     return undefined;
   }
 
   const name = approval.tauTool ? 'Tau' : requesterName(approval.agentId, activeExecution);
-  const focused = defaultOption(approval.options);
-  const respond = (approved: boolean, optionId?: string): void => {
-    const resolve = async (): Promise<void> => {
-      try {
-        await respondToToolApproval(approval.approvalId, approved, { optionId });
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'The host did not accept that decision.');
-      }
-    };
-    // async-iife: the banner clears when the durable resolution arrives, not here.
-    void resolve();
-  };
-
   return (
-    <section
-      aria-label='Approval required'
-      className='mb-2 flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm'
-    >
-      <div className='flex min-w-0 items-center gap-2'>
-        <ShieldQuestion className='size-4 shrink-0 text-warning' />
-        <p className='min-w-0 truncate font-medium'>{`${name} is waiting for approval`}</p>
-      </div>
-      <p className='min-w-0 break-words text-foreground/90'>{approval.prompt}</p>
-      <p className='text-xs text-muted-foreground'>
-        {continuationNote(approval.tauTool ? undefined : activeExecution, name)}
-      </p>
-      {approval.options.some((option) => option.kind === 'allow_always') ? (
-        <p className='text-xs text-muted-foreground'>
-          Standing-grant persistence is controlled by the connected agent or MCP server; Tau only forwards this exact
-          choice.
-        </p>
-      ) : undefined}
-      <div className='flex flex-row flex-wrap gap-2'>
-        {approval.options.length > 0 ? (
-          /* The agent's own options, in its own order and its own words (EQ5).
-           * A binary Approve/Deny cannot say "allow once" from "allow always",
-           * so answering with one substituted a guess for the user's choice. */
-          approval.options.map((option) => (
-            <Button
-              key={option.optionId}
-              size='sm'
-              variant={option.kind?.startsWith('allow') === true ? 'default' : 'outline'}
-              autoFocus={option.optionId === focused?.optionId}
-              onClick={() => {
-                respond(option.kind?.startsWith('allow') ?? true, option.optionId);
-              }}
-            >
-              {option.name}
-            </Button>
-          ))
-        ) : (
-          <>
-            <Button
-              size='sm'
-              autoFocus
-              onClick={() => {
-                respond(true);
-              }}
-            >
-              Approve
-            </Button>
-            <Button
-              size='sm'
-              variant='outline'
-              onClick={() => {
-                respond(false);
-              }}
-            >
-              Deny
-            </Button>
-          </>
-        )}
-      </div>
-    </section>
+    <ChatPermissionRequest
+      key={approval.approvalId}
+      approval={approval}
+      name={name}
+      onReview={approval.context?.jobId === undefined ? undefined : () => workspace?.openPanel('print')}
+      onRespond={async (approved, optionId) => {
+        await answerInterrupt({
+          approval,
+          approved,
+          machines,
+          answer: async (id, accepted) => respondToToolApproval(id, accepted, { optionId }),
+        });
+      }}
+    />
   );
 }

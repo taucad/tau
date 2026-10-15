@@ -747,6 +747,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                                   },
                                   "pane": {
                                     "enum": [
+                                      "browser",
                                       "parameters",
                                       "model",
                                       "print",
@@ -815,6 +816,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                     "unavailable": {
                       "items": {
                         "enum": [
+                          "browser",
                           "parameters",
                           "model",
                           "print",
@@ -928,6 +930,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                               },
                               "pane": {
                                 "enum": [
+                                  "browser",
                                   "parameters",
                                   "model",
                                   "print",
@@ -1038,12 +1041,14 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                       "revisions",
                       "update_todos",
                       "ask_questions",
+                      "install_packages",
+                      "list_machines",
                       "get_machine",
+                      "machine_action",
+                      "stop_machine",
                       "get_print_profiles",
-                      "request_print",
-                      "get_print_request",
-                      "list_print_requests",
-                      "cancel_print",
+                      "request_job",
+                      "check_job",
                     ],
                     "type": "string",
                   },

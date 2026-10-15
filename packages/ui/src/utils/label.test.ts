@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDisplayLabel, toTitleCase } from '@taucad/ui/utils/label';
+import { formatDisplayLabel, formatFieldLabel, toTitleCase } from '@taucad/ui/utils/label';
 
 describe('toTitleCase', () => {
   describe('basic camelCase conversion', () => {
@@ -131,5 +131,16 @@ describe('formatDisplayLabel', () => {
   it('should preserve already-authored Title Case labels and acronyms', () => {
     expect(formatDisplayLabel('Valve Cover Left')).toBe('Valve Cover Left');
     expect(formatDisplayLabel('USB Port')).toBe('USB Port');
+  });
+});
+
+describe('formatFieldLabel', () => {
+  it('should show a schema title as written', () => {
+    expect(formatFieldLabel('Command forms (testing)', 'Command forms (testing)')).toBe('Command forms (testing)');
+    expect(formatFieldLabel('X1C', 'X1C')).toBe('X1C');
+  });
+
+  it('should format a label made from a property key', () => {
+    expect(formatFieldLabel('nozzleDiameter', undefined)).toBe('Nozzle Diameter');
   });
 });

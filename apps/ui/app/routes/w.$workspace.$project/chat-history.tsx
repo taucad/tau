@@ -1,12 +1,18 @@
+import { ChatMessageQueue } from '#components/chat/chat-message-queue.js';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { useLocation } from 'react-router';
 import { XIcon } from 'lucide-react';
+import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
 import type { TurnGroup as TurnGroupData } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { ScrollDownButton } from '#routes/w.$workspace.$project/scroll-down-button.js';
+import {
+  instantScrollBehavior,
+  useFollowLatestOutput,
+} from '#routes/w.$workspace.$project/use-follow-latest-output.js';
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -39,38 +45,7 @@ import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { flagParameter } from '#utils/search-parameter.codecs.js';
 import { ArchivedChats } from '#routes/w.$workspace.$project/archived-chats.js';
 
-// Component-local CSS variable. Declared here (rather than in global.css)
-// to keep the chat-history pinning system self-contained — the only
-// consumer is `TurnGroup` (`min-h-(--chat-live-turn-min-h)`). Applied as
-// inline style on `ChatScroller` so it cascades to every Virtuoso item.
-//
-// Reserve exactly the transcript viewport for the last turn, including when
-// the pane is resized or the composer/adornments grow. ChatScroller establishes
-// the size container; a window-height estimate creates phantom overflow.
-// oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- React.CSSProperties does not type custom-property keys
-const chatScrollerCssVariables = {
-  '--chat-live-turn-min-h': '100cqh',
-} as React.CSSProperties;
-
-// Virtuoso's `scrollToIndex` types restrict `behavior` to `'auto' | 'smooth'`,
-// but at runtime the value is forwarded straight to the native `scrollTo()`
-// API which also accepts `'instant'` (no animation, no layout-shift jitter
-// while assistant tokens stream in). Bridge the type vs runtime mismatch
-// once here so the call sites read cleanly.
-// oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- runtime accepts 'instant'; Virtuoso's type is narrower than the native ScrollBehavior
-const instantScrollBehavior = 'instant' as 'auto';
-
-// One conversational turn = one Virtuoso row. Every group has the same DOM
-// shape so streaming a new turn never re-mounts the previous one. The last
-// turn additionally reserves viewport-height (`min-h-(--chat-live-turn-min-h)`)
-// so the user message at the top of the live turn stays pinned to the
-// scroller top while the assistant reply fills downward — combined with
-// `scrollToIndex(LAST, align: 'start')` on submit (below), this is the only
-// pinning mechanism for the live user message. We previously experimented
-// with `position: sticky` to also pin past user messages while the user
-// scrolls through their assistant content, but every scoping attempt
-// triggered a multi-hundred-px viewport jump on wheel-up from the
-// scroll-bottom — pin new user message so assistant reply streams under it.
+// One conversational turn per virtual row, sized only by its content.
 const TurnGroup = memo(function ({
   messageIds,
   isLast,
@@ -79,12 +54,7 @@ const TurnGroup = memo(function ({
   readonly isLast: boolean;
 }) {
   return (
-    <div
-      className={cn(
-        'mx-auto flex w-[calc(100%_-_1rem)] max-w-xl flex-col gap-1 py-1',
-        isLast && 'min-h-(--chat-live-turn-min-h)',
-      )}
-    >
+    <div className='mx-auto flex w-[calc(100%_-_1rem)] max-w-xl flex-col gap-1 py-1'>
       {messageIds.map((id, index) => (
         <ChatMessage
           key={id}
@@ -116,8 +86,7 @@ const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: st
       ref={ref}
       role='region'
       aria-label='Chat history'
-      style={{ ...props.style, ...chatScrollerCssVariables }}
-      className={cn('[container-type:size] [scrollbar-gutter:stable]', props.className)}
+      className={cn('[scrollbar-gutter:stable]', props.className)}
     />
   );
 });
@@ -129,7 +98,7 @@ const ChatHistoryEmptyPlaceholder = (): React.JSX.Element => (
   </div>
 );
 // Initial positioning waits for Virtuoso's measured content, including an initially empty pane.
-const initialChatTurn = { index: 'LAST', align: 'start' } as const;
+const initialChatTurn = { index: 'LAST', align: 'end' } as const;
 
 const virtuosoComponents = {
   Scroller: ChatScroller,
@@ -257,39 +226,9 @@ const ExpandedChatHistory = memo(function ({
     setAtBottom(atBottom);
   }, []);
 
-  // Only auto-follow output when the user is already pinned to the bottom —
-  // otherwise leave the scroll position alone so the user can read earlier
-  // messages without Virtuoso fighting them as assistant tokens stream in.
-  const followOutput = useCallback((atBottom: boolean): 'auto' | false => (atBottom ? 'auto' : false), []);
-
-  // When the user submits a new message, pin it to the top of the viewport
-  // so the assistant reply streams into the spacer canvas below it. rAF
-  // defers the scroll until after Virtuoso lays out the new last item, so
-  // `scrollToIndex` measures the spacer height correctly.
-  const lastTurnId = groups.at(-1)?.messageIds[0];
-  // A populated transcript may arrive before this pane mounts; it still opens at its latest turn.
-  const previousLastTurnIdRef = useRef<string | undefined>(undefined);
-
-  useEffect(() => {
-    if (lastTurnId === previousLastTurnIdRef.current) {
-      return;
-    }
-    const frame = requestAnimationFrame(() => {
-      const scroller = virtuosoRef.current;
-      if (!scroller) {
-        return;
-      }
-      scroller.scrollToIndex({
-        index: 'LAST',
-        align: 'start',
-        behavior: instantScrollBehavior,
-      });
-      previousLastTurnIdRef.current = lastTurnId;
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-    };
-  }, [lastTurnId]);
+  // Follow streaming output only while the user stays pinned to the bottom —
+  // otherwise leave the scroll position alone so they can read earlier messages.
+  const followLatestOutput = useFollowLatestOutput(virtuosoRef);
 
   // Handler to scroll to the bottom of the chat
   const scrollToBottom = useCallback(() => {
@@ -343,7 +282,9 @@ const ExpandedChatHistory = memo(function ({
                 initialTopMostItemIndex={initialChatTurn}
                 itemContent={renderItem}
                 computeItemKey={computeItemKey}
-                followOutput={followOutput}
+                scrollerRef={followLatestOutput.scrollerRef}
+                followOutput={followLatestOutput.followOutput}
+                totalListHeightChanged={followLatestOutput.totalListHeightChanged}
                 className='mt-1 min-h-0 min-w-0 flex-1'
                 atBottomStateChange={handleAtBottomStateChange}
                 components={virtuosoComponents}
@@ -372,8 +313,10 @@ const ExpandedChatHistory = memo(function ({
                 isVisible={!atBottom}
                 onScrollToBottom={scrollToBottom}
               />
-              <div className='mx-2 -mb-3 flex flex-col rounded-t-lg border border-b-0 bg-muted/40 pb-3 empty:hidden'>
+              <ChatMessagePlanning key={activeChatId} className='mb-3 px-3' />
+              <div className='mx-2 -mb-3 flex flex-col rounded-t-2xl border border-b-0 border-border/60 bg-muted/20 pb-3 empty:hidden'>
                 <ChatTodoList key={activeChatId} />
+                <ChatMessageQueue key={`${activeChatId}:messages`} />
                 <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />
               </div>
               <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />

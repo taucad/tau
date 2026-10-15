@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router';
+import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { projectManifestSchemaUrl, projectToManifest } from '@taucad/types';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
@@ -10,6 +10,24 @@ import { cookieName } from '#constants/cookie.constants.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
+
+const routerContent = createContext<React.ReactNode>(null);
+
+function RouterContent(): React.ReactNode {
+  return useContext(routerContent);
+}
+
+function TestRouter({
+  children,
+  initialEntries = ['/projects'],
+}: React.PropsWithChildren<{ readonly initialEntries?: string[] }>): React.JSX.Element {
+  const [router] = useState(() => createMemoryRouter([{ path: '*', Component: RouterContent }], { initialEntries }));
+  return (
+    <routerContent.Provider value={children}>
+      <RouterProvider router={router} />
+    </routerContent.Provider>
+  );
+}
 
 const makeProject = (id: string, name: string, directory = `/${id}`): ProjectListItem => ({
   ...projectToManifest({
@@ -183,13 +201,24 @@ vi.mock('#hooks/use-file-manager.js', () => {
 /* D20: the Tau Cloud listing, scripted rather than fetched. */
 const { cloudListing, mockOpenCloudProject } = vi.hoisted(() => ({
   cloudListing: {
+    isFailed: false,
+    isFetching: false,
     current: [] as Array<{ id: string; name: string; role: 'owner' | 'write' | 'read'; updatedAt?: number }>,
   },
   mockOpenCloudProject: vi.fn(async () => undefined),
 }));
+vi.mock('#hooks/use-cloud-project-preview.js', () => ({
+  useCloudProjectPreview: () => ({ url: undefined, isLoading: false, isFailed: false, retry: vi.fn() }),
+}));
 vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useCloudProjects: () => ({ projects: cloudListing.current, isSettled: true, isFailed: false, isFetching: false }),
+  useCloudProjects: () => ({
+    projects: cloudListing.current,
+    isSettled: !cloudListing.isFetching && !cloudListing.isFailed,
+    isFailed: cloudListing.isFailed,
+    isFetching: cloudListing.isFetching,
+    retry: vi.fn(),
+  }),
 }));
 vi.mock('#hooks/use-open-cloud-project.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -210,23 +239,69 @@ vi.mock('#components/cad-preview.js', () => ({
 describe('ProjectLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        public observe() {
+          /* No viewport in jsdom; thumbnail query is independently mocked. */
+        }
+        public disconnect() {
+          /* No observer registration to release in this fixture. */
+        }
+      },
+    );
     mockCookieValues = {};
     mockUseProjectsResult = createUseProjectsResult();
     mockTrashedProjects = [];
     cloudListing.current = [];
+    cloudListing.isFailed = false;
+    cloudListing.isFetching = false;
   });
 
   // ── D20: one list, local and Tau Cloud ──────────────────────────────────────
   describe('one list with Tau Cloud (D20)', () => {
     const renderLibrary = (): void => {
       render(
-        <MemoryRouter>
+        <TestRouter>
           <TooltipProvider>
             <ProjectLibrary />
           </TooltipProvider>
-        </MemoryRouter>,
+        </TestRouter>,
       );
     };
+
+    it('should preserve local projects while reporting a failed cloud catalog', () => {
+      cloudListing.isFailed = true;
+      renderLibrary();
+      expect(screen.getByRole('alert')).toHaveTextContent('Tau Cloud projects could not be loaded');
+      expect(screen.getByRole('button', { name: 'Retry Tau Cloud' })).toBeEnabled();
+      expect(screen.getByRole('link', { name: 'Open Gearbox Alpha' })).toBeInTheDocument();
+    });
+
+    it('should not claim an empty library while cloud discovery is pending or failed', () => {
+      mockUseProjectsResult.projects = [];
+      cloudListing.isFetching = true;
+      const view = render(
+        <TestRouter>
+          <TooltipProvider>
+            <ProjectLibrary />
+          </TooltipProvider>
+        </TestRouter>,
+      );
+      expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
+      expect(screen.getByText('Loading Tau Cloud projects…')).toBeInTheDocument();
+      cloudListing.isFetching = false;
+      cloudListing.isFailed = true;
+      view.rerender(
+        <TestRouter>
+          <TooltipProvider>
+            <ProjectLibrary />
+          </TooltipProvider>
+        </TestRouter>,
+      );
+      expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
 
     it('should list local-only, both and Tau-Cloud-only projects in the same grid, with no second section', () => {
       cloudListing.current = [
@@ -240,7 +315,7 @@ describe('ProjectLibrary', () => {
       expect(screen.getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
       /* Both: the Tau Cloud glyph, once. */
       expect(screen.getAllByText('Also on Tau Cloud')).toHaveLength(1);
-      expect(screen.getByText('Backed up on Tau Cloud. This device does not have it yet.')).toBeInTheDocument();
+      expect(screen.queryByText('Backed up on Tau Cloud. This device does not have it yet.')).not.toBeInTheDocument();
       expect(screen.queryByRole('heading', { name: 'From Tau Cloud' })).toBeNull();
     });
 
@@ -255,7 +330,8 @@ describe('ProjectLibrary', () => {
       expect(screen.getByRole('row', { name: /Gearbox Alpha/u })).toHaveTextContent('Also on Tau Cloud');
       expect(screen.getByRole('row', { name: /Bracket Beta/u })).not.toHaveTextContent('Also on Tau Cloud');
       const cloudOnly = screen.getByRole('row', { name: /Hinge Delta/u });
-      expect(cloudOnly).toHaveTextContent('Backed up on Tau Cloud. This device does not have it yet.');
+      expect(cloudOnly).toHaveTextContent('Tau Cloud');
+      expect(cloudOnly).not.toHaveTextContent('Backed up on');
       expect(within(cloudOnly).getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
     });
 
@@ -274,7 +350,10 @@ describe('ProjectLibrary', () => {
       cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
       renderLibrary();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Open Hinge Delta' }));
+      const open = screen.getByRole('button', { name: 'Open Hinge Delta' });
+      expect(open).toHaveClass('absolute', 'inset-0');
+      expect(open.parentElement).toHaveClass('hover:border-foreground/30');
+      fireEvent.click(open);
 
       await waitFor(() => {
         expect(mockOpenCloudProject).toHaveBeenCalledWith(
@@ -301,6 +380,8 @@ describe('ProjectLibrary', () => {
       const opening = await screen.findByRole('button', { name: 'Opening… Hinge Delta' });
       expect(opening).toHaveAttribute('aria-busy', 'true');
       expect(opening).toBeDisabled();
+      fireEvent.click(opening);
+      expect(mockOpenCloudProject).toHaveBeenCalledOnce();
       finish();
       expect(await screen.findByRole('button', { name: 'Open Hinge Delta' })).toHaveAttribute('aria-busy', 'false');
     });
@@ -315,7 +396,7 @@ describe('ProjectLibrary', () => {
 
       const card = screen.getByRole('row', { name: /Reference Jig/u });
       expect(card).toHaveTextContent('Can view');
-      expect(card).toHaveTextContent('Shared with you. You can open it but not change it.');
+      expect(card).not.toHaveTextContent('This device does not have it yet.');
     });
 
     it('should show a Tau-Cloud-only project instead of the empty state when this device has none', () => {
@@ -371,11 +452,11 @@ describe('ProjectLibrary', () => {
 
   it('should render the projects heading and every project from useProjects', () => {
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
@@ -396,11 +477,11 @@ describe('ProjectLibrary', () => {
       ],
     };
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getAllByText('Gearbox Alpha')).toHaveLength(2);
@@ -423,11 +504,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('Tau is finishing this project.')).toBeInTheDocument();
@@ -471,11 +552,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('This project directory could not be read.')).toBeInTheDocument();
@@ -514,11 +595,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('47 projects are linked to previous workspace identities.')).toBeInTheDocument();
@@ -543,11 +624,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('Projects could not be loaded')).toBeInTheDocument();
@@ -560,11 +641,11 @@ describe('ProjectLibrary', () => {
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [] };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByTestId('new-project-chat-composer')).toBeInTheDocument();
@@ -574,11 +655,11 @@ describe('ProjectLibrary', () => {
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByRole('status', { name: 'Loading projects' })).toHaveAttribute('aria-busy', 'true');
@@ -601,11 +682,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('gearbox-alpha-2')).toBeInTheDocument();
@@ -641,11 +722,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('This project needs a Tau identity before it can be opened.')).toBeInTheDocument();
@@ -676,11 +757,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
     screen.getByRole('button', { name: 'Use this folder' }).click();
 
@@ -702,11 +783,11 @@ describe('ProjectLibrary', () => {
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [degraded, mockProjects[1]!] };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('assets: Unrecognized key: "second"')).toBeInTheDocument();
@@ -739,11 +820,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(
@@ -759,11 +840,11 @@ describe('ProjectLibrary', () => {
     mockUseProjectsResult = { ...createUseProjectsResult(), deleteProject };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
     screen.getByRole('button', { name: `Trash ${mockProjects[0]!.name}` }).click();
 
@@ -784,11 +865,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
@@ -806,11 +887,11 @@ describe('ProjectLibrary', () => {
     };
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <TooltipProvider>
           <ProjectLibrary />
         </TooltipProvider>
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByText('Page 1 of 3')).toBeInTheDocument();
@@ -836,15 +917,73 @@ describe('ProjectLibrary', () => {
         return undefined;
       };
       render(
-        <MemoryRouter initialEntries={[entry]}>
+        <TestRouter initialEntries={[entry]}>
           <TooltipProvider>
             <ProjectLibrary />
             <SearchProbe />
           </TooltipProvider>
-        </MemoryRouter>,
+        </TestRouter>,
       );
       return { search: () => currentSearch };
     };
+
+    it('should remain on the next page after queued table updates settle', async () => {
+      mockUseProjectsResult = {
+        ...createUseProjectsResult(),
+        projects: Array.from({ length: 44 }, (_, index) =>
+          makeProject(`proj_${String(index).padStart(21, '0')}`, `Project ${index}`),
+        ),
+      };
+      renderAt('/projects');
+      fireEvent.click(screen.getByRole('button', { name: 'Go to next page' }));
+      await waitFor(() => {
+        expect(screen.getByText('Page 2 of 3')).toBeInTheDocument();
+      });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      expect(screen.getByText('Page 2 of 3')).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search projects' }), { target: { value: 'Project 43' } });
+      await waitFor(() => {
+        expect(screen.getByText('Page 1 of 1')).toBeInTheDocument();
+      });
+    });
+
+    it('should preserve search, sorting and column choices while switching views', async () => {
+      Element.prototype.hasPointerCapture = vi.fn(() => false);
+      Element.prototype.scrollIntoView = vi.fn();
+      const route = renderAt('/projects?q=Gearbox&sort=name:asc');
+      expect(screen.getByRole('searchbox', { name: 'Search projects' })).toHaveValue('Gearbox');
+      expect(screen.queryByRole('button', { name: 'Toggle columns' })).not.toBeInTheDocument();
+      const controls = screen.getByRole('group', { name: 'Project controls' });
+      expect(within(controls).getByRole('button', { name: 'Sort' })).toBeInTheDocument();
+      fireEvent.keyDown(screen.getByRole('button', { name: 'View mode' }), { key: 'Enter' });
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Table' }));
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Toggle columns' }), { key: 'Enter' });
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Description' }));
+      fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+      fireEvent.keyDown(screen.getByRole('button', { name: 'View mode' }), { key: 'Enter' });
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Grid' }));
+      expect(screen.getByRole('searchbox', { name: 'Search projects' })).toHaveValue('Gearbox');
+      expect(route.search()).toContain('sort=name:asc');
+      fireEvent.keyDown(screen.getByRole('button', { name: 'View mode' }), { key: 'Enter' });
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Table' }));
+      expect(screen.queryByRole('columnheader', { name: 'Description' })).not.toBeInTheDocument();
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search projects' }), { target: { value: 'missing' } });
+      expect(screen.getByRole('heading', { name: 'No matching projects' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+      expect(route.search()).not.toContain('q=');
+      expect(screen.getByRole('table')).toBeInTheDocument();
+    });
+
+    it('should use busy table rows for table loading without claiming an empty library', () => {
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+      mockCookieValues[cookieName.projectViewMode] = 'table';
+      renderAt('/projects');
+      expect(screen.getByRole('table')).toHaveAttribute('aria-busy', 'true');
+      expect(screen.getAllByRole('row')).toHaveLength(9);
+      expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
+    });
 
     it('lists trashed projects on arrival at /projects?trash=1', () => {
       useProjectsOptions.length = 0;

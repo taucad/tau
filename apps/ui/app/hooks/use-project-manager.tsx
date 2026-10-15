@@ -45,6 +45,7 @@ import {
   getAllProjectFileSystemConfigs,
   listWorkspaces,
   pinHomeStorageBackend,
+  requestHomeStoragePersistence,
   setProjectCreationLocation,
   subscribeProjectRootConfigurationChanges,
   applyProjectFileSystemConfigChanges,
@@ -70,7 +71,13 @@ import { attachmentKind, attachmentReferenceOf } from '#utils/attachment.utils.j
 import { buildUserMessage } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { createAttachmentStore, createChatAttachmentStore, isNotFound } from '#db/attachment-store.js';
-import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
+import {
+  getMainFile,
+  getEmptyCode,
+  getKernelDependencies,
+  getKernelOption,
+  getKernelProjectTemplate,
+} from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultProjectName } from '#constants/project-names.js';
 import type { AppUiPreferences, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
@@ -183,6 +190,8 @@ type CreateProjectFromKernel = CreateProjectChatOptions & {
  * Use this when cloning, remixing, or importing a project.
  */
 type CreateProjectFromData = CreateProjectChatOptions & {
+  /** Wait for the remote manifest before choosing the first view. */
+  deferInitialView?: boolean;
   /** The project metadata to use */
   project: Omit<ProjectManifest, '$schema' | 'id'>;
   /** The files for the project */
@@ -1411,6 +1420,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       } catch (error) {
         throw new PendingProjectRecoveryError('local-state-error', { cause: error });
       }
+      if (operation.backend === 'indexeddb' || operation.backend === 'opfs') {
+        void requestHomeStoragePersistence();
+      }
     },
     [
       assertProjectAbsentAfterDelete,
@@ -1505,6 +1517,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           projectName: projectName ?? defaultProjectName,
           mainFileName,
           emptyCodeContent: encodeTextFile(emptyCode),
+          ecosystem: getKernelOption(options.kernel).ecosystem,
+          dependencies: await getKernelDependencies(options.kernel),
+          template: await getKernelProjectTemplate(options.kernel),
         });
         projectData = result.projectData;
         files = result.files;
@@ -1564,6 +1579,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
               ...attachmentSourceOf(options),
             }),
         editorState: options.editorState,
+        deferInitialView: 'project' in options && options.deferInitialView,
         files,
         storage: pendingStorage,
       });

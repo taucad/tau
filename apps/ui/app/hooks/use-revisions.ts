@@ -433,7 +433,7 @@ export function useRevisions(): RevisionsView {
      */
     const appendMinted = async (): Promise<void> => {
       try {
-        const [minted] = await queryClient.fetchQuery({
+        const [minted] = await queryClient.query({
           queryKey: ['revision-log-head', projectId, branch, headRevisionId],
           queryFn: async () => client.log({ branch, limit: 1 }),
           staleTime: Number.POSITIVE_INFINITY,

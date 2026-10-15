@@ -55,7 +55,7 @@ describe('geometry utility dispatcher', () => {
       return result;
     });
     const post = vi.fn<(frame: unknown) => void>();
-    const host = createGeometryHost({ post, measure: vi.fn(), performance: vi.fn(), createRunner: async () => runner });
+    const host = createGeometryHost({ post, measure: vi.fn(), createRunner: async () => runner });
     host.handle({
       data: {
         type: 'geometry-run',
@@ -92,32 +92,6 @@ describe('geometry utility dispatcher', () => {
     ).toEqual([{ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result } }]);
     expect(listeners.size).toBe(0);
   });
-  it('runs a diagnostic through the process-local evaluator and preserves its request id', async () => {
-    const post = vi.fn();
-    const performance = vi.fn(async () => ({ backend: 'native', samples: [1] }));
-    const host = createGeometryHost({ post, measure: vi.fn(), performance, createRunner: vi.fn() });
-    host.handle({
-      data: {
-        type: 'geometry-run',
-        generation: 2,
-        requestId: 4,
-        kind: 'performance',
-        input: { type: 'run', id: 12, input: { engine: 'native-desktop' } },
-      },
-      ports: [],
-    });
-    await vi.waitFor(() => {
-      expect(post).toHaveBeenCalledOnce();
-    });
-    expect(performance).toHaveBeenCalledExactlyOnceWith({ engine: 'native-desktop' });
-    expect(post).toHaveBeenCalledWith({
-      type: 'geometry-result',
-      generation: 2,
-      requestId: 4,
-      value: { id: 12, type: 'result', result: { backend: 'native', samples: [1] } },
-    });
-  });
-
   it('never starts a suite canceled while the runner is being created', async () => {
     const deferred = Promise.withResolvers<HostGeoSpecRunner>();
     const port = mock<UtilityPort>();
@@ -128,7 +102,6 @@ describe('geometry utility dispatcher', () => {
     const host = createGeometryHost({
       post,
       measure: vi.fn(),
-      performance: vi.fn(),
       createRunner: async () => deferred.promise,
     });
     host.handle({

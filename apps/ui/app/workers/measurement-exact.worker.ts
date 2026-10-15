@@ -27,7 +27,7 @@ type ExactEngine = Parameters<typeof queryDirectAp242MinimumDistance>[0]['engine
 export async function evaluateExactOccurrenceDistance(
   request: ExactRequest,
   initialize: () => Promise<ExactEngine> = async () => {
-    const native = await import('@taucad/geospec-engine-native');
+    const native = await import('geospec-engine');
     await native.initialize();
     return new native.Engine();
   },

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { expect } from 'vitest';
+import { machineChannelProtocolVersion } from '@taucad/runtime/machine';
 import type { DesktopSession } from '#support/desktop-app.js';
 
 /** Product geometry utility events, observed in packaged main without replacing its fork. */
@@ -25,7 +26,7 @@ Module._load = function(request, parent, isMain) {
   const binding = load.apply(this, arguments);
   let resolved;
   try { resolved = Module._resolveFilename(request, parent, isMain); } catch { return binding; }
-  if (typeof resolved !== 'string' || !/geospec-engine-native.*\.node$/u.test(resolved) ||
+  if (typeof resolved !== 'string' || !/geospec-engine.*\.node$/u.test(resolved) ||
       typeof binding?.Engine?.prototype?.evaluateClaim !== 'function') return binding;
   const original = binding.Engine.prototype.evaluateClaim;
   if (original.__tauE2eNativeEntryWrapped) return binding;
@@ -281,6 +282,6 @@ export const probeServicesHost = async (session: DesktopSession): Promise<number
       shell.requestServicesPort(requestId, 'machines');
     });
   }, randomUUID());
-  expect(hello).toEqual({ server: 'machines', protocolVersion: 1 });
+  expect(hello).toEqual({ server: 'machines', protocolVersion: machineChannelProtocolVersion });
   return Date.now() - before;
 };

@@ -3,7 +3,7 @@ title: 'Release Policy'
 description: 'Versioning, building, and publishing strategy for @taucad/* npm packages: Nx Release, version plans, tsdown, OIDC.'
 status: active
 created: '2026-02-27'
-updated: '2026-10-12'
+updated: '2026-10-15'
 related:
   - docs/policy/version-policy.md
   - docs/policy/public-surface-policy.md
@@ -196,6 +196,8 @@ For alpha, beta, and release candidate versions:
 - Publish under a dist-tag (`next`, `alpha`, `beta`, `rc`) so `npm install @taucad/runtime` always resolves to the latest stable version
 - Prerelease versions follow the format `X.Y.Z-alpha.N`
 - Prereleases do not generate changelog entries in the stable changelog
+- A beta train of the whole fixed group runs `nx release version prerelease --preid beta --first-release` with git and staging disabled, which keeps the version plans for the next stable release; the `package-release` skill owns the exact command
+- A name that has never been published needs an operator-published `0.0.0` placeholder and an `npm trust` binding to `publish.yml` before Trusted Publishing can publish it
 
 ## Operator Publish Handoff
 
@@ -226,16 +228,15 @@ pnpm registry:check
 pnpm runtime:npm-local-smoke
 NX_CLOUD=false pnpm nx release --dry-run --skip-publish --first-release
 pnpm nx release --skip-publish --first-release
-git push origin main --follow-tags
 ```
 
-The operator then dispatches `.github/workflows/publish.yml` on the release tag (`gh workflow run publish.yml --ref v<version>`); a pushed tag alone publishes nothing. The run executes the release gate, dry-runs, then publishes the fixed group in one `nx release publish`. After verifying the train, the operator may promote each approved package:
+`main` accepts changes only through pull requests, so the operator pushes the release commit on a branch, squash-merges its pull request once CI is green, and tags the merge commit `v<version>` (the local tag Nx created points at the pre-merge commit). The operator then dispatches `.github/workflows/publish.yml` on the release tag (`gh workflow run publish.yml --ref v<version>`); a pushed tag alone publishes nothing. When the tag ruleset prevents the tag, dispatching on `main` at the merge commit publishes the same versions, because the publish reads them from the package manifests. The run executes the release gate, dry-runs, then publishes the fixed group in one `nx release publish`. After verifying the train, the operator may promote each approved package:
 
 ```bash
 npm dist-tag add '<package>@<released-version>' latest
 ```
 
-The first successful train publication claims the decided names `geospec` and `@taucad/geospec-engine`. Do not publish placeholder packages merely to reserve either name.
+The first successful train publication claims the decided names `geospec` and `@taucad/geospec-engine`. Do not publish placeholder packages merely to reserve either name; the Trusted Publishing bootstrap placeholder is the only exception.
 
 ### Superseded Package Deprecations
 
@@ -260,7 +261,7 @@ The deployable applications (projects tagged `release:app`: `ui`, `api` and `des
 
 - **Version source**: `scripts/src/release-apps.ts` bumps each application from the conventional commits that touched its workspace dependency closure since its last `<project>@<version>` tag (feature: minor; breaking: major, or minor below 1.0.0; anything else: patch). Tests and Markdown do not count. An application without a tag starts at `0.1.0`.
 - **Release PRs**: `.github/workflows/release.yml` keeps one bot-owned pull request per application on `release/<project>`, whose commit only changes that application's `package.json` version and `CHANGELOG.md`. Squash-merging one is the release act for that application; its push creates the application's tag and GitHub Release with the release GitHub App. Applications release independently.
-- **Release CI**: a published GitHub Release starts `.github/workflows/release-build.yml`, which lints, typechecks, tests and builds the application at its tag, then ships it in the same run. A desktop release also packages macOS (Developer ID signed and notarized), Linux and Windows (unsigned) archives, attaches them with `SHA256SUMS.txt` and the per-platform update feeds, becomes the repository's latest release, and then writes its feeds to the fixed `desktop-feed` prerelease, which installed apps read. The "Latest" badge is therefore not a production control.
+- **Release CI**: the release GitHub App creates each GitHub Release as a draft and then its tag; the tag's push starts `.github/workflows/release-build.yml`, which lints, typechecks, tests and builds the application at its tag, attaches the release's assets to the draft and publishes it, then ships it in the same run. Published releases are immutable: an asset is never replaced, and a rerun accepts only an asset with the same sha256. A desktop release also packages macOS (Developer ID signed and notarized), Linux and Windows (unsigned) archives, attaches them with `SHA256SUMS.txt` and the per-platform update feeds, mirrors them to its channel's R2 bucket, and is published after native OTA qualification; a production release then becomes the repository's latest release and its R2 feeds, which installed apps read, are promoted. The "Latest" badge is therefore not a production control.
 - **Staging desktop**: dispatching `.github/workflows/release-desktop-staging.yml` from `main` creates a `desktop-staging@<version>-staging.<n>` prerelease with the release GitHub App. `release-build.yml` builds it exactly like a desktop release, packaged for the staging channel (taucad.dev endpoints, no update checks) and signed from the `desktop-staging` environment; it attaches the archives without update feeds and never marks the prerelease latest.
 - **Production**: merging a UI or API release pull request is the release, with no further approval. Its `release-build.yml` run verifies the application at its tag and then deploys only that application (the API to Fly; the UI and docs to Netlify); the other application stays where it is. The desktop keeps its `desktop` approval, because a shipped desktop build updates installed apps and can only be replaced, not rolled back. Rollbacks and redeploys dispatch `.github/workflows/deploy-production.yml` from `main` with one `ui@` or `api@` tag: it requires the release build to have verified that tag and dispatches the same deploys. Deploying an older version than the application's last production deploy requires `rollback: true`.
 - **Who releases**: merging a `release/*` pull request ships production, so it is the operator's act. An agent merges one only on the operator's explicit instruction for that release.
@@ -295,3 +296,4 @@ The deployable applications (projects tagged `release:app`: `ui`, `api` and `des
 | 2026-10 | Desktop update feed on a fixed `desktop-feed` release   | GitHub has one "Latest" per repository; installed apps no longer depend on which application released last                                                |
 | 2026-10 | One-tap release: the release run deploys production     | Merging a release PR is the release; one approval in its run takes it to production, and the Command Center follows that run by its merge commit          |
 | 2026-10 | Drop the production approval for the UI and API         | The approval came hours after the merge and added no information; staging rehearsal, rollback and fix-forward for migrations are the controls instead     |
+| 2026-10 | Draft-first immutable application releases              | Immutable releases accept assets only before publication; the fixed `desktop-feed` release is retired because installed apps read the R2 feed (DEL-20)    |

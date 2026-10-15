@@ -1,23 +1,16 @@
-import { Link } from 'react-router';
-import { Button } from '@taucad/ui/components/button';
-import { ComingSoon } from '#components/ui/coming-soon.js';
+import type { MetaFunction } from 'react-router';
+import { PageContent } from '#components/layout/page-content.js';
+import { PageHeader } from '#components/layout/page-header.js';
 import type { Handle } from '#types/matches.types.js';
 
-export const handle: Handle = {
-  breadcrumb() {
-    return (
-      <Button asChild variant='ghost'>
-        <Link to='/workflows'>Workflows</Link>
-      </Button>
-    );
-  },
-};
+export const meta: MetaFunction = () => [{ title: 'Workflows · Tau' }];
+export const handle: Handle = { enableOverflowY: true };
 
 export default function Workflows(): React.JSX.Element {
   return (
-    <div className='container flex h-full flex-col items-center justify-center gap-4 px-4 py-8'>
-      <h1 className='text-6xl font-medium tracking-tight'>Workflows</h1>
-      <ComingSoon size='landing' />
-    </div>
+    <PageContent className='space-y-6'>
+      <PageHeader title='Workflows' />
+      <p className='text-sm text-muted-foreground'>Workflows are coming soon.</p>
+    </PageContent>
   );
 }

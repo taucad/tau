@@ -38,6 +38,9 @@ vi.mock('@better-auth-ui/react', () => ({
       newApiKeyWarning: 'Copy this key now.',
     },
   }),
+}));
+
+vi.mock('@better-auth-ui/react/plugins/api-key', () => ({
   useCreateApiKey: () => ({
     mutate: authMocks.createApiKey,
     isPending: false,

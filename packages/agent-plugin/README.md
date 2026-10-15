@@ -87,7 +87,13 @@ The tools load with the session in both hosts rather than waiting behind tool se
 
 ### Printing
 
-With `TAU_HOST_MACHINES=true` in the server's environment (the Codex manifest passes it through), `tau mcp` also offers the print tools (`get_print_profiles`, `request_print`, `get_print_request`, `list_print_requests`, `cancel_print`) over the printers you bound in the Tau app. `request_print` slices the model in the folder the agent is working in, which must be a Tau project (it holds `tau.json`), and asks you to approve the print in the agent app's own form; the print starts only if you tick Approve and accept. An agent app that cannot show a form gets the request back waiting, and you approve it in Tau's Print pane. Printers are shared by every Tau app on the computer and only one can use them at a time, so while the Tau desktop app has them the server offers no print tools, and while the server has them the desktop app waits. That is why printing is off unless you turn it on, and why a server whose one folder is not a Tau project (Claude Code's project folder, or `--project`) leaves the printers alone and says so on stderr. Codex names the folder with each call, so its server prints from whichever project the thread works in. Hosts that draw MCP Apps also get the tools the viewer page calls; see [Viewer](#viewer).
+With `TAU_HOST_MACHINES=true` in the server's environment (the Codex manifest passes it through), `tau mcp` also offers the machine tools (`list_machines`, `get_machine`, `machine_action`, `stop_machine`, `get_print_profiles`, `request_job`, `check_job`) over the machines you bound in the Tau app. `request_job` slices the model in the folder the agent is working in, which must be a Tau project (it holds `tau.json`), and leaves the job waiting: you approve it in Tau's Print pane, where Tau asks for the checks every job needs, and an action that needs your approval waits there too. Machines are shared by every Tau app on the computer and only one can use them at a time, so while the Tau desktop app has them the server offers no machine tools, and while the server has them the desktop app waits. That is why the machine tools are off unless you turn them on, and why a server whose one folder is not a Tau project (Claude Code's project folder, or `--project`) leaves the machines alone and says so on stderr. Codex names the folder with each call, so its server requests jobs from whichever project the thread works in. Hosts that draw MCP Apps also get the tools the viewer page calls; see [Viewer](#viewer).
+
+### Native kernels
+
+`.py` (Build123d) and `.cs` (PicoGK) files run on a native runtime, an interpreter and wheels or a .NET runtime, that is downloaded once into a payload store every Tau app on the computer shares. No CAD tool downloads: until the runtime is prepared, every tool answers a `.py` or `.cs` file with `KERNEL_NOT_PREPARED`, naming the kernel, the bytes preparing downloads and the call that prepares it. That call is `prepare_kernel` with `{ "kernel": "build123d" }` or `{ "kernel": "picogk" }`; it reports progress, keeps every verified file when it is cancelled, and is the one tool that reaches the network, so approving it is the consent to download. A runtime prepared elsewhere, by `tau prepare` or the Tau app, is used on the next call with no `prepare_kernel`.
+
+The server does not pass its environment on: the threads that run models get the platform's own variables, the proxy and CA variables, and Tau's `TAU_*` acquisition profile (`TAU_PAYLOAD_MIRROR`, `TAU_PAYLOAD_MIRROR_NO_FALLBACK`, `TAU_PAYLOAD_DIR`, `TAU_CONFIG_DIR`, `TAU_ACQUISITION`, `TAU_PAYLOAD_TARGET`, `TAU_PAYLOAD_EMULATION`), and nothing else. The Codex manifest forwards those names to the server, and with a proxy set the launcher sets `NODE_USE_ENV_PROXY=1` so downloads use it.
 
 ## Viewer
 
@@ -185,7 +191,7 @@ pnpm plugin:dev doctor --smoke                # starts the launcher as a host wo
 pnpm plugin:dev uninstall                     # and `desktop --remove`
 ```
 
-`doctor --smoke` calls `test_model`, which needs this checkout's GeoSpec engine (`pnpm nx run geospec-engine-native:build-node`, with Rust 1.88), and `screenshot`, which needs a graphics adapter.
+`doctor --smoke` calls `test_model`, which needs the GeoSpec engine that `pnpm install` takes from npm as `geospec-engine` (its prebuilt native binding covers only the platforms it publishes), and `screenshot`, which needs a graphics adapter.
 
 Claude Code reads a catalog added from a local folder in place, so a rebuild reaches it at the next session. Codex copies the folder into `~/.codex/plugins/cache/tau-dev/tau/<version>/`. By hand, the same steps are:
 

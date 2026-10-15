@@ -1,3 +1,4 @@
+import { MemoryRouter } from 'react-router';
 import type { MockInstance } from 'vitest';
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest';
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -365,15 +366,24 @@ vi.mock('#services/part-thumbnail-visual.js', () => ({
   sourceGlbDigest: async () => 'sha256:viewer-preview',
 }));
 
+vi.mock('#hooks/use-cloud-projects.js', () => ({
+  useTauCloudIntent: () => (mockSyncStatus.sync.state === 'checking' ? 'open' : undefined),
+  canOpenCloudProject: () => true,
+}));
+
 vi.mock('#hooks/use-revision-status.js', () => ({
-  useRevisionStatus: () =>
-    useSyncExternalStore(
+  useRevisionCommands: () => ({ connectRemote: vi.fn(), syncNow: vi.fn() }),
+  useRevisionClient: () => undefined,
+  useRevisionStatus: () => ({
+    remote: { phase: 'connected' },
+    ...useSyncExternalStore(
       (listener) => {
         mockSyncListeners.add(listener);
         return () => mockSyncListeners.delete(listener);
       },
       () => mockSyncStatus,
     ),
+  }),
 }));
 
 // =============================================================================
@@ -543,7 +553,14 @@ const mockPanelApi = {
   updateParameters: vi.fn(),
 } as unknown as DockviewPanelApi;
 
-const renderViewer = (ui: React.ReactElement): ReturnType<typeof render> => render(ui, { wrapper: TooltipProvider });
+const renderViewer = (ui: React.ReactElement): ReturnType<typeof render> =>
+  render(ui, {
+    wrapper: ({ children }) => (
+      <MemoryRouter>
+        <TooltipProvider>{children}</TooltipProvider>
+      </MemoryRouter>
+    ),
+  });
 
 describe('ChatViewer reopen-renderer overlay', () => {
   let getBoundingClientRectSpy: MockInstance<typeof HTMLElement.prototype.getBoundingClientRect> | undefined;
@@ -1113,7 +1130,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockSyncStatus = { sync: { state: 'checking' } };
     const viewer = renderViewer(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Checking synced files…');
+    expect(screen.getByRole('region', { name: 'Connecting to Tau Cloud' })).toBeInTheDocument();
     expect(screen.queryByText('File not found')).not.toBeInTheDocument();
 
     act(() => {

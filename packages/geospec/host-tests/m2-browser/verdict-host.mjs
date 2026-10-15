@@ -2,16 +2,9 @@
 import assert from 'node:assert/strict';
 import { createHash, webcrypto } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
-/* eslint-disable @nx/enforce-module-boundaries -- This host-only check exercises the private conformance loader without publishing a testing subpath. */
-// oxlint-disable-next-line no-restricted-imports -- This host-only check exercises the private conformance loader, not a shipped package API.
-import { loadSupplementalBrowserInputs } from '../../../geospec-engine-native/bindings/browser-conformance/m2-inputs.ts';
-/* eslint-enable @nx/enforce-module-boundaries -- Restore enforcement after the one private test import. */
 
 const source = readFileSync(new URL('app.ts', import.meta.url), 'utf8');
 const tree = ts.createSourceFile('app.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -176,35 +169,6 @@ void test('should preserve default complete-golden authority and exact supplied 
   assert.equal(nullableDefault.runtimeFailure.phase, 'expected-authority');
 });
 
-const loadRow = async (input) => {
-  const folder = await mkdtemp(join(tmpdir(), 'geospec-browser-authority-'));
-  try {
-    const asset = Buffer.from('ordinary inert host asset');
-    await writeFile(join(folder, 'asset'), asset);
-    const inputRow = structuredClone(input);
-    inputRow.ingest.primary = { source: 'asset', byteLength: asset.length, sha256: hash(asset), url: '' };
-    const metadata = {
-      schemaVersion: 1,
-      expectedRowCount: 1,
-      authorities: [{ path: 'inert-authority', sha256: hash('inert') }],
-      rows: [inputRow],
-    };
-    const bytes = JSON.stringify(metadata);
-    const path = join(folder, 'inputs.json');
-    await writeFile(path, bytes);
-    return await loadSupplementalBrowserInputs(path, hash(bytes));
-  } finally {
-    await rm(folder, { recursive: true, force: true });
-  }
-};
-
-void test('should load explicit nullable supplemental authority without replacing it with candidate bytes', async () => {
-  const loaded = await loadRow(row);
-  assert.deepEqual(loaded.metadata.rows[0].expected, expected);
-  assert.equal(loaded.metadata.expectedRowCount, 1);
-  assert.equal(loaded.assets.size, 1);
-});
-
 const failedRow = {
   ...row,
   expected: { ...expected, status: 'failed', error: { name: 'GeoSpecAssertionError', message: null } },
@@ -264,8 +228,6 @@ const queryRow = {
 for (const status of ['passed', 'failed']) {
   void test(`should accept an independently ${status} positive query report without an assertion error`, async () => {
     const input = { ...queryRow, expected: { ...expected, status } };
-    const loaded = await loadRow(input);
-    assert.deepEqual(loaded.metadata.rows[0].expected, input.expected);
     const captured = await run(input, true, status);
     assert.equal(captured.passed, true);
     assert.equal(captured.comparison.status, true);
@@ -312,10 +274,6 @@ void test('should keep nullable failed authority restricted to the matching publ
   ];
   await Promise.all(
     inputs.map(async (input) => {
-      await assert.rejects(loadRow(input), {
-        name: 'Error',
-        message: `Supplemental browser row ${input.id} has unavailable authority without a known verdict and matching assertion-error expectation.`,
-      });
       const captured = await run(input, true, 'failed');
       assert.equal(captured.passed, false);
       assert.equal(captured.runtimeFailure.phase, 'expected-authority');

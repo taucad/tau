@@ -1,4 +1,6 @@
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
+import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useCallback, useId, useState, useRef, useMemo, useEffect, memo } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import type { ItemInstance, TreeInstance } from '@headless-tree/core';
@@ -88,7 +90,6 @@ import { FileExtensionIcon, getIconIdForFilename } from '#components/icons/file-
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
@@ -2140,14 +2141,11 @@ export const ChatEditorFileTree = memo(function ({
  * would otherwise all re-render on every revision the project mints.
  */
 function FileTreeEmptyState(): React.JSX.Element {
-  const checkingRemote = useRevisionStatus()?.sync.state === 'checking';
-  return (
-    <PanelEmptyState
-      icon={FolderOpen}
-      title={checkingRemote ? 'Checking…' : 'No files available'}
-      className='rounded-xl border bg-card'
-    />
-  );
+  const availability = useProjectAvailability();
+  if (availability !== 'ready') {
+    return <ProjectSyncPlaceholder state={availability} />;
+  }
+  return <PanelEmptyState icon={FolderOpen} title='No files available' className='rounded-xl border bg-card' />;
 }
 
 type TreeItemProps = {

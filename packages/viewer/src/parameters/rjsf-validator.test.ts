@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RJSFSchema } from '@rjsf/utils';
+import type { CustomValidator, RJSFSchema } from '@rjsf/utils';
+import type { RJSFContext } from '#parameters/rjsf-context.js';
 import { isJsonSchemaValid, rjsfValidator } from '#parameters/rjsf-validator.js';
 
 const schema: RJSFSchema = {
@@ -39,6 +40,35 @@ describe('rjsfValidator', () => {
     );
     expect(result.errorSchema).toEqual({
       mode: { __errors: [expect.any(String)] },
+      width: { __errors: [expect.any(String)] },
+    });
+  });
+
+  it('addresses errors for keys containing path separators or no characters at all', () => {
+    const separatorSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        'a.b': { type: 'number', minimum: 1 },
+        '': { type: 'object', properties: { '[0]': { type: 'number', minimum: 1 } } },
+      },
+    };
+
+    const result = rjsfValidator.validateFormData({ 'a.b': 0, '': { '[0]': 0 } }, separatorSchema);
+
+    expect(result.errorSchema).toEqual({
+      'a.b': { __errors: [expect.any(String)] },
+      '': { '[0]': { __errors: [expect.any(String)] } },
+    });
+  });
+
+  it('passes the computed error schema to a custom validator', () => {
+    const customValidate = vi.fn<CustomValidator<Record<string, unknown>, RJSFSchema, RJSFContext>>(
+      (_formData, errors) => errors,
+    );
+
+    rjsfValidator.validateFormData({ width: 0 }, schema, customValidate);
+
+    expect(customValidate).toHaveBeenCalledWith(expect.anything(), expect.anything(), undefined, {
       width: { __errors: [expect.any(String)] },
     });
   });

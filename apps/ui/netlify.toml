@@ -23,14 +23,13 @@
 # fails the build unless `TAU_SOURCEMAPS_OPTIONAL=true`, which `deploy-ui.yml`
 # sets for staging only, so a bad staging PostHog key cannot block the deploy.
 #
-# NX_PREFER_NODE_STRIP_TYPES: NODE_ENV=production at build time would make pnpm
-# skip devDependencies (including @swc/core). Nx needs a TS transpiler to load
-# plugin config files — this flag uses Node's native type stripping instead.
+# Actions installs the workspace's development dependencies before this build.
+# Use Nx's default TypeScript transpiler for config imports and dependency builds.
 
 [build]
 # Vendored engine licences must clear before any deploy artifact is built.
 # Paths relative to site base directory (`apps/ui`, set in Terraform).
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 publish = "build/client"
 
 [build.environment]
@@ -46,13 +45,13 @@ NX_NO_CLOUD = "true"
 directory = ".netlify/v1/functions"
 
 [context.production]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 
 [context.deploy-preview]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
 
 [context.branch-deploy]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
 
 [dev]
 command = "pnpm nx dev ui"
@@ -159,21 +158,18 @@ Document-Policy = "js-profiling"
 #     immediately reported.
 #   - https://*.ingest.sentry.io / https://*.ingest.us.sentry.io: Sentry browser
 #     error reports (launch gate OBS-7), sent only when SENTRY_DSN is set.
-Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new https://*.ingest.sentry.io https://*.ingest.us.sentry.io wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+#   - https://registry.npmjs.org: packuments and tarballs for the Packages
+#     panel's Install (tarballs are checked against package-lock.json integrity).
+Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://registry.npmjs.org wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
 
-# Homepage cache policy. Previously a `headers` export in
-# `app/routes/_index/route.tsx`; moved here because React Router SPA mode (the
-# `ui:build:desktop` config) bans route `headers` exports and the desktop build
-# shares this route module. Values must stay in step with
-# `app/constants/cache.constants.ts` (`browserRevalidateCacheControl` +
-# `edgeShortLivedSsrRouteCacheControl`, `cacheTag.homepage`).
+# The apex selects marketing or the app from a presentation cookie. Never reuse
+# one visitor's document for another, or restore stale HTML after switching.
 [[headers]]
 for = "/"
 [headers.values]
-Cache-Control = "public, max-age=0, must-revalidate"
-Netlify-CDN-Cache-Control = "public, durable, s-maxage=600, stale-while-revalidate=86400"
-Cache-Tag = "homepage"
-Netlify-Vary = "query="
+Cache-Control = "private, no-store"
+CDN-Cache-Control = "no-store"
+Netlify-CDN-Cache-Control = "no-store"
 
 # Content-hashed Vite bundles + WASM (immutable filenames)
 [[headers]]

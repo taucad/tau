@@ -28,7 +28,7 @@ Use Nx tasks and workspace generators; inspect help/source for unfamiliar flags.
 
 Before editing a path, read every `AGENTS.md` from the repository root through that path's parent, in order. For several paths, read the union of those chains. Apply the policy conditions below and include applicable instruction paths in delegated briefs. Start a bounded native task in its narrowest suitable directory when supported; root-started tasks still read target descendants explicitly.
 
-System, developer and current user instructions take precedence. [DESIGN.md](DESIGN.md) governs user-facing design. Applicable normative policies cannot be weakened by operational AGENTS files or skills. Local AGENTS narrow ancestor operation within their directory, consistently with those policies; skills implement that task contract. Resolve contradictions at the owning source.
+System, developer and current user instructions take precedence. [Design](docs/policy/design-policy.md) governs user-facing design. Applicable normative policies cannot be weakened by operational AGENTS files or skills. Local AGENTS narrow ancestor operation within their directory, consistently with those policies; skills implement that task contract. Resolve contradictions at the owning source.
 
 Every canonical AGENTS has an adjacent `CLAUDE.md` containing only `@AGENTS.md`. Shared skills live in [.agents/skills](.agents/skills); `.claude/skills` is a discovery alias. Native permissions, trust and tool availability are host responsibilities.
 
@@ -51,7 +51,7 @@ Project configuration and package exports define Tau's current interfaces.
 - [libs](libs): Shared events/RPC authority, contracts, memory, telemetry, types and tooling
 - [tools](tools), [scripts](scripts), [.github](.github), [infra](infra): Generators/build tooling, maintenance/validation, CI/release and infrastructure
 
-Nothing under `packages/**` or `libs/**` depends on `apps/libs/**`. Query project configuration for names, exports, targets.
+`packages/**` and `libs/**` never depend on `apps/libs/**`.
 
 ## Required policy routes
 
@@ -60,7 +60,7 @@ Read the owners for each touched concern:
 - TS/JS/declarations: [lint](docs/policy/lint-policy.md), [TypeScript](docs/policy/typescript-policy.md), [JSDoc](docs/policy/jsdoc-policy.md); public APIs also [library API](docs/policy/library-api-policy.md)
 - Tests/specs/harnesses: [testing](docs/policy/testing-policy.md); React/jsdom adds [React testing](docs/policy/react-testing-policy.md); TLA+/Lean specs add [formal verification](docs/policy/formal-verification-policy.md)
 - XState: [XState](docs/policy/xstate-policy.md); revision graphs/checkouts/machines/sync also [revisions](docs/policy/revisions-policy.md)
-- React/Tailwind/tokens/accessibility: [DESIGN](DESIGN.md), [React](docs/policy/react-policy.md), [UI](docs/policy/ui-policy.md), [color](docs/policy/color-policy.md), [accessibility](docs/policy/accessibility-policy.md), [pages](docs/policy/page-composition-policy.md)
+- React/Tailwind/tokens/accessibility: [DESIGN](docs/policy/design-policy.md), [React](docs/policy/react-policy.md), [UI](docs/policy/ui-policy.md), [color](docs/policy/color-policy.md), [accessibility](docs/policy/accessibility-policy.md), [pages](docs/policy/page-composition-policy.md)
 - Prompts/tools/transcripts/compaction/offloading: [context engineering](docs/policy/context-engineering-policy.md), [filesystem context](docs/policy/filesystem-context-policy.md)
 - App-library placement/manifests: [workspace projects](docs/policy/workspace-project-policy.md); use `create-package`
 - Filesystem/runtime/app/UI event fan-out: [event fan-out](docs/policy/event-fanout-policy.md)
@@ -84,7 +84,7 @@ Use `create-research`, `create-charter`, `superplan`, `work-charter`, `create-cl
 
 `docs/{research,reference,handbooks,incidents}` link into optional `repos/tau-brain`, mounted sparsely per checkout by the `pnpm agent-env` hook. Write through `docs/...`, validate from Tau root and commit with `pnpm agent-env commit`. Follow the [artifact contract](.agents/skills/create-research/artifacts.md). Workers without Brain return evidence to the permitted parent; ordinary install/build/test/runtime works without Brain.
 
-`repos.yaml` is the public source catalog; authorized checkouts may overlay `repos/tau-brain/repos.yaml`. Use the `repos` skill for dependency-source investigation and catalog entries. Checkouts are optional.
+`tools/repositories/catalog.yaml` is the public source catalog; authorized checkouts may overlay `repos/tau-brain/repos.yaml`. Use the `repos` skill for dependency-source investigation and catalog entries. Checkouts are optional.
 
 ## Learned User Preferences
 

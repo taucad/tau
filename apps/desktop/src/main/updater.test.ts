@@ -3,9 +3,18 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DesktopUpdaterOptions, SquirrelUpdater } from '#main/updater.js';
 import { availableUpdate, isNewerVersion, startDesktopUpdater, updateFeedUrl } from '#main/updater.js';
 
-const feed = (version: string, tag = `desktop@${version}`): unknown => ({
+const feed = (version: string, tag = `desktop@${version}`, platform = 'darwin'): unknown => ({
   currentRelease: version,
-  releases: [{ version, updateTo: { version, name: tag, url: `https://example.test/${tag}.zip` } }],
+  releases: [
+    {
+      version,
+      updateTo: {
+        version,
+        name: tag,
+        url: `${tag.startsWith('desktop-staging@') ? 'https://downloads.taucad.dev' : 'https://downloads.tau.new'}/releases/${encodeURIComponent(tag)}/${platform === 'darwin' ? 'Tau-macos-arm64.zip' : 'Tau-linux-x64.tar.gz'}`,
+      },
+    },
+  ],
 });
 
 type FakeSquirrel = SquirrelUpdater & { listeners: Map<string, (error?: Error) => void> };
@@ -31,6 +40,7 @@ const options = (overrides: Partial<DesktopUpdaterOptions> = {}): DesktopUpdater
   autoUpdater: squirrel(),
   fetchJson: vi.fn(async () => feed('0.3.0')),
   confirm: vi.fn(async () => true),
+  prepareToRestart: vi.fn(async () => true),
   openExternal: vi.fn(async () => undefined),
   log: vi.fn(),
   schedule: vi.fn(),
@@ -62,16 +72,14 @@ describe('availableUpdate', () => {
   it('offers nothing for the same or an older release, or a malformed feed', () => {
     expect(availableUpdate(feed('0.2.0'), '0.2.0')).toBeUndefined();
     expect(availableUpdate(feed('0.1.0'), '0.2.0')).toBeUndefined();
-    expect(availableUpdate({ currentRelease: '0.3.0', releases: [] }, '0.2.0')).toBeUndefined();
-    expect(availableUpdate('not a feed', '0.2.0')).toBeUndefined();
+    expect(() => availableUpdate({ currentRelease: '0.3.0', releases: [] }, '0.2.0')).toThrow(TypeError);
+    expect(() => availableUpdate('not a feed', '0.2.0')).toThrow();
   });
 });
 
 describe('updateFeedUrl', () => {
-  it('reads the platform feed from the fixed desktop-feed release, not the Latest badge', () => {
-    expect(updateFeedUrl('win32', 'x64')).toBe(
-      'https://github.com/taucad/tau/releases/download/desktop-feed/desktop-update-win32-x64.json',
-    );
+  it('should read the platform feed from the channel R2 pointer', () => {
+    expect(updateFeedUrl('win32', 'x64')).toBe('https://downloads.tau.new/latest/desktop-update-win32-x64.json');
   });
 });
 
@@ -80,7 +88,6 @@ describe('startDesktopUpdater', () => {
     ['unpackaged', { packaged: false }],
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
     ['switched off', { environment: { TAU_DESKTOP_UPDATES: 'off' } }],
-    ['a staging package', { channel: 'staging' }],
   ] as const)('does nothing when %s', async (_case, overrides) => {
     const disabled = options(overrides);
     const updater = startDesktopUpdater(disabled);
@@ -94,7 +101,7 @@ describe('startDesktopUpdater', () => {
     const updater = startDesktopUpdater(options({ autoUpdater, schedule: vi.fn() }));
     await updater.check();
     expect(autoUpdater.setFeedURL).toHaveBeenCalledWith({
-      url: 'https://github.com/taucad/tau/releases/download/desktop-feed/desktop-update-darwin-arm64.json',
+      url: 'https://downloads.tau.new/releases/desktop%400.3.0/desktop-update-darwin-arm64.json',
       serverType: 'json',
     });
     expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
@@ -115,7 +122,15 @@ describe('startDesktopUpdater', () => {
   it('offers the release page on Linux and Windows instead of installing', async () => {
     const openExternal = vi.fn(async () => undefined);
     const autoUpdater = squirrel();
-    const updater = startDesktopUpdater(options({ platform: 'linux', arch: 'x64', autoUpdater, openExternal }));
+    const updater = startDesktopUpdater(
+      options({
+        platform: 'linux',
+        arch: 'x64',
+        autoUpdater,
+        openExternal,
+        fetchJson: async () => feed('0.3.0', 'desktop@0.3.0', 'linux'),
+      }),
+    );
     await updater.check();
     expect(autoUpdater.setFeedURL).not.toHaveBeenCalled();
     expect(openExternal).toHaveBeenCalledWith('https://github.com/taucad/tau/releases/tag/desktop%400.3.0');
@@ -132,6 +147,85 @@ describe('startDesktopUpdater', () => {
       }),
     );
     expect(await updater.check()).toBeUndefined();
-    expect(log).toHaveBeenCalledWith('warn', 'updater.feed-failed', { message: 'offline' });
+    expect(updater.status()).toContain('offline');
+    expect(log).toHaveBeenCalledWith(
+      'warn',
+      'updater.error',
+      expect.objectContaining({ message: expect.stringContaining('offline') as unknown }),
+    );
+  });
+});
+
+describe('staging and restart safety', () => {
+  it('should enable staging without ever accepting production metadata', async () => {
+    const config = options({
+      channel: 'staging',
+      currentVersion: '1.0.15',
+      fetchJson: async () => feed('1.0.16', 'desktop-staging@0.0.1-staging.16'),
+    });
+    await startDesktopUpdater(config).check();
+    expect(config.autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+    expect(() =>
+      availableUpdate(feed('2.0.0'), '1.0.15', { channel: 'staging', platform: 'darwin', arch: 'arm64' }),
+    ).toThrow('disagree');
+    expect(() => startDesktopUpdater(options({ candidateTag: 'desktop-staging@0.0.1-staging.16' }))).toThrow(
+      'installed channel',
+    );
+  });
+
+  it('should refuse a feed whose archive or nested version disagrees', () => {
+    const updateTo = { version: '0.3.0', name: 'desktop@0.3.0', url: 'https://evil.test/app.zip' };
+    expect(() =>
+      availableUpdate({ currentRelease: '0.3.0', releases: [{ version: '0.3.0', updateTo }] }, '0.2.0'),
+    ).toThrow('disagree');
+    expect(() =>
+      availableUpdate(feed('1.0.16', 'desktop-staging@0.0.1-staging.17'), '1.0.15', {
+        channel: 'staging',
+        platform: 'darwin',
+        arch: 'arm64',
+      }),
+    ).toThrow('disagree');
+  });
+
+  it('should retry the same version after a native error and serialize checks', async () => {
+    const autoUpdater = squirrel();
+    const updater = startDesktopUpdater(options({ autoUpdater }));
+    await Promise.all([updater.check(), updater.check()]);
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
+    autoUpdater.listeners.get('error')?.(new Error('download interrupted'));
+    await updater.check();
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2);
+  });
+
+  it('should retry a native failure even after a download completed', async () => {
+    const autoUpdater = squirrel();
+    const updater = startDesktopUpdater(options({ autoUpdater, confirm: async () => false }));
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+    autoUpdater.listeners.get('error')?.(new Error('download validation failed'));
+    await updater.check();
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2);
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it('should wait for saving and preserve cancellation before closing windows', async () => {
+    const autoUpdater = squirrel();
+    const saving = Promise.withResolvers<boolean>();
+    const prepareToRestart = vi.fn(async () => saving.promise);
+    const updater = startDesktopUpdater(options({ autoUpdater, prepareToRestart }));
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+    await vi.waitFor(() => {
+      expect(prepareToRestart).toHaveBeenCalledOnce();
+    });
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    saving.resolve(false);
+    await saving.promise;
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    prepareToRestart.mockResolvedValue(true);
+    await vi.waitFor(async () => {
+      await updater.install();
+      expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
+    });
   });
 });

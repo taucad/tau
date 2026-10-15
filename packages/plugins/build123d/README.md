@@ -12,7 +12,7 @@ Native Build123d kernel for trusted Tau desktop and Node hosts.
 
 - **Native Build123d and OCP** — execute Python CAD without a WebAssembly translation layer.
 - **Retained topology** — one build feeds GLB preview, `TAU_cad_topology`, and STEP export.
-- **Supervised process** — exact packaged resources, bounded protocol and artifacts, process-tree termination, and no system-Python fallback.
+- **Supervised process** — exact packaged resources, validated protocol and artifacts, process-tree termination, and no system-Python fallback.
 
 ## Install
 
@@ -50,6 +50,13 @@ Do not point production at `python`, a virtual environment, or a user-writable w
 
 One preset, `default`, selecting `kernels.default`.
 
+## Large models
+
+Native requests run until completion or cancellation by default (`requestTimeout: 0`). Hosts may
+set a positive deadline in milliseconds or a `maxArtifactBytes` policy under `kernels.default`.
+The default artifact allowance is `Number.MAX_SAFE_INTEGER`; actual allocation and filesystem
+limits still apply. Workspace mirroring has no fixed byte, file-count or directory-depth quota.
+
 ## Environment
 
 | Host           | Supported  | Notes                                                              |
@@ -63,6 +70,10 @@ One preset, `default`, selecting `kernels.default`.
 A `.py` entry defines a top-level `@dataclass(frozen=True) class Params` and synchronous `main(params)`. Supported parameter types are `bool`, `int`, `float`, `str`, and scalar `Literal`. Return one `build123d.Shape` or a non-empty list or tuple of uniquely labeled shapes. Declare non-Python inputs in `__tau__ = {"dependencies": [...]}`.
 
 See the package's [`cad-build123d` agent skill](./agent/SKILL.md) and the [Build123d runtime reference](https://docs.tau.new/runtime/reference/build123d) for the complete authoring and trust contract.
+
+## Project files
+
+`@taucad/build123d/project/*` holds the files a new Build123d project carries, so it runs outside Tau with uv (`uv sync --locked`, then `uv run main.py`): a `pyproject.toml` that pins `build123d` and `cadquery-ocp-novtk` at the versions this kernel runs, a PEP 751 `pylock.toml` of the kernel's own wheels for every supported target, and a `uv.lock` of the same versions. `pnpm nx run build123d:generate-project-template` regenerates them from `python/pylock.<target>.toml`. When a project's `pyproject.toml` pins one of those libraries at another version, evaluation succeeds with a `LIBRARY_VERSION_MISMATCH` warning located at the pin.
 
 ## Versioning and stability
 

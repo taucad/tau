@@ -1,3 +1,4 @@
+import { getProviderId } from '@better-auth-ui/core';
 import { useAuth, useListAccounts } from '@better-auth-ui/react';
 import { Card, CardContent } from '@taucad/ui/components/card';
 import { Separator } from '@taucad/ui/components/separator';
@@ -25,7 +26,8 @@ export function LinkedAccounts({ className }: LinkedAccountsProps): React.JSX.El
 
   const linkedAccounts = accounts?.filter((account) => account.providerId !== 'credential');
   const linkedProviderIds = new Set(linkedAccounts?.map((account) => account.providerId) ?? []);
-  const unlinkedSocialProviders = socialProviders?.filter((provider) => !linkedProviderIds.has(provider)) ?? [];
+  const unlinkedSocialProviders =
+    socialProviders?.filter((provider) => !linkedProviderIds.has(getProviderId(provider))) ?? [];
 
   const allRows = [
     ...(linkedAccounts?.map((account) => ({
@@ -34,9 +36,9 @@ export function LinkedAccounts({ className }: LinkedAccountsProps): React.JSX.El
       provider: account.providerId,
     })) ?? []),
     ...unlinkedSocialProviders.map((provider) => ({
-      key: provider,
+      key: getProviderId(provider),
       account: undefined,
-      provider,
+      provider: getProviderId(provider),
     })),
   ];
 
@@ -48,7 +50,7 @@ export function LinkedAccounts({ className }: LinkedAccountsProps): React.JSX.El
         <CardContent className='p-0'>
           {isPending
             ? socialProviders?.map((provider, index) => (
-                <div key={provider}>
+                <div key={getProviderId(provider)}>
                   {index > 0 && <Separator />}
                   <AccountRowSkeleton />
                 </div>

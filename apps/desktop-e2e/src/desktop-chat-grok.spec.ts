@@ -101,9 +101,21 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
       await expect
         .poll(
           async () => {
+            const scroll = page.getByRole('button', { name: 'Scroll to bottom', exact: true });
+            if (await scroll.isVisible()) {
+              await scroll.click();
+            }
+            // Approval records can leave the still-running activity group collapsed.
+            for (const group of await page.locator('button[aria-busy="true"][aria-expanded="false"]').all()) {
+              // oxlint-disable-next-line no-await-in-loop -- Open each active disclosure before inspecting its cards.
+              await group.click();
+            }
             const activity = await page.getByRole('status', { name: 'Current activity' }).allTextContents();
             const loading = await page.locator('[data-status="loading"]:visible').allTextContents();
-            for (const label of [...activity, ...loading]) {
+            const permissions = await page
+              .locator('[aria-label="Approval required"], [aria-label="Request allowed"]')
+              .allTextContents();
+            for (const label of [...activity, ...loading, ...permissions]) {
               if (/tau__(?:evaluate_model|test_model|screenshot)/u.test(label)) {
                 rawMcpLabels.add(label);
               }

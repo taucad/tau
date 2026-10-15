@@ -109,7 +109,10 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
             const group = page
               .getByRole('button', { name: /Rendering models|Running tests|Capturing images/u, expanded: false })
               .first();
-            if (await group.isVisible()) {
+            // Concurrent tools can have separate collapsed groups; inspect all before approving either.
+            // oxlint-disable-next-line no-await-in-loop -- Each click removes that group from the collapsed locator.
+            while (await group.isVisible()) {
+              // oxlint-disable-next-line no-await-in-loop -- Re-resolve the first remaining group after each click.
               await group.click();
             }
             const activity = await page.getByRole('status', { name: 'Current activity' }).allTextContents();

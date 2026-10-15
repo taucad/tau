@@ -34,7 +34,8 @@ const failedOutputText = (value: unknown): string | undefined => {
   if (!isRecord(value)) {
     return undefined;
   }
-  const output = externalToolOutputText(value) ?? (typeof value['error'] === 'string' ? value['error'] : undefined);
+  const decoded = externalToolOutputText(value);
+  const output = decoded?.trim() ? decoded : typeof value['error'] === 'string' ? value['error'] : undefined;
   const result =
     isRecord(value['result']) && Array.isArray(value['result']['content']) ? value['result']['content'] : [];
   const resultText = result

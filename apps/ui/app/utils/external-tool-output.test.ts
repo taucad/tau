@@ -17,5 +17,6 @@ describe('external tool output text', () => {
     ).toBe('missing path');
     expect(externalToolOutputText({ formatted_output: 'Codex output' })).toBe('Codex output');
     expect(externalToolOutputText({ output: 'Claude output' })).toBe('Claude output');
+    expect(externalToolOutputText({ formatted_output: ' ', output: 'Fallback output' })).toBe('Fallback output');
   });
 });

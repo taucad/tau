@@ -37,6 +37,6 @@ export const externalToolOutputText = (output: unknown): string | undefined => {
     );
   }
   return [output['formatted_output'], output['aggregated_output'], output['output'], output['text']].find(
-    (value): value is string => typeof value === 'string',
+    (value): value is string => typeof value === 'string' && value.trim() !== '',
   );
 };

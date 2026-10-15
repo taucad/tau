@@ -109,6 +109,8 @@ export {
 export type { SecretVault, SecretVaultFacts, SecretVaultKind, SecretVaultWriteOptions } from '#secret-vault.js';
 export { createHostToolRegistry } from '#agent-tools.js';
 export type { HostToolRegistryOptions } from '#agent-tools.js';
+export { prepareKernelToolName } from '#prepare-kernel-tool.js';
+export type { HostPrepareKernel, HostPrepareKernelProgress } from '#agent-tools.js';
 export {
   acpAdapterEnvironment,
   acpAdapterOverrideVariable,

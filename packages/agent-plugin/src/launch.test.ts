@@ -17,12 +17,15 @@ type Run = { readonly stdout: string; readonly stderr: string; readonly code: nu
 const launch = async (
   tauCli: string,
   stopWhen?: (stdout: string) => boolean,
-  args: readonly string[] = [],
+  {
+    args = [],
+    environment = process.env,
+  }: { readonly args?: readonly string[]; readonly environment?: NodeJS.ProcessEnv } = {},
 ): Promise<Run> =>
   new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [launcher, ...args], {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
-      env: { ...process.env, TAU_CLI: tauCli },
+      env: { ...environment, TAU_CLI: tauCli },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -77,11 +80,59 @@ describe.skipIf(process.platform === 'win32')('launch', () => {
       "process.stdin.resume().on('end', () => { process.stdout.write(JSON.stringify(process.argv.slice(2))); process.exit(0); });",
     );
 
-    await expect(launch(cli, undefined, ['--project', '/work/bracket'])).resolves.toEqual({
+    await expect(launch(cli, undefined, { args: ['--project', '/work/bracket'] })).resolves.toEqual({
       stdout: '["mcp","--project","/work/bracket"]',
       stderr: '',
       code: 0,
     });
+  });
+
+  /** A CLI that prints the names of the variables it was given, then exits. */
+  const environmentProbe = async (): Promise<string> =>
+    fakeCli(
+      "process.stdin.resume().on('end', () => { process.stdout.write(JSON.stringify({ names: Object.keys(process.env), envProxy: process.env.NODE_USE_ENV_PROXY ?? 'unset' })); process.exit(0); });",
+    );
+
+  /* Built by assignment so no environment key is a source literal. */
+  const baseEnvironment = (): NodeJS.ProcessEnv => {
+    const environment: NodeJS.ProcessEnv = {};
+    environment['PATH'] = process.env['PATH'];
+    environment['HOME'] = process.env['HOME'];
+    return environment;
+  };
+
+  it('should forward the proxy, CA and payload variables and turn on the environment proxy when one is set', async () => {
+    const environment = baseEnvironment();
+    environment['HTTPS_PROXY'] = 'http://127.0.0.1:9';
+    environment['NO_PROXY'] = '127.0.0.1';
+    environment['NODE_EXTRA_CA_CERTS'] = '/etc/ssl/certs/ca-certificates.crt';
+    environment['TAU_PAYLOAD_MIRROR'] = 'https://mirror.example/';
+    environment['TAU_CONFIG_DIR'] = directory;
+
+    const run = await launch(await environmentProbe(), undefined, { environment });
+
+    const probe = JSON.parse(run.stdout) as { names: string[]; envProxy: string };
+    expect(probe.names).toEqual(
+      expect.arrayContaining([
+        'HTTPS_PROXY',
+        'NO_PROXY',
+        'NODE_EXTRA_CA_CERTS',
+        'TAU_PAYLOAD_MIRROR',
+        'TAU_CONFIG_DIR',
+      ]),
+    );
+    expect(probe.envProxy).toBe('1');
+  });
+
+  it('should leave the environment proxy off without a proxy, and keep an explicit setting', async () => {
+    const plain = await launch(await environmentProbe(), undefined, { environment: baseEnvironment() });
+    const environment = baseEnvironment();
+    environment['https_proxy'] = 'http://127.0.0.1:9';
+    environment['NODE_USE_ENV_PROXY'] = '0';
+    const explicit = await launch(await environmentProbe(), undefined, { environment });
+
+    expect(JSON.parse(plain.stdout)).toMatchObject({ envProxy: 'unset' });
+    expect(JSON.parse(explicit.stdout)).toMatchObject({ envProxy: '0' });
   });
 
   it('should forward SIGTERM to the CLI and exit once it has stopped', async () => {

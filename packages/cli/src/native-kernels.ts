@@ -7,15 +7,24 @@ import type { Build123dClosureOptions } from '@taucad/build123d';
 import { defaultPayloadStore } from '@taucad/host';
 import { picogkOptionsFromClosure } from '@taucad/picogk';
 import type { PicogkKernelOptions } from '@taucad/picogk';
-import { createPreparationHost, parsePluginDeployment, readManagedPreparation } from '@taucad/runtime/preparation/node';
+import {
+  createPreparationHost,
+  detectHostIndicators,
+  parsePluginDeployment,
+  PreparationError,
+  readManagedPreparation,
+  selectVariant,
+} from '@taucad/runtime/preparation/node';
 import type {
   ClosureReceipt,
+  Integrity,
   ManagedPreparation,
   PreparationHost,
   PreparationPlugin,
 } from '@taucad/runtime/preparation/node';
 
 import { cliError, exitCodes } from '#output.js';
+import type { UnavailableNativeKernel } from '#unprepared-kernels.js';
 
 // Packages whose `tau-plugin.json` declares native runtime payloads; each is read without running plugin code.
 const nativePackages = ['@taucad/build123d', '@taucad/picogk'] as const;
@@ -127,4 +136,217 @@ export const nativeKernelFor = async (
     }
   }
   return undefined;
+};
+
+/** The native kernels a CLI runtime composes, read from the store's receipts alone. */
+export type NativeComposition = {
+  /** Options for each native kernel whose closure is sealed, as `createCliRuntime` takes them. */
+  readonly build123d?: Build123dClosureOptions;
+  readonly picogk?: PicogkKernelOptions;
+  /** Every declared native kernel that is not composed, with why; the runtime answers its files with the refusal. */
+  readonly unavailable: readonly UnavailableNativeKernel[];
+};
+
+// The bytes preparing a kernel downloads on this host: the payloads of the variant each required dependency selects.
+const preparationBytes = (plugin: PreparationPlugin, requires: readonly string[], managed: ManagedPreparation) => {
+  const indicators = detectHostIndicators();
+  if (indicators === undefined) {
+    return 0;
+  }
+  let byteLength = 0;
+  for (const dependency of requires) {
+    const selection = selectVariant(plugin.deployment.dependencies[dependency] ?? [], indicators, managed.selection);
+    for (const payload of selection.status === 'selected' ? selection.variant.payloads : []) {
+      byteLength += payload.byteLength;
+    }
+  }
+  return byteLength;
+};
+
+/**
+ * Compose every native kernel the CLI declares from the payload store: a sealed closure gives its kernel options, and
+ * any other state gives the refusal the runtime answers that kernel's files with. Receipts only: nothing is
+ * downloaded and no closure is verified, so this is a per-launch cost (I11).
+ * @returns The composition.
+ */
+export const composeNativeKernels = async (): Promise<NativeComposition> => {
+  const managed = readManaged();
+  const kernels: { build123d?: Build123dClosureOptions; picogk?: PicogkKernelOptions } = {};
+  const unavailable: UnavailableNativeKernel[] = [];
+  for (const plugin of await nativePreparationPlugins()) {
+    for (const [kernel, { requires, extensions }] of Object.entries(plugin.deployment.kernels)) {
+      // oxlint-disable-next-line no-await-in-loop -- two small manifests, read in roster order
+      const { state } = await storeReader(plugin).inspect({ package: plugin.package, dependencies: requires });
+      const receipt = state.status === 'ready' ? state.receipts[requires[0]] : undefined;
+      const options = receipt === undefined ? undefined : adopters[plugin.package]?.options(receipt);
+      if (options !== undefined) {
+        Object.assign(kernels, options);
+        continue;
+      }
+      const unsupported = state.status === 'blocked' && state.reason === 'unsupported-target';
+      unavailable.push({
+        kernel,
+        package: plugin.package,
+        extensions,
+        reason: unsupported ? 'unsupported-target' : 'not-prepared',
+        byteLength: unsupported ? 0 : preparationBytes(plugin, requires, managed),
+        ...(unsupported ? { detail: state.message } : {}),
+      });
+    }
+  }
+  return { ...kernels, unavailable };
+};
+
+/** What `prepare_kernel` answers (D7). */
+export type PrepareKernelOutput =
+  | {
+      readonly status: 'ready';
+      readonly kernel: string;
+      readonly closureIntegrity: Integrity;
+      readonly treeIntegrity: Integrity;
+      readonly byteLength: number;
+    }
+  | {
+      readonly status: 'blocked';
+      readonly kernel: string;
+      readonly reason: 'unsupported-target' | 'offline-miss' | 'missing-system-library';
+      readonly message: string;
+    }
+  | { readonly status: 'cancelled'; readonly kernel: string; readonly message: string }
+  | { readonly status: 'failed'; readonly kernel: string; readonly code: string; readonly message: string };
+
+/** One progress report of a preparation: bytes done of the total, strictly increasing. */
+export type PrepareKernelProgress = { readonly progress: number; readonly total: number; readonly message: string };
+
+/** A preparation host for one long-lived process (`tau mcp`), joining concurrent calls for one kernel. */
+export type NativePreparation = {
+  /**
+   * Prepare a kernel by name.
+   * @throws {Error} `UNKNOWN_KERNEL` when no installed package declares it, naming the kernels that can be prepared.
+   */
+  readonly prepare: (
+    kernel: string,
+    context: { readonly signal: AbortSignal; readonly onProgress?: (progress: PrepareKernelProgress) => void },
+  ) => Promise<PrepareKernelOutput>;
+  readonly dispose: () => Promise<void>;
+};
+
+/**
+ * Open the preparation host `tau mcp` prepares through: the CLI's roster with its seal steps, the shared store and
+ * the managed profile, with the process's unrestricted `fetch` (D4). Verified payloads persist, so a cancelled or
+ * failed call leaves the next one only the remainder to download.
+ * @param options - The transport, for tests.
+ * @returns The preparation and its disposal.
+ */
+export const openNativePreparation = (options: { readonly fetch?: typeof fetch } = {}): NativePreparation => {
+  let opened: Promise<{ host: PreparationHost; plugins: readonly PreparationPlugin[]; offline: boolean }> | undefined;
+  const open = async () => {
+    const managed = readManaged();
+    const plugins = await nativePreparationPlugins();
+    const indicators = detectHostIndicators();
+    const host = createPreparationHost({
+      plugins,
+      store: defaultPayloadStore(),
+      ...(indicators === undefined ? {} : { indicators }),
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+      ...(managed.mirror === undefined ? {} : { mirror: managed.mirror }),
+      ...(managed.seed === undefined ? {} : { seed: managed.seed }),
+      selection: managed.selection,
+    });
+    return { host, plugins, offline: managed.offline };
+  };
+  return {
+    prepare: async (kernel, { signal, onProgress }) => {
+      opened ??= open();
+      const { host, plugins, offline } = await opened;
+      const owner = plugins.find((plugin) => Object.hasOwn(plugin.deployment.kernels, kernel));
+      const requires = owner?.deployment.kernels[kernel]?.requires;
+      if (owner === undefined || requires === undefined) {
+        const known = plugins.flatMap((plugin) => Object.keys(plugin.deployment.kernels)).toSorted();
+        throw cliError(
+          'UNKNOWN_KERNEL',
+          `No native kernel is called '${kernel}'. Kernels that can be prepared: ${known.length === 0 ? 'none are installed' : known.join(', ')}.`,
+          exitCodes.usage,
+        );
+      }
+      let reported = 0;
+      const unsubscribe = host.on('preparation', ({ selection, state }) => {
+        /* MCP progress must increase with every notification: a phase that moves no bytes is not reported. */
+        if (selection.package === owner.package && state.status === 'preparing' && state.completedBytes > reported) {
+          reported = state.completedBytes;
+          onProgress?.({
+            progress: state.completedBytes,
+            total: state.totalBytes,
+            message: `${state.phase} ${state.payload} (${String(state.completedPayloads)}/${String(state.totalPayloads)})`,
+          });
+        }
+      });
+      try {
+        const outcome = await host.prepare({ package: owner.package, dependencies: requires, offline, signal });
+        if (outcome.status === 'cancelled') {
+          return {
+            status: 'cancelled',
+            kernel,
+            message: `Preparing ${kernel} was cancelled; verified payloads are kept, so the next call downloads only the rest.`,
+          };
+        }
+        if (outcome.status === 'blocked') {
+          return { status: 'blocked', kernel, reason: outcome.reason, message: outcome.message };
+        }
+        const receipts = requires.flatMap((dependency) => outcome.receipts[dependency] ?? []);
+        const [first] = receipts;
+        if (first === undefined) {
+          throw new Error(
+            `${kernel} is ready but holds no receipt; the store is inconsistent. Run tau prepare --verify.`,
+          );
+        }
+        return {
+          status: 'ready',
+          kernel,
+          closureIntegrity: first.closureIntegrity,
+          treeIntegrity: first.treeIntegrity,
+          byteLength: receipts.flatMap((receipt) => receipt.files).reduce((sum, file) => sum + file.byteLength, 0),
+        };
+      } catch (error) {
+        if (error instanceof PreparationError) {
+          return { status: 'failed', kernel, code: error.code, message: error.message };
+        }
+        throw error;
+      } finally {
+        unsubscribe();
+      }
+    },
+    dispose: async () => {
+      const session = await opened;
+      session?.host.dispose();
+    },
+  };
+};
+
+/**
+ * The kernels a tool result refuses as not prepared: every `KERNEL_NOT_PREPARED` issue's `details.kernel`, wherever
+ * the tool placed its issues.
+ * @param value - A tool result's content.
+ * @param found - Accumulator.
+ * @returns The kernel names.
+ */
+export const refusedKernels = (value: unknown, found = new Set<string>()): Set<string> => {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      refusedKernels(item, found);
+    }
+    return found;
+  }
+  if (typeof value !== 'object' || value === null) {
+    return found;
+  }
+  const details: unknown = Reflect.get(value, 'details');
+  const kernel: unknown = typeof details === 'object' && details !== null ? Reflect.get(details, 'kernel') : undefined;
+  if (Reflect.get(value, 'code') === 'KERNEL_NOT_PREPARED' && typeof kernel === 'string') {
+    found.add(kernel);
+  }
+  for (const child of Object.values(value)) {
+    refusedKernels(child, found);
+  }
+  return found;
 };

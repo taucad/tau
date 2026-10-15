@@ -122,8 +122,9 @@ export async function flushProjectSessionPersistence({
   if (projectId !== undefined) {
     refuseCloseWhileRecording(projectId);
   }
-  await parameterService.close();
+  // A record refusal keeps this session live, including its parameter editing authority.
   await flushWorkbenchRecords?.();
+  await parameterService.close();
   projectRef.send({ type: 'flushNow' });
   editorRef.send({ type: 'flushNow' });
   const [projectSnapshot, editorSnapshot] = await Promise.all([

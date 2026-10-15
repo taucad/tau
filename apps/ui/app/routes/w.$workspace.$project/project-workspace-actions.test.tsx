@@ -41,7 +41,11 @@ vi.mock('#components/ui/sidebar.js', () => ({
 }));
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (importOriginal) => ({
   ...(await importOriginal<typeof ProjectWorkspaceContext>()),
-  useProjectWorkspace: () => ({ openPanel }),
+  useProjectWorkspace: () => ({
+    openPanel,
+    registerRecordRecoveryFocus: () => undefined,
+    restoreRecordRecoveryFocus: () => undefined,
+  }),
   useWorkspaceLanes: () => state.lanes,
 }));
 

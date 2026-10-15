@@ -160,12 +160,13 @@ function ViewSettingsSyncEntry({
       });
     };
   }, [store]);
-  useEffect(() => registerWorkbenchRecordProducer(async () => store.flush()), [registerWorkbenchRecordProducer, store]);
-  useFlushOnClose(
+  const flushAtClose = useCallback(
     async () =>
       confirmFlush(store.flush, `View settings for ${viewEntryPaths.get(viewId) ?? viewId} are not confirmed saved.`),
-    { stage: 'producer' },
+    [store, viewEntryPaths, viewId],
   );
+  useEffect(() => registerWorkbenchRecordProducer(flushAtClose), [registerWorkbenchRecordProducer, flushAtClose]);
+  useFlushOnClose(flushAtClose, { stage: 'producer' });
   const record = viewRecords.get(viewId);
   const writeRecord = useCallback(async (next: WorkbenchView) => store.edit(next), [store]);
   const onRecordApplied = useCallback(

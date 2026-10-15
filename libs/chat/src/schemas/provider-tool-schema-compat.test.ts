@@ -14,7 +14,6 @@ import {
   machineActionInputSchema,
   requestJobInputSchema,
 } from '#schemas/tools/machine.tool.schema.js';
-import { installPackagesInputSchema } from '#schemas/tools/install-packages.tool.schema.js';
 
 /**
  * Keywords no provider accepts today: Vertex rejects `const`/`propertyNames`/`prefixItems`, and

@@ -8,12 +8,13 @@ import type {
   IconButtonProps,
   WidgetProps,
   ArrayFieldTemplateProps,
-  ArrayFieldTemplateItemType,
+  ArrayFieldItemTemplateProps,
   ErrorListProps,
   RJSFSchema,
 } from '@rjsf/utils';
 import { ChevronDown, Info, SearchX, Trash2 } from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import type { ReactElement } from 'react';
 import { projectParameterField } from '@taucad/parameters';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -341,7 +342,7 @@ function ObjectFieldTemplate(
 ): React.ReactNode {
   'use no memo';
 
-  const { title, description, properties, idSchema, registry, schema } = props;
+  const { title, description, properties, fieldPathId, registry, schema, optionalDataControl } = props;
 
   const { formContext } = registry;
   const layoutContext = useRjsfLayoutContext();
@@ -350,8 +351,8 @@ function ObjectFieldTemplate(
     [layoutContext.arrayDisclosure],
   );
 
-  const [isOpen, setIsOpen] = useParameterDisclosure(formContext, idSchema.$id);
-  const isRoot = idSchema.$id === formContext.idPrefix;
+  const [isOpen, setIsOpen] = useParameterDisclosure(formContext, fieldPathId.$id);
+  const isRoot = fieldPathId.$id === formContext.idPrefix;
 
   // Check if the group should be visible by checking:
   // 1. If the group title itself matches the search term, OR
@@ -475,6 +476,7 @@ function ObjectFieldTemplate(
     >
       <rjsfLayoutContext.Provider value={descendantLayout}>
         {description ? <div className='px-2.5 py-1.5 text-xs text-muted-foreground'>{description}</div> : null}
+        {optionalDataControl}
         <ParameterPropertyList
           properties={properties}
           schema={schema}
@@ -491,10 +493,10 @@ function ArrayFieldTemplate(
 ): React.ReactNode {
   'use no memo';
 
-  const { title, items, canAdd, onAddClick, registry, schema } = props;
-  const { formContext } = registry;
+  const { title, items, canAdd, onAddClick, registry, schema, fieldPathId, optionalDataControl } = props;
+  const { formContext, schemaUtils } = registry;
 
-  const [isOpen, setIsOpen] = useParameterDisclosure(formContext, props.idSchema.$id);
+  const [isOpen, setIsOpen] = useParameterDisclosure(formContext, fieldPathId.$id);
 
   // Check if the array should be visible by checking:
   // 1. If the array title itself matches the search term, OR
@@ -523,6 +525,8 @@ function ArrayFieldTemplate(
 
   const itemCount = items.length;
   const countDisplay = `(${itemCount})`;
+  const itemSchema = typeof schema.items === 'object' && !Array.isArray(schema.items) ? schema.items : undefined;
+  const hasObjectItems = itemSchema !== undefined && isObjectLikeSchema(schemaUtils.retrieveSchema(itemSchema));
 
   return (
     <Collapsible
@@ -546,7 +550,10 @@ function ArrayFieldTemplate(
       </CollapsibleTrigger>
 
       <CollapsibleContent data-slot='parameter-group-content' className='border-t border-border/70 px-2.5 py-1'>
-        <ParameterArrayList items={items} title={prettyTitle} />
+        {optionalDataControl}
+        <arrayTitleContext.Provider value={prettyTitle}>
+          <ParameterArrayList items={items} title={prettyTitle} hasObjectItems={hasObjectItems} />
+        </arrayTitleContext.Provider>
         {canAdd ? (
           <Button type='button' variant='outline' size='sm' className='my-1.5' onClick={onAddClick}>
             Add item ({prettyTitle})
@@ -562,9 +569,11 @@ type ParameterProperty = ObjectFieldTemplateProps<
   RJSFSchema,
   RJSFContext
 >['properties'][number];
-type ParameterArrayItem = ArrayFieldTemplateItemType<Record<string, unknown>, RJSFSchema, RJSFContext>;
 const propertyKey = (property: ParameterProperty): string => property.name;
-const arrayItemKey = (item: ParameterArrayItem): string => item.key;
+/* RJSF 6 renders each array item itself and keys the element with the item's stable row key. */
+const arrayItemKey = (item: ReactElement): string => String(item.key);
+const renderArrayItem = (_index: number, item: ReactElement): React.ReactNode => item;
+const arrayTitleContext = createContext('');
 const renderProperty = (_index: number, property: ParameterProperty): React.ReactNode => property.content;
 
 const ParameterPropertyList = memo(function ParameterPropertyList({
@@ -615,54 +624,22 @@ const ParameterPropertyList = memo(function ParameterPropertyList({
 const ParameterArrayList = memo(function ParameterArrayList({
   items,
   title,
+  hasObjectItems,
 }: {
-  readonly items: ParameterArrayItem[];
+  readonly items: ReactElement[];
   readonly title: string;
+  readonly hasObjectItems: boolean;
 }): React.JSX.Element {
-  const renderItem = useCallback(
-    (_index: number, item: ParameterArrayItem) => <ScopedArrayFieldItem item={item} title={title} />,
-    [title],
-  );
   return (
     <PaneVirtualList
       data={items}
       getItemKey={arrayItemKey}
-      itemContent={renderItem}
-      itemSpacing={items.some((item) => isObjectLikeSchema(item.schema)) ? 'groups' : undefined}
+      itemContent={renderArrayItem}
+      itemSpacing={hasObjectItems ? 'groups' : undefined}
       ariaLabel={`Items: ${title}`}
     />
   );
 });
-
-function ScopedArrayFieldItem({
-  item,
-  title,
-}: {
-  readonly item: ArrayFieldTemplateItemType<Record<string, unknown>, RJSFSchema, RJSFContext>;
-  readonly title: string;
-}): React.ReactNode {
-  const { key, ...itemProps } = item;
-  const parentDepth = useRenderedFieldPath()?.path.length ?? 0;
-  const layoutContext = useMemo<RjsfLayoutContextValue>(
-    () => ({
-      objectArrayItem: isObjectLikeSchema(item.schema),
-      arrayDisclosure: { key, parentDepth },
-      arrayItemAction: item.hasRemove
-        ? {
-            label: `Remove ${title} ${item.index + 1}`,
-            onRemove: item.onDropIndexClick(item.index),
-          }
-        : undefined,
-    }),
-    [item, key, parentDepth, title],
-  );
-
-  return (
-    <rjsfLayoutContext.Provider value={layoutContext}>
-      <ArrayFieldItemTemplate key={key} {...itemProps} />
-    </rjsfLayoutContext.Provider>
-  );
-}
 
 // Custom Select Widget for Enums
 function SelectWidget(props: WidgetProps): React.ReactNode {
@@ -727,20 +704,33 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
 }
 
 function ArrayFieldItemTemplate(
-  props: ArrayFieldTemplateItemType<Record<string, unknown>, RJSFSchema, RJSFContext>,
+  props: ArrayFieldItemTemplateProps<Record<string, unknown>, RJSFSchema, RJSFContext>,
 ): React.ReactNode {
-  const { children } = props;
-  const layoutContext = useRjsfLayoutContext();
-
-  if (layoutContext.objectArrayItem) {
-    return <div className='w-full'>{children}</div>;
-  }
+  const { children, itemKey, index, schema, buttonsProps } = props;
+  const { hasRemove, onRemoveItem } = buttonsProps;
+  const title = useContext(arrayTitleContext);
+  const parentDepth = useRenderedFieldPath()?.path.length ?? 0;
+  const objectArrayItem = isObjectLikeSchema(schema);
+  const layoutContext = useMemo<RjsfLayoutContextValue>(
+    () => ({
+      objectArrayItem,
+      arrayDisclosure: { key: itemKey, parentDepth },
+      arrayItemAction: hasRemove ? { label: `Remove ${title} ${index + 1}`, onRemove: onRemoveItem } : undefined,
+    }),
+    [objectArrayItem, itemKey, parentDepth, hasRemove, title, index, onRemoveItem],
+  );
 
   return (
-    <div className='flex items-center gap-2'>
-      <div className='min-w-0 flex-1'>{children}</div>
-      <ArrayItemRemoveAction action={layoutContext.arrayItemAction} />
-    </div>
+    <rjsfLayoutContext.Provider value={layoutContext}>
+      {objectArrayItem ? (
+        <div className='w-full'>{children}</div>
+      ) : (
+        <div className='flex items-center gap-2'>
+          <div className='min-w-0 flex-1'>{children}</div>
+          <ArrayItemRemoveAction action={layoutContext.arrayItemAction} />
+        </div>
+      )}
+    </rjsfLayoutContext.Provider>
   );
 }
 
@@ -822,7 +812,7 @@ export const widgets: RegistryWidgetsType<Record<string, unknown>, RJSFSchema, R
  * The RJSF templates the parameter form lays fields, objects and arrays out with.
  * @public
  */
-export const templates: TemplatesType<Record<string, unknown>, RJSFSchema, RJSFContext> = {
+export const templates: Partial<TemplatesType<Record<string, unknown>, RJSFSchema, RJSFContext>> = {
   ButtonTemplates: {
     SubmitButton: () => null,
     AddButton: (props: IconButtonProps<Record<string, unknown>, RJSFSchema, RJSFContext>) => (
@@ -848,6 +838,11 @@ export const templates: TemplatesType<Record<string, unknown>, RJSFSchema, RJSFC
     RemoveButton: (props: IconButtonProps<Record<string, unknown>, RJSFSchema, RJSFContext>) => (
       <Button type='button' variant='outline' size='sm' disabled={props.disabled} onClick={props.onClick}>
         Remove
+      </Button>
+    ),
+    ClearButton: (props: IconButtonProps<Record<string, unknown>, RJSFSchema, RJSFContext>) => (
+      <Button type='button' variant='outline' size='sm' disabled={props.disabled} onClick={props.onClick}>
+        Clear
       </Button>
     ),
   },

@@ -93,7 +93,7 @@ jobs:
         run: pnpm nx run build123d:test-python-desktop --skip-nx-cache
       - name: Qualify the native worker subprocess and sandbox
         if: runner.os != 'Windows'
-        run: pnpm nx test build123d --watch=false --skip-nx-cache
+        run: pnpm nx test build123d --watch=false --coverage --maxWorkers=1 --skip-nx-cache
       - name: Upload qualification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -101,6 +101,7 @@ jobs:
           name: build123d-native-${{ matrix.target }}
           path: |
             out/reports/coverage/packages/plugins/build123d-python/
+            out/reports/coverage/packages/plugins/build123d/
             apps/desktop/resources/python/${{ matrix.target }}/tau-runtime-manifest.json
             apps/desktop/resources/python/${{ matrix.target }}/tau-python-sbom.cdx.json
           if-no-files-found: warn

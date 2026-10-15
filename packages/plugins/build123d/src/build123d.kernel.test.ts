@@ -145,6 +145,42 @@ describe('Build123d kernel lifecycle errors', () => {
     expect(context.session.request).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'analyze' }));
   });
 
+  it('reports an analyzer response that omits the required parameter declaration', async () => {
+    const context = createContext();
+    context.session.request.mockResolvedValueOnce({ resolved: ['main.py'], unresolved: [] });
+    await expect(definition.describe({ entryPath: 'main.py' }, runtime, context)).resolves.toMatchObject({
+      success: false,
+      issues: [expect.objectContaining({ message: 'Build123d analyzer omitted its parameter declaration.' })],
+    });
+  });
+
+  it('closes the compute scope as cancelled when the build is interrupted', async () => {
+    const context = createContext();
+    const cancellation = new AbortController();
+    const capability = runtime.compute as Extract<typeof runtime.compute, { status: 'on' }>;
+    const scope = capability.openScope({
+      namespace: 'build123d.operation.v1',
+      producer: context.computeProducer,
+      environment: {},
+      resident: context.resident,
+    });
+    const close = vi.spyOn(scope, 'close');
+    const openScope = vi.spyOn(capability, 'openScope').mockReturnValueOnce(scope);
+    context.session.request.mockImplementationOnce(async () => {
+      cancellation.abort();
+      throw new Error('build cancelled');
+    });
+    await expect(
+      definition.evaluate(
+        { entryPath: 'main.py', parameters: {}, options: {} },
+        { ...runtime, signal: cancellation.signal },
+        context,
+      ),
+    ).rejects.toThrow('build cancelled');
+    expect(close).toHaveBeenCalledWith({ outcome: 'cancelled' });
+    openScope.mockRestore();
+  });
+
   it('analyzes the entry once per runtime operation and scopes each mirror sync to it', async () => {
     const context = createContext();
     context.session.request.mockImplementation(async ({ method }: { method: string }) =>
@@ -235,7 +271,7 @@ describe('Build123d kernel lifecycle errors', () => {
       artifactPath: '/private/model.glb',
       byteLength: 3,
       mechanismDiagnostics: [diagnostic],
-      mechanismIntent: { connections: [] },
+      mechanismIntent: { connections: [{}] },
     });
     const result = await definition.render?.(
       { view: 'model', handle: { sessionGeneration: 2, handleId: 'shape' }, options: renderOptions },

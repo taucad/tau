@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) \u2014 measured 8.28 kB brotli on 2026-10-15; build123dOptionsFromClosure and the sandboxed seal step add 2.08 kB",
+    "name": "total (ESM JS) \u2014 measured 8669 bytes brotli on 2026-10-15; native intent/playback admission and four checked support modules; shared kinematics stays external",
     "path": "dist/**/*.mjs",
-    "limit": "8.5 kB"
+    "limit": "8.9 kB"
   }
 ]

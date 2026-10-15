@@ -6,7 +6,7 @@ import { Topic } from '@taucad/events';
 import { admitCapacityWrite, measureCapacityDomain } from '@taucad/filesystem';
 
 import { computeClosureIntegrity, computeTreeIntegrity } from '#preparation/closure-receipt.js';
-import { runSealStep } from '#preparation/closure-seal.js';
+import { runSealStep, SealRefused } from '#preparation/closure-seal.js';
 import { verifyClosureTree } from '#preparation/closure-verify.js';
 import { detectHostIndicators } from '#preparation/host-indicators.js';
 import { acquirePayload, locallyAvailable, OfflineMiss } from '#preparation/payload-source.js';
@@ -447,7 +447,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           signal,
         });
         if ('refusal' in resealed) {
-          throw new PreparationError('EXTRACTION_REFUSED', resealed.refusal.message);
+          throw new SealRefused(resealed.refusal);
         }
       }
       await advanceGeneration(layout);
@@ -817,6 +817,10 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       if (error instanceof OfflineMiss) {
         return finish({ status: 'blocked', attemptId, reason: 'offline-miss', message: error.message });
       }
+      if (error instanceof SealRefused) {
+        const { reason, message, detail } = error.refusal;
+        return finish({ status: 'blocked', attemptId, reason, message, ...(detail === undefined ? {} : { detail }) });
+      }
       const failure =
         error instanceof PreparationError
           ? error
@@ -922,6 +926,10 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           repair: input.repair === true,
           offline: input.offline === true,
           signal: input.signal,
+        }).catch((error: unknown) => {
+          throw error instanceof SealRefused
+            ? new PreparationError('EXTRACTION_REFUSED', error.message, { cause: error })
+            : error;
         });
         results.push(verified);
       }

@@ -17,6 +17,7 @@ import type {
   PreparationHost,
   PreparationPlugin,
   PrepareOutcome,
+  SealClosureRefusal,
 } from '#preparation/preparation-host.types.js';
 import type { DependencyPayload, DependencyVariant, HostIndicators } from '#preparation/preparation.types.js';
 
@@ -328,6 +329,40 @@ describe('createPreparationHost', () => {
       expect(repaired).toMatchObject({ status: 'repaired', payloads: [] });
       expect(intact).toMatchObject({ status: 'intact' });
       expect(runs).toBe(2);
+    });
+
+    it("should end blocked with the seal step's refusal when a newer Tau repairs a closure on a host that lost a library", async () => {
+      let libraryPresent = true;
+      const refusal: SealClosureRefusal = {
+        reason: 'missing-system-library',
+        message: 'needs libGL.so.1',
+        detail: { library: 'libGL.so.1' },
+      };
+      const { host, reopen } = await scenario({
+        seal: async ({ root }) => {
+          if (!libraryPresent) {
+            return refusal;
+          }
+          await mkdir(join(root, 'python', 'lib', 'python3.13', '__pycache__'), { recursive: true });
+          await writeFile(join(root, ...bytecode.split('/')), 'compiled');
+          return undefined;
+        },
+      });
+      const receipt = readyReceipt(await prepare(host));
+      await writeFile(join(receipt.root, ...bytecode.split('/')), 'tampered');
+      libraryPresent = false;
+      const upgraded = reopen({ tauVersion: '2.0.0' });
+
+      await expect(prepare(upgraded, { offline: true })).resolves.toMatchObject({ status: 'blocked', ...refusal });
+      await expectPreparationError(
+        upgraded.verify({
+          package: packageName,
+          repair: true,
+          offline: true,
+          signal: AbortSignal.timeout(prepareTimeout),
+        }),
+        'EXTRACTION_REFUSED',
+      );
     });
   });
 

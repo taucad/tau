@@ -68,6 +68,21 @@ const receiptAddedFiles = async (
 };
 
 /**
+ * A seal step's refusal raised while a closure is repaired, so the attempt that reuses it ends `blocked` with the
+ * refusal's reason and detail rather than failing.
+ * @internal
+ */
+export class SealRefused extends Error {
+  public override readonly name = 'SealRefused';
+  public readonly refusal: SealClosureRefusal;
+
+  public constructor(refusal: SealClosureRefusal) {
+    super(refusal.message);
+    this.refusal = refusal;
+  }
+}
+
+/**
  * Run a plugin's seal step over a closure root and receipt the files it added.
  * @internal
  * @param input - The plugin, the closure and the payload rows already receipted.

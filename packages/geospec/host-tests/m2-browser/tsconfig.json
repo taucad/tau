@@ -6,10 +6,7 @@
     "declaration": false,
     "declarationMap": false,
     "incremental": false,
-    "noEmit": true,
-    "paths": {
-      "@taucad/geospec-engine-native": ["../../../geospec-engine-native/src/index.ts"]
-    }
+    "noEmit": true
   },
   "files": ["app.ts", "verdict-host.mjs"],
   "include": [],

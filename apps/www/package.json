@@ -4,26 +4,50 @@
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "description": "Static Tau marketing website",
+  "description": "Server-rendered Tau marketing website",
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "test": "node --test tests/*.test.mjs",
-    "dev": "node scripts/serve.mjs"
+    "build": "react-router build && node scripts/prepare-assets.ts",
+    "test": "vitest run",
+    "dev": "node scripts/prepare-assets.ts --dev && react-router dev"
   },
   "dependencies": {
     "@taucad/planetary-gearbox": "workspace:*",
     "@taucad/utils": "workspace:*",
-    "three": "catalog:"
+    "three": "catalog:",
+    "@taucad/ui": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-router": "catalog:"
   },
   "devDependencies": {
     "axe-core": "catalog:",
     "esbuild": "catalog:",
     "playwright": "catalog:",
-    "sharp": "catalog:"
+    "sharp": "catalog:",
+    "@react-router/dev": "catalog:",
+    "@netlify/vite-plugin-react-router": "^3.1.1",
+    "@tailwindcss/vite": "^4.3.1",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@types/three": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "tailwindcss": "catalog:",
+    "lighthouse": "catalog:"
   },
   "imports": {
-    "#www/*.js": "./src/*.mjs",
-    "#tools/*.js": "./scripts/*.mjs",
-    "#tools/tooling.js": "./scripts/tooling.js"
+    "#www/*.js": "./src/*.ts",
+    "#tools/*.js": "./scripts/*.ts",
+    "#www/site-link.js": "./src/site-link.tsx",
+    "#www/site.css": "./src/site.css",
+    "#app/*.js": "./app/*.ts",
+    "#app/root.js": "./app/root.tsx",
+    "#content/*": "./content/*",
+    "#www/page-components.js": "./src/page-components.tsx",
+    "#app/marketing-page.js": "./app/marketing-page.tsx",
+    "#app/routes/*.js": "./app/routes/*.tsx",
+    "#app/routes/sitemap.js": "./app/routes/sitemap.ts",
+    "#app/routes/robots.js": "./app/routes/robots.ts",
+    "#app/hydrate.client.js": "./app/hydrate.client.tsx"
   }
 }

@@ -120,14 +120,13 @@ export default function main(params: typeof defaultParams) {
  * Why `test_model` cannot run here, or `undefined` when it can.
  *
  * The native GeoSpec engine is an optional peer of the host, resolved from the
- * host's own package as the server resolves it; its binding is built, not
- * committed, so a checkout without it skips that step rather than failing.
+ * host's own package as the server resolves it; the npm package ships prebuilt
+ * bindings for some platforms only, so a host without one skips that step
+ * rather than failing.
  */
 const nativeEngineUnavailable = await (async (): Promise<string | undefined> => {
   try {
-    const resolved = createRequire(join(repoRoot, 'packages/host/package.json')).resolve(
-      '@taucad/geospec-engine-native/node',
-    );
+    const resolved = createRequire(join(repoRoot, 'packages/host/package.json')).resolve('geospec-engine/node');
     await import(pathToFileURL(resolved).href);
     return undefined;
   } catch (error) {

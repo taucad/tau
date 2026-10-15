@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 (globalThis as typeof globalThis & { __reactRouterAppDirectory?: string }).__reactRouterAppDirectory =
   import.meta.dirname;
@@ -10,18 +10,6 @@ describe('desktop route manifest', () => {
     expect(routes.find((entry) => entry.path === 'parts')).toEqual(
       expect.objectContaining({ file: '../../app/routes/parts/route.tsx' }),
     );
-  });
-
-  it('should omit the artifact-dependent GeoSpec lab from production builds', async () => {
-    vi.stubEnv('NODE_ENV', 'production');
-    try {
-      vi.resetModules();
-      const { default: productionRoutes } = await import('./routes.js');
-      expect(JSON.stringify(productionRoutes)).not.toContain('debug.geospec');
-    } finally {
-      vi.unstubAllEnvs();
-      vi.resetModules();
-    }
   });
 
   it('should omit legal and cookie routes while retaining browser auth handoff', () => {

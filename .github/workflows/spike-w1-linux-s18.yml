@@ -5,9 +5,6 @@
 name: Spike S18 (x86_64_v3 CPython)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/spike-w1-linux-s18.yml'
   workflow_dispatch:
 
 permissions:

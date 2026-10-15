@@ -4,11 +4,6 @@
 name: Spike S12 (serve UI layer)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/spike-s12.yml'
-      - 'scripts/spikes/native-deps/linux/s12/**'
-      - 'scripts/spikes/native-deps/linux/annotate.sh'
   workflow_dispatch:
 
 permissions:
@@ -35,16 +30,6 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
-      # The UI bundles the GeoSpec engine's WASM binding; restore the products CI already built
-      # for this source closure (a miss fails here, by name, rather than inside the build).
-      - name: Identify the GeoSpec engine product closure
-        id: geospec-key
-        run: echo "key=geospec-transport-v1-$(node packages/geospec-engine-native/scripts/ci-artifacts.mjs product-key)" >> "$GITHUB_OUTPUT"
-      - name: Restore the GeoSpec engine products
-        uses: ./.github/actions/geospec-transport
-        with:
-          key: ${{ steps.geospec-key.outputs.key }}
-          mode: restore
       - name: Build the serve UI
         run: |
           mkdir -p "$RUNNER_TEMP/evidence"

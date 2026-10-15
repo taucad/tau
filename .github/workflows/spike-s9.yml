@@ -4,14 +4,6 @@
 name: Spike S9 (Windows PBS CRT)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/spike-s9.yml'
-      - 'scripts/spikes/native-deps/linux/s9/**'
-      - 'scripts/spikes/native-deps/linux/s8/read-wheel.ts'
-      - 'scripts/spikes/native-deps/linux/s8/survey.ts'
-      - 'packages/plugins/build123d/python/requirements.lock'
-      - 'scripts/spikes/native-deps/linux/annotate.sh'
   workflow_dispatch:
 
 permissions:

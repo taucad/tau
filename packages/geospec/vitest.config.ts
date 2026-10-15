@@ -29,7 +29,12 @@ export const substrateCoverageSourcePolicy = {
 export default defineConfig({
   test: {
     environment: 'node',
-    env: installedConsumerRoot ? { GEOSPEC_INSTALLED_CONSUMER_ROOT: installedConsumerRoot } : {},
+    env: installedConsumerRoot
+      ? {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+          GEOSPEC_INSTALLED_CONSUMER_ROOT: installedConsumerRoot,
+        }
+      : {},
     // Source checks and externally installed campaigns remain required test dependencies.
     exclude: [
       ...configDefaults.exclude,

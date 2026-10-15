@@ -3063,8 +3063,12 @@ describe('Print pane print settings file', () => {
     await expectPreferences({});
     expect(combobox('Plate')).toHaveTextContent(selectedLabel('textured-pei'));
     expect(queryReset('print settings')).not.toBeInTheDocument();
+  });
 
+  it('should clear the process and filament picks when another printer preset is chosen', async () => {
     // Another printer preset has its own processes and filaments, so choosing one clears those picks.
+    const user = userEvent.setup();
+    await renderStudio('0.20mm Standard @BBL X1C');
     await chooseOption(user, combobox('Process'), gyroid);
     await chooseOption(user, combobox('Filament A1'), petg);
     await expectPreferences({ process: gyroid, filaments: { 0: petg } });
@@ -3072,8 +3076,12 @@ describe('Print pane print settings file', () => {
     await expectPreferences({ printer: 'My X1C' });
     await user.click(reset('Printer preset'));
     await expectPreferences({});
+  });
 
+  it('should leave only the printer model when every print setting is reset', async () => {
     // Reset print settings, beside the Prepare heading, leaves only the printer model.
+    const user = userEvent.setup();
+    await renderStudio('0.20mm Standard @BBL X1C');
     await chooseOption(user, combobox('Plate'), 'Cool plate');
     await chooseOption(user, combobox('Process'), '0.28mm Extra Draft @BBL X1C');
     await expectPreferences({

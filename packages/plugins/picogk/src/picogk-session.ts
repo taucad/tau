@@ -17,14 +17,18 @@ import type { PicogkIssue } from '#picogk.protocol.js';
 /**
  * Host-owned paths and bounds for a PicoGK worker session.
  *
- * The worker's directory is the prepared runtime root; it is the only host path the
- * sandbox lets the worker read besides its workspace mirror.
+ * The runtime root (a prepared closure's root, else the worker's directory) is the only host
+ * path the sandbox lets the worker read besides its workspace mirror.
  *
  * @public
  */
 export type PicogkSessionOptions = {
   readonly workerExecutable: string;
   readonly workerSha256: string;
+  /** Read-only runtime root; defaults to the executable's directory. */
+  readonly runtimePath?: string;
+  /** Arguments before the worker's own, such as the worker assembly the `dotnet` muxer runs. */
+  readonly workerArguments?: readonly string[];
   readonly workspacePath: string;
   readonly artifactPath: string;
   readonly resourceFiles: ReadonlyArray<{
@@ -80,6 +84,7 @@ export class PicogkSession {
       executablePath: options.workerExecutable,
       executableSha256: options.workerSha256,
       arguments: [
+        ...(options.workerArguments ?? []),
         '--workspace',
         options.workspacePath,
         '--artifacts',
@@ -87,7 +92,7 @@ export class PicogkSession {
         '--parent-pid',
         String(process.pid),
       ],
-      runtimePath: dirname(options.workerExecutable),
+      runtimePath: options.runtimePath ?? dirname(options.workerExecutable),
       workspacePath: options.workspacePath,
       artifactPath: options.artifactPath,
       resources: options.resourceFiles,

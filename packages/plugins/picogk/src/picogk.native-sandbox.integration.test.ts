@@ -9,44 +9,23 @@
  * the sandbox was created.
  */
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 
 import { createTestRuntimeClient } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { describe, expect, it } from 'vitest';
 
 import { picogk } from '#index.js';
-
-type ResourceManifest = {
-  readonly workerPath: string;
-  readonly workerSha256: string;
-  readonly resourceFiles: ReadonlyArray<{
-    readonly path: string;
-    readonly sha256: string;
-    readonly label: string;
-  }>;
-};
-
-const workspaceRoot = resolve(import.meta.dirname, '../../../..');
-const targetRoot = resolve(workspaceRoot, `apps/desktop/resources/picogk/${process.platform}-${process.arch}`);
-const manifest = JSON.parse(readFileSync(resolve(targetRoot, 'tau-runtime-manifest.json'), 'utf8')) as ResourceManifest;
-// Upstream PicoGK ships no Linux voxel library, so a Linux payload carries the managed worker
-// without it and these suites run only where the native engine is present.
-const nativeEngineAvailable = manifest.resourceFiles.some(({ path }) => /^picogk\.\d/u.test(path));
+import { nativeEngineAvailable, nativeKernelOptions } from '#picogk-native.fixture.js';
 
 const runtime = defineRuntime({
   plugins: [
     picogk({
       kernels: {
         default: {
-          workerExecutable: resolve(targetRoot, manifest.workerPath),
-          workerSha256: manifest.workerSha256,
-          resourceFiles: manifest.resourceFiles.map(({ path, ...resource }) => ({
-            ...resource,
-            path: resolve(targetRoot, path),
-          })),
+          ...nativeKernelOptions,
           requestTimeout: 120_000,
         },
       },

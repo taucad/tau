@@ -1102,7 +1102,8 @@ const assertRuntimePinPublished = async (pin: { sha512: string; url: string }): 
   };
   const file = metadata.releases
     .find(({ runtime }) => runtime?.version === dotnetRuntimeVersion)
-    ?.runtime?.files.find(({ rid, url }) => rid === 'osx-arm64' && url.endsWith('.tar.gz'));
+    // The same RID also has an app-host pack; select the pinned runtime archive.
+    ?.runtime?.files.find(({ rid, url }) => rid === 'osx-arm64' && url === pin.url);
   if (file?.url !== pin.url || file.hash.toLowerCase() !== pin.sha512) {
     throw new Error(
       `Microsoft's release metadata for .NET ${dotnetRuntimeVersion} osx-arm64 does not publish the pinned archive.`,

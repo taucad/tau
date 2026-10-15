@@ -98,12 +98,29 @@ case "$phase" in
       shift
       "$@" >"$log" 2>&1 || { echo "step failed: $*" >&2; tail -40 "$log" >&2; return 1; }
     }
-    build_step "$evidence/image-build-cli.log" bash -c "cd '$REPO_ROOT' && pnpm nx build cli --outputStyle=static"
+    build_step "$evidence/image-build-cli.log" bash -c "cd '$REPO_ROOT' && pnpm nx run cli:build-deps --outputStyle=static && pnpm nx build cli --outputStyle=static"
     rm -rf "$work/image"
     mkdir -p "$work/image"
     # The host's optional peer `geospec@^0.1.0-beta.0` is not on npm (only 0.0.0), so a legacy deploy that auto-installs
     # peers resolves it from the registry and fails; the image does not need the optional peer.
     build_step "$evidence/image-deploy.log" bash -c "cd '$REPO_ROOT' && pnpm --filter=@taucad/cli --prod deploy '$work/image/app' --legacy --config.auto-install-peers=false"
+    # A legacy deploy copies workspace packages with their development `exports` (./src/*.ts); apply each one's
+    # publishConfig as `pnpm publish` would, so the image resolves the built dist like an installed CLI.
+    find "$work/image/app" -name package.json -type f -exec grep -l '"publishConfig"' {} + |
+      node --input-type=module -e "
+import { readFileSync, writeFileSync } from 'node:fs';
+const fields = ['exports', 'imports', 'main', 'module', 'types', 'typings', 'bin'];
+let applied = 0;
+for (const manifest of readFileSync(0, 'utf8').split('\\n').filter(Boolean)) {
+  const json = JSON.parse(readFileSync(manifest, 'utf8'));
+  const config = json.publishConfig ?? {};
+  if (!fields.some((field) => field in config)) continue;
+  for (const field of fields) if (field in config) json[field] = config[field];
+  writeFileSync(manifest, JSON.stringify(json, undefined, 2));
+  applied += 1;
+}
+console.log('publishConfig applied to ' + applied + ' manifests');
+" | tee "$evidence/image-publishconfig.txt"
     cp -a "$baked" "$work/image/config"
     cat >"$work/image/Dockerfile" <<'DOCKER'
 FROM node:24-slim

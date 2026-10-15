@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 167.84 kB brotli on 2026-10-13 (the MCP viewer page, its parameter actors, workbench keeper, this computer's machines and the install_packages handler; @taucad/bundler-core stays external); the adopted-repository open check adds 0.8 kB",
+    "name": "total (ESM JS) — measured 170.06 kB brotli in Linux CI on 2026-10-15 with scoped GitHub write-credential validation and custody; 171 kB allows less than 1 kB headroom",
     "path": "dist/**/*.mjs",
-    "limit": "170 kB"
+    "limit": "171 kB"
   }
 ]

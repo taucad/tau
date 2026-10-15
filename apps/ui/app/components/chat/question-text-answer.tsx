@@ -105,7 +105,7 @@ export function QuestionTextAnswer({
         style={{ minHeight: isDictating ? recordingHeight : undefined }}
       >
         {isDictating ? (
-          <DictationRecording phase={dictation.phase} levels={dictation.levels} onCancel={dictation.cancel} />
+          <DictationRecording phase={dictation.phase} waveform={dictation.waveform} onCancel={dictation.cancel} />
         ) : (
           <InputGroupTextarea
             ref={textRef}

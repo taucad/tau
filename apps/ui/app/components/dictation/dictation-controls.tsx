@@ -1,11 +1,11 @@
-import { memo, useCallback, useLayoutEffect, useRef } from 'react';
+import { memo, useCallback } from 'react';
 import { Mic, Square, X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
 import { dictationLabels } from '#components/dictation/use-dictation.js';
-import type { DictationPhase } from '#components/dictation/use-dictation.js';
+import type { DictationPhase, DictationWaveform } from '#components/dictation/use-dictation.js';
 
 type DictationControls = {
   readonly phase: DictationPhase;
@@ -56,23 +56,13 @@ export const DictationButton = memo(function ({ phase, onStart, onStop }: Dictat
 
 export const DictationRecording = memo(function ({
   phase,
-  levels,
+  waveform: { levels, batch },
   onCancel,
 }: {
   readonly phase: DictationPhase;
-  readonly levels: readonly number[];
+  readonly waveform: DictationWaveform;
   readonly onCancel: () => void;
 }): React.JSX.Element {
-  const row = useRef<HTMLDivElement>(null);
-  // Each batch shifts the levels one slot left, which the finished glide already shows, so rewinding the glide in
-  // the same frame keeps the row travelling continuously instead of stepping or, in silence, standing still.
-  useLayoutEffect(() => {
-    if (row.current && 'getAnimations' in row.current) {
-      for (const animation of row.current.getAnimations()) {
-        animation.currentTime = 0;
-      }
-    }
-  }, [levels]);
   return (
     <>
       <Tooltip>
@@ -98,7 +88,15 @@ export const DictationRecording = memo(function ({
           data-level={levels.at(-1) ?? 0}
           className='flex h-7 min-w-0 flex-1 items-center justify-end overflow-hidden mask-x-from-[calc(100%-var(--spacing)*4)] mask-x-to-100% text-muted-foreground/70 motion-reduce:hidden'
         >
-          <div ref={row} className='flex h-full shrink-0 animate-dictation-scroll items-center gap-0.75'>
+          {/* Each batch shifts the levels one slot left, where the finished glide already shows them. Swapping
+              between two identical glides restarts it in that same frame, so the row travels continuously
+              instead of stepping, even through silence. */}
+          <div
+            className={cn(
+              'flex h-full shrink-0 items-center gap-0.75',
+              batch % 2 === 0 ? 'animate-dictation-scroll' : 'animate-dictation-scroll-alternate',
+            )}
+          >
             {levels.map((level, index) => (
               <span
                 // Fixed time slots, never interactive or reordered.

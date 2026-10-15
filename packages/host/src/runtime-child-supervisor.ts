@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { fork } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+import type { Readable, Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { z } from 'zod';
@@ -37,6 +38,323 @@ export type RuntimeChildHandle = {
   post<Frame extends { readonly type: string }>(frame: Frame): void;
   /** Stop the child; settles once `closed` has. */
   close(): Promise<void>;
+};
+
+/**
+ * One native worker launch a runtime child asks its daemon for: what runs, the digests it must match and the paths
+ * it may use. The shape of `NativeWorkerLaunch` in `@taucad/native-process-core`.
+ *
+ * @public
+ */
+export type RuntimeChildWorkerLaunch = {
+  readonly executablePath: string;
+  readonly executableSha256: string;
+  readonly executableName: string;
+  readonly arguments: readonly string[];
+  readonly runtimePath: string;
+  readonly resources: ReadonlyArray<{ readonly path: string; readonly sha256: string; readonly label: string }>;
+  readonly workspacePath: string;
+  readonly artifactPath: string;
+  readonly commandId: string;
+};
+
+/** A native worker the daemon started for a runtime child: the shape of `NativeWorkerProcess`. @public */
+export type RuntimeChildWorker = {
+  readonly stdin: Writable;
+  readonly stdout: Readable;
+  readonly stderr: Readable;
+  readonly ended: Promise<{ readonly exitCode?: number; readonly signal?: NodeJS.Signals } | { readonly error: Error }>;
+  terminate(): Promise<void>;
+};
+
+/**
+ * The native kernels a daemon serves through its runtime children (D37).
+ *
+ * The runtime child runs project code under Node's permission model and may not spawn, so the daemon starts each
+ * native worker on its behalf (North Star S2): only from a closure sealed in the payload store, only through the OS
+ * sandbox, and with the sandbox granting only a directory the daemon created for that child, which holds the child's
+ * private directory and which neither the child nor its workers can replace.
+ *
+ * @public
+ */
+export type RuntimeChildNativeKernels = {
+  /**
+   * Where the daemon creates each child's directory: outside the daemon's temp directory, which the child may write,
+   * so no one the daemon serves can swap an entry on the way to a worker's sandbox root. Launches are refused when
+   * it is inside.
+   */
+  readonly directory: string;
+  /**
+   * The payload store's root. The broker resolves it to its real path once, when a child starts, so a store reached
+   * through a symbolic link (macOS's `/tmp`, a linked home or `TAU_CONFIG_DIR`) still launches, while a closure whose
+   * real path leaves the store does not.
+   */
+  readonly store: string;
+  /**
+   * What a new child composes, handed over in its `start` frame as `native`: read from the store's receipts, never
+   * downloading. Read again for every child, so a child started after a preparation composes the prepared kernel.
+   */
+  readonly compose: () => Promise<unknown>;
+  /** The roots of the closures sealed in the store, read again for every launch; a launch from any other is refused. */
+  readonly closureRoots: () => Promise<readonly string[]>;
+  /**
+   * Verify, sandbox and spawn one accepted launch in this process (`startNativeWorker`). `sandboxRoot` is the
+   * daemon-created directory the sandbox grants in place of the launch's workspace and artifact paths.
+   */
+  readonly start: (launch: RuntimeChildWorkerLaunch & { readonly sandboxRoot: string }) => Promise<RuntimeChildWorker>;
+};
+
+const workerLaunchMessageSchema = z.object({
+  type: z.literal('native-worker:launch'),
+  id: z.string().min(1).max(128),
+  launch: z.object({
+    executablePath: z.string().min(1),
+    executableSha256: z.string().regex(/^[\da-f]{64}$/iu),
+    executableName: z.string().min(1).max(256),
+    arguments: z.array(z.string()).max(64),
+    runtimePath: z.string().min(1),
+    resources: z
+      .array(
+        z.object({ path: z.string().min(1), sha256: z.string().regex(/^[\da-f]{64}$/iu), label: z.string().max(256) }),
+      )
+      .max(4096),
+    workspacePath: z.string().min(1),
+    artifactPath: z.string().min(1),
+    commandId: z.string().min(1).max(256),
+  }),
+});
+
+const workerControlMessageSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('native-worker:stdin'), id: z.string(), data: z.base64() }),
+  z.object({ type: z.literal('native-worker:stdin-end'), id: z.string() }),
+  z.object({ type: z.literal('native-worker:terminate'), id: z.string() }),
+]);
+
+const isWithin = (root: string, candidate: string): boolean => {
+  const path = relative(root, candidate);
+  return path.length > 0 && path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+};
+
+/**
+ * Why a child's launch is refused, or nothing: the runtime root must be a sealed closure in the store, spelled as the
+ * daemon composed it or as its real path, whose real path lies inside the store's; everything the worker runs must lie
+ * inside it, and the worker's workspace and writable root inside the child's own directory.
+ * The child can still rewrite its directory after this check, so the sandbox never grants these two paths: it grants
+ * the daemon's directory that holds them ({@link startRuntimeChild}).
+ *
+ * @param launch - The child's request.
+ * @param closureRoots - The store's sealed closures, now, as the daemon composed them.
+ * @param directories - The store's real path, or `undefined` when it could not be resolved, and the child's private
+ *   temp directory (a real path).
+ * @returns The refusal, or `undefined` to start it.
+ */
+const launchRefusal = async (
+  launch: RuntimeChildWorkerLaunch,
+  closureRoots: readonly string[],
+  directories: { readonly store: string | undefined; readonly privateDirectory: string },
+): Promise<string | undefined> => {
+  const { store, privateDirectory } = directories;
+  const real = async (path: string): Promise<string | undefined> => {
+    try {
+      return await realpath(path);
+    } catch {
+      return undefined;
+    }
+  };
+  const runtimePath = await real(launch.runtimePath);
+  const sealed = await Promise.all(closureRoots.map(async (root) => ({ root, real: await real(root) })));
+  const closure = sealed.find((candidate) => runtimePath !== undefined && candidate.real === runtimePath);
+  /* Real paths on both sides, inside the real store; and only the daemon's spelling or the real one, so a link of the
+   * child's own that resolves into a closure is not one. */
+  if (
+    store === undefined ||
+    runtimePath === undefined ||
+    closure === undefined ||
+    !isWithin(store, runtimePath) ||
+    (launch.runtimePath !== closure.root && launch.runtimePath !== runtimePath)
+  ) {
+    return `${launch.runtimePath} is not a closure sealed in the payload store.`;
+  }
+  const escaped = [launch.executablePath, ...launch.resources.map(({ path }) => path)].find(
+    (path) => !isWithin(launch.runtimePath, path),
+  );
+  if (escaped !== undefined) {
+    return `${escaped} is outside the sealed closure.`;
+  }
+  for (const path of [launch.workspacePath, launch.artifactPath]) {
+    // oxlint-disable-next-line no-await-in-loop -- two paths, checked in order.
+    const resolved = await real(path);
+    if (resolved === undefined || resolved !== path || !isWithin(privateDirectory, resolved)) {
+      return `${path} is not inside the runtime child's private directory.`;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Serve one child's native worker launches until it exits: refuse what {@link launchRefusal} refuses, start the
+ * rest, carry each worker's pipes over the IPC channel, and stop every worker the child leaves behind.
+ *
+ * @param child - The forked runtime child.
+ * @param native - The daemon's native kernels.
+ * @param directories - The store's real path (`undefined` when it could not be resolved), the child's private temp
+ *   directory, and either the daemon-created directory that holds it (each worker's sandbox root) or why there is none
+ *   safe to grant.
+ */
+const brokerNativeWorkers = (
+  child: ChildProcess,
+  native: RuntimeChildNativeKernels,
+  directories: {
+    readonly store: string | undefined;
+    readonly privateDirectory: string;
+    readonly sandboxRoot: string | { readonly refusal: string };
+  },
+): void => {
+  const { store, privateDirectory, sandboxRoot } = directories;
+  const workers = new Map<string, Promise<RuntimeChildWorker | undefined>>();
+  const send = (frame: Readonly<Record<string, unknown>>): void => {
+    if (child.connected) {
+      child.send(frame);
+    }
+  };
+  const launch = async (id: string, request: RuntimeChildWorkerLaunch): Promise<RuntimeChildWorker | undefined> => {
+    let worker: RuntimeChildWorker;
+    try {
+      const refusal =
+        typeof sandboxRoot === 'string'
+          ? await launchRefusal(request, await native.closureRoots(), { store, privateDirectory })
+          : sandboxRoot.refusal;
+      if (refusal !== undefined || typeof sandboxRoot !== 'string') {
+        throw new Error(`Tau Host refused a native worker launch: ${refusal}`);
+      }
+      worker = await native.start({ ...request, sandboxRoot });
+    } catch (error) {
+      send({ type: 'native-worker:refused', id, message: error instanceof Error ? error.message : String(error) });
+      return undefined;
+    }
+    /* A child that exited while its worker started leaves no one to read it. */
+    if (child.exitCode !== null || child.signalCode !== null) {
+      await worker.terminate();
+      return undefined;
+    }
+    send({ type: 'native-worker:started', id });
+    worker.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+      send({ type: 'native-worker:stdout', id, data: Buffer.from(chunk).toString('base64') });
+    });
+    worker.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+      send({ type: 'native-worker:stderr', id, data: Buffer.from(chunk).toString('base64') });
+    });
+    /* A worker that exits mid-write fails its pipe; its end is reported below. */
+    worker.stdin.on('error', () => undefined);
+    // async-iife: bootstrap -- the worker's end is reported to the child; nothing awaits it.
+    void (async () => {
+      const end = await worker.ended;
+      workers.delete(id);
+      send(
+        'error' in end
+          ? { type: 'native-worker:exit', id, message: end.error.message }
+          : { type: 'native-worker:exit', id, ...end },
+      );
+    })();
+    return worker;
+  };
+  child.on('message', (message: unknown) => {
+    const requested = workerLaunchMessageSchema.safeParse(message);
+    if (requested.success) {
+      const { id, launch: request } = requested.data;
+      if (!workers.has(id)) {
+        workers.set(id, launch(id, request));
+      }
+      return;
+    }
+    const control = workerControlMessageSchema.safeParse(message);
+    if (!control.success) {
+      return;
+    }
+    // async-iife: bootstrap -- a control frame acts on a worker that may still be starting.
+    void (async () => {
+      const worker = await workers.get(control.data.id);
+      if (worker === undefined) {
+        return;
+      }
+      if (control.data.type === 'native-worker:stdin') {
+        worker.stdin.write(Buffer.from(control.data.data, 'base64'));
+      } else if (control.data.type === 'native-worker:stdin-end') {
+        worker.stdin.end();
+      } else {
+        await worker.terminate();
+      }
+    })();
+  });
+  child.once('exit', () => {
+    for (const starting of workers.values()) {
+      // async-iife: bootstrap -- a worker outlives no child; nothing awaits its stop.
+      void (async () => {
+        const worker = await starting;
+        await worker?.terminate();
+      })();
+    }
+  });
+};
+
+/** Milliseconds a child directory may go without its owner marker before a sweep takes it for abandoned. */
+const unmarkedDirectoryGrace = 10 * 60_000;
+const childDirectoryPrefix = 'tau-runtime-child-';
+/* The directories a sweep has already run for in this process. */
+const swept = new Set<string>();
+
+/** Whether a process with this id is running; a process this one may not signal is running too. */
+const processAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
+/**
+ * Remove the child directories a daemon left behind under its native directory, which, unlike TMPDIR, no OS cleans:
+ * a daemon that crashed or was killed, or a removal that failed while a worker still wrote. Each directory's owner
+ * marker (`<directory>.pid`, beside it where neither the child nor a worker can write) names the daemon that made it;
+ * one whose daemon still runs is kept, so concurrent daemons leave each other alone. Runs once per directory.
+ *
+ * @param directory - The daemon's native directory.
+ */
+const sweepAbandonedChildDirectories = async (directory: string): Promise<void> => {
+  if (swept.has(directory)) {
+    return;
+  }
+  swept.add(directory);
+  let entries: string[];
+  try {
+    entries = await readdir(directory);
+  } catch {
+    return;
+  }
+  const abandoned = async (name: string): Promise<boolean> => {
+    const owner = Number.parseInt(await readFile(join(directory, `${name}.pid`), 'utf8').catch(() => ''), 10);
+    if (Number.isSafeInteger(owner) && owner > 0) {
+      return owner !== process.pid && !processAlive(owner);
+    }
+    /* No marker: a daemon stopped between creating the directory and marking it, or is marking it now. */
+    const { mtimeMs } = await stat(join(directory, name));
+    return Date.now() - mtimeMs > unmarkedDirectoryGrace;
+  };
+  await Promise.all(
+    entries
+      .filter((name) => name.startsWith(childDirectoryPrefix) && !name.endsWith('.pid'))
+      .map(async (name) => {
+        try {
+          if (await abandoned(name)) {
+            await rm(join(directory, name), { recursive: true, force: true });
+            await rm(join(directory, `${name}.pid`), { force: true });
+          }
+        } catch {
+          // The next daemon's sweep tries again.
+        }
+      }),
+  );
 };
 
 const minimalEnvironment = (): NodeJS.ProcessEnv => {
@@ -140,11 +458,43 @@ const killChild = async (child: ChildProcess): Promise<void> => {
 export const startRuntimeChild = async (options: {
   readonly modulePath: string;
   readonly args?: readonly string[];
+  /** The native kernels this child composes, whose workers the caller starts on its behalf. */
+  readonly native?: RuntimeChildNativeKernels;
 }): Promise<RuntimeChildHandle> => {
   const authorizationToken = randomBytes(32).toString('base64url');
+  /* A composition that cannot be read leaves this child without native kernels, never without a runtime. */
+  const native = await options.native?.compose().catch(() => undefined);
   /* The real path: importing a module resolves symlinks component by component (macOS's `/var` is a link to
-   * `/private/var`), and the grants cover only this directory, not its symlinked ancestors. */
-  const temporaryDirectory = await realpath(await mkdtemp(join(tmpdir(), 'tau-runtime-child-')));
+   * `/private/var`), and the grants cover only this directory, not its symlinked ancestors. A child with native
+   * kernels gets its directory inside one the daemon creates outside every grant: that outer directory is what a
+   * worker's sandbox grants, and since neither the child nor a worker can replace it, a path the child rewrites
+   * after the broker checked it cannot carry the grant elsewhere. */
+  const parentDirectory = options.native?.directory ?? tmpdir();
+  if (options.native !== undefined) {
+    await mkdir(parentDirectory, { recursive: true, mode: 0o700 });
+    await sweepAbandonedChildDirectories(parentDirectory);
+  }
+  /* What the child's exit removes: its temp directory, or the daemon's directory that holds it. */
+  const removableDirectory = await realpath(await mkdtemp(join(parentDirectory, childDirectoryPrefix)));
+  /* Outside TMPDIR nothing reclaims a directory this daemon leaves behind; the marker lets the next sweep do it. */
+  const ownerMarker = options.native === undefined ? undefined : `${removableDirectory}.pid`;
+  if (ownerMarker !== undefined) {
+    await writeFile(ownerMarker, `${String(process.pid)}\n`, { mode: 0o600 });
+  }
+  const temporaryDirectory = options.native === undefined ? removableDirectory : join(removableDirectory, 'tmp');
+  /* The child may write the daemon's temp directory, so a sandbox root inside it could be swapped after all. */
+  const childWritableTemporary = await realpath(tmpdir());
+  const sandboxRoot =
+    removableDirectory === childWritableTemporary || isWithin(childWritableTemporary, removableDirectory)
+      ? {
+          refusal: `${parentDirectory} is inside ${childWritableTemporary}, which the runtime child may write; keep the native workers' directory outside TMPDIR.`,
+        }
+      : removableDirectory;
+  if (options.native !== undefined) {
+    await mkdir(temporaryDirectory);
+  }
+  /* Resolved once: a store that does not exist yet holds no closure, and a child composed then launches none. */
+  const store = options.native === undefined ? undefined : await realpath(options.native.store).catch(() => undefined);
   const child = fork(options.modulePath, [...(options.args ?? [])], {
     cwd: process.cwd(),
     env: {
@@ -163,6 +513,9 @@ export const startRuntimeChild = async (options: {
     ],
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
+  if (options.native !== undefined) {
+    brokerNativeWorkers(child, options.native, { store, privateDirectory: temporaryDirectory, sandboxRoot });
+  }
   const exited = new Promise<{ exitCode?: number; signal?: NodeJS.Signals }>((resolve) => {
     child.once('exit', (exitCode, signal) => {
       resolve({
@@ -171,13 +524,17 @@ export const startRuntimeChild = async (options: {
       });
     });
   });
-  /* The directory is the child's alone, so it goes with the child; a failed removal leaves only temp files. */
+  /* The directory is the child's alone, so it goes with the child. A failed removal leaves it to the OS in TMPDIR, and
+   * to the next daemon's sweep in the native directory, whose marker then names a daemon that is gone. */
   const removeTemporaryDirectoryOnExit = async (): Promise<Awaited<typeof exited>> => {
     const exit = await exited;
     try {
-      await rm(temporaryDirectory, { recursive: true, force: true });
+      await rm(removableDirectory, { recursive: true, force: true });
+      if (ownerMarker !== undefined) {
+        await rm(ownerMarker, { force: true });
+      }
     } catch {
-      // The OS reclaims the temp directory.
+      // Reclaimed later, as above.
     }
     return exit;
   };
@@ -208,7 +565,7 @@ export const startRuntimeChild = async (options: {
       new Error(`Tau Host runtime child exited before ready (code ${String(exitCode)}, signal ${String(signal)}).`),
     );
   });
-  child.send({ type: 'start', authorizationToken });
+  child.send({ type: 'start', authorizationToken, ...(native === undefined ? {} : { native }) });
 
   const message = await Promise.race([
     ready.promise,

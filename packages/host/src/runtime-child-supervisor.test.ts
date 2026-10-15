@@ -1,14 +1,30 @@
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { access, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
+import type { RuntimeChildWorker, RuntimeChildWorkerLaunch } from '#runtime-child-supervisor.js';
 
 const proofSchema = z.object({
   filesystem: z.literal(true),
@@ -146,5 +162,373 @@ describe('runtime child control frames', () => {
     } finally {
       process.off('uncaughtException', onUncaught);
     }
+  });
+});
+
+describe('native workers brokered for a runtime child (D37, North Star S2)', () => {
+  const daemonTemporary = process.env['TMPDIR'];
+  afterEach(() => {
+    if (daemonTemporary === undefined) {
+      delete process.env['TMPDIR'];
+    } else {
+      process.env['TMPDIR'] = daemonTemporary;
+    }
+  });
+
+  /**
+   * A scratch tree laid out like a daemon's: its temp directory (which the child may write) and, beside it, the
+   * directory where it keeps each child's directory, plus a store of sealed closures.
+   */
+  const daemonLayout = async (prefix: string) => {
+    temporaryDirectory = await realpath(await mkdtemp(join(tmpdir(), prefix)));
+    const daemonTemporaryDirectory = join(temporaryDirectory, 'tmp');
+    await mkdir(daemonTemporaryDirectory);
+    process.env['TMPDIR'] = daemonTemporaryDirectory;
+    return { scratch: temporaryDirectory, daemonTemporaryDirectory, directory: join(temporaryDirectory, 'children') };
+  };
+
+  /** What `startNativeWorker` returns, minus the sandbox: this suite proves the brokering, not the containment. */
+  const spawnUncontained = async (launch: RuntimeChildWorkerLaunch): Promise<RuntimeChildWorker> => {
+    const process = spawn(launch.executablePath, [...launch.arguments], { stdio: 'pipe' });
+    const ended = new Promise<Awaited<RuntimeChildWorker['ended']>>((resolve) => {
+      process.once('exit', (code, signal) => {
+        resolve({ ...(code === null ? {} : { exitCode: code }), ...(signal === null ? {} : { signal }) });
+      });
+    });
+    return {
+      stdin: process.stdin,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      ended,
+      terminate: async () => {
+        process.kill();
+        await ended;
+      },
+    };
+  };
+
+  /** A closure sealed in a store under `root`, holding a worker that echoes its stdin. */
+  const sealedClosure = async (root: string, name = 'a'.repeat(64)) => {
+    const closure = join(root, 'store', 'closures', 'sha256', name);
+    const worker = '#!/bin/sh\necho worker ready\ncat\n';
+    await mkdir(closure, { recursive: true });
+    await writeFile(join(closure, 'worker.sh'), worker);
+    await chmod(join(closure, 'worker.sh'), 0o755);
+    return {
+      closure,
+      launchFrom: (overrides: Partial<RuntimeChildWorkerLaunch> = {}) => ({
+        executablePath: join(closure, 'worker.sh'),
+        executableSha256: createHash('sha256').update(worker).digest('hex'),
+        executableName: 'Fixture worker',
+        arguments: [],
+        runtimePath: closure,
+        resources: [],
+        workspacePath: '<private>/workspace',
+        artifactPath: '<private>/artifacts',
+        commandId: 'Fixture#1',
+        ...overrides,
+      }),
+    };
+  };
+
+  /** The flags `permissionArguments` gives a built child; native kernels add none. */
+  const permissionFlags = (modulePath: string, childTemporaryDirectory: string): string[] => [
+    '--permission',
+    `--allow-fs-read=${process.cwd()}`,
+    `--allow-fs-read=${dirname(modulePath)}`,
+    `--allow-fs-read=${childTemporaryDirectory}`,
+    `--allow-fs-write=${tmpdir()}`,
+    `--allow-fs-write=${childTemporaryDirectory}`,
+    ...(Number.parseInt(process.versions.node.split('.')[0] ?? '0', 10) >= 26 ? ['--allow-net'] : []),
+  ];
+
+  const outcomeSchema = z.union([
+    z.object({
+      started: z.literal(true),
+      stdout: z.string(),
+      end: z.object({ exitCode: z.number().optional(), signal: z.string().optional() }),
+    }),
+    z.object({ started: z.literal(false), refusal: z.string() }),
+  ]);
+  const brokerProofSchema = z.object({
+    execArgv: z.array(z.string()),
+    childPermission: z.boolean(),
+    ownSpawn: z.string(),
+    native: z.unknown().optional(),
+    outcomes: z.record(z.string(), outcomeSchema),
+  });
+
+  it('keeps the child flags and its spawn refusal, and starts a worker only from a sealed closure into the private directory of the child', async () => {
+    const { scratch, daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-');
+    /* The proof lands where the child may write: the daemon's temp directory. */
+    const proofPath = join(daemonTemporaryDirectory, 'proof.json');
+    /* A sealed closure in the store, and an unsealed tree beside it holding the same worker. */
+    const { closure: sealed, launchFrom } = await sealedClosure(scratch);
+    const { closure: unsealed } = await sealedClosure(join(scratch, 'unsealed'), 'b'.repeat(64));
+    const requests = [
+      { name: 'sealed', launch: launchFrom() },
+      { name: 'unsealed', launch: launchFrom({ runtimePath: unsealed, executablePath: join(unsealed, 'worker.sh') }) },
+      { name: 'escapedExecutable', launch: launchFrom({ executablePath: '/bin/sh' }) },
+      { name: 'foreignWorkspace', launch: launchFrom({ workspacePath: scratch }) },
+    ];
+    const start = vi.fn(async (launch: RuntimeChildWorkerLaunch & { readonly sandboxRoot: string }) =>
+      spawnUncontained(launch),
+    );
+    const modulePath = fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url));
+
+    const child = await startRuntimeChild({
+      modulePath,
+      args: [proofPath, JSON.stringify(requests)],
+      native: {
+        directory,
+        store: join(scratch, 'store'),
+        compose: async () => ({ unavailable: [], closureRoots: [sealed] }),
+        closureRoots: async () => [sealed],
+        start,
+      },
+    });
+    const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
+    const childTemporaryDirectory = proof.execArgv.at(3)?.slice('--allow-fs-read='.length) ?? '';
+    await child.close();
+
+    expect(proof.execArgv).toEqual(permissionFlags(modulePath, childTemporaryDirectory));
+    /* The child's temp directory sits in one the daemon created outside its own temp directory. */
+    expect(childTemporaryDirectory).toMatch(new RegExp(`^${directory}/tau-runtime-child-[^/]+/tmp$`, 'u'));
+    expect({ childPermission: proof.childPermission, ownSpawn: proof.ownSpawn }).toEqual({
+      childPermission: false,
+      ownSpawn: 'ERR_ACCESS_DENIED',
+    });
+    expect(proof.native).toEqual({ unavailable: [], closureRoots: [sealed] });
+    expect(proof.outcomes['sealed']).toEqual({
+      started: true,
+      stdout: 'worker ready\nechoed through the daemon\n',
+      end: { exitCode: 0 },
+    });
+    expect(proof.outcomes['unsealed']).toEqual({
+      started: false,
+      refusal: `Tau Host refused a native worker launch: ${unsealed} is not a closure sealed in the payload store.`,
+    });
+    expect(proof.outcomes['escapedExecutable']).toEqual({
+      started: false,
+      refusal: 'Tau Host refused a native worker launch: /bin/sh is outside the sealed closure.',
+    });
+    expect(proof.outcomes['foreignWorkspace']).toEqual({
+      started: false,
+      refusal: `Tau Host refused a native worker launch: ${scratch} is not inside the runtime child's private directory.`,
+    });
+    expect(start).toHaveBeenCalledOnce();
+    const [started] = start.mock.calls[0] ?? [];
+    expect(started?.runtimePath).toBe(sealed);
+    expect(started?.workspacePath).toMatch(/\/tau-runtime-child-[^/]+\/tmp\/mirror-[^/]+\/workspace$/u);
+    expect(started?.sandboxRoot).toBe(dirname(childTemporaryDirectory));
+  });
+
+  it('launches from a store reached through a symbolic link, and still refuses a closure whose real path leaves the store', async () => {
+    const { scratch, daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-linked-');
+    const proofPath = join(daemonTemporaryDirectory, 'proof.json');
+    /* The store sits under a link, as one under macOS's `/tmp` (a link to `/private/tmp`) or a linked home does. */
+    const realParent = join(scratch, 'real');
+    await mkdir(realParent);
+    const linkedParent = join(scratch, 'linked');
+    await symlink(realParent, linkedParent);
+    const store = join(linkedParent, 'store');
+    const { closure: sealed, launchFrom } = await sealedClosure(linkedParent);
+    const sealedReal = join(realParent, 'store', 'closures', 'sha256', 'a'.repeat(64));
+    /* A closure entry in the store that is itself a link to a tree outside the store. */
+    const { closure: outside } = await sealedClosure(join(scratch, 'outside'), 'c'.repeat(64));
+    const escaping = join(store, 'closures', 'sha256', 'd'.repeat(64));
+    await symlink(outside, escaping);
+    /* A link the daemon never composed, resolving into the sealed closure. */
+    const alias = join(scratch, 'alias');
+    await symlink(sealed, alias);
+    const requests = [
+      { name: 'linked', launch: launchFrom() },
+      { name: 'real', launch: launchFrom({ runtimePath: sealedReal, executablePath: join(sealedReal, 'worker.sh') }) },
+      { name: 'escaping', launch: launchFrom({ runtimePath: escaping, executablePath: join(escaping, 'worker.sh') }) },
+      { name: 'alias', launch: launchFrom({ runtimePath: alias, executablePath: join(alias, 'worker.sh') }) },
+    ];
+    const start = vi.fn(async (launch: RuntimeChildWorkerLaunch & { readonly sandboxRoot: string }) =>
+      spawnUncontained(launch),
+    );
+
+    const child = await startRuntimeChild({
+      modulePath: fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url)),
+      args: [proofPath, JSON.stringify(requests)],
+      native: {
+        directory,
+        store,
+        compose: async () => ({ unavailable: [], closureRoots: [sealed, escaping] }),
+        closureRoots: async () => [sealed, escaping],
+        start,
+      },
+    });
+    const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
+    await child.close();
+
+    const ran = { started: true, stdout: 'worker ready\nechoed through the daemon\n', end: { exitCode: 0 } };
+    expect(proof.outcomes['linked']).toEqual(ran);
+    expect(proof.outcomes['real']).toEqual(ran);
+    expect(proof.outcomes['escaping']).toEqual({
+      started: false,
+      refusal: `Tau Host refused a native worker launch: ${escaping} is not a closure sealed in the payload store.`,
+    });
+    expect(proof.outcomes['alias']).toEqual({
+      started: false,
+      refusal: `Tau Host refused a native worker launch: ${alias} is not a closure sealed in the payload store.`,
+    });
+    /* The worker starts from the path as the launch spelled it; the sandbox grants its real path beside it. */
+    expect(start.mock.calls.map(([launch]) => launch.runtimePath)).toEqual([sealed, sealedReal]);
+  });
+
+  it('grants a worker only the directory the daemon created, even when a checked path is redirected to elsewhere', async () => {
+    const { scratch, daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-swap-');
+    const proofPath = join(daemonTemporaryDirectory, 'proof.json');
+    const elsewhere = join(scratch, 'elsewhere');
+    await mkdir(elsewhere);
+    const { closure, launchFrom } = await sealedClosure(scratch);
+    /* Between the broker's check and the spawn, the checked artifact directory becomes a link to elsewhere: what a
+     * worker that shares the child's directory can plant. */
+    const start = vi.fn(async (launch: RuntimeChildWorkerLaunch & { readonly sandboxRoot: string }) => {
+      await rm(launch.artifactPath, { recursive: true });
+      await symlink(elsewhere, launch.artifactPath);
+      return spawnUncontained(launch);
+    });
+    const child = await startRuntimeChild({
+      modulePath: fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url)),
+      args: [proofPath, JSON.stringify([{ name: 'swapped', launch: launchFrom() }])],
+      native: {
+        directory,
+        store: join(scratch, 'store'),
+        compose: async () => ({ unavailable: [] }),
+        closureRoots: async () => [closure],
+        start,
+      },
+    });
+    const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
+    const [launched] = start.mock.calls[0] ?? [];
+    const redirected = launched === undefined ? undefined : await realpath(launched.artifactPath);
+    const granted = launched?.sandboxRoot ?? '';
+    const grantedNow = await realpath(granted);
+    await child.close();
+
+    expect(proof.outcomes['swapped']).toMatchObject({ started: true });
+    expect(redirected).toBe(elsewhere);
+    /* The sandbox grants the daemon's directory, which still resolves to itself and does not hold elsewhere. */
+    expect(grantedNow).toBe(granted);
+    expect(granted.startsWith(`${directory}/tau-runtime-child-`)).toBe(true);
+    expect(elsewhere.startsWith(`${granted}/`)).toBe(false);
+    expect(granted.startsWith(`${daemonTemporaryDirectory}/`)).toBe(false);
+  });
+
+  it('reclaims the child directories a gone daemon left in its native directory, and keeps those of a running one', async () => {
+    const { scratch, daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-sweep-');
+    const proofPath = join(daemonTemporaryDirectory, 'proof.json');
+    /* A process that has exited: its id names no running daemon. */
+    const gone = spawn(process.execPath, ['-e', '']);
+    const gonePid = gone.pid!;
+    await once(gone, 'exit');
+    const leftBehind = {
+      gone: { pid: gonePid, keep: false },
+      running: { pid: process.ppid, keep: true },
+      unmarkedOld: { pid: undefined, keep: false },
+      unmarkedFresh: { pid: undefined, keep: true },
+    };
+    await mkdir(directory, { recursive: true });
+    for (const [name, { pid }] of Object.entries(leftBehind)) {
+      const path = join(directory, `tau-runtime-child-${name}`);
+      // oxlint-disable-next-line no-await-in-loop -- four fixtures, laid out in order.
+      await mkdir(join(path, 'tmp'), { recursive: true });
+      if (pid !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- four fixtures, laid out in order.
+        await writeFile(`${path}.pid`, `${String(pid)}\n`);
+      }
+    }
+    const anHourAgo = new Date(Date.now() - 60 * 60_000);
+    await utimes(join(directory, 'tau-runtime-child-unmarkedOld'), anHourAgo, anHourAgo);
+
+    const child = await startRuntimeChild({
+      modulePath: fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url)),
+      args: [proofPath, '[]'],
+      native: {
+        directory,
+        store: join(scratch, 'store'),
+        compose: async () => ({ unavailable: [] }),
+        closureRoots: async () => [],
+        start: vi.fn(),
+      },
+    });
+    const whileRunning = await readdir(directory);
+    await child.close();
+    const afterClose = await readdir(directory);
+
+    for (const [name, { keep }] of Object.entries(leftBehind)) {
+      expect(whileRunning.includes(`tau-runtime-child-${name}`), name).toBe(keep);
+    }
+    expect(whileRunning).not.toContain(`tau-runtime-child-gone.pid`);
+    /* The running child's own directory carries this daemon's marker, and both go when it exits. */
+    const own = whileRunning.filter(
+      (name) =>
+        name.startsWith('tau-runtime-child-') && !Object.keys(leftBehind).some((fixture) => name.includes(fixture)),
+    );
+    expect(own).toHaveLength(2);
+    expect(afterClose.filter((name) => own.includes(name))).toEqual([]);
+  });
+
+  it('refuses every launch when the daemon would keep its directory where the child may write', async () => {
+    const { scratch, daemonTemporaryDirectory } = await daemonLayout('tau-host-broker-inside-');
+    const proofPath = join(daemonTemporaryDirectory, 'proof.json');
+    const { closure, launchFrom } = await sealedClosure(scratch);
+    const start = vi.fn(spawnUncontained);
+    const directory = join(daemonTemporaryDirectory, 'children');
+    const child = await startRuntimeChild({
+      modulePath: fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url)),
+      args: [proofPath, JSON.stringify([{ name: 'inside', launch: launchFrom() }])],
+      native: {
+        directory,
+        store: join(scratch, 'store'),
+        compose: async () => ({ unavailable: [] }),
+        closureRoots: async () => [closure],
+        start,
+      },
+    });
+    const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
+    await child.close();
+
+    expect(proof.outcomes['inside']).toEqual({
+      started: false,
+      refusal: `Tau Host refused a native worker launch: ${directory} is inside ${daemonTemporaryDirectory}, which the runtime child may write; keep the native workers' directory outside TMPDIR.`,
+    });
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('hands a child no composition when the store cannot be read, and carries a failed start back as its refusal', async () => {
+    const { scratch, daemonTemporaryDirectory, directory } = await daemonLayout('tau-host-broker-refused-');
+    const { closure: sealed, launchFrom } = await sealedClosure(scratch);
+    const launch = launchFrom({ executableSha256: '0'.repeat(64) });
+    const modulePath = fileURLToPath(new URL('fixtures/native-broker-child.mjs', import.meta.url));
+    const refusedProof = join(daemonTemporaryDirectory, 'refused.json');
+    const refused = await startRuntimeChild({
+      modulePath,
+      args: [refusedProof, JSON.stringify([{ name: 'refused', launch }])],
+      native: {
+        directory,
+        store: join(scratch, 'store'),
+        compose: async () => {
+          throw new Error('the store cannot be read');
+        },
+        closureRoots: async () => [sealed],
+        start: async () => {
+          throw new Error('The native runtime is unavailable because its sandbox could not start: no bwrap.');
+        },
+      },
+    });
+    await refused.close();
+
+    const refusedRun = brokerProofSchema.parse(JSON.parse(await readFile(refusedProof, 'utf8')));
+    expect(refusedRun.native).toBeUndefined();
+    expect(refusedRun.outcomes['refused']).toEqual({
+      started: false,
+      refusal: 'The native runtime is unavailable because its sandbox could not start: no bwrap.',
+    });
   });
 });

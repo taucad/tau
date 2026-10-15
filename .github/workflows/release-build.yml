@@ -844,7 +844,7 @@ jobs:
             previous_dir=$(mktemp -d "$RUNNER_TEMP/previous.XXXXXX")
             if ! gh release download "$previous" --pattern mirror-receipt.json --dir "$previous_dir" 2> "$RUNNER_TEMP/previous-error"; then
               # Publication is not qualification: only completely mirrored candidates can bootstrap.
-              if grep -q 'no assets match' "$RUNNER_TEMP/previous-error"; then continue; fi
+              if grep -Eq '^(no assets match|no assets to download$)' "$RUNNER_TEMP/previous-error"; then continue; fi
               cat "$RUNNER_TEMP/previous-error" >&2; exit 1
             fi
             gh release download "$previous" --pattern download.json --dir "$previous_dir"

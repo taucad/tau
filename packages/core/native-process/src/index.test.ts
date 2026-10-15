@@ -10,6 +10,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -28,10 +29,13 @@ import {
   NativeProcessSession,
   NativeRuntimeUnavailableError,
   nativeSandboxPolicy,
+  installNativeWorkerLauncher,
   NativeWorkerReportedError,
   processEnvironment,
+  startNativeWorker,
   terminateProcessTree,
 } from '#index.js';
+import type { NativeWorkerLaunch } from '#index.js';
 
 const fsOverrides = vi.hoisted(() => ({
   readFile: undefined as undefined | (() => Promise<Uint8Array<ArrayBuffer>>),
@@ -39,9 +43,12 @@ const fsOverrides = vi.hoisted(() => ({
 }));
 /**
  * The sandbox runtime is replaced by a controllable double: its default wrap runs the
- * quoted command through `/bin/sh` unsandboxed so lifecycle cases stay portable, while
- * a wrap failure proves the fail-closed seam. Initialization knobs are exercised in
- * `native-sandbox.test.ts`; real containment in `native-sandbox.integration.test.ts`.
+ * quoted command unsandboxed so lifecycle cases stay portable, while a wrap failure proves
+ * the fail-closed seam. It answers in the runtime's own shape, so the link refusal is added
+ * as in production: on Linux a stand-in for `bwrap` checks that the seccomp program arrived
+ * on descriptor 3 and runs the command; on macOS the profile is a real `(allow default)`
+ * Seatbelt one plus the refusal. Initialization knobs are exercised in `native-sandbox.test.ts`;
+ * real containment in `native-sandbox.integration.test.ts`.
  */
 const sandbox = vi.hoisted(() => ({
   supported: true,
@@ -50,8 +57,32 @@ const sandbox = vi.hoisted(() => ({
   reset: vi.fn(async () => undefined),
   wrap: vi.fn<(command: string, ...rest: unknown[]) => void>(),
   wrapFailure: undefined as unknown,
-  launcher: '/bin/sh',
+  /* The process the double's vector starts; `undefined` is the default stand-in. */
+  launcher: undefined as string | undefined,
 }));
+const shellQuote = (value: string): string => `'${value.replaceAll("'", `'"'"'`)}'`;
+let bwrapStandIn: string | undefined;
+/** A stand-in for `bwrap` that refuses to run without the link-refusing program on descriptor 3. */
+const bwrapStandInPath = (): string => {
+  if (bwrapStandIn === undefined) {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), 'tau-bwrap-stand-in-')));
+    bwrapStandIn = join(directory, 'sh');
+    writeFileSync(
+      bwrapStandIn,
+      [
+        '#!/bin/sh',
+        `case "$2" in 'bwrap --seccomp 3 '*) ;; *) echo 'no link-refusing seccomp program' >&2; exit 97 ;; esac`,
+        'size=$(wc -c <&3)',
+        `if [ "$size" -eq 0 ] || [ $((size % 8)) -ne 0 ]; then echo "bad seccomp program: $size bytes" >&2; exit 98; fi`,
+        `eval "set -- \${2#bwrap --seccomp 3 }"`,
+        'exec /bin/sh -c "$1"',
+        '',
+      ].join('\n'),
+    );
+    chmodSync(bwrapStandIn, 0o700);
+  }
+  return bwrapStandIn;
+};
 vi.mock('@anthropic-ai/sandbox-runtime', async (importActual) => ({
   // The default write roots stay real: the profile's deny list is derived from them.
   ...(await importActual<{ getDefaultWritePaths: typeof getDefaultWritePaths }>()),
@@ -67,7 +98,18 @@ vi.mock('@anthropic-ai/sandbox-runtime', async (importActual) => ({
         // oxlint-disable-next-line typescript/only-throw-error -- launchers can reject with bare strings.
         throw sandbox.wrapFailure;
       }
-      return { argv: [sandbox.launcher, '-c', command], env: process.env };
+      if (process.platform === 'darwin') {
+        const profile = shellQuote('(version 1)\n(allow default)');
+        return {
+          argv: [
+            sandbox.launcher ?? '/bin/sh',
+            '-c',
+            `env /usr/bin/sandbox-exec -p ${profile} /bin/sh -c ${shellQuote(command)}`,
+          ],
+          env: process.env,
+        };
+      }
+      return { argv: [sandbox.launcher ?? bwrapStandInPath(), '-c', `bwrap ${shellQuote(command)}`], env: process.env };
     },
   },
 }));
@@ -510,6 +552,125 @@ ${keepAlive}`;
     expect(sandbox.reset).toHaveBeenCalledTimes(2);
   });
 
+  it('should hand the whole launch to an installed launcher, and neither verify, lease nor wrap here', async () => {
+    const value = fixture(
+      respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'brokered'}}`),
+    );
+    const launches: NativeWorkerLaunch[] = [];
+    installNativeWorkerLauncher(async (launch) => {
+      launches.push(launch);
+      return startNativeWorker(launch);
+    });
+    try {
+      await expect(request(value.session)).resolves.toEqual({ value: 'brokered' });
+      expect(launches).toEqual([
+        {
+          executablePath: value.options.executablePath,
+          executableSha256: value.options.executableSha256,
+          executableName: 'test executable',
+          arguments: value.options.arguments,
+          runtimePath: value.root,
+          resources: value.options.resources,
+          workspacePath: value.options.workspacePath,
+          artifactPath: value.artifactPath,
+          commandId: 'Test native#1',
+        },
+      ]);
+    } finally {
+      installNativeWorkerLauncher(undefined);
+      await value.session.cleanup();
+    }
+    /* The worker's own lease ended with it; the session took none, so its cleanup stops nothing twice. */
+    await vi.waitFor(() => {
+      expect(sandbox.reset).toHaveBeenCalledOnce();
+    });
+  });
+
+  it('should fail the request with the refusal of the launcher, starting nothing', async () => {
+    const value = fixture();
+    installNativeWorkerLauncher(async () => {
+      throw new Error('Refused: the runtime root is not a sealed closure.');
+    });
+    try {
+      await expect(request(value.session)).rejects.toThrow('Refused: the runtime root is not a sealed closure.');
+      expect(sandbox.wrap).not.toHaveBeenCalled();
+    } finally {
+      installNativeWorkerLauncher(undefined);
+      await value.session.cleanup();
+    }
+  });
+
+  it('should verify digests before startNativeWorker wraps anything, and hold the sandbox until the worker ends', async () => {
+    const value = fixture();
+    const launch = {
+      ...value.options,
+      commandId: 'broker#1',
+    } satisfies NativeWorkerLaunch;
+
+    await expect(startNativeWorker({ ...launch, executableSha256: hash('tampered') })).rejects.toThrow(
+      'test executable failed its SHA-256 integrity check.',
+    );
+    await expect(
+      startNativeWorker({ ...launch, resources: [{ path: '/etc/hosts', sha256: hash(''), label: 'escaped' }] }),
+    ).rejects.toThrow('escaped is outside the native runtime root.');
+    expect(sandbox.wrap).not.toHaveBeenCalled();
+
+    const worker = await startNativeWorker(launch);
+    const firstLine = await new Promise<string>((resolve) => {
+      worker.stdout.once('data', (chunk: Uint8Array<ArrayBuffer>) => {
+        resolve(Buffer.from(chunk).toString('utf8'));
+      });
+    });
+    expect(firstLine).toBe('{"protocolVersion":1,"type":"ready"}\n');
+    expect(sandbox.reset).not.toHaveBeenCalled();
+    await worker.terminate();
+    await expect(worker.ended).resolves.toEqual({ signal: 'SIGTERM' });
+    await vi.waitFor(() => {
+      expect(sandbox.reset).toHaveBeenCalledOnce();
+    });
+  });
+
+  it('should hash again after a failed verification instead of failing every later launch', async () => {
+    const value = fixture();
+    const launch = { ...value.options, commandId: 'broker#1' } satisfies NativeWorkerLaunch;
+    const [resource] = value.options.resources;
+    const sealing = `${resource!.path}.sealing`;
+    /* The closure is still being sealed: its resource is not in place yet. */
+    renameSync(resource!.path, sealing);
+    await expect(startNativeWorker(launch)).rejects.toThrow(/ENOENT/u);
+    renameSync(sealing, resource!.path);
+
+    const worker = await startNativeWorker(launch);
+    await worker.terminate();
+    await expect(worker.ended).resolves.toEqual({ signal: 'SIGTERM' });
+  });
+
+  it('should grant the sandbox root instead of the requested paths, which a requester may have redirected', async () => {
+    const value = fixture();
+    const sandboxRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tau-native-broker-root-')));
+    const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'tau-native-elsewhere-')));
+    roots.push(sandboxRoot, elsewhere);
+    const workspacePath = join(sandboxRoot, 'workspace');
+    const artifactPath = join(sandboxRoot, 'artifacts');
+    mkdirSync(workspacePath);
+    /* What the broker checked was a directory; by the spawn it points outside. */
+    symlinkSync(elsewhere, artifactPath);
+
+    const worker = await startNativeWorker({
+      ...value.options,
+      workspacePath,
+      artifactPath,
+      sandboxRoot,
+      commandId: 'broker#2',
+    });
+    await worker.terminate();
+
+    const policy = sandbox.wrap.mock.calls[0]![2] as ReturnType<typeof nativeSandboxPolicy>;
+    expect(policy.filesystem.allowWrite).toEqual([sandboxRoot]);
+    expect(policy.filesystem.allowRead).not.toContain(elsewhere);
+    expect(sandbox.wrap.mock.calls[0]![0]).toContain(`TMPDIR='${sandboxRoot}'`);
+  });
+
   it('should not take a sandbox lease when cleanup lands while resources are being verified', async () => {
     const closing = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'a'}}`));
     const pending = request(closing.session);
@@ -756,7 +917,7 @@ ${keepAlive}`);
     const missingLauncher = fixture();
     sandbox.launcher = join(missingLauncher.root, 'missing-sandbox-launcher');
     await expect(request(missingLauncher.session)).rejects.toThrow(/ENOENT/);
-    sandbox.launcher = '/bin/sh';
+    sandbox.launcher = undefined;
     await missingLauncher.session.cleanup();
 
     const writeFailure = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));

@@ -80,7 +80,7 @@ export type ProjectHostOptions = Pick<
   'projectId' | 'checkoutsDirectory' | 'gitExecutable' | 'apiBaseUrl' | 'tauCredential' | 'syncTelemetryPlacement'
 > &
   Pick<AgentLauncherOptions, 'systemPrompt' | 'model' | 'modelTransport' | 'credential'> &
-  Pick<HostToolRegistryOptions, 'systemSkillBundles' | 'geospecRunner' | 'machines'> &
+  Pick<HostToolRegistryOptions, 'systemSkillBundles' | 'geospecRunner' | 'machines' | 'prepareKernel'> &
   Readonly<{
     /** Absolute project root: the live checkout, and where `.tau/chats/` lives. */
     workspaceRoot: string;
@@ -253,6 +253,8 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     /* The machine tools, over a facet this host already serves; a job names the project by its id. */
     ...(options.machines === undefined ? {} : { machines: options.machines }),
     ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
+    /* `prepare_kernel` (D7, D37): offered to Tau's agent and, through the host-local MCP endpoint, to ACP agents. */
+    ...(options.prepareKernel === undefined ? {} : { prepareKernel: options.prepareKernel }),
   };
   const toolRegistry = createHostToolRegistry({ ...registryOptions, workspaceRoot, checkouts });
   const toolRegistryFor = (root: string, filesystem?: HostToolFileSystem): ToolRegistry =>

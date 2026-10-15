@@ -305,7 +305,8 @@
           "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'"
+          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'",
+          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts'"
         ],
         "parallel": false
       }

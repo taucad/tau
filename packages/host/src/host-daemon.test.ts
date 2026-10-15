@@ -32,6 +32,7 @@ import type { HostDaemonEvent } from '#host-daemon.js';
 import { writeHostCredential } from '#credential-store.js';
 import * as revisions from '#revisions.js';
 import * as agentTools from '#agent-tools.js';
+import type { HostPrepareKernel } from '#agent-tools.js';
 import * as agentServer from '#agent-server.js';
 import * as machineHost from '#machine-host.js';
 import * as projectHosts from '#project-host.js';
@@ -2397,6 +2398,67 @@ describe('startHostDaemon runtime child per root and session', () => {
       await daemon.close();
     }
     expect(await Promise.all(runtimeChildren.map(async ({ handle }) => exitOf(handle, 0)))).not.toContain('open');
+  }, 30_000);
+
+  it('offers prepare_kernel, composes every child from the store, and replaces each root child once a kernel is ready (D37)', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-native-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const compose = vi.fn(async () => ({ unavailable: [] }));
+    const outcomes: Array<Awaited<ReturnType<HostPrepareKernel>>> = [
+      { status: 'blocked', kernel: 'picogk', reason: 'offline-miss', message: 'offline' },
+      { status: 'ready', kernel: 'picogk' },
+    ];
+    const prepareKernel = vi.fn(async () => outcomes.shift() ?? { status: 'ready', kernel: 'picogk' });
+    projectHostSpy.mockClear();
+    registrySpy.mockClear();
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: {
+        modulePath: proofChild,
+        native: {
+          directory: join(temporaryDirectory, 'children'),
+          store: join(temporaryDirectory, 'store'),
+          compose,
+          closureRoots: async () => [],
+          start: vi.fn(),
+        },
+      },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), prepareKernel },
+    });
+    try {
+      await daemon.ready;
+      await awaitControlReady(relay);
+      const options = projectHostSpy.mock.calls.at(-1)?.[0];
+      if (options?.prepareKernel === undefined) {
+        throw new TypeError('Expected the daemon to hand its project host prepare_kernel.');
+      }
+      expect(typeof registrySpy.mock.lastCall?.[0]?.prepareKernel).toBe('function');
+      const root = join(temporaryDirectory, 'workspace');
+      const before = runtimeChildren.length;
+      const composedBefore = compose.mock.calls.length;
+      await options.runtimeClient(root);
+      const [first] = runtimeChildren.slice(before);
+      const context = { signal: new AbortController().signal, onProgress: () => undefined };
+
+      await expect(options.prepareKernel({ kernel: 'picogk' }, context)).resolves.toMatchObject({ status: 'blocked' });
+      expect(await exitOf(first!.handle, 200)).toBe('open');
+      await expect(options.prepareKernel({ kernel: 'picogk' }, context)).resolves.toMatchObject({ status: 'ready' });
+      expect(await exitOf(first!.handle)).toBe('closed');
+      await options.runtimeClient(root);
+
+      expect(runtimeChildren.slice(before)).toHaveLength(2);
+      expect(compose.mock.calls.length - composedBefore).toBe(2);
+      expect(prepareKernel).toHaveBeenCalledWith({ kernel: 'picogk' }, context);
+    } finally {
+      await daemon.close();
+    }
   }, 30_000);
 
   it('stays quiet about the runtime child a close interrupts while it starts', async () => {

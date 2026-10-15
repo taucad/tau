@@ -1787,15 +1787,21 @@ const bootstrapElectronApp = async (): Promise<void> => {
       await updater.install();
     }
   };
-  Menu.getApplicationMenu()?.items[0]?.submenu?.insert(
-    1,
-    new MenuItem({
-      label: 'Check for Updates…',
-      click: () => {
-        void checkForUpdates();
-      },
-    }),
-  );
+  const applicationMenu = Menu.getApplicationMenu();
+  const appSubmenu = applicationMenu?.items[0]?.submenu;
+  if (applicationMenu && appSubmenu) {
+    appSubmenu.insert(
+      1,
+      new MenuItem({
+        label: 'Check for Updates…',
+        click: () => {
+          void checkForUpdates();
+        },
+      }),
+    );
+    // Native menus must be reinstalled after adding items.
+    Menu.setApplicationMenu(applicationMenu);
+  }
 };
 
 /* Electron fires `ready` only after the main ESM module finishes evaluating, so

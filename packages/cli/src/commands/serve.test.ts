@@ -2,9 +2,26 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { defaultPayloadStore } from '@taucad/host';
+import { startNativeWorker } from '@taucad/native-process-core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { agentWorkspaceRoot } from '#commands/serve.js';
+import { agentWorkspaceRoot, serveNativeKernels } from '#commands/serve.js';
+
+const nativeKernels = vi.hoisted(() => ({
+  composeNativeKernels: vi.fn<() => Promise<unknown>>(),
+  prepare: vi.fn(async (kernel: string) => ({ status: 'ready', kernel })),
+  dispose: vi.fn(async () => undefined),
+  opened: 0,
+}));
+
+vi.mock('#native-kernels.js', () => ({
+  composeNativeKernels: nativeKernels.composeNativeKernels,
+  openNativePreparation: () => {
+    nativeKernels.opened += 1;
+    return { prepare: nativeKernels.prepare, dispose: nativeKernels.dispose };
+  },
+}));
 
 const roots: string[] = [];
 
@@ -63,5 +80,47 @@ describe('agentWorkspaceRoot', () => {
     expect(() => agentWorkspaceRoot(undefined, join(root, 'packages', 'part'))).toThrow(
       `inside the Git checkout at ${root},`,
     );
+  });
+});
+
+describe('serveNativeKernels', () => {
+  const context = { signal: new AbortController().signal, onProgress: () => undefined };
+
+  it('should compose each child from the store, start workers only from its sealed closures, and prepare in this process once opened', async () => {
+    nativeKernels.composeNativeKernels.mockResolvedValue({
+      unavailable: [],
+      closureRoots: ['/store/closures/sha256/a'],
+    });
+    const kernels = serveNativeKernels();
+
+    await expect(kernels.native.compose()).resolves.toEqual({
+      unavailable: [],
+      closureRoots: ['/store/closures/sha256/a'],
+    });
+    await expect(kernels.native.closureRoots()).resolves.toEqual(['/store/closures/sha256/a']);
+    expect(kernels.native.start).toBe(startNativeWorker);
+    /* The broker resolves the store's real path itself, so a store under a link launches (macOS's `/tmp`). */
+    expect(kernels.native.store).toBe(defaultPayloadStore());
+    await kernels.dispose();
+    expect(nativeKernels.opened).toBe(0);
+
+    await expect(kernels.prepareKernel({ kernel: 'picogk' }, context)).resolves.toEqual({
+      status: 'ready',
+      kernel: 'picogk',
+    });
+    await kernels.prepareKernel({ kernel: 'build123d' }, context);
+    await kernels.dispose();
+
+    expect(nativeKernels.opened).toBe(1);
+    expect(nativeKernels.prepare).toHaveBeenCalledWith('build123d', context);
+    expect(nativeKernels.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('should serve without native kernels, and start nothing, when the store cannot be composed', async () => {
+    nativeKernels.composeNativeKernels.mockRejectedValue(new Error('TAU_ACQUISITION is "sometimes"'));
+    const kernels = serveNativeKernels();
+
+    await expect(kernels.native.compose()).resolves.toEqual({ unavailable: [] });
+    await expect(kernels.native.closureRoots()).resolves.toEqual([]);
   });
 });

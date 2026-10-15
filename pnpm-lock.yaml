@@ -3560,6 +3560,9 @@ importers:
       '@taucad/middleware':
         specifier: workspace:*
         version: link:../plugins/middleware
+      '@taucad/native-process-core':
+        specifier: workspace:*
+        version: link:../core/native-process
       '@taucad/opencascade':
         specifier: workspace:*
         version: link:../plugins/opencascade

@@ -78,6 +78,56 @@ describe('ProjectWorkspaceProvider', () => {
     keyboard.useKeybinding.mockImplementation(stubKeybinding);
   });
 
+  it('opens a Preview drawer and delivers Export once its workbench mounts on mobile', () => {
+    state.isMobile = true;
+    const reveal = vi.fn();
+    const open = vi.fn();
+    render(
+      <ProjectWorkspaceProvider workbenchMode='pane' onWorkbenchOpen={reveal}>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    act(() => {
+      workspace.openPanel('export');
+    });
+    expect(reveal).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    act(() => {
+      workspace.connectWorkbench(open);
+    });
+    expect(open).toHaveBeenCalledExactlyOnceWith('export');
+    act(() => {
+      workspace.connectWorkbench(open);
+    });
+    expect(open).toHaveBeenCalledTimes(1);
+    act(() => {
+      workspace.openPanel('files');
+    });
+    expect(open).toHaveBeenLastCalledWith('files');
+  });
+
+  it('does not deliver a pending Preview panel after navigating to another route', () => {
+    const open = vi.fn();
+    const view = render(
+      <ProjectWorkspaceProvider workbenchMode='pane'>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    act(() => {
+      workspace.openPanel('export');
+    });
+    route.key = 'another-preview';
+    view.rerender(
+      <ProjectWorkspaceProvider workbenchMode='pane'>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    act(() => {
+      workspace.connectWorkbench(open);
+    });
+    expect(open).not.toHaveBeenCalled();
+  });
+
   it('reveals the Workbench lane and fulfills Files once when its launcher mounts', () => {
     render(
       <ProjectWorkspaceProvider>

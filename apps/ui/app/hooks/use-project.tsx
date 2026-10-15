@@ -1,5 +1,7 @@
 /* oxlint-disable typescript/no-restricted-types -- Workbench record entry paths are nullable by schema. */
 /* oxlint-disable eslint/no-await-in-loop -- Producer flushes must finish in owner order before project close. */
+import { parameterRecordInputValues } from '@taucad/parameters';
+import { usePreviewParameterLifetime } from '#hooks/use-preview-parameter-lifetime.js';
 import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { peekRevisionClient } from '#hooks/use-revision-status.js';
 import { ObservationService } from '@taucad/fs-client/observation-service';
@@ -366,6 +368,7 @@ export function ProjectProvider({
   input,
   kernelOptionsFactory,
   profile = 'editor',
+  previewParameterService,
 }: {
   readonly children: ReactNode;
   readonly projectId: string;
@@ -380,6 +383,7 @@ export function ProjectProvider({
   >;
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
   readonly profile?: 'editor' | 'shared';
+  readonly previewParameterService?: ParameterSetService;
 }): React.JSX.Element {
   // A caller without a factory (the converter route) gets the local kernel, which
   // reads the same preference the focused workbench does instead of silently
@@ -393,6 +397,7 @@ export function ProjectProvider({
   const fileSystemRoot = useSelector(fileManager.fileManagerRef, (state) => state.context.rootDirectory);
   const parameterService = useMemo(
     () =>
+      previewParameterService ??
       createParameterSetService({
         rootDirectory: fileSystemRoot,
         client: fileManager.parameterFiles,
@@ -414,7 +419,7 @@ export function ProjectProvider({
           toast.error(errorMessage(error));
         },
       }),
-    [fileManager.parameterFiles, fileManager.contentService, fileSystemRoot],
+    [fileManager.parameterFiles, fileManager.contentService, fileSystemRoot, previewParameterService],
   );
   const workbenchRecordProducers = useRef(new Set<() => Promise<boolean>>());
   const registerWorkbenchRecordProducer = useCallback((flush: () => Promise<boolean>) => {
@@ -448,6 +453,8 @@ export function ProjectProvider({
       }
     })();
   }, [parameterService]);
+
+  usePreviewParameterLifetime(parameterService, profile === 'shared' && previewParameterService === undefined);
 
   const projectActors = {
     loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async ({ input }) => {
@@ -688,6 +695,33 @@ export function ProjectProvider({
    * (move rollback, delete and recreate, retried close) gets a fresh subscription. */
   const parameterObservers = useRef(new Map<string, Readonly<{ actor: unknown; unsubscribe: () => void }>>());
 
+  const previewValuesByRuntime = useRef(new WeakMap<object, string>());
+  const publishPreviewParameters = useCallback(
+    (entryPath: string): void => {
+      if (previewParameterService === undefined) {
+        return;
+      }
+      const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
+      const snapshot = previewParameterService.snapshot(entryPath);
+      if (cadRef === undefined || snapshot === undefined) {
+        return;
+      }
+      const runtime = cadRef.getSnapshot();
+      const { document } = runtime.context;
+      if (document === undefined || !runtime.can({ type: 'setPreviewParameters', parameters: {} })) {
+        return;
+      }
+      const parameters = parameterRecordInputValues(snapshot.entry);
+      const signature = JSON.stringify(parameters);
+      if (previewValuesByRuntime.current.get(document) === signature) {
+        return;
+      }
+      previewValuesByRuntime.current.set(document, signature);
+      cadRef.send({ type: 'setPreviewParameters', parameters });
+    },
+    [actorRef, previewParameterService],
+  );
+
   const observeParameters = useCallback(
     (entryPath: string): void => {
       const actor = parameterService.actor(entryPath);
@@ -701,6 +735,12 @@ export function ProjectProvider({
         const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
         const current = parameterService.snapshot(entryPath);
         if (cadRef === undefined || current === undefined) {
+          return;
+        }
+        if (previewParameterService !== undefined) {
+          if (shouldDispatchParameterSettlement(outcome)) {
+            publishPreviewParameters(entryPath);
+          }
           return;
         }
         const stage = parameterStageForSettlement({ entryPath, outcome, bytes: current.bytes ?? undefined });
@@ -719,7 +759,7 @@ export function ProjectProvider({
         },
       });
     },
-    [actorRef, parameterService],
+    [actorRef, parameterService, previewParameterService, publishPreviewParameters],
   );
 
   useEffect(() => {
@@ -727,8 +767,14 @@ export function ProjectProvider({
     const observeAll = (): void => {
       for (const entryPath of geometryUnits.keys()) {
         observeParameters(entryPath);
+        publishPreviewParameters(entryPath);
       }
     };
+    const runtimeSubscriptions = [...geometryUnits].map(([entryPath, cadRef]) =>
+      cadRef.subscribe(() => {
+        publishPreviewParameters(entryPath);
+      }),
+    );
     observeAll();
     const unsubscribeActors = parameterService.subscribeActors(observeAll);
     for (const [entryPath, { unsubscribe }] of observers) {
@@ -739,12 +785,15 @@ export function ProjectProvider({
     }
     return () => {
       unsubscribeActors();
+      for (const subscription of runtimeSubscriptions) {
+        subscription.unsubscribe();
+      }
       for (const { unsubscribe } of observers.values()) {
         unsubscribe();
       }
       observers.clear();
     };
-  }, [geometryUnits, observeParameters, parameterService]);
+  }, [geometryUnits, observeParameters, parameterService, publishPreviewParameters]);
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const resolvedRequestedChatId = useSelector(editorRef, (state) => state.context.requestedChatId);
   const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
@@ -876,6 +925,7 @@ export function ProjectProvider({
       const settle = async (): Promise<void> => {
         try {
           await operation;
+          publishPreviewParameters(filePath);
         } catch {
           // The set actor holds the typed diagnostic.
         }
@@ -883,7 +933,7 @@ export function ProjectProvider({
       // async-iife: bootstrap -- resolution is observed through the set actor, not this promise.
       void settle();
     },
-    [parameterService],
+    [parameterService, publishPreviewParameters],
   );
 
   const setGeometryUnitParameters = useCallback(

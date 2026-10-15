@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
+import { waitForRenderedGeometry } from '#support/headless-capture.js';
 import * as target from '#support/external-target.js';
 import { measureHorizontalOverflow, seriousAxeViolations } from '#support/page-audit.js';
 
@@ -61,20 +62,23 @@ describe('mobile Preview controls', () => {
     await target.click(decline);
     await target.setViewport({ width: 320, height: 720 });
     await target.navigate(`${editorUrl}/preview`);
-    const model = selectors.getByRole('tab', { name: 'Model', exact: true });
-    await target.expectVisible(model, 60_000);
-    await target.expectVisible(selectors.getByRole('tabpanel', { name: 'Model', exact: true }));
+    const workbench = selectors.getByRole('button', { name: 'Workbench', exact: true });
+    await target.expectVisible(workbench, 60_000);
+    await target.expectVisible(selectors.getByRole('application', { name: 'CAD canvas' }));
     expect(await seriousAxeViolations()).toEqual([]);
-    await target.click(selectors.getByRole('tab', { name: 'Files', exact: true }));
-    await target.expectVisible(selectors.getByRole('tabpanel', { name: 'Files', exact: true }));
-    await target.click(selectors.getByRole('tab', { name: 'Details', exact: true }));
-    await target.expectVisible(selectors.getByRole('tabpanel', { name: 'Details', exact: true }));
-    await target.click(model);
-    const edit = selectors.getByRole('button', { name: 'Edit', exact: true });
+    await target.click(selectors.getByRole('button', { name: 'Export', exact: true }));
+    await target.expectVisible(selectors.getByRole('dialog', { name: 'Project workbench' }));
+    await target.expectVisible(selectors.getByRole('tabpanel', { name: 'Export', exact: true }));
+    await target.click(selectors.getByRole('button', { name: 'Open workbench tab', exact: true }));
+    await target.click(selectors.getByRole('menuitem', { name: 'Files', exact: true }));
+    await target.expectVisible(selectors.getByRole('tabpanel', { name: 'Open file', exact: true }));
+    await target.keyboardPress('Escape');
+    await target.expectHidden(selectors.getByRole('dialog', { name: 'Project workbench' }));
+    const edit = selectors.getByRole('link', { name: 'Edit', exact: true });
     await target.expectVisible(edit);
     const editIsHittable = async (): Promise<boolean> =>
       target.evaluate(() => {
-        const button = [...document.querySelectorAll('button')].find(
+        const button = [...document.querySelectorAll('a')].find(
           (element) => element.checkVisibility() && element.textContent.trim() === 'Edit',
         );
         if (!button) {
@@ -88,6 +92,43 @@ describe('mobile Preview controls', () => {
     await expect.poll(editIsHittable).toBe(true);
     await target.click(edit);
     await target.expectUrl(new RegExp(`${editorUrl}$`, 'u'));
+  });
+});
+
+describe('compact owned Preview parameters', () => {
+  test('keeps edited parameters temporary when Preview is reopened', async () => {
+    await target.setViewport({ width: 1728, height: 1080 });
+    await target.navigate('/__e2e/example-fixture?locator=replicad.v8-engine');
+    await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
+    const editorUrl = new URL(await target.currentUrl()).pathname;
+    await target.click(selectors.getByRole('button', { name: 'Decline', exact: true }));
+    await target.navigate(`${editorUrl}/preview`);
+    const angle = selectors.getByRole('spinbutton', { name: 'Input for Crank Angle' });
+    await target.expectVisible(angle, 60_000);
+    const readAngle = async (): Promise<string | undefined> =>
+      target.evaluate(() => document.querySelector<HTMLInputElement>('[aria-label="Input for Crank Angle"]')?.value);
+    await expect.poll(readAngle).toBe('0');
+    await waitForRenderedGeometry('gltf');
+    const settledBefore = await target.evaluate(() => performance.getEntriesByName('tau:parameter-settled').length);
+    await target.fill(angle, '35');
+    await target.press(angle, 'Enter');
+    await expect.poll(readAngle).toBe('35');
+    await target.waitFor(
+      (before) => performance.getEntriesByName('tau:parameter-settled').length > before,
+      settledBefore,
+      { timeout: 60_000 },
+    );
+    await target.navigate('/projects');
+    await target.navigate(`${editorUrl}/preview`);
+    await target.expectVisible(angle, 60_000);
+    await expect.poll(readAngle).toBe('0');
+    await waitForRenderedGeometry('gltf');
+    await target.expectHidden(selectors.getByText('Rendering…', { exact: true }), 60_000);
+    await target.screenshot(undefined, 'preview-compact-v8-1728.png');
+    await target.setViewport({ width: 768, height: 720 });
+    await target.expectVisible(selectors.getByRole('button', { name: 'Workbench', exact: true }));
+    await expect.poll(measureHorizontalOverflow).toEqual({ document: 0, scroller: 0, offenders: [] });
+    await target.screenshot(undefined, 'preview-compact-v8-768.png');
   });
 });
 

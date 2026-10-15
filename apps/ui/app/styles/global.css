@@ -294,6 +294,20 @@
   --animate-pulse-subtle: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-gradient: gradient 5s ease infinite;
   --animate-bounce-subtle: gentle-bounce 2s infinite;
+  /* Dictation listening ripple: silent waveform bars swell in a travelling wave so a quiet microphone still reads as live.
+     Transform only, per DESIGN Motion; the waveform is hidden under reduced motion. */
+  --animate-dictation-idle: dictation-idle 1.2s ease-in-out infinite;
+
+  @keyframes dictation-idle {
+    0%,
+    100% {
+      transform: scaleY(1);
+    }
+
+    50% {
+      transform: scaleY(2.5);
+    }
+  }
   --color-fd-primary: var(--primary);
   --color-fd-primary-foreground: var(--primary-foreground);
   --color-fd-secondary: var(--secondary);

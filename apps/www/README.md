@@ -54,7 +54,7 @@ This site is the only owner of Tau's legal documents. `content/legal/*.md` holds
 
 ## Privacy and measurement
 
-Cookie preferences live here, not in the app. The consent panel offers the analytics choice on any page while no decision is recorded (DNT/GPC suppress it); **Cookie preferences** in the footer and on `/legal/cookies/` reopen it, and `/privacy/` withdraws it. The decision is the host-only `tau-cookie-consent` cookie (`{"status":"accepted"|"declined","version":1}`, 365 days) that the app on the same hostname reads to gate PostHog; a write is announced on the `tau-cookie-consent` broadcast channel so open app tabs re-read it. The former site-only `localStorage` record is migrated once.
+The consent panel offers the analytics choice on any page while no decision is recorded (DNT/GPC suppress it); **Cookie preferences** in the footer and on `/legal/cookies/` reopen it, and `/privacy/` withdraws it. The decision is the shared `tau-cookie-consent` cookie owned by `@taucad/consent` (`apps/libs/consent`); the app on the same hostname reads it to gate PostHog and offers the same choice under **Help → Cookie preferences**. The former site-only `localStorage` record is migrated once.
 
 Tracking is disabled by default. `WWW_ANALYTICS_ENDPOINT=/api/marketing-events` is the only accepted optional endpoint. Configure it only after an approved consent-aware first-party collector exists; the marketing deployment does not create that collector. No provider secret or PostHog SDK is bundled. The endpoint must discard transport IP/UA/referrer, validate this schema, rate-limit abuse and deduplicate `event_id` before forwarding to the authorized project. Do not enable it merely because the parent has connector access.
 

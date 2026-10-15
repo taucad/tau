@@ -4,8 +4,8 @@ import { readStoryProgress } from '#www/story-progress.js';
 import { randomUuid } from '@taucad/utils/id';
 import { sanitizeEvent, campaignCodes } from '#www/analytics.js';
 import { environmentHref, stagingDesktopNote } from '#www/environment.js';
-import { consentChannelName, consentCookie, legacyConsentKey, readConsentCookie } from '#www/consent.js';
-import type { ConsentDecision } from '#www/consent.js';
+import { consentChannelName, readConsentCookie, writeConsent } from '@taucad/consent';
+import type { ConsentDecision } from '@taucad/consent';
 
 export function initializePage(signal: AbortSignal): () => void {
   const cleanups: Array<() => void> = [];
@@ -95,13 +95,10 @@ export function initializePage(signal: AbortSignal): () => void {
   const privacySignal =
     ('globalPrivacyControl' in navigator && navigator.globalPrivacyControl === true) || navigator.doNotTrack === '1';
   /** The shared cookie is authoritative; the former site-only record is migrated once. */
-  const readConsent = (): ConsentDecision | undefined => readConsentCookie(document.cookie);
-  const writeConsent = (decision: ConsentDecision | undefined): void => {
-    // oxlint-disable-next-line unicorn/no-document-cookie -- The app reads this cookie on its own requests; the Cookie Store API is not universally available.
-    document.cookie = consentCookie(decision, location.protocol === 'https:');
-    const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(consentChannelName);
-    channel?.postMessage(decision ?? 'unknown');
-    channel?.close();
+  const legacyConsentKey = 'tau-www-analytics-consent-v1';
+  const readConsent = (): ConsentDecision | undefined => {
+    const status = readConsentCookie(document.cookie);
+    return status === 'unknown' ? undefined : status;
   };
   let consent = readConsent();
   const legacy = safeRead(legacyConsentKey);

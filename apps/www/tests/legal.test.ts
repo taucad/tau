@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { loader, renderLegalDocument, slugify } from '#app/legal.server.js';
 import { legalDocuments } from '#www/legal.js';
-import { consentCookie, consentCookieName, readConsentCookie } from '#www/consent.js';
 
 const load = (document: string): ReturnType<typeof loader> => {
   const url = new URL(`https://tau.new/legal/${document}/`);
@@ -34,23 +33,5 @@ describe('legal documents', () => {
 
   test('should answer a missing document with a 404', () => {
     expect(() => load('missing')).toThrow(Response);
-  });
-});
-
-describe('shared consent cookie', () => {
-  test('should write the versioned shape the app reads and delete it on withdrawal', () => {
-    const accepted = consentCookie('accepted', true);
-    expect(accepted).toContain(`${consentCookieName}=${encodeURIComponent('{"status":"accepted","version":1}')}`);
-    expect(accepted).toContain('Path=/');
-    expect(accepted).toContain('SameSite=Lax; Secure');
-    expect(readConsentCookie(`other=1; ${accepted.split(';')[0]}`)).toBe('accepted');
-    expect(consentCookie(undefined, false)).toBe(`${consentCookieName}=; Path=/; Max-Age=0; SameSite=Lax`);
-  });
-
-  test('should ignore absent and malformed values and read the app’s legacy values as it does', () => {
-    expect(readConsentCookie('')).toBeUndefined();
-    expect(readConsentCookie(`${consentCookieName}=%7Bbroken`)).toBeUndefined();
-    expect(readConsentCookie(`${consentCookieName}=%22granted%22`)).toBe('accepted');
-    expect(readConsentCookie(`${consentCookieName}=%22denied%22`)).toBe('declined');
   });
 });

@@ -22,7 +22,8 @@
     "remark-gfm": "catalog:",
     "remark-parse": "catalog:",
     "remark-rehype": "catalog:",
-    "unified": "catalog:"
+    "unified": "catalog:",
+    "@taucad/consent": "workspace:*"
   },
   "devDependencies": {
     "axe-core": "catalog:",

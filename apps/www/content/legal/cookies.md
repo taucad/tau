@@ -39,7 +39,7 @@ When you are signed in, the web and desktop apps report operational telemetry an
 
 ## Your Choice and Global Privacy Control
 
-On your first eligible visit to the Tau website with no valid decision, the website shows a consent form. Your decision covers the website and the Tau web app on the same domain; the web app does not ask separately and does not start analytics until you have accepted. Accept and Decline apply only to optional analytics. Choose **Cookie preferences** in the website footer, or **Manage cookie preferences** on this page, to review or change the choice.
+On your first eligible visit to the Tau website with no valid decision, the website shows a consent form. Your decision covers the website and the Tau web app on the same domain, and the web app does not start analytics until you have accepted. Accept and Decline apply only to optional analytics. Choose **Cookie preferences** in the website footer, **Manage cookie preferences** on this page, or **Help → Cookie preferences** in the Tau web app to review or change the choice.
 
 Withdrawing consent stops capture and session replay, resets the analytics identity, and asks the PostHog SDK to clear its analytics persistence. It does not delete functional project data or account cookies needed for a signed-in session.
 

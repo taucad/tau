@@ -8,7 +8,9 @@ export const loader: typeof loadLegalDocument = loadLegalDocument;
 /** Reopens the site-wide consent panel; the client enhancement enables it. */
 const CookiePreferences = (): React.JSX.Element => (
   <aside className='cell legal-preferences' aria-label='Cookie preferences'>
-    <p>Your analytics choice applies to this website and the Tau web app.</p>
+    <p>
+      Your analytics choice applies to this website and the Tau web app, where Help → Cookie preferences changes it too.
+    </p>
     <Button variant='outline' data-consent-open disabled>
       Manage cookie preferences
     </Button>

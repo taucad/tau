@@ -1397,7 +1397,7 @@ describe('Monitor readings', () => {
     ] satisfies readonly ComponentObservation[];
     renderControl(entry({ snapshot: machineSnapshot(components) }));
     const monitor = screen.getByRole('region', { name: 'Monitor' });
-    expect(within(monitor).getByRole('heading', { name: /chamber/iu })).toBeInTheDocument();
+    expect(within(monitor).getByRole('heading', { name: /^chamber$/iu, level: 3 })).toBeInTheDocument();
     expect(monitor).toHaveTextContent('Humidity40');
     // One component unknown, its siblings still read.
     expect(monitor).toHaveTextContent('Bed24 °C');

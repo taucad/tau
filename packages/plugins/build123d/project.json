@@ -26,6 +26,19 @@
         }
       }
     },
+    "generate-project-template": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/generate-project-template.mts"
+      },
+      "configurations": {
+        "check": {
+          "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/generate-project-template.mts --check"
+        }
+      }
+    },
     "seed": {
       "executor": "nx:run-commands",
       "cache": false,

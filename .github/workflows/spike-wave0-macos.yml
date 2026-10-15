@@ -1,0 +1,499 @@
+# Native dependency resolution, spike wave 0 on GitHub-hosted macOS runners.
+#
+# The charter's "idle M2 Pro" spikes S1, S2, S3, S5, S6 and S13 run here instead
+# (handoff resume.md § 3): each keeps its relative pass line and states its
+# absolute budget re-based on the runner. One job per spike after a producer job
+# that runs the existing desktop producers once and hands their trees on as an
+# artifact. Each spike job writes raw JSON records, a summary with its verdict
+# (scripts/spikes/native-deps/summarize.mts) and a job summary, uploads them, and
+# re-emits them as check annotations (readable through the REST API where the
+# log and artifact hosts are not). Dispatch only: `spikes` selects jobs and
+# `trees-run-id` reuses an earlier run's producer artifacts.
+#
+# Read-only beyond its own jobs: the producers run as CI already runs them;
+# downloaded registry bytes are hashed and unpacked as data (S13) and never
+# executed. No actions/cache writes, so the shared 10 GB cache keeps its GeoSpec
+# entries. This file and scripts/spikes/native-deps are deleted when their W
+# packages land (charter § Spikes).
+name: Spike wave 0 (macOS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      spikes:
+        description: 'Comma-separated spikes to run (S1,S2,S3,S5,S6,S13)'
+        required: false
+        type: string
+        default: 'S1,S2,S3,S5,S6,S13'
+      trees-run-id:
+        description: 'Reuse the spike-trees and spike-producer artifacts of this earlier run instead of producing them'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  actions: read # nrwl/nx-set-shas inside setup-nx
+  contents: read
+
+concurrency:
+  group: spike-wave0-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  produce:
+    name: Produce the build123d and PicoGK trees
+    if: inputs.trees-run-id == ''
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - &checkout
+        name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - &setup-nx
+        name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+          save-pnpm-store: 'false'
+
+      - &install-uv
+        name: Install uv
+        run: |
+          command -v uv || pipx install uv
+          uv --version
+
+      - name: Check host and toolchain
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          sw_vers
+          sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
+          cmake --version
+          ninja --version
+          xcrun --find clang++
+
+      - name: Prepare build123d Python (desktop producer)
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          pnpm nx run desktop:prepare-build123d-python-macos
+
+      - name: Prepare PicoGK .NET (desktop producer)
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          pnpm nx run desktop:prepare-picogk-dotnet-macos
+
+      - name: Republish the PicoGK worker with ReadyToRun (S2)
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          mkdir -p "$RUNNER_TEMP/trees/python" "$RUNNER_TEMP/trees/picogk" "$RUNNER_TEMP/producer"
+          scripts/spikes/native-deps/publish-picogk-r2r.sh apps/desktop/resources/picogk/darwin-arm64 \
+            "$RUNNER_TEMP/trees/picogk-r2r" "$RUNNER_TEMP/producer/s2-layer.json"
+          cat "$RUNNER_TEMP/producer/s2-layer.json"
+
+      - name: Pack the trees
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          cp -R apps/desktop/resources/python/darwin-arm64 "$RUNNER_TEMP/trees/python/darwin-arm64"
+          cp -R apps/desktop/resources/picogk/darwin-arm64 "$RUNNER_TEMP/trees/picogk/darwin-arm64"
+          tar -cf "$RUNNER_TEMP/producer/trees.tar" -C "$RUNNER_TEMP/trees" .
+          ls -l "$RUNNER_TEMP/producer"
+
+      - name: Upload the trees
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-trees
+          path: ${{ runner.temp }}/producer/trees.tar
+          compression-level: 1
+          retention-days: 5
+          if-no-files-found: error
+
+      - name: Upload the producer records
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-producer
+          path: ${{ runner.temp }}/producer/*.json
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Publish the producer records as check annotations
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          cp "$RUNNER_TEMP"/producer/*.json "$RUNNER_TEMP/out/" 2> /dev/null || true
+          scripts/spikes/native-deps/annotate.sh
+
+  s1:
+    name: S1 bytecode precompilation
+    needs: produce
+    if: >-
+      !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
+      contains(format(',{0},', inputs.spikes), ',S1,')
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      SPIKE_ID: S1
+      SPIKE_TITLE: S1 bytecode precompilation
+    steps:
+      - *checkout
+      - *setup-nx
+      - &download-trees
+        name: Download the trees
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: spike-trees
+          path: ${{ runner.temp }}/artifact
+          run-id: ${{ inputs.trees-run-id || github.run_id }}
+          github-token: ${{ github.token }}
+      - &unpack-trees
+        name: Unpack the trees
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          mkdir -p "$RUNNER_TEMP/trees" "$RUNNER_TEMP/out"
+          tar -xf "$RUNNER_TEMP/artifact/trees.tar" -C "$RUNNER_TEMP/trees"
+          rm -f "$RUNNER_TEMP/artifact/trees.tar"
+          {
+            echo "TREES=$RUNNER_TEMP/trees"
+            echo "OUT=$RUNNER_TEMP/out"
+          } >> "$GITHUB_ENV"
+
+      - name: Precompile a clone with the D22 command
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          clone="$TREES/python-compiled"
+          /bin/cp -c -R "$TREES/python/darwin-arm64" "$clone"
+          pyc_count() { find "$1" -name '*.pyc' | wc -l | tr -d ' '; }
+          pyc_bytes() { find "$1" -name '*.pyc' -print0 | xargs -0 stat -f %z | awk '{ s += $1 } END { print s + 0 }'; }
+          before_count=$(pyc_count "$clone")
+          before_bytes=$(pyc_bytes "$clone")
+          set +e
+          /usr/bin/time -p "$clone/bin/python3" -I -m compileall -q -j 0 --invalidation-mode unchecked-hash "$clone" \
+            > "$OUT/compileall.log" 2> "$OUT/compileall-time.txt"
+          status=$?
+          set -e
+          after_count=$(pyc_count "$clone")
+          after_bytes=$(pyc_bytes "$clone")
+          real=$(awk '/^real/ { print $2 }' "$OUT/compileall-time.txt")
+          user=$(awk '/^user/ { print $2 }' "$OUT/compileall-time.txt")
+          sys=$(awk '/^sys/ { print $2 }' "$OUT/compileall-time.txt")
+          allocated=$(find "$clone" -type d -name __pycache__ -print0 | xargs -0 du -sk | awk '{ s += $1 } END { print s * 1024 }')
+          jq -n --argjson bc "$before_count" --argjson bb "$before_bytes" --argjson ac "$after_count" --argjson ab "$after_bytes" \
+            --argjson real "$real" --argjson user "$user" --argjson sys "$sys" --argjson status "$status" --argjson alloc "$allocated" \
+            '{pycBefore: $bc, pycBytesBefore: $bb, pycAfter: $ac, pycBytesAfter: $ab, addedPycBytes: ($ab - $bb),
+              pycacheAllocatedBytes: $alloc, compileallExitStatus: $status,
+              compileallSeconds: {real: $real, user: $user, sys: $sys}}' > "$OUT/s1-extra.json"
+          cat "$OUT/s1-extra.json"
+          tail -20 "$OUT/compileall.log"
+
+      - name: Measure cold handshakes (purged page cache, interleaved, three runs each)
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          mkdir -p "$OUT/s1"
+          spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
+          for run in 1 2 3; do
+            for label in baseline compiled; do
+              root="$TREES/python/darwin-arm64"
+              if [ "$label" = compiled ]; then root="$TREES/python-compiled"; fi
+              sync && sudo purge
+              spike build123d-bench --root "$root" --label "$label" --loop 0 --out "$OUT/s1/$label-$run.json"
+              spike build123d-bench --root "$root" --label "$label-warm" --loop 0 --out "$OUT/s1/$label-warm-$run.json"
+              jq -c '{label, coldAnalysisMilliseconds}' "$OUT/s1/$label-$run.json" "$OUT/s1/$label-warm-$run.json"
+            done
+          done
+
+      - &summarize
+        name: Summarize against the charter line
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          lower=$(echo "$SPIKE_ID" | tr '[:upper:]' '[:lower:]')
+          extra=()
+          if [ -f "$OUT/$lower-extra.json" ]; then extra=(--extra "$OUT/$lower-extra.json"); fi
+          node --import @oxc-node/core/register scripts/spikes/native-deps/summarize.mts --spike "$SPIKE_ID" \
+            --dir "$OUT/$lower" --out "$OUT/$lower-summary.json" --title "$SPIKE_TITLE" ${extra[@]+"${extra[@]}"}
+
+      - &annotate
+        name: Publish the results as check annotations
+        if: always()
+        run: scripts/spikes/native-deps/annotate.sh
+      - &upload-records
+        name: Upload the records
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spike-${{ github.job }}${{ matrix.runner && format('-{0}', matrix.runner) || '' }}
+          path: ${{ runner.temp }}/out
+          retention-days: 30
+          if-no-files-found: warn
+
+  s2:
+    name: S2 ReadyToRun Tau layer
+    needs: produce
+    if: >-
+      !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
+      contains(format(',{0},', inputs.spikes), ',S2,')
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      SPIKE_ID: S2
+      SPIKE_TITLE: S2 ReadyToRun Tau layer
+    steps:
+      - *checkout
+      - *setup-nx
+      - *download-trees
+      - *unpack-trees
+      - name: Download the producer records
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: spike-producer
+          path: ${{ runner.temp }}/producer
+          run-id: ${{ inputs.trees-run-id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Measure cold handshake and first build (purged page cache, interleaved, three runs each)
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          mkdir -p "$OUT/s2"
+          jq '{layer: .}' "$RUNNER_TEMP/producer/s2-layer.json" > "$OUT/s2-extra.json"
+          spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
+          for run in 1 2 3; do
+            for label in il r2r; do
+              root="$TREES/picogk/darwin-arm64"
+              if [ "$label" = r2r ]; then root="$TREES/picogk-r2r"; fi
+              sync && sudo purge
+              spike picogk-bench --root "$root" --label "$label" --out "$OUT/s2/$label-$run.json"
+              jq -c '{label, coldHandshakeMilliseconds, firstCompileMilliseconds, firstBuildMilliseconds}' "$OUT/s2/$label-$run.json"
+            done
+          done
+
+      - *summarize
+      - *annotate
+      - *upload-records
+
+  s3:
+    name: S3 full receipt verification
+    needs: produce
+    if: >-
+      !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
+      contains(format(',{0},', inputs.spikes), ',S3,')
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      SPIKE_ID: S3
+      SPIKE_TITLE: S3 full receipt verification
+    steps:
+      - *checkout
+      - *setup-nx
+      - *download-trees
+      - *unpack-trees
+      - name: Calibrate in-memory sha256 throughput
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          node --input-type=module -e '
+            import { createHash, randomBytes } from "node:crypto";
+            const bytes = randomBytes(256 * 1024 * 1024);
+            let best = Infinity;
+            for (let i = 0; i < 5; i += 1) { const t = performance.now(); createHash("sha256").update(bytes).digest(); best = Math.min(best, performance.now() - t); }
+            console.log(JSON.stringify({ sha256GigabytesPerSecond: bytes.length / best / 1e6, m2ProSha256GigabytesPerSecond: 2.32 }));
+          ' > "$OUT/s3-extra.json"
+          cat "$OUT/s3-extra.json"
+
+      - name: Verify both closures (three runs per mode)
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          mkdir -p "$OUT/s3" "$OUT/s3-receipts"
+          spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
+          threads=$(sysctl -n hw.ncpu)
+          for tree in python picogk; do
+            root="$TREES/$tree/darwin-arm64"
+            spike verify-tree --root "$root" --label "$tree-receipt" --mode async --concurrency 8 \
+              --write-receipt "$OUT/s3-receipts/$tree.json" --out "$OUT/s3-receipts/$tree-record.json"
+            for run in 1 2 3; do
+              sync && sudo purge
+              spike verify-tree --root "$root" --label "$tree-async-cold" --mode async --concurrency 8 --receipt "$OUT/s3-receipts/$tree.json" --out "$OUT/s3/$tree-async-cold-$run.json"
+              spike verify-tree --root "$root" --label "$tree-async-warm" --mode async --concurrency 8 --receipt "$OUT/s3-receipts/$tree.json" --out "$OUT/s3/$tree-async-warm-$run.json"
+              sync && sudo purge
+              spike verify-tree --root "$root" --label "$tree-threads-cold" --mode threads --concurrency "$threads" --receipt "$OUT/s3-receipts/$tree.json" --out "$OUT/s3/$tree-threads-cold-$run.json"
+              spike verify-tree --root "$root" --label "$tree-threads-warm" --mode threads --concurrency "$threads" --receipt "$OUT/s3-receipts/$tree.json" --out "$OUT/s3/$tree-threads-warm-$run.json"
+              sync && sudo purge
+              spike verify-tree --root "$root" --label "$tree-serial-cold" --mode async --concurrency 1 --receipt "$OUT/s3-receipts/$tree.json" --out "$OUT/s3/$tree-serial-cold-$run.json"
+            done
+          done
+          for f in "$OUT"/s3/*.json; do jq -c '{label, files, wallMilliseconds, cpuMilliseconds}' "$f"; done
+          rm -f "$OUT"/s3-receipts/python.json "$OUT"/s3-receipts/picogk.json
+
+      - *summarize
+      - *annotate
+      - *upload-records
+
+  s5:
+    name: S5 macOS wheel tier (${{ matrix.runner }})
+    needs: produce
+    if: >-
+      !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
+      contains(format(',{0},', inputs.spikes), ',S5,')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+    env:
+      SPIKE_ID: S5
+      SPIKE_TITLE: S5 macOS wheel tier (${{ matrix.runner }})
+    steps:
+      - *checkout
+      - *setup-nx
+      - *install-uv
+      - *download-trees
+      - *unpack-trees
+      - name: Build the floor and Accelerate variants
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          sw_vers
+          scripts/spikes/native-deps/wheel-tier-variant.sh "$TREES/python/darwin-arm64" "$TREES/python-floor" 12.0 "$OUT/s5-floor-tags.json"
+          scripts/spikes/native-deps/wheel-tier-variant.sh "$TREES/python/darwin-arm64" "$TREES/python-accelerate" 14.0 "$OUT/s5-accelerate-tags.json"
+          jq -s '{floor: .[0], accelerate: .[1]}' "$OUT/s5-floor-tags.json" "$OUT/s5-accelerate-tags.json" > "$OUT/s5-extra.json"
+
+      - name: Run the build123d workload (purged page cache, interleaved, five runs each)
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          mkdir -p "$OUT/s5"
+          spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
+          for run in 1 2 3 4 5; do
+            for label in floor accelerate; do
+              sync && sudo purge
+              spike build123d-bench --root "$TREES/python-$label" --label "$label" --loop 50 --out "$OUT/s5/$label-$run.json"
+              jq -c '{label, coldAnalysisMilliseconds, warmWorkloadMilliseconds}' "$OUT/s5/$label-$run.json"
+            done
+          done
+
+      - *summarize
+      - *annotate
+      - *upload-records
+
+  s6:
+    name: S6 Rosetta x64 closure
+    needs: produce
+    if: >-
+      !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
+      contains(format(',{0},', inputs.spikes), ',S6,')
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      SPIKE_ID: S6
+      SPIKE_TITLE: S6 Rosetta x64 closure
+    steps:
+      - *checkout
+      - *setup-nx
+      - *install-uv
+      - *download-trees
+      - *unpack-trees
+      - name: Ensure Rosetta 2
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          if ! /usr/bin/arch -x86_64 /usr/bin/true 2> /dev/null; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+          /usr/bin/arch -x86_64 /usr/bin/uname -m
+          /usr/bin/arch -x86_64 /usr/sbin/sysctl -n sysctl.proc_translated
+
+      - name: Prepare the darwin-x64 build123d Python (desktop producer, x64 target)
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          node --import @oxc-node/core/register apps/desktop/scripts/prepare-build123d-python.mts --target darwin-x64
+
+      - name: Bundle the benchmark for both Node architectures
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          echo "ARM_NODE=$(command -v node)" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/bench"
+          node_modules/.bin/esbuild scripts/spikes/native-deps/build123d-bench.mts --bundle --platform=node --format=esm \
+            --target=node24 --outfile="$RUNNER_TEMP/bench/build123d-bench.mjs" \
+            "--banner:js=import { createRequire as __spikeCreateRequire } from 'node:module'; const require = __spikeCreateRequire(import.meta.url);"
+
+      - name: Setup x64 Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.10.0'
+          architecture: x64
+
+      - name: Run the build123d workload (arm64 vs x64 under Rosetta, interleaved, three runs each)
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          x64_node=$(command -v node)
+          file "$ARM_NODE" "$x64_node"
+          /usr/bin/arch -x86_64 "$x64_node" -p 'JSON.stringify({ arch: process.arch, cpu: require("node:os").cpus()[0].model })'
+          mkdir -p "$OUT/s6"
+          bench="$RUNNER_TEMP/bench/build123d-bench.mjs"
+          for run in 1 2 3; do
+            sync && sudo purge
+            "$ARM_NODE" "$bench" --repo-root "$GITHUB_WORKSPACE" --root "$TREES/python/darwin-arm64" --label arm64 --loop 50 --out "$OUT/s6/arm64-$run.json"
+            sync && sudo purge
+            /usr/bin/arch -x86_64 "$x64_node" "$bench" --repo-root "$GITHUB_WORKSPACE" \
+              --root "$GITHUB_WORKSPACE/apps/desktop/resources/python/darwin-x64" --label x64-rosetta --loop 50 --out "$OUT/s6/x64-rosetta-$run.json"
+            jq -c '{label, arch: .host.arch, translated: .host.translated, cpu: .host.cpuModel, coldAnalysisMilliseconds, warmWorkloadMilliseconds}' \
+              "$OUT/s6/arm64-$run.json" "$OUT/s6/x64-rosetta-$run.json"
+          done
+
+      - name: Restore arm64 Node for the summary
+        run: echo "$(dirname "$ARM_NODE")" >> "$GITHUB_PATH"
+      - *summarize
+      - *annotate
+      - *upload-records
+
+  s13:
+    name: S13 Node unpack of the registry-native closures
+    needs: produce
+    if: >-
+      !cancelled() && (needs.produce.result == 'success' || needs.produce.result == 'skipped') &&
+      contains(format(',{0},', inputs.spikes), ',S13,')
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      SPIKE_ID: S13
+      SPIKE_TITLE: S13 Node unpack of the registry-native closures
+    steps:
+      - *checkout
+      - *setup-nx
+      - *download-trees
+      - *unpack-trees
+      - name: Fetch and digest-check the payloads (data only)
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
+          payloads="$RUNNER_TEMP/payloads"
+          mkdir -p "$payloads"
+          spike fetch-payloads --python-tree "$TREES/python/darwin-arm64" --picogk-tree "$TREES/picogk/darwin-arm64" \
+            --cache "$payloads" --plan "$OUT/s13-plan.json" --layer-list "$payloads/layer.txt" \
+            --layer-archive "$payloads/tau-layer.tar.gz" --out "$OUT/s13-extra.json"
+          tar -czf "$payloads/tau-layer.tar.gz" -C "$TREES/picogk/darwin-arm64" -T "$payloads/layer.txt"
+          ls -l "$payloads" | head -80
+          jq -c '{wheelCount, wheelBytes, pythonBuildStandalone, dotnetRuntime, layerFiles}' "$OUT/s13-extra.json"
+
+      - name: Unpack each closure (purged page cache, three runs, with and without hash-while-write)
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/console.log") 2>&1
+          mkdir -p "$OUT/s13"
+          spike() { node --import @oxc-node/core/register "scripts/spikes/native-deps/$1.mts" "${@:2}"; }
+          for run in 1 2 3; do
+            for closure in python picogk; do
+              for hash in write none; do
+                label="$closure-hash"
+                if [ "$hash" = none ]; then label="$closure-nohash"; fi
+                sync && sudo purge
+                spike unpack --plan "$OUT/s13-plan.json" --closure "$closure" --staging "$RUNNER_TEMP/staging/$closure" \
+                  --hash "$hash" --concurrency 4 --label "$label" --out "$OUT/s13/$label-$run.json"
+                jq -c '{label, files, bytes, compressedBytes, wallMilliseconds, cpuMilliseconds, recordRowsChecked}' "$OUT/s13/$label-$run.json"
+                rm -rf "$RUNNER_TEMP/staging/$closure"
+              done
+            done
+          done
+
+      - *summarize
+      - *annotate
+      - *upload-records

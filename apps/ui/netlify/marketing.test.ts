@@ -34,6 +34,17 @@ describe('resolveMarketingUrl', () => {
     expect(resolve('/?utm_source=x&ref=hn')).toBe(`${origin}/`);
   });
 
+  it('should route marketing data while preserving app data ownership', () => {
+    expect(resolve('/pricing.data?_routes=www-page&code=secret')).toBe(`${origin}/pricing.data?_routes=www-page`);
+    expect(resolve('/_root.data?_routes=www-home')).toBe(`${origin}/_root.data?_routes=www-home`);
+    expect(resolve('/_root.data')).toBeUndefined();
+    expect(resolve('/_root.data?_routes=root,routes/home')).toBeUndefined();
+    expect(resolve('/vision.data?_routes=www-vision')).toBe(`${origin}/vision.data?_routes=www-vision`);
+    expect(resolve('/vision.data')).toBeUndefined();
+    expect(resolve('/vision/')).toBe(`${origin}/vision/`);
+    expect(resolve('/sitemap-marketing.xml')).toBe(`${origin}/sitemap.xml`);
+  });
+
   it('should drop the query when proxying a marketing page', () => {
     expect(resolve('/pricing/?utm_source=x')).toBe(`${origin}/pricing/`);
   });
@@ -80,10 +91,17 @@ describe('marketing response selection', () => {
         ['/', '/?utm_source=return'].map(async (path) => {
           const next = vi.fn(
             async () =>
-              new Response('app', { headers: { 'Netlify-CDN-Cache-Control': 'public, durable, s-maxage=600' } }),
+              new Response('app', {
+                headers: {
+                  'Netlify-CDN-Cache-Control': 'public, durable, s-maxage=600',
+                },
+              }),
           );
           const response = await marketing(
-            new Request(`https://tau.new${path}`, { method, headers: { cookie: 'other=x; tau-entry=app' } }),
+            new Request(`https://tau.new${path}`, {
+              method,
+              headers: { cookie: 'other=x; tau-entry=app' },
+            }),
             { next },
           );
           expect(await response.text()).toBe('app');
@@ -102,11 +120,18 @@ describe('marketing response selection', () => {
       vi.stubGlobal('Netlify', { env: { get: () => origin } });
       const fetch = vi.fn(
         async () =>
-          new Response('marketing', { headers: { 'cache-control': 'public', 'CDN-Cache-Control': 'public' } }),
+          new Response('marketing', {
+            headers: {
+              'cache-control': 'public',
+              'CDN-Cache-Control': 'public',
+            },
+          }),
       );
       vi.stubGlobal('fetch', fetch);
       const response = await marketing(
-        new Request('https://tau.new/', { headers: { cookie, authorization: 'Bearer test' } }),
+        new Request('https://tau.new/', {
+          headers: { cookie, authorization: 'Bearer test' },
+        }),
         { next: vi.fn() },
       );
       expect(await response.text()).toBe('marketing');
@@ -131,11 +156,16 @@ describe('root redirect cache isolation', () => {
         async () =>
           new Response(null, {
             status: 302,
-            headers: { location: '/pricing/', 'cache-control': 'public, max-age=600' },
+            headers: {
+              location: '/pricing/',
+              'cache-control': 'public, max-age=600',
+            },
           }),
       ),
     );
-    const response = await marketing(new Request('https://tau.new/'), { next: vi.fn() });
+    const response = await marketing(new Request('https://tau.new/'), {
+      next: vi.fn(),
+    });
     expect(response.status).toBe(302);
     expect(response.headers.get('location')).toBe('https://tau.new/pricing/');
     expect(response.headers.get('cache-control')).toBe('private, no-store');
@@ -144,13 +174,114 @@ describe('root redirect cache isolation', () => {
     vi.stubGlobal('Netlify', { env: { get: () => origin } });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response('pricing', { headers: { 'cache-control': 'public, max-age=600' } })),
+      vi.fn(
+        async () =>
+          new Response('pricing', {
+            headers: { 'cache-control': 'public, max-age=600' },
+          }),
+      ),
     );
     const response = await marketing(
-      new Request('https://tau.new/pricing/', { headers: { cookie: 'tau-entry=app' } }),
+      new Request('https://tau.new/pricing/', {
+        headers: { cookie: 'tau-entry=app' },
+      }),
       { next: vi.fn() },
     );
     expect(await response.text()).toBe('pricing');
     expect(response.headers.get('cache-control')).toBe('public, max-age=600');
+  });
+});
+
+it('should preserve app crawler resources and expose a separate marketing sitemap', () => {
+  for (const path of ['/robots.txt', '/sitemap.xml']) {
+    expect(resolveMarketingUrl(new URL(path, 'https://tau.new'), 'GET', origin)).toBeUndefined();
+  }
+  expect(resolveMarketingUrl(new URL('/sitemap-marketing.xml', 'https://tau.new'), 'GET', origin)?.href).toBe(
+    `${origin}/sitemap.xml`,
+  );
+});
+
+it('should retain app robots restrictions and advertise marketing only on the enabled production host', async () => {
+  const body = 'User-agent: *\nDisallow: /projects\nSitemap: https://tau.new/sitemap.xml\n';
+  const next = async () => new Response(body, { headers: { 'content-type': 'text/plain' } });
+  vi.stubGlobal('Netlify', { env: { get: () => origin } });
+  const production = await marketing(new Request('https://tau.new/robots.txt'), { next });
+  expect(await production.text()).toBe(`${body}Sitemap: https://tau.new/sitemap-marketing.xml\n`);
+  const staging = await marketing(new Request('https://taucad.dev/robots.txt'), { next });
+  expect(await staging.text()).toBe(body);
+  vi.stubGlobal('Netlify', { env: { get: () => undefined } });
+  const disabled = await marketing(new Request('https://tau.new/robots.txt'), { next });
+  expect(await disabled.text()).toBe(body);
+});
+
+describe('marketing download channel before JavaScript', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const files = [
+    'Tau-macos-x64.zip',
+    'Tau-macos-arm64.zip',
+    'Tau-macos-x64.zip',
+    'Tau-win32-x64.zip',
+    'Tau-linux-x64.tar.gz',
+  ];
+  const scripts =
+    '<script>const anchor = `<a href="https://downloads.tau.new/latest/Tau-macos-arm64.zip">Download</a>`;</script><script type="application/ld+json">{"url":"https://tau.new/download/"}</script>';
+  const html = `<link rel="canonical" href="https://tau.new/download/">${scripts}${files.map((file) => `<a class="text-link" href="https://downloads.tau.new/latest/${file}" data-event="download">Download</a>`).join('')}`;
+
+  it('should serve every archive link from staging while preserving scripts and document policies', async () => {
+    vi.stubGlobal('Netlify', { env: { get: () => origin } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(html, {
+            headers: {
+              'content-type': 'text/html; charset=utf-8',
+              'content-length': String(html.length),
+              'content-encoding': 'gzip',
+              etag: '"upstream"',
+              'last-modified': 'Wed, 14 Oct 2026 01:00:00 GMT',
+              'content-security-policy': "script-src 'self' 'sha256-boot'",
+              'cache-control': 'public, max-age=0, must-revalidate',
+            },
+          }),
+      ),
+    );
+    const response = await marketing(new Request('https://taucad.dev/download/'), { next: vi.fn() });
+    const body = await response.text();
+    expect([...body.replace(scripts, '').matchAll(/<a[^>]+href="([^"]+)"/gu)].map((match) => match[1])).toEqual(
+      files.map((file) => `https://downloads.taucad.dev/latest/${file}`),
+    );
+    expect(body).toContain(scripts);
+    expect(body).toContain('<link rel="canonical" href="https://tau.new/download/">');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-security-policy')).toBe("script-src 'self' 'sha256-boot'");
+    expect(response.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
+    for (const header of ['content-length', 'content-encoding', 'etag', 'last-modified']) {
+      expect(response.headers.has(header)).toBe(false);
+    }
+  });
+
+  it.each([
+    ['https://tau.new/download/', 'GET', 'text/html'],
+    ['https://taucad.dev.example/download/', 'GET', 'text/html'],
+    ['https://taucad.dev/_www/assets/site.js', 'GET', 'application/javascript'],
+    ['https://taucad.dev/download/', 'HEAD', 'text/html'],
+  ])('should preserve upstream bytes and validators for %s %s %s', async (url, method, contentType) => {
+    vi.stubGlobal('Netlify', { env: { get: () => origin } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(method === 'HEAD' ? null : html, {
+            headers: {
+              'content-type': contentType,
+              etag: '"upstream"',
+            },
+          }),
+      ),
+    );
+    const response = await marketing(new Request(url, { method }), { next: vi.fn() });
+    expect(await response.text()).toBe(method === 'HEAD' ? '' : html);
+    expect(response.headers.get('etag')).toBe('"upstream"');
   });
 });

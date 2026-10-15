@@ -37,7 +37,7 @@ export const redactPermissionMetadata = (value: JsonValue): JsonValue => {
   if (value === null || typeof value !== 'object') {
     return value;
   }
-  const headerName = 'name' in value ? value.name : undefined;
+  const headerName = 'name' in value ? value['name'] : undefined;
   const credentialHeader =
     typeof headerName === 'string' && credentialKeys.has(headerName.replaceAll(/[_-]/gu, '').toLowerCase());
   return Object.fromEntries(

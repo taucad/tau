@@ -10,6 +10,10 @@
 # is the parent of both sandboxed workers. Each cell's verdict is a check annotation and a step
 # summary row; the raw files are the job's artifact.
 #
+# The facts cell requires `spctl` to accept the app as notarised. Staging releases are signed
+# with Developer ID but not notarised (release-build.yml), so a desktop-staging@ tag fails that
+# cell while its other cells still run; only a production desktop@ release can pass the gate.
+#
 # GitHub-hosted runners report SIP disabled, so the quarantined-copy cell is recorded as
 # unobservable there (ruling X19) and needs a SIP-enabled Mac running the same script.
 #
@@ -30,11 +34,6 @@ on:
         description: 'Ref whose CLI, manifests and golden receipt to run (default: the dispatched ref)'
         required: false
         type: string
-  # TEMPORARY (removed before merge): exercise the workflow on its own pull request.
-  pull_request:
-    paths:
-      - .github/workflows/qualify-desktop-macos.yml
-      - apps/desktop/scripts/qualify-first-use-download.sh
 
 permissions:
   contents: read
@@ -68,7 +67,7 @@ jobs:
       - name: Download the published archive
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.release-tag || 'desktop-staging@0.1.0-staging.72' }}
+          TAG: ${{ inputs.release-tag }}
         run: |
           mkdir -p "$RUNNER_TEMP/release"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,publishedAt,targetCommitish
@@ -91,7 +90,7 @@ jobs:
         env:
           W12_ANNOTATE: '1'
           RUNNER_IMAGE: ${{ matrix.runner }}
-          TAG: ${{ inputs.release-tag || 'desktop-staging@0.1.0-staging.72' }}
+          TAG: ${{ inputs.release-tag }}
         run: |
           OUT="$RUNNER_TEMP/w12"
           rm -rf "$HOME/Library/Application Support/tau/payloads"

@@ -394,9 +394,22 @@ export const createUiReactCompilerPlugin = (): Plugin => {
   };
 };
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   const isTest = mode === 'test';
+  /*
+   * Ordered build identity for the stale-tab skew guard (blueprint DF20).
+   * Evaluated once per build / dev-server start, which is exactly the
+   * granularity at which a tab's app-logic vintage can diverge.
+   *
+   * A production build defines it for the server only, which publishes it to
+   * the page as `window.ENV.TAU_BUILD_ID` (`#lib/build-identity`). Baked into a
+   * client chunk, a fresh timestamp changed that chunk's hash on every build,
+   * and with it the hash of every chunk importing it: about 3.4 MB of the app
+   * shell got new URLs per deploy without a source change.
+   */
+  const buildIdDefine = { tauBuildId: JSON.stringify(Date.now()) };
+  const isProductionBuild = command === 'build' && !isTest;
   // Netlify's own CI sets NETLIFY=true; `netlify deploy` from GitHub Actions
   // (deploy-ui.yml) builds with NETLIFY_LOCAL=true instead. Both need the SSR function.
   const isNetlify = process.env['NETLIFY'] === 'true' || process.env['NETLIFY_LOCAL'] === 'true';
@@ -408,10 +421,7 @@ export default defineConfig(({ mode }) => {
     cacheDir: '../../node_modules/.vite/apps/ui',
     define: {
       tauBuildFrontendUrl: JSON.stringify(buildFrontendUrl ?? ''),
-      // Ordered build identity for the stale-tab skew guard (blueprint DF20).
-      // Evaluated once per build / dev-server start, which is exactly the
-      // granularity at which a tab's app-logic vintage can diverge.
-      tauBuildId: JSON.stringify(Date.now()),
+      ...(isProductionBuild ? {} : buildIdDefine),
       tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
       tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
       /*
@@ -482,6 +492,8 @@ export default defineConfig(({ mode }) => {
     },
     ssr: uiSsrOptions,
 
+    // Merged over the shared `define` for the server graph only (see `buildIdDefine`).
+    ...(isProductionBuild ? { environments: { ssr: { define: buildIdDefine } } } : {}),
     server: {
       port: 3000,
       // Permit LAN previews (e.g. `nx dev ui --host`); production deploys terminate TLS upstream.

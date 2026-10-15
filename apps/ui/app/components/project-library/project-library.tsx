@@ -1,4 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
+import { z } from 'zod';
+import type { ReactNode } from 'react';
 import {
   Grid,
   ArrowRight,
@@ -26,7 +28,7 @@ import type { ProjectListItem } from '#types/project-library.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import { createColumns } from '#components/project-library/columns.js';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
-import { CardHeader, CardFooter } from '@taucad/ui/components/card';
+import { Card, CardHeader, CardFooter } from '@taucad/ui/components/card';
 import {
   DataTable,
   DataTableSearch,
@@ -69,16 +71,16 @@ import { formatRelativeTime } from '#utils/date.utils.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { cookieName } from '#constants/cookie.constants.js';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
-import { flagParameter } from '#utils/search-parameter.codecs.js';
+import { flagParameter, stringParameter, enumParameter } from '#utils/search-parameter.codecs.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
-import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
 import { ChatComposerProvider } from '#hooks/active-chat-provider.js';
-import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
+import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
@@ -447,12 +449,56 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
     handleRestore,
   };
 
+  const viewControls = (
+    <div className='flex items-center gap-2'>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant='outline' size='icon' aria-label='View mode'>
+            {viewMode === 'grid' ? <Grid /> : <TableIcon />}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align='end'>
+          <DropdownMenuCheckboxItem
+            checked={viewMode === 'grid'}
+            onCheckedChange={() => {
+              setViewMode('grid');
+            }}
+          >
+            Grid
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={viewMode === 'table'}
+            onCheckedChange={() => {
+              setViewMode('table');
+            }}
+          >
+            Table
+          </DropdownMenuCheckboxItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant='outline' size='icon' aria-label='Settings'>
+            <Cog className='size-4' />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align='end'>
+          <DropdownMenuLabel>Settings</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuCheckboxItem checked={showDeleted} onCheckedChange={handleToggleDeleted}>
+            Show trashed projects
+          </DropdownMenuCheckboxItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+
   return (
-    <PageContent>
+    <PageContent className='flex flex-col gap-4 pb-4'>
       <PageHeader
         title='Projects'
         headingLevel={headingLevel}
-        className='mb-6'
+        className='mb-0'
         action={
           <Button asChild>
             <NavLink to='/projects/new'>
@@ -608,7 +654,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
       )}
 
       {listingError && projects.length > 0 ? (
-        <div className='mb-6 flex items-center justify-between gap-3 rounded-md border border-feature/40 p-3'>
+        <div role='alert' className='flex items-center justify-between gap-3 rounded-md border p-3'>
           <span className='text-sm'>Projects could not be refreshed.</span>
           <Button size='sm' variant='outline' onClick={async () => retry()}>
             Retry
@@ -616,47 +662,6 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
         </div>
       ) : null}
 
-      <div className='mb-4 flex justify-end gap-2'>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant='outline' size='icon' aria-label='View mode'>
-              {viewMode === 'grid' ? <Grid /> : <TableIcon />}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align='end'>
-            <DropdownMenuCheckboxItem
-              checked={viewMode === 'grid'}
-              onCheckedChange={() => {
-                setViewMode('grid');
-              }}
-            >
-              Grid
-            </DropdownMenuCheckboxItem>
-            <DropdownMenuCheckboxItem
-              checked={viewMode === 'table'}
-              onCheckedChange={() => {
-                setViewMode('table');
-              }}
-            >
-              Table
-            </DropdownMenuCheckboxItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant='outline' size='icon' aria-label='Settings'>
-              <Cog className='size-4' />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align='end'>
-            <DropdownMenuLabel>Settings</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuCheckboxItem checked={showDeleted} onCheckedChange={handleToggleDeleted}>
-              Show trashed projects
-            </DropdownMenuCheckboxItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
       {!showDeleted && isCloudFailed && auth === 'authed' ? (
         <div role='alert' className='flex flex-wrap items-center justify-between gap-3 rounded-md border p-4'>
           <span className='text-sm'>
@@ -679,7 +684,10 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
         </div>
       ) : null}
       {listingError && projects.length === 0 ? (
-        <div className='flex min-h-80 flex-col items-center justify-center gap-3 rounded-md border p-6 text-center'>
+        <div
+          role='alert'
+          className='flex min-h-80 flex-col items-center justify-center gap-3 rounded-md border p-6 text-center'
+        >
           <PackageX className='size-8 text-muted-foreground' />
           <div>
             <div className='font-medium'>Projects could not be loaded</div>
@@ -689,21 +697,12 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
             Retry
           </Button>
         </div>
-      ) : isLoading && projects.length === 0 ? (
-        <div
-          className='grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4'
-          role='status'
-          aria-label='Loading projects'
-          aria-busy='true'
-        >
-          {Array.from({ length: 4 }, (_, index) => (
-            <Skeleton key={index} className='aspect-4/3 w-full rounded-md' />
-          ))}
-        </div>
       ) : (
         <UnifiedProjectList
           rows={toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted })}
           isCatalogUnavailable={!showDeleted && auth === 'authed' && (cloudPending || isCloudFailed)}
+          controls={viewControls}
+          isLoading={isLoading && projects.length === 0}
           viewMode={viewMode}
           actions={actions}
           onOpenCloudProject={handleOpenCloudProject}
@@ -767,6 +766,8 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
 
 type UnifiedProjectListProps = {
   readonly isCatalogUnavailable: boolean;
+  readonly controls: ReactNode;
+  readonly isLoading: boolean;
   readonly rows: LibraryRow[];
   readonly viewMode: 'grid' | 'table';
   readonly actions: ProjectActions;
@@ -774,6 +775,20 @@ type UnifiedProjectListProps = {
 };
 
 // Page size options, shared by both view modes so the remembered choice survives a view switch.
+const queryParameter = stringParameter();
+const sortParameter = enumParameter(
+  z.enum([
+    'lastActivityAt:desc',
+    'lastActivityAt:asc',
+    'name:desc',
+    'name:asc',
+    'description:desc',
+    'description:asc',
+    'none',
+  ]),
+  'lastActivityAt:desc',
+);
+
 const defaultPageSize = 20;
 const pageSizeOptions = [defaultPageSize, 50, 100, 150, 200];
 
@@ -783,13 +798,19 @@ function UnifiedProjectList({
   actions,
   onOpenCloudProject,
   isCatalogUnavailable,
+  controls,
+  isLoading,
 }: UnifiedProjectListProps) {
   'use no memo';
 
-  const [sorting, setSorting] = useState<SortingState>([{ id: 'lastActivityAt', desc: true }]);
+  const [sort, setSort] = useSearchParameter(searchParameterName.sort, sortParameter);
+  const sorting = useMemo<SortingState>(() => {
+    const [id, direction] = sort.split(':');
+    return sort === 'none' ? [] : [{ id: id!, desc: direction === 'desc' }];
+  }, [sort]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
-  const [globalFilter, setGlobalFilter] = useState('');
+  const [globalFilter, setGlobalFilter] = useSearchParameter(searchParameterName.query, queryParameter);
   const [pageSize, setPageSize] = useCookie<number>(cookieName.projectPageSize, defaultPageSize);
   const [pageIndex, setPageIndex] = useState(0);
 
@@ -803,7 +824,11 @@ function UnifiedProjectList({
     enableRowSelection: (row) => !isCloudOnly(row.original),
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    onSortingChange: setSorting,
+    onSortingChange: (updater) => {
+      const next = isFunction(updater) ? updater(sorting) : updater;
+      const first = next[0];
+      setSort(sortParameter.parse(first ? `${first.id}:${first.desc ? 'desc' : 'asc'}` : 'none'));
+    },
     getSortedRowModel: getSortedRowModel(),
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
@@ -824,84 +849,124 @@ function UnifiedProjectList({
   });
 
   // Show empty state if no projects at all
-  if (rows.length === 0 && isCatalogUnavailable) {
-    return null;
+  if (rows.length === 0 && !isLoading && isCatalogUnavailable) {
+    return <div className='flex justify-end'>{controls}</div>;
   }
-  if (rows.length === 0) {
+  if (rows.length === 0 && !isLoading) {
     return (
-      <CollectionEmptyState className='min-h-[60vh]'>
-        {/* Empty-library CTA — composer-only, no chat session to attach to. */}
-        <ChatComposerProvider surface='library'>
-          <div className='mx-auto w-full max-w-2xl space-y-6'>
-            <div className='flex flex-col items-center space-y-4 text-center'>
-              <PackageX className='size-16 text-muted-foreground' strokeWidth={1} />
-              <div className='space-y-2'>
-                <h2 className='text-xl font-semibold'>No projects yet</h2>
-                <p className='text-sm'>Start by describing what you want to build, or create from code</p>
+      <div className='space-y-4'>
+        <div className='flex justify-end'>{controls}</div>
+        <div className='flex min-h-[60vh] items-center justify-center p-4'>
+          {/* Empty-library CTA — composer-only, no chat session to attach to. */}
+          <ChatComposerProvider surface='library'>
+            <div className='mx-auto w-full max-w-2xl space-y-6'>
+              <div className='flex flex-col items-center space-y-4 text-center'>
+                <PackageX className='size-16 text-muted-foreground' strokeWidth={1} />
+                <div className='space-y-2'>
+                  <h2 className='text-xl font-semibold'>No projects yet</h2>
+                  <p className='text-sm'>Start by describing what you want to build, or create from code</p>
+                </div>
+              </div>
+              <NewProjectChatComposer enableAutoFocus={false} className='shadow-none' />
+              <div className='flex items-center justify-center gap-4 text-sm text-muted-foreground'>
+                <div className='h-px flex-1 bg-border' />
+                <span>or</span>
+                <div className='h-px flex-1 bg-border' />
+              </div>
+              <div className='flex justify-center'>
+                <NavLink to='/projects/new' className={buttonVariants({ variant: 'outline' })}>
+                  {({ isPending }) => <>Build from code {isPending ? <Loader /> : <ArrowRight />}</>}
+                </NavLink>
               </div>
             </div>
-            <NewProjectChatComposer enableAutoFocus={false} className='shadow-none' />
-            <div className='flex items-center justify-center gap-4 text-sm text-muted-foreground'>
-              <div className='h-px flex-1 bg-border' />
-              <span>or</span>
-              <div className='h-px flex-1 bg-border' />
-            </div>
-            <div className='flex justify-center'>
-              <NavLink to='/projects/new' tabIndex={-1}>
-                {({ isPending }) => (
-                  <InteractiveHoverButton className='flex items-center gap-2 font-light [&_svg]:size-4 [&_svg]:stroke-1'>
-                    {isPending ? <Loader /> : 'Build from code'}
-                  </InteractiveHoverButton>
-                )}
-              </NavLink>
-            </div>
-          </div>
-        </ChatComposerProvider>
-      </CollectionEmptyState>
+          </ChatComposerProvider>
+        </div>
+      </div>
     );
   }
 
   const columns = createColumns(actions, onOpenCloudProject);
   return (
     <div className='space-y-4'>
-      <div className='flex items-center justify-between gap-2'>
-        <DataTableSearch table={table} placeholder='Search projects…' containerClassName='grow' />
-        <div className='flex items-center gap-2'>
+      <div role='group' aria-label='Project controls' className='flex flex-wrap items-center justify-between gap-2'>
+        <DataTableSearch table={table} placeholder='Search projects…' containerClassName='min-w-40 grow basis-40' />
+        <div className='flex flex-wrap items-center gap-2'>
           {/* Add bulk actions when rows are selected */}
           {table.getFilteredSelectedRowModel().rows.length > 0 && (
             <BulkActions table={table} deleteProject={actions.handleDelete} />
           )}
           <DataTableSortingDropdown table={table} />
-          <DataTableColumnVisibilityDropdown table={table} />
+          {controls}
+          {viewMode === 'table' ? <DataTableColumnVisibilityDropdown table={table} /> : null}
         </div>
       </div>
 
-      {viewMode === 'table' ? (
+      {isLoading && viewMode === 'table' ? (
+        <div role='status' aria-label='Loading projects' aria-busy='true'>
+          <DataTable table={table} columns={columns} isLoading />
+        </div>
+      ) : isLoading ? (
+        <div role='status' aria-label='Loading projects' aria-busy='true' className={projectGridClassName}>
+          {Array.from({ length: 20 }, (_, index) => (
+            <Card key={index} className='overflow-hidden pt-0'>
+              <Skeleton className='aspect-4/3 w-full rounded-none' />
+              <CardHeader>
+                <div className='py-1'>
+                  <Skeleton className='h-7 w-3/4' />
+                  <Skeleton className='h-4 w-1/2' />
+                </div>
+              </CardHeader>
+              <CardFooter>
+                <Skeleton className='h-8 w-20' />
+              </CardFooter>
+            </Card>
+          ))}
+        </div>
+      ) : table.getFilteredRowModel().rows.length === 0 ? (
+        <PanelEmptyState
+          className='h-60'
+          icon={PackageX}
+          title={isCatalogUnavailable ? 'No matches on this device' : 'No matching projects'}
+          description={isCatalogUnavailable ? 'Tau Cloud projects are not all available yet.' : undefined}
+        >
+          <Button
+            variant='outline'
+            onClick={() => {
+              setGlobalFilter('');
+            }}
+          >
+            Clear filters
+          </Button>
+        </PanelEmptyState>
+      ) : viewMode === 'table' ? (
         // Table View
         <DataTable table={table} columns={columns} />
       ) : (
         // Grid View
-        <div className='grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'>
+        <ul aria-label='Projects' className={projectGridClassName}>
           {table.getRowModel().rows.map((row) => {
             const { original } = row;
-            return isCloudOnly(original) ? (
-              <CloudProjectCard key={original.id} entry={original} onOpen={onOpenCloudProject} />
-            ) : (
-              <ProjectLibraryCard
-                key={original.id}
-                project={original}
-                actions={actions}
-                isSelected={row.getIsSelected()}
-                onSelect={() => {
-                  row.toggleSelected();
-                }}
-              />
+            return (
+              <li key={original.id}>
+                {isCloudOnly(original) ? (
+                  <CloudProjectCard entry={original} onOpen={onOpenCloudProject} />
+                ) : (
+                  <ProjectLibraryCard
+                    project={original}
+                    actions={actions}
+                    isSelected={row.getIsSelected()}
+                    onSelect={() => {
+                      row.toggleSelected();
+                    }}
+                  />
+                )}
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
 
-      <DataTablePagination table={table} pageSizeOptions={pageSizeOptions} itemName='project' />
+      {isLoading ? null : <DataTablePagination table={table} pageSizeOptions={pageSizeOptions} itemName='project' />}
     </div>
   );
 }

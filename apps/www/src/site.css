@@ -1463,7 +1463,7 @@ main > .band:first-child::before {
 }
 .legal {
   max-width: 52rem;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .legal h3 {
   font-size: 1.125rem;

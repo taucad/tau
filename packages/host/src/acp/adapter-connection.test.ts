@@ -32,7 +32,7 @@ describe('ACP adapter connection', () => {
       setup({
         schemas: {
           events: childEventSchemas,
-          children: types<{ adapter: ActorRefFrom<ReturnType<typeof createAdapterConnection>> }>(),
+          children: { adapter: types<ActorRefFrom<ReturnType<typeof createAdapterConnection>>>() },
         },
         actors: { adapter: createAdapterConnection() },
       }).createMachine({
@@ -52,7 +52,11 @@ describe('ACP adapter connection', () => {
           },
         },
         on: {
-          '*': ({ event }) => {
+          adapterExited: ({ event }) => {
+            events.push(event);
+            return {};
+          },
+          callSettled: ({ event }) => {
             events.push(event);
             return {};
           },

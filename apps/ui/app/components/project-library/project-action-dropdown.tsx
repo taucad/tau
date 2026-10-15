@@ -6,6 +6,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { Button } from '@taucad/ui/components/button';
@@ -17,6 +18,7 @@ import { useProjectSidebarRow, useSidebarCommands } from '#hooks/use-sidebar-sta
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ProjectClosePlan } from '#services/chat-session-store.js';
 import { toast } from '#components/ui/sonner.js';
+import { NativeFileManagerIcon, useOpenProjectInFileManager } from '#hooks/use-native-file-manager.js';
 
 type ProjectActionDropdownProps = {
   readonly project: ProjectListItem;
@@ -33,6 +35,7 @@ export function ProjectActionDropdown({ project, actions, onRename }: ProjectAct
   const row = useProjectSidebarRow(project.id);
   const { closeProject } = useSidebarCommands();
   const chatSessions = useChatSessionStore();
+  const openInFileManager = useOpenProjectInFileManager(project);
 
   const requestTrash = async (): Promise<void> => {
     try {
@@ -112,6 +115,22 @@ export function ProjectActionDropdown({ project, actions, onRename }: ProjectAct
             </>
           ) : (
             <>
+              {openInFileManager ? (
+                <>
+                  <DropdownMenuItem
+                    data-action='open-in-file-manager'
+                    disabled={openInFileManager.isOpening}
+                    aria-busy={openInFileManager.isOpening}
+                    onClick={() => {
+                      void openInFileManager.open();
+                    }}
+                  >
+                    <NativeFileManagerIcon icon={openInFileManager.icon} />
+                    <span>{openInFileManager.label}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              ) : null}
               <DropdownMenuItem
                 data-action='duplicate'
                 data-id={project.id}

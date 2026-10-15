@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
-import { mkdir, mkdtemp, realpath, rm, stat, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   computeControlChannels,
   openDirectoryChannel,
+  revealPathChannel,
   machinesChannels,
   quitChannels,
   servicesPortRelayTag,
@@ -248,7 +249,7 @@ vi.mock('electron', () => ({
       webRequest: {},
     },
   },
-  shell: { openExternal: vi.fn(), openPath: vi.fn(async () => '') },
+  shell: { openExternal: vi.fn(), openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() },
   utilityProcess: { fork: vi.fn() },
 }));
 
@@ -529,6 +530,23 @@ describe('desktop main compute owner', () => {
     expect(shell.openPath).not.toHaveBeenCalled();
     vi.mocked(shell.openPath).mockResolvedValueOnce('No file manager available');
     await expect(open({ senderFrame: {} }, directory)).rejects.toThrow('No file manager available');
+  }, 120_000);
+
+  it('should reveal only granted files and folders in the file manager', async () => {
+    const directory = await bootstrap();
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'main.ts'), '');
+    const { shell } = await import('electron');
+    const reveal = state.handlers.get(revealPathChannel)!;
+    await expect(reveal({ senderFrame: {} }, join(directory, 'main.ts'))).resolves.toBeUndefined();
+    expect(shell.showItemInFolder).toHaveBeenCalledWith(join(await realpath(directory), 'main.ts'));
+    vi.mocked(shell.showItemInFolder).mockClear();
+    await expect(reveal({ senderFrame: {} }, join(tmpdir(), 'outside.ts'))).rejects.toThrow('Reopen this folder');
+    await expect(reveal({ senderFrame: {} }, 42)).rejects.toThrow('refused');
+    await expect(reveal({ senderFrame: {} }, join(directory, 'missing.ts'))).rejects.toThrow('ENOENT');
+    await symlink(tmpdir(), join(directory, 'escape'));
+    await expect(reveal({ senderFrame: {} }, join(directory, 'escape', 'x'))).rejects.toThrow('Reopen this folder');
+    expect(shell.showItemInFolder).not.toHaveBeenCalled();
   }, 120_000);
 
   it(

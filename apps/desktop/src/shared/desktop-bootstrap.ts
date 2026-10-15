@@ -23,6 +23,9 @@ export const agentHostSessionChannels = {
 /** Open a granted directory in the operating system's file manager. */
 export const openDirectoryChannel = 'tau:open-directory';
 
+/** Select a granted file or directory in the operating system's file manager. */
+export const revealPathChannel = 'tau:reveal-path';
+
 /** Theme notification shared by main and preload for the native app icon. */
 export const appIconThemeChannel = 'tau:app-icon-theme';
 

@@ -110,6 +110,7 @@ import { startDesktopUpdater } from '#main/updater.js';
 import {
   appIconThemeChannel,
   openDirectoryChannel,
+  revealPathChannel,
   agentHostSessionChannels,
   machinesChannels,
   externalAgentsChannel,
@@ -1124,6 +1125,20 @@ const bootstrapElectronApp = async (): Promise<void> => {
     if (error) {
       throw new Error(error);
     }
+  });
+
+  /* A file opens in its default app under `openPath`, so a file or folder the
+   * person names inside a project is selected in its parent instead. */
+  ipcMain.handle(revealPathChannel, async (event, path: unknown) => {
+    if (!trusted(event.senderFrame) || typeof path !== 'string' || path.includes('\0')) {
+      throw new Error('Desktop shell refused the reveal request.');
+    }
+    const target = roots.canonical(path);
+    if (target === undefined) {
+      throw new Error('Reopen this folder from Tau before revealing it in the file manager.');
+    }
+    await stat(target);
+    shell.showItemInFolder(target);
   });
 
   ipcMain.handle('tau:select-directory', async (event, options: unknown) => {

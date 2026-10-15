@@ -135,6 +135,8 @@ import {
 } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { previewProjectFileInQuickLook } from '#filesystem/desktop-quick-look.js';
+import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';
+import type { RevealInFileManager } from '#hooks/use-native-file-manager.js';
 
 /**
  * What one row shows about where its bytes come from.
@@ -1402,6 +1404,8 @@ export const ChatEditorFileTree = memo(function ({
     [projectRef],
   );
 
+  const revealInFileManager = useRevealInFileManager(projectId);
+
   const handleQuickLook = useCallback(
     (path: string) => {
       if (!projectId) {
@@ -2059,6 +2063,7 @@ export const ChatEditorFileTree = memo(function ({
                               onOpenInEditor={handleOpenInEditor}
                               onOpenInViewer={handleOpenInViewer}
                               onQuickLook={desktopBridge()?.quickLook ? handleQuickLook : undefined}
+                              revealInFileManager={revealInFileManager}
                               onDownload={handleDownload}
                               onCopyPath={handleCopyPath}
                               onCopyToProject={handleCopyToProject}
@@ -2163,6 +2168,8 @@ type TreeItemProps = {
   readonly onOpenInEditor: (path: string) => void;
   readonly onOpenInViewer: (path: string) => void;
   readonly onQuickLook?: (path: string) => void;
+  /** Absent where the host has no native file manager. */
+  readonly revealInFileManager?: RevealInFileManager;
   readonly onDownload: (path: string, isFolder: boolean) => void;
   readonly onCopyPath: (path: string) => Promise<void>;
   readonly onCopyToProject: (path: string) => void;
@@ -2185,6 +2192,7 @@ function TreeItem({
   onOpenInEditor,
   onOpenInViewer,
   onQuickLook,
+  revealInFileManager,
   onDownload,
   onCopyPath,
   onCopyToProject,
@@ -2354,6 +2362,18 @@ function TreeItem({
           <Separator />
         </>
       )}
+      {/* Overlay entries are composed views with no file of their own on disk. */}
+      {revealInFileManager &&
+      (presentation.provenance === undefined || presentation.provenance.source === 'project') ? (
+        <Item
+          onSelect={() => {
+            void revealInFileManager.reveal(item.getId());
+          }}
+        >
+          <NativeFileManagerIcon icon={revealInFileManager.icon} />
+          {revealInFileManager.label}
+        </Item>
+      ) : null}
       <Item
         onSelect={() => {
           void onCopyPath(item.getId());

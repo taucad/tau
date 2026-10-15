@@ -1,0 +1,59 @@
+name: 'GeoSpec source and relink kit'
+description: >-
+  Downloads the GeoSpec engine's source and relink kit for the installed
+  `geospec-engine` catalog pin from that version's taucad/geospec release, and checks
+  it against the SOURCE-RELINK.json receipt inside the installed package. OCCT
+  (LGPL-2.1 with the Open CASCADE exception) is compiled into the engine, so a UI or
+  desktop release ships only with this kit. A missing release or asset refuses: it
+  never falls back or skips.
+
+inputs:
+  github-token:
+    description: 'Token that can read taucad/geospec releases'
+    required: true
+
+outputs:
+  archive:
+    description: 'Absolute path of the verified kit'
+    value: ${{ steps.kit.outputs.archive }}
+  licenses:
+    description: "Absolute path of the installed engine's licenses directory"
+    value: ${{ steps.kit.outputs.licenses }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download and verify the kit
+      id: kit
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        engine="$GITHUB_WORKSPACE/node_modules/geospec-engine"
+        version=$(jq -r .version "$engine/package.json")
+        licenses="$engine/licenses"
+        receipt="$licenses/SOURCE-RELINK.json"
+        name=$(jq -r .artifact.fileName "$receipt")
+        expected_sha=$(jq -r .artifact.sha256 "$receipt")
+        expected_bytes=$(jq -r .artifact.bytes "$receipt")
+        if ! [[ "$name" =~ ^[A-Za-z0-9._-]+\.tar\.gz$ && "$expected_sha" =~ ^[0-9a-f]{64}$ && "$expected_bytes" =~ ^[1-9][0-9]*$ ]]; then
+          echo "::error::$receipt names no valid source/relink archive."
+          exit 1
+        fi
+        directory="$RUNNER_TEMP/geospec-source-relink"
+        mkdir -p "$directory"
+        tag="v$version"
+        if ! gh release download "$tag" --repo taucad/geospec --pattern "$name" --dir "$directory"; then
+          echo "::error::taucad/geospec has no $name on release $tag for geospec-engine $version. OCCT is compiled into the engine, so this release cannot ship without its source and relink kit; publish the asset beside the engine release first."
+          exit 1
+        fi
+        archive="$directory/$name"
+        actual_bytes=$(wc -c < "$archive" | tr -d ' ')
+        actual_sha=$(shasum -a 256 "$archive" | cut -d' ' -f1)
+        if [ "$actual_bytes" != "$expected_bytes" ] || [ "$actual_sha" != "$expected_sha" ]; then
+          echo "::error::$name is $actual_bytes bytes with sha256 $actual_sha; SOURCE-RELINK.json records $expected_bytes and $expected_sha."
+          exit 1
+        fi
+        echo "archive=$archive" >> "$GITHUB_OUTPUT"
+        echo "licenses=$licenses" >> "$GITHUB_OUTPUT"

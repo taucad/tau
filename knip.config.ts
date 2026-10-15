@@ -186,7 +186,7 @@ const config: KnipConfig = {
       ],
       ignoreDependencies: [
         // The externalization test resolves this platform package from a synthetic install tree it writes.
-        '@taucad/geospec-engine-native-darwin-arm64',
+        'geospec-engine-darwin-arm64',
         // `desktopExternalizedDependencies` (electron.vite.config.ts): loaded from node_modules at run
         // time and copied in by the packaging script; the ACP adapters are resolved by name through
         // `discoverAcpAgents({ resolveFrom: import.meta.url })` (packages/host/src/acp/registry.ts).
@@ -332,29 +332,6 @@ const config: KnipConfig = {
       // Fixture model sources: the runtime CLI evaluates them to regenerate the committed
       // STEP corpus, and each fixture manifest records its script as provenance.
       ignore: ['fixtures/scripts/*/**'],
-    },
-    'packages/geospec-engine-native': {
-      entry: [
-        // Nx targets run these with workspace-root paths (`node`, `node --test`).
-        'bench/run.ts',
-        'bench/{lib,broad-harness,broad-fixtures,measurements}.test.ts',
-        'bindings/node/current-profile.test.mjs',
-        'bindings/browser-conformance/run-browser-conformance.ts',
-        'scripts/{build-mixed-wasm,prepare-legacy-reference}.mts',
-        'scripts/ci-artifacts{,.test}.mjs',
-        // `run.ts` starts `worker.ts` by URL; run-browser-conformance serves `app/run.ts` as its page script.
-        'bench/worker.ts',
-        'bindings/browser-conformance/app/run.ts',
-        // `trust/run.mjs` (the `./trust` export) spawns these by path.
-        'trust/{canonicalize,evaluate-worker}.mjs',
-      ],
-      // CAD workspace the performance lab evaluates from `fixtures/performance-lab/manifest.json`.
-      ignore: ['bench/fixtures/performance-lab/workspace/**'],
-      // Both resolve through package.json `imports` into binding output that the build generates.
-      ignoreUnresolved: ['#native-binding', '#mixed-wasm-binding'],
-      // `build-node` runs `pnpm --dir packages/geospec-engine-native exec napi build`; knip attributes
-      // that root-level command to the root workspace.
-      ignoreDependencies: ['@napi-rs/cli'],
     },
     'packages/host': {
       // `runtime-child-render.integration.test.ts` spawns it by path.

@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { GeoSpecCanonicalClaimReport } from 'geospec/assertion-client';
 import type * as AssertionModule from 'geospec/assertion-client';
-import type * as NativeModule from '@taucad/geospec-engine-native/node';
+import type * as NativeModule from 'geospec-engine/node';
 import type { JSONValue } from '@taucad/runtime/types';
 
 type ArtifactRecord = {
@@ -36,7 +36,7 @@ type Row = {
 const [workspace, installation, manifestPath, outputPath] = process.argv.slice(2);
 assert.ok(workspace && installation && manifestPath && outputPath);
 const installed = createRequire(resolve(installation, 'package.json'));
-const nativePath = installed.resolve('@taucad/geospec-engine-native/node');
+const nativePath = installed.resolve('geospec-engine/node');
 const clientPath = installed.resolve('geospec/assertion-client');
 const nativeModule = (await import(pathToFileURL(nativePath).href)) as typeof NativeModule;
 const { createGeoSpecAssertionClient } = (await import(pathToFileURL(clientPath).href)) as typeof AssertionModule;
